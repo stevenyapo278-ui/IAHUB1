@@ -1,0 +1,465 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  TECHNICIAN
+  REQUESTER
+}
+
+enum TicketStatus {
+  NEW
+  OPEN
+  PENDING
+  WAITING_FOR_USER
+  SOLVED
+  CLOSED
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum TicketEventType {
+  CREATED
+  STATUS_CHANGED
+  PRIORITY_CHANGED
+  ASSIGNED
+  EMAIL_RECEIVED
+  EMAIL_SENT
+  FOLLOWUP_ADDED
+  AI_ANALYZED
+  AI_DRAFT_GENERATED
+  KNOWLEDGE_CREATED
+  REOPENED
+  ESCALATED
+  REMINDER_SENT
+  CLOSED_AUTO
+}
+
+enum TicketPriority {
+  P1
+  P2
+  P3
+  P4
+}
+
+enum ApprovalStatus {
+  NOT_REQUIRED
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id            Int      @id @default(autoincrement())
+  email         String   @unique
+  passwordHash  String
+  fullName      String
+  role          Role     @default(REQUESTER)
+  team          Team?    @relation(fields: [teamId], references: [id])
+  teamId        Int?
+  isActive      Boolean  @default(true)
+  glpiId        Int?     @unique // identifiant de l'utilisateur correspondant dans GLPI
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  ticketsCreated  Ticket[] @relation("TicketRequester")
+  ticketsAssigned Ticket[] @relation("TicketAssignee")
+  ticketsApproved Ticket[] @relation("TicketApprover")
+  followups       Followup[]
+  aiEmailDraftsReviewed AiEmailDraft[]
+  knowledgeDraftsReviewed KnowledgeDraft[]
+}
+
+model Team {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  category  String?
+  glpiGroupId Int?   @unique // identifiant du groupe correspondant dans GLPI
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members User[]
+  tickets Ticket[]
+}
+
+model Ticket {
+  id            Int            @id @default(autoincrement())
+  title         String
+  content       String
+  status        TicketStatus   @default(NEW)
+  priority      TicketPriority @default(P3)
+  category      String?
+  glpiTicketId  Int?     @unique // identifiant du ticket correspondant dans GLPI, une fois synchronisé
+  aiProcessed   Boolean  @default(false) // vrai si le ticket a été créé/traité par l'agent IA de triage (workflow n8n)
+
+  sourceEmail   String? // adresse email de l'expéditeur du mail ayant déclenché la création du ticket (via n8n)
+  sourceName    String? // nom affiché de l'expéditeur du mail d'origine
+  sourceSubject String? // sujet du mail d'origine
+
+  requester     User?  @relation("TicketRequester", fields: [requesterId], references: [id])
+  requesterId   Int?
+
+  assignedTo    User?  @relation("TicketAssignee", fields: [assignedToId], references: [id])
+  assignedToId  Int?
+
+  team          Team?  @relation(fields: [teamId], references: [id])
+  teamId        Int?
+
+  approvalStatus ApprovalStatus @default(NOT_REQUIRED)
+  approvedBy     User?    @relation("TicketApprover", fields: [approvedById], references: [id])
+  approvedById   Int?
+  approvedAt     DateTime?
+  approvalNote   String?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  solvedAt      DateTime?
+  closedAt      DateTime?
+
+  // Identifiants de conversation Outlook pour le rattachement automatique
+  outlookConversationId String?
+  lastUserReplyAt       DateTime?
+  reminderSentAt        DateTime?
+  reminderCount         Int       @default(0)
+  aiSummary             String?
+  contentEmbedding      Unsupported("vector(768)")?
+
+  // Incident majeur — regroupement multi-sites
+  isMajorIncident Boolean  @default(false)
+  impactedSites   String[] @default([])
+  firstDetectedAt DateTime?
+  lastDetectedAt  DateTime?
+
+  followups       Followup[]
+  aiEmailDrafts   AiEmailDraft[]
+  attachments     TicketAttachment[]
+  aiSuggestions   AiTicketSuggestion[]
+  knowledgeDrafts KnowledgeDraft[]
+  messages        TicketMessage[]
+  events          TicketEvent[]
+}
+
+// Suggestion d'action interne générée par l'agent IA pour le technicien (ex: réassigner, changer priorité, ticket similaire)
+model AiTicketSuggestion {
+  id          Int      @id @default(autoincrement())
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ticketId    Int
+  suggestion  String   // texte de la suggestion ("Augmenter la priorité à P1", "Ticket similaire #42", ...)
+  reason      String?  // justification donnée par l'IA
+  createdAt   DateTime @default(now())
+}
+
+// Pièce jointe d'un ticket, importée depuis GLPI (Document_Item) lors de la synchronisation
+model TicketAttachment {
+  id              Int      @id @default(autoincrement())
+  ticket          Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ticketId        Int
+  glpiDocumentId  Int      @unique
+  filename        String
+  mimeType        String?
+  createdAt       DateTime @default(now())
+}
+
+model Followup {
+  id        Int      @id @default(autoincrement())
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ticketId  Int
+  author    User?    @relation(fields: [authorId], references: [id])
+  authorId  Int?
+  content   String
+  createdAt DateTime @default(now())
+}
+
+model ApiConfig {
+  id          Int      @id @default(autoincrement())
+  serviceName String   @unique
+  baseUrl     String?
+  apiKey      String?
+  extra       Json?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Fournisseur d'IA (OpenAI, Anthropic, Google Gemini, NVIDIA, Mistral, etc.)
+model AiProvider {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique // identifiant technique : "openai", "anthropic", "gemini", "nvidia", ...
+  label       String   // nom affiché : "OpenAI", "Anthropic (Claude)", ...
+  baseUrl     String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  models AiModel[]
+  keys   AiKey[]
+}
+
+// Modèle disponible chez un fournisseur (gpt-4o, claude-sonnet-4-6, gemini-1.5-pro, ...)
+model AiModel {
+  id         Int        @id @default(autoincrement())
+  provider   AiProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  providerId Int
+  name       String     // identifiant technique du modèle
+  label      String?    // nom affiché
+  isDefault  Boolean    @default(false)
+  isActive   Boolean    @default(true)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  keys AiKey[]
+
+  @@unique([providerId, name])
+}
+
+// Clé API pour un fournisseur, optionnellement liée à un modèle précis.
+// Plusieurs clés possibles pour le même fournisseur/modèle (rotation, quotas, comptes différents).
+model AiKey {
+  id         Int        @id @default(autoincrement())
+  provider   AiProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  providerId Int
+  model      AiModel?   @relation(fields: [modelId], references: [id], onDelete: SetNull)
+  modelId    Int?
+  label      String     // nom donné par l'utilisateur : "Clé perso", "Clé société", ...
+  apiKey     String
+  isActive   Boolean    @default(true)
+  isDefault  Boolean    @default(false)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+}
+
+enum EmailProvider {
+  OUTLOOK
+  GMAIL
+  IMAP_SMTP
+}
+
+// Configuration de boîte mail (ex: Outlook/Microsoft 365) utilisée par le workflow ITSM
+model EmailAccount {
+  id            Int           @id @default(autoincrement())
+  label         String        // nom donné par l'utilisateur : "Support IT", "Boîte principale", ...
+  provider      EmailProvider @default(OUTLOOK)
+  emailAddress  String
+
+  // OAuth2 (Outlook / Gmail)
+  clientId      String?
+  clientSecret  String?
+  tenantId      String?
+  refreshToken  String?
+
+  // IMAP/SMTP générique
+  imapHost      String?
+  imapPort      Int?
+  smtpHost      String?
+  smtpPort      Int?
+  username      String?
+  password      String?
+  useTls        Boolean       @default(true)
+
+  isActive      Boolean       @default(true)
+  isDefault     Boolean       @default(false)
+
+  // Suivi du polling Microsoft Graph
+  lastSyncAt    DateTime?
+  deltaLink     String?       // lien de pagination delta Microsoft Graph pour ne traiter que les nouveaux messages
+
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+}
+
+// Email entrant reçu via Microsoft Graph, traité par le pipeline IA
+model IncomingEmail {
+  id                  Int           @id @default(autoincrement())
+  graphMessageId      String        @unique
+  internetMessageId   String?
+  conversationId      String?
+  inReplyTo           String?
+  references          String?
+  emailAccountId      Int
+  fromEmail           String
+  fromName            String?
+  subject             String
+  bodyPreview         String?
+  bodyHtml            String?
+  receivedAt          DateTime
+
+  // Résultat de l'analyse IA
+  aiSummary           String?
+  aiCategory          String?
+  aiPriority          String?
+  aiTeam              String?
+  aiConfidence        Float?
+  aiIsSpam            Boolean       @default(false)
+  aiIntent            String?       // RESOLVED | STILL_PRESENT | NEW_INFO | QUESTION | REOPEN
+
+  // Ticket rattaché
+  glpiTicketId        Int?
+  erpTicketId         Int?
+  isNewTicket         Boolean       @default(true)
+
+  status              String        @default("PENDING")
+  error               String?
+
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  @@index([conversationId])
+  @@index([internetMessageId])
+}
+
+// Historique complet des messages entrants et sortants d'un ticket
+model TicketMessage {
+  id                Int              @id @default(autoincrement())
+  ticket            Ticket           @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ticketId          Int
+  direction         MessageDirection
+  sender            String
+  recipients        String[]
+  subject           String
+  body              String
+  bodyHtml          String?
+
+  // Identifiants Outlook pour le threading
+  outlookMessageId  String?          @unique
+  internetMessageId String?
+  inReplyTo         String?
+  conversationId    String?
+
+  timestamp         DateTime         @default(now())
+  createdAt         DateTime         @default(now())
+
+  @@index([ticketId])
+  @@index([conversationId])
+}
+
+// Journal d'audit de toutes les actions sur un ticket
+model TicketEvent {
+  id          Int             @id @default(autoincrement())
+  ticket      Ticket          @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ticketId    Int
+  type        TicketEventType
+  actor       String          @default("SYSTEM") // email utilisateur ou "SYSTEM" / "AI"
+  payload     Json?           // données contextuelles de l'événement
+  createdAt   DateTime        @default(now())
+
+  @@index([ticketId])
+}
+
+// Configuration des relances automatiques (délais en jours)
+model ReminderConfig {
+  id                Int      @id @default(autoincrement())
+  firstReminderDays Int      @default(2)
+  secondReminderDays Int     @default(5)
+  preCloseDays      Int      @default(10)
+  autoCloseDays     Int      @default(15)
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+// Brouillon de réponse email généré par l'agent IA (workflow n8n), en attente de validation humaine
+model AiEmailDraft {
+  id              Int            @id @default(autoincrement())
+  ticket          Ticket?        @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  ticketId        Int?
+
+  recipientEmail  String
+  subject         String
+  proposedContent String
+
+  status          ApprovalStatus @default(PENDING)
+  reviewedBy      User?          @relation(fields: [reviewedById], references: [id])
+  reviewedById    Int?
+  reviewedAt      DateTime?
+  reviewNote      String?
+
+  sentAt          DateTime?
+
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+}
+
+enum KnowledgeDocumentStatus {
+  PROCESSING
+  READY
+  ERROR
+}
+
+// Document source de la base de connaissances (PDF, DOCX, Markdown, ou article approuvé)
+model KnowledgeDocument {
+  id          Int                     @id @default(autoincrement())
+  title       String
+  sourceType  String                  // "pdf" | "docx" | "markdown" | "article"
+  filename    String?
+  status      KnowledgeDocumentStatus @default(PROCESSING)
+  error       String?
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+
+  chunks      KnowledgeChunk[]
+}
+
+// Fragment de texte d'un document, avec son embedding pour la recherche de similarité (pgvector)
+model KnowledgeChunk {
+  id          Int               @id @default(autoincrement())
+  document    KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId  Int
+  chunkIndex  Int
+  content     String
+  embedding   Unsupported("vector(768)")?
+  createdAt   DateTime          @default(now())
+
+  @@index([documentId])
+}
+
+enum KnowledgeDraftStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// Brouillon d'article de connaissance généré par l'IA à partir d'un ticket résolu
+model KnowledgeDraft {
+  id          Int                  @id @default(autoincrement())
+  ticket      Ticket?              @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  ticketId    Int?
+
+  title       String
+  problem     String
+  cause       String
+  solution    String
+  keywords    String[]
+
+  status      KnowledgeDraftStatus @default(PENDING)
+  reviewedBy  User?                @relation(fields: [reviewedById], references: [id])
+  reviewedById Int?
+  reviewedAt  DateTime?
+  reviewNote  String?
+
+  documentId  Int? // document de connaissance créé une fois approuvé
+
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+}
+
+// Workflow n8n déclenchable depuis l'UI (ex: synchro GLPI, notification, automatisation)
+model N8nWorkflow {
+  id          Int      @id @default(autoincrement())
+  name        String   // nom affiché : "Synchro GLPI", "Notification Slack", ...
+  webhookUrl  String   // URL du webhook n8n à appeler
+  description String?
+  isActive    Boolean  @default(true)
+  lastRunAt   DateTime?
+  lastStatus  String?  // "success" | "error"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

@@ -1,0 +1,588 @@
+{
+  "name": "GLPI copy Ok 1",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {},
+        "options": {}
+      },
+      "type": "n8n-nodes-base.microsoftOutlookTrigger",
+      "typeVersion": 1,
+      "position": [
+        -480,
+        -48
+      ],
+      "id": "f451827d-db89-48db-8693-f2b72c1e2bc7",
+      "name": "Microsoft Outlook Trigger",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "CFXJ9SLyJMoUJQ4X",
+          "name": "Microsoft Outlook account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.bodyPreview }}",
+        "options": {
+          "systemMessage": "=Tu es un expert en dispatching de tickets pour l'équipe IT.\nTu reçois des emails et tu dois créer un ticket GLPI quand c'est nécessaire.\n\n**Techniciens :**\n- Ahmed (technicien_id: 5) → Réseau, WiFi, Firewall, VPN, Imprimantes, Matériel\n- Sophie (technicien_id: 8) → Windows, Active Directory, Office 365, Applications métier (Sage...), Logiciels\n\n**ANALYSE CRITIQUE DU CONTEXTE (Nouveau problème VS Fil en cours) :**\nRegarde attentivement le texte du mail reçu :\n1. Si l'e-mail contient des phrases de suivi ou de clôture comme : \"Le problème est résolu\", \"Merci pour votre retour\", \"Ça fonctionne à nouveau\", \"Qu'en est-il de ma demande ?\", \"C'était quoi le problème ?\", ou s'il s'agit d'un échange poli suite à une intervention récente  Considère que c'est une conversation déjà entamée. Mets `\"intervenir\": false`.\n2. Si le mail décrit une panne, un problème bloquant, ou une nouvelle demande d'assistance IT (sans être une simple discussion/remerciement sur un fil) Considère que c'est un nouveau problème à traiter. Mets `\"intervenir\": true`.\n\nRéponds uniquement avec un JSON valide, sans aucun texte avant ou après :\n{\n  \"titre_ticket\": \"Titre professionnel\",\n  \"description_ticket\": \"Description détaillée\",\n  \"technicien_id\": 5 ou 8,\n  \"urgence\": 1 à 5,\n  \"categorie_id\": 1,\n  \"intervenir\": true ou false\n}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        80,
+        -64
+      ],
+      "id": "c8110048-8014-40af-a2cc-4728453bbf40",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        1056,
+        560
+      ],
+      "id": "393e2d7f-ce99-419e-a0d8-28bc904e58cf",
+      "name": "Ollama Chat Model"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Récupérer la réponse brute de l'IA\nconst texteBrut = items[0].json.output || items[0].json.text || \"\";\n\n// 2. Trouver la position de la toute première accolade { et de la dernière }\nconst debutJSON = texteBrut.indexOf(\"{\");\nconst finJSON = texteBrut.lastIndexOf(\"}\");\n\n// Si on ne trouve pas d'accolades, on renvoie une erreur propre\nif (debutJSON === -1 || finJSON === -1) {\n  throw new Error(\"Aucun format JSON valide trouvé dans la réponse de l'IA.\");\n}\n\n// 3. Extraire uniquement la chaîne de caractères entre ces deux positions\nconst chaineJSON = texteBrut.substring(debutJSON, finJSON + 1);\n\n// 4. Convertir la chaîne propre en objet JavaScript\nconst donnees = JSON.parse(chaineJSON);\n\n// 5. Retourner le résultat formaté pour GLPI\nreturn [{\n  json: {\n    titre_ticket: donnees.titre_ticket,\n    description_ticket: donnees.description_ticket,\n    technicien_id: Number(donnees.technicien_id),\n    urgence: Number(donnees.urgence || 3),\n    categorie_id: Number(donnees.categorie_id || 1),\n    intervenir: donnees.intervenir === true\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        -64
+      ],
+      "id": "8c17c003-316c-4d52-9546-1d089ad8b2b3",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = items[0].json;\n\nreturn [{\n  json: {\n    input: [{\n      name: d.titre_ticket,\n      content: d.description_ticket,\n      status: 1,\n      urgency: d.urgence,\n      impact: 3,\n      priority: d.urgence,\n      entities_id: 0,\n      itilcategories_id: d.categorie_id,\n      _users_id_assign: d.technicien_id,\n      _users_id_requester: 2\n    }]\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        -64
+      ],
+      "id": "40231687-5166-44d2-ae5b-563f27a0c3d9",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://10.10.9.99:8080/apirest.php/Ticket/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "App-Token",
+              "value": "BI0nQlbxc3hNpXLFC3UnK0bxBB7KAvBCAt99afdz"
+            },
+            {
+              "name": "Session-Token",
+              "value": "={{ $('Init Session GLPI').item.json.session_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ input: $('Code in JavaScript1').item.json.input[0] }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1264,
+        -64
+      ],
+      "id": "75053454-f887-4fe1-b42b-5bc51f7e5380",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "toRecipients": "styapo@prosuma.ci",
+        "subject": "okok",
+        "bodyContent": "okok",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        560
+      ],
+      "id": "d6462d7c-5912-405d-93b9-91e30ed6050a",
+      "name": "Send a message",
+      "webhookId": "d8e1b66c-cb54-4a2a-bae5-38dd7162bf96",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "evMDqSIc98Oq1mnF",
+          "name": "Microsoft Outlook account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5d3ba0cc-ab11-4c7a-abe0-72aac53742e8",
+              "name": "id",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "4ed7a763-1238-4afc-a4be-7980429b5bda",
+              "name": "conversationId",
+              "value": "={{ $json.conversationId }}",
+              "type": "string"
+            },
+            {
+              "id": "9476b097-4629-4e53-9076-53238937290a",
+              "name": "subject",
+              "value": "={{ $json.subject }}",
+              "type": "string"
+            },
+            {
+              "id": "2835289e-218b-4a0b-89ec-691ec06e87d0",
+              "name": "bodyPreview",
+              "value": "={{ $json.bodyPreview }}",
+              "type": "string"
+            },
+            {
+              "id": "b2dc4606-e153-41ed-afc9-7357ba43f722",
+              "name": "from",
+              "value": "={{ $json.from }}",
+              "type": "string"
+            },
+            {
+              "id": "055de0a9-ee90-4e47-9154-0c41b2978ffe",
+              "name": "to",
+              "value": "={{ $json.to }}",
+              "type": "array"
+            },
+            {
+              "id": "c2cde527-a033-4132-857a-3a30df0cfb3a",
+              "name": "categories",
+              "value": "={{ $json.categories }}",
+              "type": "array"
+            },
+            {
+              "id": "31bf9162-525b-45b4-8050-3f90346b7a12",
+              "name": "hasAttachments",
+              "value": "={{ $json.hasAttachments }}",
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        640,
+        560
+      ],
+      "id": "79bfebb9-cc80-487f-aba1-2fb954973839",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "878be605-8491-48c0-abe7-97cdcaab2f92",
+              "leftValue": "={{ $json.from.toLowerCase() }}",
+              "rightValue": "issouf.fofana@prosuma.ci",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -272,
+        -48
+      ],
+      "id": "5bffbafc-ea25-47c6-b4f7-f0df6090e423",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        80,
+        288
+      ],
+      "id": "41ca581d-e774-4335-97c6-af519d9b7e63",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "JxVFBQvQbfwjA1oq",
+          "name": "Google Gemini(PaLM) Api account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "reply",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $('Microsoft Outlook Trigger').item.json.id }}",
+          "mode": "id"
+        },
+        "message": "=Bonjour M./Mme,\n\nVotre demande a bien été prise en compte.\n\nNous nous efforcerons d’y répondre dans les plus brefs délais. \n\nVotre demande est enregistrée sur le ticket : Ticket (#{{ $json.id }}) – DSI : {{ $('Code in JavaScript').item.json.titre_ticket }} – ID {{ $json.id }} – GLPI",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        1232,
+        272
+      ],
+      "id": "10110d69-4211-4c68-a8e6-79fe599a0f34",
+      "name": "Reply to a message",
+      "webhookId": "b4ba6254-9098-4787-9994-f0018f778feb",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "CFXJ9SLyJMoUJQ4X",
+          "name": "Microsoft Outlook account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $json.conversationId }}",
+        "contextWindowLength": 10
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        176,
+        176
+      ],
+      "id": "90709040-c3de-4d7c-98a3-c38210716b2d",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "content": "",
+        "height": 608,
+        "width": 2000,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -512,
+        -112
+      ],
+      "typeVersion": 1,
+      "id": "77c1b719-2300-415b-8f1f-30211d9533c5",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "e05b2856-a57c-43e7-b0db-9410ed8815fe",
+              "leftValue": "={{ $('Code in JavaScript').item.json.intervenir }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        832,
+        -64
+      ],
+      "id": "c99b5fe6-a39f-4e32-8922-5f1144de8744",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "operation": "reply",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $('Microsoft Outlook Trigger').item.json.id }}",
+          "mode": "id"
+        },
+        "message": "=Bonjour M./Mme @{{ $('Microsoft Outlook Trigger').item.json.from }},\n\nVotre demande a bien été prise en compte.\n\nNous nous efforcerons d’y répondre dans les plus brefs délais. ",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        912,
+        576
+      ],
+      "id": "13785b40-ad01-4e15-ad33-00c873c370a0",
+      "name": "Reply to a message1",
+      "webhookId": "b8074a0e-9fd3-43f7-8c2d-8b1e079dca6e",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "CFXJ9SLyJMoUJQ4X",
+          "name": "Microsoft Outlook account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "# 🤖 Projet 1 : Automatisation du Support Informatique (SOS) avec IA & n8n\n\n## Fonctionnalités Clés\n\n* **Détection Intelligente des Nouveaux Problèmes :** L'IA analyse le contenu des e-mails pour déterminer s'il s'agit d'une nouvelle panne ou d'une simple relance/discussion en cours.\n* **Barrière Anti-Boucle Infinie (Filtre Temporel & Sémantique) :** Si un utilisateur interagit dans un fil de discussion déjà ouvert (moins de 24h ou e-mail de remerciement/clôture), l'IA passe le relais aux humains et s'arrête pour ne pas polluer l'échange.\n* **Routage Automatique (Dispatching) :** Attribution automatique des tickets au bon technicien GLPI (Ahmed ou Sophie) en fonction des compétences requises (Réseau, Système, Logiciel, etc.).\n* **Accusé de Réception Automatique :** Envoi instantané d'une notification par e-mail à l'utilisateur dès la création du ticket.\n\n",
+        "height": 272,
+        "width": 2000,
+        "color": "#000000"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -512,
+        -432
+      ],
+      "typeVersion": 1,
+      "id": "0798432c-8813-42c7-9578-9683c0ae07f4",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "endpointUrl": "http://10.0.70.63:80",
+        "tool": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "parameters": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.mcpClient",
+      "typeVersion": 1,
+      "position": [
+        464,
+        544
+      ],
+      "id": "54228dae-95ff-4dc5-8b14-da9ba649e9e4",
+      "name": "MCP Client"
+    },
+    {
+      "parameters": {
+        "url": "http://10.10.9.99:8080/apirest.php/initSession",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "user_token 3auTrAUYVCKr1cwb4dK7ySBrBrTkVc1fs1L4GwAL"
+            },
+            {
+              "name": "App-Token",
+              "value": "BI0nQlbxc3hNpXLFC3UnK0bxBB7KAvBCAt99afdz"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "init-session-node",
+      "name": "Init Session GLPI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1056,
+        -80
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Microsoft Outlook Trigger": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Reply to a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "Init Session GLPI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply to a message": {
+      "main": [
+        []
+      ]
+    },
+    "Init Session GLPI": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionTimeout": 366,
+    "timeSavedPerExecution": 5
+  },
+  "versionId": "3400034d-4d77-462f-9f80-656ad5bf027f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "4163a3e5961624a0cd0ba091b929abf707a02b7a3e8909a075346b4ff4fdc9bb"
+  },
+  "nodeGroups": [],
+  "id": "QutHJyfwUES8jrfG",
+  "tags": []
+}

@@ -1,0 +1,39 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-background text-on-background font-sans;
+  }
+}
+
+@layer components {
+  .card-shadow {
+    box-shadow: 0px 4px 6px -1px rgba(0, 0, 0, 0.1);
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-label-md font-label-md uppercase tracking-wider;
+  }
+
+  /* Ticket status badges */
+  .badge-status-new { @apply bg-primary/10 text-primary; }
+  .badge-status-open { @apply bg-secondary/10 text-secondary; }
+  .badge-status-pending { @apply bg-tertiary/10 text-tertiary; }
+  .badge-status-solved { @apply bg-green-100 text-green-700; }
+  .badge-status-closed { @apply bg-gray-200 text-gray-600; }
+
+  /* Priority badges */
+  .badge-priority-p1 { @apply bg-error/10 text-error; }
+  .badge-priority-p2 { @apply bg-tertiary/10 text-tertiary; }
+  .badge-priority-p3 { @apply bg-secondary/10 text-secondary; }
+  .badge-priority-p4 { @apply bg-green-100 text-green-700; }
+}
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}

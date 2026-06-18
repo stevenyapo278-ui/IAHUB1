@@ -1,0 +1,24 @@
+# Mode développement : hot reload sur backend et frontend
+# Usage : docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+
+  backend:
+    build:
+      context: ./erp-backend
+    command: npm run dev
+    volumes:
+      - ./erp-backend/src:/app/src
+      - ./erp-backend/prisma:/app/prisma
+
+  frontend:
+    build:
+      context: ./erp-frontend
+      target: builder
+    command: npm run dev
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:4000/api
+    volumes:
+      - ./erp-frontend/src:/app/src

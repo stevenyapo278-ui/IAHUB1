@@ -1,0 +1,185 @@
+import { useEffect, useState } from 'react';
+import api from '../api/client';
+import { useAuth } from '../context/AuthContext';
+
+export default function Teams() {
+  const { user } = useAuth();
+  const [teams, setTeams] = useState([]);
+  const [form, setForm] = useState({ name: '', category: '' });
+  const [error, setError] = useState('');
+
+  function load() {
+    api
+      .get('/teams')
+      .then(({ data }) => setTeams(data))
+      .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
+  }
+
+  useEffect(load, []);
+
+  async function handleCreate(e) {
+    e.preventDefault();
+    setError('');
+    try {
+      await api.post('/teams', form);
+      setForm({ name: '', category: '' });
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur lors de la création');
+    }
+  }
+
+  async function handleDelete(id) {
+    if (!confirm('Supprimer cette équipe ?')) return;
+    try {
+      await api.delete(`/teams/${id}`);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur lors de la suppression');
+    }
+  }
+
+  const totalMembers = teams.reduce((sum, t) => sum + t.members.length, 0);
+  const totalTickets = teams.reduce((sum, t) => sum + t._count.tickets, 0);
+  const maxTickets = Math.max(1, ...teams.map((t) => t._count.tickets));
+
+  return (
+    <div className="flex flex-col gap-lg">
+      <header>
+        <h2 className="font-display-lg text-display-lg text-on-background">Équipes</h2>
+        <p className="font-body-lg text-body-lg text-on-surface-variant">Configuration des groupes de support et niveaux d'escalade.</p>
+      </header>
+
+      {error && <div className="border border-outline-variant text-on-surface p-md rounded-none">{error}</div>}
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-md">
+        <div className="bg-surface-container-lowest p-lg rounded-none border border-outline-variant flex flex-col justify-between">
+          <div className="flex justify-between items-start mb-md">
+            <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-widest">Total équipes</span>
+            <div className="w-8 h-8 rounded-none border border-outline-variant flex items-center justify-center">
+              <span className="material-symbols-outlined text-on-surface text-sm">hub</span>
+            </div>
+          </div>
+          <span className="font-display-lg text-display-lg text-on-surface">{teams.length}</span>
+        </div>
+        <div className="bg-surface-container-lowest p-lg rounded-none border border-outline-variant flex flex-col justify-between">
+          <div className="flex justify-between items-start mb-md">
+            <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-widest">Membres actifs</span>
+            <div className="w-8 h-8 rounded-none border border-outline-variant flex items-center justify-center">
+              <span className="material-symbols-outlined text-on-surface text-sm">badge</span>
+            </div>
+          </div>
+          <span className="font-display-lg text-display-lg text-on-surface">{totalMembers}</span>
+        </div>
+        <div className="bg-surface-container-lowest p-lg rounded-none border border-outline-variant flex flex-col justify-between">
+          <div className="flex justify-between items-start mb-md">
+            <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-widest">Tickets totaux</span>
+            <div className="w-8 h-8 rounded-none border border-outline-variant flex items-center justify-center">
+              <span className="material-symbols-outlined text-on-surface text-sm">confirmation_number</span>
+            </div>
+          </div>
+          <span className="font-display-lg text-display-lg text-on-surface">{totalTickets}</span>
+        </div>
+      </div>
+
+      <div className={`grid grid-cols-1 ${user?.role === 'ADMIN' ? 'lg:grid-cols-3' : ''} gap-xl`}>
+        <div className={`${user?.role === 'ADMIN' ? 'lg:col-span-2' : ''} space-y-md`}>
+          <h3 className="font-headline-md text-headline-md text-on-surface">Équipes actives</h3>
+          <div className="bg-surface-container-lowest rounded-none border border-outline-variant overflow-hidden">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-outline-variant bg-surface-bright">
+                  <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">Nom</th>
+                  <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">Catégorie</th>
+                  <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase text-center">Membres</th>
+                  <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase text-right">Tickets</th>
+                  {user?.role === 'ADMIN' && <th className="py-sm px-md w-10"></th>}
+                </tr>
+              </thead>
+              <tbody className="font-body-md text-body-md text-on-surface">
+                {teams.map((t) => (
+                  <tr key={t.id} className="border-b border-outline-variant hover:bg-surface-container-low transition-colors group">
+                    <td className="py-md px-md font-headline-sm text-headline-sm">{t.name}</td>
+                    <td className="py-md px-md">
+                      {t.category ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-none text-xs font-semibold border border-outline-variant text-on-surface">
+                          {t.category}
+                        </span>
+                      ) : (
+                        <span className="text-outline">-</span>
+                      )}
+                    </td>
+                    <td className="py-md px-md text-center">{t.members.length}</td>
+                    <td className="py-md px-md text-right">
+                      <div className="flex items-center justify-end gap-sm">
+                        <span>{t._count.tickets}</span>
+                        <div className="w-16 h-1.5 bg-surface-container rounded-full overflow-hidden">
+                          <div className="bg-on-surface h-full" style={{ width: `${(t._count.tickets / maxTickets) * 100}%` }}></div>
+                        </div>
+                      </div>
+                    </td>
+                    {user?.role === 'ADMIN' && (
+                      <td className="py-md px-md text-right opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => handleDelete(t.id)} className="text-on-surface-variant hover:text-error">
+                          <span className="material-symbols-outlined">delete</span>
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+                {teams.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="py-8 px-md text-center text-on-surface-variant">Aucune équipe.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {user?.role === 'ADMIN' && (
+          <div className="lg:col-span-1">
+            <div className="bg-surface-container-lowest rounded-none border border-outline-variant sticky top-4">
+              <div className="p-lg border-b border-outline-variant">
+                <h3 className="font-headline-md text-headline-md text-on-surface flex items-center gap-sm">
+                  <span className="material-symbols-outlined text-on-surface">add_circle</span>
+                  Nouvelle équipe
+                </h3>
+                <p className="font-body-sm text-body-sm text-on-surface-variant mt-1">Définir le nom et le domaine de l'équipe.</p>
+              </div>
+              <form onSubmit={handleCreate} className="p-lg space-y-md">
+                <div>
+                  <label className="block font-label-md text-label-md text-on-surface mb-xs">Nom de l'équipe</label>
+                  <input
+                    className="w-full h-10 px-sm rounded-none border border-outline-variant bg-surface focus:outline-none focus:border-on-surface font-body-sm text-body-sm text-on-surface"
+                    placeholder="ex: Réseau L1"
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block font-label-md text-label-md text-on-surface mb-xs">Catégorie</label>
+                  <input
+                    className="w-full h-10 px-sm rounded-none border border-outline-variant bg-surface focus:outline-none focus:border-on-surface font-body-sm text-body-sm text-on-surface"
+                    placeholder="ex: Infrastructure"
+                    value={form.category}
+                    onChange={(e) => setForm({ ...form, category: e.target.value })}
+                  />
+                </div>
+                <div className="pt-md mt-md border-t border-outline-variant flex justify-end">
+                  <button
+                    type="submit"
+                    className="px-md py-sm rounded-none border border-outline-variant bg-on-surface text-surface font-headline-sm text-headline-sm hover:opacity-80 transition-colors"
+                  >
+                    Créer l'équipe
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

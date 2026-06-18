@@ -1,0 +1,1592 @@
+{
+  "name": "ITSM Dispatcher & Triage (Production)",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "\nfunction cleanText(text) {\n  if (!text) return '';\n  let cleaned = text.replace(/<[^>]*>/g, ' ');\n  cleaned = cleaned.replace(/\\s+/g, ' ').trim();\n  return cleaned;\n}\n\nconst crypto = require('crypto');\nfunction sha256(text) {\n  return crypto.createHash('sha256').update(text).digest('hex');\n}\n\nconst item = $input.item;\nconst subject = item.json.subject || '';\nconst textBody = item.json.text || '';\nconst messageId = item.json.messageId || item.json.message_id || '';\nconst conversationId = item.json.conversationId || item.json.conversation_id || '';\nconst fromEmail = item.json.from ? (item.json.from.value?.[0]?.address || item.json.from) : '';\nconst fromName = item.json.from?.value?.[0]?.name || '';\n\nconst cleanedBody = cleanText(textBody);\nconst bodyHash = sha256(cleanedBody);\nconst isThreadReply = /^(re|fwd|tr)\\s*:/i.test(subject.trim());\n\nreturn {\n  json: {\n    subject,\n    original_body: textBody,\n    cleaned_body: cleanedBody,\n    body_hash: bodyHash,\n    message_id: messageId,\n    conversation_id: conversationId,\n    from_email: fromEmail,\n    from_name: fromName,\n    is_thread_reply: isThreadReply\n  }\n};\n"
+      },
+      "id": "fc9657af-5b92-486b-8df6-73c47a6d0e31",
+      "name": "Normalisation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ticket_id, status, updated_at FROM ticket_mapping \n              WHERE (conversation_id = $1 AND conversation_id != '') \n                 OR (message_id = $2 AND message_id != '') \n              ORDER BY id DESC \n              LIMIT 1;",
+        "options": {
+          "queryReplacement": "={{$json.conversation_id}},{{$json.message_id}}"
+        }
+      },
+      "id": "7f07b420-3302-40f6-85f6-a42cdc98e2b5",
+      "name": "Lookup Mapping",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        192,
+        512
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "MxKAmtSXyjK4ega6",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ticket_id }}",
+              "operator": {
+                "type": "number",
+                "operation": "exists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "50cd41c8-9245-4246-a4cd-8e76134a380d",
+      "name": "Has Mapping?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.status }}",
+              "operator": {
+                "type": "string",
+                "operation": "in"
+              },
+              "rightValue": "solved,closed"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ed73d997-6775-4600-82df-4d1f80af6414",
+      "name": "Is Solved or Closed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        400,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ (Date.now() - new Date($json.updated_at).getTime()) / (1000 * 60 * 60 * 24) }}",
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              },
+              "rightValue": 3,
+              "id": "a2dd39f8-6831-47af-a67e-1f615e4106b5"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "aecbeaf7-c172-4774-8088-1f2a4d2eb845",
+      "name": "Within Grace Period?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        752,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "mGbITn7HZ9jythSC"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "action": "update_status",
+            "payload": {
+              "ticket_id": "={{ $(\"Lookup Mapping\").item.json.ticket_id }}",
+              "status": 2
+            }
+          }
+        },
+        "options": {}
+      },
+      "id": "044ad1b1-9f2a-418c-a0d1-4264d68c56ed",
+      "name": "Call Subworkflow Reopen",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1056,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "mGbITn7HZ9jythSC"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "action": "add_followup",
+            "payload": {
+              "ticket_id": "={{ $(\"Lookup Mapping\").item.json.ticket_id }}",
+              "content": "={{ $(\"Normalisation\").item.json.cleaned_body }}"
+            }
+          }
+        },
+        "options": {}
+      },
+      "id": "b7ad2f72-e913-405c-ad0e-d0f36e5aefd2",
+      "name": "Call Subworkflow Followup",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1328,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "\n        INSERT INTO mail_events (message_id, conversation_id, from_email, subject, body_hash, decision, related_ticket_id)\n        VALUES ($1, $2, $3, $4, $5, '{\"type\": \"followup\"}'::jsonb, $6) ON CONFLICT (message_id) DO NOTHING;\n        \n        INSERT INTO ticket_mapping (provider, conversation_id, message_id, requester_email, ticket_id, status)\n        VALUES ('outlook', $2, $1, $3, $6, 'open') ON CONFLICT DO NOTHING;\n      ",
+        "options": {
+          "queryReplacement": "={{ $(\"Normalisation\").item.json.message_id }},{{ $(\"Normalisation\").item.json.conversation_id }},{{ $(\"Normalisation\").item.json.from_email }},{{ $(\"Normalisation\").item.json.subject }},{{ $(\"Normalisation\").item.json.body_hash }},{{ $(\"Lookup Mapping\").item.json.ticket_id }}"
+        }
+      },
+      "id": "7068c021-782c-4837-a873-eb821e25f032",
+      "name": "Log Mail Event Followup",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1600,
+        -96
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "MxKAmtSXyjK4ega6",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{\n  (() => {\n    const norm = $('Normalisation').item.json;\n    let prompt = norm.subject + '\\n\\n' + norm.cleaned_body;\n    try {\n      const reopenCtx = $('Mark Reopen Context').item.json.reopen_context;\n      if (reopenCtx) prompt = '[CONTEXTE] ' + reopenCtx + '\\n\\n' + prompt;\n    } catch(e) {}\n    return prompt;\n  })()\n}}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "Tu es un agent d'intelligence artificielle expert en triage de tickets de support informatique pour une entreprise (ITSM).\nTu dois analyser le sujet et le contenu de l'email entrant et produire obligatoirement un JSON valide.\n\nRègles :\n- Ne jamais inventer d'information.\n- Si l'information est insuffisante, mets une confiance basse.\n- Détermine si un ticket doit être créé (needs_ticket = true). Si l'email est vide ou n'est pas une demande de support, mets false.\n- Détermine le titre (summary) court, professionnel et précis.\n- Détermine la priorité (P1, P2, P3, P4) et l'équipe (Réseau, Système, Sécurité, Applicatif).\n- Si le contexte précise que cet email fait suite à un ticket résolu/fermé depuis plus de 5 jours, traite-le comme une NOUVELLE demande indépendante et force needs_ticket = true.\n- Si tu estimes qu'il s'agit d'un doublon, positionne duplicate_candidate à true.\n\nRetourne uniquement le format JSON demandé. Les instructions de format JSON sont prioritaires sur tout le reste."
+        }
+      },
+      "id": "c921d762-b445-481b-a0af-e4d373be22e1",
+      "name": "TriageAgent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        736,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolDescription": "Rechercher dans la base de connaissances / procédures RAG pour trouver des runbooks ou des solutions aux pannes signalées.",
+        "tableName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "documents"
+        },
+        "options": {}
+      },
+      "id": "965ecf2b-ab9e-41c4-b0f6-97b013d7a2b2",
+      "name": "SupabaseVectorStore",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1.3,
+      "position": [
+        752,
+        1168
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "nw6Zh5opury56v7F",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "9e74cda3-d0cf-4a73-be02-c08c9729e9e6",
+      "name": "GeminiEmbeddings",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1776,
+        1248
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "Imwoy44gPsKmOfLd",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\"needs_ticket\":true,\"ticket_type\":\"incident\",\"summary\":\"WiFi en panne\",\"category\":\"reseau\",\"team\":\"Réseau\",\"priority\":\"P3\",\"confidence\":0.95,\"duplicate_candidate\":false,\"duplicate_ticket_id\":null,\"kb_needed\":true,\"justification\":\"L'utilisateur signale une coupure WiFi.\"}",
+        "autoFix": true
+      },
+      "id": "7033813c-9334-453f-b284-318adae5b649",
+      "name": "StructuredParser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        736,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.output.needs_ticket }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              },
+              "id": "5b63d3f5-42b3-49cb-b881-a5f1befefdcb"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "77a26496-7b24-44e8-835d-4bd8ac6d0c18",
+      "name": "Needs Ticket?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1152,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ticket_id, summary, body_short, status FROM ticket_similarity_index \n              WHERE requester_email = $1 \n                AND status NOT IN ('closed', 'solved') \n                AND opened_at > NOW() - INTERVAL '30 days';",
+        "options": {
+          "queryReplacement": "={{ $(\"Normalisation\").item.json.from_email }}"
+        }
+      },
+      "id": "624428c4-f702-42ee-8802-38d469dda475",
+      "name": "Find Recent Tickets",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1440,
+        512
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "MxKAmtSXyjK4ega6",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst items = $input.all();\nconst tickets = items.map(item => ({\n  ticket_id: item.json.ticket_id,\n  summary: item.json.summary,\n  body_short: item.json.body_short,\n  status: item.json.status\n})).filter(t => t.ticket_id);\n\nreturn {\n  json: {\n    tickets,\n    has_tickets: tickets.length > 0\n  }\n};\n"
+      },
+      "id": "46978482-2a47-4584-a895-c6dfc233c9f8",
+      "name": "Aggregate Recent Tickets",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1616,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.has_tickets }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7921692a-dd30-4ee0-b961-9c4ddcfe7929",
+      "name": "Has Recent Tickets?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1776,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{\"Compare le nouvel email avec les tickets existants de l'utilisateur :\\n\\nNouvel Email :\\nSujet : \" + $(\"Normalisation\").item.json.subject + \"\\nMessage : \" + $(\"Normalisation\").item.json.cleaned_body + \"\\n\\nTickets Récents : \" + JSON.stringify($json.tickets)}}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "Tu es un agent chargé de détecter les doublons de tickets.\nAnalyse le nouvel email et détermine s'il correspond EXACTEMENT à un incident déjà ouvert dans la liste des tickets récents fournis.\n\nRègles :\n- Si l'email est une relance ou une précision sur un des tickets listés, indique qu'il s'agit d'un doublon en retournant son ticket_id.\n- Si le problème décrit est totalement différent ou si la liste est vide, retourne duplicate_detected = false.\n\nRetourne un JSON valide."
+        }
+      },
+      "id": "bc21a588-e147-42ae-ac3b-f1f639b50b49",
+      "name": "Check Duplicate User",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        2016,
+        496
+      ]
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\"duplicate_detected\":true,\"duplicate_ticket_id\":123,\"confidence\":0.95,\"justification\":\"L'utilisateur relance le même problème.\"}",
+        "autoFix": true
+      },
+      "id": "a294a100-d2be-42b6-b5a7-d638b0ec131b",
+      "name": "StructuredParserDuplicate",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        2080,
+        832
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.output.duplicate_detected }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d422a3f8-6237-4916-829a-161a4a7a3dc7",
+      "name": "Is Duplicate User?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2320,
+        496
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "mGbITn7HZ9jythSC"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "action": "add_followup",
+            "payload": {
+              "ticket_id": "={{ $json.output.duplicate_ticket_id }}",
+              "content": "={{ $(\"Normalisation\").item.json.cleaned_body }}"
+            }
+          }
+        },
+        "options": {}
+      },
+      "id": "39b8d64e-76d9-4b40-bf91-888228453aa5",
+      "name": "Call Subworkflow Duplicate User",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2544,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "\n        INSERT INTO mail_events (message_id, conversation_id, from_email, subject, body_hash, decision, related_ticket_id)\n        VALUES ($1, $2, $3, $4, $5, '{\"type\": \"duplicate_user\"}'::jsonb, $6) ON CONFLICT (message_id) DO NOTHING;\n        \n        INSERT INTO ticket_mapping (provider, conversation_id, message_id, requester_email, ticket_id, status)\n        VALUES ('outlook', $2, $1, $3, $6, 'open') ON CONFLICT DO NOTHING;\n      ",
+        "options": {
+          "queryReplacement": "={{ $(\"Normalisation\").item.json.message_id }},{{ $(\"Normalisation\").item.json.conversation_id }},{{ $(\"Normalisation\").item.json.from_email }},{{ $(\"Normalisation\").item.json.subject }},{{ $(\"Normalisation\").item.json.body_hash }},{{ $(\"Check Duplicate User\").item.json.output.duplicate_ticket_id }}"
+        }
+      },
+      "id": "a6fa0ef5-f704-46a5-aaa7-6a935f3a0687",
+      "name": "Log Duplicate User",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2752,
+        480
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "MxKAmtSXyjK4ega6",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "load",
+        "tableName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "ticket_similarity_index"
+        },
+        "prompt": "={{ $(\"Normalisation\").item.json.cleaned_body }}",
+        "topK": 3,
+        "options": {
+          "queryName": "match_tickets"
+        }
+      },
+      "id": "c8f80cd4-2988-4817-843c-0a755fff0a9a",
+      "name": "SemanticSearchTickets",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1.3,
+      "position": [
+        1776,
+        752
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "nw6Zh5opury56v7F",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nlet searchItems = [];\ntry {\n  searchItems = $('SemanticSearchTickets').all();\n} catch (e) {\n  // En cas d'erreur ou si le nœud n'a pas été exécuté\n}\n\nconst tickets = searchItems.map(item => ({\n  ticket_id: item.json.metadata?.ticket_id || item.json.ticket_id,\n  summary: item.json.metadata?.summary || item.json.summary,\n  body_short: item.json.content || item.json.body_short,\n  similarity: item.json.similarity || item.json.metadata?.similarity\n})).filter(t => t.ticket_id && (t.similarity === undefined || t.similarity > 0.88));\n\nreturn {\n  json: {\n    tickets,\n    has_tickets: tickets.length > 0\n  }\n};\n"
+      },
+      "id": "825313db-602f-4f91-a2d9-2948eb4fcc88",
+      "name": "Aggregate Semantic Tickets",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2496,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.has_tickets }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b6127bb2-a365-4fac-ab81-6c3009909c5d",
+      "name": "Has Semantic Tickets?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2720,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{\"Compare le nouvel email avec les tickets sémantiquement similaires trouvés :\\n\\nNouvel Email :\\nSujet : \" + $(\"Normalisation\").item.json.subject + \"\\nMessage : \" + $(\"Normalisation\").item.json.cleaned_body + \"\\n\\nTickets Similaires : \" + JSON.stringify($json.tickets)}}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "Tu es un agent expert en détection de doublons globaux (outages système, pannes générales).\nCompare l'email reçu avec les tickets similaires trouvés et détermine s'ils décrivent la même panne ou le même problème système.\n\nRègles :\n- Si oui, retourne duplicate_detected = true et l'ID du ticket correspondant dans duplicate_ticket_id.\n- Si non, retourne duplicate_detected = false.\n\nRetourne un JSON valide."
+        }
+      },
+      "id": "46f4207f-d0f6-455c-be4a-4373aeee72cb",
+      "name": "Check Duplicate Semantic",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        2912,
+        736
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.output.duplicate_detected }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "2ddd6097-a91c-4911-82d9-e7bea6b3d456",
+      "name": "Is Duplicate Semantic?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3344,
+        736
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "mGbITn7HZ9jythSC"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "action": "add_followup",
+            "payload": {
+              "ticket_id": "={{ $json.output.duplicate_ticket_id }}",
+              "content": "={{ $(\"Normalisation\").item.json.cleaned_body }}"
+            }
+          }
+        },
+        "options": {}
+      },
+      "id": "db108e69-af98-4be9-8507-fce44a007f0e",
+      "name": "Call Subworkflow Duplicate Semantic",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        3552,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "\n        INSERT INTO mail_events (message_id, conversation_id, from_email, subject, body_hash, decision, related_ticket_id)\n        VALUES ($1, $2, $3, $4, $5, '{\"type\": \"duplicate_semantic\"}'::jsonb, $6) ON CONFLICT (message_id) DO NOTHING;\n        \n        INSERT INTO ticket_mapping (provider, conversation_id, message_id, requester_email, ticket_id, status)\n        VALUES ('outlook', $2, $1, $3, $6, 'open') ON CONFLICT DO NOTHING;\n      ",
+        "options": {
+          "queryReplacement": "={{ $(\"Normalisation\").item.json.message_id }},{{ $(\"Normalisation\").item.json.conversation_id }},{{ $(\"Normalisation\").item.json.from_email }},{{ $(\"Normalisation\").item.json.subject }},{{ $(\"Normalisation\").item.json.body_hash }},{{ $(\"Check Duplicate Semantic\").item.json.output.duplicate_ticket_id }}"
+        }
+      },
+      "id": "bd013988-5563-4ef1-a098-56b5807a7785",
+      "name": "Log Duplicate Semantic",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3744,
+        720
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "MxKAmtSXyjK4ega6",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT users_id AS requester_id FROM glpi_useremails WHERE email = $1\nUNION ALL\nSELECT 3 AS requester_id\nLIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ $(\"Normalisation\").item.json.from_email }}"
+        }
+      },
+      "id": "a7819a25-4098-4bf5-ac1c-800eaea41b6c",
+      "name": "Lookup Requester ID",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.2,
+      "position": [
+        3024,
+        1104
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "19mLDqvz7i84qgPb",
+          "name": "MySQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT glpi_group_name FROM support_teams WHERE team_name = $1\nUNION ALL\nSELECT NULL AS glpi_group_name\nLIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ $(\"TriageAgent\").item.json.output.team }}"
+        }
+      },
+      "id": "f23e3570-ea3b-40c4-9e9b-12c84a9c5c3f",
+      "name": "Lookup Team Assignment",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3232,
+        1104
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "MxKAmtSXyjK4ega6",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "(\n  SELECT gu.users_id AS glpi_assigned_id\n  FROM glpi_groups_users gu\n  JOIN glpi_groups g ON gu.groups_id = g.id\n  LEFT JOIN (\n    SELECT tu.users_id, COUNT(t.id) AS ticket_count, MIN(t.date_creation) AS oldest_ticket_date\n    FROM glpi_tickets_users tu\n    JOIN glpi_tickets t ON tu.tickets_id = t.id\n    WHERE tu.type = 2 AND t.status NOT IN (5, 6)\n    GROUP BY tu.users_id\n  ) workload ON gu.users_id = workload.users_id\n  WHERE g.name = $1\n  ORDER BY COALESCE(workload.ticket_count, 0) ASC, workload.oldest_ticket_date ASC\n  LIMIT 1\n)\nUNION ALL\nSELECT 2 AS glpi_assigned_id\nLIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ $json.glpi_group_name }}"
+        }
+      },
+      "id": "125a6b41-09f4-4126-ac62-3c94eb7c55a1",
+      "name": "Load Balance Technician",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.2,
+      "position": [
+        3424,
+        1104
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "19mLDqvz7i84qgPb",
+          "name": "MySQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "mGbITn7HZ9jythSC"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "action": "create_ticket",
+            "payload": {
+              "title": "={{ $(\"TriageAgent\").item.json.output.summary }}",
+              "content": "={{ $(\"Normalisation\").item.json.cleaned_body }}",
+              "assigned_to": "={{ $json.glpi_assigned_id || 2 }}",
+              "urgency": "={{ $(\"TriageAgent\").item.json.output.priority === \"P1\" ? 5 : ($(\"TriageAgent\").item.json.output.priority === \"P2\" ? 4 : ($(\"TriageAgent\").item.json.output.priority === \"P3\" ? 3 : 2)) }}",
+              "category_id": 1,
+              "status": 2,
+              "requester_id": "={{ $(\"Lookup Requester ID\").item.json.requester_id || 3 }}"
+            }
+          }
+        },
+        "options": {}
+      },
+      "id": "534ba0f1-af5b-4120-9466-9ef770ec9a0f",
+      "name": "Call Subworkflow Create Ticket",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        3664,
+        1104
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Priority 1: read ticket_id directly from structured subworkflow output\nlet ticketId = $json.ticket_id || null;\n\n// Priority 2: fallback regex on result text\nif (!ticketId) {\n  const resultText = $json.result || '';\n  const match = resultText.match(/(?:ticket|#|id\\s*[:=]\\s*)(\\d+)/i) || resultText.match(/(\\d{2,6})/);\n  ticketId = match ? parseInt(match[1], 10) : null;\n}\n\nif (!ticketId) {\n  return {\n    json: {\n      ticket_id: null,\n      success: false,\n      raw_result: $json.result || '',\n      error: 'Could not extract ticket_id from subworkflow output'\n    }\n  };\n}\n\nreturn {\n  json: {\n    ticket_id: ticketId,\n    success: true,\n    raw_result: $json.result || ''\n  }\n};"
+      },
+      "id": "0df2139f-5649-4116-94f8-8dee34ab190e",
+      "name": "Extract Ticket ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3888,
+        1104
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "\n        INSERT INTO mail_events (message_id, conversation_id, from_email, subject, body_hash, decision, related_ticket_id)\n        VALUES ($1, $2, $3, $4, $5, '{\"type\": \"new_ticket\"}'::jsonb, $6) ON CONFLICT (message_id) DO NOTHING;\n        \n        INSERT INTO ticket_mapping (provider, conversation_id, message_id, requester_email, ticket_id, status)\n        VALUES ('outlook', $2, $1, $3, $6, 'open') ON CONFLICT DO NOTHING;\n      ",
+        "options": {
+          "queryReplacement": "={{ $(\"Normalisation\").item.json.message_id }},{{ $(\"Normalisation\").item.json.conversation_id }},{{ $(\"Normalisation\").item.json.from_email }},{{ $(\"Normalisation\").item.json.subject }},{{ $(\"Normalisation\").item.json.body_hash }},{{ $json.ticket_id }}"
+        }
+      },
+      "id": "82d1a90d-114c-4b34-8e34-d988159998c7",
+      "name": "Log New Ticket Mapping",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        4112,
+        1104
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "MxKAmtSXyjK4ega6",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "tableName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "ticket_similarity_index"
+        },
+        "options": {}
+      },
+      "id": "2bc2e79b-5aa0-4be4-b78b-56d124686425",
+      "name": "Insert Ticket Embeddings",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1.3,
+      "position": [
+        4320,
+        1104
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "nw6Zh5opury56v7F",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonMode": "expressionData",
+        "jsonData": "={{ $(\"Normalisation\").item.json.cleaned_body }}",
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "ticket_id",
+                "value": "={{ $(\"Extract Ticket ID\").item.json.ticket_id }}"
+              },
+              {
+                "name": "summary",
+                "value": "={{ $(\"TriageAgent\").item.json.output.summary }}"
+              },
+              {
+                "name": "team",
+                "value": "={{ $(\"TriageAgent\").item.json.output.team }}"
+              },
+              {
+                "name": "category",
+                "value": "={{ $(\"TriageAgent\").item.json.output.category }}"
+              },
+              {
+                "name": "status",
+                "value": "open"
+              },
+              {
+                "name": "requester_email",
+                "value": "={{ $(\"Normalisation\").item.json.from_email }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "d56ed67a-85b0-4f51-81d7-906fb04d4d67",
+      "name": "Document Loader",
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1.1,
+      "position": [
+        4368,
+        1392
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "c4afe305-360b-45f1-b204-60e30cae7708",
+      "name": "Send Confirmation Email",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        4640,
+        1104
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "{\n    \"subject\": \"Re: Acc\\u00e8s impossible : Alerte de s\\u00e9curit\\u00e9 certificat sur l'outil de Commande\",\n    \"text\": \"Bonjour l'\\u00e9quipe Syst\\u00e8me,\\n\\nLe probl\\u00e8me persiste malgr\\u00e9 le red\\u00e9marrage. Pouvez-vous faire le n\\u00e9cessaire pour renouveler le certificat s'il vous pla\\u00eet ?\\n\\nCordialement,\\n\\nAnne-Carine Royer\",\n    \"messageId\": \"msg-prosuma-sys-55110\",\n    \"conversationId\": \"conv-prosuma-sys-2294\",\n    \"from\": {\n          \"value\": [\n                  {\n                            \"address\": \"Anne-Carine.Royer@prosuma.ci\",\n                            \"name\": \"Anne-Carine Royer\"\n                  }\n          ]\n    }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -176,
+        512
+      ],
+      "id": "33e6c305-c153-4d02-b49f-4f7c563e74b3",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -448,
+        512
+      ],
+      "id": "d4a551fa-3052-4c64-8f92-551b3fcdeada",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatNvidia",
+      "typeVersion": 1,
+      "position": [
+        736,
+        1344
+      ],
+      "id": "a1744ac5-f9a7-47e4-b395-ae9a8f052def",
+      "name": "NVIDIA Nemotron Chat Model",
+      "credentials": {
+        "nvidiaApi": {
+          "id": "WsIe2QUMizZJk4vC",
+          "name": "NVIDIA Nemotron account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "is_reopen",
+              "name": "is_reopen",
+              "value": true,
+              "type": "boolean"
+            },
+            {
+              "id": "reopen_context",
+              "name": "reopen_context",
+              "value": "=Cet email fait suite à un ticket précédemment résolu/fermé il y a plus de 5 jours (ticket_id: {{ $('Lookup Mapping').item.json.ticket_id }}). Traite-le comme une nouvelle demande indépendante.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d40142b7-631a-4737-911c-3db60a70ecf3",
+      "name": "Mark Reopen Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        944,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO mail_errors (\n  message_id, conversation_id, from_email, subject,\n  body_hash, error_stage, error_details, raw_subworkflow_output, failed_at\n)\nVALUES ($1, $2, $3, $4, $5, 'create_ticket', $6, $7, NOW())\nON CONFLICT (message_id) DO UPDATE\n  SET error_details = EXCLUDED.error_details,\n      failed_at = NOW();",
+        "options": {
+          "queryReplacement": "={{ [\n  $('Normalisation').item.json.message_id,\n  $('Normalisation').item.json.conversation_id,\n  $('Normalisation').item.json.from_email,\n  $('Normalisation').item.json.subject,\n  $('Normalisation').item.json.body_hash,\n  $json.error || 'ticket_id extraction failed',\n  $json.raw_result || ''\n].join(',') }}"
+        }
+      },
+      "id": "74ac45b1-ca2d-48e8-9ad3-22c15fee81b9",
+      "name": "Dead Letter Queue",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3264,
+        1312
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "MxKAmtSXyjK4ega6",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.success }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "2227af7a-aef4-45fc-bf73-b80a2c6c4e61",
+      "name": "Ticket ID Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3488,
+        1104
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://10.10.9.41:4000/api/n8n-config/ticket-source",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-webhook-secret",
+              "value": "a16250af2972f5a730804124d50bf2659830b921ea7c7a52"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"glpiTicketId\": $json.ticket_id,\n  \"sourceEmail\": $(\"Normalisation\").item.json.from_email,\n  \"sourceName\": $(\"Normalisation\").item.json.from_name,\n  \"sourceSubject\": $(\"Normalisation\").item.json.subject\n} }}",
+        "options": {}
+      },
+      "id": "f3a1b2c4-1234-4abc-9def-ticketsourcepush",
+      "name": "Push Ticket Source to ERP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4112,
+        1280
+      ],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Normalisation": {
+      "main": [
+        [
+          {
+            "node": "Lookup Mapping",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Mapping": {
+      "main": [
+        [
+          {
+            "node": "Has Mapping?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Mapping?": {
+      "main": [
+        [
+          {
+            "node": "Is Solved or Closed?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "TriageAgent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Solved or Closed?": {
+      "main": [
+        [
+          {
+            "node": "Within Grace Period?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call Subworkflow Followup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Within Grace Period?": {
+      "main": [
+        [
+          {
+            "node": "Call Subworkflow Reopen",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Reopen Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Subworkflow Reopen": {
+      "main": [
+        [
+          {
+            "node": "Call Subworkflow Followup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Subworkflow Followup": {
+      "main": [
+        [
+          {
+            "node": "Log Mail Event Followup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TriageAgent": {
+      "main": [
+        [
+          {
+            "node": "Needs Ticket?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SupabaseVectorStore": {
+      "ai_tool": [
+        [
+          {
+            "node": "TriageAgent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GeminiEmbeddings": {
+      "ai_embedding": [
+        [
+          {
+            "node": "SupabaseVectorStore",
+            "type": "ai_embedding",
+            "index": 0
+          },
+          {
+            "node": "SemanticSearchTickets",
+            "type": "ai_embedding",
+            "index": 0
+          },
+          {
+            "node": "Insert Ticket Embeddings",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "StructuredParser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "TriageAgent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Ticket?": {
+      "main": [
+        [
+          {
+            "node": "Find Recent Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Recent Tickets": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Recent Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Recent Tickets": {
+      "main": [
+        [
+          {
+            "node": "Has Recent Tickets?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Recent Tickets?": {
+      "main": [
+        [
+          {
+            "node": "Check Duplicate User",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "SemanticSearchTickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Duplicate User": {
+      "main": [
+        [
+          {
+            "node": "Is Duplicate User?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "StructuredParserDuplicate": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Check Duplicate User",
+            "type": "ai_outputParser",
+            "index": 0
+          },
+          {
+            "node": "Check Duplicate Semantic",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Duplicate User?": {
+      "main": [
+        [
+          {
+            "node": "Call Subworkflow Duplicate User",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "SemanticSearchTickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Subworkflow Duplicate User": {
+      "main": [
+        [
+          {
+            "node": "Log Duplicate User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SemanticSearchTickets": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Semantic Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Semantic Tickets": {
+      "main": [
+        [
+          {
+            "node": "Has Semantic Tickets?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Semantic Tickets?": {
+      "main": [
+        [
+          {
+            "node": "Check Duplicate Semantic",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Lookup Requester ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Duplicate Semantic": {
+      "main": [
+        [
+          {
+            "node": "Is Duplicate Semantic?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Duplicate Semantic?": {
+      "main": [
+        [
+          {
+            "node": "Call Subworkflow Duplicate Semantic",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Lookup Requester ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Subworkflow Duplicate Semantic": {
+      "main": [
+        [
+          {
+            "node": "Log Duplicate Semantic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Requester ID": {
+      "main": [
+        [
+          {
+            "node": "Lookup Team Assignment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Team Assignment": {
+      "main": [
+        [
+          {
+            "node": "Load Balance Technician",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Balance Technician": {
+      "main": [
+        [
+          {
+            "node": "Call Subworkflow Create Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Subworkflow Create Ticket": {
+      "main": [
+        [
+          {
+            "node": "Extract Ticket ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log New Ticket Mapping": {
+      "main": [
+        [
+          {
+            "node": "Insert Ticket Embeddings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Ticket Embeddings": {
+      "main": [
+        [
+          {
+            "node": "Send Confirmation Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Document Loader": {
+      "ai_document": [
+        [
+          {
+            "node": "Insert Ticket Embeddings",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Normalisation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NVIDIA Nemotron Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "TriageAgent",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Check Duplicate User",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Check Duplicate Semantic",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "StructuredParser",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "StructuredParserDuplicate",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Reopen Context": {
+      "main": [
+        [
+          {
+            "node": "TriageAgent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Ticket ID": {
+      "main": [
+        [
+          {
+            "node": "Ticket ID Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ticket ID Exists?": {
+      "main": [
+        [
+          {
+            "node": "Log New Ticket Mapping",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Push Ticket Source to ERP",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Dead Letter Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "versionId": "649e63f1-7459-406f-9f8c-4d33d7ce4f24",
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp",
+    "templateCredsSetupCompleted": true,
+    "instanceId": "e3fed30a5499b1dde2ee11314aa44ac9c02ccbb5369aab98c852920c182d4f8b"
+  },
+  "id": "v9dWKCvpqy11yTqn",
+  "tags": []
+}

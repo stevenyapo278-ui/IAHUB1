@@ -1,0 +1,60 @@
+services:
+
+  # Base de données PostgreSQL avec pgvector
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: ia-hub-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: erp_user
+      POSTGRES_PASSWORD: erp_password
+      POSTGRES_DB: erp_itsm
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U erp_user -d erp_itsm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # API Backend
+  backend:
+    build:
+      context: ./erp-backend
+      dockerfile: Dockerfile
+    container_name: ia-hub-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 4000
+      DATABASE_URL: postgresql://erp_user:erp_password@postgres:5432/erp_itsm?schema=public
+      JWT_SECRET: ${JWT_SECRET:-change_me_in_production}
+      JWT_EXPIRES_IN: 8h
+      CORS_ORIGIN: "*"
+      MICROSOFT_REDIRECT_URI: ${MICROSOFT_REDIRECT_URI:-http://localhost:4000/api/oauth/outlook/callback}
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./erp-backend/src:/app/src  # hot reload en dev
+
+  # Frontend React (Nginx en prod)
+  frontend:
+    build:
+      context: ./erp-frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:4000/api}
+    container_name: ia-hub-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+
+volumes:
+  postgres_data:
