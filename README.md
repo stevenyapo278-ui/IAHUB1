@@ -45,13 +45,30 @@ VITE_API_URL=http://localhost:4000/api
 ### 3. Lancer
 
 ```bash
+./start.sh
+```
+
+Le script demande comment gérer GLPI :
+
+```
+1) Je n'ai pas encore de GLPI -> en créer un nouveau (conteneur dédié)
+2) J'ai déjà un GLPI qui tourne -> me connecter dessus (aucun conteneur GLPI créé)
+```
+
+- **Option 1** : démarre un GLPI neuf (+ sa base MariaDB) en plus du reste de la stack. Voir [Première installation de GLPI](#première-installation-de-glpi-premier-démarrage-uniquement).
+- **Option 2** : demande l'URL de l'API REST GLPI, l'App Token et le User Token de ton instance existante, les enregistre dans `.env`, et démarre la stack **sans créer de conteneur GLPI**.
+
+Alternative sans script (démarre uniquement la stack de base, sans GLPI) :
+
+```bash
 docker compose up -d
 ```
 
-C'est tout. Les services démarrent dans l'ordre :
+Les services démarrent dans l'ordre :
 1. PostgreSQL (avec pgvector activé automatiquement)
-2. Backend (migrations appliquées + seed au démarrage)
-3. Frontend (build React servi par Nginx)
+2. GLPI, si l'option 1 a été choisie (+ sa base MariaDB)
+3. Backend (migrations appliquées + seed au démarrage)
+4. Frontend (build React servi par Nginx)
 
 ### Accès
 
@@ -63,9 +80,45 @@ C'est tout. Les services démarrent dans l'ordre :
 
 ### Identifiants par défaut
 
+Ces comptes sont créés automatiquement par le script de seed (`erp-backend/prisma/seed.js`) à chaque démarrage (`docker compose up -d`), s'ils n'existent pas déjà en base.
+
 ```
 Email    : admin@example.com
 Password : ChangeMe123!
+```
+
+```
+Email    : admin@prosuma.ci
+Password : 1234
+```
+
+Si aucun de ces comptes ne fonctionne (ex: base de données déjà initialisée par un seed plus ancien, mot de passe changé manuellement), recrée un admin directement en base :
+
+```bash
+docker exec ia-hub-backend node -e "
+const bcrypt = require('bcryptjs');
+const prisma = require('./src/prismaClient');
+(async () => {
+  const passwordHash = await bcrypt.hash('1234', 10);
+  const user = await prisma.user.upsert({
+    where: { email: 'admin@prosuma.ci' },
+    create: { email: 'admin@prosuma.ci', passwordHash, fullName: 'Admin Prosuma', role: 'ADMIN' },
+    update: { passwordHash, role: 'ADMIN' },
+  });
+  console.log('Admin prêt :', user.email);
+  process.exit();
+})();
+"
+```
+
+Ou directement en SQL via `psql` (le hash correspond au mot de passe `1234`) :
+
+```bash
+docker exec ia-hub-postgres psql -U erp_user -d erp_itsm -c "
+INSERT INTO \"User\" (email, \"passwordHash\", \"fullName\", role, \"createdAt\", \"updatedAt\")
+VALUES ('admin@prosuma.ci', '\$2a\$10\$v5oqXMZI1b5dytp0BBgtDe/tolP3PMCg0M4dhXZ8PZ4WlnyQiZOVS', 'Admin Prosuma', 'ADMIN', NOW(), NOW())
+ON CONFLICT (email) DO UPDATE SET \"passwordHash\" = EXCLUDED.\"passwordHash\", role = 'ADMIN';
+"
 ```
 
 ### Commandes utiles
@@ -143,15 +196,90 @@ npm run dev
 
 ---
 
+## GLPI — nouveau ou existant
+
+`./start.sh` pose la question au démarrage : créer un GLPI neuf ou se connecter à un GLPI déjà existant. Les deux cas sont gérés par des fichiers Docker Compose séparés :
+
+| Fichier | Rôle |
+|---|---|
+| `docker-compose.yml` | Stack de base : PostgreSQL, backend, frontend — sans GLPI |
+| `docker-compose.glpi.yml` | Override **optionnel** : ajoute les services `glpi` + `glpi-db` |
+
+### Option 1 — Créer un nouveau GLPI
+
+```bash
+./start.sh
+# choisir 1
+```
+
+Équivalent manuel :
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.glpi.yml up -d --build
+```
+
+| Service | URL |
+|---|---|
+| GLPI | http://localhost:8080 |
+
+Première installation (une seule fois) :
+
+1. Ouvrir http://localhost:8080 et suivre l'assistant d'installation GLPI.
+2. À l'étape base de données, renseigner : host `glpi-db`, user `glpi`, password `glpi_pass`, base `glpi`.
+3. Terminer l'installation (créer le compte admin GLPI, choisir la langue, etc.).
+4. Activer l'API REST : Configuration → Générale → onglet **API** → activer "API REST".
+5. Créer un **App Token** : Configuration → Générale → onglet **API** → ajouter un client API (ou utiliser celui par défaut "full access from localhost").
+6. Générer un **User Token** : Administration → Utilisateurs → (ton compte) → onglet "Jetons API" → générer un nouveau jeton API.
+
+Puis relancer `./start.sh` et choisir l'option 2 pour enregistrer ces tokens (ou éditer `.env` directement, voir ci-dessous).
+
+### Option 2 — Se connecter à un GLPI déjà existant
+
+```bash
+./start.sh
+# choisir 2, puis renseigner : URL de l'API REST, App Token, User Token
+```
+
+Cette option **ne crée aucun conteneur GLPI** — elle enregistre la configuration dans `.env` et démarre uniquement `docker-compose.yml` (postgres, backend, frontend). Si l'URL fournie pointe sur `localhost`, le script la convertit automatiquement en `host.docker.internal` pour que le conteneur backend puisse l'atteindre.
+
+Équivalent manuel — renseigner dans le `.env` à la racine du projet :
+
+```env
+GLPI_URL=http://host.docker.internal:8080/apirest.php
+GLPI_APP_TOKEN=<ton App Token>
+GLPI_USER_TOKEN=<ton User Token>
+```
+
+Puis :
+
+```bash
+docker compose up -d --build backend
+```
+
+### Configuration automatique
+
+Dans les deux cas, le script de seed (`erp-backend/prisma/seed.js`) lit `GLPI_URL` / `GLPI_APP_TOKEN` / `GLPI_USER_TOKEN` depuis l'environnement et configure automatiquement la connexion GLPI en base à chaque démarrage — pas besoin de repasser par Settings → GLPI dans l'interface.
+
+### GLPI configuré manuellement (alternative)
+
+Si tu préfères passer par l'interface au lieu des variables d'environnement, configurer dans **Paramètres** :
+
+Settings → GLPI → renseigner :
+- URL de base (ex: `http://glpi/apirest.php` si GLPI tourne dans ce docker-compose, ou l'URL de ton instance externe)
+- User Token
+- App Token
+
+### Persistance des données GLPI (option 1 uniquement)
+
+- La base de données GLPI (tickets, utilisateurs, configuration) est stockée dans le volume Docker `glpi_mysql_data` — elle survit aux `docker compose down` et aux rebuilds.
+- La configuration de connexion GLPI (`config_db.php`) est stockée dans le volume `glpi_config`.
+- `docker compose down -v` supprime ces volumes et donc **toutes les données GLPI** — à utiliser uniquement pour une réinitialisation complète.
+
+---
+
 ## Configuration post-installation
 
 Une fois connecté au dashboard, configurer dans **Paramètres** :
-
-### GLPI (obligatoire)
-Settings → GLPI → renseigner :
-- URL de base (ex: `http://glpi.local/apirest.php`)
-- User Token
-- App Token
 
 ### Intelligence Artificielle (obligatoire)
 Settings → Intelligence Artificielle → Gemini → Ajouter une clé API

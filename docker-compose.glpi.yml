@@ -1,0 +1,37 @@
+services:
+
+  # Base de données GLPI
+  glpi-db:
+    image: mariadb:10.11
+    container_name: ia-hub-glpi-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root_pass
+      MYSQL_DATABASE: glpi
+      MYSQL_USER: glpi
+      MYSQL_PASSWORD: glpi_pass
+    volumes:
+      - glpi_mysql_data:/var/lib/mysql
+
+  # GLPI (ITSM)
+  glpi:
+    image: diouxx/glpi:latest
+    container_name: ia-hub-glpi
+    restart: unless-stopped
+    depends_on:
+      - glpi-db
+    environment:
+      TIMEZONE: Europe/Paris
+    ports:
+      - "8080:80"
+    volumes:
+      - glpi_config:/var/www/html/glpi/config
+
+  backend:
+    depends_on:
+      glpi:
+        condition: service_started
+
+volumes:
+  glpi_mysql_data:
+  glpi_config:

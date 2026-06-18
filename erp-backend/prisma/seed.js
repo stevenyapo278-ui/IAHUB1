@@ -58,6 +58,21 @@ async function main() {
     console.log(`Admin créé : ${adminEmail} / ChangeMe123!`);
   }
 
+  const secondAdminEmail = 'admin@prosuma.ci';
+  const existingSecondAdmin = await prisma.user.findUnique({ where: { email: secondAdminEmail } });
+  if (!existingSecondAdmin) {
+    const passwordHash = await bcrypt.hash('1234', 10);
+    await prisma.user.create({
+      data: {
+        email: secondAdminEmail,
+        passwordHash,
+        fullName: 'Admin Prosuma',
+        role: 'ADMIN',
+      },
+    });
+    console.log(`Admin créé : ${secondAdminEmail} / 1234`);
+  }
+
   const providers = [
     {
       name: 'openai',
@@ -106,6 +121,27 @@ async function main() {
         create: { providerId: provider.id, name: modelName, isDefault: i === 0 },
       });
     }
+  }
+
+  // Configuration GLPI automatique depuis les variables d'environnement (si fournies)
+  if (process.env.GLPI_URL && process.env.GLPI_APP_TOKEN && process.env.GLPI_USER_TOKEN) {
+    await prisma.apiConfig.upsert({
+      where: { serviceName: 'glpi' },
+      update: {
+        baseUrl: process.env.GLPI_URL,
+        apiKey: process.env.GLPI_USER_TOKEN,
+        extra: { appToken: process.env.GLPI_APP_TOKEN },
+        isActive: true,
+      },
+      create: {
+        serviceName: 'glpi',
+        baseUrl: process.env.GLPI_URL,
+        apiKey: process.env.GLPI_USER_TOKEN,
+        extra: { appToken: process.env.GLPI_APP_TOKEN },
+        isActive: true,
+      },
+    });
+    console.log('Configuration GLPI appliquée depuis les variables d\'environnement.');
   }
 
   console.log('Seed terminé.');
