@@ -10,7 +10,7 @@ const router = express.Router();
 router.post(
   '/register',
   [
-    body('email').isEmail(),
+    body('email').trim().isEmail(),
     body('password').isLength({ min: 8 }),
     body('fullName').notEmpty(),
   ],
@@ -20,7 +20,8 @@ router.post(
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { email, password, fullName, role, teamId } = req.body;
+    const email = req.body.email.trim().toLowerCase();
+    const { password, fullName, role, teamId } = req.body;
 
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {
@@ -50,14 +51,15 @@ router.post(
 
 router.post(
   '/login',
-  [body('email').isEmail(), body('password').notEmpty()],
+  [body('email').trim().isEmail(), body('password').notEmpty()],
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { email, password } = req.body;
+    const email = req.body.email.trim().toLowerCase();
+    const { password } = req.body;
 
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user || !user.isActive) {
