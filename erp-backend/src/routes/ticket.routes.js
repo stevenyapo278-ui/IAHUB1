@@ -4,7 +4,10 @@ const prisma = require('../prismaClient');
 const { authenticate, authorize } = require('../middleware/auth');
 const { getGlpiConfig, glpiInitSession, glpiKillSession } = require('../utils/glpiSync');
 const { notifyMajorIncidentResolved } = require('../services/emailSender');
+const { createGlpiTicket, updateGlpiTicket, uploadGlpiAttachment } = require('../services/glpiTicketCreator');
+const multer = require('multer');
 
+const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); // 20 Mo max
 const router = express.Router();
 router.use(authenticate);
 
@@ -28,11 +31,17 @@ router.get('/', async (req, res) => {
 
   if (req.query.approvalStatus) where.approvalStatus = req.query.approvalStatus;
 
+  // source=glpi -> uniquement les tickets synchronisés avec GLPI
+  // source=erp  -> uniquement les tickets internes (jamais envoyés à GLPI)
+  if (req.query.source === 'glpi') where.glpiTicketId = { not: null };
+  if (req.query.source === 'erp') where.glpiTicketId = null;
+
   const tickets = await prisma.ticket.findMany({
     where,
     include: {
       requester: { select: { id: true, fullName: true, email: true } },
       assignedTo: { select: { id: true, fullName: true, email: true } },
+      observers: { select: { id: true, fullName: true, email: true } },
       team: { select: { id: true, name: true } },
       approvedBy: { select: { id: true, fullName: true, email: true } },
     },
@@ -49,6 +58,7 @@ router.get('/:id', async (req, res) => {
     include: {
       requester: { select: { id: true, fullName: true, email: true } },
       assignedTo: { select: { id: true, fullName: true, email: true } },
+      observers: { select: { id: true, fullName: true, email: true } },
       team: { select: { id: true, name: true } },
       approvedBy: { select: { id: true, fullName: true, email: true } },
       followups: { include: { author: { select: { id: true, fullName: true } } }, orderBy: { createdAt: 'asc' } },
@@ -94,6 +104,7 @@ router.get('/:id/attachments/:attachmentId/file', async (req, res) => {
 // Create ticket
 router.post(
   '/',
+  upload.single('attachment'),
   [body('title').notEmpty(), body('content').notEmpty()],
   async (req, res) => {
     const errors = validationResult(req);
@@ -101,21 +112,82 @@ router.post(
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { title, content, priority, category, teamId, assignedToId, requiresApproval } = req.body;
+    const {
+      title, content, priority, category, teamId, assignedToId, requesterId, requiresApproval,
+      type, urgency, impact, source, externalId, status, openedAt,
+    } = req.body;
+
+    // observerIds peut arriver en JSON (multipart) ou en tableau (JSON direct)
+    let observerIds = [];
+    if (req.body.observerIds) {
+      try {
+        observerIds = Array.isArray(req.body.observerIds) ? req.body.observerIds : JSON.parse(req.body.observerIds);
+      } catch {
+        observerIds = [];
+      }
+    }
+
+    // Seul un ADMIN/TECHNICIAN peut créer un ticket pour un autre demandeur
+    const canSetRequester = ['ADMIN', 'TECHNICIAN'].includes(req.user.role);
+    const finalRequesterId = canSetRequester && requesterId ? Number(requesterId) : req.user.sub;
+
+    let glpiTicketId = null;
+    try {
+      glpiTicketId = await createGlpiTicket({ title, content, priority, category, type, urgency, impact, source });
+    } catch (err) {
+      console.error('[ticket.routes] Création GLPI échouée:', err.message);
+    }
+
+    // Seul un ADMIN/TECHNICIAN peut fixer le statut initial (ex: importer un ticket déjà résolu)
+    const canSetStatus = ['ADMIN', 'TECHNICIAN'].includes(req.user.role);
+    const finalStatus = canSetStatus && status ? status : 'NEW';
 
     const ticket = await prisma.ticket.create({
       data: {
+        ...(glpiTicketId ? { glpiTicketId } : {}),
         title,
         content,
         priority: priority || 'P3',
         category: category || null,
-        teamId: teamId || null,
-        assignedToId: assignedToId || null,
-        requesterId: req.user.sub,
-        status: 'NEW',
-        approvalStatus: requiresApproval ? 'PENDING' : 'NOT_REQUIRED',
+        teamId: teamId ? Number(teamId) : null,
+        assignedToId: assignedToId ? Number(assignedToId) : null,
+        requesterId: finalRequesterId,
+        status: finalStatus,
+        ...(finalStatus === 'SOLVED' ? { solvedAt: new Date() } : {}),
+        ...(finalStatus === 'CLOSED' ? { closedAt: new Date() } : {}),
+        ...(openedAt ? { createdAt: new Date(openedAt) } : {}),
+        approvalStatus: requiresApproval === 'true' || requiresApproval === true ? 'PENDING' : 'NOT_REQUIRED',
+        type: type || 'INCIDENT',
+        urgency: urgency || 'MEDIUM',
+        impact: impact || 'MEDIUM',
+        source: source || null,
+        externalId: externalId || null,
+        ...(observerIds.length > 0 ? { observers: { connect: observerIds.map((id) => ({ id: Number(id) })) } } : {}),
       },
     });
+
+    if (req.file && glpiTicketId) {
+      try {
+        const documentId = await uploadGlpiAttachment({
+          glpiTicketId,
+          buffer: req.file.buffer,
+          filename: req.file.originalname,
+          mimeType: req.file.mimetype,
+        });
+        if (documentId) {
+          await prisma.ticketAttachment.create({
+            data: {
+              ticketId: ticket.id,
+              glpiDocumentId: documentId,
+              filename: req.file.originalname,
+              mimeType: req.file.mimetype,
+            },
+          });
+        }
+      } catch (err) {
+        console.error('[ticket.routes] Upload pièce jointe GLPI échoué:', err.message);
+      }
+    }
 
     return res.status(201).json(ticket);
   }
@@ -124,7 +196,7 @@ router.post(
 // Update ticket (status, priority, assignment, etc.)
 router.patch('/:id', authorize('ADMIN', 'TECHNICIAN'), async (req, res) => {
   const id = Number(req.params.id);
-  const { title, content, status, priority, category, teamId, assignedToId } = req.body;
+  const { title, content, status, priority, category, teamId, assignedToId, type, urgency, impact, source, externalId } = req.body;
 
   const data = {};
   if (title !== undefined) data.title = title;
@@ -133,6 +205,11 @@ router.patch('/:id', authorize('ADMIN', 'TECHNICIAN'), async (req, res) => {
   if (category !== undefined) data.category = category;
   if (teamId !== undefined) data.teamId = teamId;
   if (assignedToId !== undefined) data.assignedToId = assignedToId;
+  if (type !== undefined) data.type = type;
+  if (urgency !== undefined) data.urgency = urgency;
+  if (impact !== undefined) data.impact = impact;
+  if (source !== undefined) data.source = source;
+  if (externalId !== undefined) data.externalId = externalId;
 
   if (status !== undefined) {
     data.status = status;
@@ -156,6 +233,24 @@ router.patch('/:id', authorize('ADMIN', 'TECHNICIAN'), async (req, res) => {
     });
 
     const ticket = await prisma.ticket.update({ where: { id }, data });
+
+    // Répercuter les changements vers GLPI si le ticket y est synchronisé
+    if (before?.glpiTicketId) {
+      try {
+        let assignedToGlpiId, teamGlpiId;
+        if (assignedToId !== undefined && assignedToId) {
+          const assignee = await prisma.user.findUnique({ where: { id: Number(assignedToId) }, select: { glpiId: true } });
+          assignedToGlpiId = assignee?.glpiId || undefined;
+        }
+        if (teamId !== undefined && teamId) {
+          const team = await prisma.team.findUnique({ where: { id: Number(teamId) }, select: { glpiGroupId: true } });
+          teamGlpiId = team?.glpiGroupId || undefined;
+        }
+        await updateGlpiTicket(before.glpiTicketId, { status, priority, category, type, urgency, impact, assignedToGlpiId, teamGlpiId });
+      } catch (err) {
+        console.error('[ticket.routes] Mise à jour GLPI échouée:', err.message);
+      }
+    }
 
     // Notifier tous les sites impactés si un incident majeur vient d'être résolu/clôturé
     const isNowResolved = (status === 'SOLVED' || status === 'CLOSED');
@@ -246,6 +341,18 @@ router.delete('/:id', authorize('ADMIN'), async (req, res) => {
   } catch (err) {
     return res.status(404).json({ error: 'Ticket introuvable' });
   }
+});
+
+// Delete tickets in bulk — body: { ids: [1, 2, 3] }
+router.post('/bulk-delete', authorize('ADMIN'), [body('ids').isArray({ min: 1 })], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+  const ids = req.body.ids.map(Number).filter((n) => !Number.isNaN(n));
+  if (ids.length === 0) return res.status(400).json({ error: 'Aucun identifiant valide fourni' });
+
+  const result = await prisma.ticket.deleteMany({ where: { id: { in: ids } } });
+  return res.json({ deleted: result.count });
 });
 
 module.exports = router;

@@ -123,27 +123,6 @@ async function main() {
     }
   }
 
-  // Configuration GLPI automatique depuis les variables d'environnement (si fournies)
-  if (process.env.GLPI_URL && process.env.GLPI_APP_TOKEN && process.env.GLPI_USER_TOKEN) {
-    await prisma.apiConfig.upsert({
-      where: { serviceName: 'glpi' },
-      update: {
-        baseUrl: process.env.GLPI_URL,
-        apiKey: process.env.GLPI_USER_TOKEN,
-        extra: { appToken: process.env.GLPI_APP_TOKEN },
-        isActive: true,
-      },
-      create: {
-        serviceName: 'glpi',
-        baseUrl: process.env.GLPI_URL,
-        apiKey: process.env.GLPI_USER_TOKEN,
-        extra: { appToken: process.env.GLPI_APP_TOKEN },
-        isActive: true,
-      },
-    });
-    console.log('Configuration GLPI appliquée depuis les variables d\'environnement.');
-  }
-
   console.log('Seed terminé.');
 }
 

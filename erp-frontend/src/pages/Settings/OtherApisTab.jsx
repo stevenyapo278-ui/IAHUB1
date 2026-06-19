@@ -6,18 +6,58 @@ const inputClass =
 
 export default function OtherApisTab() {
   const [configs, setConfigs] = useState([]);
-  const [form, setForm] = useState({ serviceName: '', baseUrl: '', apiKey: '' });
+  const [form, setForm] = useState({ serviceName: '', baseUrl: '', apiKey: '', appToken: '' });
   const [workflows, setWorkflows] = useState([]);
   const [workflowForm, setWorkflowForm] = useState({ name: '', webhookUrl: '', description: '' });
   const [triggering, setTriggering] = useState(null);
   const [syncingGlpi, setSyncingGlpi] = useState(false);
+  const [testingId, setTestingId] = useState(null);
+  const [connectionStatus, setConnectionStatus] = useState({}); // { [configId]: { connected, error } }
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+
+  const REQUIRED_FIELDS = {
+    glpi: [
+      { key: 'baseUrl', label: 'URL de base' },
+      { key: 'apiKey', label: 'Clé API (User Token)' },
+      { key: 'appToken', label: 'App Token' },
+    ],
+  };
+
+  function getMissingFields(config) {
+    const required = REQUIRED_FIELDS[config.serviceName];
+    if (!required) return [];
+    const values = { baseUrl: config.baseUrl, apiKey: config.apiKey, appToken: config.extra?.appToken };
+    return required.filter((f) => !values[f.key]).map((f) => f.label);
+  }
+
+  async function handleTestConnection(config) {
+    const missing = getMissingFields(config);
+    if (missing.length > 0) {
+      setConnectionStatus((s) => ({ ...s, [config.id]: { connected: false, error: `Champ(s) manquant(s) : ${missing.join(', ')}` } }));
+      return;
+    }
+    setTestingId(config.id);
+    try {
+      const { data } = await api.post(`/api-configs/${config.id}/test-connection`);
+      setConnectionStatus((s) => ({ ...s, [config.id]: data }));
+    } catch (err) {
+      setConnectionStatus((s) => ({
+        ...s,
+        [config.id]: { connected: false, error: err.response?.data?.error || 'Erreur lors du test de connexion' },
+      }));
+    } finally {
+      setTestingId(null);
+    }
+  }
 
   function load() {
     api
       .get('/api-configs')
-      .then(({ data }) => setConfigs(data))
+      .then(({ data }) => {
+        setConfigs(data);
+        data.filter((c) => c.isActive && REQUIRED_FIELDS[c.serviceName]).forEach((c) => handleTestConnection(c));
+      })
       .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
   }
 
@@ -94,9 +134,21 @@ export default function OtherApisTab() {
   async function handleCreate(e) {
     e.preventDefault();
     setError('');
+
+    const required = REQUIRED_FIELDS[form.serviceName];
+    if (required) {
+      const missing = required.filter((f) => !form[f.key]).map((f) => f.label);
+      if (missing.length > 0) {
+        setError(`Champ(s) manquant(s) : ${missing.join(', ')}`);
+        return;
+      }
+    }
+
     try {
-      await api.post('/api-configs', form);
-      setForm({ serviceName: '', baseUrl: '', apiKey: '' });
+      const { appToken, ...rest } = form;
+      const payload = { ...rest, ...(appToken ? { extra: { appToken } } : {}) };
+      await api.post('/api-configs', payload);
+      setForm({ serviceName: '', baseUrl: '', apiKey: '', appToken: '' });
       load();
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la création');
@@ -109,6 +161,16 @@ export default function OtherApisTab() {
       load();
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la mise à jour');
+    }
+  }
+
+  async function handleUpdateAppToken(id, currentExtra, appToken) {
+    if (!appToken) return;
+    try {
+      await api.patch(`/api-configs/${id}`, { extra: { ...currentExtra, appToken } });
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || "Erreur lors de la mise à jour de l'App Token");
     }
   }
 
@@ -148,9 +210,23 @@ export default function OtherApisTab() {
             <input className={inputClass} value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} placeholder="https://..." />
           </label>
           <label className="flex flex-col gap-xs">
-            <span className="font-label-md text-label-md text-on-surface uppercase">Clé API</span>
+            <span className="font-label-md text-label-md text-on-surface uppercase">
+              Clé API{form.serviceName === 'glpi' ? ' (User Token)' : ''}
+            </span>
             <input className={inputClass} type="password" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} />
           </label>
+          {form.serviceName === 'glpi' && (
+            <label className="flex flex-col gap-xs">
+              <span className="font-label-md text-label-md text-on-surface uppercase">App Token (GLPI)</span>
+              <input
+                className={inputClass}
+                type="password"
+                value={form.appToken}
+                onChange={(e) => setForm({ ...form, appToken: e.target.value })}
+                placeholder="Jeton du client API GLPI"
+              />
+            </label>
+          )}
           <div className="md:col-span-3">
             <button
               type="submit"
@@ -169,6 +245,8 @@ export default function OtherApisTab() {
               <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm">Service</th>
               <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm">URL de base</th>
               <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm">Clé API</th>
+              <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm">App Token</th>
+              <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm w-36">Statut</th>
               <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm w-24 text-center">Active</th>
               <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm w-32"></th>
               <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm w-16"></th>
@@ -194,6 +272,47 @@ export default function OtherApisTab() {
                       if (e.target.value) handleUpdate(c.id, 'apiKey', e.target.value);
                     }}
                   />
+                </td>
+                <td className="p-sm">
+                  {c.serviceName === 'glpi' ? (
+                    <input
+                      className={`${inputClass} w-full`}
+                      type="password"
+                      placeholder={c.extra?.appToken ? 'Défini' : 'Non défini'}
+                      onBlur={(e) => handleUpdateAppToken(c.id, c.extra, e.target.value)}
+                    />
+                  ) : (
+                    <span className="text-outline">-</span>
+                  )}
+                </td>
+                <td className="p-sm">
+                  {REQUIRED_FIELDS[c.serviceName] && (
+                    <button
+                      onClick={() => handleTestConnection(c)}
+                      disabled={testingId === c.id}
+                      title="Tester la connexion"
+                      className="inline-flex items-center gap-1.5 px-2 py-1 border border-outline-variant rounded-none text-[11px] font-medium hover:bg-surface-container-low transition-colors disabled:opacity-50"
+                    >
+                      {testingId === c.id ? (
+                        <span className="text-on-surface-variant">Test...</span>
+                      ) : connectionStatus[c.id]?.connected ? (
+                        <>
+                          <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                          <span className="text-on-surface">Connecté</span>
+                        </>
+                      ) : connectionStatus[c.id] ? (
+                        <>
+                          <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                          <span className="text-error" title={connectionStatus[c.id].error}>Non connecté</span>
+                        </>
+                      ) : (
+                        <span className="text-on-surface-variant">Tester</span>
+                      )}
+                    </button>
+                  )}
+                  {connectionStatus[c.id]?.error && (
+                    <div className="text-[11px] text-error mt-1 max-w-[180px]">{connectionStatus[c.id].error}</div>
+                  )}
                 </td>
                 <td className="p-sm text-center">
                   <input
@@ -222,7 +341,7 @@ export default function OtherApisTab() {
               </tr>
             ))}
             {configs.length === 0 && (
-              <tr><td colSpan={6} className="p-sm text-center text-on-surface-variant">Aucune intégration configurée</td></tr>
+              <tr><td colSpan={8} className="p-sm text-center text-on-surface-variant">Aucune intégration configurée</td></tr>
             )}
           </tbody>
         </table>

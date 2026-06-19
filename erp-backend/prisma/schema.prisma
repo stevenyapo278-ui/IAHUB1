@@ -51,6 +51,29 @@ enum TicketPriority {
   P4
 }
 
+enum TicketType {
+  INCIDENT
+  REQUEST
+}
+
+enum TicketUrgency {
+  VERY_LOW
+  LOW
+  MEDIUM
+  HIGH
+  VERY_HIGH
+  MAJOR
+}
+
+enum TicketImpact {
+  VERY_LOW
+  LOW
+  MEDIUM
+  HIGH
+  VERY_HIGH
+  MAJOR
+}
+
 enum ApprovalStatus {
   NOT_REQUIRED
   PENDING
@@ -74,6 +97,7 @@ model User {
   ticketsCreated  Ticket[] @relation("TicketRequester")
   ticketsAssigned Ticket[] @relation("TicketAssignee")
   ticketsApproved Ticket[] @relation("TicketApprover")
+  ticketsObserved Ticket[] @relation("TicketObservers")
   followups       Followup[]
   aiEmailDraftsReviewed AiEmailDraft[]
   knowledgeDraftsReviewed KnowledgeDraft[]
@@ -138,6 +162,14 @@ model Ticket {
   impactedSites   String[] @default([])
   firstDetectedAt DateTime?
   lastDetectedAt  DateTime?
+
+  // Champs alignés sur le formulaire de ticket GLPI
+  type        TicketType   @default(INCIDENT)
+  source      String?      // "Helpdesk", "Email", "Téléphone", etc.
+  urgency     TicketUrgency  @default(MEDIUM)
+  impact      TicketImpact   @default(MEDIUM)
+  externalId  String?      // "ID externe" GLPI
+  observers   User[]       @relation("TicketObservers")
 
   followups       Followup[]
   aiEmailDrafts   AiEmailDraft[]

@@ -7,6 +7,8 @@ export default function Teams() {
   const [teams, setTeams] = useState([]);
   const [form, setForm] = useState({ name: '', category: '' });
   const [error, setError] = useState('');
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState('');
 
   function load() {
     api
@@ -39,18 +41,46 @@ export default function Teams() {
     }
   }
 
+  async function handleSyncGlpi() {
+    setSyncing(true);
+    setError('');
+    setSyncMessage('');
+    try {
+      const { data } = await api.post('/teams/sync-glpi');
+      setSyncMessage(`${data.synced} équipe(s) synchronisée(s) depuis GLPI.`);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur lors de la synchronisation GLPI');
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   const totalMembers = teams.reduce((sum, t) => sum + t.members.length, 0);
   const totalTickets = teams.reduce((sum, t) => sum + t._count.tickets, 0);
   const maxTickets = Math.max(1, ...teams.map((t) => t._count.tickets));
 
   return (
     <div className="flex flex-col gap-lg">
-      <header>
-        <h2 className="font-display-lg text-display-lg text-on-background">Équipes</h2>
-        <p className="font-body-lg text-body-lg text-on-surface-variant">Configuration des groupes de support et niveaux d'escalade.</p>
+      <header className="flex justify-between items-start">
+        <div>
+          <h2 className="font-display-lg text-display-lg text-on-background">Équipes</h2>
+          <p className="font-body-lg text-body-lg text-on-surface-variant">Configuration des groupes de support et niveaux d'escalade.</p>
+        </div>
+        {user?.role === 'ADMIN' && (
+          <button
+            onClick={handleSyncGlpi}
+            disabled={syncing}
+            className="flex items-center gap-2 px-4 py-2 rounded-none border border-outline-variant text-on-surface font-body-sm text-body-sm hover:bg-surface-container-low transition-colors disabled:opacity-50 whitespace-nowrap"
+          >
+            <span className="material-symbols-outlined text-[18px]">sync</span>
+            {syncing ? 'Synchronisation...' : 'Synchroniser depuis GLPI'}
+          </button>
+        )}
       </header>
 
       {error && <div className="border border-outline-variant text-on-surface p-md rounded-none">{error}</div>}
+      {syncMessage && <div className="border border-outline-variant text-on-surface p-md rounded-none">{syncMessage}</div>}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-md">
         <div className="bg-surface-container-lowest p-lg rounded-none border border-outline-variant flex flex-col justify-between">
@@ -91,6 +121,7 @@ export default function Teams() {
                 <tr className="border-b border-outline-variant bg-surface-bright">
                   <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">Nom</th>
                   <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">Catégorie</th>
+                  <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">GLPI</th>
                   <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase text-center">Membres</th>
                   <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase text-right">Tickets</th>
                   {user?.role === 'ADMIN' && <th className="py-sm px-md w-10"></th>}
@@ -107,6 +138,16 @@ export default function Teams() {
                         </span>
                       ) : (
                         <span className="text-outline">-</span>
+                      )}
+                    </td>
+                    <td className="py-md px-md">
+                      {t.glpiGroupId ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-1 border border-outline-variant text-on-surface-variant font-medium text-[11px]">
+                          <span className="material-symbols-outlined text-[14px]">sync</span>
+                          #{t.glpiGroupId}
+                        </span>
+                      ) : (
+                        <span className="text-outline italic text-[11px]">Non lié</span>
                       )}
                     </td>
                     <td className="py-md px-md text-center">{t.members.length}</td>
@@ -129,7 +170,7 @@ export default function Teams() {
                 ))}
                 {teams.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="py-8 px-md text-center text-on-surface-variant">Aucune équipe.</td>
+                    <td colSpan={6} className="py-8 px-md text-center text-on-surface-variant">Aucune équipe.</td>
                   </tr>
                 )}
               </tbody>

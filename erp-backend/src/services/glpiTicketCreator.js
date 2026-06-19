@@ -1,8 +1,12 @@
+const FormData = require('form-data');
 const prisma = require('../prismaClient');
 const { categoryToGlpiId, GLPI_AI_REQUESTER_ID, GLPI_TECHNICIANS } = require('../utils/glpiMapping');
 
 const GLPI_STATUS_MAP = { NEW: 1, OPEN: 2, PENDING: 4, SOLVED: 5, CLOSED: 6 };
 const ERP_PRIORITY_MAP = { P1: 6, P2: 4, P3: 3, P4: 2 };
+const GLPI_TYPE_MAP = { INCIDENT: 1, REQUEST: 2 };
+const GLPI_URGENCY_IMPACT_MAP = { VERY_LOW: 1, LOW: 2, MEDIUM: 3, HIGH: 4, VERY_HIGH: 5, MAJOR: 6 };
+const GLPI_SOURCE_MAP = { Helpdesk: 1, Email: 4, Téléphone: 2 };
 
 async function getGlpiConfig() {
   const config = await prisma.apiConfig.findUnique({ where: { serviceName: 'glpi' } });
@@ -27,66 +31,126 @@ async function withGlpiSession(config, fn) {
   }
 }
 
+// Crée un ticket dans GLPI à partir de champs génériques (titre, contenu, priorité, catégorie).
+// Retourne l'id du ticket GLPI créé, ou null si GLPI n'est pas configuré.
+// followupNote : texte optionnel ajouté en suivi privé (ex: contexte de l'email d'origine).
+async function createGlpiTicket({ title, content, priority, category, type, urgency, impact, source, followupNote }) {
+  const config = await getGlpiConfig();
+  if (!config) return null;
+
+  return withGlpiSession(config, async (sessionToken) => {
+    const headers = {
+      'App-Token': config.appToken,
+      'Session-Token': sessionToken,
+      'Content-Type': 'application/json',
+    };
+
+    const ticketPayload = {
+      input: {
+        name: title,
+        content: content || '',
+        status: 1,
+        type: GLPI_TYPE_MAP[type] || 1,
+        urgency: GLPI_URGENCY_IMPACT_MAP[urgency] || ERP_PRIORITY_MAP[priority] || 3,
+        impact: GLPI_URGENCY_IMPACT_MAP[impact] || 3,
+        priority: ERP_PRIORITY_MAP[priority] || 3,
+        itilcategories_id: categoryToGlpiId(category) || 0,
+        requesttypes_id: GLPI_SOURCE_MAP[source] || 1,
+        users_id_recipient: GLPI_AI_REQUESTER_ID,
+      },
+    };
+
+    const ticketRes = await fetch(`${config.baseUrl}/Ticket`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(ticketPayload),
+    });
+    if (!ticketRes.ok) throw new Error(`GLPI création ticket échoué (${ticketRes.status})`);
+    const { id: glpiId } = await ticketRes.json();
+
+    if (followupNote) {
+      await fetch(`${config.baseUrl}/Ticket/${glpiId}/ITILFollowup`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          input: { items_id: glpiId, itemtype: 'Ticket', content: followupNote, is_private: 1 },
+        }),
+      }).catch(() => {});
+    }
+
+    return glpiId;
+  });
+}
+
+// Met à jour un ticket existant dans GLPI (statut, priorité, type, urgence, impact,
+// catégorie, assignation). N'envoie que les champs fournis (undefined = inchangé).
+// Ne fait rien si le ticket n'a pas de glpiTicketId ou si GLPI n'est pas configuré.
+async function updateGlpiTicket(glpiTicketId, { status, priority, category, type, urgency, impact, assignedToGlpiId, teamGlpiId }) {
+  const config = await getGlpiConfig();
+  if (!config || !glpiTicketId) return;
+
+  const input = {};
+  if (status !== undefined) input.status = GLPI_STATUS_MAP[status] || 1;
+  if (priority !== undefined) input.priority = ERP_PRIORITY_MAP[priority] || 3;
+  if (category !== undefined) input.itilcategories_id = categoryToGlpiId(category) || 0;
+  if (type !== undefined) input.type = GLPI_TYPE_MAP[type] || 1;
+  if (urgency !== undefined) input.urgency = GLPI_URGENCY_IMPACT_MAP[urgency] || 3;
+  if (impact !== undefined) input.impact = GLPI_URGENCY_IMPACT_MAP[impact] || 3;
+
+  if (Object.keys(input).length === 0 && assignedToGlpiId === undefined && teamGlpiId === undefined) return;
+
+  await withGlpiSession(config, async (sessionToken) => {
+    const headers = {
+      'App-Token': config.appToken,
+      'Session-Token': sessionToken,
+      'Content-Type': 'application/json',
+    };
+
+    if (Object.keys(input).length > 0) {
+      await fetch(`${config.baseUrl}/Ticket/${glpiTicketId}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ input: { id: glpiTicketId, ...input } }),
+      });
+    }
+
+    if (assignedToGlpiId) {
+      await fetch(`${config.baseUrl}/Ticket/${glpiTicketId}/Ticket_User`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ input: { tickets_id: glpiTicketId, users_id: assignedToGlpiId, type: 2 } }),
+      }).catch(() => {});
+    }
+
+    if (teamGlpiId) {
+      await fetch(`${config.baseUrl}/Ticket/${glpiTicketId}/Group_Ticket`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ input: { tickets_id: glpiTicketId, groups_id: teamGlpiId, type: 2 } }),
+      }).catch(() => {});
+    }
+  });
+}
+
 // Crée un ticket dans GLPI depuis les données d'un email analysé par l'IA,
 // puis crée ou met à jour l'entrée correspondante dans la table Ticket de l'ERP.
 // Si GLPI n'est pas configuré, le ticket est créé uniquement dans l'ERP.
 async function createTicketFromEmail({ subject, body, from, fromName, analysis, emailAccountId }) {
-  const config = await getGlpiConfig();
+  const title = analysis.suggestedTitle || subject;
+  const content = `${body || ''}\n\n---\nAnalyse IA : ${analysis.summary}\nConfiance : ${Math.round((analysis.confidence || 0) * 100)}%`;
+  const followupNote = from ? `Email original de ${fromName || from} &lt;${from}&gt;\nSujet : ${subject}` : null;
 
   let glpiTicketId = null;
-
-  if (config) {
-    glpiTicketId = await withGlpiSession(config, async (sessionToken) => {
-      const headers = {
-        'App-Token': config.appToken,
-        'Session-Token': sessionToken,
-        'Content-Type': 'application/json',
-      };
-
-      const ticketPayload = {
-        input: {
-          name: analysis.suggestedTitle || subject,
-          content: `${body || ''}\n\n---\nAnalyse IA : ${analysis.summary}\nConfiance : ${Math.round((analysis.confidence || 0) * 100)}%`,
-          status: 1,
-          urgency: ERP_PRIORITY_MAP[analysis.priority] || 3,
-          priority: ERP_PRIORITY_MAP[analysis.priority] || 3,
-          itilcategories_id: categoryToGlpiId(analysis.category) || 0,
-          users_id_recipient: GLPI_AI_REQUESTER_ID,
-        },
-      };
-
-      const ticketRes = await fetch(`${config.baseUrl}/Ticket`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(ticketPayload),
-      });
-      if (!ticketRes.ok) throw new Error(`GLPI création ticket échoué (${ticketRes.status})`);
-      const { id: glpiId } = await ticketRes.json();
-
-      if (from) {
-        await fetch(`${config.baseUrl}/Ticket/${glpiId}/ITILFollowup`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            input: {
-              items_id: glpiId,
-              itemtype: 'Ticket',
-              content: `Email original de ${fromName || from} &lt;${from}&gt;\nSujet : ${subject}`,
-              is_private: 1,
-            },
-          }),
-        }).catch(() => {});
-      }
-
-      return glpiId;
-    });
+  try {
+    glpiTicketId = await createGlpiTicket({ title, content, priority: analysis.priority, category: analysis.category, followupNote });
+  } catch (err) {
+    console.error('[glpiTicketCreator] Création GLPI échouée:', err.message);
   }
 
-  // Créer le ticket ERP (avec ou sans glpiTicketId)
   const erpTicket = await prisma.ticket.create({
     data: {
       ...(glpiTicketId ? { glpiTicketId } : {}),
-      title: analysis.suggestedTitle || subject,
+      title,
       content: body || '',
       status: 'NEW',
       priority: analysis.priority || 'P3',
@@ -102,4 +166,89 @@ async function createTicketFromEmail({ subject, body, from, fromName, analysis, 
   return { glpiTicketId, erpTicketId: erpTicket.id };
 }
 
-module.exports = { createTicketFromEmail };
+// Upload un fichier vers GLPI et l'attache à un ticket existant (Document + Document_Item).
+// Retourne l'id du Document GLPI créé, ou null si GLPI n'est pas configuré.
+async function uploadGlpiAttachment({ glpiTicketId, buffer, filename, mimeType }) {
+  const config = await getGlpiConfig();
+  if (!config || !glpiTicketId) return null;
+
+  return withGlpiSession(config, async (sessionToken) => {
+    const form = new FormData();
+    form.append(
+      'uploadManifest',
+      JSON.stringify({ input: { name: filename, _filename: [filename] } }),
+      { contentType: 'application/json' }
+    );
+    form.append('filename[0]', buffer, { filename, contentType: mimeType || 'application/octet-stream' });
+
+    // form-data en stream casse avec le fetch natif de Node (undici) : on le matérialise en buffer.
+    const formBuffer = await new Promise((resolve, reject) => {
+      const chunks = [];
+      form.on('data', (c) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
+      form.on('end', () => resolve(Buffer.concat(chunks)));
+      form.on('error', reject);
+      form.resume();
+    });
+
+    const docRes = await fetch(`${config.baseUrl}/Document`, {
+      method: 'POST',
+      headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken, ...form.getHeaders() },
+      body: formBuffer,
+    });
+    if (!docRes.ok) throw new Error(`GLPI upload document échoué (${docRes.status})`);
+    const { id: documentId } = await docRes.json();
+
+    await fetch(`${config.baseUrl}/Document_Item`, {
+      method: 'POST',
+      headers: {
+        'App-Token': config.appToken,
+        'Session-Token': sessionToken,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ input: { documents_id: documentId, items_id: glpiTicketId, itemtype: 'Ticket' } }),
+    });
+
+    return documentId;
+  });
+}
+
+// Récupère les groupes (Group) depuis GLPI et crée/met à jour les Team correspondantes
+// dans l'ERP, en les liant via glpiGroupId. Retourne le nombre de groupes synchronisés,
+// ou null si GLPI n'est pas configuré/accessible.
+async function syncTeamsFromGlpi() {
+  const config = await getGlpiConfig();
+  if (!config) return null;
+
+  return withGlpiSession(config, async (sessionToken) => {
+    const headers = { 'App-Token': config.appToken, 'Session-Token': sessionToken };
+
+    const res = await fetch(`${config.baseUrl}/Group?range=0-200`, { headers });
+    if (!res.ok) throw new Error(`GLPI récupération des groupes échouée (${res.status})`);
+    const groups = await res.json();
+
+    let synced = 0;
+    for (const group of groups) {
+      if (!group.name) continue;
+
+      const existingByGlpiId = await prisma.team.findUnique({ where: { glpiGroupId: group.id } });
+      if (existingByGlpiId) {
+        await prisma.team.update({ where: { id: existingByGlpiId.id }, data: { name: group.name } });
+        synced++;
+        continue;
+      }
+
+      const existingByName = await prisma.team.findUnique({ where: { name: group.name } });
+      if (existingByName) {
+        await prisma.team.update({ where: { id: existingByName.id }, data: { glpiGroupId: group.id } });
+        synced++;
+        continue;
+      }
+
+      await prisma.team.create({ data: { name: group.name, glpiGroupId: group.id } });
+      synced++;
+    }
+    return synced;
+  });
+}
+
+module.exports = { createTicketFromEmail, createGlpiTicket, updateGlpiTicket, uploadGlpiAttachment, syncTeamsFromGlpi };

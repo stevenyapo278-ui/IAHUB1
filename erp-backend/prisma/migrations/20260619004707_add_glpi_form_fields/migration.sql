@@ -1,0 +1,27 @@
+-- CreateEnum
+DO $$ BEGIN
+  CREATE TYPE "TicketType" AS ENUM ('INCIDENT', 'REQUEST');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE "TicketUrgency" AS ENUM ('VERY_LOW', 'LOW', 'MEDIUM', 'HIGH', 'VERY_HIGH', 'MAJOR');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE "TicketImpact" AS ENUM ('VERY_LOW', 'LOW', 'MEDIUM', 'HIGH', 'VERY_HIGH', 'MAJOR');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- AlterTable
+ALTER TABLE "Ticket" ADD COLUMN IF NOT EXISTS "type" "TicketType" NOT NULL DEFAULT 'INCIDENT';
+ALTER TABLE "Ticket" ADD COLUMN IF NOT EXISTS "source" TEXT;
+ALTER TABLE "Ticket" ADD COLUMN IF NOT EXISTS "urgency" "TicketUrgency" NOT NULL DEFAULT 'MEDIUM';
+ALTER TABLE "Ticket" ADD COLUMN IF NOT EXISTS "impact" "TicketImpact" NOT NULL DEFAULT 'MEDIUM';
+ALTER TABLE "Ticket" ADD COLUMN IF NOT EXISTS "externalId" TEXT;
+
+-- CreateTable
+CREATE TABLE IF NOT EXISTS "_TicketObservers" (
+  "A" INTEGER NOT NULL REFERENCES "Ticket"(id) ON DELETE CASCADE,
+  "B" INTEGER NOT NULL REFERENCES "User"(id) ON DELETE CASCADE,
+  CONSTRAINT "_TicketObservers_AB_pkey" PRIMARY KEY ("A", "B")
+);
+CREATE INDEX IF NOT EXISTS "_TicketObservers_B_index" ON "_TicketObservers"("B");

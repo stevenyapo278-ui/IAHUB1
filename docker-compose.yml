@@ -44,6 +44,8 @@ services:
       - "4000:4000"
     volumes:
       - ./erp-backend/src:/app/src  # hot reload en dev
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   # Frontend React (Nginx en prod)
   frontend:

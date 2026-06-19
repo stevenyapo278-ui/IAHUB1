@@ -5,6 +5,19 @@ import { useAuth } from '../context/AuthContext';
 
 const STATUS_OPTIONS = ['NEW', 'OPEN', 'PENDING', 'SOLVED', 'CLOSED'];
 const PRIORITY_OPTIONS = ['P1', 'P2', 'P3', 'P4'];
+const TYPE_OPTIONS = [
+  { value: 'INCIDENT', label: 'Incident' },
+  { value: 'REQUEST', label: 'Demande' },
+];
+const SOURCE_OPTIONS = ['Helpdesk', 'Email', 'Téléphone'];
+const URGENCY_IMPACT_OPTIONS = [
+  { value: 'VERY_LOW', label: 'Très basse' },
+  { value: 'LOW', label: 'Basse' },
+  { value: 'MEDIUM', label: 'Moyenne' },
+  { value: 'HIGH', label: 'Haute' },
+  { value: 'VERY_HIGH', label: 'Très haute' },
+  { value: 'MAJOR', label: 'Majeure' },
+];
 
 const PRIORITY_BADGE = {
   P1: 'bg-error-container text-on-error-container',
@@ -30,6 +43,8 @@ export default function TicketDetail() {
   const [ticket, setTicket] = useState(null);
   const [followup, setFollowup] = useState('');
   const [error, setError] = useState('');
+  const [teams, setTeams] = useState([]);
+  const [users, setUsers] = useState([]);
 
   const canManage = user?.role === 'ADMIN' || user?.role === 'TECHNICIAN';
 
@@ -41,6 +56,12 @@ export default function TicketDetail() {
   }
 
   useEffect(load, [id]);
+
+  useEffect(() => {
+    if (!canManage) return;
+    api.get('/teams').then(({ data }) => setTeams(data)).catch(() => {});
+    api.get('/users').then(({ data }) => setUsers(data)).catch(() => {});
+  }, [canManage]);
 
   async function updateField(field, value) {
     try {
@@ -363,6 +384,25 @@ export default function TicketDetail() {
             <h3 className="font-headline-sm text-headline-sm text-on-surface mb-md uppercase tracking-wider">Propriétés du ticket</h3>
             <div className="space-y-md">
               <div>
+                <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Date d'ouverture</label>
+                <div className="w-full bg-surface-container-low border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface-variant">
+                  {new Date(ticket.createdAt).toLocaleString('fr-FR')}
+                </div>
+              </div>
+              <div>
+                <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Type</label>
+                <select
+                  className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface disabled:opacity-60"
+                  value={ticket.type}
+                  disabled={!canManage}
+                  onChange={(e) => updateField('type', e.target.value)}
+                >
+                  {TYPE_OPTIONS.map((t) => (
+                    <option key={t.value} value={t.value}>{t.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Statut</label>
                 <select
                   className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface disabled:opacity-60"
@@ -372,6 +412,46 @@ export default function TicketDetail() {
                 >
                   {STATUS_OPTIONS.map((s) => (
                     <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Source de la demande</label>
+                <select
+                  className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface disabled:opacity-60"
+                  value={ticket.source || ''}
+                  disabled={!canManage}
+                  onChange={(e) => updateField('source', e.target.value)}
+                >
+                  <option value="">-----</option>
+                  {SOURCE_OPTIONS.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Urgence</label>
+                <select
+                  className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface disabled:opacity-60"
+                  value={ticket.urgency}
+                  disabled={!canManage}
+                  onChange={(e) => updateField('urgency', e.target.value)}
+                >
+                  {URGENCY_IMPACT_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Impact</label>
+                <select
+                  className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface disabled:opacity-60"
+                  value={ticket.impact}
+                  disabled={!canManage}
+                  onChange={(e) => updateField('impact', e.target.value)}
+                >
+                  {URGENCY_IMPACT_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
                 </select>
               </div>
@@ -389,26 +469,77 @@ export default function TicketDetail() {
                 </select>
               </div>
               <div>
-                <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Équipe</label>
-                <div className="w-full bg-surface-container-low border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface-variant">
-                  {ticket.team?.name || 'Non assignée'}
-                </div>
+                <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">ID externe</label>
+                <input
+                  className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface disabled:opacity-60"
+                  defaultValue={ticket.externalId || ''}
+                  disabled={!canManage}
+                  onBlur={(e) => updateField('externalId', e.target.value)}
+                />
               </div>
               <div>
-                <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Assigné à</label>
-                <div className="w-full flex items-center gap-2 bg-surface-container-low border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface">
-                  {ticket.assignedTo ? (
-                    <>
-                      <div className="w-6 h-6 rounded-full border border-outline-variant text-on-surface flex items-center justify-center text-[10px] font-bold shrink-0">
-                        {initials(ticket.assignedTo.fullName)}
-                      </div>
-                      {ticket.assignedTo.fullName}
-                    </>
-                  ) : (
-                    <span className="text-outline italic">Non assigné</span>
-                  )}
-                </div>
+                <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Équipe</label>
+                {canManage ? (
+                  <select
+                    className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface"
+                    value={ticket.teamId || ''}
+                    onChange={(e) => updateField('teamId', e.target.value ? Number(e.target.value) : null)}
+                  >
+                    <option value="">Aucune</option>
+                    {teams.map((t) => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="w-full bg-surface-container-low border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface-variant">
+                    {ticket.team?.name || 'Non assignée'}
+                  </div>
+                )}
               </div>
+              <div>
+                <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Attribué à</label>
+                {canManage ? (
+                  <select
+                    className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface"
+                    value={ticket.assignedToId || ''}
+                    onChange={(e) => updateField('assignedToId', e.target.value ? Number(e.target.value) : null)}
+                  >
+                    <option value="">Non assigné</option>
+                    {users.map((u) => (
+                      <option key={u.id} value={u.id}>{u.fullName}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="w-full flex items-center gap-2 bg-surface-container-low border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface">
+                    {ticket.assignedTo ? (
+                      <>
+                        <div className="w-6 h-6 rounded-full border border-outline-variant text-on-surface flex items-center justify-center text-[10px] font-bold shrink-0">
+                          {initials(ticket.assignedTo.fullName)}
+                        </div>
+                        {ticket.assignedTo.fullName}
+                      </>
+                    ) : (
+                      <span className="text-outline italic">Non assigné</span>
+                    )}
+                  </div>
+                )}
+              </div>
+              {ticket.observers?.length > 0 && (
+                <div>
+                  <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Observateur(s)</label>
+                  <div className="w-full bg-surface-container-low border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface-variant">
+                    {ticket.observers.map((o) => o.fullName).join(', ')}
+                  </div>
+                </div>
+              )}
+              {ticket.glpiTicketId && (
+                <div>
+                  <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Ticket GLPI</label>
+                  <div className="w-full bg-surface-container-low border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface-variant">
+                    #{ticket.glpiTicketId}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

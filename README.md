@@ -231,43 +231,34 @@ Première installation (une seule fois) :
 5. Créer un **App Token** : Configuration → Générale → onglet **API** → ajouter un client API (ou utiliser celui par défaut "full access from localhost").
 6. Générer un **User Token** : Administration → Utilisateurs → (ton compte) → onglet "Jetons API" → générer un nouveau jeton API.
 
-Puis relancer `./start.sh` et choisir l'option 2 pour enregistrer ces tokens (ou éditer `.env` directement, voir ci-dessous).
-
 ### Option 2 — Se connecter à un GLPI déjà existant
 
 ```bash
 ./start.sh
-# choisir 2, puis renseigner : URL de l'API REST, App Token, User Token
+# choisir 2
 ```
 
-Cette option **ne crée aucun conteneur GLPI** — elle enregistre la configuration dans `.env` et démarre uniquement `docker-compose.yml` (postgres, backend, frontend). Si l'URL fournie pointe sur `localhost`, le script la convertit automatiquement en `host.docker.internal` pour que le conteneur backend puisse l'atteindre.
+Cette option **ne crée aucun conteneur GLPI** — elle démarre uniquement `docker-compose.yml` (postgres, backend, frontend), GLPI restant géré ailleurs.
 
-Équivalent manuel — renseigner dans le `.env` à la racine du projet :
+### Connecter GLPI au backend — uniquement via l'UI
 
-```env
-GLPI_URL=http://host.docker.internal:8080/apirest.php
-GLPI_APP_TOKEN=<ton App Token>
-GLPI_USER_TOKEN=<ton User Token>
-```
+La connexion GLPI (URL, User Token, App Token) se configure **exclusivement depuis l'interface**, jamais via `.env` ou un script — c'est la seule source de vérité, pour éviter qu'une valeur en dur n'écrase ce que tu configures :
 
-Puis :
+**Settings → Autres intégrations** :
 
-```bash
-docker compose up -d --build backend
-```
+1. Dans "Ajouter une intégration", renseigner :
+   - **Nom du service** : `glpi`
+   - **URL de base** : `http://glpi/apirest.php` (si GLPI tourne dans ce docker-compose, option 1) ou l'URL complète de ton instance externe (option 2)
+   - **Clé API** : ton **User Token**
+   - **App Token (GLPI)** : ce champ apparaît automatiquement quand le nom du service est `glpi` — renseigner ton **App Token**
+2. Cliquer **Ajouter**.
+3. Cliquer **Synchroniser GLPI** sur la ligne créée pour valider la connexion immédiatement.
 
-### Configuration automatique
+Si la config existe déjà, modifie directement les champs "Clé API" et "App Token" sur la ligne du tableau (la valeur se sauvegarde en quittant le champ).
 
-Dans les deux cas, le script de seed (`erp-backend/prisma/seed.js`) lit `GLPI_URL` / `GLPI_APP_TOKEN` / `GLPI_USER_TOKEN` depuis l'environnement et configure automatiquement la connexion GLPI en base à chaque démarrage — pas besoin de repasser par Settings → GLPI dans l'interface.
+### Synchronisation automatique
 
-### GLPI configuré manuellement (alternative)
-
-Si tu préfères passer par l'interface au lieu des variables d'environnement, configurer dans **Paramètres** :
-
-Settings → GLPI → renseigner :
-- URL de base (ex: `http://glpi/apirest.php` si GLPI tourne dans ce docker-compose, ou l'URL de ton instance externe)
-- User Token
-- App Token
+Une fois GLPI configuré et actif, le backend synchronise les tickets GLPI → ERP automatiquement **toutes les 20 secondes** ([erp-backend/src/server.js](erp-backend/src/server.js)) — un ticket créé ou modifié dans GLPI apparaît quasi instantanément dans l'ERP, sans action manuelle.
 
 ### Persistance des données GLPI (option 1 uniquement)
 
@@ -331,6 +322,22 @@ curl -s -X POST http://localhost:4000/api/inbox/simulate \
 | Relances automatiques | J+2, J+5, J+10, fermeture automatique J+15 |
 | Base de connaissances | Recherche sémantique + génération d'articles depuis tickets résolus |
 | Journal d'audit | Historique complet de chaque action sur un ticket |
+| Suppression de tickets | Individuelle ou en masse, réservée aux ADMIN |
+
+---
+
+### Suppression de tickets
+
+Réservée au rôle **ADMIN**.
+
+- **Un seul ticket** : depuis la page de détail d'un ticket (`/tickets/:id`), bouton "Supprimer", ou directement dans la liste via l'icône corbeille sur chaque ligne.
+- **En masse** : sur la page Tickets, des cases à cocher apparaissent sur chaque ligne (et une case "tout sélectionner" dans l'en-tête) lorsque l'utilisateur est ADMIN. Une fois une ou plusieurs lignes sélectionnées, le bouton "Supprimer la sélection (N)" apparaît au-dessus du tableau. Une confirmation est demandée avant suppression définitive.
+
+API correspondante :
+- `DELETE /api/tickets/:id` — supprime un ticket (ADMIN uniquement).
+- `POST /api/tickets/bulk-delete` — supprime plusieurs tickets en une requête, body `{ "ids": [1, 2, 3] }` (ADMIN uniquement).
+
+⚠️ La suppression ne supprime que le ticket côté ERP — si le ticket était synchronisé avec GLPI (`glpiTicketId` renseigné), le ticket correspondant n'est **pas** supprimé côté GLPI.
 
 ---
 

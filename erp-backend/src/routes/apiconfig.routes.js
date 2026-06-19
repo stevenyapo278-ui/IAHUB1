@@ -24,6 +24,22 @@ router.get('/:id', async (req, res) => {
   return res.json({ ...config, apiKey: maskKey(config.apiKey) });
 });
 
+// Champs requis par service connu, pour donner un message d'erreur précis
+const REQUIRED_FIELDS = {
+  glpi: [
+    { key: 'baseUrl', label: 'URL de base' },
+    { key: 'apiKey', label: 'Clé API (User Token)' },
+    { key: 'extra.appToken', label: 'App Token' },
+  ],
+};
+
+function getMissingFields(serviceName, { baseUrl, apiKey, extra }) {
+  const required = REQUIRED_FIELDS[serviceName];
+  if (!required) return [];
+  const values = { baseUrl, apiKey, 'extra.appToken': extra?.appToken };
+  return required.filter((f) => !values[f.key]).map((f) => f.label);
+}
+
 router.post('/', [body('serviceName').notEmpty()], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
@@ -32,6 +48,11 @@ router.post('/', [body('serviceName').notEmpty()], async (req, res) => {
 
   const existing = await prisma.apiConfig.findUnique({ where: { serviceName } });
   if (existing) return res.status(409).json({ error: 'Cette configuration existe déjà' });
+
+  const missing = getMissingFields(serviceName, { baseUrl, apiKey, extra });
+  if (missing.length > 0) {
+    return res.status(400).json({ error: `Champ(s) manquant(s) : ${missing.join(', ')}` });
+  }
 
   const config = await prisma.apiConfig.create({
     data: {
@@ -60,6 +81,39 @@ router.patch('/:id', async (req, res) => {
   } catch (err) {
     return res.status(404).json({ error: 'Configuration introuvable' });
   }
+});
+
+// Teste la connexion au service configuré (actuellement supporté : glpi)
+router.post('/:id/test-connection', async (req, res) => {
+  const config = await prisma.apiConfig.findUnique({ where: { id: Number(req.params.id) } });
+  if (!config) return res.status(404).json({ error: 'Configuration introuvable' });
+
+  const missing = getMissingFields(config.serviceName, config);
+  if (missing.length > 0) {
+    return res.status(422).json({ connected: false, error: `Champ(s) manquant(s) : ${missing.join(', ')}` });
+  }
+
+  if (config.serviceName === 'glpi') {
+    try {
+      const appToken = config.extra?.appToken;
+      const sessionRes = await fetch(`${config.baseUrl}/initSession`, {
+        headers: { 'App-Token': appToken, Authorization: `user_token ${config.apiKey}` },
+      });
+      const data = await sessionRes.json().catch(() => null);
+      if (!sessionRes.ok || !data?.session_token) {
+        const message = Array.isArray(data) ? data[1] : 'Réponse GLPI invalide';
+        return res.status(422).json({ connected: false, error: message || `Échec (${sessionRes.status})` });
+      }
+      await fetch(`${config.baseUrl}/killSession`, {
+        headers: { 'App-Token': appToken, 'Session-Token': data.session_token },
+      }).catch(() => {});
+      return res.json({ connected: true });
+    } catch (err) {
+      return res.status(502).json({ connected: false, error: err.message || 'Connexion impossible' });
+    }
+  }
+
+  return res.status(422).json({ connected: false, error: `Test de connexion non supporté pour "${config.serviceName}"` });
 });
 
 router.delete('/:id', async (req, res) => {
