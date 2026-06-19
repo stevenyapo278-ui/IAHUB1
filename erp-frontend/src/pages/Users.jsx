@@ -25,23 +25,53 @@ function initials(name) {
 export default function Users() {
   const [users, setUsers] = useState([]);
   const [teams, setTeams] = useState([]);
+  const [groups, setGroups] = useState([]);
   const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [submitting, setSubmitting] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [assignGroupId, setAssignGroupId] = useState('');
+  const [assigning, setAssigning] = useState(false);
 
   function load() {
-    Promise.all([api.get('/users'), api.get('/teams')])
-      .then(([usersRes, teamsRes]) => {
+    Promise.all([api.get('/users'), api.get('/teams'), api.get('/permission-groups')])
+      .then(([usersRes, teamsRes, groupsRes]) => {
         setUsers(usersRes.data);
         setTeams(teamsRes.data);
+        setGroups(groupsRes.data);
+        setSelectedIds([]);
       })
       .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
   }
 
   useEffect(load, []);
+
+  function toggleSelect(id) {
+    setSelectedIds((ids) => (ids.includes(id) ? ids.filter((i) => i !== id) : [...ids, id]));
+  }
+
+  function toggleSelectAll() {
+    setSelectedIds((ids) => (ids.length === users.length ? [] : users.map((u) => u.id)));
+  }
+
+  async function handleAssignToGroup() {
+    if (!assignGroupId || selectedIds.length === 0) return;
+    setAssigning(true);
+    setError('');
+    try {
+      await api.post(`/permission-groups/${assignGroupId}/assign`, { userIds: selectedIds });
+      setAssignGroupId('');
+      setSelectedIds([]);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || "Erreur lors de l'assignation");
+    } finally {
+      setAssigning(false);
+    }
+  }
 
   async function updateField(id, field, value) {
     try {
@@ -204,6 +234,28 @@ export default function Users() {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center gap-3 bg-surface-container-lowest p-md rounded-none border border-outline-variant">
+        <select
+          className="px-3 py-1.5 rounded-none border border-outline-variant bg-surface text-on-surface font-body-sm text-body-sm focus:outline-none"
+          value={assignGroupId}
+          onChange={(e) => setAssignGroupId(e.target.value)}
+          disabled={selectedIds.length === 0}
+        >
+          <option value="">Groupe de droits...</option>
+          {groups.map((g) => (
+            <option key={g.id} value={g.id}>{g.name}</option>
+          ))}
+        </select>
+        <button
+          onClick={handleAssignToGroup}
+          disabled={!assignGroupId || selectedIds.length === 0 || assigning}
+          className="flex items-center gap-2 px-4 py-2 rounded-none border border-outline-variant bg-on-surface text-surface font-body-sm text-body-sm font-semibold hover:opacity-80 transition-all disabled:opacity-50 whitespace-nowrap"
+        >
+          <span className="material-symbols-outlined text-[18px]">group_add</span>
+          Assigner à un groupe de droits ({selectedIds.length})
+        </button>
+      </div>
+
       <div className="bg-surface-container-lowest border border-outline-variant rounded-none overflow-hidden flex flex-col">
         <div className="p-md border-b border-outline-variant flex justify-between items-center">
           <span className="font-headline-sm text-headline-sm text-on-surface">Annuaire</span>
@@ -213,6 +265,14 @@ export default function Users() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-surface-container-lowest border-b border-outline-variant">
+                <th className="p-md w-10">
+                  <input
+                    type="checkbox"
+                    checked={users.length > 0 && selectedIds.length === users.length}
+                    onChange={toggleSelectAll}
+                    className="cursor-pointer"
+                  />
+                </th>
                 <th className="p-md font-label-md text-label-md text-on-surface-variant uppercase">Utilisateur</th>
                 <th className="p-md font-label-md text-label-md text-on-surface-variant uppercase">Rôle</th>
                 <th className="p-md font-label-md text-label-md text-on-surface-variant uppercase">Équipe</th>
@@ -223,6 +283,14 @@ export default function Users() {
             <tbody className="divide-y divide-outline-variant font-body-sm text-body-sm text-on-surface">
               {users.map((u) => (
                 <tr key={u.id} className="hover:bg-surface-container-low transition-colors group">
+                  <td className="p-md">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.includes(u.id)}
+                      onChange={() => toggleSelect(u.id)}
+                      className="cursor-pointer"
+                    />
+                  </td>
                   <td className="p-md">
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 rounded-full border border-outline-variant flex items-center justify-center font-headline-sm text-xs font-bold shrink-0 text-on-surface">
@@ -274,7 +342,7 @@ export default function Users() {
               ))}
               {users.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="p-md text-center text-on-surface-variant">Aucun utilisateur.</td>
+                  <td colSpan={6} className="p-md text-center text-on-surface-variant">Aucun utilisateur.</td>
                 </tr>
               )}
             </tbody>

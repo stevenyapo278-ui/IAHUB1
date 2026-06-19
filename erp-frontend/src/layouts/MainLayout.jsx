@@ -8,6 +8,7 @@ const navItems = [
   { to: '/inbox', label: 'Boîte mail', icon: 'inbox' },
   { to: '/knowledge-base', label: 'Base de connaissances', icon: 'menu_book' },
   { to: '/users', label: 'Utilisateurs', icon: 'person', adminOnly: true },
+  { to: '/permission-groups', label: 'Groupes de droits', icon: 'admin_panel_settings', adminOnly: true },
   { to: '/settings', label: 'Paramètres', icon: 'settings', adminOnly: true },
 ];
 

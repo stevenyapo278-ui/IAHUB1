@@ -101,6 +101,18 @@ model User {
   followups       Followup[]
   aiEmailDraftsReviewed AiEmailDraft[]
   knowledgeDraftsReviewed KnowledgeDraft[]
+  permissionGroups PermissionGroup[] @relation("UserPermissionGroups")
+}
+
+model PermissionGroup {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  description String?
+  permissions String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members User[] @relation("UserPermissionGroups")
 }
 
 model Team {

@@ -7,6 +7,7 @@ import Tickets from './pages/Tickets';
 import TicketDetail from './pages/TicketDetail';
 import Teams from './pages/Teams';
 import Users from './pages/Users';
+import PermissionGroups from './pages/PermissionGroups';
 import Settings from './pages/Settings';
 import KnowledgeBase from './pages/KnowledgeBase';
 import Inbox from './pages/Inbox';
@@ -34,6 +35,14 @@ export default function App() {
           element={
             <ProtectedRoute roles={['ADMIN']}>
               <Users />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="permission-groups"
+          element={
+            <ProtectedRoute roles={['ADMIN']}>
+              <PermissionGroups />
             </ProtectedRoute>
           }
         />
