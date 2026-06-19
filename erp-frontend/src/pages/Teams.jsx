@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 export default function Teams() {
   const { user } = useAuth();
@@ -9,6 +10,8 @@ export default function Teams() {
   const [error, setError] = useState('');
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   function load() {
     api
@@ -31,13 +34,21 @@ export default function Teams() {
     }
   }
 
-  async function handleDelete(id) {
-    if (!confirm('Supprimer cette équipe ?')) return;
+  function askDelete(id) {
+    setConfirmDeleteId(id);
+  }
+
+  async function handleDelete() {
+    if (!confirmDeleteId) return;
+    setDeleting(true);
     try {
-      await api.delete(`/teams/${id}`);
+      await api.delete(`/teams/${confirmDeleteId}`);
       load();
+      setConfirmDeleteId(null);
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la suppression');
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -161,7 +172,7 @@ export default function Teams() {
                     </td>
                     {user?.role === 'ADMIN' && (
                       <td className="py-md px-md text-right opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => handleDelete(t.id)} className="text-on-surface-variant hover:text-error">
+                        <button onClick={() => askDelete(t.id)} className="text-on-surface-variant hover:text-error">
                           <span className="material-symbols-outlined">delete</span>
                         </button>
                       </td>
@@ -221,6 +232,17 @@ export default function Teams() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={!!confirmDeleteId}
+        title="Supprimer l'équipe"
+        message="Supprimer définitivement cette équipe ? Cette action est irréversible."
+        confirmLabel="Supprimer"
+        danger
+        loading={deleting}
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
     </div>
   );
 }

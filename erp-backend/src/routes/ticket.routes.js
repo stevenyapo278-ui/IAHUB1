@@ -4,7 +4,7 @@ const prisma = require('../prismaClient');
 const { authenticate, authorize } = require('../middleware/auth');
 const { getGlpiConfig, glpiInitSession, glpiKillSession } = require('../utils/glpiSync');
 const { notifyMajorIncidentResolved } = require('../services/emailSender');
-const { createGlpiTicket, updateGlpiTicket, uploadGlpiAttachment } = require('../services/glpiTicketCreator');
+const { createGlpiTicket, updateGlpiTicket, deleteGlpiTicket, uploadGlpiAttachment } = require('../services/glpiTicketCreator');
 const multer = require('multer');
 
 const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); // 20 Mo max
@@ -335,8 +335,20 @@ router.post('/:id/followups', [body('content').notEmpty()], async (req, res) => 
 
 // Delete ticket
 router.delete('/:id', authorize('ADMIN'), async (req, res) => {
+  const id = Number(req.params.id);
   try {
-    await prisma.ticket.delete({ where: { id: Number(req.params.id) } });
+    const ticket = await prisma.ticket.findUnique({ where: { id }, select: { glpiTicketId: true } });
+    if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
+
+    if (ticket.glpiTicketId) {
+      try {
+        await deleteGlpiTicket(ticket.glpiTicketId);
+      } catch (err) {
+        console.error('[ticket.routes] Suppression GLPI échouée:', err.message);
+      }
+    }
+
+    await prisma.ticket.delete({ where: { id } });
     return res.status(204).send();
   } catch (err) {
     return res.status(404).json({ error: 'Ticket introuvable' });
@@ -350,6 +362,19 @@ router.post('/bulk-delete', authorize('ADMIN'), [body('ids').isArray({ min: 1 })
 
   const ids = req.body.ids.map(Number).filter((n) => !Number.isNaN(n));
   if (ids.length === 0) return res.status(400).json({ error: 'Aucun identifiant valide fourni' });
+
+  const ticketsToDelete = await prisma.ticket.findMany({
+    where: { id: { in: ids } },
+    select: { glpiTicketId: true },
+  });
+
+  await Promise.all(
+    ticketsToDelete
+      .filter((t) => t.glpiTicketId)
+      .map((t) => deleteGlpiTicket(t.glpiTicketId).catch((err) => {
+        console.error('[ticket.routes] Suppression GLPI échouée:', err.message);
+      }))
+  );
 
   const result = await prisma.ticket.deleteMany({ where: { id: { in: ids } } });
   return res.json({ deleted: result.count });

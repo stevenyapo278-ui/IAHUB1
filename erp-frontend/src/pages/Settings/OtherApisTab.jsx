@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../../api/client';
+import ConfirmDialog from '../../components/ConfirmDialog';
 
 const inputClass =
   'h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface';
@@ -15,6 +16,8 @@ export default function OtherApisTab() {
   const [connectionStatus, setConnectionStatus] = useState({}); // { [configId]: { connected, error } }
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+  const [pendingDelete, setPendingDelete] = useState(null); // { type: 'workflow'|'config', id }
+  const [deleting, setDeleting] = useState(false);
 
   const REQUIRED_FIELDS = {
     glpi: [
@@ -92,13 +95,21 @@ export default function OtherApisTab() {
     }
   }
 
-  async function handleDeleteWorkflow(id) {
-    if (!confirm('Supprimer ce workflow ?')) return;
+  function askDeleteWorkflow(id) {
+    setPendingDelete({ type: 'workflow', id });
+  }
+
+  async function handleDeleteWorkflow() {
+    if (!pendingDelete || pendingDelete.type !== 'workflow') return;
+    setDeleting(true);
     try {
-      await api.delete(`/n8n-workflows/${id}`);
+      await api.delete(`/n8n-workflows/${pendingDelete.id}`);
       loadWorkflows();
+      setPendingDelete(null);
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la suppression');
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -174,13 +185,21 @@ export default function OtherApisTab() {
     }
   }
 
-  async function handleDelete(id) {
-    if (!confirm('Supprimer cette configuration ?')) return;
+  function askDelete(id) {
+    setPendingDelete({ type: 'config', id });
+  }
+
+  async function handleDelete() {
+    if (!pendingDelete || pendingDelete.type !== 'config') return;
+    setDeleting(true);
     try {
-      await api.delete(`/api-configs/${id}`);
+      await api.delete(`/api-configs/${pendingDelete.id}`);
       load();
+      setPendingDelete(null);
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la suppression');
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -334,7 +353,7 @@ export default function OtherApisTab() {
                   )}
                 </td>
                 <td className="p-sm text-right">
-                  <button onClick={() => handleDelete(c.id)} className="text-on-surface-variant hover:text-error">
+                  <button onClick={() => askDelete(c.id)} className="text-on-surface-variant hover:text-error">
                     <span className="material-symbols-outlined text-sm">delete</span>
                   </button>
                 </td>
@@ -438,7 +457,7 @@ export default function OtherApisTab() {
                         <span className="material-symbols-outlined text-sm">play_arrow</span>
                         {triggering === w.id ? '...' : 'Lancer'}
                       </button>
-                      <button onClick={() => handleDeleteWorkflow(w.id)} className="text-on-surface-variant hover:text-error">
+                      <button onClick={() => askDeleteWorkflow(w.id)} className="text-on-surface-variant hover:text-error">
                         <span className="material-symbols-outlined text-sm">delete</span>
                       </button>
                     </div>
@@ -452,6 +471,21 @@ export default function OtherApisTab() {
           </table>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        title={pendingDelete?.type === 'workflow' ? 'Supprimer le workflow' : 'Supprimer la configuration'}
+        message={
+          pendingDelete?.type === 'workflow'
+            ? 'Supprimer définitivement ce workflow ? Cette action est irréversible.'
+            : 'Supprimer définitivement cette configuration ? Cette action est irréversible.'
+        }
+        confirmLabel="Supprimer"
+        danger
+        loading={deleting}
+        onConfirm={pendingDelete?.type === 'workflow' ? handleDeleteWorkflow : handleDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

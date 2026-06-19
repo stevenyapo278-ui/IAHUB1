@@ -132,6 +132,21 @@ async function updateGlpiTicket(glpiTicketId, { status, priority, category, type
   });
 }
 
+// Supprime (purge) un ticket dans GLPI. Ne fait rien si GLPI n'est pas configuré
+// ou si le ticket n'a pas de glpiTicketId. Échec silencieux (best-effort).
+async function deleteGlpiTicket(glpiTicketId) {
+  const config = await getGlpiConfig();
+  if (!config || !glpiTicketId) return false;
+
+  return withGlpiSession(config, async (sessionToken) => {
+    const res = await fetch(`${config.baseUrl}/Ticket/${glpiTicketId}?force_purge=true`, {
+      method: 'DELETE',
+      headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken, 'Content-Type': 'application/json' },
+    });
+    return res.ok;
+  });
+}
+
 // Crée un ticket dans GLPI depuis les données d'un email analysé par l'IA,
 // puis crée ou met à jour l'entrée correspondante dans la table Ticket de l'ERP.
 // Si GLPI n'est pas configuré, le ticket est créé uniquement dans l'ERP.
@@ -251,4 +266,4 @@ async function syncTeamsFromGlpi() {
   });
 }
 
-module.exports = { createTicketFromEmail, createGlpiTicket, updateGlpiTicket, uploadGlpiAttachment, syncTeamsFromGlpi };
+module.exports = { createTicketFromEmail, createGlpiTicket, updateGlpiTicket, deleteGlpiTicket, uploadGlpiAttachment, syncTeamsFromGlpi };

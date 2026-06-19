@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../../api/client';
+import ConfirmDialog from '../../components/ConfirmDialog';
 
 const EMPTY_FORM = {
   label: '',
@@ -40,6 +41,8 @@ export default function EmailAccountsTab() {
   const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   function load() {
     api
@@ -78,13 +81,21 @@ export default function EmailAccountsTab() {
     }
   }
 
-  async function handleDelete(id) {
-    if (!confirm('Supprimer ce compte mail ?')) return;
+  function askDelete(id) {
+    setConfirmDeleteId(id);
+  }
+
+  async function handleDelete() {
+    if (!confirmDeleteId) return;
+    setDeleting(true);
     try {
-      await api.delete(`/email-accounts/${id}`);
+      await api.delete(`/email-accounts/${confirmDeleteId}`);
       load();
+      setConfirmDeleteId(null);
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la suppression');
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -226,7 +237,7 @@ export default function EmailAccountsTab() {
             </div>
             <div className="flex items-center gap-md">
               <Toggle checked={acc.isActive} onChange={(v) => handleUpdate(acc.id, 'isActive', v)} />
-              <button onClick={() => handleDelete(acc.id)} className="text-on-surface-variant hover:text-error transition-colors">
+              <button onClick={() => askDelete(acc.id)} className="text-on-surface-variant hover:text-error transition-colors">
                 <span className="material-symbols-outlined">delete</span>
               </button>
             </div>
@@ -304,6 +315,17 @@ export default function EmailAccountsTab() {
           )}
         </div>
       ))}
+
+      <ConfirmDialog
+        open={!!confirmDeleteId}
+        title="Supprimer le compte mail"
+        message="Supprimer définitivement ce compte mail ? Cette action est irréversible."
+        confirmLabel="Supprimer"
+        danger
+        loading={deleting}
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../api/client';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 const ROLES = ['ADMIN', 'TECHNICIAN', 'REQUESTER'];
 
@@ -28,6 +29,8 @@ export default function Users() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [submitting, setSubmitting] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   function load() {
     Promise.all([api.get('/users'), api.get('/teams')])
@@ -49,13 +52,21 @@ export default function Users() {
     }
   }
 
-  async function handleDelete(id) {
-    if (!confirm('Supprimer cet utilisateur ?')) return;
+  function askDelete(id) {
+    setConfirmDeleteId(id);
+  }
+
+  async function handleDelete() {
+    if (!confirmDeleteId) return;
+    setDeleting(true);
     try {
-      await api.delete(`/users/${id}`);
+      await api.delete(`/users/${confirmDeleteId}`);
       load();
+      setConfirmDeleteId(null);
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la suppression');
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -255,7 +266,7 @@ export default function Users() {
                     />
                   </td>
                   <td className="p-md text-right">
-                    <button onClick={() => handleDelete(u.id)} className="text-on-surface-variant hover:text-error transition-colors p-1">
+                    <button onClick={() => askDelete(u.id)} className="text-on-surface-variant hover:text-error transition-colors p-1">
                       <span className="material-symbols-outlined text-[18px]">delete</span>
                     </button>
                   </td>
@@ -270,6 +281,17 @@ export default function Users() {
           </table>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={!!confirmDeleteId}
+        title="Supprimer l'utilisateur"
+        message="Supprimer définitivement cet utilisateur ? Cette action est irréversible."
+        confirmLabel="Supprimer"
+        danger
+        loading={deleting}
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
     </div>
   );
 }

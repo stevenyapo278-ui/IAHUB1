@@ -337,7 +337,7 @@ API correspondante :
 - `DELETE /api/tickets/:id` — supprime un ticket (ADMIN uniquement).
 - `POST /api/tickets/bulk-delete` — supprime plusieurs tickets en une requête, body `{ "ids": [1, 2, 3] }` (ADMIN uniquement).
 
-⚠️ La suppression ne supprime que le ticket côté ERP — si le ticket était synchronisé avec GLPI (`glpiTicketId` renseigné), le ticket correspondant n'est **pas** supprimé côté GLPI.
+Si le ticket était synchronisé avec GLPI (`glpiTicketId` renseigné), le ticket correspondant est aussi purgé côté GLPI (suppression définitive, `force_purge`). Si GLPI est inaccessible au moment de la suppression, le ticket est tout de même supprimé côté ERP (best-effort, non bloquant) — il peut alors rester orphelin dans GLPI.
 
 ---
 

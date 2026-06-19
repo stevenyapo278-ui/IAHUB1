@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../../api/client';
+import ConfirmDialog from '../../components/ConfirmDialog';
 
 function Toggle({ checked, onChange }) {
   return (
@@ -22,6 +23,8 @@ export default function AiProvidersTab() {
   const [keyForms, setKeyForms] = useState({});
   const [syncing, setSyncing] = useState(null);
   const [info, setInfo] = useState('');
+  const [pendingDelete, setPendingDelete] = useState(null); // { type: 'provider'|'model'|'key', id }
+  const [deleting, setDeleting] = useState(false);
 
   function load() {
     api
@@ -53,13 +56,21 @@ export default function AiProvidersTab() {
     }
   }
 
-  async function handleDeleteProvider(id) {
-    if (!confirm('Supprimer ce fournisseur et toutes ses clés/modèles ?')) return;
+  function askDeleteProvider(id) {
+    setPendingDelete({ type: 'provider', id });
+  }
+
+  async function handleDeleteProvider() {
+    if (!pendingDelete || pendingDelete.type !== 'provider') return;
+    setDeleting(true);
     try {
-      await api.delete(`/ai-providers/${id}`);
+      await api.delete(`/ai-providers/${pendingDelete.id}`);
       load();
+      setPendingDelete(null);
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la suppression');
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -100,13 +111,21 @@ export default function AiProvidersTab() {
     }
   }
 
-  async function handleDeleteModel(modelId) {
-    if (!confirm('Supprimer ce modèle ?')) return;
+  function askDeleteModel(modelId) {
+    setPendingDelete({ type: 'model', id: modelId });
+  }
+
+  async function handleDeleteModel() {
+    if (!pendingDelete || pendingDelete.type !== 'model') return;
+    setDeleting(true);
     try {
-      await api.delete(`/ai-providers/models/${modelId}`);
+      await api.delete(`/ai-providers/models/${pendingDelete.id}`);
       load();
+      setPendingDelete(null);
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la suppression');
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -146,13 +165,21 @@ export default function AiProvidersTab() {
     }
   }
 
-  async function handleDeleteKey(keyId) {
-    if (!confirm('Supprimer cette clé API ?')) return;
+  function askDeleteKey(keyId) {
+    setPendingDelete({ type: 'key', id: keyId });
+  }
+
+  async function handleDeleteKey() {
+    if (!pendingDelete || pendingDelete.type !== 'key') return;
+    setDeleting(true);
     try {
-      await api.delete(`/ai-providers/keys/${keyId}`);
+      await api.delete(`/ai-providers/keys/${pendingDelete.id}`);
       load();
+      setPendingDelete(null);
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la suppression');
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -236,7 +263,7 @@ export default function AiProvidersTab() {
             </div>
             <div className="flex items-center gap-md">
               <Toggle checked={provider.isActive} onChange={(v) => handleUpdateProvider(provider.id, 'isActive', v)} />
-              <button onClick={() => handleDeleteProvider(provider.id)} className="text-on-surface-variant hover:text-error transition-colors">
+              <button onClick={() => askDeleteProvider(provider.id)} className="text-on-surface-variant hover:text-error transition-colors">
                 <span className="material-symbols-outlined">delete</span>
               </button>
             </div>
@@ -288,7 +315,7 @@ export default function AiProvidersTab() {
                         />
                       </td>
                       <td className="p-sm text-right">
-                        <button onClick={() => handleDeleteModel(m.id)} className="text-on-surface-variant hover:text-error">
+                        <button onClick={() => askDeleteModel(m.id)} className="text-on-surface-variant hover:text-error">
                           <span className="material-symbols-outlined text-sm">delete</span>
                         </button>
                       </td>
@@ -357,7 +384,7 @@ export default function AiProvidersTab() {
                         />
                       </td>
                       <td className="p-sm text-right">
-                        <button onClick={() => handleDeleteKey(k.id)} className="text-on-surface-variant hover:text-error">
+                        <button onClick={() => askDeleteKey(k.id)} className="text-on-surface-variant hover:text-error">
                           <span className="material-symbols-outlined text-sm">delete</span>
                         </button>
                       </td>
@@ -409,6 +436,35 @@ export default function AiProvidersTab() {
           </div>
         </div>
       ))}
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        title={
+          pendingDelete?.type === 'provider'
+            ? 'Supprimer le fournisseur'
+            : pendingDelete?.type === 'model'
+            ? 'Supprimer le modèle'
+            : 'Supprimer la clé API'
+        }
+        message={
+          pendingDelete?.type === 'provider'
+            ? 'Supprimer définitivement ce fournisseur et toutes ses clés/modèles ? Cette action est irréversible.'
+            : pendingDelete?.type === 'model'
+            ? 'Supprimer définitivement ce modèle ? Cette action est irréversible.'
+            : 'Supprimer définitivement cette clé API ? Cette action est irréversible.'
+        }
+        confirmLabel="Supprimer"
+        danger
+        loading={deleting}
+        onConfirm={
+          pendingDelete?.type === 'provider'
+            ? handleDeleteProvider
+            : pendingDelete?.type === 'model'
+            ? handleDeleteModel
+            : handleDeleteKey
+        }
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

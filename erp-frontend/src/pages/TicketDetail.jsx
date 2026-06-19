@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 const STATUS_OPTIONS = ['NEW', 'OPEN', 'PENDING', 'SOLVED', 'CLOSED'];
 const PRIORITY_OPTIONS = ['P1', 'P2', 'P3', 'P4'];
@@ -93,13 +94,17 @@ export default function TicketDetail() {
     }
   }
 
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
   async function handleDelete() {
-    if (!confirm('Supprimer ce ticket ?')) return;
+    setDeleting(true);
     try {
       await api.delete(`/tickets/${id}`);
       navigate('/tickets');
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la suppression');
+      setDeleting(false);
     }
   }
 
@@ -562,7 +567,7 @@ export default function TicketDetail() {
           {user?.role === 'ADMIN' && (
             <div className="pt-lg border-t border-outline-variant border-dashed">
               <button
-                onClick={handleDelete}
+                onClick={() => setShowDeleteConfirm(true)}
                 className="w-full flex items-center justify-center gap-2 bg-transparent border border-error text-error hover:bg-error-container transition-colors duration-200 rounded-lg py-sm font-headline-sm text-headline-sm"
               >
                 <span className="material-symbols-outlined text-[18px]">delete</span>
@@ -572,6 +577,17 @@ export default function TicketDetail() {
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="Supprimer le ticket"
+        message={`Supprimer définitivement le ticket #${id} ? Cette action est irréversible et supprime aussi le ticket GLPI lié.`}
+        confirmLabel="Supprimer"
+        danger
+        loading={deleting}
+        onConfirm={handleDelete}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
     </div>
   );
 }

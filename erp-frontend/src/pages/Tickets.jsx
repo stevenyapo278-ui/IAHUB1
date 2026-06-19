@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 const STATUS_OPTIONS = ['NEW', 'OPEN', 'PENDING', 'SOLVED', 'CLOSED'];
 const PRIORITY_OPTIONS = ['P1', 'P2', 'P3', 'P4'];
@@ -103,26 +104,31 @@ export default function Tickets() {
     setSelectedIds((ids) => (ids.length === tickets.length ? [] : tickets.map((t) => t.id)));
   }
 
-  async function handleDeleteOne(id) {
-    if (!confirm(`Supprimer le ticket #${id} ?`)) return;
-    try {
-      await api.delete(`/tickets/${id}`);
-      loadTickets();
-    } catch (err) {
-      setError(err.response?.data?.error || 'Erreur lors de la suppression');
-    }
+  const [confirmDelete, setConfirmDelete] = useState(null); // { mode: 'one'|'bulk', id? }
+
+  function askDeleteOne(id) {
+    setConfirmDelete({ mode: 'one', id });
   }
 
-  async function handleDeleteSelected() {
+  function askDeleteSelected() {
     if (selectedIds.length === 0) return;
-    if (!confirm(`Supprimer définitivement ${selectedIds.length} ticket(s) ?`)) return;
+    setConfirmDelete({ mode: 'bulk' });
+  }
+
+  async function confirmDeleteAction() {
+    if (!confirmDelete) return;
     setDeleting(true);
     setError('');
     try {
-      await api.post('/tickets/bulk-delete', { ids: selectedIds });
+      if (confirmDelete.mode === 'one') {
+        await api.delete(`/tickets/${confirmDelete.id}`);
+      } else {
+        await api.post('/tickets/bulk-delete', { ids: selectedIds });
+      }
       loadTickets();
+      setConfirmDelete(null);
     } catch (err) {
-      setError(err.response?.data?.error || 'Erreur lors de la suppression en masse');
+      setError(err.response?.data?.error || 'Erreur lors de la suppression');
     } finally {
       setDeleting(false);
     }
@@ -446,7 +452,7 @@ export default function Tickets() {
         <div className="flex items-center gap-3">
           {isAdmin && selectedIds.length > 0 && (
             <button
-              onClick={handleDeleteSelected}
+              onClick={askDeleteSelected}
               disabled={deleting}
               className="flex items-center gap-2 px-4 py-2 rounded-none border border-error/30 text-error font-body-sm text-body-sm font-semibold hover:bg-error/5 transition-colors whitespace-nowrap disabled:opacity-50"
             >
@@ -555,7 +561,7 @@ export default function Tickets() {
                   {isAdmin && (
                     <td className="px-md py-3">
                       <button
-                        onClick={() => handleDeleteOne(t.id)}
+                        onClick={() => askDeleteOne(t.id)}
                         title="Supprimer ce ticket"
                         className="text-outline hover:text-error transition-colors"
                       >
@@ -576,6 +582,21 @@ export default function Tickets() {
           </table>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={!!confirmDelete}
+        title="Supprimer le ticket"
+        message={
+          confirmDelete?.mode === 'bulk'
+            ? `Supprimer définitivement ${selectedIds.length} ticket(s) ? Cette action est irréversible et supprime aussi le(s) ticket(s) GLPI lié(s).`
+            : `Supprimer définitivement le ticket #${confirmDelete?.id} ? Cette action est irréversible et supprime aussi le ticket GLPI lié.`
+        }
+        confirmLabel="Supprimer"
+        danger
+        loading={deleting}
+        onConfirm={confirmDeleteAction}
+        onCancel={() => setConfirmDelete(null)}
+      />
     </div>
   );
 }
