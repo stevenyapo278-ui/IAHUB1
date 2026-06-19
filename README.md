@@ -140,6 +140,34 @@ docker compose down -v
 docker compose up -d --build
 ```
 
+### Migrations de base de données
+
+Les migrations Prisma s'appliquent **automatiquement** à chaque démarrage du conteneur backend (via `docker-entrypoint.sh`, qui lance `npx prisma migrate deploy`) — pas besoin de commande manuelle dans le cas normal. Un simple `git pull` suivi de `docker compose up -d --build` suffit.
+
+Si malgré tout le backend plante au démarrage avec une erreur du type `The column "Ticket.xxx" does not exist in the current database` (P2022) alors que les logs indiquent `No pending migrations to apply`, cela signifie que le `git pull` n'a pas récupéré les derniers fichiers de migration (`erp-backend/prisma/migrations/`). Dans ce cas :
+
+```bash
+# 1. Vérifier qu'on est bien sur la bonne branche et à jour
+git branch --show-current
+git pull origin <ta-branche>
+
+# 2. Vérifier que les fichiers de migration sont bien présents
+ls erp-backend/prisma/migrations/
+
+# 3. Forcer la reconstruction sans cache puis relancer
+docker compose build --no-cache backend
+docker compose up -d backend
+
+# 4. Vérifier dans les logs que les migrations s'appliquent
+docker logs ia-hub-backend --tail=30
+```
+
+Si une migration doit être appliquée manuellement dans le conteneur (cas rare, déboguage) :
+
+```bash
+docker compose run --rm --entrypoint sh backend -c "npx prisma migrate deploy"
+```
+
 ---
 
 ## Mode développement (hot reload)
