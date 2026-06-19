@@ -311,7 +311,7 @@ Tout bouton actif, highlight, nav active, badge utilise `var(--accent)`.
 ```
 
 Le JS écoute `input` sur la roue et `keydown Enter` sur le hex. La swatch active reçoit la classe `active`.
-
+test
 ---
 
 ## 5. Couleurs personnalisables (fond, bordures)
