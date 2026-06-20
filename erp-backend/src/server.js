@@ -2,10 +2,12 @@ require('dotenv').config();
 const app = require('./app');
 const { syncAllProviders } = require('./utils/modelSync');
 const { syncGlpiTickets } = require('./utils/glpiSync');
+const { runEmailPipeline } = require('./services/emailPipeline');
 
 const PORT = process.env.PORT || 4000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const GLPI_SYNC_INTERVAL_MS = 20 * 1000;
+const EMAIL_SYNC_INTERVAL_MS = 15 * 1000;
 
 app.listen(PORT, () => {
   console.log(`ERP backend listening on port ${PORT}`);
@@ -21,3 +23,9 @@ syncGlpiTickets().catch((err) => console.error('Erreur synchro GLPI:', err));
 setInterval(() => {
   syncGlpiTickets().catch((err) => console.error('Erreur synchro GLPI:', err));
 }, GLPI_SYNC_INTERVAL_MS);
+
+// Synchronisation automatique des boîtes mail (toutes les 60s)
+runEmailPipeline().catch((err) => console.error('Erreur synchro emails:', err));
+setInterval(() => {
+  runEmailPipeline().catch((err) => console.error('Erreur synchro emails:', err));
+}, EMAIL_SYNC_INTERVAL_MS);

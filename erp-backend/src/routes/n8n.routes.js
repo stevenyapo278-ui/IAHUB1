@@ -1,7 +1,8 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/permissions');
 
 const router = express.Router();
 router.use(authenticate);
@@ -13,7 +14,7 @@ router.get('/', async (req, res) => {
 });
 
 // Create workflow (ADMIN only)
-router.post('/', authorize('ADMIN'), [body('name').notEmpty(), body('webhookUrl').notEmpty()], async (req, res) => {
+router.post('/', requirePermission('automation.manage', ['ADMIN']), [body('name').notEmpty(), body('webhookUrl').notEmpty()], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
@@ -32,7 +33,7 @@ router.post('/', authorize('ADMIN'), [body('name').notEmpty(), body('webhookUrl'
 });
 
 // Update workflow (ADMIN only)
-router.patch('/:id', authorize('ADMIN'), async (req, res) => {
+router.patch('/:id', requirePermission('automation.manage', ['ADMIN']), async (req, res) => {
   const { name, webhookUrl, description, isActive } = req.body;
   const data = {};
   if (name !== undefined) data.name = name;
@@ -49,7 +50,7 @@ router.patch('/:id', authorize('ADMIN'), async (req, res) => {
 });
 
 // Delete workflow (ADMIN only)
-router.delete('/:id', authorize('ADMIN'), async (req, res) => {
+router.delete('/:id', requirePermission('automation.manage', ['ADMIN']), async (req, res) => {
   try {
     await prisma.n8nWorkflow.delete({ where: { id: Number(req.params.id) } });
     return res.status(204).send();
@@ -59,7 +60,7 @@ router.delete('/:id', authorize('ADMIN'), async (req, res) => {
 });
 
 // Trigger workflow webhook (ADMIN/TECHNICIAN)
-router.post('/:id/trigger', authorize('ADMIN', 'TECHNICIAN'), async (req, res) => {
+router.post('/:id/trigger', requirePermission('automation.manage', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const id = Number(req.params.id);
   const workflow = await prisma.n8nWorkflow.findUnique({ where: { id } });
   if (!workflow) return res.status(404).json({ error: 'Workflow introuvable' });

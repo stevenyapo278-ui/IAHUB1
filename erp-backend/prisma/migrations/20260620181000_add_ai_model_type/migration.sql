@@ -1,0 +1,6 @@
+DO $$ BEGIN
+    CREATE TYPE "AiModelType" AS ENUM ('CHAT', 'EMBEDDING');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+ALTER TABLE "AiModel" ADD COLUMN IF NOT EXISTS "type" "AiModelType" NOT NULL DEFAULT 'CHAT';

@@ -11,6 +11,8 @@ import PermissionGroups from './pages/PermissionGroups';
 import Settings from './pages/Settings';
 import KnowledgeBase from './pages/KnowledgeBase';
 import Inbox from './pages/Inbox';
+import AiEmailDrafts from './pages/AiEmailDrafts';
+import Prompts from './pages/Prompts';
 
 export default function App() {
   return (
@@ -30,6 +32,7 @@ export default function App() {
         <Route path="teams" element={<Teams />} />
         <Route path="knowledge-base" element={<KnowledgeBase />} />
         <Route path="inbox" element={<Inbox />} />
+        <Route path="email-drafts" element={<AiEmailDrafts />} />
         <Route
           path="users"
           element={
@@ -51,6 +54,14 @@ export default function App() {
           element={
             <ProtectedRoute roles={['ADMIN']}>
               <Settings />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="prompts"
+          element={
+            <ProtectedRoute roles={['ADMIN']}>
+              <Prompts />
             </ProtectedRoute>
           }
         />

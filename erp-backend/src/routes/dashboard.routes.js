@@ -62,6 +62,23 @@ router.get('/recent-activity', async (req, res) => {
   return res.json(tickets);
 });
 
+// Tickets que l'IA n'a pas pu trancher avec assez de confiance (fermeture/réouverture refusée,
+// limite de scission atteinte) et qui nécessitent une revue humaine.
+router.get('/needs-human-review', async (req, res) => {
+  const recentEvents = await prisma.ticketEvent.findMany({
+    where: { type: 'NEEDS_HUMAN_REVIEW' },
+    orderBy: { createdAt: 'desc' },
+    take: 20,
+    distinct: ['ticketId'],
+    include: {
+      ticket: { select: { id: true, title: true, status: true, glpiTicketId: true } },
+    },
+  });
+
+  const stillWaiting = recentEvents.filter((e) => e.ticket?.status === 'WAITING_FOR_USER');
+  return res.json(stillWaiting);
+});
+
 // Réponses IA en attente de validation
 router.get('/pending-ai-drafts', async (req, res) => {
   const drafts = await prisma.aiEmailDraft.findMany({

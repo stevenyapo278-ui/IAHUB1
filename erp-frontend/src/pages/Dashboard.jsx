@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   BarChart,
@@ -14,6 +14,29 @@ import {
   Cell,
 } from 'recharts';
 import api from '../api/client';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { isVoiceAlertEnabled, getVoiceAlertLang } from '../utils/voiceAlertPreference';
+
+// Messages d'annonce traduits — la langue affichée suit le réglage choisi par l'utilisateur dans
+// Paramètres > Automatisation (préférence locale au navigateur, indépendante des autres utilisateurs).
+const ANNOUNCE_MESSAGES = {
+  drafts: {
+    'fr-FR': 'Nouvelle réponse IA en attente de validation.',
+    'en-US': 'New AI reply waiting for approval.',
+    'es-ES': 'Nueva respuesta de la IA en espera de validación.',
+    'de-DE': 'Neue KI-Antwort wartet auf Genehmigung.',
+    'pt-PT': 'Nova resposta da IA à espera de validação.',
+    'ar-SA': 'رد جديد من الذكاء الاصطناعي في انتظار الموافقة.',
+  },
+  review: {
+    'fr-FR': "Un ticket nécessite une revue humaine, l'intelligence artificielle n'est pas certaine de la décision à prendre.",
+    'en-US': 'A ticket needs human review, the AI is not confident about the decision to make.',
+    'es-ES': 'Un ticket necesita revisión humana, la IA no está segura de la decisión a tomar.',
+    'de-DE': 'Ein Ticket benötigt eine menschliche Überprüfung, die KI ist sich der Entscheidung nicht sicher.',
+    'pt-PT': 'Um ticket precisa de revisão humana, a IA não tem certeza da decisão a tomar.',
+    'ar-SA': 'تذكرة تحتاج إلى مراجعة بشرية، الذكاء الاصطناعي غير متأكد من القرار المناسب.',
+  },
+};
 
 const colors = {
   ink: '#0b1c30',
@@ -78,13 +101,46 @@ export default function Dashboard() {
   const [integrations, setIntegrations] = useState(null);
   const [techPerformance, setTechPerformance] = useState([]);
   const [pendingAiDrafts, setPendingAiDrafts] = useState([]);
+  const [needsReview, setNeedsReview] = useState([]);
   const [error, setError] = useState('');
+  const autoSendAiEmailsRef = useRef(false);
 
   function loadPendingAiDrafts() {
-    api.get('/dashboard/pending-ai-drafts').then(({ data }) => setPendingAiDrafts(data)).catch(() => {});
+    api.get('/dashboard/pending-ai-drafts').then(({ data }) => {
+      announceIfNew('drafts', data.map((d) => d.id));
+      setPendingAiDrafts(data);
+    }).catch(() => {});
   }
 
-  useEffect(() => {
+  function loadNeedsReview() {
+    api.get('/dashboard/needs-human-review').then(({ data }) => {
+      announceIfNew('review', data.map((e) => e.ticketId));
+      setNeedsReview(data);
+    }).catch(() => {});
+  }
+
+  // Annonce vocalement (synthèse vocale du navigateur) uniquement les NOUVEAUX éléments apparus
+  // depuis le dernier rafraîchissement, pour ne pas répéter la même alerte toutes les 15s.
+  const seenIdsRef = useRef({ drafts: new Set(), review: new Set() });
+  function announceIfNew(kind, currentIds) {
+    const seen = seenIdsRef.current[kind];
+    const newOnes = currentIds.filter((id) => !seen.has(id));
+    currentIds.forEach((id) => seen.add(id));
+
+    if (newOnes.length === 0 || typeof window === 'undefined' || !window.speechSynthesis) return;
+    if (!isVoiceAlertEnabled()) return;
+    // Si l'auto-envoi des emails IA est activé (Paramètres > Automatisation), les réponses partent
+    // directement sans jamais créer de brouillon en attente — annoncer "drafts" n'aurait alors aucun sens.
+    if (kind === 'drafts' && autoSendAiEmailsRef.current) return;
+
+    const lang = getVoiceAlertLang();
+    const message = ANNOUNCE_MESSAGES[kind][lang] || ANNOUNCE_MESSAGES[kind]['fr-FR'];
+    const utterance = new SpeechSynthesisUtterance(message);
+    utterance.lang = lang;
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function loadAll() {
     api
       .get('/dashboard/stats')
       .then(({ data }) => setStats(data))
@@ -94,15 +150,73 @@ export default function Dashboard() {
     api.get('/dashboard/recent-activity').then(({ data }) => setRecentActivity(data)).catch(() => {});
     api.get('/dashboard/integrations').then(({ data }) => setIntegrations(data)).catch(() => {});
     api.get('/dashboard/technician-performance').then(({ data }) => setTechPerformance(data)).catch(() => {});
+    api.get('/system-settings').then(({ data }) => { autoSendAiEmailsRef.current = !!data.autoSendAiEmails; }).catch(() => {});
     loadPendingAiDrafts();
+    loadNeedsReview();
+  }
+
+  useEffect(() => {
+    loadAll();
+    const intervalId = setInterval(loadAll, 15000);
+    return () => clearInterval(intervalId);
   }, []);
 
-  async function reviewDraft(id, action) {
+  const [editedDrafts, setEditedDrafts] = useState({});
+  const [editedRecipients, setEditedRecipients] = useState({});
+  const [editedCc, setEditedCc] = useState({});
+  const [ccInput, setCcInput] = useState({});
+
+  function setDraftContent(id, content) {
+    setEditedDrafts((prev) => ({ ...prev, [id]: content }));
+  }
+
+  function getCcList(draft) {
+    return editedCc[draft.id] !== undefined ? editedCc[draft.id] : (draft.ccRecipients || []);
+  }
+
+  function addCc(draft) {
+    const value = (ccInput[draft.id] || '').trim();
+    if (!value) return;
+    const current = getCcList(draft);
+    if (!current.includes(value)) {
+      setEditedCc((prev) => ({ ...prev, [draft.id]: [...current, value] }));
+    }
+    setCcInput((prev) => ({ ...prev, [draft.id]: '' }));
+  }
+
+  function removeCc(draft, email) {
+    setEditedCc((prev) => ({ ...prev, [draft.id]: getCcList(draft).filter((e) => e !== email) }));
+  }
+
+  const [confirmReview, setConfirmReview] = useState(null); // { id, action, draft }
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+
+  function askReview(id, action, draft) {
+    setConfirmReview({ id, action, draft });
+  }
+
+  async function confirmReviewRun() {
+    if (!confirmReview) return;
+    const { id, action, draft } = confirmReview;
+    setReviewSubmitting(true);
     try {
-      await api.post(`/ai-email-drafts/${id}/${action}`);
+      const body = action === 'approve'
+        ? {
+            proposedContent: editedDrafts[id] !== undefined ? editedDrafts[id] : draft.proposedContent,
+            recipientEmail: editedRecipients[id] !== undefined ? editedRecipients[id] : draft.recipientEmail,
+            ccRecipients: getCcList(draft),
+          }
+        : {};
+      await api.post(`/ai-email-drafts/${id}/${action}`, body);
+      setEditedDrafts((prev) => { const n = { ...prev }; delete n[id]; return n; });
+      setEditedRecipients((prev) => { const n = { ...prev }; delete n[id]; return n; });
+      setEditedCc((prev) => { const n = { ...prev }; delete n[id]; return n; });
+      setConfirmReview(null);
       loadPendingAiDrafts();
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la validation');
+    } finally {
+      setReviewSubmitting(false);
     }
   }
 
@@ -236,7 +350,14 @@ export default function Dashboard() {
         <Panel
           title="Réponses IA en attente"
           icon="smart_toy"
-          action={<span className="font-mono-sm text-mono-sm text-on-surface-variant">{pendingAiDrafts.length}</span>}
+          action={
+            <div className="flex items-center gap-sm">
+              <span className="font-mono-sm text-mono-sm text-on-surface-variant">{pendingAiDrafts.length}</span>
+              <Link to="/email-drafts" className="text-xs text-on-surface-variant hover:underline">
+                Voir tout (incl. rejetées) →
+              </Link>
+            </div>
+          }
         >
           {pendingAiDrafts.length === 0 && (
             <p className="font-body-sm text-body-sm text-on-surface-variant">Aucune réponse IA en attente.</p>
@@ -249,25 +370,101 @@ export default function Dashboard() {
                     {d.ticket ? `#${d.ticket.id} ${d.ticket.title}` : d.subject}
                   </div>
                 </div>
-                <div className="font-body-sm text-body-sm text-on-surface-variant">
-                  À : {d.recipientEmail} · {d.subject}
+                <div className="font-body-sm text-body-sm text-on-surface-variant">{d.subject}</div>
+
+                <div className="flex items-center gap-xs">
+                  <span className="font-label-md text-label-md text-on-surface-variant uppercase shrink-0">À</span>
+                  <input
+                    type="email"
+                    value={editedRecipients[d.id] !== undefined ? editedRecipients[d.id] : d.recipientEmail}
+                    onChange={(e) => setEditedRecipients((prev) => ({ ...prev, [d.id]: e.target.value }))}
+                    className="flex-1 border border-outline-variant rounded-none px-2 py-1 text-body-sm text-on-surface bg-surface focus:outline-none focus:border-on-surface"
+                  />
                 </div>
-                <p className="font-body-sm text-body-sm text-on-surface line-clamp-3">{d.proposedContent}</p>
+
+                <div className="flex flex-col gap-xs">
+                  <div className="flex items-center gap-xs">
+                    <span className="font-label-md text-label-md text-on-surface-variant uppercase shrink-0">Cc</span>
+                    <input
+                      type="email"
+                      placeholder="Ajouter un email en copie..."
+                      value={ccInput[d.id] || ''}
+                      onChange={(e) => setCcInput((prev) => ({ ...prev, [d.id]: e.target.value }))}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCc(d); } }}
+                      className="flex-1 border border-outline-variant rounded-none px-2 py-1 text-body-sm text-on-surface bg-surface focus:outline-none focus:border-on-surface"
+                    />
+                    <button
+                      onClick={() => addCc(d)}
+                      className="px-2 py-1 border border-outline-variant text-on-surface-variant hover:bg-surface-container-high transition-colors"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">add</span>
+                    </button>
+                  </div>
+                  {getCcList(d).length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {getCcList(d).map((email) => (
+                        <span key={email} className="flex items-center gap-1 px-2 py-0.5 border border-outline-variant text-on-surface-variant text-xs">
+                          {email}
+                          <button onClick={() => removeCc(d, email)} className="hover:text-error">
+                            <span className="material-symbols-outlined text-[12px]">close</span>
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="border border-outline-variant rounded-none p-sm bg-surface-container-lowest text-on-surface font-body-sm text-body-sm max-h-40 overflow-y-auto"
+                  dangerouslySetInnerHTML={{ __html: editedDrafts[d.id] !== undefined ? editedDrafts[d.id] : d.proposedContent }}
+                  contentEditable
+                  suppressContentEditableWarning
+                  onBlur={(e) => setDraftContent(d.id, e.currentTarget.innerHTML)}
+                />
+                <p className="text-xs text-outline italic">Destinataire, Cc et contenu sont modifiables avant validation.</p>
                 <div className="flex gap-sm mt-xs">
                   <button
-                    onClick={() => reviewDraft(d.id, 'approve')}
+                    onClick={() => askReview(d.id, 'approve', d)}
                     className="px-3 py-1 border border-on-surface text-on-surface font-body-sm text-body-sm hover:bg-surface-container-high transition-colors"
                   >
-                    Approuver
+                    Approuver et envoyer
                   </button>
                   <button
-                    onClick={() => reviewDraft(d.id, 'reject')}
+                    onClick={() => askReview(d.id, 'reject', d)}
                     className="px-3 py-1 border border-outline-variant text-on-surface-variant font-body-sm text-body-sm hover:bg-surface-container-high transition-colors"
                   >
                     Rejeter
                   </button>
                 </div>
               </div>
+            ))}
+          </div>
+        </Panel>
+
+        <Panel
+          title="Tickets nécessitant une revue humaine"
+          icon="warning"
+          action={<span className="font-mono-sm text-mono-sm text-on-surface-variant">{needsReview.length}</span>}
+        >
+          {needsReview.length === 0 && (
+            <p className="font-body-sm text-body-sm text-on-surface-variant">Aucun ticket en attente de revue.</p>
+          )}
+          <div className="flex flex-col divide-y divide-outline-variant">
+            {needsReview.map((e) => (
+              <Link
+                key={e.ticketId}
+                to={`/tickets/${e.ticketId}`}
+                className="py-sm flex items-center justify-between hover:bg-surface-container-low transition-colors"
+              >
+                <div>
+                  <div className="font-headline-sm text-headline-sm text-on-surface truncate">
+                    #{e.ticketId} {e.ticket?.title}
+                  </div>
+                  <div className="text-body-sm text-on-surface-variant">
+                    L'IA n'est pas certaine de la décision à prendre sur la réponse reçue.
+                  </div>
+                </div>
+                <span className="material-symbols-outlined text-on-surface-variant">chevron_right</span>
+              </Link>
             ))}
           </div>
         </Panel>
@@ -395,6 +592,21 @@ export default function Dashboard() {
           </div>
         </Panel>
       </div>
+
+      <ConfirmDialog
+        open={!!confirmReview}
+        title={confirmReview?.action === 'approve' ? 'Approuver et envoyer' : 'Rejeter cette réponse'}
+        message={
+          confirmReview?.action === 'approve'
+            ? "Cette réponse va être envoyée immédiatement par email au destinataire (et en copie aux Cc s'il y en a). Confirmer ?"
+            : 'Ce brouillon sera rejeté et ne sera jamais envoyé. Vous pourrez le consulter dans les réponses rejetées.'
+        }
+        confirmLabel={confirmReview?.action === 'approve' ? 'Envoyer' : 'Rejeter'}
+        danger={confirmReview?.action === 'reject'}
+        loading={reviewSubmitting}
+        onConfirm={confirmReviewRun}
+        onCancel={() => setConfirmReview(null)}
+      />
     </div>
   );
 }

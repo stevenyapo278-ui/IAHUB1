@@ -9,7 +9,7 @@ Plateforme de gestion des tickets IT avec analyse IA des emails, création autom
 | Backend | Node.js 20 + Express + Prisma |
 | Base de données | PostgreSQL 16 + pgvector |
 | Frontend | React + Vite + Tailwind CSS |
-| IA | Google Gemini (analyse, déduplication) |
+| IA | Multi-fournisseurs : Gemini, OpenAI, Anthropic, NVIDIA NIM, Mistral (analyse, déduplication, embeddings avec bascule automatique entre fournisseurs actifs) |
 | ITSM | GLPI via API REST |
 | Email | Microsoft Graph API (OAuth2) |
 
@@ -19,7 +19,7 @@ Plateforme de gestion des tickets IT avec analyse IA des emails, création autom
 
 ### Prérequis
 - Docker + Docker Compose installés
-- Ports 80, 4000, 5432 disponibles
+- Ports 3000 (frontend), 4000 (API), 5433 (PostgreSQL) disponibles — et 8080 si GLPI est créé via l'option 1 du script
 
 ### 1. Cloner le repo
 
@@ -74,9 +74,9 @@ Les services démarrent dans l'ordre :
 
 | Service | URL |
 |---|---|
-| Dashboard | http://localhost |
+| Dashboard | http://localhost:3000 |
 | API | http://localhost:4000 |
-| Base de données | localhost:5432 |
+| Base de données | localhost:5433 |
 
 ### Identifiants par défaut
 
@@ -301,9 +301,17 @@ Une fois GLPI configuré et actif, le backend synchronise les tickets GLPI → E
 Une fois connecté au dashboard, configurer dans **Paramètres** :
 
 ### Intelligence Artificielle (obligatoire)
-Settings → Intelligence Artificielle → Gemini → Ajouter une clé API
+Settings → Intelligence Artificielle → ajouter au moins un fournisseur actif avec une clé API.
 
-Obtenir une clé gratuite sur [aistudio.google.com](https://aistudio.google.com)
+Fournisseurs supportés : **Gemini**, **OpenAI**, **Anthropic**, **NVIDIA NIM**, **Mistral**.
+
+Clé gratuite Gemini sur [aistudio.google.com](https://aistudio.google.com).
+
+Pour chaque fournisseur, les modèles se déclarent avec un type **CHAT** (analyse d'emails, génération de réponses) ou **EMBEDDING** (recherche sémantique dans la base de connaissances) — un même fournisseur peut avoir un modèle par défaut différent pour chaque type. Anthropic ne propose pas d'API d'embeddings et est ignoré automatiquement pour cet usage.
+
+Si plusieurs fournisseurs/modèles d'embedding actifs sont configurés, le backend les essaie dans l'ordre jusqu'à obtenir un vecteur de la dimension attendue par la base (1024) — pas besoin de désactiver les autres en cas d'ajout d'un nouveau fournisseur.
+
+Les prompts utilisés pour chaque tâche IA (analyse d'email, génération de réponse, déduplication, etc.) sont éditables sans toucher au code : **Prompts IA** dans le menu.
 
 ### Outlook (optionnel)
 Pour recevoir et analyser les vrais emails :
@@ -348,9 +356,15 @@ curl -s -X POST http://localhost:4000/api/inbox/simulate \
 | Threading | Suivi des réponses sur le même fil email |
 | Accusé de réception | Email automatique envoyé à l'utilisateur |
 | Relances automatiques | J+2, J+5, J+10, fermeture automatique J+15 |
-| Base de connaissances | Recherche sémantique + génération d'articles depuis tickets résolus |
+| Base de connaissances | Recherche sémantique + génération d'articles depuis tickets résolus, remplacement/suppression de documents |
 | Journal d'audit | Historique complet de chaque action sur un ticket |
 | Suppression de tickets | Individuelle ou en masse, réservée aux ADMIN |
+| Auto-assignation des tickets | Le technicien le moins chargé de l'équipe correspondant à la catégorie détectée est assigné automatiquement (création email ou manuelle) |
+| Charge par équipe | Visualisation du nombre de tickets actifs par technicien, page Équipes |
+| Auto-approbation GLPI | Approuve automatiquement la solution d'un ticket marqué résolu côté GLPI si activé dans Paramètres |
+| Alertes vocales | Annonce vocale configurable (activation, langue) des nouveaux tickets/brouillons à valider |
+| Groupes de droits | Permissions fines par groupe, au-delà des rôles ADMIN/TECHNICIAN (voir section dédiée) |
+| Brouillons de réponse email | Validation humaine avant envoi, avec restauration possible d'un brouillon rejeté |
 
 ---
 
@@ -366,6 +380,18 @@ API correspondante :
 - `POST /api/tickets/bulk-delete` — supprime plusieurs tickets en une requête, body `{ "ids": [1, 2, 3] }` (ADMIN uniquement).
 
 Si le ticket était synchronisé avec GLPI (`glpiTicketId` renseigné), le ticket correspondant est aussi purgé côté GLPI (suppression définitive, `force_purge`). Si GLPI est inaccessible au moment de la suppression, le ticket est tout de même supprimé côté ERP (best-effort, non bloquant) — il peut alors rester orphelin dans GLPI.
+
+---
+
+## Groupes de droits (permissions)
+
+Au-delà des rôles **ADMIN** / **TECHNICIAN**, l'accès aux fonctionnalités peut être affiné via **Groupes de droits** (menu, réservé ADMIN).
+
+- Chaque groupe définit une liste de permissions parmi : gestion des tickets (création, suppression, assignation, approbation), équipes, utilisateurs, paramètres, base de connaissances, synchronisation boîte mail, synchronisation GLPI, prompts IA, brouillons de réponse email, automatisations (relances, n8n).
+- Un utilisateur sans groupe assigné garde le comportement **par rôle** classique (ADMIN = tout, TECHNICIAN = accès historique). Dès qu'un utilisateur est ajouté à un groupe, **seules** les permissions de ce groupe s'appliquent — le rôle n'est plus utilisé en complément.
+- Un groupe **Techniciens** est créé automatiquement au premier démarrage (seed), avec les permissions historiquement accordées au rôle TECHNICIAN, et tous les comptes TECHNICIAN existants y sont rattachés automatiquement.
+- La barre latérale masque les liens vers les pages dont la permission de gestion correspondante n'est pas accordée (ex : retirer `knowledge.manage` cache "Base de connaissances" pour cet utilisateur dès son prochain chargement de page, sans besoin de se reconnecter).
+- Les routes `Utilisateurs`, `Paramètres → API/Fournisseurs IA/Comptes email`, et `Groupes de droits` eux-mêmes restent **strictement réservés à ADMIN**, quel que soit le contenu d'un groupe — un groupe ne peut jamais s'accorder ces droits.
 
 ---
 

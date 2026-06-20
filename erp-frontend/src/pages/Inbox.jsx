@@ -51,6 +51,14 @@ export default function Inbox() {
 
   useEffect(() => { load(1, filter); setPage(1); }, [filter]);
 
+  // Rafraîchit silencieusement la liste en arrière-plan pour voir arriver les nouveaux emails sans recharger la page
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      if (page === 1) load(1, filter);
+    }, 15000);
+    return () => clearInterval(intervalId);
+  }, [page, filter]);
+
   async function handleSync() {
     setSyncing(true);
     setError('');

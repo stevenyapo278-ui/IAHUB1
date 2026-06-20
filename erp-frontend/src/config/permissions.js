@@ -11,4 +11,7 @@ export const PERMISSION_DEFINITIONS = [
   { key: 'inbox.sync', label: 'Synchroniser la boîte mail' },
   { key: 'dashboard.view', label: 'Voir le tableau de bord' },
   { key: 'glpi.manage', label: 'Gérer la synchronisation GLPI' },
+  { key: 'prompts.manage', label: 'Modifier les prompts IA' },
+  { key: 'emaildrafts.manage', label: 'Approuver / rejeter les réponses email IA' },
+  { key: 'automation.manage', label: "Gérer l'automatisation (auto-envoi, auto-approbation)" },
 ];

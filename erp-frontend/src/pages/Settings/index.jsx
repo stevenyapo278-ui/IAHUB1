@@ -1,16 +1,26 @@
-import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import AiProvidersTab from './AiProvidersTab';
 import EmailAccountsTab from './EmailAccountsTab';
 import OtherApisTab from './OtherApisTab';
+import AutomationTab from './AutomationTab';
 
 const TABS = [
   { id: 'ai', label: 'Intelligence Artificielle' },
   { id: 'email', label: 'Email (Outlook / IMAP)' },
   { id: 'other', label: 'Autres intégrations' },
+  { id: 'automation', label: 'Automatisation' },
 ];
 
+const TAB_IDS = TABS.map((t) => t.id);
+
 export default function Settings() {
-  const [activeTab, setActiveTab] = useState('ai');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const activeTab = TAB_IDS.includes(tabParam) ? tabParam : 'ai';
+
+  function setActiveTab(id) {
+    setSearchParams({ tab: id });
+  }
 
   return (
     <div className="flex flex-col gap-lg">
@@ -42,6 +52,7 @@ export default function Settings() {
         {activeTab === 'ai' && <AiProvidersTab />}
         {activeTab === 'email' && <EmailAccountsTab />}
         {activeTab === 'other' && <OtherApisTab />}
+        {activeTab === 'automation' && <AutomationTab />}
       </div>
     </div>
   );

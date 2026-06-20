@@ -1,6 +1,7 @@
 const express = require('express');
 const prisma = require('../prismaClient');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/permissions');
 const { generateKnowledgeDraft } = require('../services/knowledgeDraftGenerator');
 const { runReminderScheduler } = require('../services/reminderScheduler');
 const { logEvent } = require('../services/ticketEvent');
@@ -54,7 +55,7 @@ router.get('/tickets/:id/intelligence', async (req, res) => {
 });
 
 // Générer un KnowledgeDraft depuis un ticket résolu
-router.post('/tickets/:id/generate-knowledge', authorize('ADMIN', 'TECHNICIAN'), async (req, res) => {
+router.post('/tickets/:id/generate-knowledge', requirePermission('knowledge.manage', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const { resolutionNote } = req.body;
   try {
     const draft = await generateKnowledgeDraft({
@@ -69,7 +70,7 @@ router.post('/tickets/:id/generate-knowledge', authorize('ADMIN', 'TECHNICIAN'),
 });
 
 // Lancer manuellement le scheduler de relances
-router.post('/reminders/run', authorize('ADMIN'), async (req, res) => {
+router.post('/reminders/run', requirePermission('automation.manage', ['ADMIN']), async (req, res) => {
   try {
     const results = await runReminderScheduler();
     res.json({ processed: results.length, results });
@@ -79,12 +80,12 @@ router.post('/reminders/run', authorize('ADMIN'), async (req, res) => {
 });
 
 // Obtenir / mettre à jour la config des relances
-router.get('/reminders/config', authorize('ADMIN'), async (req, res) => {
+router.get('/reminders/config', requirePermission('automation.manage', ['ADMIN']), async (req, res) => {
   const config = await prisma.reminderConfig.findFirst({ where: { isActive: true } });
   res.json(config || { firstReminderDays: 2, secondReminderDays: 5, preCloseDays: 10, autoCloseDays: 15 });
 });
 
-router.put('/reminders/config', authorize('ADMIN'), async (req, res) => {
+router.put('/reminders/config', requirePermission('automation.manage', ['ADMIN']), async (req, res) => {
   const { firstReminderDays, secondReminderDays, preCloseDays, autoCloseDays } = req.body;
   const existing = await prisma.reminderConfig.findFirst({ where: { isActive: true } });
   const data = { firstReminderDays, secondReminderDays, preCloseDays, autoCloseDays };

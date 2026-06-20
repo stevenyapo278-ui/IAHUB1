@@ -1,6 +1,7 @@
 const express = require('express');
 const prisma = require('../prismaClient');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/permissions');
 const { runEmailPipeline, processMessage } = require('../services/emailPipeline');
 const { analyzeEmail } = require('../services/mailAnalyzer');
 
@@ -35,7 +36,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // Déclenche manuellement un cycle de polling + pipeline IA (ADMIN/TECHNICIAN)
-router.post('/sync', authorize('ADMIN', 'TECHNICIAN'), async (req, res) => {
+router.post('/sync', requirePermission('inbox.sync', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   try {
     const results = await runEmailPipeline();
     res.json({ processed: results.length, results });
@@ -45,7 +46,7 @@ router.post('/sync', authorize('ADMIN', 'TECHNICIAN'), async (req, res) => {
 });
 
 // Test : analyse un email fictif sans créer de ticket (pour vérifier que Gemini fonctionne)
-router.post('/test-analyze', authorize('ADMIN', 'TECHNICIAN'), async (req, res) => {
+router.post('/test-analyze', requirePermission('inbox.sync', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const { subject, body, from, fromName } = req.body;
   if (!subject || !body) return res.status(400).json({ error: 'subject et body sont requis' });
   try {
@@ -57,8 +58,8 @@ router.post('/test-analyze', authorize('ADMIN', 'TECHNICIAN'), async (req, res) 
 });
 
 // Simulation complète du pipeline email (sans Outlook connecté) — crée un vrai ticket
-router.post('/simulate', authorize('ADMIN', 'TECHNICIAN'), async (req, res) => {
-  const { subject, body, from, fromName, conversationId } = req.body;
+router.post('/simulate', requirePermission('inbox.sync', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+  const { subject, body, from, fromName, conversationId, cc, simulatedAttachments } = req.body;
   if (!subject || !body) return res.status(400).json({ error: 'subject et body sont requis' });
 
   // Utiliser le premier compte email disponible pour la simulation
@@ -72,11 +73,13 @@ router.post('/simulate', authorize('ADMIN', 'TECHNICIAN'), async (req, res) => {
     bodyPreview: body.substring(0, 255),
     body: { content: body, contentType: 'text' },
     from: { emailAddress: { address: from || 'utilisateur@test.com', name: fromName || 'Utilisateur Test' } },
+    ccRecipients: Array.isArray(cc) ? cc.map((addr) => ({ emailAddress: { address: addr } })) : [],
     receivedDateTime: new Date().toISOString(),
     conversationId: conversationId || `SIM-CONV-${Date.now()}`,
     internetMessageId: null,
     inReplyTo: null,
     references: null,
+    simulatedAttachments: Array.isArray(simulatedAttachments) ? simulatedAttachments : undefined,
   };
 
   try {

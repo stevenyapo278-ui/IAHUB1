@@ -1,14 +1,30 @@
 const prisma = require('../prismaClient');
 const { pollAllAccounts } = require('./emailPoller');
 const { analyzeEmail } = require('./mailAnalyzer');
-const { createTicketFromEmail } = require('./glpiTicketCreator');
+const { createTicketFromEmail, addGlpiFollowup } = require('./glpiTicketCreator');
 const { findExistingTicket } = require('./conversationMatcher');
 const { findSimilarOpenTicket, attachSiteToTicket, saveTicketEmbedding } = require('./similarIncidentDetector');
 const { analyzeIntent, applyIntentActions } = require('./intentAnalyzer');
-const { sendAcknowledgement, sendKnownIncidentNotification } = require('./emailSender');
+const { buildAcknowledgementHtml, buildKnownIncidentNotificationHtml, sendEmail } = require('./emailSender');
+const { processIncomingAttachments } = require('./emailAttachmentProcessor');
+const { stripSignature } = require('./signatureStripper');
 const { logEvent } = require('./ticketEvent');
+const { getSystemSettings } = require('./systemSettings');
 
-const MESSAGE_SELECT = 'id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,conversationId,internetMessageId,inReplyTo,references';
+// Selon le réglage "Auto-envoi des emails sans validation humaine" (Paramètres > Automatisation) :
+// envoie directement l'email, ou crée un AiEmailDraft en attente d'approbation comme aujourd'hui.
+async function dispatchOrQueueEmail({ ticketId, glpiTicketId, recipientEmail, ccRecipients, subject, html, draftType }) {
+  const settings = await getSystemSettings();
+  if (settings.autoSendAiEmails) {
+    await sendEmail({ ticketId, to: recipientEmail, cc: ccRecipients, subject, bodyHtml: html, saveAsMessage: true });
+    await logEvent(ticketId, 'EMAIL_SENT', 'AI', { to: recipientEmail, cc: ccRecipients, subject, autoSent: true });
+  } else {
+    await prisma.aiEmailDraft.create({
+      data: { ticketId, glpiTicketId, recipientEmail, ccRecipients, subject, proposedContent: html },
+    });
+    await logEvent(ticketId, 'AI_DRAFT_GENERATED', 'AI', { type: draftType });
+  }
+}
 
 async function processMessage(message, account) {
   const graphMessageId = message.id;
@@ -20,17 +36,31 @@ async function processMessage(message, account) {
   const receivedAt = message.receivedDateTime ? new Date(message.receivedDateTime) : new Date();
   const conversationId = message.conversationId || null;
   const internetMessageId = message.internetMessageId || null;
-  const inReplyTo = message.inReplyTo || null;
-  const references = message.references || null;
+  const headers = message.internetMessageHeaders || [];
+  const getHeader = (name) => headers.find((h) => h.name.toLowerCase() === name)?.value || null;
+  // In-Reply-To/References ne sont pas exposés comme propriétés directes par Graph sur l'endpoint delta,
+  // seulement via les en-têtes RFC822 bruts.
+  const inReplyToRaw = getHeader('in-reply-to');
+  const inReplyTo = inReplyToRaw ? inReplyToRaw.split(/\s+/)[0] : null;
+  const references = getHeader('references');
+  const toRecipients = (message.toRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean);
+  const ccRecipients = (message.ccRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean);
+  const hasAttachments = message.hasAttachments === true || !!message.simulatedAttachments;
 
   const existing = await prisma.incomingEmail.findUnique({ where: { graphMessageId } });
   if (existing) return existing;
+
+  // Corps nettoyé de la signature/disclaimer, calculé une seule fois ici et réutilisé par toutes
+  // les analyses IA en aval (intention, filtrage des images, résumé) pour éviter qu'elles soient
+  // biaisées par le texte de signature répété à chaque message du fil.
+  const cleanBody = await stripSignature(bodyPreview);
 
   const incoming = await prisma.incomingEmail.create({
     data: {
       graphMessageId, internetMessageId, conversationId, inReplyTo, references,
       emailAccountId: account.id, fromEmail, fromName, subject,
       bodyPreview, bodyHtml, receivedAt, status: 'PROCESSING',
+      ccRecipients, hasAttachments,
     },
   });
 
@@ -48,7 +78,8 @@ async function processMessage(message, account) {
           ticketId: match.ticketId,
           direction: 'INBOUND',
           sender: fromEmail,
-          recipients: [account.emailAddress],
+          recipients: toRecipients,
+          ccRecipients,
           subject,
           body: bodyPreview,
           bodyHtml,
@@ -60,16 +91,47 @@ async function processMessage(message, account) {
         },
       });
 
-      await logEvent(match.ticketId, 'EMAIL_RECEIVED', fromEmail, { subject, method: match.method });
-
-      // Analyser l'intention de la réponse
-      const intent = await analyzeIntent({
-        subject, body: bodyPreview,
-        ticketTitle: ticket?.title,
-        ticketSummary: ticket?.aiSummary,
+      await processIncomingAttachments({
+        account, graphMessageId, incomingEmailId: incoming.id,
+        ticketId: match.ticketId, glpiTicketId: ticket?.glpiTicketId,
+        simulatedAttachments: message.simulatedAttachments,
+        bodyText: cleanBody,
       });
 
-      await applyIntentActions(match.ticketId, intent, fromEmail);
+      // Répercute la réponse de l'utilisateur dans GLPI (pas seulement le mail initial à la création) :
+      // sans ça, les échanges ultérieurs n'apparaissent jamais dans l'interface GLPI.
+      if (ticket?.glpiTicketId) {
+        try {
+          await addGlpiFollowup(ticket.glpiTicketId, `Email de ${fromName || fromEmail} <${fromEmail}> :\n\n${cleanBody}`);
+        } catch (err) {
+          console.error('[emailPipeline] Échec ajout followup GLPI:', err.message);
+        }
+      }
+
+      await logEvent(match.ticketId, 'EMAIL_RECEIVED', fromEmail, { subject, method: match.method });
+
+      // Récupère les derniers échanges du fil pour donner du contexte réel à l'analyse d'intention
+      // (sans ça, un "ok merci" se juge sans savoir à quelle relance précise l'utilisateur répond).
+      const recentMessages = await prisma.ticketMessage.findMany({
+        where: { ticketId: match.ticketId },
+        orderBy: { timestamp: 'desc' },
+        take: 5,
+        select: { direction: true, body: true, timestamp: true },
+      });
+
+      // Analyser l'intention de la réponse
+      const intentResult = await analyzeIntent({
+        subject, body: cleanBody,
+        ticketTitle: ticket?.title,
+        ticketSummary: ticket?.aiSummary,
+        conversationHistory: recentMessages.reverse(),
+        fromEmail,
+      });
+
+      await applyIntentActions(match.ticketId, intentResult, fromEmail, {
+        fromEmail, fromName, emailAccountId: account.id,
+        originalBody: bodyPreview, originalSubject: subject,
+      });
 
       // Si réouverture, noter dans GLPI
       if (match.method === 'REOPEN') {
@@ -79,14 +141,14 @@ async function processMessage(message, account) {
 
       await prisma.incomingEmail.update({
         where: { id: incoming.id },
-        data: { status: 'DONE', erpTicketId: match.ticketId, isNewTicket: false, aiIntent: intent },
+        data: { status: 'DONE', erpTicketId: match.ticketId, isNewTicket: false, aiIntent: intentResult.intent },
       });
 
       return prisma.incomingEmail.findUnique({ where: { id: incoming.id } });
     }
 
     // Étape 2 : analyse IA pour nouveau ticket
-    const analysis = await analyzeEmail({ subject, body: bodyPreview, from: fromEmail, fromName });
+    const analysis = await analyzeEmail({ subject, body: cleanBody, from: fromEmail, fromName });
 
     if (analysis.isSpam) {
       await prisma.incomingEmail.update({
@@ -98,7 +160,7 @@ async function processMessage(message, account) {
 
     // Étape 2b : détecter un incident similaire déjà ouvert (même problème, autre site/magasin)
     const similarMatch = await findSimilarOpenTicket({
-      subject, body: bodyPreview, category: analysis.category,
+      subject, body: cleanBody, category: analysis.category,
     });
 
     if (similarMatch) {
@@ -108,7 +170,8 @@ async function processMessage(message, account) {
           ticketId: similarMatch.ticketId,
           direction: 'INBOUND',
           sender: fromEmail,
-          recipients: [account.emailAddress],
+          recipients: toRecipients,
+          ccRecipients,
           subject, body: bodyPreview, bodyHtml,
           outlookMessageId: graphMessageId,
           internetMessageId, inReplyTo, conversationId,
@@ -139,20 +202,39 @@ async function processMessage(message, account) {
         select: { glpiTicketId: true, impactedSites: true, isMajorIncident: true },
       });
 
-      // Envoyer notification "incident déjà connu" si Outlook configuré
-      try {
-        await sendKnownIncidentNotification({
-          ticketId: similarMatch.ticketId,
-          glpiTicketId: updatedTicket.glpiTicketId,
-          toEmail: fromEmail,
-          toName: fromName,
-          originalSubject: similarMatch.ticketTitle,
-          isMajor: updatedTicket.isMajorIncident,
-          impactedCount: updatedTicket.impactedSites.length,
-        });
-      } catch {
-        // Outlook non configuré — silencieux
+      await processIncomingAttachments({
+        account, graphMessageId, incomingEmailId: incoming.id,
+        ticketId: similarMatch.ticketId, glpiTicketId: updatedTicket.glpiTicketId,
+        simulatedAttachments: message.simulatedAttachments,
+        bodyText: cleanBody,
+      });
+
+      if (updatedTicket.glpiTicketId) {
+        try {
+          await addGlpiFollowup(updatedTicket.glpiTicketId, `Email de ${fromName || fromEmail} <${fromEmail}> (site impacté supplémentaire) :\n\n${cleanBody}`);
+        } catch (err) {
+          console.error('[emailPipeline] Échec ajout followup GLPI:', err.message);
+        }
       }
+
+      // Notification "incident déjà connu" — envoyée directement ou mise en attente d'approbation
+      // selon le réglage Paramètres > Automatisation > Auto-envoi des emails IA.
+      const knownIncidentHtml = buildKnownIncidentNotificationHtml({
+        toName: fromName,
+        glpiTicketId: updatedTicket.glpiTicketId,
+        originalSubject: similarMatch.ticketTitle,
+        isMajor: updatedTicket.isMajorIncident,
+        impactedCount: updatedTicket.impactedSites.length,
+      });
+      await dispatchOrQueueEmail({
+        ticketId: similarMatch.ticketId,
+        glpiTicketId: updatedTicket.glpiTicketId,
+        recipientEmail: fromEmail,
+        ccRecipients,
+        subject: `[Ticket #${updatedTicket.glpiTicketId}] ${similarMatch.ticketTitle}`,
+        html: knownIncidentHtml,
+        draftType: 'KNOWN_INCIDENT',
+      });
 
       await prisma.incomingEmail.update({
         where: { id: incoming.id },
@@ -173,7 +255,8 @@ async function processMessage(message, account) {
       return prisma.incomingEmail.findUnique({ where: { id: incoming.id } });
     }
 
-    // Étape 3 : créer ticket GLPI + ERP
+    // Étape 3 : créer ticket GLPI + ERP — on garde le corps brut complet (bodyPreview) comme
+    // contenu du ticket, pour ne jamais perdre d'information par rapport à l'email d'origine.
     const { glpiTicketId, erpTicketId } = await createTicketFromEmail({
       subject, body: bodyPreview, from: fromEmail, fromName, analysis, emailAccountId: account.id,
     });
@@ -193,7 +276,8 @@ async function processMessage(message, account) {
         ticketId: erpTicketId,
         direction: 'INBOUND',
         sender: fromEmail,
-        recipients: [account.emailAddress],
+        recipients: toRecipients,
+        ccRecipients,
         subject, body: bodyPreview, bodyHtml,
         outlookMessageId: graphMessageId,
         internetMessageId, inReplyTo, conversationId,
@@ -201,18 +285,31 @@ async function processMessage(message, account) {
       },
     });
 
+    await processIncomingAttachments({
+      account, graphMessageId, incomingEmailId: incoming.id,
+      ticketId: erpTicketId, glpiTicketId,
+      simulatedAttachments: message.simulatedAttachments,
+      bodyText: cleanBody,
+    });
+
     await logEvent(erpTicketId, 'CREATED', fromEmail, { glpiTicketId, source: 'EMAIL' });
     await logEvent(erpTicketId, 'AI_ANALYZED', 'AI', { analysis });
 
     // Sauvegarder l'embedding pour la détection future d'incidents similaires
-    await saveTicketEmbedding(erpTicketId, subject, bodyPreview);
+    await saveTicketEmbedding(erpTicketId, subject, cleanBody);
 
-    // Étape 6 : accusé de réception
-    try {
-      await sendAcknowledgement({ ticketId: erpTicketId, glpiTicketId, toEmail: fromEmail, toName: fromName, originalSubject: subject });
-    } catch (e) {
-      console.error('[emailPipeline] Accusé de réception échoué:', e.message);
-    }
+    // Étape 6 : accusé de réception — envoyé directement ou mis en attente d'approbation selon
+    // le réglage Paramètres > Automatisation > Auto-envoi des emails IA.
+    const acknowledgementHtml = buildAcknowledgementHtml({ toName: fromName, glpiTicketId, originalSubject: subject });
+    await dispatchOrQueueEmail({
+      ticketId: erpTicketId,
+      glpiTicketId,
+      recipientEmail: fromEmail,
+      ccRecipients,
+      subject: `[Ticket #${glpiTicketId}] ${subject}`,
+      html: acknowledgementHtml,
+      draftType: 'ACKNOWLEDGEMENT',
+    });
 
     await prisma.incomingEmail.update({
       where: { id: incoming.id },

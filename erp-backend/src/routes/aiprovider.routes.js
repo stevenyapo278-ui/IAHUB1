@@ -111,13 +111,16 @@ router.post('/:id/models', [body('name').notEmpty()], async (req, res) => {
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
   const providerId = Number(req.params.id);
-  const { name, label, isDefault, isActive } = req.body;
+  const { name, label, type, isDefault, isActive } = req.body;
+  const modelType = type === 'EMBEDDING' ? 'EMBEDDING' : 'CHAT';
 
   const existing = await prisma.aiModel.findUnique({ where: { providerId_name: { providerId, name } } });
   if (existing) return res.status(409).json({ error: 'Ce modèle existe déjà pour ce fournisseur' });
 
+  // "Par défaut" est unique par TYPE (chat / embedding), pas par fournisseur entier — un fournisseur
+  // peut avoir un modèle de chat par défaut ET un modèle d'embedding par défaut simultanément.
   if (isDefault) {
-    await prisma.aiModel.updateMany({ where: { providerId }, data: { isDefault: false } });
+    await prisma.aiModel.updateMany({ where: { providerId, type: modelType }, data: { isDefault: false } });
   }
 
   const model = await prisma.aiModel.create({
@@ -125,6 +128,7 @@ router.post('/:id/models', [body('name').notEmpty()], async (req, res) => {
       providerId,
       name,
       label: label || null,
+      type: modelType,
       isDefault: !!isDefault,
       isActive: isActive !== undefined ? isActive : true,
     },
@@ -141,7 +145,7 @@ router.patch('/models/:modelId', async (req, res) => {
   if (!model) return res.status(404).json({ error: 'Modèle introuvable' });
 
   if (isDefault) {
-    await prisma.aiModel.updateMany({ where: { providerId: model.providerId }, data: { isDefault: false } });
+    await prisma.aiModel.updateMany({ where: { providerId: model.providerId, type: model.type }, data: { isDefault: false } });
   }
 
   const data = {};

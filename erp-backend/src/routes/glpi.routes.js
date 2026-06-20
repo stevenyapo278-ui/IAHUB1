@@ -1,12 +1,13 @@
 const express = require('express');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/permissions');
 const { syncGlpiTickets } = require('../utils/glpiSync');
 
 const router = express.Router();
 router.use(authenticate);
 
 // Synchronise les tickets GLPI vers l'ERP (import/mise à jour par glpiTicketId)
-router.post('/sync', authorize('ADMIN', 'TECHNICIAN'), async (req, res) => {
+router.post('/sync', requirePermission('glpi.manage', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   try {
     const result = await syncGlpiTickets();
     if (!result) {

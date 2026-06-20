@@ -1,6 +1,7 @@
 const prisma = require('../prismaClient');
 const { sendReminder } = require('./emailSender');
 const { logEvent } = require('./ticketEvent');
+const { updateGlpiTicket } = require('./glpiTicketCreator');
 
 function daysSince(date) {
   return Math.floor((Date.now() - new Date(date).getTime()) / (1000 * 60 * 60 * 24));
@@ -29,6 +30,13 @@ async function runReminderScheduler() {
           data: { status: 'CLOSED', closedAt: new Date() },
         });
         await logEvent(ticket.id, 'CLOSED_AUTO', 'SYSTEM', { reason: 'no_response', daysSinceLastReply: since });
+        if (ticket.glpiTicketId) {
+          try {
+            await updateGlpiTicket(ticket.glpiTicketId, { status: 'CLOSED' });
+          } catch (err) {
+            console.error('[reminderScheduler] Échec synchro statut GLPI:', err.message);
+          }
+        }
         results.push({ ticketId: ticket.id, action: 'AUTO_CLOSED' });
         continue;
       }

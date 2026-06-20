@@ -19,6 +19,8 @@ const knowledgeRoutes = require('./routes/knowledge.routes');
 const outlookOAuthRoutes = require('./routes/outlookoauth.routes');
 const inboxRoutes = require('./routes/inbox.routes');
 const ticketIntelligenceRoutes = require('./routes/ticketintelligence.routes');
+const systemSettingsRoutes = require('./routes/systemsettings.routes');
+const promptTemplateRoutes = require('./routes/prompttemplate.routes');
 
 const app = express();
 
@@ -45,6 +47,8 @@ app.use('/api/knowledge', knowledgeRoutes);
 app.use('/api', outlookOAuthRoutes);
 app.use('/api/inbox', inboxRoutes);
 app.use('/api', ticketIntelligenceRoutes);
+app.use('/api/system-settings', systemSettingsRoutes);
+app.use('/api/prompt-templates', promptTemplateRoutes);
 
 app.use((req, res) => res.status(404).json({ error: 'Route introuvable' }));
 

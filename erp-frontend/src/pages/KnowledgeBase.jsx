@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api from '../api/client';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 const STATUS_LABELS = {
   PROCESSING: 'Traitement...',
@@ -24,6 +25,12 @@ export default function KnowledgeBase() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState(null);
   const [searching, setSearching] = useState(false);
+
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [replacingId, setReplacingId] = useState(null);
+  const replaceInputRef = useRef(null);
+  const replaceTargetRef = useRef(null);
 
   function load() {
     api
@@ -59,12 +66,45 @@ export default function KnowledgeBase() {
     }
   }
 
-  async function handleDelete(id) {
+  async function confirmDelete() {
+    if (!confirmDeleteId) return;
+    setDeleting(true);
     try {
-      await api.delete(`/knowledge/documents/${id}`);
+      await api.delete(`/knowledge/documents/${confirmDeleteId}`);
+      setConfirmDeleteId(null);
       load();
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la suppression');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  function askReplace(doc) {
+    replaceTargetRef.current = doc;
+    replaceInputRef.current?.click();
+  }
+
+  async function handleReplaceFileChosen(e) {
+    const file = e.target.files?.[0];
+    const doc = replaceTargetRef.current;
+    e.target.value = '';
+    if (!file || !doc) return;
+
+    setError('');
+    setReplacingId(doc.id);
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      await api.put(`/knowledge/documents/${doc.id}/replace`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur lors du remplacement');
+    } finally {
+      setReplacingId(null);
     }
   }
 
@@ -131,13 +171,25 @@ export default function KnowledgeBase() {
                       </span>
                     </td>
                     <td className="px-md py-3 text-right">
-                      <button
-                        onClick={() => handleDelete(doc.id)}
-                        title="Supprimer"
-                        className="text-on-surface-variant hover:text-on-surface"
-                      >
-                        <span className="material-symbols-outlined text-[18px]">delete</span>
-                      </button>
+                      <div className="flex items-center justify-end gap-sm">
+                        <button
+                          onClick={() => askReplace(doc)}
+                          disabled={replacingId === doc.id}
+                          title="Remplacer le fichier"
+                          className="text-on-surface-variant hover:text-on-surface disabled:opacity-50"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">
+                            {replacingId === doc.id ? 'hourglass_empty' : 'upload_file'}
+                          </span>
+                        </button>
+                        <button
+                          onClick={() => setConfirmDeleteId(doc.id)}
+                          title="Supprimer"
+                          className="text-on-surface-variant hover:text-on-surface"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">delete</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -223,6 +275,25 @@ export default function KnowledgeBase() {
           </form>
         </div>
       </div>
+
+      <input
+        ref={replaceInputRef}
+        type="file"
+        accept=".pdf,.docx,.md,.markdown,.txt"
+        onChange={handleReplaceFileChosen}
+        className="hidden"
+      />
+
+      <ConfirmDialog
+        open={!!confirmDeleteId}
+        title="Supprimer ce document"
+        message="Le document et tous ses fragments indexés seront supprimés définitivement de la base de connaissances. Cette action est irréversible."
+        confirmLabel="Supprimer"
+        danger
+        loading={deleting}
+        onConfirm={confirmDelete}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
     </div>
   );
 }

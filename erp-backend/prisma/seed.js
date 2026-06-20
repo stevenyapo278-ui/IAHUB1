@@ -1,6 +1,22 @@
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 const { GLPI_TECHNICIANS } = require('../src/utils/glpiMapping');
+const { PERMISSION_KEYS } = require('../src/config/permissions');
+
+// Liste exacte des permissions que le rôle TECHNICIAN possédait déjà avant l'introduction du
+// système de groupes (cf. fallbackRoles de chaque requirePermission() dans les routes) — ce groupe
+// par défaut doit reproduire fidèlement l'accès historique, ni plus (pas de prompts.manage ni
+// automation.manage, qui étaient ADMIN-only) ni moins (pas de perte au déploiement).
+const TECHNICIAN_DEFAULT_PERMISSIONS = [
+  'tickets.create',
+  'tickets.assign',
+  'tickets.approve',
+  'knowledge.manage',
+  'inbox.sync',
+  'dashboard.view',
+  'glpi.manage',
+  'emaildrafts.manage',
+];
 
 const prisma = new PrismaClient();
 
@@ -121,6 +137,35 @@ async function main() {
         create: { providerId: provider.id, name: modelName, isDefault: i === 0 },
       });
     }
+  }
+
+  // Groupe de droits par défaut pour les techniciens : créé une seule fois (jamais ré-écrasé après
+  // sa création, pour laisser l'admin retirer des permissions sans que le seed les remette à chaque
+  // démarrage), avec TOUTES les permissions — équivalent exact de ce que le rôle TECHNICIAN donnait
+  // déjà par défaut avant l'introduction du système de groupes de droits. Tout TECHNICIAN existant
+  // sans groupe est automatiquement ajouté ici, pour ne perdre aucun accès au déploiement.
+  let techniciansGroup = await prisma.permissionGroup.findUnique({ where: { name: 'Techniciens' } });
+  if (!techniciansGroup) {
+    techniciansGroup = await prisma.permissionGroup.create({
+      data: {
+        name: 'Techniciens',
+        description: 'Groupe par défaut couvrant toutes les permissions historiquement accordées au rôle Technicien.',
+        permissions: TECHNICIAN_DEFAULT_PERMISSIONS,
+      },
+    });
+    console.log('Groupe de droits "Techniciens" créé avec toutes les permissions.');
+  }
+
+  const techniciansWithoutGroup = await prisma.user.findMany({
+    where: { role: 'TECHNICIAN', permissionGroups: { none: {} } },
+    select: { id: true },
+  });
+  if (techniciansWithoutGroup.length > 0) {
+    await prisma.permissionGroup.update({
+      where: { id: techniciansGroup.id },
+      data: { members: { connect: techniciansWithoutGroup.map((u) => ({ id: u.id })) } },
+    });
+    console.log(`${techniciansWithoutGroup.length} technicien(s) ajouté(s) au groupe "Techniciens".`);
   }
 
   console.log('Seed terminé.');

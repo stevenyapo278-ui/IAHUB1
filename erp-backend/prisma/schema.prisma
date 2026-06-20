@@ -42,6 +42,14 @@ enum TicketEventType {
   ESCALATED
   REMINDER_SENT
   CLOSED_AUTO
+  SPLIT_NEW_ISSUE
+  CREATED_FROM_SPLIT
+  AI_LOW_CONFIDENCE_CLOSE_SKIPPED
+  AI_LOW_CONFIDENCE_REOPEN_SKIPPED
+  AI_AUTO_REPLY_IGNORED
+  AI_LIFETIME_EXCEEDED
+  AI_SPLIT_LIMIT_REACHED
+  NEEDS_HUMAN_REVIEW
 }
 
 enum TicketPriority {
@@ -167,7 +175,11 @@ model Ticket {
   reminderSentAt        DateTime?
   reminderCount         Int       @default(0)
   aiSummary             String?
-  contentEmbedding      Unsupported("vector(768)")?
+  contentEmbedding      Unsupported("vector(1024)")?
+
+  // Garde-fous sur l'analyse d'intention automatique des réponses email
+  splitCount            Int       @default(0) // nombre de tickets déjà créés par scission depuis ce ticket
+  firstOpenedAt         DateTime? // date du tout premier passage à OPEN, pour plafonner la durée de vie totale
 
   // Incident majeur — regroupement multi-sites
   isMajorIncident Boolean  @default(false)
@@ -203,14 +215,23 @@ model AiTicketSuggestion {
 }
 
 // Pièce jointe d'un ticket, importée depuis GLPI (Document_Item) lors de la synchronisation
+enum EmailAttachmentSource {
+  MANUAL_UPLOAD
+  INCOMING_EMAIL
+}
+
 model TicketAttachment {
-  id              Int      @id @default(autoincrement())
-  ticket          Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  id              Int                   @id @default(autoincrement())
+  ticket          Ticket                @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   ticketId        Int
-  glpiDocumentId  Int      @unique
+  glpiDocumentId  Int                   @unique
   filename        String
   mimeType        String?
-  createdAt       DateTime @default(now())
+  source          EmailAttachmentSource @default(MANUAL_UPLOAD)
+  incomingEmail   IncomingEmail?        @relation(fields: [incomingEmailId], references: [id], onDelete: SetNull)
+  incomingEmailId Int?
+  contentHash     String? // hash sha256 du contenu binaire, pour détecter les logos/signatures dupliqués entre messages d'un même ticket
+  createdAt       DateTime              @default(now())
 }
 
 model Followup {
@@ -234,6 +255,15 @@ model ApiConfig {
   updatedAt   DateTime @updatedAt
 }
 
+// Réglages globaux d'automatisation IA, modifiables depuis Paramètres > Automatisation.
+// Table singleton : une seule ligne, toujours id=1.
+model SystemSettings {
+  id                     Int      @id @default(1)
+  autoApproveGlpiSolutions Boolean @default(false) // approuve automatiquement la validation de solution GLPI dès qu'un ticket passe Résolu
+  autoSendAiEmails       Boolean  @default(false) // envoie directement les emails générés par l'IA sans passer par le circuit d'approbation humaine AiEmailDraft
+  updatedAt              DateTime @updatedAt
+}
+
 // Fournisseur d'IA (OpenAI, Anthropic, Google Gemini, NVIDIA, Mistral, etc.)
 model AiProvider {
   id          Int      @id @default(autoincrement())
@@ -249,12 +279,18 @@ model AiProvider {
 }
 
 // Modèle disponible chez un fournisseur (gpt-4o, claude-sonnet-4-6, gemini-1.5-pro, ...)
+enum AiModelType {
+  CHAT
+  EMBEDDING
+}
+
 model AiModel {
   id         Int        @id @default(autoincrement())
   provider   AiProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
   providerId Int
   name       String     // identifiant technique du modèle
   label      String?    // nom affiché
+  type       AiModelType @default(CHAT) // détermine si ce modèle peut être "par défaut" pour le chat (5 prompts IA) ou pour les embeddings (base de connaissances) — un fournisseur peut avoir un défaut distinct pour chaque type
   isDefault  Boolean    @default(false)
   isActive   Boolean    @default(true)
   createdAt  DateTime   @default(now())
@@ -353,6 +389,10 @@ model IncomingEmail {
   status              String        @default("PENDING")
   error               String?
 
+  ccRecipients        String[]      @default([])
+  hasAttachments      Boolean       @default(false)
+  attachments         TicketAttachment[]
+
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
 
@@ -378,6 +418,7 @@ model TicketMessage {
   inReplyTo         String?
   conversationId    String?
 
+  ccRecipients      String[]         @default([])
   timestamp         DateTime         @default(now())
   createdAt         DateTime         @default(now())
 
@@ -416,7 +457,9 @@ model AiEmailDraft {
   ticket          Ticket?        @relation(fields: [ticketId], references: [id], onDelete: SetNull)
   ticketId        Int?
 
+  glpiTicketId    Int?
   recipientEmail  String
+  ccRecipients    String[]       @default([])
   subject         String
   proposedContent String
 
@@ -459,7 +502,7 @@ model KnowledgeChunk {
   documentId  Int
   chunkIndex  Int
   content     String
-  embedding   Unsupported("vector(768)")?
+  embedding   Unsupported("vector(1024)")?
   createdAt   DateTime          @default(now())
 
   @@index([documentId])
@@ -493,6 +536,18 @@ model KnowledgeDraft {
 
   createdAt   DateTime             @default(now())
   updatedAt   DateTime             @updatedAt
+}
+
+// Prompt IA modifiable depuis Paramètres > Prompts IA. key = identifiant technique fixe (un par
+// usage : analyzeEmail, analyzeIntent, stripSignature, filterOutSignatureImages, generateKnowledgeDraft).
+// template contient des espaces réservés {{nomVariable}} substitués au moment de l'appel — si la ligne
+// n'existe pas encore en base, le code retombe sur un texte par défaut codé en dur (jamais de crash).
+model PromptTemplate {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  label     String
+  template  String
+  updatedAt DateTime @updatedAt
 }
 
 // Workflow n8n déclenchable depuis l'UI (ex: synchro GLPI, notification, automatisation)

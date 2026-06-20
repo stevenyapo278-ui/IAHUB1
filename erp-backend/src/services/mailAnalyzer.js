@@ -7,7 +7,7 @@ async function getActiveProvider() {
     where: { isActive: true },
     include: {
       keys: { where: { isActive: true }, orderBy: { isDefault: 'desc' } },
-      models: { where: { isActive: true, isDefault: true }, take: 1 },
+      models: { where: { isActive: true, isDefault: true, type: 'CHAT' }, take: 1 },
     },
     orderBy: { label: 'asc' },
   });
@@ -112,30 +112,13 @@ async function analyzeEmail({ subject, body, from, fromName }) {
   const provider = await getActiveProvider();
   if (!provider) throw new Error('Aucun provider IA configuré (Settings → Intelligence Artificielle)');
 
-  const prompt = `Tu es un agent ITSM expert. Analyse cet email de support informatique et retourne UNIQUEMENT un objet JSON valide (sans markdown, sans explication).
-
-Email reçu :
-De : ${fromName || ''} <${from}>
-Sujet : ${subject}
-Corps : ${body?.substring(0, 2000) || ''}
-
-Retourne ce JSON :
-{
-  "summary": "résumé du problème en 1-2 phrases",
-  "category": "Logiciel|Matériel|Réseau|Téléphonie|Système",
-  "priority": "P1|P2|P3|P4",
-  "team": "nom de l'équipe concernée",
-  "confidence": 0.0-1.0,
-  "suggestedTitle": "titre court pour le ticket (max 80 caractères)",
-  "isSpam": false,
-  "language": "fr|en|autre"
-}
-
-Règles de priorité :
-- P1 : service totalement indisponible, impact critique sur la production
-- P2 : dégradation majeure, plusieurs utilisateurs impactés
-- P3 : problème limité à un utilisateur, contournement possible
-- P4 : demande d'information, amélioration, question générale`;
+  const { getPrompt } = require('./promptTemplates');
+  const prompt = await getPrompt('analyzeEmail', {
+    fromName: fromName || '',
+    from,
+    subject,
+    body: body?.substring(0, 2000) || '',
+  });
 
   const raw = await callProvider(provider, prompt);
 
@@ -145,4 +128,4 @@ Règles de priorité :
   return JSON.parse(jsonMatch[0]);
 }
 
-module.exports = { analyzeEmail };
+module.exports = { analyzeEmail, getActiveProvider, callProvider };

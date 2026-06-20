@@ -1,7 +1,7 @@
 const prisma = require('../prismaClient');
 const { graphFetch } = require('../utils/graphClient');
 
-const MESSAGE_SELECT = 'id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,conversationId';
+const MESSAGE_SELECT = 'id,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,body,conversationId,hasAttachments,internetMessageId,internetMessageHeaders';
 
 // Récupère les nouveaux messages reçus depuis le dernier passage, via l'API delta de Microsoft Graph
 async function fetchNewMessages(account) {
@@ -55,4 +55,12 @@ async function pollAllAccounts() {
   return results;
 }
 
-module.exports = { fetchNewMessages, pollAllAccounts };
+// Télécharge les pièces jointes de type fichier d'un message Graph (images, PDF, Word, etc.).
+// isInline/size/contentId sont conservés pour permettre de distinguer plus tard un logo de signature
+// d'une vraie capture d'écran collée par l'utilisateur.
+async function fetchMessageAttachments(account, messageId) {
+  const res = await graphFetch(account, `/me/messages/${messageId}/attachments`);
+  return (res.value || []).filter((a) => a['@odata.type'] === '#microsoft.graph.fileAttachment');
+}
+
+module.exports = { fetchNewMessages, pollAllAccounts, fetchMessageAttachments, MESSAGE_SELECT };

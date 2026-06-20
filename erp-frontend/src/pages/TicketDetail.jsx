@@ -37,6 +37,29 @@ function initials(name) {
     .toUpperCase();
 }
 
+// Les pièces jointes exigent un token JWT (Authorization header), qu'une balise <img src> ne peut pas envoyer :
+// on les récupère via axios puis on les affiche via une URL blob.
+function AttachmentThumbnail({ ticketId, attachment }) {
+  const [blobUrl, setBlobUrl] = useState(null);
+
+  useEffect(() => {
+    let url;
+    api
+      .get(`/tickets/${ticketId}/attachments/${attachment.id}/file`, { responseType: 'blob' })
+      .then(({ data }) => {
+        url = URL.createObjectURL(data);
+        setBlobUrl(url);
+      })
+      .catch(() => {});
+    return () => { if (url) URL.revokeObjectURL(url); };
+  }, [ticketId, attachment.id]);
+
+  if (!blobUrl) {
+    return <div className="h-24 w-24 border border-outline-variant bg-surface-container-low animate-pulse" />;
+  }
+  return <img src={blobUrl} alt={attachment.filename} className="h-24 w-24 object-cover border border-outline-variant" />;
+}
+
 export default function TicketDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -57,6 +80,23 @@ export default function TicketDetail() {
   }
 
   useEffect(load, [id]);
+
+  // Rafraîchit le ticket en arrière-plan pour voir arriver les nouveaux suivis/pièces jointes sans recharger la page
+  useEffect(() => {
+    const intervalId = setInterval(load, 15000);
+    return () => clearInterval(intervalId);
+  }, [id]);
+
+  async function downloadAttachment(attachment) {
+    try {
+      const { data } = await api.get(`/tickets/${id}/attachments/${attachment.id}/file`, { responseType: 'blob' });
+      const url = URL.createObjectURL(data);
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch {
+      setError('Échec du téléchargement de la pièce jointe');
+    }
+  }
 
   useEffect(() => {
     if (!canManage) return;
@@ -194,23 +234,32 @@ export default function TicketDetail() {
                 <h4 className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-sm">Pièces jointes</h4>
                 <div className="flex flex-wrap gap-sm">
                   {ticket.attachments.map((a) => {
-                    const fileUrl = `${import.meta.env.VITE_API_URL || 'http://localhost:4000/api'}/tickets/${ticket.id}/attachments/${a.id}/file`;
                     const isImage = a.mimeType?.startsWith('image/');
+                    const fromEmail = a.source === 'INCOMING_EMAIL';
                     return isImage ? (
-                      <a key={a.id} href={fileUrl} target="_blank" rel="noreferrer" title={a.filename}>
-                        <img src={fileUrl} alt={a.filename} className="h-24 w-24 object-cover border border-outline-variant" />
-                      </a>
-                    ) : (
-                      <a
+                      <button
                         key={a.id}
-                        href={fileUrl}
-                        target="_blank"
-                        rel="noreferrer"
+                        type="button"
+                        onClick={() => downloadAttachment(a)}
+                        title={fromEmail ? `${a.filename} (reçu par email)` : a.filename}
+                        className="relative"
+                      >
+                        <AttachmentThumbnail ticketId={ticket.id} attachment={a} />
+                        {fromEmail && (
+                          <span className="material-symbols-outlined text-[14px] absolute top-1 right-1 bg-surface rounded-full p-0.5 text-on-surface-variant">mail</span>
+                        )}
+                      </button>
+                    ) : (
+                      <button
+                        key={a.id}
+                        type="button"
+                        onClick={() => downloadAttachment(a)}
+                        title={fromEmail ? 'Reçu par email' : undefined}
                         className="flex items-center gap-xs px-3 py-2 border border-outline-variant text-on-surface font-body-sm text-body-sm hover:bg-surface-container-high transition-colors"
                       >
-                        <span className="material-symbols-outlined text-[16px]">attach_file</span>
+                        <span className="material-symbols-outlined text-[16px]">{fromEmail ? 'mail' : 'attach_file'}</span>
                         {a.filename}
-                      </a>
+                      </button>
                     );
                   })}
                 </div>
@@ -225,25 +274,53 @@ export default function TicketDetail() {
             </h3>
 
             <div className="space-y-md">
-              {ticket.followups.length === 0 && (
-                <p className="font-body-sm text-body-sm text-on-surface-variant">Aucun commentaire pour le moment.</p>
-              )}
-              {ticket.followups.map((f) => (
-                <div key={f.id} className="p-md rounded-none border border-outline-variant bg-surface-container-low flex gap-md">
-                  <div className="w-9 h-9 rounded-full border border-outline-variant text-on-surface flex items-center justify-center font-label-md text-label-md font-bold shrink-0">
-                    {initials(f.author?.fullName)}
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="font-headline-sm text-headline-sm text-on-surface">{f.author?.fullName || 'Inconnu'}</div>
-                      <time className="font-mono-sm text-mono-sm text-on-surface-variant">
-                        {new Date(f.createdAt).toLocaleString('fr-FR')}
-                      </time>
+              {(() => {
+                const timeline = [
+                  ...ticket.followups.map((f) => ({ kind: 'followup', date: f.createdAt, data: f })),
+                  ...(ticket.messages || []).map((m) => ({ kind: 'email', date: m.timestamp, data: m })),
+                ].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+                if (timeline.length === 0) {
+                  return <p className="font-body-sm text-body-sm text-on-surface-variant">Aucun commentaire pour le moment.</p>;
+                }
+
+                return timeline.map((item) =>
+                  item.kind === 'followup' ? (
+                    <div key={`f-${item.data.id}`} className="p-md rounded-none border border-outline-variant bg-surface-container-low flex gap-md">
+                      <div className="w-9 h-9 rounded-full border border-outline-variant text-on-surface flex items-center justify-center font-label-md text-label-md font-bold shrink-0">
+                        {initials(item.data.author?.fullName)}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="font-headline-sm text-headline-sm text-on-surface">{item.data.author?.fullName || 'Inconnu'}</div>
+                          <time className="font-mono-sm text-mono-sm text-on-surface-variant">
+                            {new Date(item.data.createdAt).toLocaleString('fr-FR')}
+                          </time>
+                        </div>
+                        <div className="font-body-sm text-body-sm text-on-surface-variant whitespace-pre-wrap">{item.data.content}</div>
+                      </div>
                     </div>
-                    <div className="font-body-sm text-body-sm text-on-surface-variant whitespace-pre-wrap">{f.content}</div>
-                  </div>
-                </div>
-              ))}
+                  ) : (
+                    <div key={`m-${item.data.id}`} className="p-md rounded-none border border-outline-variant bg-surface-container-lowest flex gap-md">
+                      <div className="w-9 h-9 rounded-full border border-outline-variant text-on-surface-variant flex items-center justify-center shrink-0">
+                        <span className="material-symbols-outlined text-[18px]">mail</span>
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="font-headline-sm text-headline-sm text-on-surface">
+                            {item.data.direction === 'INBOUND' ? `Email de ${item.data.sender}` : `Email envoyé à ${item.data.recipients?.join(', ')}`}
+                          </div>
+                          <time className="font-mono-sm text-mono-sm text-on-surface-variant">
+                            {new Date(item.data.timestamp).toLocaleString('fr-FR')}
+                          </time>
+                        </div>
+                        <div className="text-xs text-outline mb-1">{item.data.subject}</div>
+                        <div className="font-body-sm text-body-sm text-on-surface-variant whitespace-pre-wrap">{item.data.body}</div>
+                      </div>
+                    </div>
+                  )
+                );
+              })()}
             </div>
 
             <form onSubmit={handleAddFollowup} className="mt-lg pt-md border-t border-outline-variant">

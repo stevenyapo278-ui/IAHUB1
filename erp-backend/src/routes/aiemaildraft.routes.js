@@ -1,7 +1,9 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/permissions');
+const { sendEmail } = require('../services/emailSender');
 
 const router = express.Router();
 
@@ -58,33 +60,32 @@ router.get('/', async (req, res) => {
 });
 
 // Approuver un brouillon : déclenche l'envoi via n8n
-router.post('/:id/approve', authorize('ADMIN', 'TECHNICIAN'), async (req, res) => {
+router.post('/:id/approve', requirePermission('emaildrafts.manage', ['ADMIN', 'TECHNICIAN']), [body('recipientEmail').optional().isEmail()], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
   const id = Number(req.params.id);
-  const { proposedContent, reviewNote } = req.body;
+  const { proposedContent, reviewNote, recipientEmail, ccRecipients } = req.body;
 
   const draft = await prisma.aiEmailDraft.findUnique({ where: { id } });
   if (!draft) return res.status(404).json({ error: 'Brouillon introuvable' });
   if (draft.status !== 'PENDING') return res.status(400).json({ error: 'Brouillon déjà traité' });
 
   const finalContent = proposedContent !== undefined ? proposedContent : draft.proposedContent;
+  const finalRecipient = recipientEmail !== undefined ? recipientEmail : draft.recipientEmail;
+  const finalCc = Array.isArray(ccRecipients) ? ccRecipients : draft.ccRecipients;
 
-  const sendWebhookUrl = process.env.N8N_SEND_EMAIL_WEBHOOK_URL;
-  if (sendWebhookUrl) {
-    try {
-      await fetch(sendWebhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          draftId: draft.id,
-          ticketId: draft.ticketId,
-          recipientEmail: draft.recipientEmail,
-          subject: draft.subject,
-          content: finalContent,
-        }),
-      });
-    } catch (err) {
-      return res.status(502).json({ error: 'Impossible de joindre le workflow n8n d\'envoi' });
-    }
+  try {
+    await sendEmail({
+      ticketId: draft.ticketId,
+      to: finalRecipient,
+      cc: finalCc,
+      subject: draft.subject,
+      bodyHtml: finalContent,
+      saveAsMessage: true,
+    });
+  } catch (err) {
+    return res.status(502).json({ error: `Envoi échoué : ${err.message}` });
   }
 
   const updated = await prisma.aiEmailDraft.update({
@@ -92,10 +93,12 @@ router.post('/:id/approve', authorize('ADMIN', 'TECHNICIAN'), async (req, res) =
     data: {
       status: 'APPROVED',
       proposedContent: finalContent,
+      recipientEmail: finalRecipient,
+      ccRecipients: finalCc,
       reviewedById: req.user.sub,
       reviewedAt: new Date(),
       reviewNote: reviewNote || null,
-      sentAt: sendWebhookUrl ? new Date() : null,
+      sentAt: new Date(),
     },
   });
 
@@ -103,7 +106,7 @@ router.post('/:id/approve', authorize('ADMIN', 'TECHNICIAN'), async (req, res) =
 });
 
 // Rejeter un brouillon
-router.post('/:id/reject', authorize('ADMIN', 'TECHNICIAN'), async (req, res) => {
+router.post('/:id/reject', requirePermission('emaildrafts.manage', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const id = Number(req.params.id);
   const { reviewNote } = req.body;
 
@@ -118,6 +121,29 @@ router.post('/:id/reject', authorize('ADMIN', 'TECHNICIAN'), async (req, res) =>
       reviewedById: req.user.sub,
       reviewedAt: new Date(),
       reviewNote: reviewNote || null,
+    },
+  });
+
+  return res.json(updated);
+});
+
+// Restaure un brouillon rejeté en PENDING, pour pouvoir l'éditer et l'approuver à nouveau
+// (ex: rejeté par erreur, ou contexte ayant changé depuis le rejet).
+router.post('/:id/restore', requirePermission('emaildrafts.manage', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+  const id = Number(req.params.id);
+
+  const draft = await prisma.aiEmailDraft.findUnique({ where: { id } });
+  if (!draft) return res.status(404).json({ error: 'Brouillon introuvable' });
+  if (draft.status !== 'REJECTED') return res.status(400).json({ error: 'Seul un brouillon rejeté peut être restauré' });
+
+  const updated = await prisma.aiEmailDraft.update({
+    where: { id },
+    data: {
+      status: 'PENDING',
+      reviewedById: null,
+      reviewedAt: null,
+      reviewNote: null,
+      sentAt: null,
     },
   });
 

@@ -91,11 +91,11 @@ export default function AiProvidersTab() {
 
   async function handleAddModel(providerId, e) {
     e.preventDefault();
-    const form = modelForms[providerId] || { name: '', label: '' };
+    const form = modelForms[providerId] || { name: '', label: '', type: 'CHAT' };
     if (!form.name) return;
     try {
-      await api.post(`/ai-providers/${providerId}/models`, form);
-      setModelForms({ ...modelForms, [providerId]: { name: '', label: '' } });
+      await api.post(`/ai-providers/${providerId}/models`, { ...form, type: form.type || 'CHAT' });
+      setModelForms({ ...modelForms, [providerId]: { name: '', label: '', type: 'CHAT' } });
       load();
     } catch (err) {
       setError(err.response?.data?.error || "Erreur lors de l'ajout du modèle");
@@ -287,6 +287,7 @@ export default function AiProvidersTab() {
                   <tr className="bg-surface-container-low border-b border-outline-variant">
                     <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm">Nom</th>
                     <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm">Libellé</th>
+                    <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm w-28">Type</th>
                     <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm w-24 text-center">Par défaut</th>
                     <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm w-24 text-center">Actif</th>
                     <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm w-16"></th>
@@ -297,11 +298,16 @@ export default function AiProvidersTab() {
                     <tr key={m.id} className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low transition-colors">
                       <td className="p-sm">{m.name}</td>
                       <td className="p-sm text-on-surface-variant">{m.label || '-'}</td>
-                      <td className="p-sm text-center">
+                      <td className="p-sm text-on-surface-variant">
+                        <span className="border border-outline-variant px-xs py-[2px] rounded-none text-[10px] uppercase">
+                          {m.type === 'EMBEDDING' ? 'Embedding' : 'Chat'}
+                        </span>
+                      </td>
+                      <td className="p-sm text-center" title="Par défaut pour ce type (chat ou embedding)">
                         <input
                           type="radio"
                           className="accent-on-surface w-4 h-4"
-                          name={`default-model-${provider.id}`}
+                          name={`default-model-${provider.id}-${m.type}`}
                           checked={m.isDefault}
                           onChange={() => handleSetDefaultModel(m.id, true)}
                         />
@@ -322,7 +328,7 @@ export default function AiProvidersTab() {
                     </tr>
                   ))}
                   {provider.models.length === 0 && (
-                    <tr><td colSpan={5} className="p-sm text-center text-on-surface-variant">Aucun modèle configuré</td></tr>
+                    <tr><td colSpan={6} className="p-sm text-center text-on-surface-variant">Aucun modèle configuré</td></tr>
                   )}
                 </tbody>
               </table>
@@ -340,6 +346,14 @@ export default function AiProvidersTab() {
                 value={modelForms[provider.id]?.label || ''}
                 onChange={(e) => setModelForms({ ...modelForms, [provider.id]: { ...modelForms[provider.id], label: e.target.value } })}
               />
+              <select
+                className={inputClass}
+                value={modelForms[provider.id]?.type || 'CHAT'}
+                onChange={(e) => setModelForms({ ...modelForms, [provider.id]: { ...modelForms[provider.id], type: e.target.value } })}
+              >
+                <option value="CHAT">Chat</option>
+                <option value="EMBEDDING">Embedding</option>
+              </select>
               <button type="submit" className="text-on-surface font-headline-sm text-body-sm hover:underline flex items-center gap-xs px-sm">
                 <span className="material-symbols-outlined text-sm">add</span> Ajouter le modèle
               </button>

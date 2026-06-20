@@ -1,7 +1,8 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/permissions');
 
 const router = express.Router();
 
@@ -39,7 +40,7 @@ router.post(
 router.use(authenticate);
 
 // Supprimer une suggestion (technicien l'a traitée/ignorée)
-router.delete('/:id', authorize('ADMIN', 'TECHNICIAN'), async (req, res) => {
+router.delete('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   try {
     await prisma.aiTicketSuggestion.delete({ where: { id: Number(req.params.id) } });
     return res.status(204).send();

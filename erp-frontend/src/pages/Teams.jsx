@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -12,6 +12,27 @@ export default function Teams() {
   const [syncMessage, setSyncMessage] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [openTeamId, setOpenTeamId] = useState(null);
+  const [openTeamDetail, setOpenTeamDetail] = useState(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+
+  async function toggleTeamDetail(teamId) {
+    if (openTeamId === teamId) {
+      setOpenTeamId(null);
+      setOpenTeamDetail(null);
+      return;
+    }
+    setOpenTeamId(teamId);
+    setLoadingDetail(true);
+    try {
+      const { data } = await api.get(`/teams/${teamId}`);
+      setOpenTeamDetail(data);
+    } catch (err) {
+      setError(err.response?.data?.error || "Erreur lors du chargement de l'équipe");
+    } finally {
+      setLoadingDetail(false);
+    }
+  }
 
   function load() {
     api
@@ -140,8 +161,13 @@ export default function Teams() {
               </thead>
               <tbody className="font-body-md text-body-md text-on-surface">
                 {teams.map((t) => (
-                  <tr key={t.id} className="border-b border-outline-variant hover:bg-surface-container-low transition-colors group">
-                    <td className="py-md px-md font-headline-sm text-headline-sm">{t.name}</td>
+                  <Fragment key={t.id}>
+                  <tr className="border-b border-outline-variant hover:bg-surface-container-low transition-colors group">
+                    <td className="py-md px-md font-headline-sm text-headline-sm">
+                      <button onClick={() => toggleTeamDetail(t.id)} className="hover:underline text-left">
+                        {t.name}
+                      </button>
+                    </td>
                     <td className="py-md px-md">
                       {t.category ? (
                         <span className="inline-flex items-center px-2 py-0.5 rounded-none text-xs font-semibold border border-outline-variant text-on-surface">
@@ -178,6 +204,37 @@ export default function Teams() {
                       </td>
                     )}
                   </tr>
+                  {openTeamId === t.id && (
+                    <tr className="border-b border-outline-variant bg-surface-container-low">
+                      <td colSpan={user?.role === 'ADMIN' ? 6 : 5} className="py-md px-md">
+                        {loadingDetail && <p className="text-on-surface-variant font-body-sm text-body-sm">Chargement...</p>}
+                        {!loadingDetail && openTeamDetail && (
+                          <div className="flex flex-col gap-2">
+                            <span className="font-label-md text-label-md text-on-surface-variant uppercase">
+                              Charge active par technicien (du moins au plus chargé)
+                            </span>
+                            {openTeamDetail.members.length === 0 && (
+                              <p className="text-on-surface-variant font-body-sm text-body-sm">Aucun membre dans cette équipe.</p>
+                            )}
+                            <div className="flex flex-col divide-y divide-outline-variant">
+                              {openTeamDetail.members.map((m) => (
+                                <div key={m.id} className="py-xs flex items-center justify-between">
+                                  <div>
+                                    <span className="font-body-md text-body-md text-on-surface">{m.fullName}</span>
+                                    <span className="text-xs text-on-surface-variant ml-2">{m.role}</span>
+                                  </div>
+                                  <span className="font-mono-sm text-mono-sm text-on-surface-variant">
+                                    {m.activeTicketCount} ticket(s) actif(s)
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
                 {teams.length === 0 && (
                   <tr>

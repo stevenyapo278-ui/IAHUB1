@@ -2,7 +2,7 @@ const FormData = require('form-data');
 const prisma = require('../prismaClient');
 const { categoryToGlpiId, GLPI_AI_REQUESTER_ID, GLPI_TECHNICIANS } = require('../utils/glpiMapping');
 
-const GLPI_STATUS_MAP = { NEW: 1, OPEN: 2, PENDING: 4, SOLVED: 5, CLOSED: 6 };
+const GLPI_STATUS_MAP = { NEW: 1, OPEN: 2, PENDING: 4, WAITING_FOR_USER: 4, SOLVED: 5, CLOSED: 6 };
 const ERP_PRIORITY_MAP = { P1: 6, P2: 4, P3: 3, P4: 2 };
 const GLPI_TYPE_MAP = { INCIDENT: 1, REQUEST: 2 };
 const GLPI_URGENCY_IMPACT_MAP = { VERY_LOW: 1, LOW: 2, MEDIUM: 3, HIGH: 4, VERY_HIGH: 5, MAJOR: 6 };
@@ -132,6 +132,32 @@ async function updateGlpiTicket(glpiTicketId, { status, priority, category, type
   });
 }
 
+// Ajoute un suivi (ITILFollowup) à un ticket GLPI existant — utilisé pour répercuter chaque
+// réponse email ultérieure de l'utilisateur, et pas seulement le mail d'origine à la création.
+// Ne fait rien si GLPI n'est pas configuré ou si le ticket n'a pas de glpiTicketId.
+async function addGlpiFollowup(glpiTicketId, content, { isPrivate = false } = {}) {
+  const config = await getGlpiConfig();
+  if (!config || !glpiTicketId || !content) return null;
+
+  return withGlpiSession(config, async (sessionToken) => {
+    const headers = {
+      'App-Token': config.appToken,
+      'Session-Token': sessionToken,
+      'Content-Type': 'application/json',
+    };
+    const res = await fetch(`${config.baseUrl}/Ticket/${glpiTicketId}/ITILFollowup`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        input: { items_id: glpiTicketId, itemtype: 'Ticket', content, is_private: isPrivate ? 1 : 0 },
+      }),
+    });
+    if (!res.ok) throw new Error(`GLPI ajout followup échoué (${res.status})`);
+    const { id } = await res.json();
+    return id;
+  });
+}
+
 // Supprime (purge) un ticket dans GLPI. Ne fait rien si GLPI n'est pas configuré
 // ou si le ticket n'a pas de glpiTicketId. Échec silencieux (best-effort).
 async function deleteGlpiTicket(glpiTicketId) {
@@ -177,6 +203,18 @@ async function createTicketFromEmail({ subject, body, from, fromName, analysis, 
       aiSummary: analysis.summary || null,
     },
   });
+
+  // Assigne automatiquement le technicien le moins chargé de l'équipe correspondant à la
+  // catégorie détectée par l'IA — best-effort, un ticket sans équipe connue reste non assigné.
+  try {
+    const { autoAssignTechnician } = require('./ticketAutoAssign');
+    const assigned = await autoAssignTechnician(erpTicket.id, analysis.category);
+    if (assigned && glpiTicketId) {
+      await updateGlpiTicket(glpiTicketId, { assignedToGlpiId: assigned.glpiId });
+    }
+  } catch (err) {
+    console.error('[glpiTicketCreator] Auto-assignation échouée:', err.message);
+  }
 
   return { glpiTicketId, erpTicketId: erpTicket.id };
 }
@@ -266,4 +304,4 @@ async function syncTeamsFromGlpi() {
   });
 }
 
-module.exports = { createTicketFromEmail, createGlpiTicket, updateGlpiTicket, deleteGlpiTicket, uploadGlpiAttachment, syncTeamsFromGlpi };
+module.exports = { createTicketFromEmail, createGlpiTicket, updateGlpiTicket, deleteGlpiTicket, uploadGlpiAttachment, syncTeamsFromGlpi, addGlpiFollowup };

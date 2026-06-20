@@ -1,10 +1,11 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/permissions');
 const { getGlpiConfig, glpiInitSession, glpiKillSession } = require('../utils/glpiSync');
 const { notifyMajorIncidentResolved } = require('../services/emailSender');
-const { createGlpiTicket, updateGlpiTicket, deleteGlpiTicket, uploadGlpiAttachment } = require('../services/glpiTicketCreator');
+const { createGlpiTicket, updateGlpiTicket, deleteGlpiTicket, uploadGlpiAttachment, addGlpiFollowup } = require('../services/glpiTicketCreator');
 const multer = require('multer');
 
 const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); // 20 Mo max
@@ -62,6 +63,7 @@ router.get('/:id', async (req, res) => {
       team: { select: { id: true, name: true } },
       approvedBy: { select: { id: true, fullName: true, email: true } },
       followups: { include: { author: { select: { id: true, fullName: true } } }, orderBy: { createdAt: 'asc' } },
+      messages: { orderBy: { timestamp: 'asc' } },
       attachments: true,
       aiSuggestions: { orderBy: { createdAt: 'desc' } },
     },
@@ -166,6 +168,21 @@ router.post(
       },
     });
 
+    // Si aucun technicien n'a été choisi explicitement à la création, assigne automatiquement
+    // le moins chargé de l'équipe correspondant à la catégorie — best-effort, ticket non assigné
+    // si la catégorie ne correspond à aucune équipe connue.
+    if (!ticket.assignedToId && ticket.category) {
+      try {
+        const { autoAssignTechnician } = require('../services/ticketAutoAssign');
+        const assigned = await autoAssignTechnician(ticket.id, ticket.category);
+        if (assigned && glpiTicketId) {
+          await updateGlpiTicket(glpiTicketId, { assignedToGlpiId: assigned.glpiId });
+        }
+      } catch (err) {
+        console.error('[ticket.routes] Auto-assignation échouée:', err.message);
+      }
+    }
+
     if (req.file && glpiTicketId) {
       try {
         const documentId = await uploadGlpiAttachment({
@@ -189,12 +206,13 @@ router.post(
       }
     }
 
-    return res.status(201).json(ticket);
+    const finalTicket = await prisma.ticket.findUnique({ where: { id: ticket.id } });
+    return res.status(201).json(finalTicket);
   }
 );
 
 // Update ticket (status, priority, assignment, etc.)
-router.patch('/:id', authorize('ADMIN', 'TECHNICIAN'), async (req, res) => {
+router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const id = Number(req.params.id);
   const { title, content, status, priority, category, teamId, assignedToId, type, urgency, impact, source, externalId } = req.body;
 
@@ -271,7 +289,7 @@ router.patch('/:id', authorize('ADMIN', 'TECHNICIAN'), async (req, res) => {
 });
 
 // Approve a ticket
-router.post('/:id/approve', authorize('ADMIN', 'TECHNICIAN'), async (req, res) => {
+router.post('/:id/approve', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const id = Number(req.params.id);
   try {
     const ticket = await prisma.ticket.update({
@@ -290,7 +308,7 @@ router.post('/:id/approve', authorize('ADMIN', 'TECHNICIAN'), async (req, res) =
 });
 
 // Reject a ticket
-router.post('/:id/reject', authorize('ADMIN', 'TECHNICIAN'), async (req, res) => {
+router.post('/:id/reject', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const id = Number(req.params.id);
   try {
     const ticket = await prisma.ticket.update({
@@ -328,13 +346,23 @@ router.post('/:id/followups', [body('content').notEmpty()], async (req, res) => 
       authorId: req.user.sub,
       content: req.body.content,
     },
+    include: { author: { select: { id: true, fullName: true } } },
   });
+
+  // Toute action humaine sur le ticket doit se répercuter dans GLPI, pas seulement les emails.
+  if (ticket.glpiTicketId) {
+    try {
+      await addGlpiFollowup(ticket.glpiTicketId, `${followup.author.fullName} :\n\n${req.body.content}`);
+    } catch (err) {
+      console.error('[ticket.routes] Échec ajout followup GLPI:', err.message);
+    }
+  }
 
   return res.status(201).json(followup);
 });
 
 // Delete ticket
-router.delete('/:id', authorize('ADMIN'), async (req, res) => {
+router.delete('/:id', requirePermission('tickets.delete', ['ADMIN']), async (req, res) => {
   const id = Number(req.params.id);
   try {
     const ticket = await prisma.ticket.findUnique({ where: { id }, select: { glpiTicketId: true } });
@@ -356,7 +384,7 @@ router.delete('/:id', authorize('ADMIN'), async (req, res) => {
 });
 
 // Delete tickets in bulk — body: { ids: [1, 2, 3] }
-router.post('/bulk-delete', authorize('ADMIN'), [body('ids').isArray({ min: 1 })], async (req, res) => {
+router.post('/bulk-delete', requirePermission('tickets.bulkDelete', ['ADMIN']), [body('ids').isArray({ min: 1 })], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 

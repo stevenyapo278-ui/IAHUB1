@@ -16,6 +16,9 @@ export default function PermissionGroups() {
   const [deleting, setDeleting] = useState(false);
   const [openGroupId, setOpenGroupId] = useState(null);
   const [memberSearch, setMemberSearch] = useState('');
+  const [detailForm, setDetailForm] = useState({ name: '', description: '' });
+  const [savingDetail, setSavingDetail] = useState(false);
+  const [savedMessage, setSavedMessage] = useState(false);
 
   function load() {
     Promise.all([api.get('/permission-groups'), api.get('/users')])
@@ -50,6 +53,28 @@ export default function PermissionGroups() {
       setError(err.response?.data?.error || 'Erreur lors de la création');
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  function openGroupDetail(group) {
+    setOpenGroupId(group.id);
+    setDetailForm({ name: group.name, description: group.description || '' });
+    setMemberSearch('');
+    setSavedMessage(false);
+  }
+
+  async function saveGroupDetail(group) {
+    setSavingDetail(true);
+    setError('');
+    setSavedMessage(false);
+    try {
+      await api.patch(`/permission-groups/${group.id}`, { name: detailForm.name, description: detailForm.description });
+      setSavedMessage(true);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur lors de la mise à jour');
+    } finally {
+      setSavingDetail(false);
     }
   }
 
@@ -187,7 +212,7 @@ export default function PermissionGroups() {
                 <tr key={g.id} className="hover:bg-surface-container-low transition-colors">
                   <td className="p-md font-headline-sm text-headline-sm">
                     <button
-                      onClick={() => { setOpenGroupId(openGroupId === g.id ? null : g.id); setMemberSearch(''); }}
+                      onClick={() => (openGroupId === g.id ? setOpenGroupId(null) : openGroupDetail(g))}
                       className="hover:underline text-left"
                     >
                       {g.name}
@@ -216,10 +241,39 @@ export default function PermissionGroups() {
       {openGroup && (
         <div className="bg-surface-container-lowest border border-outline-variant rounded-none p-lg flex flex-col gap-lg">
           <div className="flex justify-between items-center">
-            <span className="font-headline-sm text-headline-sm text-on-surface">{openGroup.name} — détail</span>
+            <span className="font-headline-sm text-headline-sm text-on-surface">Modifier le groupe</span>
             <button onClick={() => setOpenGroupId(null)} className="text-on-surface-variant hover:text-on-surface">
               <span className="material-symbols-outlined text-[18px]">close</span>
             </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-md">
+            <div className="flex flex-col gap-1">
+              <label className="font-label-md text-label-md text-on-surface-variant uppercase">Nom</label>
+              <input
+                value={detailForm.name}
+                onChange={(e) => { setDetailForm({ ...detailForm, name: e.target.value }); setSavedMessage(false); }}
+                className={inputClass}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="font-label-md text-label-md text-on-surface-variant uppercase">Description</label>
+              <input
+                value={detailForm.description}
+                onChange={(e) => { setDetailForm({ ...detailForm, description: e.target.value }); setSavedMessage(false); }}
+                className={inputClass}
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-md -mt-sm">
+            <button
+              onClick={() => saveGroupDetail(openGroup)}
+              disabled={savingDetail || (detailForm.name === openGroup.name && detailForm.description === (openGroup.description || ''))}
+              className="border border-outline-variant rounded-none py-2 px-4 font-label-md text-label-md text-on-surface bg-surface-container-high hover:bg-surface-container-highest transition-colors disabled:opacity-50"
+            >
+              {savingDetail ? 'Enregistrement...' : 'Enregistrer'}
+            </button>
+            {savedMessage && <span className="text-body-sm text-on-surface-variant">Enregistré.</span>}
           </div>
 
           <div className="flex flex-col gap-2">

@@ -1,15 +1,21 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { hasPermission } from '../utils/permissions';
 
+// permission: null = visible à tout utilisateur connecté, quel que soit son rôle/groupe (ex:
+// Dashboard, Tickets, Boîte mail — jamais masqué). Sinon, le lien n'apparaît que si
+// hasPermission(user, permission, fallbackRoles) est vrai — voir utils/permissions.js.
 const navItems = [
-  { to: '/', label: 'Dashboard', icon: 'dashboard', end: true },
-  { to: '/tickets', label: 'Tickets', icon: 'confirmation_number' },
-  { to: '/teams', label: 'Équipes', icon: 'groups' },
-  { to: '/inbox', label: 'Boîte mail', icon: 'inbox' },
-  { to: '/knowledge-base', label: 'Base de connaissances', icon: 'menu_book' },
-  { to: '/users', label: 'Utilisateurs', icon: 'person', adminOnly: true },
-  { to: '/permission-groups', label: 'Groupes de droits', icon: 'admin_panel_settings', adminOnly: true },
-  { to: '/settings', label: 'Paramètres', icon: 'settings', adminOnly: true },
+  { to: '/', label: 'Dashboard', icon: 'dashboard', end: true, permission: null },
+  { to: '/tickets', label: 'Tickets', icon: 'confirmation_number', permission: null },
+  { to: '/teams', label: 'Équipes', icon: 'groups', permission: null },
+  { to: '/inbox', label: 'Boîte mail', icon: 'inbox', permission: null },
+  { to: '/email-drafts', label: 'Réponses à valider', icon: 'mark_email_unread', permission: 'emaildrafts.manage', fallbackRoles: ['ADMIN', 'TECHNICIAN'] },
+  { to: '/knowledge-base', label: 'Base de connaissances', icon: 'menu_book', permission: null },
+  { to: '/users', label: 'Utilisateurs', icon: 'person', permission: 'users.manage', fallbackRoles: ['ADMIN'] },
+  { to: '/permission-groups', label: 'Groupes de droits', icon: 'admin_panel_settings', permission: 'users.manage', fallbackRoles: ['ADMIN'] },
+  { to: '/prompts', label: 'Prompts IA', icon: 'smart_toy', permission: 'prompts.manage', fallbackRoles: ['ADMIN'] },
+  { to: '/settings', label: 'Paramètres', icon: 'settings', permission: 'settings.manage', fallbackRoles: ['ADMIN'] },
 ];
 
 export default function MainLayout() {
@@ -48,7 +54,7 @@ export default function MainLayout() {
 
         <ul className="flex-1 overflow-y-auto py-sm px-sm space-y-xs">
           {navItems
-            .filter((item) => !item.adminOnly || user?.role === 'ADMIN')
+            .filter((item) => item.permission === null || hasPermission(user, item.permission, item.fallbackRoles))
             .map((item) => (
               <li key={item.to}>
                 <NavLink

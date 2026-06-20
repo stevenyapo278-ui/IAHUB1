@@ -94,7 +94,22 @@ export default function Tickets() {
       .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
   }
 
+  // Rafraîchit la liste en arrière-plan sans réinitialiser la sélection en cours
+  function refreshTicketsSilently() {
+    const params = {};
+    if (filters.status) params.status = filters.status;
+    if (filters.priority) params.priority = filters.priority;
+    if (filters.source) params.source = filters.source;
+
+    api.get('/tickets', { params }).then(({ data }) => setTickets(data)).catch(() => {});
+  }
+
   useEffect(loadTickets, [filters]);
+
+  useEffect(() => {
+    const intervalId = setInterval(refreshTicketsSilently, 15000);
+    return () => clearInterval(intervalId);
+  }, [filters]);
 
   function toggleSelect(id) {
     setSelectedIds((ids) => (ids.includes(id) ? ids.filter((i) => i !== id) : [...ids, id]));

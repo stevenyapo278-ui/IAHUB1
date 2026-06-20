@@ -53,8 +53,9 @@ async function graphFetch(account, path, options = {}) {
     throw new Error(`Erreur Graph API (${res.status}) sur ${path} : ${errBody}`);
   }
 
-  if (res.status === 204) return null;
-  return res.json();
+  const text = await res.text();
+  if (!text) return null;
+  return JSON.parse(text);
 }
 
 module.exports = { getAccessToken, graphFetch, GRAPH_SCOPES };
