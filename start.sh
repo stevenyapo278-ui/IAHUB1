@@ -4,7 +4,13 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 ENV_FILE=".env"
-[ -f "$ENV_FILE" ] || cp .env.example "$ENV_FILE"
+if [ ! -f "$ENV_FILE" ]; then
+  cp .env.example "$ENV_FILE"
+  # Génère un JWT_SECRET aléatoire pour éviter de garder la valeur placeholder de l'exemple.
+  JWT_SECRET_VALUE=$(openssl rand -hex 32 2>/dev/null || head -c 48 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 64)
+  sed -i.bak "s|^JWT_SECRET=.*|JWT_SECRET=${JWT_SECRET_VALUE}|" "$ENV_FILE" && rm -f "${ENV_FILE}.bak"
+  echo "Fichier .env créé avec un JWT_SECRET généré automatiquement."
+fi
 
 echo "=== IA Hub — Démarrage ==="
 echo ""

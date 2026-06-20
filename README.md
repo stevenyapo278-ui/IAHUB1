@@ -18,8 +18,21 @@ Plateforme de gestion des tickets IT avec analyse IA des emails, création autom
 ## Lancer avec Docker (recommandé)
 
 ### Prérequis
-- Docker + Docker Compose installés
-- Ports 3000 (frontend), 4000 (API), 5433 (PostgreSQL) disponibles — et 8080 si GLPI est créé via l'option 1 du script
+
+- **Windows / Mac** : installer [Docker Desktop](https://www.docker.com/products/docker-desktop/) (inclut Docker Compose). Sur Windows, WSL2 doit être activé (proposé automatiquement à l'installation).
+- **Linux** : installer Docker Engine + le plugin Compose v2 :
+  ```bash
+  curl -fsSL https://get.docker.com | sh
+  sudo usermod -aG docker $USER   # puis se déconnecter/reconnecter (ou redémarrer la session)
+  ```
+  Vérifier ensuite que `docker compose version` répond (sans tiret — c'est le plugin intégré, pas l'ancien `docker-compose`).
+- Aucun autre outil requis : pas besoin de Node.js, npm, ni PostgreSQL sur la machine — tout tourne dans des conteneurs.
+- Ports disponibles : **3000** (frontend), **4000** (API), **5433** (PostgreSQL) — et **8080** uniquement si un GLPI est créé via l'option 1 du script.
+
+Si `./start.sh` renvoie `Permission denied`, rendre le script exécutable :
+```bash
+chmod +x start.sh
+```
 
 ### 1. Cloner le repo
 
