@@ -286,6 +286,17 @@ model SystemSettings {
   draftReminderEnabled      Boolean @default(true)
   draftReminderDelayMinutes Int     @default(30) // délai après lequel une relance est envoyée si le brouillon est toujours PENDING
 
+  // Texte de l'accusé de réception automatique (Paramètres > Automatisation > Emails).
+  // Placeholders disponibles : {ticketId}, {subject}, {toName}. Laisser vide = texte par défaut codé en dur.
+  acknowledgementMessage String? @db.Text
+
+  // Signature HTML insérée en bas de tous les emails automatiques (accusé de réception, relance,
+  // notification d'incident connu), à la place du "Cordialement, Support IT" codé en dur. Laisser vide = défaut.
+  emailSignature String? @db.Text
+  // URL absolue du logo uploadé (Paramètres > Automatisation), insérée automatiquement dans emailSignature.
+  signatureLogoUrl    String? @db.Text
+  signatureLogoHeight Int     @default(60) // hauteur d'affichage du logo dans l'email, en pixels
+
   updatedAt              DateTime @updatedAt
 }
 

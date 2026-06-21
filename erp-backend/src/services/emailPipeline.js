@@ -5,7 +5,7 @@ const { createTicketFromEmail, addGlpiFollowup } = require('./glpiTicketCreator'
 const { findExistingTicket } = require('./conversationMatcher');
 const { findSimilarOpenTicket, attachSiteToTicket, saveTicketEmbedding } = require('./similarIncidentDetector');
 const { analyzeIntent, applyIntentActions } = require('./intentAnalyzer');
-const { buildAcknowledgementHtml, buildKnownIncidentNotificationHtml, sendEmail } = require('./emailSender');
+const { buildAcknowledgementHtml, buildKnownIncidentNotificationHtml, sendEmail, getEmailSignature } = require('./emailSender');
 const { processIncomingAttachments } = require('./emailAttachmentProcessor');
 const { stripSignature } = require('./signatureStripper');
 const { logEvent } = require('./ticketEvent');
@@ -46,7 +46,10 @@ async function processMessage(message, account) {
   const references = getHeader('references');
   const toRecipients = (message.toRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean);
   const ccRecipients = (message.ccRecipients || []).map((r) => r.emailAddress?.address).filter(Boolean);
-  const hasAttachments = message.hasAttachments === true || !!message.simulatedAttachments;
+  // Graph signale parfois hasAttachments=false alors qu'une image collée inline (cid:...) est bien
+  // présente dans le corps HTML — cas vu en pratique sur de longs fils de réponse. On considère donc
+  // aussi la présence d'une référence cid: dans bodyHtml comme preuve d'une pièce jointe à récupérer.
+  const hasAttachments = message.hasAttachments === true || !!message.simulatedAttachments || /cid:/i.test(bodyHtml || '');
 
   const existing = await prisma.incomingEmail.findUnique({ where: { graphMessageId } });
   if (existing) return existing;
@@ -232,6 +235,7 @@ async function processMessage(message, account) {
         originalSubject: similarMatch.ticketTitle,
         isMajor: updatedTicket.isMajorIncident,
         impactedCount: updatedTicket.impactedSites.length,
+        signature: await getEmailSignature(),
       });
       await dispatchOrQueueEmail({
         ticketId: similarMatch.ticketId,
@@ -307,7 +311,14 @@ async function processMessage(message, account) {
 
     // Étape 6 : accusé de réception — envoyé directement ou mis en attente d'approbation selon
     // le réglage Paramètres > Automatisation > Auto-envoi des emails IA.
-    const acknowledgementHtml = buildAcknowledgementHtml({ toName: fromName, glpiTicketId, originalSubject: subject });
+    const pipelineSettings = await getSystemSettings();
+    const acknowledgementHtml = buildAcknowledgementHtml({
+      toName: fromName,
+      glpiTicketId,
+      originalSubject: subject,
+      customMessage: pipelineSettings.acknowledgementMessage,
+      signature: await getEmailSignature(),
+    });
     await dispatchOrQueueEmail({
       ticketId: erpTicketId,
       glpiTicketId,

@@ -30,6 +30,17 @@ export default function ApprovalPage() {
       .finally(() => setLoading(false));
   }, [token]);
 
+  // L'aperçu navigateur ne peut pas résoudre cid:logo-signature (réservé aux emails réellement
+  // envoyés, où le logo est joint en pièce jointe inline) — on l'échange pour l'URL réelle juste
+  // pour l'affichage, puis on revient à cid: avant sauvegarde pour ne pas casser l'envoi.
+  function toDisplayHtml(html) {
+    return draft?.signatureLogoUrl ? html.replaceAll('cid:logo-signature', draft.signatureLogoUrl) : html;
+  }
+
+  function fromDisplayHtml(html) {
+    return draft?.signatureLogoUrl ? html.split(draft.signatureLogoUrl).join('cid:logo-signature') : html;
+  }
+
   async function handleApprove() {
     setSubmitting(true);
     setError('');
@@ -92,10 +103,10 @@ export default function ApprovalPage() {
               <span className="font-label-md text-label-md text-on-surface-variant uppercase">Contenu (modifiable avant envoi)</span>
               <div
                 className="bg-surface border border-outline-variant rounded-none p-md text-body-sm text-on-surface min-h-[260px] max-h-[420px] overflow-y-auto focus:outline-none focus:border-on-surface"
-                dangerouslySetInnerHTML={{ __html: editedContent }}
+                dangerouslySetInnerHTML={{ __html: toDisplayHtml(editedContent) }}
                 contentEditable
                 suppressContentEditableWarning
-                onBlur={(e) => setEditedContent(e.currentTarget.innerHTML)}
+                onBlur={(e) => setEditedContent(fromDisplayHtml(e.currentTarget.innerHTML))}
               />
             </div>
 

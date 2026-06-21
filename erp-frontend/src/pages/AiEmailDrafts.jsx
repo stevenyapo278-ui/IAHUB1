@@ -17,6 +17,22 @@ export default function AiEmailDrafts() {
   const [confirmAction, setConfirmAction] = useState(null); // { type: 'approve'|'reject', id }
   const [reviewNote, setReviewNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [signatureLogoUrl, setSignatureLogoUrl] = useState(null);
+
+  useEffect(() => {
+    api.get('/system-settings').then(({ data }) => setSignatureLogoUrl(data.signatureLogoUrl || null)).catch(() => {});
+  }, []);
+
+  // L'aperçu navigateur ne peut pas résoudre cid:logo-signature (réservé aux emails réellement
+  // envoyés, où le logo est joint en pièce jointe inline) — on l'échange pour l'URL réelle juste
+  // pour l'affichage, puis on revient à cid: avant sauvegarde pour ne pas casser l'envoi.
+  function toDisplayHtml(html) {
+    return signatureLogoUrl ? html.replaceAll('cid:logo-signature', signatureLogoUrl) : html;
+  }
+
+  function fromDisplayHtml(html) {
+    return signatureLogoUrl ? html.split(signatureLogoUrl).join('cid:logo-signature') : html;
+  }
 
   function addCc() {
     const value = ccInput.trim();
@@ -204,10 +220,10 @@ export default function AiEmailDrafts() {
                 <div
                   key={selected.id}
                   className="bg-surface border border-outline-variant rounded-none p-md text-body-sm text-on-surface min-h-[260px] max-h-[420px] overflow-y-auto focus:outline-none focus:border-on-surface"
-                  dangerouslySetInnerHTML={{ __html: editedContent }}
+                  dangerouslySetInnerHTML={{ __html: toDisplayHtml(editedContent) }}
                   contentEditable={selected.status === 'PENDING'}
                   suppressContentEditableWarning
-                  onBlur={(e) => setEditedContent(e.currentTarget.innerHTML)}
+                  onBlur={(e) => setEditedContent(fromDisplayHtml(e.currentTarget.innerHTML))}
                 />
               </div>
 

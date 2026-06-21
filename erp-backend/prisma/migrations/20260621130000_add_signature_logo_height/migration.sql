@@ -1,0 +1,1 @@
+ALTER TABLE "SystemSettings" ADD COLUMN IF NOT EXISTS "signatureLogoHeight" INTEGER NOT NULL DEFAULT 60;

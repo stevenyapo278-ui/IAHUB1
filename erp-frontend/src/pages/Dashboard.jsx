@@ -113,6 +113,7 @@ export default function Dashboard() {
   const [error, setError] = useState('');
   const autoSendAiEmailsRef = useRef(false);
   const draftReminderDelayMinutesRef = useRef(30);
+  const signatureLogoUrlRef = useRef(null);
   // Brouillons déjà signalés "en retard" lors du cycle précédent — sert à ne ré-annoncer
   // que les brouillons qui viennent juste de dépasser le délai, pas à chaque rafraîchissement.
   const overdueAnnouncedRef = useRef(new Set());
@@ -178,6 +179,7 @@ export default function Dashboard() {
     api.get('/system-settings').then(({ data }) => {
       autoSendAiEmailsRef.current = !!data.autoSendAiEmails;
       draftReminderDelayMinutesRef.current = data.draftReminderDelayMinutes || 30;
+      signatureLogoUrlRef.current = data.signatureLogoUrl || null;
     }).catch(() => {});
     loadPendingAiDrafts();
     loadNeedsReview();
@@ -194,8 +196,21 @@ export default function Dashboard() {
   const [editedCc, setEditedCc] = useState({});
   const [ccInput, setCcInput] = useState({});
 
+  // L'aperçu navigateur ne peut pas résoudre cid:logo-signature (réservé aux emails réellement
+  // envoyés, où le logo est joint en pièce jointe inline) — on l'échange pour l'URL réelle juste
+  // pour l'affichage, puis on revient à cid: avant sauvegarde pour ne pas casser l'envoi.
+  function toDisplayHtml(html) {
+    if (!signatureLogoUrlRef.current) return html;
+    return html.replaceAll('cid:logo-signature', signatureLogoUrlRef.current);
+  }
+
+  function fromDisplayHtml(html) {
+    if (!signatureLogoUrlRef.current) return html;
+    return html.split(signatureLogoUrlRef.current).join('cid:logo-signature');
+  }
+
   function setDraftContent(id, content) {
-    setEditedDrafts((prev) => ({ ...prev, [id]: content }));
+    setEditedDrafts((prev) => ({ ...prev, [id]: fromDisplayHtml(content) }));
   }
 
   function getCcList(draft) {
@@ -450,7 +465,7 @@ export default function Dashboard() {
                 </div>
 
                 <div className="border border-outline-variant rounded-none p-sm bg-surface-container-lowest text-on-surface font-body-sm text-body-sm max-h-40 overflow-y-auto"
-                  dangerouslySetInnerHTML={{ __html: editedDrafts[d.id] !== undefined ? editedDrafts[d.id] : d.proposedContent }}
+                  dangerouslySetInnerHTML={{ __html: toDisplayHtml(editedDrafts[d.id] !== undefined ? editedDrafts[d.id] : d.proposedContent) }}
                   contentEditable
                   suppressContentEditableWarning
                   onBlur={(e) => setDraftContent(d.id, e.currentTarget.innerHTML)}

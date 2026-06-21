@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { sendEmail } = require('../services/emailSender');
+const { getSystemSettings } = require('../services/systemSettings');
 
 const router = express.Router();
 
@@ -26,6 +27,10 @@ router.get('/:token', async (req, res) => {
   if (error) return res.status(410).json({ error });
 
   const { draft } = approvalToken;
+  // signatureLogoUrl est renvoyée uniquement pour permettre à cette page publique d'afficher
+  // l'aperçu du logo (cid:logo-signature, résolu seulement dans l'email réellement envoyé, jamais
+  // dans un navigateur) — aucune donnée sensible, juste l'URL publique du fichier image.
+  const settings = await getSystemSettings();
   return res.json({
     id: draft.id,
     ticket: draft.ticket,
@@ -34,6 +39,7 @@ router.get('/:token', async (req, res) => {
     subject: draft.subject,
     proposedContent: draft.proposedContent,
     createdAt: draft.createdAt,
+    signatureLogoUrl: settings.signatureLogoUrl || null,
   });
 });
 

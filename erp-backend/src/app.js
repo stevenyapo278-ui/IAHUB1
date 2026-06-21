@@ -28,6 +28,9 @@ const app = express();
 app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
 app.use(express.json());
 
+// Fichiers persistants servis statiquement (ex: logo de signature email, voir systemsettings.routes.js)
+app.use('/uploads', express.static('uploads'));
+
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 app.use('/api/auth', authRoutes);

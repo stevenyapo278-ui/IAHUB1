@@ -38,6 +38,7 @@ services:
       CORS_ORIGIN: "*"
       MICROSOFT_REDIRECT_URI: ${MICROSOFT_REDIRECT_URI:-http://localhost:4000/api/oauth/outlook/callback}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      BACKEND_URL: ${BACKEND_URL:-http://localhost:4000}
       GLPI_URL: ${GLPI_URL:-http://glpi/apirest.php}
       GLPI_APP_TOKEN: ${GLPI_APP_TOKEN:-}
       GLPI_USER_TOKEN: ${GLPI_USER_TOKEN:-}
@@ -45,6 +46,7 @@ services:
       - "4000:4000"
     volumes:
       - ./erp-backend/src:/app/src  # hot reload en dev
+      - backend_uploads:/app/uploads  # fichiers persistants (ex: logo de signature email)
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -64,3 +66,4 @@ services:
 
 volumes:
   postgres_data:
+  backend_uploads:

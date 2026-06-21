@@ -41,6 +41,29 @@ function SettingRow({ title, description, checked, onChange, disabled }) {
   );
 }
 
+const DEFAULT_ACK_MESSAGE = 'Nous avons bien reçu votre demande de support et un ticket a été créé automatiquement.';
+const DEFAULT_SIGNATURE = '<p>Cordialement,<br>Support IT</p>';
+const ACK_PREVIEW = { toName: 'Jean Dupont', ticketId: 42, subject: 'Problème imprimante 3e étage' };
+
+function buildAckPreviewHtml(customMessage, signature, logoUrl, logoHeight) {
+  const intro = (customMessage || DEFAULT_ACK_MESSAGE)
+    .replaceAll('{ticketId}', ACK_PREVIEW.ticketId)
+    .replaceAll('{subject}', ACK_PREVIEW.subject)
+    .replaceAll('{toName}', ACK_PREVIEW.toName);
+  const logoHtml = logoUrl ? `<p style="margin-top:8px"><img src="${logoUrl}" alt="Logo" style="height:${logoHeight || 60}px"></p>` : '';
+  return `
+<p>Bonjour ${ACK_PREVIEW.toName},</p>
+<p>${intro}</p>
+<table style="border-collapse:collapse;margin:16px 0">
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Numéro de ticket</td><td><strong>#${ACK_PREVIEW.ticketId}</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Sujet</td><td>${ACK_PREVIEW.subject}</td></tr>
+</table>
+<p>Notre équipe va analyser votre demande et vous contactera dans les meilleurs délais.</p>
+<p>Vous pouvez répondre directement à cet email pour ajouter des informations à votre ticket.</p>
+<div style="margin-top:24px">${signature || DEFAULT_SIGNATURE}${logoHtml}</div>
+`.trim();
+}
+
 function IntervalRow({ title, description, value, onChange, disabled, max, unit }) {
   return (
     <div className="flex items-center justify-between gap-lg p-lg border border-outline-variant bg-surface-container-lowest">
@@ -70,6 +93,9 @@ export default function AutomationTab() {
   const [saving, setSaving] = useState(false);
   const [voiceAlerts, setVoiceAlerts] = useState(isVoiceAlertEnabled());
   const [voiceLang, setVoiceLang] = useState(getVoiceAlertLang());
+  const [ackMessageDraft, setAckMessageDraft] = useState('');
+  const [signatureDraft, setSignatureDraft] = useState('');
+  const [uploadingLogo, setUploadingLogo] = useState(false);
 
   function toggleVoiceAlerts(value) {
     setVoiceAlertEnabled(value);
@@ -82,7 +108,11 @@ export default function AutomationTab() {
   }
 
   function load() {
-    api.get('/system-settings').then(({ data }) => setSettings(data)).catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
+    api.get('/system-settings').then(({ data }) => {
+      setSettings(data);
+      setAckMessageDraft(data.acknowledgementMessage || '');
+      setSignatureDraft(data.emailSignature || '');
+    }).catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
   }
 
   useEffect(load, []);
@@ -98,6 +128,30 @@ export default function AutomationTab() {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleLogoUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingLogo(true);
+    setError('');
+    try {
+      const formData = new FormData();
+      formData.append('logo', file);
+      const { data } = await api.post('/system-settings/signature-logo', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setSettings(data);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur lors de l\'upload du logo');
+    } finally {
+      setUploadingLogo(false);
+      e.target.value = '';
+    }
+  }
+
+  async function removeLogo() {
+    await updateSetting('signatureLogoUrl', null);
   }
 
   if (!settings) {
@@ -127,6 +181,126 @@ export default function AutomationTab() {
         onChange={(v) => updateSetting('autoApproveGlpiSolutions', v)}
         disabled={saving}
       />
+
+      <div className="mt-md">
+        <h3 className="font-headline-sm text-headline-sm text-on-surface mb-1">Texte de l'accusé de réception et signature</h3>
+        <p className="font-body-sm text-body-sm text-on-surface-variant mb-md">
+          Message et signature envoyés automatiquement au demandeur quand un nouveau ticket est créé par email (la même
+          signature est aussi utilisée pour les relances et notifications d'incident). Placeholders disponibles dans le
+          message : <code>{'{ticketId}'}</code>, <code>{'{subject}'}</code>, <code>{'{toName}'}</code>. Laisser vide pour
+          utiliser le texte par défaut.
+        </p>
+        <div className="grid grid-cols-2 gap-md">
+          <div className="flex flex-col gap-md">
+            <div className="flex flex-col gap-sm p-lg border border-outline-variant bg-surface-container-lowest">
+              <span className="font-label-sm text-label-sm text-on-surface-variant uppercase">Message d'accueil</span>
+              <textarea
+                value={ackMessageDraft}
+                onChange={(e) => setAckMessageDraft(e.target.value)}
+                disabled={saving}
+                rows={4}
+                maxLength={2000}
+                placeholder={DEFAULT_ACK_MESSAGE}
+                className="border border-outline-variant rounded-none px-3 py-2 text-body-sm text-on-surface bg-surface disabled:opacity-50 resize-none flex-1"
+              />
+            </div>
+            <div className="flex flex-col gap-sm p-lg border border-outline-variant bg-surface-container-lowest">
+              <span className="font-label-sm text-label-sm text-on-surface-variant uppercase">
+                Signature (HTML — colle ici ta signature Outlook)
+              </span>
+              <textarea
+                value={signatureDraft}
+                onChange={(e) => setSignatureDraft(e.target.value)}
+                disabled={saving}
+                rows={4}
+                maxLength={2000}
+                placeholder={DEFAULT_SIGNATURE}
+                className="border border-outline-variant rounded-none px-3 py-2 text-body-sm text-on-surface bg-surface disabled:opacity-50 resize-none flex-1 font-mono"
+              />
+            </div>
+            <div className="flex flex-col gap-sm p-lg border border-outline-variant bg-surface-container-lowest">
+              <span className="font-label-sm text-label-sm text-on-surface-variant uppercase">Logo de signature</span>
+              {settings.signatureLogoUrl ? (
+                <div className="flex flex-col gap-sm">
+                  <div className="flex items-center gap-md">
+                    <img
+                      src={settings.signatureLogoUrl}
+                      alt="Logo actuel"
+                      style={{ height: `${settings.signatureLogoHeight || 60}px` }}
+                      className="border border-outline-variant"
+                    />
+                    <button
+                      type="button"
+                      onClick={removeLogo}
+                      disabled={saving || uploadingLogo}
+                      className="px-3 py-2 border border-outline-variant text-on-surface-variant hover:bg-surface-container-high transition-colors disabled:opacity-50"
+                    >
+                      Retirer le logo
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-sm">
+                    <span className="font-body-sm text-body-sm text-on-surface-variant shrink-0">Taille</span>
+                    <input
+                      type="range"
+                      min={16}
+                      max={200}
+                      value={settings.signatureLogoHeight || 60}
+                      onChange={(e) => updateSetting('signatureLogoHeight', Number(e.target.value))}
+                      disabled={saving}
+                      className="flex-1"
+                    />
+                    <span className="font-body-sm text-body-sm text-on-surface-variant shrink-0 w-12 text-right">
+                      {settings.signatureLogoHeight || 60}px
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/gif,image/svg+xml,image/webp"
+                  onChange={handleLogoUpload}
+                  disabled={uploadingLogo}
+                  className="font-body-sm text-body-sm text-on-surface-variant disabled:opacity-50"
+                />
+              )}
+              {uploadingLogo && <span className="font-body-sm text-body-sm text-on-surface-variant">Envoi en cours...</span>}
+            </div>
+          </div>
+          <div className="flex flex-col gap-sm p-lg border border-outline-variant bg-surface">
+            <span className="font-label-sm text-label-sm text-on-surface-variant uppercase">Aperçu de l'email envoyé</span>
+            <div
+              className="text-body-sm text-on-surface flex-1 overflow-auto"
+              dangerouslySetInnerHTML={{ __html: buildAckPreviewHtml(ackMessageDraft, signatureDraft, settings.signatureLogoUrl, settings.signatureLogoHeight) }}
+            />
+          </div>
+        </div>
+        <div className="flex flex-col gap-sm p-lg border border-outline-variant bg-surface-container-lowest mt-sm">
+          <div className="flex justify-end gap-sm">
+            <button
+              type="button"
+              onClick={() => {
+                setAckMessageDraft(settings.acknowledgementMessage || '');
+                setSignatureDraft(settings.emailSignature || '');
+              }}
+              disabled={saving || (ackMessageDraft === (settings.acknowledgementMessage || '') && signatureDraft === (settings.emailSignature || ''))}
+              className="px-3 py-2 border border-outline-variant text-on-surface-variant hover:bg-surface-container-high transition-colors disabled:opacity-50"
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                await updateSetting('acknowledgementMessage', ackMessageDraft);
+                await updateSetting('emailSignature', signatureDraft);
+              }}
+              disabled={saving || (ackMessageDraft === (settings.acknowledgementMessage || '') && signatureDraft === (settings.emailSignature || ''))}
+              className="px-3 py-2 bg-on-surface text-surface hover:opacity-80 transition-colors disabled:opacity-50"
+            >
+              Enregistrer
+            </button>
+          </div>
+        </div>
+      </div>
 
       <div className="mt-md">
         <h3 className="font-headline-sm text-headline-sm text-on-surface mb-1">Relance des brouillons en attente</h3>

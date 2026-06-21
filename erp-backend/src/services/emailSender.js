@@ -1,5 +1,37 @@
+const fs = require('fs');
+const path = require('path');
 const prisma = require('../prismaClient');
 const { graphFetch } = require('../utils/graphClient');
+const { getSystemSettings } = require('./systemSettings');
+
+const LOGO_CONTENT_ID = 'logo-signature';
+
+// Le logo de signature est référencé en cid: dans le HTML (voir getEmailSignature) plutôt que par
+// une URL http(s) — les destinataires Outlook/M365 peuvent être hors du réseau local et n'auraient
+// alors aucun moyen de charger une image hébergée sur le serveur ERP. L'image est donc lue depuis
+// le disque local et jointe en pièce jointe inline à l'envoi, ce qui fonctionne sans dépendance réseau.
+function getLogoAttachmentIfReferenced(bodyHtml, signatureLogoUrl) {
+  if (!signatureLogoUrl || !bodyHtml.includes(`cid:${LOGO_CONTENT_ID}`)) return null;
+  try {
+    // signatureLogoUrl est de la forme {BACKEND_URL}/uploads/signature-logo/<fichier> (voir systemsettings.routes.js)
+    const filename = signatureLogoUrl.split('/uploads/signature-logo/')[1];
+    if (!filename) return null;
+    const filePath = path.join('uploads', 'signature-logo', filename);
+    const buffer = fs.readFileSync(filePath);
+    const ext = path.extname(filename).slice(1).toLowerCase();
+    const mimeType = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp' }[ext] || 'image/png';
+    return {
+      '@odata.type': '#microsoft.graph.fileAttachment',
+      name: filename,
+      contentType: mimeType,
+      contentBytes: buffer.toString('base64'),
+      isInline: true,
+      contentId: LOGO_CONTENT_ID,
+    };
+  } catch {
+    return null; // fichier introuvable (ex: supprimé manuellement) : on envoie sans logo plutôt que d'échouer l'email
+  }
+}
 
 // Envoie un email via Microsoft Graph et l'enregistre dans TicketMessage
 async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo = null, conversationId = null, saveAsMessage = true }) {
@@ -8,6 +40,9 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
   });
   if (!account) throw new Error('Aucun compte Outlook configuré et connecté');
 
+  const settings = await getSystemSettings();
+  const logoAttachment = getLogoAttachmentIfReferenced(bodyHtml, settings.signatureLogoUrl);
+
   const message = {
     subject,
     body: { contentType: 'HTML', content: bodyHtml },
@@ -15,6 +50,7 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
       ? to.map((addr) => ({ emailAddress: { address: addr } }))
       : [{ emailAddress: { address: to } }],
     ...(cc && cc.length > 0 ? { ccRecipients: cc.map((addr) => ({ emailAddress: { address: addr } })) } : {}),
+    ...(logoAttachment ? { attachments: [logoAttachment] } : {}),
   };
 
   // On crée le message comme brouillon puis on l'envoie (au lieu de /sendMail) pour récupérer son id
@@ -48,43 +84,66 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
   return draft;
 }
 
-// Génère le HTML de l'accusé de réception (fonction pure, sans envoi)
-function buildAcknowledgementHtml({ toName, glpiTicketId, originalSubject, estimatedDelay = '4 heures ouvrées' }) {
+const DEFAULT_ACKNOWLEDGEMENT_MESSAGE = 'Nous avons bien reçu votre demande de support et un ticket a été créé automatiquement.';
+const DEFAULT_EMAIL_SIGNATURE = '<p>Cordialement,<br>Support IT</p>';
+
+// Récupère la signature configurée (Paramètres > Automatisation), avec le logo uploadé ajouté
+// dessous s'il existe, et l'espace toujours du corps du message via une marge dédiée.
+async function getEmailSignature() {
+  const settings = await getSystemSettings();
+  const base = settings.emailSignature || DEFAULT_EMAIL_SIGNATURE;
+  const logoHtml = settings.signatureLogoUrl
+    ? `<p style="margin-top:8px"><img src="cid:${LOGO_CONTENT_ID}" alt="Logo" style="height:${settings.signatureLogoHeight || 60}px"></p>`
+    : '';
+  return `<div style="margin-top:24px">${base}${logoHtml}</div>`;
+}
+
+// Génère le HTML de l'accusé de réception (fonction pure, sans envoi).
+// `customMessage` vient de SystemSettings.acknowledgementMessage (Paramètres > Automatisation > Emails) ;
+// placeholders supportés : {ticketId}, {subject}, {toName}.
+function buildAcknowledgementHtml({ toName, glpiTicketId, originalSubject, customMessage, signature }) {
+  const introMessage = (customMessage || DEFAULT_ACKNOWLEDGEMENT_MESSAGE)
+    .replaceAll('{ticketId}', glpiTicketId)
+    .replaceAll('{subject}', originalSubject)
+    .replaceAll('{toName}', toName || '');
   return `
 <p>Bonjour ${toName || ''},</p>
-<p>Nous avons bien reçu votre demande de support et un ticket a été créé automatiquement.</p>
+<p>${introMessage}</p>
 <table style="border-collapse:collapse;margin:16px 0">
   <tr><td style="padding:4px 12px 4px 0;color:#666">Numéro de ticket</td><td><strong>#${glpiTicketId}</strong></td></tr>
   <tr><td style="padding:4px 12px 4px 0;color:#666">Sujet</td><td>${originalSubject}</td></tr>
-  <tr><td style="padding:4px 12px 4px 0;color:#666">Délai estimé</td><td>${estimatedDelay}</td></tr>
 </table>
 <p>Notre équipe va analyser votre demande et vous contactera dans les meilleurs délais.</p>
 <p>Vous pouvez répondre directement à cet email pour ajouter des informations à votre ticket.</p>
-<p>Cordialement,<br>Support IT</p>
+${signature || DEFAULT_EMAIL_SIGNATURE}
 `.trim();
 }
 
 // Envoie un accusé de réception automatique lors de la création d'un nouveau ticket
-async function sendAcknowledgement({ ticketId, glpiTicketId, toEmail, toName, originalSubject, estimatedDelay = '4 heures ouvrées' }) {
+async function sendAcknowledgement({ ticketId, glpiTicketId, toEmail, toName, originalSubject }) {
   // On garde le sujet original de l'utilisateur (juste préfixé du numéro de ticket), pour ne pas
   // casser le fil de conversation côté client mail et rester reconnaissable pour l'utilisateur.
   const subject = `[Ticket #${glpiTicketId}] ${originalSubject}`;
-  const bodyHtml = buildAcknowledgementHtml({ toName, glpiTicketId, originalSubject, estimatedDelay });
+  const settings = await getSystemSettings();
+  const signature = await getEmailSignature();
+  const bodyHtml = buildAcknowledgementHtml({ toName, glpiTicketId, originalSubject, customMessage: settings.acknowledgementMessage, signature });
   return sendEmail({ ticketId, to: toEmail, subject, bodyHtml, saveAsMessage: true });
 }
 
 // Envoie une relance automatique pour un ticket en attente de réponse utilisateur
 async function sendReminder({ ticketId, glpiTicketId, toEmail, toName, subject, reminderNumber, isPreClose = false }) {
   const emailSubject = `[Ticket #${glpiTicketId}] ${subject}`;
+  const signature = await getEmailSignature();
   const bodyHtml = isPreClose
     ? `<p>Bonjour ${toName || ''},</p>
 <p>Sans réponse de votre part dans les 5 prochains jours, votre ticket <strong>#${glpiTicketId}</strong> (${subject}) sera automatiquement clôturé.</p>
 <p>Si le problème est résolu, vous n'avez rien à faire. Sinon, répondez à cet email.</p>
-<p>Cordialement,<br>Support IT</p>`
+${signature}`
     : `<p>Bonjour ${toName || ''},</p>
 <p>Nous revenons vers vous concernant votre ticket <strong>#${glpiTicketId}</strong> : ${subject}.</p>
 <p>Votre demande est toujours en attente. Pouvez-vous nous confirmer si le problème est résolu ou s'il persiste ?</p>
-<p>Répondez simplement à cet email.<br>Cordialement,<br>Support IT</p>`;
+<p>Répondez simplement à cet email.</p>
+${signature}`;
 
   const { logEvent } = require('./ticketEvent');
   await logEvent(ticketId, 'REMINDER_SENT', 'SYSTEM', { reminderNumber, isPreClose });
@@ -93,7 +152,7 @@ async function sendReminder({ ticketId, glpiTicketId, toEmail, toName, subject, 
 }
 
 // Génère le HTML de la notification "incident déjà connu" (fonction pure, sans envoi)
-function buildKnownIncidentNotificationHtml({ toName, glpiTicketId, originalSubject, isMajor, impactedCount }) {
+function buildKnownIncidentNotificationHtml({ toName, glpiTicketId, originalSubject, isMajor, impactedCount, signature }) {
   const majorNote = isMajor
     ? `<p>⚠️ Cet incident a été promu en <strong>incident majeur</strong> (${impactedCount} sites impactés). Notre équipe est mobilisée en priorité.</p>`
     : '';
@@ -108,25 +167,27 @@ function buildKnownIncidentNotificationHtml({ toName, glpiTicketId, originalSubj
 </table>
 ${majorNote}
 <p>Votre site a été ajouté à la liste des sites impactés. Nous vous informerons dès que le service sera rétabli.</p>
-<p>Cordialement,<br>Support IT</p>
+${signature || DEFAULT_EMAIL_SIGNATURE}
 `.trim();
 }
 
 // Envoie une notification "incident déjà connu" quand un site est rattaché à un incident existant
 async function sendKnownIncidentNotification({ ticketId, glpiTicketId, toEmail, toName, originalSubject, isMajor, impactedCount }) {
   const subject = `[Ticket #${glpiTicketId}] ${originalSubject}`;
-  const bodyHtml = buildKnownIncidentNotificationHtml({ toName, glpiTicketId, originalSubject, isMajor, impactedCount });
+  const signature = await getEmailSignature();
+  const bodyHtml = buildKnownIncidentNotificationHtml({ toName, glpiTicketId, originalSubject, isMajor, impactedCount, signature });
   return sendEmail({ ticketId, to: toEmail, subject, bodyHtml, saveAsMessage: true });
 }
 
 // Notifie tous les sites impactés lors de la résolution d'un incident majeur
 async function notifyMajorIncidentResolved({ ticketId, glpiTicketId, ticketTitle, impactedSites }) {
   const subject = `[Ticket #${glpiTicketId}] ${ticketTitle}`;
+  const signature = await getEmailSignature();
   const bodyHtml = `
 <p>Bonjour,</p>
 <p>L'incident <strong>#${glpiTicketId} — ${ticketTitle}</strong> a été résolu.</p>
 <p>Le service est maintenant rétabli. Merci de votre patience.</p>
-<p>Cordialement,<br>Support IT</p>
+${signature}
 `.trim();
 
   for (const site of impactedSites) {
@@ -209,4 +270,5 @@ module.exports = {
   sendTemporaryPasswordEmail,
   buildAcknowledgementHtml,
   buildKnownIncidentNotificationHtml,
+  getEmailSignature,
 };
