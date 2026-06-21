@@ -21,6 +21,7 @@ const inboxRoutes = require('./routes/inbox.routes');
 const ticketIntelligenceRoutes = require('./routes/ticketintelligence.routes');
 const systemSettingsRoutes = require('./routes/systemsettings.routes');
 const promptTemplateRoutes = require('./routes/prompttemplate.routes');
+const draftApprovalRoutes = require('./routes/draftapproval.routes');
 
 const app = express();
 
@@ -44,6 +45,7 @@ app.use('/api/ai-email-drafts', aiEmailDraftRoutes);
 app.use('/api/ai-ticket-suggestions', aiTicketSuggestionRoutes);
 app.use('/api/n8n-config', n8nConfigRoutes);
 app.use('/api/knowledge', knowledgeRoutes);
+app.use('/api/draft-approval', draftApprovalRoutes); // doit être monté avant les routers génériques /api (ligne suivante), qui appliquent authenticate à toute requête entrante peu importe si une de leurs routes internes matche
 app.use('/api', outlookOAuthRoutes);
 app.use('/api/inbox', inboxRoutes);
 app.use('/api', ticketIntelligenceRoutes);

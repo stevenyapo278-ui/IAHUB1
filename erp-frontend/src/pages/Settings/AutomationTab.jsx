@@ -41,6 +41,29 @@ function SettingRow({ title, description, checked, onChange, disabled }) {
   );
 }
 
+function IntervalRow({ title, description, value, onChange, disabled, max, unit }) {
+  return (
+    <div className="flex items-center justify-between gap-lg p-lg border border-outline-variant bg-surface-container-lowest">
+      <div>
+        <div className="font-headline-sm text-headline-sm text-on-surface">{title}</div>
+        <p className="font-body-sm text-body-sm text-on-surface-variant mt-1">{description}</p>
+      </div>
+      <div className="flex items-center gap-sm shrink-0">
+        <input
+          type="number"
+          min={0}
+          max={max}
+          value={value}
+          onChange={(e) => onChange(Math.max(0, Math.min(max, Number(e.target.value) || 0)))}
+          disabled={disabled}
+          className="w-20 border border-outline-variant rounded-none px-3 py-2 text-body-sm text-on-surface bg-surface disabled:opacity-50"
+        />
+        <span className="font-body-sm text-body-sm text-on-surface-variant">{unit}</span>
+      </div>
+    </div>
+  );
+}
+
 export default function AutomationTab() {
   const [settings, setSettings] = useState(null);
   const [error, setError] = useState('');
@@ -104,6 +127,78 @@ export default function AutomationTab() {
         onChange={(v) => updateSetting('autoApproveGlpiSolutions', v)}
         disabled={saving}
       />
+
+      <div className="mt-md">
+        <h3 className="font-headline-sm text-headline-sm text-on-surface mb-1">Relance des brouillons en attente</h3>
+        <p className="font-body-sm text-body-sm text-on-surface-variant mb-md">
+          Quand une réponse IA reste en attente de validation trop longtemps, un email de relance est envoyé aux
+          responsables ayant activé « Recevoir les alertes de brouillons » (page Utilisateurs).
+        </p>
+        <div className="flex flex-col gap-md">
+          <SettingRow
+            title="Relance email des brouillons en attente"
+            description="Envoie un email aux responsables désignés si un brouillon reste en attente plus longtemps que le délai configuré ci-dessous."
+            checked={settings.draftReminderEnabled}
+            onChange={(v) => updateSetting('draftReminderEnabled', v)}
+            disabled={saving}
+          />
+          <IntervalRow
+            title="Délai avant relance"
+            description="Temps d'attente après lequel un brouillon toujours non validé déclenche une relance."
+            value={settings.draftReminderDelayMinutes}
+            onChange={(v) => updateSetting('draftReminderDelayMinutes', v)}
+            disabled={saving || !settings.draftReminderEnabled}
+            max={1440}
+            unit="minutes"
+          />
+        </div>
+      </div>
+
+      <div className="mt-md">
+        <h3 className="font-headline-sm text-headline-sm text-on-surface mb-1">Fréquences de synchronisation</h3>
+        <p className="font-body-sm text-body-sm text-on-surface-variant mb-md">
+          À quel rythme chaque source externe est interrogée automatiquement. Mettre à 0 désactive la synchro automatique
+          pour cette tâche — le bouton manuel correspondant (s'il existe) reste alors le seul moyen de forcer une mise à jour.
+        </p>
+        <div className="flex flex-col gap-md">
+          <IntervalRow
+            title="Tickets GLPI (+ pièces jointes, approbations)"
+            description="Fréquence d'import/mise à jour des tickets depuis GLPI vers l'ERP."
+            value={settings.glpiTicketsSyncIntervalSeconds}
+            onChange={(v) => updateSetting('glpiTicketsSyncIntervalSeconds', v)}
+            disabled={saving}
+            max={3600}
+            unit="secondes"
+          />
+          <IntervalRow
+            title="Emails entrants"
+            description="Fréquence de relevé des boîtes mail connectées (Outlook)."
+            value={settings.emailSyncIntervalSeconds}
+            onChange={(v) => updateSetting('emailSyncIntervalSeconds', v)}
+            disabled={saving}
+            max={3600}
+            unit="secondes"
+          />
+          <IntervalRow
+            title="Équipes et catégories GLPI"
+            description="Fréquence de synchro des groupes (équipes) et catégories de tickets depuis GLPI."
+            value={settings.glpiTeamsCategoriesSyncIntervalMinutes}
+            onChange={(v) => updateSetting('glpiTeamsCategoriesSyncIntervalMinutes', v)}
+            disabled={saving}
+            max={1440}
+            unit="minutes"
+          />
+          <IntervalRow
+            title="Modèles IA disponibles"
+            description="Fréquence de vérification des modèles disponibles auprès de chaque fournisseur IA actif."
+            value={settings.aiModelsSyncIntervalHours}
+            onChange={(v) => updateSetting('aiModelsSyncIntervalHours', v)}
+            disabled={saving}
+            max={168}
+            unit="heures"
+          />
+        </div>
+      </div>
 
       <SettingRow
         title="Alerte vocale (ce navigateur uniquement)"

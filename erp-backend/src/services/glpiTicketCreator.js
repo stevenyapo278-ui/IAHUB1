@@ -1,6 +1,6 @@
 const FormData = require('form-data');
 const prisma = require('../prismaClient');
-const { categoryToGlpiId, GLPI_AI_REQUESTER_ID, GLPI_TECHNICIANS } = require('../utils/glpiMapping');
+const { categoryToGlpiId, GLPI_AI_REQUESTER_ID } = require('../utils/glpiMapping');
 
 const GLPI_STATUS_MAP = { NEW: 1, OPEN: 2, PENDING: 4, WAITING_FOR_USER: 4, SOLVED: 5, CLOSED: 6 };
 const ERP_PRIORITY_MAP = { P1: 6, P2: 4, P3: 3, P4: 2 };
@@ -54,7 +54,7 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
         urgency: GLPI_URGENCY_IMPACT_MAP[urgency] || ERP_PRIORITY_MAP[priority] || 3,
         impact: GLPI_URGENCY_IMPACT_MAP[impact] || 3,
         priority: ERP_PRIORITY_MAP[priority] || 3,
-        itilcategories_id: categoryToGlpiId(category) || 0,
+        itilcategories_id: (await categoryToGlpiId(category)) || 0,
         requesttypes_id: GLPI_SOURCE_MAP[source] || 1,
         users_id_recipient: GLPI_AI_REQUESTER_ID,
       },
@@ -75,7 +75,9 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
         body: JSON.stringify({
           input: { items_id: glpiId, itemtype: 'Ticket', content: followupNote, is_private: 1 },
         }),
-      }).catch(() => {});
+      }).catch((err) => {
+        console.error(`[glpiTicketCreator] Échec ajout followup initial (ticket GLPI ${glpiId}):`, err.message);
+      });
     }
 
     return glpiId;
@@ -92,7 +94,7 @@ async function updateGlpiTicket(glpiTicketId, { status, priority, category, type
   const input = {};
   if (status !== undefined) input.status = GLPI_STATUS_MAP[status] || 1;
   if (priority !== undefined) input.priority = ERP_PRIORITY_MAP[priority] || 3;
-  if (category !== undefined) input.itilcategories_id = categoryToGlpiId(category) || 0;
+  if (category !== undefined) input.itilcategories_id = (await categoryToGlpiId(category)) || 0;
   if (type !== undefined) input.type = GLPI_TYPE_MAP[type] || 1;
   if (urgency !== undefined) input.urgency = GLPI_URGENCY_IMPACT_MAP[urgency] || 3;
   if (impact !== undefined) input.impact = GLPI_URGENCY_IMPACT_MAP[impact] || 3;
@@ -119,7 +121,9 @@ async function updateGlpiTicket(glpiTicketId, { status, priority, category, type
         method: 'POST',
         headers,
         body: JSON.stringify({ input: { tickets_id: glpiTicketId, users_id: assignedToGlpiId, type: 2 } }),
-      }).catch(() => {});
+      }).catch((err) => {
+        console.error(`[glpiTicketCreator] Échec assignation technicien GLPI (ticket ${glpiTicketId}, user ${assignedToGlpiId}) — désynchro ERP/GLPI possible:`, err.message);
+      });
     }
 
     if (teamGlpiId) {
@@ -127,7 +131,9 @@ async function updateGlpiTicket(glpiTicketId, { status, priority, category, type
         method: 'POST',
         headers,
         body: JSON.stringify({ input: { tickets_id: glpiTicketId, groups_id: teamGlpiId, type: 2 } }),
-      }).catch(() => {});
+      }).catch((err) => {
+        console.error(`[glpiTicketCreator] Échec assignation équipe GLPI (ticket ${glpiTicketId}, groupe ${teamGlpiId}) — désynchro ERP/GLPI possible:`, err.message);
+      });
     }
   });
 }
@@ -304,4 +310,44 @@ async function syncTeamsFromGlpi() {
   });
 }
 
-module.exports = { createTicketFromEmail, createGlpiTicket, updateGlpiTicket, deleteGlpiTicket, uploadGlpiAttachment, syncTeamsFromGlpi, addGlpiFollowup };
+// Récupère les catégories (ITILCategory) depuis GLPI et crée/met à jour les TicketCategory
+// correspondantes dans l'ERP, en les liant via glpiCategoryId. Remplace le mapping statique
+// GLPI_CATEGORIES (glpiMapping.js) qui se désynchronisait silencieusement si la liste changeait
+// côté GLPI. Retourne le nombre de catégories synchronisées, ou null si GLPI n'est pas configuré.
+async function syncCategoriesFromGlpi() {
+  const config = await getGlpiConfig();
+  if (!config) return null;
+
+  return withGlpiSession(config, async (sessionToken) => {
+    const headers = { 'App-Token': config.appToken, 'Session-Token': sessionToken };
+
+    const res = await fetch(`${config.baseUrl}/ITILCategory?range=0-200`, { headers });
+    if (!res.ok) throw new Error(`GLPI récupération des catégories échouée (${res.status})`);
+    const categories = await res.json();
+
+    let synced = 0;
+    for (const cat of categories) {
+      if (!cat.name) continue;
+
+      const existingByGlpiId = await prisma.ticketCategory.findUnique({ where: { glpiCategoryId: cat.id } });
+      if (existingByGlpiId) {
+        await prisma.ticketCategory.update({ where: { id: existingByGlpiId.id }, data: { name: cat.name } });
+        synced++;
+        continue;
+      }
+
+      const existingByName = await prisma.ticketCategory.findUnique({ where: { name: cat.name } });
+      if (existingByName) {
+        await prisma.ticketCategory.update({ where: { id: existingByName.id }, data: { glpiCategoryId: cat.id } });
+        synced++;
+        continue;
+      }
+
+      await prisma.ticketCategory.create({ data: { name: cat.name, glpiCategoryId: cat.id } });
+      synced++;
+    }
+    return synced;
+  });
+}
+
+module.exports = { createTicketFromEmail, createGlpiTicket, updateGlpiTicket, deleteGlpiTicket, uploadGlpiAttachment, syncTeamsFromGlpi, syncCategoriesFromGlpi, addGlpiFollowup };

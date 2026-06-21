@@ -13,5 +13,5 @@ export const PERMISSION_DEFINITIONS = [
   { key: 'glpi.manage', label: 'Gérer la synchronisation GLPI' },
   { key: 'prompts.manage', label: 'Modifier les prompts IA' },
   { key: 'emaildrafts.manage', label: 'Approuver / rejeter les réponses email IA' },
-  { key: 'automation.manage', label: "Gérer l'automatisation (auto-envoi, auto-approbation)" },
+  { key: 'automation.manage', label: "Gérer l'automatisation (auto-envoi, auto-approbation, synchro GLPI)" },
 ];

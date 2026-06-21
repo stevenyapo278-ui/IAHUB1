@@ -3,7 +3,7 @@ const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
-const { syncTeamsFromGlpi } = require('../services/glpiTicketCreator');
+const { syncTeamsFromGlpi, syncCategoriesFromGlpi } = require('../services/glpiTicketCreator');
 
 const router = express.Router();
 router.use(authenticate);
@@ -73,14 +73,15 @@ router.patch('/:id', requirePermission('teams.manage', ['ADMIN']), async (req, r
   }
 });
 
-// Synchronise les équipes depuis les groupes GLPI (Group)
+// Synchronise les équipes (Group) et les catégories de tickets (ITILCategory) depuis GLPI
 router.post('/sync-glpi', requirePermission('teams.manage', ['ADMIN']), async (req, res) => {
   try {
     const synced = await syncTeamsFromGlpi();
     if (synced === null) {
       return res.status(422).json({ error: 'GLPI non configuré ou inactif (Settings → GLPI)' });
     }
-    return res.json({ synced });
+    const syncedCategories = await syncCategoriesFromGlpi();
+    return res.json({ synced, syncedCategories: syncedCategories || 0 });
   } catch (err) {
     return res.status(502).json({ error: err.message || 'Erreur lors de la synchronisation GLPI' });
   }

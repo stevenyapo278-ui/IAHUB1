@@ -99,6 +99,9 @@ model User {
   teamId        Int?
   isActive      Boolean  @default(true)
   glpiId        Int?     @unique // identifiant de l'utilisateur correspondant dans GLPI
+  receiveDraftAlerts Boolean @default(true) // reçoit l'email de relance quand un AiEmailDraft attend trop longtemps une validation humaine
+  mustChangePassword Boolean @default(false) // force l'affichage de l'écran de changement de mot de passe à la prochaine connexion (ex: après réinitialisation par un admin)
+  passwordResetTokens PasswordResetToken[]
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -133,6 +136,17 @@ model Team {
 
   members User[]
   tickets Ticket[]
+}
+
+// Catégories de tickets synchronisées depuis les ITILCategory de GLPI — évite de coder en
+// dur la correspondance nom <-> itilcategories_id (cf. glpiMapping.js, risque de désynchro
+// si la liste des catégories change côté GLPI).
+model TicketCategory {
+  id              Int      @id @default(autoincrement())
+  name            String   @unique
+  glpiCategoryId  Int      @unique
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
 
 model Ticket {
@@ -261,6 +275,17 @@ model SystemSettings {
   id                     Int      @id @default(1)
   autoApproveGlpiSolutions Boolean @default(false) // approuve automatiquement la validation de solution GLPI dès qu'un ticket passe Résolu
   autoSendAiEmails       Boolean  @default(false) // envoie directement les emails générés par l'IA sans passer par le circuit d'approbation humaine AiEmailDraft
+  // Fréquences de synchronisation automatique (Paramètres > Automatisation > Fréquences de synchronisation).
+  // Toutes désactivables individuellement en mettant 0 — le bouton manuel correspondant (s'il existe) reste alors le seul moyen de forcer une synchro.
+  glpiTicketsSyncIntervalSeconds         Int @default(20)   // tickets GLPI + pièces jointes + approbations auto
+  emailSyncIntervalSeconds               Int @default(15)   // relevé des boîtes mail entrantes
+  glpiTeamsCategoriesSyncIntervalMinutes Int @default(10)   // groupes GLPI -> équipes, ITILCategory -> catégories
+  aiModelsSyncIntervalHours              Int @default(24)   // liste des modèles disponibles par fournisseur IA
+
+  // Relance des brouillons AiEmailDraft non validés (Paramètres > Automatisation).
+  draftReminderEnabled      Boolean @default(true)
+  draftReminderDelayMinutes Int     @default(30) // délai après lequel une relance est envoyée si le brouillon est toujours PENDING
+
   updatedAt              DateTime @updatedAt
 }
 
@@ -471,8 +496,46 @@ model AiEmailDraft {
 
   sentAt          DateTime?
 
+  reminderCount   Int       @default(0) // nombre de relances déjà envoyées pour ce brouillon en attente
+  lastReminderAt  DateTime? // date de la dernière relance envoyée — évite de relancer à chaque cycle
+
+  approvalTokens  EmailApprovalToken[]
+
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
+}
+
+// Lien d'approbation à distance envoyé par email de relance, pour qu'un responsable hors du
+// réseau local (pas connecté à l'app) puisse approuver/rejeter/modifier un AiEmailDraft sans
+// login. Token opaque à usage unique, distinct d'un JWT : invalidé dès qu'il est consommé
+// (approve/reject) et expire après un délai court, pour limiter l'exposition si le lien fuit.
+model EmailApprovalToken {
+  id          Int           @id @default(autoincrement())
+  token       String        @unique
+  draft       AiEmailDraft  @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  draftId     Int
+  expiresAt   DateTime
+  usedAt      DateTime?
+  // internetMessageId de l'email de relance envoyé contenant ce token — permet de reconnaître
+  // la RÉPONSE du responsable (in-reply-to) quand il préfère répondre directement par email
+  // ("j'approuve" / "je rejette") plutôt que de cliquer le lien, notamment hors réseau local
+  // sans accès au tunnel/VPN exposant l'application.
+  reminderInternetMessageId String? @unique
+  createdAt   DateTime      @default(now())
+}
+
+// Lien "mot de passe oublié" envoyé par email à l'utilisateur — token opaque à usage unique,
+// expire après un délai court, comme EmailApprovalToken mais volontairement séparé : ce token
+// donne accès à la définition d'un mot de passe de connexion complet, un niveau de sensibilité
+// différent d'approuver un brouillon d'email.
+model PasswordResetToken {
+  id        Int       @id @default(autoincrement())
+  token     String    @unique
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
 }
 
 enum KnowledgeDocumentStatus {

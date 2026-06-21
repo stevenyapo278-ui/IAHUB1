@@ -67,6 +67,19 @@ router.post('/', [body('serviceName').notEmpty()], async (req, res) => {
   return res.status(201).json({ ...config, apiKey: maskKey(config.apiKey) });
 });
 
+// Les id GLPI (glpiTicketId, glpiGroupId, glpiCategoryId) sont des numéros internes à CHAQUE
+// instance GLPI, pas des identifiants universels — un ticket #5 sur le nouveau GLPI n'a aucun
+// rapport avec le ticket #5 de l'ancien. Détache toutes les correspondances existantes pour que
+// la prochaine synchro recrée les vrais liens proprement, sans faux raccordement par collision d'id.
+async function detachGlpiLinks() {
+  const [tickets, teams, categories] = await Promise.all([
+    prisma.ticket.updateMany({ where: { glpiTicketId: { not: null } }, data: { glpiTicketId: null } }),
+    prisma.team.updateMany({ where: { glpiGroupId: { not: null } }, data: { glpiGroupId: null } }),
+    prisma.ticketCategory.deleteMany({}), // pas de glpiCategoryId nullable : on repart d'une table vide, resynchronisée immédiatement après
+  ]);
+  return { tickets: tickets.count, teams: teams.count, categories: categories.count };
+}
+
 router.patch('/:id', async (req, res) => {
   const { baseUrl, apiKey, extra, isActive } = req.body;
   const data = {};
@@ -75,9 +88,20 @@ router.patch('/:id', async (req, res) => {
   if (extra !== undefined) data.extra = extra;
   if (isActive !== undefined) data.isActive = isActive;
 
+  const before = await prisma.apiConfig.findUnique({ where: { id: Number(req.params.id) } });
+  if (!before) return res.status(404).json({ error: 'Configuration introuvable' });
+
+  // Changement d'instance GLPI détecté (URL différente) — on détache les anciens liens avant
+  // d'enregistrer la nouvelle config, sinon la prochaine synchro mélangerait les deux instances.
+  const isGlpiUrlChange = before.serviceName === 'glpi' && baseUrl !== undefined && baseUrl !== before.baseUrl && before.baseUrl;
+  let detached = null;
+  if (isGlpiUrlChange) {
+    detached = await detachGlpiLinks();
+  }
+
   try {
     const config = await prisma.apiConfig.update({ where: { id: Number(req.params.id) }, data });
-    return res.json({ ...config, apiKey: maskKey(config.apiKey) });
+    return res.json({ ...config, apiKey: maskKey(config.apiKey), ...(detached ? { glpiLinksReset: detached } : {}) });
   } catch (err) {
     return res.status(404).json({ error: 'Configuration introuvable' });
   }

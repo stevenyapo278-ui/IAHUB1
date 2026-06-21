@@ -23,6 +23,17 @@ export function AuthProvider({ children }) {
     setUser(null);
   }
 
+  // Appelé après un changement de mot de passe réussi (écran ForcePasswordChange), pour faire
+  // disparaître immédiatement cet écran sans devoir se reconnecter.
+  function clearMustChangePassword() {
+    setUser((prev) => {
+      if (!prev) return prev;
+      const updated = { ...prev, mustChangePassword: false };
+      localStorage.setItem('user', JSON.stringify(updated));
+      return updated;
+    });
+  }
+
   // Rafraîchit les permissions effectives au chargement de l'app (pas seulement au login) : si un
   // admin retire un droit à un groupe pendant qu'un utilisateur est déjà connecté, ça se reflète
   // au prochain chargement de page plutôt que de rester figé jusqu'à la prochaine reconnexion.
@@ -30,7 +41,7 @@ export function AuthProvider({ children }) {
     if (!localStorage.getItem('token')) return;
     api.get('/auth/me')
       .then(({ data }) => {
-        const refreshed = { id: data.id, email: data.email, fullName: data.fullName, role: data.role, teamId: data.teamId, permissions: data.permissions };
+        const refreshed = { id: data.id, email: data.email, fullName: data.fullName, role: data.role, teamId: data.teamId, permissions: data.permissions, mustChangePassword: data.mustChangePassword };
         localStorage.setItem('user', JSON.stringify(refreshed));
         setUser(refreshed);
       })
@@ -38,7 +49,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, login, logout }}>
+    <AuthContext.Provider value={{ user, login, logout, clearMustChangePassword }}>
       {children}
     </AuthContext.Provider>
   );

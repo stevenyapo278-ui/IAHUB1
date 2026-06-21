@@ -13,11 +13,17 @@ import KnowledgeBase from './pages/KnowledgeBase';
 import Inbox from './pages/Inbox';
 import AiEmailDrafts from './pages/AiEmailDrafts';
 import Prompts from './pages/Prompts';
+import ApprovalPage from './pages/ApprovalPage';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 
 export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/approve/:token" element={<ApprovalPage />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password/:token" element={<ResetPassword />} />
       <Route
         path="/"
         element={

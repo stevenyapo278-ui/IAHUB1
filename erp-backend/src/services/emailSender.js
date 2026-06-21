@@ -133,10 +133,69 @@ async function notifyMajorIncidentResolved({ ticketId, glpiTicketId, ticketTitle
     if (!site.includes('@')) continue; // ignorer les noms sans email
     try {
       await sendEmail({ ticketId, to: site, subject, bodyHtml, saveAsMessage: false });
-    } catch {
-      // ignorer les erreurs individuelles
+    } catch (err) {
+      console.error(`[emailSender] Échec notification résolution incident majeur vers ${site} (ticket ${ticketId}):`, err.message);
     }
   }
+}
+
+// Relance un responsable (admin/technicien) qu'un brouillon AiEmailDraft attend toujours sa
+// validation humaine depuis trop longtemps (Paramètres > Automatisation > Relance des brouillons).
+// saveAsMessage: false car ce mail s'adresse au responsable interne, pas au demandeur d'origine
+// — il ne doit pas apparaître dans le fil de conversation du ticket.
+async function sendDraftPendingReminderEmail({ recipientEmail, recipientName, draftId, draftSubject, draftRecipientEmail, draftContent, minutesWaiting, approvalToken }) {
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+  const approvalLink = `${frontendUrl}/approve/${approvalToken}`;
+  const subject = `[Relance] Réponse IA en attente de validation depuis ${minutesWaiting} min`;
+  const bodyHtml = `
+<p>Bonjour ${recipientName || ''},</p>
+<p>Une réponse générée par l'IA attend toujours votre validation depuis <strong>${minutesWaiting} minutes</strong> :</p>
+<table style="border-collapse:collapse;margin:16px 0">
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Destinataire prévu</td><td>${draftRecipientEmail}</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Sujet</td><td>${draftSubject}</td></tr>
+</table>
+<p>Si vous êtes au bureau (réseau local), relisez et validez depuis ce lien — vous pouvez aussi y modifier le texte avant envoi :</p>
+<p style="margin:20px 0">
+  <a href="${approvalLink}" style="background:#0b1c30;color:#fff;padding:10px 20px;text-decoration:none;display:inline-block">Relire et valider la réponse</a>
+</p>
+<p style="color:#888;font-size:12px">Ce lien est à usage unique et expire dans 24 heures.</p>
+<p><strong>Si vous n'êtes pas au bureau</strong> (hors réseau local), répondez simplement à cet email avec le mot <strong>« J'approuve »</strong> pour envoyer la réponse telle quelle ci-dessous, ou <strong>« Je rejette »</strong> pour l'annuler.</p>
+<blockquote style="border-left:3px solid #ccc;margin:12px 0;padding:8px 16px;color:#444">${draftContent}</blockquote>
+<p>Cordialement,<br>Support IT</p>
+`.trim();
+  return sendEmail({ to: recipientEmail, subject, bodyHtml, saveAsMessage: false });
+}
+
+// Envoie le lien de réinitialisation à un utilisateur qui a cliqué "mot de passe oublié"
+async function sendPasswordResetLinkEmail({ recipientEmail, recipientName, resetToken }) {
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+  const resetLink = `${frontendUrl}/reset-password/${resetToken}`;
+  const subject = 'Réinitialisation de votre mot de passe';
+  const bodyHtml = `
+<p>Bonjour ${recipientName || ''},</p>
+<p>Vous avez demandé la réinitialisation de votre mot de passe. Cliquez sur le lien ci-dessous pour en choisir un nouveau :</p>
+<p style="margin:20px 0">
+  <a href="${resetLink}" style="background:#0b1c30;color:#fff;padding:10px 20px;text-decoration:none;display:inline-block">Choisir un nouveau mot de passe</a>
+</p>
+<p style="color:#888;font-size:12px">Ce lien est à usage unique et expire dans 1 heure. Si vous n'êtes pas à l'origine de cette demande, ignorez cet email.</p>
+<p>Cordialement,<br>Support IT</p>
+`.trim();
+  return sendEmail({ to: recipientEmail, subject, bodyHtml, saveAsMessage: false });
+}
+
+// Envoie le mot de passe temporaire généré par un admin lors d'une réinitialisation forcée
+async function sendTemporaryPasswordEmail({ recipientEmail, recipientName, temporaryPassword }) {
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+  const subject = 'Votre mot de passe a été réinitialisé';
+  const bodyHtml = `
+<p>Bonjour ${recipientName || ''},</p>
+<p>Un administrateur a réinitialisé votre mot de passe. Voici votre mot de passe temporaire :</p>
+<p style="margin:16px 0;padding:12px 16px;background:#f4f4f4;font-family:monospace;font-size:16px;font-weight:bold;display:inline-block">${temporaryPassword}</p>
+<p><strong>Vous devrez le changer dès votre prochaine connexion</strong> — l'application vous le demandera automatiquement.</p>
+<p>Connectez-vous ici : <a href="${frontendUrl}/login">${frontendUrl}/login</a></p>
+<p>Cordialement,<br>Support IT</p>
+`.trim();
+  return sendEmail({ to: recipientEmail, subject, bodyHtml, saveAsMessage: false });
 }
 
 module.exports = {
@@ -145,6 +204,9 @@ module.exports = {
   sendReminder,
   sendKnownIncidentNotification,
   notifyMajorIncidentResolved,
+  sendDraftPendingReminderEmail,
+  sendPasswordResetLinkEmail,
+  sendTemporaryPasswordEmail,
   buildAcknowledgementHtml,
   buildKnownIncidentNotificationHtml,
 };

@@ -1,5 +1,5 @@
 const prisma = require('../prismaClient');
-const { GLPI_CATEGORIES, GLPI_AI_REQUESTER_ID } = require('./glpiMapping');
+const { GLPI_AI_REQUESTER_ID, glpiIdToCategory } = require('./glpiMapping');
 const { getSystemSettings } = require('../services/systemSettings');
 
 // Statut GLPI "TicketValidation" : 2 = en attente, 3 = approuvé, 4 = refusé (constantes ITIL standard GLPI).
@@ -28,10 +28,6 @@ function glpiPriorityToErp(priority) {
   return 'P4';
 }
 
-const GLPI_CATEGORY_ID_TO_NAME = Object.fromEntries(
-  Object.entries(GLPI_CATEGORIES).map(([name, id]) => [id, name])
-);
-
 async function getGlpiConfig() {
   const config = await prisma.apiConfig.findUnique({ where: { serviceName: 'glpi' } });
   if (!config || !config.isActive || !config.baseUrl || !config.apiKey) return null;
@@ -57,7 +53,9 @@ async function glpiKillSession(config, sessionToken) {
   await fetch(`${config.baseUrl}/killSession`, {
     method: 'GET',
     headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
-  }).catch(() => {});
+  }).catch((err) => {
+    console.error('[glpiSync] Échec killSession (fuite possible de session GLPI):', err.message);
+  });
 }
 
 // Récupère les tickets GLPI et les importe/met à jour dans la table Ticket de l'ERP.
@@ -95,7 +93,7 @@ async function syncGlpiTickets() {
         content: t.content || '',
         status,
         priority: glpiPriorityToErp(t.priority),
-        category: GLPI_CATEGORY_ID_TO_NAME[t.itilcategories_id] || null,
+        category: await glpiIdToCategory(t.itilcategories_id),
         aiProcessed: t.users_id_recipient === GLPI_AI_REQUESTER_ID,
       };
 
@@ -141,7 +139,9 @@ async function maybeAutoApproveValidation(config, sessionToken, glpiTicketId) {
         method: 'PUT',
         headers,
         body: JSON.stringify({ input: { id: v.id, status: VALIDATION_STATUS_APPROVED, comment_validation: 'Approuvé automatiquement (IA)' } }),
-      }).catch(() => {});
+      }).catch((err) => {
+        console.error(`[glpiSync] Échec approbation TicketValidation ${v.id} (ticket GLPI ${glpiTicketId}):`, err.message);
+      });
     }
   } catch (err) {
     console.error('[glpiSync] Échec auto-approbation validation:', err.message);
@@ -184,7 +184,9 @@ async function maybeAutoApproveSolution(config, sessionToken, ticket) {
           _do_not_compute_status: true,
         },
       }),
-    }).catch(() => {});
+    }).catch((err) => {
+      console.error(`[glpiSync] Échec création/approbation ITILSolution (ticket GLPI ${ticket.id}):`, err.message);
+    });
   } catch (err) {
     console.error('[glpiSync] Échec auto-approbation solution:', err.message);
   }

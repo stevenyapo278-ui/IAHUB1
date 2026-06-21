@@ -5,8 +5,8 @@ const prisma = require('../prismaClient');
 const ACTIVE_STATUSES = ['NEW', 'OPEN', 'PENDING', 'WAITING_FOR_USER'];
 
 // Choisit automatiquement un technicien de l'équipe correspondant à `category` (le nom de
-// catégorie d'un ticket correspond directement au nom de Team, cf. seed.js et GLPI_TECHNICIANS) et
-// l'assigne au ticket — le moins chargé en tickets actifs parmi les membres TECHNICIAN de l'équipe.
+// catégorie d'un ticket correspond directement au nom de Team, cf. seed.js) et l'assigne au
+// ticket — le moins chargé en tickets actifs parmi les membres TECHNICIAN de l'équipe.
 // Ne fait rien si la catégorie ne correspond à aucune équipe connue, ou si l'équipe n'a aucun
 // technicien (le ticket reste alors non assigné, comme avant — pas d'erreur ni de blocage).
 async function autoAssignTechnician(ticketId, category) {

@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
+import ForcePasswordChange from '../components/ForcePasswordChange';
 
 // permission: null = visible à tout utilisateur connecté, quel que soit son rôle/groupe (ex:
 // Dashboard, Tickets, Boîte mail — jamais masqué). Sinon, le lien n'apparaît que si
@@ -98,6 +99,8 @@ export default function MainLayout() {
       <main className="ml-64 flex-1 h-full overflow-y-auto p-container-margin w-full">
         <Outlet />
       </main>
+
+      {user?.mustChangePassword && <ForcePasswordChange />}
     </div>
   );
 }

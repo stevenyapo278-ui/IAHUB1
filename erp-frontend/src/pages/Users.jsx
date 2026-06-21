@@ -35,6 +35,12 @@ export default function Users() {
   const [selectedIds, setSelectedIds] = useState([]);
   const [assignGroupId, setAssignGroupId] = useState('');
   const [assigning, setAssigning] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({ fullName: '', email: '' });
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [confirmResetId, setConfirmResetId] = useState(null);
+  const [resetting, setResetting] = useState(false);
+  const [resetMessage, setResetMessage] = useState('');
 
   function load() {
     Promise.all([api.get('/users'), api.get('/teams'), api.get('/permission-groups')])
@@ -82,8 +88,49 @@ export default function Users() {
     }
   }
 
+  function startEdit(u) {
+    setEditingId(u.id);
+    setEditForm({ fullName: u.fullName, email: u.email });
+    setError('');
+  }
+
+  async function saveEdit(id) {
+    setSavingEdit(true);
+    setError('');
+    try {
+      await api.patch(`/users/${id}`, editForm);
+      setEditingId(null);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur lors de la mise à jour');
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
   function askDelete(id) {
     setConfirmDeleteId(id);
+  }
+
+  function askResetPassword(id) {
+    setConfirmResetId(id);
+    setResetMessage('');
+  }
+
+  async function handleResetPassword() {
+    if (!confirmResetId) return;
+    setResetting(true);
+    setError('');
+    try {
+      const { data } = await api.post(`/users/${confirmResetId}/reset-password`);
+      setResetMessage(data.message);
+      setConfirmResetId(null);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur lors de la réinitialisation');
+      setConfirmResetId(null);
+    } finally {
+      setResetting(false);
+    }
   }
 
   async function handleDelete() {
@@ -141,6 +188,7 @@ export default function Users() {
       </header>
 
       {error && <div className="border border-outline-variant rounded-none p-md text-on-surface bg-surface-container-low">{error}</div>}
+      {resetMessage && <div className="border border-outline-variant rounded-none p-md text-on-surface bg-surface-container-low">{resetMessage}</div>}
 
       {showForm && (
         <form onSubmit={handleCreate} className="bg-surface-container-lowest border border-outline-variant rounded-none p-lg flex flex-col gap-md">
@@ -170,6 +218,8 @@ export default function Users() {
               <input
                 required
                 type="password"
+                minLength={8}
+                placeholder="Au moins 8 caractères"
                 className={inputClass}
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
@@ -277,6 +327,7 @@ export default function Users() {
                 <th className="p-md font-label-md text-label-md text-on-surface-variant uppercase">Rôle</th>
                 <th className="p-md font-label-md text-label-md text-on-surface-variant uppercase">Équipe</th>
                 <th className="p-md font-label-md text-label-md text-on-surface-variant uppercase text-center w-24">Actif</th>
+                <th className="p-md font-label-md text-label-md text-on-surface-variant uppercase text-center w-32" title="Reçoit un email si un brouillon de réponse IA attend trop longtemps une validation">Alertes brouillons</th>
                 <th className="p-md font-label-md text-label-md text-on-surface-variant uppercase text-right w-24">Actions</th>
               </tr>
             </thead>
@@ -292,15 +343,49 @@ export default function Users() {
                     />
                   </td>
                   <td className="p-md">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full border border-outline-variant flex items-center justify-center font-headline-sm text-xs font-bold shrink-0 text-on-surface">
-                        {initials(u.fullName)}
+                    {editingId === u.id ? (
+                      <div className="flex flex-col gap-1">
+                        <input
+                          value={editForm.fullName}
+                          onChange={(e) => setEditForm({ ...editForm, fullName: e.target.value })}
+                          placeholder="Nom complet"
+                          className="border border-outline-variant rounded-none px-2 py-1 text-body-sm text-on-surface bg-surface focus:outline-none focus:border-on-surface"
+                        />
+                        <input
+                          type="email"
+                          value={editForm.email}
+                          onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                          placeholder="Email"
+                          className="border border-outline-variant rounded-none px-2 py-1 text-body-sm text-on-surface bg-surface focus:outline-none focus:border-on-surface"
+                        />
+                        <div className="flex gap-1 mt-1">
+                          <button
+                            onClick={() => saveEdit(u.id)}
+                            disabled={savingEdit}
+                            className="text-xs px-2 py-1 border border-outline-variant bg-on-surface text-surface hover:opacity-80 disabled:opacity-50"
+                          >
+                            {savingEdit ? 'Enregistrement...' : 'Enregistrer'}
+                          </button>
+                          <button
+                            onClick={() => setEditingId(null)}
+                            disabled={savingEdit}
+                            className="text-xs px-2 py-1 border border-outline-variant text-on-surface-variant hover:bg-surface-container-high"
+                          >
+                            Annuler
+                          </button>
+                        </div>
                       </div>
-                      <div>
-                        <div className="font-headline-sm text-headline-sm text-on-surface">{u.fullName}</div>
-                        <div className="text-on-surface-variant text-xs">{u.email}</div>
-                      </div>
-                    </div>
+                    ) : (
+                      <button onClick={() => startEdit(u)} className="flex items-center gap-3 text-left hover:opacity-80 transition-opacity">
+                        <div className="w-8 h-8 rounded-full border border-outline-variant flex items-center justify-center font-headline-sm text-xs font-bold shrink-0 text-on-surface">
+                          {initials(u.fullName)}
+                        </div>
+                        <div>
+                          <div className="font-headline-sm text-headline-sm text-on-surface">{u.fullName}</div>
+                          <div className="text-on-surface-variant text-xs">{u.email}</div>
+                        </div>
+                      </button>
+                    )}
                   </td>
                   <td className="p-md">
                     <select
@@ -333,16 +418,35 @@ export default function Users() {
                       onChange={(e) => updateField(u.id, 'isActive', e.target.checked)}
                     />
                   </td>
+                  <td className="p-md text-center">
+                    {u.role !== 'REQUESTER' && (
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 border-outline-variant cursor-pointer"
+                        checked={u.receiveDraftAlerts}
+                        onChange={(e) => updateField(u.id, 'receiveDraftAlerts', e.target.checked)}
+                      />
+                    )}
+                  </td>
                   <td className="p-md text-right">
-                    <button onClick={() => askDelete(u.id)} className="text-on-surface-variant hover:text-error transition-colors p-1">
-                      <span className="material-symbols-outlined text-[18px]">delete</span>
-                    </button>
+                    <div className="flex items-center justify-end gap-1">
+                      <button
+                        onClick={() => askResetPassword(u.id)}
+                        title="Réinitialiser le mot de passe"
+                        className="text-on-surface-variant hover:text-on-surface transition-colors p-1"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">lock_reset</span>
+                      </button>
+                      <button onClick={() => askDelete(u.id)} className="text-on-surface-variant hover:text-error transition-colors p-1">
+                        <span className="material-symbols-outlined text-[18px]">delete</span>
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
               {users.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="p-md text-center text-on-surface-variant">Aucun utilisateur.</td>
+                  <td colSpan={7} className="p-md text-center text-on-surface-variant">Aucun utilisateur.</td>
                 </tr>
               )}
             </tbody>
@@ -359,6 +463,16 @@ export default function Users() {
         loading={deleting}
         onConfirm={handleDelete}
         onCancel={() => setConfirmDeleteId(null)}
+      />
+
+      <ConfirmDialog
+        open={!!confirmResetId}
+        title="Réinitialiser le mot de passe"
+        message="Un nouveau mot de passe temporaire sera généré et envoyé par email à cet utilisateur. Il devra le changer dès sa prochaine connexion."
+        confirmLabel="Réinitialiser"
+        loading={resetting}
+        onConfirm={handleResetPassword}
+        onCancel={() => setConfirmResetId(null)}
       />
     </div>
   );

@@ -167,8 +167,17 @@ export default function OtherApisTab() {
   }
 
   async function handleUpdate(id, field, value) {
+    setError('');
+    setInfo('');
     try {
-      await api.patch(`/api-configs/${id}`, { [field]: value });
+      const { data } = await api.patch(`/api-configs/${id}`, { [field]: value });
+      if (data.glpiLinksReset) {
+        const { tickets, teams, categories } = data.glpiLinksReset;
+        setInfo(
+          `Changement d'instance GLPI détecté : ${tickets} ticket(s) et ${teams} équipe(s) détachés de l'ancien GLPI, ${categories} catégorie(s) supprimée(s). ` +
+          `Cliquez « Synchroniser GLPI » pour récupérer les données de la nouvelle instance.`
+        );
+      }
       load();
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la mise à jour');

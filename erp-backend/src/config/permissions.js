@@ -32,7 +32,7 @@ const PERMISSION_LABELS = {
   'glpi.manage': 'Gérer la synchronisation GLPI',
   'prompts.manage': "Modifier les prompts IA",
   'emaildrafts.manage': 'Approuver / rejeter les réponses email IA',
-  'automation.manage': "Gérer l'automatisation (auto-envoi, auto-approbation)",
+  'automation.manage': "Gérer l'automatisation (auto-envoi, auto-approbation, synchro GLPI)",
 };
 
 module.exports = { PERMISSION_KEYS, PERMISSION_LABELS };

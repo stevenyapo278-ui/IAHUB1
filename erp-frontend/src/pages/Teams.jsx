@@ -79,7 +79,7 @@ export default function Teams() {
     setSyncMessage('');
     try {
       const { data } = await api.post('/teams/sync-glpi');
-      setSyncMessage(`${data.synced} équipe(s) synchronisée(s) depuis GLPI.`);
+      setSyncMessage(`${data.synced} équipe(s) et ${data.syncedCategories || 0} catégorie(s) synchronisée(s) depuis GLPI.`);
       load();
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la synchronisation GLPI');

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 export default function Login() {
@@ -76,6 +76,9 @@ export default function Login() {
                 <label className="block font-label-md text-label-md text-on-surface uppercase" htmlFor="password">
                   Mot de passe
                 </label>
+                <Link to="/forgot-password" className="font-body-sm text-body-sm text-on-surface-variant hover:underline">
+                  Mot de passe oublié ?
+                </Link>
               </div>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-sm flex items-center pointer-events-none">

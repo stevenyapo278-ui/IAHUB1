@@ -36,6 +36,14 @@ const ANNOUNCE_MESSAGES = {
     'pt-PT': 'Um ticket precisa de revisão humana, a IA não tem certeza da decisão a tomar.',
     'ar-SA': 'تذكرة تحتاج إلى مراجعة بشرية، الذكاء الاصطناعي غير متأكد من القرار المناسب.',
   },
+  draftsOverdue: {
+    'fr-FR': "Rappel : une réponse IA attend toujours votre validation.",
+    'en-US': 'Reminder: an AI reply is still waiting for your approval.',
+    'es-ES': 'Recordatorio: una respuesta de la IA sigue esperando su validación.',
+    'de-DE': 'Erinnerung: Eine KI-Antwort wartet immer noch auf Ihre Genehmigung.',
+    'pt-PT': 'Lembrete: uma resposta da IA ainda está à espera da sua validação.',
+    'ar-SA': 'تذكير: لا يزال هناك رد من الذكاء الاصطناعي في انتظار موافقتك.',
+  },
 };
 
 const colors = {
@@ -104,10 +112,27 @@ export default function Dashboard() {
   const [needsReview, setNeedsReview] = useState([]);
   const [error, setError] = useState('');
   const autoSendAiEmailsRef = useRef(false);
+  const draftReminderDelayMinutesRef = useRef(30);
+  // Brouillons déjà signalés "en retard" lors du cycle précédent — sert à ne ré-annoncer
+  // que les brouillons qui viennent juste de dépasser le délai, pas à chaque rafraîchissement.
+  const overdueAnnouncedRef = useRef(new Set());
 
   function loadPendingAiDrafts() {
     api.get('/dashboard/pending-ai-drafts').then(({ data }) => {
       announceIfNew('drafts', data.map((d) => d.id));
+
+      const delayMs = draftReminderDelayMinutesRef.current * 60 * 1000;
+      const now = Date.now();
+      const overdueIds = data.filter((d) => now - new Date(d.createdAt).getTime() >= delayMs).map((d) => d.id);
+      const stillPendingIds = new Set(data.map((d) => d.id));
+      // Un brouillon qui n'est plus en attente (traité) sort du suivi, pour pouvoir être réannoncé
+      // s'il revenait un jour avec le même id (cas improbable mais évite une fuite mémoire du Set).
+      for (const id of overdueAnnouncedRef.current) {
+        if (!stillPendingIds.has(id)) overdueAnnouncedRef.current.delete(id);
+      }
+      announceIfNew('draftsOverdue', overdueIds.filter((id) => !overdueAnnouncedRef.current.has(id)));
+      overdueIds.forEach((id) => overdueAnnouncedRef.current.add(id));
+
       setPendingAiDrafts(data);
     }).catch(() => {});
   }
@@ -121,7 +146,7 @@ export default function Dashboard() {
 
   // Annonce vocalement (synthèse vocale du navigateur) uniquement les NOUVEAUX éléments apparus
   // depuis le dernier rafraîchissement, pour ne pas répéter la même alerte toutes les 15s.
-  const seenIdsRef = useRef({ drafts: new Set(), review: new Set() });
+  const seenIdsRef = useRef({ drafts: new Set(), review: new Set(), draftsOverdue: new Set() });
   function announceIfNew(kind, currentIds) {
     const seen = seenIdsRef.current[kind];
     const newOnes = currentIds.filter((id) => !seen.has(id));
@@ -150,7 +175,10 @@ export default function Dashboard() {
     api.get('/dashboard/recent-activity').then(({ data }) => setRecentActivity(data)).catch(() => {});
     api.get('/dashboard/integrations').then(({ data }) => setIntegrations(data)).catch(() => {});
     api.get('/dashboard/technician-performance').then(({ data }) => setTechPerformance(data)).catch(() => {});
-    api.get('/system-settings').then(({ data }) => { autoSendAiEmailsRef.current = !!data.autoSendAiEmails; }).catch(() => {});
+    api.get('/system-settings').then(({ data }) => {
+      autoSendAiEmailsRef.current = !!data.autoSendAiEmails;
+      draftReminderDelayMinutesRef.current = data.draftReminderDelayMinutes || 30;
+    }).catch(() => {});
     loadPendingAiDrafts();
     loadNeedsReview();
   }
@@ -363,11 +391,18 @@ export default function Dashboard() {
             <p className="font-body-sm text-body-sm text-on-surface-variant">Aucune réponse IA en attente.</p>
           )}
           <div className="flex flex-col divide-y divide-outline-variant">
-            {pendingAiDrafts.map((d) => (
-              <div key={d.id} className="py-sm flex flex-col gap-xs">
+            {pendingAiDrafts.map((d) => {
+              const isOverdue = Date.now() - new Date(d.createdAt).getTime() >= draftReminderDelayMinutesRef.current * 60 * 1000;
+              return (
+              <div key={d.id} className={`py-sm flex flex-col gap-xs ${isOverdue ? 'bg-surface-container-low -mx-md px-md border-l-2 border-on-surface' : ''}`}>
                 <div className="flex items-center justify-between">
-                  <div className="font-headline-sm text-headline-sm text-on-surface truncate">
+                  <div className="font-headline-sm text-headline-sm text-on-surface truncate flex items-center gap-xs">
                     {d.ticket ? `#${d.ticket.id} ${d.ticket.title}` : d.subject}
+                    {isOverdue && (
+                      <span className="font-label-md text-label-md text-on-surface bg-surface-container-high border border-outline-variant px-1.5 py-0.5 shrink-0">
+                        En retard
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="font-body-sm text-body-sm text-on-surface-variant">{d.subject}</div>
@@ -436,7 +471,8 @@ export default function Dashboard() {
                   </button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </Panel>
 

@@ -10,6 +10,7 @@ const { processIncomingAttachments } = require('./emailAttachmentProcessor');
 const { stripSignature } = require('./signatureStripper');
 const { logEvent } = require('./ticketEvent');
 const { getSystemSettings } = require('./systemSettings');
+const { tryHandleReminderReply } = require('./draftReplyApproval');
 
 // Selon le réglage "Auto-envoi des emails sans validation humaine" (Paramètres > Automatisation) :
 // envoie directement l'email, ou crée un AiEmailDraft en attente d'approbation comme aujourd'hui.
@@ -49,6 +50,12 @@ async function processMessage(message, account) {
 
   const existing = await prisma.incomingEmail.findUnique({ where: { graphMessageId } });
   if (existing) return existing;
+
+  // Réponse d'un responsable à un email de relance de brouillon ("j'approuve"/"je rejette") —
+  // traité à part, ne doit pas créer de IncomingEmail/ticket (ce n'est pas une demande utilisateur).
+  if (await tryHandleReminderReply({ inReplyTo, bodyPreview })) {
+    return null;
+  }
 
   // Corps nettoyé de la signature/disclaimer, calculé une seule fois ici et réutilisé par toutes
   // les analyses IA en aval (intention, filtrage des images, résumé) pour éviter qu'elles soient
@@ -331,7 +338,11 @@ async function runEmailPipeline() {
   const pollResults = await pollAllAccounts();
   const results = [];
   for (const { account, messages, error } of pollResults) {
-    if (error) { results.push({ accountId: account.id, error }); continue; }
+    if (error) {
+      console.error(`[emailPipeline] Échec polling compte ${account.emailAddress} (id ${account.id}):`, error);
+      results.push({ accountId: account.id, error });
+      continue;
+    }
     for (const message of messages) {
       const result = await processMessage(message, account);
       results.push({ accountId: account.id, emailId: result?.id, status: result?.status });

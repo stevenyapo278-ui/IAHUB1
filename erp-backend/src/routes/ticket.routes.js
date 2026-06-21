@@ -279,7 +279,9 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
         glpiTicketId: before.glpiTicketId,
         ticketTitle: before.title,
         impactedSites: before.impactedSites,
-      }).catch(() => {});
+      }).catch((err) => {
+        console.error(`[ticket.routes] Échec notification résolution incident majeur (ticket ${id}):`, err.message);
+      });
     }
 
     return res.json(ticket);
