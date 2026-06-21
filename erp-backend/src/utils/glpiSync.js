@@ -78,13 +78,14 @@ async function syncGlpiTickets() {
     for (const t of tickets) {
       const existing = await prisma.ticket.findUnique({ where: { glpiTicketId: t.id } });
 
-      // Le statut GLPI 4 ("En attente") est ambigu : il correspond à la fois à PENDING et
-      // WAITING_FOR_USER côté ERP. WAITING_FOR_USER est un statut piloté par l'analyse IA des
-      // réponses email (intentAnalyzer) — on ne doit jamais l'écraser au profit de PENDING lors
-      // d'une simple resynchronisation depuis GLPI, sinon le ticket sort silencieusement de la
-      // file de revue humaine.
+      // WAITING_FOR_USER est un statut piloté côté ERP par l'analyse IA des réponses email
+      // (intentAnalyzer, followupEscalation) — il signale qu'un humain doit intervenir (confiance
+      // basse, conversation IA escaladée, etc.), une information que GLPI ne connaît pas. Le statut
+      // brut GLPI ("En cours", "Nouveau"...) ne doit donc jamais l'écraser lors d'une simple
+      // resynchronisation, sinon le ticket sort silencieusement de la file de revue humaine dès le
+      // prochain cycle de sync — seule une résolution/clôture réelle côté GLPI doit y mettre fin.
       const glpiStatus = GLPI_STATUS_MAP[t.status] || 'NEW';
-      const status = (glpiStatus === 'PENDING' && existing?.status === 'WAITING_FOR_USER')
+      const status = (existing?.status === 'WAITING_FOR_USER' && glpiStatus !== 'SOLVED' && glpiStatus !== 'CLOSED')
         ? 'WAITING_FOR_USER'
         : glpiStatus;
 

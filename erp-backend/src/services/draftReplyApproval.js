@@ -76,4 +76,4 @@ async function tryHandleReminderReply({ inReplyTo, bodyPreview }) {
   return true;
 }
 
-module.exports = { tryHandleReminderReply };
+module.exports = { tryHandleReminderReply, detectDecision };

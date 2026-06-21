@@ -50,6 +50,9 @@ enum TicketEventType {
   AI_LIFETIME_EXCEEDED
   AI_SPLIT_LIMIT_REACHED
   NEEDS_HUMAN_REVIEW
+  GLPI_SYNC_FAILED
+  AI_CONVERSATION_ESCALATED
+  AI_FOLLOWUP_DRAFT_GENERATED
 }
 
 enum TicketPriority {
@@ -131,6 +134,7 @@ model Team {
   name      String   @unique
   category  String?
   glpiGroupId Int?   @unique // identifiant du groupe correspondant dans GLPI
+  groupEmail  String? // adresse email de groupe (ex: reseau@entreprise.com), destinataire du récapitulatif quotidien des tickets de cette équipe
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -194,6 +198,7 @@ model Ticket {
   // Garde-fous sur l'analyse d'intention automatique des réponses email
   splitCount            Int       @default(0) // nombre de tickets déjà créés par scission depuis ce ticket
   firstOpenedAt         DateTime? // date du tout premier passage à OPEN, pour plafonner la durée de vie totale
+  aiExchangeCount       Int       @default(0) // nombre de réponses de suivi déjà générées par l'IA sur la conversation en cours, remis à 0 à la résolution — au-delà du seuil (followupEscalation.js), on escalade systématiquement vers un humain
 
   // Incident majeur — regroupement multi-sites
   isMajorIncident Boolean  @default(false)
@@ -297,7 +302,27 @@ model SystemSettings {
   signatureLogoUrl    String? @db.Text
   signatureLogoHeight Int     @default(60) // hauteur d'affichage du logo dans l'email, en pixels
 
+  // Récapitulatif quotidien des tickets ouverts (Paramètres > Automatisation > Récapitulatif quotidien).
+  dailySummaryEnabled   Boolean  @default(false)
+  dailySummaryTime      String   @default("18:00") // heure locale au format "HH:mm", vérifiée chaque minute par dailySummaryScheduler
+  dailySummaryRecipients String[] @default([])      // liste libre d'adresses email, indépendante des comptes ERP
+  dailySummaryLastSentDate String? // date "YYYY-MM-DD" du dernier envoi, pour ne déclencher qu'une fois par jour
+
   updatedAt              DateTime @updatedAt
+}
+
+// Suivi de santé de chaque tâche automatique planifiée (sync GLPI, pipeline email, relances...) —
+// permet de détecter et d'alerter en cas de panne silencieuse prolongée, au lieu de ne laisser
+// la trace que dans les logs serveur que personne ne consulte en routine.
+model SchedulerHealth {
+  id                    Int      @id @default(autoincrement())
+  name                  String   @unique // identifiant technique de la tâche, ex: "tickets GLPI"
+  consecutiveFailures   Int      @default(0)
+  lastError             String?  @db.Text
+  lastFailureAt         DateTime?
+  lastSuccessAt         DateTime?
+  alertSentAt           DateTime? // dernière fois qu'une alerte a été envoyée pour cette série d'échecs — évite de spammer à chaque cycle tant que la panne persiste
+  updatedAt             DateTime @updatedAt
 }
 
 // Fournisseur d'IA (OpenAI, Anthropic, Google Gemini, NVIDIA, Mistral, etc.)
@@ -498,6 +523,16 @@ model AiEmailDraft {
   ccRecipients    String[]       @default([])
   subject         String
   proposedContent String
+
+  draftKind       String         @default("ACKNOWLEDGEMENT") // ACKNOWLEDGEMENT | KNOWN_INCIDENT | CONVERSATION_FOLLOWUP
+  exchangeTurn    Int? // numéro du tour de conversation (copie de Ticket.aiExchangeCount), uniquement pour CONVERSATION_FOLLOWUP
+
+  // Id Outlook du message reçu auquel cette réponse fait suite (TicketMessage.outlookMessageId) —
+  // utilisé à l'envoi (emailSender.sendEmail) pour répondre dans le même fil de conversation côté
+  // destinataire au lieu de créer un nouvel email visuellement déconnecté. Vide pour les brouillons
+  // qui ne répondent à aucun message précis (ex: accusé de réception initial).
+  inReplyToGraphMessageId String?
+  outlookConversationId   String?
 
   status          ApprovalStatus @default(PENDING)
   reviewedBy      User?          @relation(fields: [reviewedById], references: [id])

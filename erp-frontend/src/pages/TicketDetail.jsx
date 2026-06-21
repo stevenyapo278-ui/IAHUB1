@@ -69,6 +69,7 @@ export default function TicketDetail() {
   const [error, setError] = useState('');
   const [teams, setTeams] = useState([]);
   const [users, setUsers] = useState([]);
+  const [syncFailures, setSyncFailures] = useState([]);
 
   const canManage = user?.role === 'ADMIN' || user?.role === 'TECHNICIAN';
 
@@ -77,6 +78,12 @@ export default function TicketDetail() {
       .get(`/tickets/${id}`)
       .then(({ data }) => setTicket(data))
       .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
+    // Échecs de synchro GLPI (création, mise à jour, suivi, pièce jointe) — invisibles autrement,
+    // voir GLPI_SYNC_FAILED dans erp-backend/src/routes/ticket.routes.js.
+    api
+      .get(`/tickets/${id}/events`)
+      .then(({ data }) => setSyncFailures(data.filter((e) => e.type === 'GLPI_SYNC_FAILED')))
+      .catch(() => {});
   }
 
   useEffect(load, [id]);
@@ -189,6 +196,22 @@ export default function TicketDetail() {
         <span className="material-symbols-outlined text-[16px]">chevron_right</span>
         <span className="font-headline-sm text-headline-sm text-on-surface">#{ticket.id}</span>
       </div>
+
+      {syncFailures.length > 0 && (
+        <div className="border border-error text-error bg-error-container/30 rounded-none p-md mb-lg flex items-start gap-sm">
+          <span className="material-symbols-outlined">sync_problem</span>
+          <div>
+            <div className="font-headline-sm text-headline-sm">Synchronisation GLPI incomplète</div>
+            <ul className="font-body-sm text-body-sm mt-1 list-disc pl-md">
+              {syncFailures.map((e) => (
+                <li key={e.id}>
+                  {new Date(e.createdAt).toLocaleString('fr-FR')} — {e.payload?.action || 'action'} : {e.payload?.error || 'erreur inconnue'}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-lg">
         <div className="xl:col-span-8 flex flex-col gap-lg">

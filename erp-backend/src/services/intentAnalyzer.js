@@ -83,6 +83,7 @@ async function applyIntentActions(ticketId, { intent, confidence, newIssueSummar
     if (canCloseAutomatically) {
       updates.status = 'SOLVED';
       updates.solvedAt = new Date();
+      updates.aiExchangeCount = 0; // conversation résolue : repart à zéro pour un futur fil sur ce ticket
     } else {
       // Confiance insuffisante pour fermer automatiquement : on laisse la main à un humain.
       updates.status = 'WAITING_FOR_USER';

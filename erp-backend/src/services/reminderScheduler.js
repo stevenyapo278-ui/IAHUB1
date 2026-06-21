@@ -9,8 +9,13 @@ function daysSince(date) {
 
 // Parcourt tous les tickets WAITING_FOR_USER et envoie les relances selon la config
 async function runReminderScheduler() {
-  const config = await prisma.reminderConfig.findFirst({ where: { isActive: true } });
-  const delays = config || { firstReminderDays: 2, secondReminderDays: 5, preCloseDays: 10, autoCloseDays: 15 };
+  const anyConfig = await prisma.reminderConfig.findFirst();
+  // Si une config existe mais a été explicitement désactivée (isActive=false), on ne doit PAS
+  // retomber sur les délais par défaut : ce serait réactiver silencieusement les relances/clôtures
+  // auto qu'un admin a justement voulu désactiver. On ne tourne avec les défauts que si aucune
+  // configuration n'existe encore en base (première installation).
+  if (anyConfig && !anyConfig.isActive) return [];
+  const delays = anyConfig || { firstReminderDays: 2, secondReminderDays: 5, preCloseDays: 10, autoCloseDays: 15 };
 
   const tickets = await prisma.ticket.findMany({
     where: { status: 'WAITING_FOR_USER', sourceEmail: { not: null } },

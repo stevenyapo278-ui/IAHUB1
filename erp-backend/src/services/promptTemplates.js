@@ -116,6 +116,44 @@ Retourne UNIQUEMENT ce JSON :
   "keywords": ["mot1", "mot2", "mot3"]
 }`,
   },
+  dailySummaryInsight: {
+    label: 'Résumé en langage naturel du récapitulatif quotidien des tickets ouverts',
+    template: `Tu es un responsable support IT qui rédige un résumé bref pour son équipe de direction.
+
+Voici la liste des tickets actuellement ouverts (priorité, statut, technicien assigné, demandeur, âge en jours) :
+{{ticketsList}}
+
+Rédige un résumé en 2 à 3 phrases maximum, en français, qui met en avant ce qui demande une action immédiate : tickets critiques (P1/P2), tickets non assignés, tickets sans réponse depuis plusieurs jours. Ton direct et factuel, pas de formules de politesse, pas de markdown.
+
+Réponds UNIQUEMENT avec un objet JSON strict, au format :
+{"insight": "le résumé en 2-3 phrases"}`,
+  },
+  generateFollowupReply: {
+    label: "Génération d'une réponse de suivi sur un ticket (conversation IA multi-tours)",
+    template: `Tu es un agent de support IT qui répond par email à un utilisateur sur un ticket déjà ouvert.
+
+Contexte du ticket :
+- Titre : {{ticketTitle}}
+- Résumé : {{ticketSummary}}
+
+Historique complet de la conversation (du plus ancien au plus récent) :
+{{historyText}}
+
+Extraits de la base de connaissances pouvant être pertinents (peuvent être vides ou non pertinents, ignore-les si c'est le cas) :
+{{knowledgeResults}}
+
+Dernier message de l'utilisateur :
+{{lastMessage}}
+
+Rédige une réponse utile et précise si tu disposes d'assez d'éléments pour aider l'utilisateur. Si tu n'as pas assez d'informations ou que la base de connaissances ne couvre pas ce cas, indique-le honnêtement plutôt que d'inventer une solution.
+
+Règles strictes de format :
+- Réponse courte : 1 à 2 paragraphes maximum, va droit au but, pas de répétition de ce que l'utilisateur a déjà dit.
+- N'inclus JAMAIS de formule de politesse ("Bonjour", "Cordialement"...), de signature, ni le nom de l'expéditeur ou du destinataire — ils sont ajoutés automatiquement par le système. Ta réponse doit commencer directement par le contenu utile.
+
+Réponds UNIQUEMENT avec un objet JSON strict, sans markdown, au format :
+{"canAnswer": true ou false, "replyHtml": "réponse en HTML simple (paragraphes, listes), sans formule de politesse ni signature, vide si canAnswer est false", "usedKnowledgeChunkIds": [identifiants numériques des extraits de connaissance réellement utilisés], "confidence": 0.0 à 1.0}`,
+  },
 };
 
 // Remplace {{nomVariable}} par la valeur correspondante dans vars. Une clé absente de vars est

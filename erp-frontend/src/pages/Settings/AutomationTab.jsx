@@ -96,6 +96,12 @@ export default function AutomationTab() {
   const [ackMessageDraft, setAckMessageDraft] = useState('');
   const [signatureDraft, setSignatureDraft] = useState('');
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [reminderConfig, setReminderConfig] = useState(null);
+  const [reminderSaving, setReminderSaving] = useState(false);
+  const [summaryRecipientInput, setSummaryRecipientInput] = useState('');
+  const [testingSummary, setTestingSummary] = useState(false);
+  const [summaryTestResult, setSummaryTestResult] = useState(null);
+  const [schedulerHealth, setSchedulerHealth] = useState(null);
 
   function toggleVoiceAlerts(value) {
     setVoiceAlertEnabled(value);
@@ -113,9 +119,60 @@ export default function AutomationTab() {
       setAckMessageDraft(data.acknowledgementMessage || '');
       setSignatureDraft(data.emailSignature || '');
     }).catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
+    api.get('/reminders/config').then(({ data }) => setReminderConfig(data)).catch(() => {});
+    api.get('/system-settings/scheduler-health').then(({ data }) => setSchedulerHealth(data)).catch(() => {});
   }
 
   useEffect(load, []);
+  // Rafraîchit l'état des tâches automatiques toutes les 30s pour refléter une panne/résolution
+  // sans devoir recharger la page — léger, une seule petite requête.
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      api.get('/system-settings/scheduler-health').then(({ data }) => setSchedulerHealth(data)).catch(() => {});
+    }, 30000);
+    return () => clearInterval(intervalId);
+  }, []);
+
+  async function updateReminderConfig(patch) {
+    setReminderSaving(true);
+    setError('');
+    try {
+      const { data } = await api.put('/reminders/config', { ...reminderConfig, ...patch });
+      setReminderConfig(data);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur lors de la mise à jour');
+    } finally {
+      setReminderSaving(false);
+    }
+  }
+
+  function addSummaryRecipient() {
+    const value = summaryRecipientInput.trim();
+    if (!value) return;
+    const current = settings.dailySummaryRecipients || [];
+    if (!current.includes(value)) {
+      updateSetting('dailySummaryRecipients', [...current, value]);
+    }
+    setSummaryRecipientInput('');
+  }
+
+  function removeSummaryRecipient(email) {
+    updateSetting('dailySummaryRecipients', (settings.dailySummaryRecipients || []).filter((e) => e !== email));
+  }
+
+  async function testDailySummary() {
+    setTestingSummary(true);
+    setSummaryTestResult(null);
+    setError('');
+    try {
+      const { data } = await api.post('/system-settings/daily-summary/test');
+      setSummaryTestResult(data);
+    } catch (err) {
+      setError(err.response?.data?.error || "Erreur lors de l'envoi de test");
+    } finally {
+      setTestingSummary(false);
+    }
+  }
 
   async function updateSetting(key, value) {
     setSaving(true);
@@ -165,6 +222,22 @@ export default function AutomationTab() {
       </p>
 
       {error && <div className="border border-outline-variant rounded-none p-md text-on-surface bg-surface-container-low">{error}</div>}
+
+      {schedulerHealth && schedulerHealth.some((s) => s.consecutiveFailures >= 3) && (
+        <div className="border border-error text-error bg-error-container/30 rounded-none p-md flex items-start gap-sm">
+          <span className="material-symbols-outlined">sync_problem</span>
+          <div>
+            <div className="font-headline-sm text-headline-sm">Tâches automatiques en panne</div>
+            <ul className="font-body-sm text-body-sm mt-1 list-disc pl-md">
+              {schedulerHealth.filter((s) => s.consecutiveFailures >= 3).map((s) => (
+                <li key={s.id}>
+                  <strong>{s.name}</strong> — {s.consecutiveFailures} échecs consécutifs depuis {new Date(s.lastFailureAt).toLocaleString('fr-FR')} : {s.lastError}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
 
       <SettingRow
         title="Auto-envoi des emails IA"
@@ -325,6 +398,148 @@ export default function AutomationTab() {
             max={1440}
             unit="minutes"
           />
+        </div>
+      </div>
+
+      {reminderConfig && (
+        <div className="mt-md">
+          <h3 className="font-headline-sm text-headline-sm text-on-surface mb-1">Relance des tickets en attente de réponse</h3>
+          <p className="font-body-sm text-body-sm text-on-surface-variant mb-md">
+            Pour les tickets créés par email et en attente de réponse du demandeur (statut « En attente
+            utilisateur ») : relances automatiques, puis clôture automatique si toujours sans réponse.
+            Vérifié toutes les heures.
+          </p>
+          <div className="flex flex-col gap-md">
+            <SettingRow
+              title="Relance et clôture automatique des tickets en attente"
+              description="Désactiver arrête uniquement les relances/clôtures automatiques — les tickets restent ouverts indéfiniment jusqu'à action manuelle."
+              checked={reminderConfig.isActive}
+              onChange={(v) => updateReminderConfig({ isActive: v })}
+              disabled={reminderSaving}
+            />
+            <IntervalRow
+              title="Première relance"
+              description="Délai après la dernière réponse du demandeur avant la première relance."
+              value={reminderConfig.firstReminderDays}
+              onChange={(v) => updateReminderConfig({ firstReminderDays: v })}
+              disabled={reminderSaving || !reminderConfig.isActive}
+              max={60}
+              unit="jours"
+            />
+            <IntervalRow
+              title="Deuxième relance"
+              description="Délai avant la deuxième relance, si toujours sans réponse."
+              value={reminderConfig.secondReminderDays}
+              onChange={(v) => updateReminderConfig({ secondReminderDays: v })}
+              disabled={reminderSaving || !reminderConfig.isActive}
+              max={60}
+              unit="jours"
+            />
+            <IntervalRow
+              title="Avertissement avant clôture"
+              description="Délai avant un dernier message prévenant que le ticket sera clôturé automatiquement."
+              value={reminderConfig.preCloseDays}
+              onChange={(v) => updateReminderConfig({ preCloseDays: v })}
+              disabled={reminderSaving || !reminderConfig.isActive}
+              max={90}
+              unit="jours"
+            />
+            <IntervalRow
+              title="Clôture automatique"
+              description="Délai après lequel le ticket est définitivement clôturé sans réponse du demandeur."
+              value={reminderConfig.autoCloseDays}
+              onChange={(v) => updateReminderConfig({ autoCloseDays: v })}
+              disabled={reminderSaving || !reminderConfig.isActive}
+              max={120}
+              unit="jours"
+            />
+          </div>
+        </div>
+      )}
+
+      <div className="mt-md">
+        <h3 className="font-headline-sm text-headline-sm text-on-surface mb-1">Récapitulatif quotidien des tickets ouverts</h3>
+        <p className="font-body-sm text-body-sm text-on-surface-variant mb-md">
+          Envoie chaque jour à l'heure choisie un email listant tous les tickets ouverts (répartition par
+          priorité, statut, assignation, ancienneté) aux adresses email configurées ci-dessous.
+        </p>
+        <div className="flex flex-col gap-md">
+          <SettingRow
+            title="Récapitulatif quotidien"
+            description="Envoie automatiquement le récapitulatif tous les jours à l'heure configurée."
+            checked={settings.dailySummaryEnabled}
+            onChange={(v) => updateSetting('dailySummaryEnabled', v)}
+            disabled={saving}
+          />
+          <div className="flex items-center justify-between gap-lg p-lg border border-outline-variant bg-surface-container-lowest">
+            <div>
+              <div className="font-headline-sm text-headline-sm text-on-surface">Heure d'envoi</div>
+              <p className="font-body-sm text-body-sm text-on-surface-variant mt-1">Heure locale du serveur, au format 24h.</p>
+            </div>
+            <input
+              type="time"
+              value={settings.dailySummaryTime}
+              onChange={(e) => updateSetting('dailySummaryTime', e.target.value)}
+              disabled={saving || !settings.dailySummaryEnabled}
+              className="border border-outline-variant rounded-none px-3 py-2 text-body-sm text-on-surface bg-surface disabled:opacity-50"
+            />
+          </div>
+          <div className="flex flex-col gap-sm p-lg border border-outline-variant bg-surface-container-lowest">
+            <span className="font-label-sm text-label-sm text-on-surface-variant uppercase">Destinataires</span>
+            <div className="flex items-center gap-sm">
+              <input
+                type="email"
+                value={summaryRecipientInput}
+                onChange={(e) => setSummaryRecipientInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addSummaryRecipient(); } }}
+                placeholder="adresse@exemple.com"
+                disabled={saving}
+                className="flex-1 border border-outline-variant rounded-none px-3 py-2 text-body-sm text-on-surface bg-surface disabled:opacity-50"
+              />
+              <button
+                type="button"
+                onClick={addSummaryRecipient}
+                disabled={saving}
+                className="px-3 py-2 border border-outline-variant text-on-surface-variant hover:bg-surface-container-high transition-colors disabled:opacity-50"
+              >
+                Ajouter
+              </button>
+            </div>
+            {(settings.dailySummaryRecipients || []).length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {settings.dailySummaryRecipients.map((email) => (
+                  <span key={email} className="flex items-center gap-1 px-2 py-0.5 border border-outline-variant text-on-surface-variant text-xs">
+                    {email}
+                    <button onClick={() => removeSummaryRecipient(email)} disabled={saving} className="hover:text-error">
+                      <span className="material-symbols-outlined text-[12px]">close</span>
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="flex flex-col gap-sm p-lg border border-outline-variant bg-surface-container-lowest">
+            <div className="flex items-center justify-between">
+              <span className="font-body-sm text-body-sm text-on-surface-variant">
+                Envoyer un récapitulatif de test maintenant, sans attendre l'heure configurée.
+              </span>
+              <button
+                type="button"
+                onClick={testDailySummary}
+                disabled={testingSummary || (settings.dailySummaryRecipients || []).length === 0}
+                className="px-3 py-2 border border-outline-variant text-on-surface-variant hover:bg-surface-container-high transition-colors disabled:opacity-50 shrink-0"
+              >
+                {testingSummary ? 'Envoi...' : 'Tester maintenant'}
+              </button>
+            </div>
+            {summaryTestResult && (
+              <p className="font-body-sm text-body-sm text-on-surface-variant">
+                {summaryTestResult.sent
+                  ? `Envoyé : ${summaryTestResult.ticketCount} ticket(s) à ${summaryTestResult.recipientCount} destinataire(s).`
+                  : summaryTestResult.reason}
+              </p>
+            )}
+          </div>
         </div>
       </div>
 

@@ -4,6 +4,7 @@ import api from '../api/client';
 import ConfirmDialog from '../components/ConfirmDialog';
 
 const STATUS_OPTIONS = ['PENDING', 'APPROVED', 'REJECTED'];
+const MAX_AI_EXCHANGES_PER_TICKET = 3; // doit rester aligné avec followupEscalation.js (backend)
 
 export default function AiEmailDrafts() {
   const [drafts, setDrafts] = useState([]);
@@ -142,7 +143,14 @@ export default function AiEmailDrafts() {
                 onClick={() => openDraft(d)}
                 className={`w-full text-left p-md hover:bg-surface-container-low transition-colors ${selected?.id === d.id ? 'bg-surface-container-low' : ''}`}
               >
-                <div className="font-headline-sm text-headline-sm text-on-surface truncate">{d.subject}</div>
+                <div className="font-headline-sm text-headline-sm text-on-surface truncate flex items-center gap-2">
+                  <span className="truncate">{d.subject}</span>
+                  {d.draftKind === 'CONVERSATION_FOLLOWUP' && (
+                    <span className="shrink-0 px-1.5 py-0.5 border border-outline-variant text-on-surface-variant text-[10px] font-mono-sm uppercase">
+                      Tour {d.exchangeTurn}/{MAX_AI_EXCHANGES_PER_TICKET}
+                    </span>
+                  )}
+                </div>
                 <div className="text-body-sm text-on-surface-variant truncate">À : {d.recipientEmail}</div>
                 {d.ccRecipients?.length > 0 && (
                   <div className="text-body-sm text-on-surface-variant truncate">Cc : {d.ccRecipients.join(', ')}</div>
@@ -210,6 +218,11 @@ export default function AiEmailDrafts() {
                 <span className="font-label-md text-label-md text-on-surface-variant uppercase">Sujet</span>
                 <p className="text-on-surface font-body-sm text-body-sm">{selected.subject}</p>
               </div>
+              {selected.draftKind === 'CONVERSATION_FOLLOWUP' && (
+                <div className="border border-outline-variant px-3 py-2 text-body-sm text-on-surface-variant">
+                  Réponse de suivi générée par l'IA — tour {selected.exchangeTurn}/{MAX_AI_EXCHANGES_PER_TICKET} de la conversation sur ce ticket.
+                </div>
+              )}
               {selected.ticket && (
                 <Link to={`/tickets/${selected.ticket.id}`} className="text-on-surface hover:underline text-body-sm font-body-sm">
                   Voir le ticket #{selected.ticket.id}

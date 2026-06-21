@@ -6,7 +6,9 @@ import ConfirmDialog from '../components/ConfirmDialog';
 export default function Teams() {
   const { user } = useAuth();
   const [teams, setTeams] = useState([]);
-  const [form, setForm] = useState({ name: '', category: '' });
+  const [form, setForm] = useState({ name: '', category: '', groupEmail: '' });
+  const [groupEmailDraft, setGroupEmailDraft] = useState('');
+  const [savingGroupEmail, setSavingGroupEmail] = useState(false);
   const [error, setError] = useState('');
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState('');
@@ -27,6 +29,7 @@ export default function Teams() {
     try {
       const { data } = await api.get(`/teams/${teamId}`);
       setOpenTeamDetail(data);
+      setGroupEmailDraft(data.groupEmail || '');
     } catch (err) {
       setError(err.response?.data?.error || "Erreur lors du chargement de l'équipe");
     } finally {
@@ -48,7 +51,7 @@ export default function Teams() {
     setError('');
     try {
       await api.post('/teams', form);
-      setForm({ name: '', category: '' });
+      setForm({ name: '', category: '', groupEmail: '' });
       load();
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la création');
@@ -57,6 +60,20 @@ export default function Teams() {
 
   function askDelete(id) {
     setConfirmDeleteId(id);
+  }
+
+  async function saveGroupEmail(teamId) {
+    setSavingGroupEmail(true);
+    setError('');
+    try {
+      await api.patch(`/teams/${teamId}`, { groupEmail: groupEmailDraft });
+      setOpenTeamDetail((prev) => ({ ...prev, groupEmail: groupEmailDraft }));
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || "Erreur lors de l'enregistrement");
+    } finally {
+      setSavingGroupEmail(false);
+    }
   }
 
   async function handleDelete() {
@@ -210,6 +227,28 @@ export default function Teams() {
                         {loadingDetail && <p className="text-on-surface-variant font-body-sm text-body-sm">Chargement...</p>}
                         {!loadingDetail && openTeamDetail && (
                           <div className="flex flex-col gap-2">
+                            {user?.role === 'ADMIN' && (
+                              <div className="flex items-center gap-sm pb-md border-b border-outline-variant mb-2">
+                                <span className="font-label-md text-label-md text-on-surface-variant uppercase shrink-0">
+                                  Email de groupe
+                                </span>
+                                <input
+                                  type="email"
+                                  className="flex-1 h-9 px-sm rounded-none border border-outline-variant bg-surface focus:outline-none focus:border-on-surface font-body-sm text-body-sm text-on-surface"
+                                  placeholder="ex: reseau@entreprise.com"
+                                  value={groupEmailDraft}
+                                  onChange={(e) => setGroupEmailDraft(e.target.value)}
+                                  disabled={savingGroupEmail}
+                                />
+                                <button
+                                  onClick={() => saveGroupEmail(t.id)}
+                                  disabled={savingGroupEmail || groupEmailDraft === (openTeamDetail.groupEmail || '')}
+                                  className="px-3 py-2 border border-outline-variant text-on-surface-variant hover:bg-surface-container-high transition-colors disabled:opacity-50 shrink-0"
+                                >
+                                  Enregistrer
+                                </button>
+                              </div>
+                            )}
                             <span className="font-label-md text-label-md text-on-surface-variant uppercase">
                               Charge active par technicien (du moins au plus chargé)
                             </span>
@@ -275,6 +314,19 @@ export default function Teams() {
                     value={form.category}
                     onChange={(e) => setForm({ ...form, category: e.target.value })}
                   />
+                </div>
+                <div>
+                  <label className="block font-label-md text-label-md text-on-surface mb-xs">Email de groupe</label>
+                  <input
+                    type="email"
+                    className="w-full h-10 px-sm rounded-none border border-outline-variant bg-surface focus:outline-none focus:border-on-surface font-body-sm text-body-sm text-on-surface"
+                    placeholder="ex: reseau@entreprise.com"
+                    value={form.groupEmail}
+                    onChange={(e) => setForm({ ...form, groupEmail: e.target.value })}
+                  />
+                  <p className="font-body-sm text-body-sm text-on-surface-variant mt-1">
+                    Reçoit le récapitulatif quotidien des tickets de cette équipe.
+                  </p>
                 </div>
                 <div className="pt-md mt-md border-t border-outline-variant flex justify-end">
                   <button

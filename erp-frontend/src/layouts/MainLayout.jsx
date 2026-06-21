@@ -2,6 +2,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import ForcePasswordChange from '../components/ForcePasswordChange';
+import { useVoiceAlerts } from '../hooks/useVoiceAlerts';
 
 // permission: null = visible à tout utilisateur connecté, quel que soit son rôle/groupe (ex:
 // Dashboard, Tickets, Boîte mail — jamais masqué). Sinon, le lien n'apparaît que si
@@ -22,6 +23,9 @@ const navItems = [
 export default function MainLayout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  // Tourne en arrière-plan sur toutes les pages (pas seulement le Dashboard) tant qu'un utilisateur
+  // est connecté — sinon l'alerte vocale ne se déclencherait que pendant que cette page est ouverte.
+  useVoiceAlerts();
 
   function handleLogout() {
     logout();

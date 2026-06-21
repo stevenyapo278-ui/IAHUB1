@@ -1,0 +1,5 @@
+DO $$ BEGIN
+  ALTER TYPE "TicketEventType" ADD VALUE IF NOT EXISTS 'GLPI_SYNC_FAILED';
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;

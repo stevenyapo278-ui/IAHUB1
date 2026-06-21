@@ -5,6 +5,8 @@ const { createTicketFromEmail, addGlpiFollowup } = require('./glpiTicketCreator'
 const { findExistingTicket } = require('./conversationMatcher');
 const { findSimilarOpenTicket, attachSiteToTicket, saveTicketEmbedding } = require('./similarIncidentDetector');
 const { analyzeIntent, applyIntentActions } = require('./intentAnalyzer');
+const { decideFollowupAction } = require('./followupEscalation');
+const { generateFollowupReply } = require('./followupReplyGenerator');
 const { buildAcknowledgementHtml, buildKnownIncidentNotificationHtml, sendEmail, getEmailSignature } = require('./emailSender');
 const { processIncomingAttachments } = require('./emailAttachmentProcessor');
 const { stripSignature } = require('./signatureStripper');
@@ -14,14 +16,14 @@ const { tryHandleReminderReply } = require('./draftReplyApproval');
 
 // Selon le réglage "Auto-envoi des emails sans validation humaine" (Paramètres > Automatisation) :
 // envoie directement l'email, ou crée un AiEmailDraft en attente d'approbation comme aujourd'hui.
-async function dispatchOrQueueEmail({ ticketId, glpiTicketId, recipientEmail, ccRecipients, subject, html, draftType }) {
+async function dispatchOrQueueEmail({ ticketId, glpiTicketId, recipientEmail, ccRecipients, subject, html, draftType, inReplyToGraphMessageId, outlookConversationId }) {
   const settings = await getSystemSettings();
   if (settings.autoSendAiEmails) {
-    await sendEmail({ ticketId, to: recipientEmail, cc: ccRecipients, subject, bodyHtml: html, saveAsMessage: true });
+    await sendEmail({ ticketId, to: recipientEmail, cc: ccRecipients, subject, bodyHtml: html, saveAsMessage: true, inReplyToGraphMessageId, conversationId: outlookConversationId });
     await logEvent(ticketId, 'EMAIL_SENT', 'AI', { to: recipientEmail, cc: ccRecipients, subject, autoSent: true });
   } else {
     await prisma.aiEmailDraft.create({
-      data: { ticketId, glpiTicketId, recipientEmail, ccRecipients, subject, proposedContent: html },
+      data: { ticketId, glpiTicketId, recipientEmail, ccRecipients, subject, proposedContent: html, inReplyToGraphMessageId, outlookConversationId },
     });
     await logEvent(ticketId, 'AI_DRAFT_GENERATED', 'AI', { type: draftType });
   }
@@ -143,6 +145,61 @@ async function processMessage(message, account) {
         originalBody: bodyPreview, originalSubject: subject,
       });
 
+      // Conversation IA multi-tours : tente de répondre directement à l'utilisateur sur les emails
+      // de suivi (au-delà du simple changement de statut ci-dessus), avec validation humaine
+      // systématique (AiEmailDraft PENDING) et escalade automatique si la conversation tourne en
+      // rond (followupEscalation.js — seuil de tours prioritaire sur la confiance).
+      if (!intentResult.isAutoReply) {
+        const ticketForFollowup = await prisma.ticket.findUnique({ where: { id: match.ticketId } });
+        const followupDecision = decideFollowupAction({
+          intent: intentResult.intent,
+          confidence: intentResult.confidence,
+          aiExchangeCount: ticketForFollowup?.aiExchangeCount || 0,
+        });
+
+        if (followupDecision.action === 'ESCALATE') {
+          await prisma.ticket.update({ where: { id: match.ticketId }, data: { status: 'WAITING_FOR_USER' } });
+          await logEvent(match.ticketId, 'AI_CONVERSATION_ESCALATED', 'AI', { reason: followupDecision.reason });
+          await logEvent(match.ticketId, 'NEEDS_HUMAN_REVIEW', 'AI', { reason: followupDecision.reason });
+        } else if (followupDecision.action === 'GENERATE_DRAFT') {
+          const replyResult = await generateFollowupReply({
+            ticketId: match.ticketId,
+            lastMessageBody: cleanBody,
+            fromEmail, fromName,
+          });
+
+          if (!replyResult.canAnswer) {
+            await prisma.ticket.update({ where: { id: match.ticketId }, data: { status: 'WAITING_FOR_USER' } });
+            await logEvent(match.ticketId, 'AI_CONVERSATION_ESCALATED', 'AI', { reason: 'GENERATION_FAILED' });
+            await logEvent(match.ticketId, 'NEEDS_HUMAN_REVIEW', 'AI', { reason: 'GENERATION_FAILED' });
+          } else {
+            const nextExchangeTurn = (ticketForFollowup?.aiExchangeCount || 0) + 1;
+            await prisma.ticket.update({ where: { id: match.ticketId }, data: { aiExchangeCount: nextExchangeTurn } });
+
+            const followupHtml = `${replyResult.replyHtml}${await getEmailSignature()}`;
+            await prisma.aiEmailDraft.create({
+              data: {
+                ticketId: match.ticketId,
+                glpiTicketId: ticketForFollowup?.glpiTicketId,
+                recipientEmail: fromEmail,
+                ccRecipients,
+                subject: `[Ticket #${ticketForFollowup?.glpiTicketId}] ${subject}`,
+                proposedContent: followupHtml,
+                draftKind: 'CONVERSATION_FOLLOWUP',
+                exchangeTurn: nextExchangeTurn,
+                inReplyToGraphMessageId: graphMessageId,
+                outlookConversationId: conversationId,
+              },
+            });
+            await logEvent(match.ticketId, 'AI_FOLLOWUP_DRAFT_GENERATED', 'AI', {
+              exchangeTurn: nextExchangeTurn,
+              lowConfidenceIntent: followupDecision.lowConfidenceIntent,
+              confidence: replyResult.confidence,
+            });
+          }
+        }
+      }
+
       // Si réouverture, noter dans GLPI
       if (match.method === 'REOPEN') {
         await logEvent(match.ticketId, 'REOPENED', fromEmail, { conversationId });
@@ -245,6 +302,8 @@ async function processMessage(message, account) {
         subject: `[Ticket #${updatedTicket.glpiTicketId}] ${similarMatch.ticketTitle}`,
         html: knownIncidentHtml,
         draftType: 'KNOWN_INCIDENT',
+        inReplyToGraphMessageId: graphMessageId,
+        outlookConversationId: conversationId,
       });
 
       await prisma.incomingEmail.update({
@@ -327,6 +386,8 @@ async function processMessage(message, account) {
       subject: `[Ticket #${glpiTicketId}] ${subject}`,
       html: acknowledgementHtml,
       draftType: 'ACKNOWLEDGEMENT',
+      inReplyToGraphMessageId: graphMessageId,
+      outlookConversationId: conversationId,
     });
 
     await prisma.incomingEmail.update({

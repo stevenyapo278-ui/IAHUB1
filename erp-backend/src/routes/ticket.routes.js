@@ -6,6 +6,7 @@ const { requirePermission } = require('../middleware/permissions');
 const { getGlpiConfig, glpiInitSession, glpiKillSession } = require('../utils/glpiSync');
 const { notifyMajorIncidentResolved } = require('../services/emailSender');
 const { createGlpiTicket, updateGlpiTicket, deleteGlpiTicket, uploadGlpiAttachment, addGlpiFollowup } = require('../services/glpiTicketCreator');
+const { logEvent } = require('../services/ticketEvent');
 const multer = require('multer');
 
 const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); // 20 Mo max
@@ -134,10 +135,12 @@ router.post(
     const finalRequesterId = canSetRequester && requesterId ? Number(requesterId) : req.user.sub;
 
     let glpiTicketId = null;
+    let glpiCreationError = null;
     try {
       glpiTicketId = await createGlpiTicket({ title, content, priority, category, type, urgency, impact, source });
     } catch (err) {
       console.error('[ticket.routes] Création GLPI échouée:', err.message);
+      glpiCreationError = err.message;
     }
 
     // Seul un ADMIN/TECHNICIAN peut fixer le statut initial (ex: importer un ticket déjà résolu)
@@ -168,6 +171,12 @@ router.post(
       },
     });
 
+    // Ticket créé côté ERP mais introuvable dans GLPI : visible dans le journal du ticket (pas
+    // seulement les logs serveur), pour qu'un humain sache qu'une création manuelle est nécessaire.
+    if (glpiCreationError) {
+      await logEvent(ticket.id, 'GLPI_SYNC_FAILED', 'SYSTEM', { action: 'create', error: glpiCreationError });
+    }
+
     // Si aucun technicien n'a été choisi explicitement à la création, assigne automatiquement
     // le moins chargé de l'équipe correspondant à la catégorie — best-effort, ticket non assigné
     // si la catégorie ne correspond à aucune équipe connue.
@@ -180,6 +189,7 @@ router.post(
         }
       } catch (err) {
         console.error('[ticket.routes] Auto-assignation échouée:', err.message);
+        await logEvent(ticket.id, 'GLPI_SYNC_FAILED', 'SYSTEM', { action: 'auto-assign', error: err.message });
       }
     }
 
@@ -203,6 +213,7 @@ router.post(
         }
       } catch (err) {
         console.error('[ticket.routes] Upload pièce jointe GLPI échoué:', err.message);
+        await logEvent(ticket.id, 'GLPI_SYNC_FAILED', 'SYSTEM', { action: 'upload-attachment', error: err.message, filename: req.file.originalname });
       }
     }
 
@@ -267,6 +278,7 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
         await updateGlpiTicket(before.glpiTicketId, { status, priority, category, type, urgency, impact, assignedToGlpiId, teamGlpiId });
       } catch (err) {
         console.error('[ticket.routes] Mise à jour GLPI échouée:', err.message);
+        await logEvent(id, 'GLPI_SYNC_FAILED', 'SYSTEM', { action: 'update', error: err.message, attemptedChanges: { status, priority, category, type, urgency, impact, assignedToId, teamId } });
       }
     }
 
@@ -357,6 +369,7 @@ router.post('/:id/followups', [body('content').notEmpty()], async (req, res) => 
       await addGlpiFollowup(ticket.glpiTicketId, `${followup.author.fullName} :\n\n${req.body.content}`);
     } catch (err) {
       console.error('[ticket.routes] Échec ajout followup GLPI:', err.message);
+      await logEvent(ticketId, 'GLPI_SYNC_FAILED', 'SYSTEM', { action: 'followup', error: err.message });
     }
   }
 
@@ -370,15 +383,23 @@ router.delete('/:id', requirePermission('tickets.delete', ['ADMIN']), async (req
     const ticket = await prisma.ticket.findUnique({ where: { id }, select: { glpiTicketId: true } });
     if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
 
+    let glpiDeletionError = null;
     if (ticket.glpiTicketId) {
       try {
         await deleteGlpiTicket(ticket.glpiTicketId);
       } catch (err) {
         console.error('[ticket.routes] Suppression GLPI échouée:', err.message);
+        glpiDeletionError = err.message;
       }
     }
 
     await prisma.ticket.delete({ where: { id } });
+    // Le ticket ERP est bien supprimé même si GLPI a échoué (cohérent avec le comportement existant),
+    // mais on prévient explicitement l'admin via la réponse plutôt que de le laisser croire à un
+    // nettoyage complet — un ticket fantôme peut subsister côté GLPI à nettoyer manuellement.
+    if (glpiDeletionError) {
+      return res.status(200).json({ warning: `Ticket supprimé côté ERP, mais la suppression dans GLPI a échoué (#${ticket.glpiTicketId}) : ${glpiDeletionError}. Une suppression manuelle dans GLPI est nécessaire.` });
+    }
     return res.status(204).send();
   } catch (err) {
     return res.status(404).json({ error: 'Ticket introuvable' });
@@ -398,16 +419,23 @@ router.post('/bulk-delete', requirePermission('tickets.bulkDelete', ['ADMIN']), 
     select: { glpiTicketId: true },
   });
 
+  const glpiFailures = [];
   await Promise.all(
     ticketsToDelete
       .filter((t) => t.glpiTicketId)
       .map((t) => deleteGlpiTicket(t.glpiTicketId).catch((err) => {
         console.error('[ticket.routes] Suppression GLPI échouée:', err.message);
+        glpiFailures.push(t.glpiTicketId);
       }))
   );
 
   const result = await prisma.ticket.deleteMany({ where: { id: { in: ids } } });
-  return res.json({ deleted: result.count });
+  // Mêmes tickets fantômes possibles qu'en suppression unitaire (voir DELETE /:id) — on les liste
+  // explicitement plutôt que de les enterrer dans les logs serveur.
+  return res.json({
+    deleted: result.count,
+    ...(glpiFailures.length > 0 ? { glpiDeletionFailedFor: glpiFailures } : {}),
+  });
 });
 
 module.exports = router;

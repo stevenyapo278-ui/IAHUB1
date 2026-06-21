@@ -6,6 +6,7 @@ const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
+const { sendDailySummary } = require('../services/dailySummary');
 
 const router = express.Router();
 router.use(authenticate);
@@ -75,6 +76,10 @@ router.patch(
     body('emailSignature').optional({ nullable: true }).isString().isLength({ max: 2000 }),
     body('signatureLogoUrl').optional({ nullable: true }).isString(),
     body('signatureLogoHeight').optional().isInt({ min: 16, max: 200 }),
+    body('dailySummaryEnabled').optional().isBoolean(),
+    body('dailySummaryTime').optional().matches(/^([01]\d|2[0-3]):([0-5]\d)$/),
+    body('dailySummaryRecipients').optional().isArray(),
+    body('dailySummaryRecipients.*').optional().isEmail(),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -95,10 +100,31 @@ router.patch(
     if (req.body.emailSignature !== undefined) data.emailSignature = req.body.emailSignature || null;
     if (req.body.signatureLogoUrl !== undefined) data.signatureLogoUrl = req.body.signatureLogoUrl || null;
     if (req.body.signatureLogoHeight !== undefined) data.signatureLogoHeight = req.body.signatureLogoHeight;
+    if (req.body.dailySummaryEnabled !== undefined) data.dailySummaryEnabled = req.body.dailySummaryEnabled;
+    if (req.body.dailySummaryTime !== undefined) data.dailySummaryTime = req.body.dailySummaryTime;
+    if (req.body.dailySummaryRecipients !== undefined) data.dailySummaryRecipients = req.body.dailySummaryRecipients;
 
     const updated = await prisma.systemSettings.update({ where: { id: 1 }, data });
     return res.json(updated);
   }
 );
+
+// Déclenche un envoi immédiat du récapitulatif, pour vérifier le rendu/les destinataires sans
+// attendre l'heure configurée.
+router.post('/daily-summary/test', requirePermission('automation.manage', ['ADMIN']), async (req, res) => {
+  try {
+    const result = await sendDailySummary();
+    return res.json(result);
+  } catch (err) {
+    return res.status(502).json({ error: err.message });
+  }
+});
+
+// État de santé de chaque tâche automatique planifiée (sync GLPI, emails, relances...) — voir
+// services/schedulerHealth.js. Permet de voir dans l'UI une panne avant qu'un utilisateur s'en plaigne.
+router.get('/scheduler-health', requirePermission('automation.manage', ['ADMIN']), async (req, res) => {
+  const health = await prisma.schedulerHealth.findMany({ orderBy: { name: 'asc' } });
+  return res.json(health);
+});
 
 module.exports = router;

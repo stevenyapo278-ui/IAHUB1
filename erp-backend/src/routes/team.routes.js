@@ -50,20 +50,21 @@ router.post('/', requirePermission('teams.manage', ['ADMIN']), [body('name').not
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-  const { name, category } = req.body;
+  const { name, category, groupEmail } = req.body;
 
   const existing = await prisma.team.findUnique({ where: { name } });
   if (existing) return res.status(409).json({ error: 'Une équipe avec ce nom existe déjà' });
 
-  const team = await prisma.team.create({ data: { name, category: category || null } });
+  const team = await prisma.team.create({ data: { name, category: category || null, groupEmail: groupEmail || null } });
   return res.status(201).json(team);
 });
 
 router.patch('/:id', requirePermission('teams.manage', ['ADMIN']), async (req, res) => {
-  const { name, category } = req.body;
+  const { name, category, groupEmail } = req.body;
   const data = {};
   if (name !== undefined) data.name = name;
   if (category !== undefined) data.category = category;
+  if (groupEmail !== undefined) data.groupEmail = groupEmail || null;
 
   try {
     const team = await prisma.team.update({ where: { id: Number(req.params.id) }, data });

@@ -33,8 +33,12 @@ function getLogoAttachmentIfReferenced(bodyHtml, signatureLogoUrl) {
   }
 }
 
-// Envoie un email via Microsoft Graph et l'enregistre dans TicketMessage
-async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo = null, conversationId = null, saveAsMessage = true }) {
+// Envoie un email via Microsoft Graph et l'enregistre dans TicketMessage.
+// inReplyToGraphMessageId (id Outlook du dernier message reçu, cf. TicketMessage.outlookMessageId) :
+// si fourni, on répond via /createReply au lieu de créer un message de zéro — sans ça, Outlook
+// affiche la réponse comme un email totalement séparé du fil de conversation de l'utilisateur,
+// au lieu de s'enchaîner avec "RE:" au même endroit que les échanges précédents.
+async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo = null, conversationId = null, inReplyToGraphMessageId = null, saveAsMessage = true }) {
   const account = await prisma.emailAccount.findFirst({
     where: { provider: 'OUTLOOK', isActive: true, isDefault: true, refreshToken: { not: null } },
   });
@@ -43,19 +47,36 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
   const settings = await getSystemSettings();
   const logoAttachment = getLogoAttachmentIfReferenced(bodyHtml, settings.signatureLogoUrl);
 
-  const message = {
-    subject,
-    body: { contentType: 'HTML', content: bodyHtml },
-    toRecipients: Array.isArray(to)
-      ? to.map((addr) => ({ emailAddress: { address: addr } }))
-      : [{ emailAddress: { address: to } }],
-    ...(cc && cc.length > 0 ? { ccRecipients: cc.map((addr) => ({ emailAddress: { address: addr } })) } : {}),
-    ...(logoAttachment ? { attachments: [logoAttachment] } : {}),
-  };
+  const toRecipients = Array.isArray(to)
+    ? to.map((addr) => ({ emailAddress: { address: addr } }))
+    : [{ emailAddress: { address: to } }];
+  const ccRecipientsPayload = cc && cc.length > 0 ? cc.map((addr) => ({ emailAddress: { address: addr } })) : [];
 
-  // On crée le message comme brouillon puis on l'envoie (au lieu de /sendMail) pour récupérer son id
-  // et son internetMessageId — nécessaires pour reconnaître la réponse du destinataire (In-Reply-To) plus tard.
-  const draft = await graphFetch(account, '/me/messages', { method: 'POST', body: JSON.stringify(message) });
+  let draft;
+  if (inReplyToGraphMessageId) {
+    draft = await graphFetch(account, `/me/messages/${inReplyToGraphMessageId}/createReply`, { method: 'POST', body: JSON.stringify({}) });
+    await graphFetch(account, `/me/messages/${draft.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        subject,
+        body: { contentType: 'HTML', content: bodyHtml },
+        toRecipients,
+        ccRecipients: ccRecipientsPayload,
+        ...(logoAttachment ? { attachments: [logoAttachment] } : {}),
+      }),
+    });
+  } else {
+    const message = {
+      subject,
+      body: { contentType: 'HTML', content: bodyHtml },
+      toRecipients,
+      ...(ccRecipientsPayload.length > 0 ? { ccRecipients: ccRecipientsPayload } : {}),
+      ...(logoAttachment ? { attachments: [logoAttachment] } : {}),
+    };
+    // On crée le message comme brouillon puis on l'envoie (au lieu de /sendMail) pour récupérer son id
+    // et son internetMessageId — nécessaires pour reconnaître la réponse du destinataire (In-Reply-To) plus tard.
+    draft = await graphFetch(account, '/me/messages', { method: 'POST', body: JSON.stringify(message) });
+  }
   await graphFetch(account, `/me/messages/${draft.id}/send`, { method: 'POST' });
 
   if (saveAsMessage && ticketId) {

@@ -79,19 +79,22 @@ router.post('/reminders/run', requirePermission('automation.manage', ['ADMIN']),
   }
 });
 
-// Obtenir / mettre à jour la config des relances
+// Obtenir / mettre à jour la config des relances — findFirst() sans filtre isActive (pas
+// findFirst({ where: { isActive: true } })) pour que l'admin puisse voir et réactiver une config
+// qu'il a précédemment désactivée, au lieu d'en recréer une nouvelle qui écraserait ses délais personnalisés.
 router.get('/reminders/config', requirePermission('automation.manage', ['ADMIN']), async (req, res) => {
-  const config = await prisma.reminderConfig.findFirst({ where: { isActive: true } });
-  res.json(config || { firstReminderDays: 2, secondReminderDays: 5, preCloseDays: 10, autoCloseDays: 15 });
+  const config = await prisma.reminderConfig.findFirst();
+  res.json(config || { firstReminderDays: 2, secondReminderDays: 5, preCloseDays: 10, autoCloseDays: 15, isActive: true });
 });
 
 router.put('/reminders/config', requirePermission('automation.manage', ['ADMIN']), async (req, res) => {
-  const { firstReminderDays, secondReminderDays, preCloseDays, autoCloseDays } = req.body;
-  const existing = await prisma.reminderConfig.findFirst({ where: { isActive: true } });
+  const { firstReminderDays, secondReminderDays, preCloseDays, autoCloseDays, isActive } = req.body;
+  const existing = await prisma.reminderConfig.findFirst();
   const data = { firstReminderDays, secondReminderDays, preCloseDays, autoCloseDays };
+  if (isActive !== undefined) data.isActive = isActive;
   const config = existing
     ? await prisma.reminderConfig.update({ where: { id: existing.id }, data })
-    : await prisma.reminderConfig.create({ data: { ...data, isActive: true } });
+    : await prisma.reminderConfig.create({ data: { ...data, isActive: isActive !== undefined ? isActive : true } });
   res.json(config);
 });
 
