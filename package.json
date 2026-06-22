@@ -1,0 +1,19 @@
+{
+  "name": "projet-ia-hub",
+  "version": "1.0.0",
+  "description": "Projet IA Hub - Plateforme d'automatisation helpdesk ITSM",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd erp-backend && npm run dev",
+    "dev:frontend": "cd erp-frontend && npm run dev",
+    "install:all": "npm install && cd erp-backend && npm install && cd ../erp-frontend && npm install",
+    "build": "cd erp-frontend && npm install && npm run build",
+    "start": "cd erp-backend && npm start"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

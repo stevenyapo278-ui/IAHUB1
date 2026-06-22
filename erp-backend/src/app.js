@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
+const fs = require('fs');
 
 const authRoutes = require('./routes/auth.routes');
 const ticketRoutes = require('./routes/ticket.routes');
@@ -56,6 +58,27 @@ app.use('/api', ticketIntelligenceRoutes);
 app.use('/api/system-settings', systemSettingsRoutes);
 app.use('/api/advanced-settings', advancedSettingsRoutes);
 app.use('/api/prompt-templates', promptTemplateRoutes);
+
+// Serve frontend static files in production
+const isProduction = process.env.NODE_ENV === 'production';
+if (isProduction) {
+    const distPath = process.env.FRONTEND_DIST_PATH || path.join(__dirname, '..', '..', 'erp-frontend', 'dist');
+    
+    if (fs.existsSync(distPath)) {
+        app.use(express.static(distPath));
+        
+        // Support React Router (SPA) by serving index.html for unknown routes
+        app.get('*', (req, res, next) => {
+            if (req.url.startsWith('/api') || req.url.includes('.')) {
+                return next();
+            }
+            res.sendFile(path.join(distPath, 'index.html'));
+        });
+        console.log(`✅ Serving frontend from: ${distPath}`);
+    } else {
+        console.warn(`⚠️ Frontend dist directory not found at: ${distPath}`);
+    }
+}
 
 app.use((req, res) => res.status(404).json({ error: 'Route introuvable' }));
 

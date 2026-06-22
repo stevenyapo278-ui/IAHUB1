@@ -5,7 +5,7 @@ services:
     restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-erp_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-erp_password}
       POSTGRES_DB: ${POSTGRES_DB:-erp_itsm}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -19,18 +19,19 @@ services:
     networks:
       - ia-hub-network
 
-  # API Backend
-  backend:
+  # Application principale (frontend + backend)
+  app:
     build:
-      context: ./erp-backend
+      context: .
       dockerfile: Dockerfile
     restart: always
     depends_on:
       postgres:
         condition: service_healthy
     environment:
+      NODE_ENV: production
       PORT: 4000
-      DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-erp_itsm}?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD:-erp_password}@postgres:5432/${POSTGRES_DB:-erp_itsm}?schema=public
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: 8h
       CORS_ORIGIN: "*"
@@ -41,20 +42,7 @@ services:
       GLPI_APP_TOKEN: ${GLPI_APP_TOKEN:-}
       GLPI_USER_TOKEN: ${GLPI_USER_TOKEN:-}
     volumes:
-      - backend_uploads:/app/uploads
-    networks:
-      - ia-hub-network
-
-  # Frontend React (Nginx en prod)
-  frontend:
-    build:
-      context: ./erp-frontend
-      dockerfile: Dockerfile
-      args:
-        VITE_API_URL: ${VITE_API_URL}
-    restart: always
-    depends_on:
-      - backend
+      - app_uploads:/app/erp-backend/uploads
     networks:
       - ia-hub-network
 
@@ -64,4 +52,4 @@ networks:
 
 volumes:
   postgres_data:
-  backend_uploads:
+  app_uploads:
