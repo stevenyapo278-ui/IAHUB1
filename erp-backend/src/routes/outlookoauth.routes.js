@@ -1,7 +1,8 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const prisma = require('../prismaClient');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/permissions');
 
 const router = express.Router();
 
@@ -21,7 +22,7 @@ function authorizeUrl(account, state) {
 }
 
 // Démarre le flux OAuth2 : redirige l'admin vers la page de connexion Microsoft
-router.get('/email-accounts/:id/oauth/connect', authenticate, authorize('ADMIN'), async (req, res) => {
+router.get('/email-accounts/:id/oauth/connect', authenticate, requirePermission('settings.email'), async (req, res) => {
   const account = await prisma.emailAccount.findUnique({ where: { id: Number(req.params.id) } });
   if (!account) return res.status(404).json({ error: 'Compte introuvable' });
   if (!account.clientId || !account.tenantId || !account.clientSecret) {

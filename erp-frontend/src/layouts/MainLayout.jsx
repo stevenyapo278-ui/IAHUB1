@@ -17,7 +17,7 @@ const navItems = [
   { to: '/users', label: 'Utilisateurs', icon: 'person', permission: 'users.manage', fallbackRoles: ['ADMIN'] },
   { to: '/permission-groups', label: 'Groupes de droits', icon: 'admin_panel_settings', permission: 'users.manage', fallbackRoles: ['ADMIN'] },
   { to: '/prompts', label: 'Prompts IA', icon: 'smart_toy', permission: 'prompts.manage', fallbackRoles: ['ADMIN'] },
-  { to: '/settings', label: 'Paramètres', icon: 'settings', permission: 'settings.manage', fallbackRoles: ['ADMIN'] },
+  { to: '/settings', label: 'Paramètres', icon: 'settings', permission: ['settings.ai', 'settings.email', 'settings.integrations', 'automation.manage'], fallbackRoles: ['ADMIN'] },
 ];
 
 export default function MainLayout() {
@@ -59,7 +59,11 @@ export default function MainLayout() {
 
         <ul className="flex-1 overflow-y-auto py-sm px-sm space-y-xs">
           {navItems
-            .filter((item) => item.permission === null || hasPermission(user, item.permission, item.fallbackRoles))
+            .filter((item) => {
+              if (item.permission === null) return true;
+              const keys = Array.isArray(item.permission) ? item.permission : [item.permission];
+              return keys.some((key) => hasPermission(user, key, item.fallbackRoles));
+            })
             .map((item) => (
               <li key={item.to}>
                 <NavLink

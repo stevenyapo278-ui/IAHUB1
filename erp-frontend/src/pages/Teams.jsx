@@ -1,10 +1,12 @@
 import { Fragment, useEffect, useState } from 'react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { hasPermission } from '../utils/permissions';
 import ConfirmDialog from '../components/ConfirmDialog';
 
 export default function Teams() {
   const { user } = useAuth();
+  const canManageTeams = hasPermission(user, 'teams.manage');
   const [teams, setTeams] = useState([]);
   const [form, setForm] = useState({ name: '', category: '', groupEmail: '' });
   const [groupEmailDraft, setGroupEmailDraft] = useState('');
@@ -116,7 +118,7 @@ export default function Teams() {
           <h2 className="font-display-lg text-display-lg text-on-background">Équipes</h2>
           <p className="font-body-lg text-body-lg text-on-surface-variant">Configuration des groupes de support et niveaux d'escalade.</p>
         </div>
-        {user?.role === 'ADMIN' && (
+        {canManageTeams && (
           <button
             onClick={handleSyncGlpi}
             disabled={syncing}
@@ -161,8 +163,8 @@ export default function Teams() {
         </div>
       </div>
 
-      <div className={`grid grid-cols-1 ${user?.role === 'ADMIN' ? 'lg:grid-cols-3' : ''} gap-xl`}>
-        <div className={`${user?.role === 'ADMIN' ? 'lg:col-span-2' : ''} space-y-md`}>
+      <div className={`grid grid-cols-1 ${canManageTeams ? 'lg:grid-cols-3' : ''} gap-xl`}>
+        <div className={`${canManageTeams ? 'lg:col-span-2' : ''} space-y-md`}>
           <h3 className="font-headline-md text-headline-md text-on-surface">Équipes actives</h3>
           <div className="bg-surface-container-lowest rounded-none border border-outline-variant overflow-hidden">
             <table className="w-full text-left border-collapse">
@@ -173,7 +175,7 @@ export default function Teams() {
                   <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">GLPI</th>
                   <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase text-center">Membres</th>
                   <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase text-right">Tickets</th>
-                  {user?.role === 'ADMIN' && <th className="py-sm px-md w-10"></th>}
+                  {canManageTeams && <th className="py-sm px-md w-10"></th>}
                 </tr>
               </thead>
               <tbody className="font-body-md text-body-md text-on-surface">
@@ -213,7 +215,7 @@ export default function Teams() {
                         </div>
                       </div>
                     </td>
-                    {user?.role === 'ADMIN' && (
+                    {canManageTeams && (
                       <td className="py-md px-md text-right opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={() => askDelete(t.id)} className="text-on-surface-variant hover:text-error">
                           <span className="material-symbols-outlined">delete</span>
@@ -223,11 +225,11 @@ export default function Teams() {
                   </tr>
                   {openTeamId === t.id && (
                     <tr className="border-b border-outline-variant bg-surface-container-low">
-                      <td colSpan={user?.role === 'ADMIN' ? 6 : 5} className="py-md px-md">
+                      <td colSpan={canManageTeams ? 6 : 5} className="py-md px-md">
                         {loadingDetail && <p className="text-on-surface-variant font-body-sm text-body-sm">Chargement...</p>}
                         {!loadingDetail && openTeamDetail && (
                           <div className="flex flex-col gap-2">
-                            {user?.role === 'ADMIN' && (
+                            {canManageTeams && (
                               <div className="flex items-center gap-sm pb-md border-b border-outline-variant mb-2">
                                 <span className="font-label-md text-label-md text-on-surface-variant uppercase shrink-0">
                                   Email de groupe
@@ -285,7 +287,7 @@ export default function Teams() {
           </div>
         </div>
 
-        {user?.role === 'ADMIN' && (
+        {canManageTeams && (
           <div className="lg:col-span-1">
             <div className="bg-surface-container-lowest rounded-none border border-outline-variant sticky top-4">
               <div className="p-lg border-b border-outline-variant">

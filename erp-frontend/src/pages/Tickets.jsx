@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { hasPermission } from '../utils/permissions';
 import ConfirmDialog from '../components/ConfirmDialog';
 
 const STATUS_OPTIONS = ['NEW', 'OPEN', 'PENDING', 'SOLVED', 'CLOSED'];
@@ -65,7 +66,9 @@ const EMPTY_FORM = {
 
 export default function Tickets() {
   const { user } = useAuth();
-  const canAssign = user?.role === 'ADMIN' || user?.role === 'TECHNICIAN';
+  const canAssign = hasPermission(user, 'tickets.assign');
+  const canDelete = hasPermission(user, 'tickets.delete');
+  const canBulkDelete = hasPermission(user, 'tickets.bulkDelete');
   const [searchParams, setSearchParams] = useSearchParams();
   const [tickets, setTickets] = useState([]);
   const [teams, setTeams] = useState([]);
@@ -77,7 +80,9 @@ export default function Tickets() {
   const [error, setError] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
   const [deleting, setDeleting] = useState(false);
-  const isAdmin = user?.role === 'ADMIN';
+  // Les cases à cocher de sélection multiple n'ont de sens que pour la suppression en masse — donc
+  // gérées par tickets.bulkDelete, distinct de tickets.delete (suppression unitaire à la ligne).
+  const showSelectionColumn = canBulkDelete;
 
   function loadTickets() {
     const params = {};
@@ -465,7 +470,7 @@ export default function Tickets() {
           </select>
         </div>
         <div className="flex items-center gap-3">
-          {isAdmin && selectedIds.length > 0 && (
+          {canBulkDelete && selectedIds.length > 0 && (
             <button
               onClick={askDeleteSelected}
               disabled={deleting}
@@ -490,7 +495,7 @@ export default function Tickets() {
           <table className="w-full text-left border-collapse min-w-[900px]">
             <thead>
               <tr className="bg-surface-bright border-b border-outline-variant">
-                {isAdmin && (
+                {showSelectionColumn && (
                   <th className="px-md py-3 w-10">
                     <input
                       type="checkbox"
@@ -509,13 +514,13 @@ export default function Tickets() {
                 <th className="px-md py-3 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider w-40">Équipe</th>
                 <th className="px-md py-3 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider w-48">Assigné à</th>
                 <th className="px-md py-3 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider w-48">Demandeur</th>
-                {isAdmin && <th className="px-md py-3 w-12"></th>}
+                {canDelete && <th className="px-md py-3 w-12"></th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-outline-variant font-body-sm text-body-sm">
               {tickets.map((t) => (
                 <tr key={t.id} className="hover:bg-surface-container-low transition-colors">
-                  {isAdmin && (
+                  {showSelectionColumn && (
                     <td className="px-md py-3">
                       <input
                         type="checkbox"
@@ -573,7 +578,7 @@ export default function Tickets() {
                   <td className="px-md py-3 text-on-surface-variant">{t.team?.name || '-'}</td>
                   <td className="px-md py-3 text-on-surface">{t.assignedTo?.fullName || <span className="text-outline italic">Non assigné</span>}</td>
                   <td className="px-md py-3 text-on-surface-variant">{t.requester?.fullName || '-'}</td>
-                  {isAdmin && (
+                  {canDelete && (
                     <td className="px-md py-3">
                       <button
                         onClick={() => askDeleteOne(t.id)}
@@ -588,7 +593,7 @@ export default function Tickets() {
               ))}
               {tickets.length === 0 && (
                 <tr>
-                  <td colSpan={isAdmin ? 11 : 9} className="px-md py-8 text-center text-on-surface-variant">
+                  <td colSpan={9 + (showSelectionColumn ? 1 : 0) + (canDelete ? 1 : 0)} className="px-md py-8 text-center text-on-surface-variant">
                     Aucun ticket trouvé.
                   </td>
                 </tr>

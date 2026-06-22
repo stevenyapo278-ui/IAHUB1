@@ -45,7 +45,15 @@ export function AuthProvider({ children }) {
         localStorage.setItem('user', JSON.stringify(refreshed));
         setUser(refreshed);
       })
-      .catch(() => {});
+      // Token invalide/expiré ou compte supprimé (404) : la session locale est périmée, on la
+      // purge plutôt que de laisser l'utilisateur "connecté" avec un user obsolète qui ferait
+      // échouer silencieusement tous les appels API suivants (cf. bug observé : /auth/me 404 en
+      // boucle après suppression/recréation d'un compte côté serveur).
+      .catch(() => {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        setUser(null);
+      });
   }, []);
 
   return (

@@ -1,12 +1,13 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/permissions');
 const { syncProviderModels } = require('../utils/modelSync');
 
 const router = express.Router();
 router.use(authenticate);
-router.use(authorize('ADMIN'));
+router.use(requirePermission('settings.ai'));
 
 function maskKey(key) {
   if (!key) return null;

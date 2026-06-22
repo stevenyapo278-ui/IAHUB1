@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
+import { useAuth } from '../context/AuthContext';
+import { hasPermission } from '../utils/permissions';
 
 const STATUS_LABELS = {
   PENDING: 'En attente',
@@ -28,6 +30,8 @@ const PRIORITY_COLORS = {
 const FILTERS = ['Tous', 'PENDING', 'DONE', 'ERROR', 'SPAM'];
 
 export default function Inbox() {
+  const { user } = useAuth();
+  const canSync = hasPermission(user, 'inbox.sync');
   const [emails, setEmails] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -98,14 +102,16 @@ export default function Inbox() {
             Emails reçus et traités automatiquement par l'agent IA.
           </p>
         </div>
-        <button
-          onClick={handleSync}
-          disabled={syncing}
-          className="flex items-center gap-xs px-md py-sm rounded-none border border-outline-variant bg-on-surface text-surface font-headline-sm text-headline-sm hover:opacity-80 transition-all disabled:opacity-60"
-        >
-          <span className="material-symbols-outlined text-[18px]">sync</span>
-          {syncing ? 'Synchronisation...' : 'Sync maintenant'}
-        </button>
+        {canSync && (
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            className="flex items-center gap-xs px-md py-sm rounded-none border border-outline-variant bg-on-surface text-surface font-headline-sm text-headline-sm hover:opacity-80 transition-all disabled:opacity-60"
+          >
+            <span className="material-symbols-outlined text-[18px]">sync</span>
+            {syncing ? 'Synchronisation...' : 'Sync maintenant'}
+          </button>
+        )}
       </header>
 
       {error && <div className="border border-outline-variant text-on-surface p-md rounded-none">{error}</div>}
@@ -213,63 +219,65 @@ export default function Inbox() {
         </div>
 
         {/* Panel test analyse IA */}
-        <div className="bg-surface-container-lowest border border-outline-variant rounded-none p-lg flex flex-col gap-md h-fit">
-          <h3 className="font-headline-md text-headline-md text-on-background">Test analyse IA</h3>
-          <p className="font-body-sm text-body-sm text-on-surface-variant">
-            Simule l'analyse d'un email par Gemini sans créer de ticket.
-          </p>
-          <form onSubmit={handleTestAnalyze} className="flex flex-col gap-md">
-            <label className="flex flex-col gap-xs">
-              <span className="font-label-md text-label-md text-on-surface uppercase">Sujet *</span>
-              <input
-                className="h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface"
-                value={testForm.subject}
-                onChange={(e) => setTestForm({ ...testForm, subject: e.target.value })}
-                placeholder="ex: Mon VPN ne fonctionne plus"
-                required
-              />
-            </label>
-            <label className="flex flex-col gap-xs">
-              <span className="font-label-md text-label-md text-on-surface uppercase">Corps *</span>
-              <textarea
-                rows={4}
-                className="px-sm py-xs rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface resize-none"
-                value={testForm.body}
-                onChange={(e) => setTestForm({ ...testForm, body: e.target.value })}
-                placeholder="Bonjour, depuis ce matin je ne peux plus me connecter au VPN..."
-                required
-              />
-            </label>
-            <label className="flex flex-col gap-xs">
-              <span className="font-label-md text-label-md text-on-surface uppercase">Email expéditeur</span>
-              <input
-                className="h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface"
-                value={testForm.from}
-                onChange={(e) => setTestForm({ ...testForm, from: e.target.value })}
-                placeholder="user@example.com"
-              />
-            </label>
-            <button
-              type="submit"
-              disabled={testing}
-              className="px-md py-sm rounded-none border border-outline-variant bg-on-surface text-surface font-body-sm text-body-sm font-semibold hover:opacity-80 transition-all disabled:opacity-60"
-            >
-              {testing ? 'Analyse en cours...' : 'Analyser'}
-            </button>
-          </form>
+        {canSync && (
+          <div className="bg-surface-container-lowest border border-outline-variant rounded-none p-lg flex flex-col gap-md h-fit">
+            <h3 className="font-headline-md text-headline-md text-on-background">Test analyse IA</h3>
+            <p className="font-body-sm text-body-sm text-on-surface-variant">
+              Simule l'analyse d'un email par Gemini sans créer de ticket.
+            </p>
+            <form onSubmit={handleTestAnalyze} className="flex flex-col gap-md">
+              <label className="flex flex-col gap-xs">
+                <span className="font-label-md text-label-md text-on-surface uppercase">Sujet *</span>
+                <input
+                  className="h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface"
+                  value={testForm.subject}
+                  onChange={(e) => setTestForm({ ...testForm, subject: e.target.value })}
+                  placeholder="ex: Mon VPN ne fonctionne plus"
+                  required
+                />
+              </label>
+              <label className="flex flex-col gap-xs">
+                <span className="font-label-md text-label-md text-on-surface uppercase">Corps *</span>
+                <textarea
+                  rows={4}
+                  className="px-sm py-xs rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface resize-none"
+                  value={testForm.body}
+                  onChange={(e) => setTestForm({ ...testForm, body: e.target.value })}
+                  placeholder="Bonjour, depuis ce matin je ne peux plus me connecter au VPN..."
+                  required
+                />
+              </label>
+              <label className="flex flex-col gap-xs">
+                <span className="font-label-md text-label-md text-on-surface uppercase">Email expéditeur</span>
+                <input
+                  className="h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface"
+                  value={testForm.from}
+                  onChange={(e) => setTestForm({ ...testForm, from: e.target.value })}
+                  placeholder="user@example.com"
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={testing}
+                className="px-md py-sm rounded-none border border-outline-variant bg-on-surface text-surface font-body-sm text-body-sm font-semibold hover:opacity-80 transition-all disabled:opacity-60"
+              >
+                {testing ? 'Analyse en cours...' : 'Analyser'}
+              </button>
+            </form>
 
-          {testResult && (
-            <div className="border border-outline-variant p-md space-y-xs font-body-sm text-body-sm">
-              <p className="font-headline-sm text-headline-sm text-on-surface mb-xs">Résultat Gemini</p>
-              {Object.entries(testResult).map(([k, v]) => (
-                <div key={k} className="flex justify-between gap-sm">
-                  <span className="text-on-surface-variant capitalize">{k}</span>
-                  <span className="text-on-surface text-right">{typeof v === 'boolean' ? (v ? 'Oui' : 'Non') : typeof v === 'number' ? (k === 'confidence' ? `${Math.round(v * 100)}%` : v) : String(v)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+            {testResult && (
+              <div className="border border-outline-variant p-md space-y-xs font-body-sm text-body-sm">
+                <p className="font-headline-sm text-headline-sm text-on-surface mb-xs">Résultat Gemini</p>
+                {Object.entries(testResult).map(([k, v]) => (
+                  <div key={k} className="flex justify-between gap-sm">
+                    <span className="text-on-surface-variant capitalize">{k}</span>
+                    <span className="text-on-surface text-right">{typeof v === 'boolean' ? (v ? 'Oui' : 'Non') : typeof v === 'number' ? (k === 'confidence' ? `${Math.round(v * 100)}%` : v) : String(v)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

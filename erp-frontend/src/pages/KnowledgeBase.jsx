@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import api from '../api/client';
+import { useAuth } from '../context/AuthContext';
+import { hasPermission } from '../utils/permissions';
 import ConfirmDialog from '../components/ConfirmDialog';
 
 const STATUS_LABELS = {
@@ -16,6 +18,8 @@ const SOURCE_ICONS = {
 };
 
 export default function KnowledgeBase() {
+  const { user } = useAuth();
+  const canManage = hasPermission(user, 'knowledge.manage');
   const [documents, setDocuments] = useState([]);
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -148,7 +152,7 @@ export default function KnowledgeBase() {
                   <th className="px-md py-3 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider w-32">Type</th>
                   <th className="px-md py-3 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider w-24">Fragments</th>
                   <th className="px-md py-3 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider w-32">Statut</th>
-                  <th className="px-md py-3 w-12"></th>
+                  {canManage && <th className="px-md py-3 w-12"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant font-body-sm text-body-sm">
@@ -170,32 +174,34 @@ export default function KnowledgeBase() {
                         {STATUS_LABELS[doc.status] || doc.status}
                       </span>
                     </td>
-                    <td className="px-md py-3 text-right">
-                      <div className="flex items-center justify-end gap-sm">
-                        <button
-                          onClick={() => askReplace(doc)}
-                          disabled={replacingId === doc.id}
-                          title="Remplacer le fichier"
-                          className="text-on-surface-variant hover:text-on-surface disabled:opacity-50"
-                        >
-                          <span className="material-symbols-outlined text-[18px]">
-                            {replacingId === doc.id ? 'hourglass_empty' : 'upload_file'}
-                          </span>
-                        </button>
-                        <button
-                          onClick={() => setConfirmDeleteId(doc.id)}
-                          title="Supprimer"
-                          className="text-on-surface-variant hover:text-on-surface"
-                        >
-                          <span className="material-symbols-outlined text-[18px]">delete</span>
-                        </button>
-                      </div>
-                    </td>
+                    {canManage && (
+                      <td className="px-md py-3 text-right">
+                        <div className="flex items-center justify-end gap-sm">
+                          <button
+                            onClick={() => askReplace(doc)}
+                            disabled={replacingId === doc.id}
+                            title="Remplacer le fichier"
+                            className="text-on-surface-variant hover:text-on-surface disabled:opacity-50"
+                          >
+                            <span className="material-symbols-outlined text-[18px]">
+                              {replacingId === doc.id ? 'hourglass_empty' : 'upload_file'}
+                            </span>
+                          </button>
+                          <button
+                            onClick={() => setConfirmDeleteId(doc.id)}
+                            title="Supprimer"
+                            className="text-on-surface-variant hover:text-on-surface"
+                          >
+                            <span className="material-symbols-outlined text-[18px]">delete</span>
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
                 {documents.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-md py-8 text-center text-on-surface-variant">
+                    <td colSpan={canManage ? 6 : 5} className="px-md py-8 text-center text-on-surface-variant">
                       Aucun document indexé.
                     </td>
                   </tr>
@@ -243,37 +249,39 @@ export default function KnowledgeBase() {
           </div>
         </div>
 
-        <div className="bg-surface-container-lowest rounded-none border border-outline-variant p-lg flex flex-col gap-md h-fit">
-          <h3 className="font-headline-md text-headline-md text-on-background">Ajouter un document</h3>
-          <form onSubmit={handleUpload} className="flex flex-col gap-md">
-            <label className="flex flex-col gap-xs">
-              <span className="font-label-md text-label-md text-on-surface uppercase">Titre (optionnel)</span>
-              <input
-                className="h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Nom affiché du document"
-              />
-            </label>
-            <label className="flex flex-col gap-xs">
-              <span className="font-label-md text-label-md text-on-surface uppercase">Fichier (PDF, DOCX, Markdown)</span>
-              <input
-                type="file"
-                accept=".pdf,.docx,.md,.markdown,.txt"
-                onChange={(e) => setFile(e.target.files?.[0] || null)}
-                className="font-body-sm text-body-sm text-on-surface-variant"
-                required
-              />
-            </label>
-            <button
-              type="submit"
-              disabled={uploading}
-              className="px-4 py-2 rounded-none border border-outline-variant bg-on-surface text-surface font-body-sm text-body-sm font-semibold hover:opacity-80 transition-all disabled:opacity-60"
-            >
-              {uploading ? 'Indexation en cours...' : 'Indexer'}
-            </button>
-          </form>
-        </div>
+        {canManage && (
+          <div className="bg-surface-container-lowest rounded-none border border-outline-variant p-lg flex flex-col gap-md h-fit">
+            <h3 className="font-headline-md text-headline-md text-on-background">Ajouter un document</h3>
+            <form onSubmit={handleUpload} className="flex flex-col gap-md">
+              <label className="flex flex-col gap-xs">
+                <span className="font-label-md text-label-md text-on-surface uppercase">Titre (optionnel)</span>
+                <input
+                  className="h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Nom affiché du document"
+                />
+              </label>
+              <label className="flex flex-col gap-xs">
+                <span className="font-label-md text-label-md text-on-surface uppercase">Fichier (PDF, DOCX, Markdown)</span>
+                <input
+                  type="file"
+                  accept=".pdf,.docx,.md,.markdown,.txt"
+                  onChange={(e) => setFile(e.target.files?.[0] || null)}
+                  className="font-body-sm text-body-sm text-on-surface-variant"
+                  required
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={uploading}
+                className="px-4 py-2 rounded-none border border-outline-variant bg-on-surface text-surface font-body-sm text-body-sm font-semibold hover:opacity-80 transition-all disabled:opacity-60"
+              >
+                {uploading ? 'Indexation en cours...' : 'Indexer'}
+              </button>
+            </form>
+          </div>
+        )}
       </div>
 
       <input

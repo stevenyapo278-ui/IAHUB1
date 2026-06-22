@@ -1,6 +1,5 @@
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
-const { GLPI_TECHNICIANS } = require('../src/utils/glpiMapping');
 const { PERMISSION_KEYS } = require('../src/config/permissions');
 
 // Liste exacte des permissions que le rôle TECHNICIAN possédait déjà avant l'introduction du
@@ -30,63 +29,28 @@ async function main() {
     });
   }
 
-  // Mappe les groupes GLPI sur les équipes correspondantes
-  for (const tech of GLPI_TECHNICIANS) {
-    await prisma.team.update({
-      where: { name: tech.team },
-      data: { glpiGroupId: tech.glpiGroupId },
-    });
-  }
+  // Le mapping statique des techniciens GLPI (GLPI_TECHNICIANS) n'existe plus dans
+  // src/utils/glpiMapping.js — les techniciens sont désormais créés/synchronisés via
+  // glpiTicketCreator.js (syncTeamsFromGlpi/syncCategoriesFromGlpi, appelé au démarrage du serveur),
+  // pas par le seed. Voir server.js.
 
-  // Crée les techniciens correspondant aux comptes GLPI
-  for (const tech of GLPI_TECHNICIANS) {
-    const email = `${tech.fullName.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, '.')}@example.com`;
-    const team = await prisma.team.findUnique({ where: { name: tech.team } });
-    const existing = await prisma.user.findFirst({ where: { glpiId: tech.glpiId } });
-    if (!existing) {
-      const passwordHash = await bcrypt.hash('ChangeMe123!', 10);
-      await prisma.user.create({
-        data: {
-          email,
-          passwordHash,
-          fullName: tech.fullName,
-          role: 'TECHNICIAN',
-          teamId: team?.id,
-          glpiId: tech.glpiId,
-        },
-      });
-      console.log(`Technicien créé : ${email} / ChangeMe123! (GLPI #${tech.glpiId})`);
-    }
-  }
-
-  const adminEmail = 'admin@example.com';
-  const existingAdmin = await prisma.user.findUnique({ where: { email: adminEmail } });
-  if (!existingAdmin) {
-    const passwordHash = await bcrypt.hash('ChangeMe123!', 10);
+  // Sur une base neuve, un seul compte SUPERADMIN par défaut est créé — c'est lui qui crée ensuite
+  // tous les autres comptes (ADMIN, TECHNICIAN, ...) et leur attribue des droits via les groupes de
+  // permissions. Cohérent avec ce que fait la migration 20260622100001 sur une base déjà peuplée
+  // (promotion automatique des ADMIN existants), pour qu'il existe toujours au moins un SUPERADMIN.
+  const superAdminEmail = 'superadmin@prosuma.ci';
+  const existingSuperAdmin = await prisma.user.findUnique({ where: { email: superAdminEmail } });
+  if (!existingSuperAdmin) {
+    const passwordHash = await bcrypt.hash('12345678', 10);
     await prisma.user.create({
       data: {
-        email: adminEmail,
+        email: superAdminEmail,
         passwordHash,
-        fullName: 'Administrateur',
-        role: 'ADMIN',
+        fullName: 'Super Admin Prosuma',
+        role: 'SUPERADMIN',
       },
     });
-    console.log(`Admin créé : ${adminEmail} / ChangeMe123!`);
-  }
-
-  const secondAdminEmail = 'admin@prosuma.ci';
-  const existingSecondAdmin = await prisma.user.findUnique({ where: { email: secondAdminEmail } });
-  if (!existingSecondAdmin) {
-    const passwordHash = await bcrypt.hash('1234', 10);
-    await prisma.user.create({
-      data: {
-        email: secondAdminEmail,
-        passwordHash,
-        fullName: 'Admin Prosuma',
-        role: 'ADMIN',
-      },
-    });
-    console.log(`Admin créé : ${secondAdminEmail} / 1234`);
+    console.log(`Super-admin créé : ${superAdminEmail} / 12345678`);
   }
 
   const providers = [

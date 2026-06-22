@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const prisma = require('../prismaClient');
 const { graphFetch } = require('../utils/graphClient');
-const { getSystemSettings } = require('./systemSettings');
+const { getSystemSettings, resolveFrontendUrl } = require('./systemSettings');
 
 const LOGO_CONTENT_ID = 'logo-signature';
 
@@ -226,7 +226,7 @@ ${signature}
 // saveAsMessage: false car ce mail s'adresse au responsable interne, pas au demandeur d'origine
 // — il ne doit pas apparaître dans le fil de conversation du ticket.
 async function sendDraftPendingReminderEmail({ recipientEmail, recipientName, draftId, draftSubject, draftRecipientEmail, draftContent, minutesWaiting, approvalToken }) {
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+  const frontendUrl = resolveFrontendUrl(await getSystemSettings());
   const approvalLink = `${frontendUrl}/approve/${approvalToken}`;
   const subject = `[Relance] Réponse IA en attente de validation depuis ${minutesWaiting} min`;
   const bodyHtml = `
@@ -250,7 +250,7 @@ async function sendDraftPendingReminderEmail({ recipientEmail, recipientName, dr
 
 // Envoie le lien de réinitialisation à un utilisateur qui a cliqué "mot de passe oublié"
 async function sendPasswordResetLinkEmail({ recipientEmail, recipientName, resetToken }) {
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+  const frontendUrl = resolveFrontendUrl(await getSystemSettings());
   const resetLink = `${frontendUrl}/reset-password/${resetToken}`;
   const subject = 'Réinitialisation de votre mot de passe';
   const bodyHtml = `
@@ -267,7 +267,7 @@ async function sendPasswordResetLinkEmail({ recipientEmail, recipientName, reset
 
 // Envoie le mot de passe temporaire généré par un admin lors d'une réinitialisation forcée
 async function sendTemporaryPasswordEmail({ recipientEmail, recipientName, temporaryPassword }) {
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+  const frontendUrl = resolveFrontendUrl(await getSystemSettings());
   const subject = 'Votre mot de passe a été réinitialisé';
   const bodyHtml = `
 <p>Bonjour ${recipientName || ''},</p>

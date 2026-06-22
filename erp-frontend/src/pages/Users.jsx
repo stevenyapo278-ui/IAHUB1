@@ -1,14 +1,24 @@
 import { useEffect, useState } from 'react';
 import api from '../api/client';
 import ConfirmDialog from '../components/ConfirmDialog';
-
-const ROLES = ['ADMIN', 'TECHNICIAN', 'REQUESTER'];
+import { useAuth } from '../context/AuthContext';
 
 const ROLE_LABELS = {
+  SUPERADMIN: 'Super-administrateur — accès total, y compris la configuration serveur',
   ADMIN: 'Administrateur — accès complet',
   TECHNICIAN: 'Technicien — gère et traite les tickets',
   REQUESTER: 'Demandeur — peut créer des tickets',
 };
+
+const ADMIN_LIKE_ROLES = ['SUPERADMIN', 'ADMIN'];
+
+// SUPERADMIN peut assigner n'importe quel rôle ; ADMIN ne peut créer/éditer que TECHNICIAN/REQUESTER
+// (jamais ADMIN ni SUPERADMIN) — reflète la règle appliquée côté backend (user.routes.js).
+function assignableRoles(actorRole) {
+  if (actorRole === 'SUPERADMIN') return ['SUPERADMIN', 'ADMIN', 'TECHNICIAN', 'REQUESTER'];
+  if (actorRole === 'ADMIN') return ['TECHNICIAN', 'REQUESTER'];
+  return [];
+}
 
 const emptyForm = { email: '', fullName: '', password: '', role: 'REQUESTER', teamId: '' };
 
@@ -23,6 +33,8 @@ function initials(name) {
 }
 
 export default function Users() {
+  const { user: currentUser } = useAuth();
+  const ROLES = assignableRoles(currentUser?.role);
   const [users, setUsers] = useState([]);
   const [teams, setTeams] = useState([]);
   const [groups, setGroups] = useState([]);
@@ -388,15 +400,22 @@ export default function Users() {
                     )}
                   </td>
                   <td className="p-md">
-                    <select
-                      className="appearance-none bg-transparent border border-outline-variant rounded-none py-1.5 px-2 text-body-sm cursor-pointer"
-                      value={u.role}
-                      onChange={(e) => updateField(u.id, 'role', e.target.value)}
-                    >
-                      {ROLES.map((r) => (
-                        <option key={r} value={r}>{r}</option>
-                      ))}
-                    </select>
+                    {currentUser?.role === 'SUPERADMIN' || !ADMIN_LIKE_ROLES.includes(u.role) ? (
+                      <select
+                        className="appearance-none bg-transparent border border-outline-variant rounded-none py-1.5 px-2 text-body-sm cursor-pointer"
+                        value={u.role}
+                        onChange={(e) => updateField(u.id, 'role', e.target.value)}
+                      >
+                        {/* Le rôle actuel de la cible doit toujours être présent dans la liste, même
+                            si l'acteur ne pourrait pas l'assigner à un AUTRE compte (ex: SUPERADMIN
+                            visualisant un ADMIN) — sinon le <select> afficherait une valeur absente. */}
+                        {Array.from(new Set([...ROLES, u.role])).map((r) => (
+                          <option key={r} value={r}>{r}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="text-on-surface-variant" title="Seul un super-administrateur peut modifier ce rôle">{u.role}</span>
+                    )}
                   </td>
                   <td className="p-md">
                     <select
@@ -429,18 +448,20 @@ export default function Users() {
                     )}
                   </td>
                   <td className="p-md text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <button
-                        onClick={() => askResetPassword(u.id)}
-                        title="Réinitialiser le mot de passe"
-                        className="text-on-surface-variant hover:text-on-surface transition-colors p-1"
-                      >
-                        <span className="material-symbols-outlined text-[18px]">lock_reset</span>
-                      </button>
-                      <button onClick={() => askDelete(u.id)} className="text-on-surface-variant hover:text-error transition-colors p-1">
-                        <span className="material-symbols-outlined text-[18px]">delete</span>
-                      </button>
-                    </div>
+                    {(currentUser?.role === 'SUPERADMIN' || !ADMIN_LIKE_ROLES.includes(u.role)) && (
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => askResetPassword(u.id)}
+                          title="Réinitialiser le mot de passe"
+                          className="text-on-surface-variant hover:text-on-surface transition-colors p-1"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">lock_reset</span>
+                        </button>
+                        <button onClick={() => askDelete(u.id)} className="text-on-surface-variant hover:text-error transition-colors p-1">
+                          <span className="material-symbols-outlined text-[18px]">delete</span>
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}

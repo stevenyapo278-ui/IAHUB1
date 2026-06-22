@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react';
 import api from '../../api/client';
+import { useAuth } from '../../context/AuthContext';
+import { hasPermission } from '../../utils/permissions';
 import ConfirmDialog from '../../components/ConfirmDialog';
 
 const inputClass =
   'h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface';
 
 export default function OtherApisTab() {
+  const { user } = useAuth();
+  const canManageGlpi = hasPermission(user, 'glpi.manage');
   const [configs, setConfigs] = useState([]);
   const [form, setForm] = useState({ serviceName: '', baseUrl: '', apiKey: '', appToken: '' });
   const [workflows, setWorkflows] = useState([]);
@@ -351,7 +355,7 @@ export default function OtherApisTab() {
                   />
                 </td>
                 <td className="p-sm">
-                  {c.serviceName === 'glpi' && (
+                  {c.serviceName === 'glpi' && canManageGlpi && (
                     <button
                       onClick={handleSyncGlpi}
                       disabled={syncingGlpi}

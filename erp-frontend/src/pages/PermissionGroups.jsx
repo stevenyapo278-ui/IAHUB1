@@ -2,10 +2,16 @@ import { useEffect, useState } from 'react';
 import api from '../api/client';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { PERMISSION_DEFINITIONS } from '../config/permissions';
+import { useAuth } from '../context/AuthContext';
 
 const emptyForm = { name: '', description: '', permissions: [] };
 
 export default function PermissionGroups() {
+  const { user } = useAuth();
+  // Créer/modifier/supprimer un groupe (et ses permissions) est réservé au SUPERADMIN — un ADMIN
+  // peut seulement assigner des utilisateurs aux groupes déjà définis (même règle côté backend,
+  // voir permissiongroup.routes.js : requireSuperAdmin sur POST/PATCH/DELETE).
+  const canManageGroups = user?.role === 'SUPERADMIN';
   const [groups, setGroups] = useState([]);
   const [users, setUsers] = useState([]);
   const [error, setError] = useState('');
@@ -129,19 +135,24 @@ export default function PermissionGroups() {
       <header className="flex justify-between items-end gap-md">
         <div>
           <h2 className="font-display-lg text-display-lg text-on-background">Groupes de droits</h2>
-          <p className="font-body-lg text-body-lg text-on-surface-variant">Gestion fine des permissions par groupe.</p>
+          <p className="font-body-lg text-body-lg text-on-surface-variant">
+            Gestion fine des permissions par groupe.
+            {!canManageGroups && ' Seul un super-administrateur peut créer, modifier ou supprimer un groupe — vous pouvez assigner des utilisateurs aux groupes existants.'}
+          </p>
         </div>
-        <button
-          onClick={() => { setShowForm((v) => !v); setError(''); }}
-          className="border border-outline-variant rounded-none py-2 px-4 font-label-md text-label-md text-on-surface hover:bg-surface-container-low transition-colors"
-        >
-          {showForm ? 'Annuler' : '+ Nouveau groupe'}
-        </button>
+        {canManageGroups && (
+          <button
+            onClick={() => { setShowForm((v) => !v); setError(''); }}
+            className="border border-outline-variant rounded-none py-2 px-4 font-label-md text-label-md text-on-surface hover:bg-surface-container-low transition-colors"
+          >
+            {showForm ? 'Annuler' : '+ Nouveau groupe'}
+          </button>
+        )}
       </header>
 
       {error && <div className="border border-outline-variant rounded-none p-md text-on-surface bg-surface-container-low">{error}</div>}
 
-      {showForm && (
+      {canManageGroups && showForm && (
         <form onSubmit={handleCreate} className="bg-surface-container-lowest border border-outline-variant rounded-none p-lg flex flex-col gap-md">
           <span className="font-headline-sm text-headline-sm text-on-surface">Créer un groupe de droits</span>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-md">
@@ -222,9 +233,11 @@ export default function PermissionGroups() {
                   <td className="p-md text-center">{g.permissions.length}</td>
                   <td className="p-md text-center">{g._count?.members ?? g.members?.length ?? 0}</td>
                   <td className="p-md text-right">
-                    <button onClick={() => askDelete(g.id)} className="text-on-surface-variant hover:text-error transition-colors p-1">
-                      <span className="material-symbols-outlined text-[18px]">delete</span>
-                    </button>
+                    {canManageGroups && (
+                      <button onClick={() => askDelete(g.id)} className="text-on-surface-variant hover:text-error transition-colors p-1">
+                        <span className="material-symbols-outlined text-[18px]">delete</span>
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -241,57 +254,61 @@ export default function PermissionGroups() {
       {openGroup && (
         <div className="bg-surface-container-lowest border border-outline-variant rounded-none p-lg flex flex-col gap-lg">
           <div className="flex justify-between items-center">
-            <span className="font-headline-sm text-headline-sm text-on-surface">Modifier le groupe</span>
+            <span className="font-headline-sm text-headline-sm text-on-surface">{canManageGroups ? 'Modifier le groupe' : openGroup.name}</span>
             <button onClick={() => setOpenGroupId(null)} className="text-on-surface-variant hover:text-on-surface">
               <span className="material-symbols-outlined text-[18px]">close</span>
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-md">
-            <div className="flex flex-col gap-1">
-              <label className="font-label-md text-label-md text-on-surface-variant uppercase">Nom</label>
-              <input
-                value={detailForm.name}
-                onChange={(e) => { setDetailForm({ ...detailForm, name: e.target.value }); setSavedMessage(false); }}
-                className={inputClass}
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="font-label-md text-label-md text-on-surface-variant uppercase">Description</label>
-              <input
-                value={detailForm.description}
-                onChange={(e) => { setDetailForm({ ...detailForm, description: e.target.value }); setSavedMessage(false); }}
-                className={inputClass}
-              />
-            </div>
-          </div>
-          <div className="flex items-center gap-md -mt-sm">
-            <button
-              onClick={() => saveGroupDetail(openGroup)}
-              disabled={savingDetail || (detailForm.name === openGroup.name && detailForm.description === (openGroup.description || ''))}
-              className="border border-outline-variant rounded-none py-2 px-4 font-label-md text-label-md text-on-surface bg-surface-container-high hover:bg-surface-container-highest transition-colors disabled:opacity-50"
-            >
-              {savingDetail ? 'Enregistrement...' : 'Enregistrer'}
-            </button>
-            {savedMessage && <span className="text-body-sm text-on-surface-variant">Enregistré.</span>}
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <span className="font-label-md text-label-md text-on-surface-variant uppercase">Permissions</span>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              {PERMISSION_DEFINITIONS.map((p) => (
-                <label key={p.key} className="flex items-center gap-2 cursor-pointer">
+          {canManageGroups && (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-md">
+                <div className="flex flex-col gap-1">
+                  <label className="font-label-md text-label-md text-on-surface-variant uppercase">Nom</label>
                   <input
-                    type="checkbox"
-                    checked={openGroup.permissions.includes(p.key)}
-                    onChange={() => toggleGroupPermission(openGroup, p.key)}
-                    className="w-4 h-4 border-outline-variant cursor-pointer"
+                    value={detailForm.name}
+                    onChange={(e) => { setDetailForm({ ...detailForm, name: e.target.value }); setSavedMessage(false); }}
+                    className={inputClass}
                   />
-                  <span className="text-body-sm text-on-surface">{p.label}</span>
-                </label>
-              ))}
-            </div>
-          </div>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="font-label-md text-label-md text-on-surface-variant uppercase">Description</label>
+                  <input
+                    value={detailForm.description}
+                    onChange={(e) => { setDetailForm({ ...detailForm, description: e.target.value }); setSavedMessage(false); }}
+                    className={inputClass}
+                  />
+                </div>
+              </div>
+              <div className="flex items-center gap-md -mt-sm">
+                <button
+                  onClick={() => saveGroupDetail(openGroup)}
+                  disabled={savingDetail || (detailForm.name === openGroup.name && detailForm.description === (openGroup.description || ''))}
+                  className="border border-outline-variant rounded-none py-2 px-4 font-label-md text-label-md text-on-surface bg-surface-container-high hover:bg-surface-container-highest transition-colors disabled:opacity-50"
+                >
+                  {savingDetail ? 'Enregistrement...' : 'Enregistrer'}
+                </button>
+                {savedMessage && <span className="text-body-sm text-on-surface-variant">Enregistré.</span>}
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <span className="font-label-md text-label-md text-on-surface-variant uppercase">Permissions</span>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {PERMISSION_DEFINITIONS.map((p) => (
+                    <label key={p.key} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={openGroup.permissions.includes(p.key)}
+                        onChange={() => toggleGroupPermission(openGroup, p.key)}
+                        className="w-4 h-4 border-outline-variant cursor-pointer"
+                      />
+                      <span className="text-body-sm text-on-surface">{p.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
 
           <div className="flex flex-col gap-2">
             <span className="font-label-md text-label-md text-on-surface-variant uppercase">Membres ({openGroup.members?.length || 0})</span>

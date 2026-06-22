@@ -65,7 +65,7 @@ export default function Login() {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="admin@example.com"
+                  placeholder="superadmin@prosuma.ci"
                   className="w-full h-[40px] pl-[36px] pr-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md placeholder-outline transition-shadow duration-200 focus:outline-none focus:border-on-surface"
                 />
               </div>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { hasPermission } from '../utils/permissions';
 import ConfirmDialog from '../components/ConfirmDialog';
 
 const STATUS_OPTIONS = ['NEW', 'OPEN', 'PENDING', 'SOLVED', 'CLOSED'];
@@ -71,7 +72,9 @@ export default function TicketDetail() {
   const [users, setUsers] = useState([]);
   const [syncFailures, setSyncFailures] = useState([]);
 
-  const canManage = user?.role === 'ADMIN' || user?.role === 'TECHNICIAN';
+  const canAssign = hasPermission(user, 'tickets.assign');
+  const canApprove = hasPermission(user, 'tickets.approve');
+  const canDelete = hasPermission(user, 'tickets.delete');
 
   function load() {
     api
@@ -106,10 +109,10 @@ export default function TicketDetail() {
   }
 
   useEffect(() => {
-    if (!canManage) return;
+    if (!canAssign) return;
     api.get('/teams').then(({ data }) => setTeams(data)).catch(() => {});
     api.get('/users').then(({ data }) => setUsers(data)).catch(() => {});
-  }, [canManage]);
+  }, [canAssign]);
 
   async function updateField(field, value) {
     try {
@@ -439,7 +442,7 @@ export default function TicketDetail() {
                 </p>
               )}
 
-              {canManage && ticket.approvalStatus === 'PENDING' && (
+              {canApprove && ticket.approvalStatus === 'PENDING' && (
                 <div className="flex gap-2">
                   <button
                     onClick={handleApprove}
@@ -458,7 +461,7 @@ export default function TicketDetail() {
                 </div>
               )}
 
-              {canManage && ticket.approvalStatus !== 'PENDING' && (
+              {canApprove && ticket.approvalStatus !== 'PENDING' && (
                 <button
                   onClick={handleRequestApproval}
                   className="w-full text-on-surface font-headline-sm text-body-sm hover:underline"
@@ -469,7 +472,7 @@ export default function TicketDetail() {
             </div>
           )}
 
-          {canManage && ticket.approvalStatus === 'NOT_REQUIRED' && (
+          {canApprove && ticket.approvalStatus === 'NOT_REQUIRED' && (
             <div className="bg-surface-container-lowest border border-outline-variant rounded-none p-lg">
               <h3 className="font-headline-sm text-headline-sm text-on-surface mb-md uppercase tracking-wider flex items-center gap-sm">
                 <span className="material-symbols-outlined text-[18px]">fact_check</span>
@@ -499,7 +502,7 @@ export default function TicketDetail() {
                 <select
                   className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface disabled:opacity-60"
                   value={ticket.type}
-                  disabled={!canManage}
+                  disabled={!canAssign}
                   onChange={(e) => updateField('type', e.target.value)}
                 >
                   {TYPE_OPTIONS.map((t) => (
@@ -512,7 +515,7 @@ export default function TicketDetail() {
                 <select
                   className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface disabled:opacity-60"
                   value={ticket.status}
-                  disabled={!canManage}
+                  disabled={!canAssign}
                   onChange={(e) => updateField('status', e.target.value)}
                 >
                   {STATUS_OPTIONS.map((s) => (
@@ -525,7 +528,7 @@ export default function TicketDetail() {
                 <select
                   className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface disabled:opacity-60"
                   value={ticket.source || ''}
-                  disabled={!canManage}
+                  disabled={!canAssign}
                   onChange={(e) => updateField('source', e.target.value)}
                 >
                   <option value="">-----</option>
@@ -539,7 +542,7 @@ export default function TicketDetail() {
                 <select
                   className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface disabled:opacity-60"
                   value={ticket.urgency}
-                  disabled={!canManage}
+                  disabled={!canAssign}
                   onChange={(e) => updateField('urgency', e.target.value)}
                 >
                   {URGENCY_IMPACT_OPTIONS.map((o) => (
@@ -552,7 +555,7 @@ export default function TicketDetail() {
                 <select
                   className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface disabled:opacity-60"
                   value={ticket.impact}
-                  disabled={!canManage}
+                  disabled={!canAssign}
                   onChange={(e) => updateField('impact', e.target.value)}
                 >
                   {URGENCY_IMPACT_OPTIONS.map((o) => (
@@ -565,7 +568,7 @@ export default function TicketDetail() {
                 <select
                   className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface disabled:opacity-60"
                   value={ticket.priority}
-                  disabled={!canManage}
+                  disabled={!canAssign}
                   onChange={(e) => updateField('priority', e.target.value)}
                 >
                   {PRIORITY_OPTIONS.map((p) => (
@@ -578,13 +581,13 @@ export default function TicketDetail() {
                 <input
                   className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface disabled:opacity-60"
                   defaultValue={ticket.externalId || ''}
-                  disabled={!canManage}
+                  disabled={!canAssign}
                   onBlur={(e) => updateField('externalId', e.target.value)}
                 />
               </div>
               <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Équipe</label>
-                {canManage ? (
+                {canAssign ? (
                   <select
                     className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface"
                     value={ticket.teamId || ''}
@@ -603,7 +606,7 @@ export default function TicketDetail() {
               </div>
               <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Attribué à</label>
-                {canManage ? (
+                {canAssign ? (
                   <select
                     className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface"
                     value={ticket.assignedToId || ''}
@@ -664,7 +667,7 @@ export default function TicketDetail() {
             </div>
           </div>
 
-          {user?.role === 'ADMIN' && (
+          {canDelete && (
             <div className="pt-lg border-t border-outline-variant border-dashed">
               <button
                 onClick={() => setShowDeleteConfirm(true)}

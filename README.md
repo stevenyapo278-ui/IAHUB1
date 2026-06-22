@@ -2,6 +2,8 @@
 
 Plateforme de gestion des tickets IT avec analyse IA des emails, création automatique de tickets GLPI, détection d'incidents similaires et relances automatiques.
 
+> **Vous installez l'application pour la première fois sur votre poste ou un serveur ?** Suivez plutôt le guide simplifié [INSTALLATION.md](INSTALLATION.md), pensé pour un utilisateur non-développeur. Ce README couvre les détails techniques (architecture, migrations, permissions, développement).
+
 ## Stack
 
 | Composant | Technologie |
@@ -93,44 +95,31 @@ Les services démarrent dans l'ordre :
 
 ### Identifiants par défaut
 
-Ces comptes sont créés automatiquement par le script de seed (`erp-backend/prisma/seed.js`) à chaque démarrage (`docker compose up -d`), s'ils n'existent pas déjà en base.
+Un seul compte est créé automatiquement par le script de seed (`erp-backend/prisma/seed.js`) au premier démarrage sur une base vide (`docker compose up -d`), s'il n'existe pas déjà en base — c'est le seul compte **SUPERADMIN** garanti d'exister dès l'installation :
 
 ```
-Email    : admin@example.com
-Password : ChangeMe123!
+Email    : superadmin@prosuma.ci
+Password : 12345678
 ```
 
-```
-Email    : admin@prosuma.ci
-Password : 1234
-```
+À la première connexion, ce compte sert à créer tous les autres comptes (ADMIN, technicien, etc.) depuis **Utilisateurs**, et à leur attribuer des droits via **Groupes de droits** — voir [Rôles et groupes de droits](#rôles-et-groupes-de-droits-permissions).
 
-Si aucun de ces comptes ne fonctionne (ex: base de données déjà initialisée par un seed plus ancien, mot de passe changé manuellement), recrée un admin directement en base :
+Si ce compte ne fonctionne pas (ex: base déjà initialisée par un seed plus ancien, mot de passe changé manuellement), recrée-le directement en base :
 
 ```bash
 docker exec ia-hub-backend node -e "
 const bcrypt = require('bcryptjs');
 const prisma = require('./src/prismaClient');
 (async () => {
-  const passwordHash = await bcrypt.hash('1234', 10);
+  const passwordHash = await bcrypt.hash('12345678', 10);
   const user = await prisma.user.upsert({
-    where: { email: 'admin@prosuma.ci' },
-    create: { email: 'admin@prosuma.ci', passwordHash, fullName: 'Admin Prosuma', role: 'ADMIN' },
-    update: { passwordHash, role: 'ADMIN' },
+    where: { email: 'superadmin@prosuma.ci' },
+    create: { email: 'superadmin@prosuma.ci', passwordHash, fullName: 'Super Admin Prosuma', role: 'SUPERADMIN' },
+    update: { passwordHash, role: 'SUPERADMIN' },
   });
-  console.log('Admin prêt :', user.email);
+  console.log('Super-admin prêt :', user.email);
   process.exit();
 })();
-"
-```
-
-Ou directement en SQL via `psql` (le hash correspond au mot de passe `1234`) :
-
-```bash
-docker exec ia-hub-postgres psql -U erp_user -d erp_itsm -c "
-INSERT INTO \"User\" (email, \"passwordHash\", \"fullName\", role, \"createdAt\", \"updatedAt\")
-VALUES ('admin@prosuma.ci', '\$2a\$10\$v5oqXMZI1b5dytp0BBgtDe/tolP3PMCg0M4dhXZ8PZ4WlnyQiZOVS', 'Admin Prosuma', 'ADMIN', NOW(), NOW())
-ON CONFLICT (email) DO UPDATE SET \"passwordHash\" = EXCLUDED.\"passwordHash\", role = 'ADMIN';
 "
 ```
 
@@ -180,6 +169,17 @@ Si une migration doit être appliquée manuellement dans le conteneur (cas rare,
 ```bash
 docker compose run --rm --entrypoint sh backend -c "npx prisma migrate deploy"
 ```
+
+### Seed (`erp-backend/prisma/seed.js`)
+
+Exécuté automatiquement au démarrage du conteneur backend (`docker-entrypoint.sh`, après les migrations), idempotent (peut être relancé sans dupliquer ce qui existe déjà) :
+
+- Crée les 7 équipes par défaut (Réseau, Système, Sécurité, Applicatif, Logiciel, Matériel, Téléphonie).
+- Crée le compte SUPERADMIN par défaut `superadmin@prosuma.ci` / `12345678` s'il n'existe pas déjà.
+- Crée les fournisseurs IA (OpenAI, Anthropic, Gemini, NVIDIA, Mistral) et leurs modèles par défaut.
+- Crée le groupe de droits **Techniciens** avec les permissions historiques du rôle TECHNICIAN, et y rattache automatiquement tout compte TECHNICIAN existant sans groupe.
+
+La création de techniciens à partir d'un mapping GLPI statique (`GLPI_TECHNICIANS`) a été retirée du seed — ce mapping n'existe plus dans `src/utils/glpiMapping.js` (le seed plantait avant d'atteindre la création du SUPERADMIN). Les techniciens/équipes liés à GLPI sont désormais synchronisés en continu via `syncTeamsFromGlpi`/`syncCategoriesFromGlpi` ([erp-backend/src/services/glpiTicketCreator.js](erp-backend/src/services/glpiTicketCreator.js)), appelés périodiquement depuis `server.js`.
 
 ---
 
@@ -342,7 +342,7 @@ Pour recevoir et analyser les vrais emails :
 # Obtenir un token
 TOKEN=$(curl -s -X POST http://localhost:4000/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@example.com","password":"ChangeMe123!"}' \
+  -d '{"email":"superadmin@prosuma.ci","password":"12345678"}' \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
 
 # Simuler un email entrant → analyse IA + création ticket GLPI
@@ -371,40 +371,52 @@ curl -s -X POST http://localhost:4000/api/inbox/simulate \
 | Relances automatiques | J+2, J+5, J+10, fermeture automatique J+15 |
 | Base de connaissances | Recherche sémantique + génération d'articles depuis tickets résolus, remplacement/suppression de documents |
 | Journal d'audit | Historique complet de chaque action sur un ticket |
-| Suppression de tickets | Individuelle ou en masse, réservée aux ADMIN |
+| Suppression de tickets | Individuelle ou en masse, soumise aux permissions `tickets.delete`/`tickets.bulkDelete` (voir Groupes de droits) |
 | Auto-assignation des tickets | Le technicien le moins chargé de l'équipe correspondant à la catégorie détectée est assigné automatiquement (création email ou manuelle) |
 | Charge par équipe | Visualisation du nombre de tickets actifs par technicien, page Équipes |
 | Auto-approbation GLPI | Approuve automatiquement la solution d'un ticket marqué résolu côté GLPI si activé dans Paramètres |
 | Alertes vocales | Annonce vocale configurable (activation, langue) des nouveaux tickets/brouillons à valider |
-| Groupes de droits | Permissions fines par groupe, au-delà des rôles ADMIN/TECHNICIAN (voir section dédiée) |
+| Groupes de droits | Permissions fines par groupe — remplacent entièrement l'accès par rôle pour ADMIN/TECHNICIAN dès qu'un groupe est assigné (voir section dédiée) |
 | Brouillons de réponse email | Validation humaine avant envoi, avec restauration possible d'un brouillon rejeté |
 
 ---
 
 ### Suppression de tickets
 
-Réservée au rôle **ADMIN**.
+Contrôlée par les permissions `tickets.delete` (unitaire) et `tickets.bulkDelete` (en masse) — voir [Rôles et groupes de droits](#rôles-et-groupes-de-droits-permissions). SUPERADMIN les a toujours ; un ADMIN/TECHNICIAN doit appartenir à un groupe cochant ces permissions.
 
-- **Un seul ticket** : depuis la page de détail d'un ticket (`/tickets/:id`), bouton "Supprimer", ou directement dans la liste via l'icône corbeille sur chaque ligne.
-- **En masse** : sur la page Tickets, des cases à cocher apparaissent sur chaque ligne (et une case "tout sélectionner" dans l'en-tête) lorsque l'utilisateur est ADMIN. Une fois une ou plusieurs lignes sélectionnées, le bouton "Supprimer la sélection (N)" apparaît au-dessus du tableau. Une confirmation est demandée avant suppression définitive.
+- **Un seul ticket** (`tickets.delete`) : depuis la page de détail d'un ticket (`/tickets/:id`), bouton "Supprimer", ou directement dans la liste via l'icône corbeille sur chaque ligne.
+- **En masse** (`tickets.bulkDelete`) : sur la page Tickets, des cases à cocher apparaissent sur chaque ligne (et une case "tout sélectionner" dans l'en-tête). Une fois une ou plusieurs lignes sélectionnées, le bouton "Supprimer la sélection (N)" apparaît au-dessus du tableau. Une confirmation est demandée avant suppression définitive.
 
 API correspondante :
-- `DELETE /api/tickets/:id` — supprime un ticket (ADMIN uniquement).
-- `POST /api/tickets/bulk-delete` — supprime plusieurs tickets en une requête, body `{ "ids": [1, 2, 3] }` (ADMIN uniquement).
+- `DELETE /api/tickets/:id` — supprime un ticket (`tickets.delete` requis).
+- `POST /api/tickets/bulk-delete` — supprime plusieurs tickets en une requête, body `{ "ids": [1, 2, 3] }` (`tickets.bulkDelete` requis).
 
 Si le ticket était synchronisé avec GLPI (`glpiTicketId` renseigné), le ticket correspondant est aussi purgé côté GLPI (suppression définitive, `force_purge`). Si GLPI est inaccessible au moment de la suppression, le ticket est tout de même supprimé côté ERP (best-effort, non bloquant) — il peut alors rester orphelin dans GLPI.
 
 ---
 
-## Groupes de droits (permissions)
+## Rôles et groupes de droits (permissions)
 
-Au-delà des rôles **ADMIN** / **TECHNICIAN**, l'accès aux fonctionnalités peut être affiné via **Groupes de droits** (menu, réservé ADMIN).
+### Rôles
 
-- Chaque groupe définit une liste de permissions parmi : gestion des tickets (création, suppression, assignation, approbation), équipes, utilisateurs, paramètres, base de connaissances, synchronisation boîte mail, synchronisation GLPI, prompts IA, brouillons de réponse email, automatisations (relances, n8n).
-- Un utilisateur sans groupe assigné garde le comportement **par rôle** classique (ADMIN = tout, TECHNICIAN = accès historique). Dès qu'un utilisateur est ajouté à un groupe, **seules** les permissions de ce groupe s'appliquent — le rôle n'est plus utilisé en complément.
+| Rôle | Description |
+|---|---|
+| **SUPERADMIN** | Seul rôle bénéficiant d'un accès total inconditionnel, jamais affecté par un groupe de droits. Seul rôle pouvant créer/modifier/supprimer un **groupe de droits** et accéder à l'onglet **Avancé** des Paramètres (config serveur, fréquences de sync, auto-envoi IA). Un seul compte SUPERADMIN existe par défaut à l'installation (voir [Identifiants par défaut](#identifiants-par-défaut)) ; c'est lui qui crée les comptes ADMIN/techniciens suivants et leur assigne un groupe. |
+| **ADMIN** | Aucun accès automatique aux fonctionnalités de gestion : ses permissions viennent **exclusivement** du ou des groupes de droits auxquels il est assigné (voir ci-dessous). Peut créer des utilisateurs et les assigner à des groupes existants, mais ne peut pas créer/modifier/supprimer un groupe. |
+| **TECHNICIAN** | Même règle qu'ADMIN : aucune permission par défaut hors groupe. Le groupe **Techniciens**, créé automatiquement au premier démarrage, couvre l'accès historiquement accordé à ce rôle. |
+| **REQUESTER** | Utilisateur final, sans accès à l'interface de gestion. |
+
+### Groupes de droits
+
+Menu **Groupes de droits** — création/modification/suppression réservée à **SUPERADMIN** ; un **ADMIN** peut consulter les groupes existants et y assigner/retirer des utilisateurs, mais pas changer leur contenu.
+
+- Chaque groupe définit une liste de permissions cochables, parmi : gestion des tickets (suppression unitaire, suppression en masse, assignation, approbation — la **création** de ticket n'est pas une permission, elle est ouverte à tout compte connecté y compris REQUESTER), équipes, utilisateurs (affichage du lien uniquement, voir note ci-dessous), Paramètres → Intelligence Artificielle / Email (Outlook-IMAP) / Autres intégrations, base de connaissances, synchronisation boîte mail, synchronisation GLPI, **Prompts IA**, brouillons de réponse email, automatisations (relances, n8n).
+- **Règle stricte, sans filet de sécurité par rôle : seules les permissions cochées dans les groupes d'un utilisateur déterminent ce qu'il peut faire — y compris pour un ADMIN.** Un utilisateur (ADMIN ou TECHNICIAN) qui n'appartient à **aucun** groupe n'a accès à rien au-delà des pages toujours visibles (Dashboard, Tickets, Équipes, Boîte mail, Base de connaissances — en lecture). **Tout nouveau compte créé doit donc être assigné à un groupe pour pouvoir agir.** Seul SUPERADMIN n'est jamais affecté par les groupes.
+- Un utilisateur peut appartenir à **plusieurs groupes simultanément** : ses permissions effectives sont alors l'**union** des permissions de tous ses groupes. Attention en pratique : ajouter un compte ADMIN au groupe **Techniciens** (par exemple) lui rend les permissions de ce groupe en plus de celles de son groupe principal, même si elles sont décochées ailleurs — vérifier l'appartenance à tous les groupes avant de diagnostiquer un accès inattendu.
 - Un groupe **Techniciens** est créé automatiquement au premier démarrage (seed), avec les permissions historiquement accordées au rôle TECHNICIAN, et tous les comptes TECHNICIAN existants y sont rattachés automatiquement.
-- La barre latérale masque les liens vers les pages dont la permission de gestion correspondante n'est pas accordée (ex : retirer `knowledge.manage` cache "Base de connaissances" pour cet utilisateur dès son prochain chargement de page, sans besoin de se reconnecter).
-- Les routes `Utilisateurs`, `Paramètres → API/Fournisseurs IA/Comptes email`, et `Groupes de droits` eux-mêmes restent **strictement réservés à ADMIN**, quel que soit le contenu d'un groupe — un groupe ne peut jamais s'accorder ces droits.
+- La barre latérale, les onglets de la page Paramètres, et les boutons/actions des pages Tickets/Détail ticket/Équipes (suppression, assignation, approbation...) se masquent dès que la permission correspondante n'est pas accordée — au prochain chargement de page, sans besoin de se reconnecter, **sauf changement de rôle** (ADMIN ↔ TECHNICIAN ↔ SUPERADMIN), qui ne prend effet qu'à la prochaine connexion car porté par le jeton de session.
+- Les routes `Utilisateurs` et `Groupes de droits` (la page elle-même, pas son contenu) restent accessibles côté serveur à **tout compte de rôle ADMIN ou SUPERADMIN**, quel que soit le contenu de ses groupes — non délégable à TECHNICIAN. La permission `users.manage` ne pilote, côté frontend uniquement, que l'affichage des liens correspondants dans la barre latérale (purement cosmétique : la retirer du groupe d'un ADMIN masque le lien mais ne bloque pas l'accès direct à l'URL). Seule la création/modification/suppression d'un groupe reste strictement réservée à SUPERADMIN.
 
 ---
 

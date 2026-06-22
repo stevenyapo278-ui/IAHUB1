@@ -101,7 +101,6 @@ export default function AutomationTab() {
   const [summaryRecipientInput, setSummaryRecipientInput] = useState('');
   const [testingSummary, setTestingSummary] = useState(false);
   const [summaryTestResult, setSummaryTestResult] = useState(null);
-  const [schedulerHealth, setSchedulerHealth] = useState(null);
 
   function toggleVoiceAlerts(value) {
     setVoiceAlertEnabled(value);
@@ -120,18 +119,9 @@ export default function AutomationTab() {
       setSignatureDraft(data.emailSignature || '');
     }).catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
     api.get('/reminders/config').then(({ data }) => setReminderConfig(data)).catch(() => {});
-    api.get('/system-settings/scheduler-health').then(({ data }) => setSchedulerHealth(data)).catch(() => {});
   }
 
   useEffect(load, []);
-  // Rafraîchit l'état des tâches automatiques toutes les 30s pour refléter une panne/résolution
-  // sans devoir recharger la page — léger, une seule petite requête.
-  useEffect(() => {
-    const intervalId = setInterval(() => {
-      api.get('/system-settings/scheduler-health').then(({ data }) => setSchedulerHealth(data)).catch(() => {});
-    }, 30000);
-    return () => clearInterval(intervalId);
-  }, []);
 
   async function updateReminderConfig(patch) {
     setReminderSaving(true);
@@ -222,38 +212,6 @@ export default function AutomationTab() {
       </p>
 
       {error && <div className="border border-outline-variant rounded-none p-md text-on-surface bg-surface-container-low">{error}</div>}
-
-      {schedulerHealth && schedulerHealth.some((s) => s.consecutiveFailures >= 3) && (
-        <div className="border border-error text-error bg-error-container/30 rounded-none p-md flex items-start gap-sm">
-          <span className="material-symbols-outlined">sync_problem</span>
-          <div>
-            <div className="font-headline-sm text-headline-sm">Tâches automatiques en panne</div>
-            <ul className="font-body-sm text-body-sm mt-1 list-disc pl-md">
-              {schedulerHealth.filter((s) => s.consecutiveFailures >= 3).map((s) => (
-                <li key={s.id}>
-                  <strong>{s.name}</strong> — {s.consecutiveFailures} échecs consécutifs depuis {new Date(s.lastFailureAt).toLocaleString('fr-FR')} : {s.lastError}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      )}
-
-      <SettingRow
-        title="Auto-envoi des emails IA"
-        description="Quand activé, les emails générés automatiquement (accusé de réception, notification d'incident connu) sont envoyés directement sans passer par la validation humaine dans « Réponses à valider »."
-        checked={settings.autoSendAiEmails}
-        onChange={(v) => updateSetting('autoSendAiEmails', v)}
-        disabled={saving}
-      />
-
-      <SettingRow
-        title="Auto-approbation des solutions GLPI"
-        description="Quand activé, dès qu'un technicien marque un ticket comme résolu dans GLPI, toute demande de validation de la solution en attente est approuvée automatiquement, sans attendre de confirmation du demandeur."
-        checked={settings.autoApproveGlpiSolutions}
-        onChange={(v) => updateSetting('autoApproveGlpiSolutions', v)}
-        disabled={saving}
-      />
 
       <div className="mt-md">
         <h3 className="font-headline-sm text-headline-sm text-on-surface mb-1">Texte de l'accusé de réception et signature</h3>
@@ -540,52 +498,6 @@ export default function AutomationTab() {
               </p>
             )}
           </div>
-        </div>
-      </div>
-
-      <div className="mt-md">
-        <h3 className="font-headline-sm text-headline-sm text-on-surface mb-1">Fréquences de synchronisation</h3>
-        <p className="font-body-sm text-body-sm text-on-surface-variant mb-md">
-          À quel rythme chaque source externe est interrogée automatiquement. Mettre à 0 désactive la synchro automatique
-          pour cette tâche — le bouton manuel correspondant (s'il existe) reste alors le seul moyen de forcer une mise à jour.
-        </p>
-        <div className="flex flex-col gap-md">
-          <IntervalRow
-            title="Tickets GLPI (+ pièces jointes, approbations)"
-            description="Fréquence d'import/mise à jour des tickets depuis GLPI vers l'ERP."
-            value={settings.glpiTicketsSyncIntervalSeconds}
-            onChange={(v) => updateSetting('glpiTicketsSyncIntervalSeconds', v)}
-            disabled={saving}
-            max={3600}
-            unit="secondes"
-          />
-          <IntervalRow
-            title="Emails entrants"
-            description="Fréquence de relevé des boîtes mail connectées (Outlook)."
-            value={settings.emailSyncIntervalSeconds}
-            onChange={(v) => updateSetting('emailSyncIntervalSeconds', v)}
-            disabled={saving}
-            max={3600}
-            unit="secondes"
-          />
-          <IntervalRow
-            title="Équipes et catégories GLPI"
-            description="Fréquence de synchro des groupes (équipes) et catégories de tickets depuis GLPI."
-            value={settings.glpiTeamsCategoriesSyncIntervalMinutes}
-            onChange={(v) => updateSetting('glpiTeamsCategoriesSyncIntervalMinutes', v)}
-            disabled={saving}
-            max={1440}
-            unit="minutes"
-          />
-          <IntervalRow
-            title="Modèles IA disponibles"
-            description="Fréquence de vérification des modèles disponibles auprès de chaque fournisseur IA actif."
-            value={settings.aiModelsSyncIntervalHours}
-            onChange={(v) => updateSetting('aiModelsSyncIntervalHours', v)}
-            disabled={saving}
-            max={168}
-            unit="heures"
-          />
         </div>
       </div>
 

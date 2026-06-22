@@ -7,6 +7,7 @@ const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { sendDailySummary } = require('../services/dailySummary');
+const { resolveBackendUrl } = require('../services/systemSettings');
 
 const router = express.Router();
 router.use(authenticate);
@@ -42,8 +43,9 @@ router.get('/', async (req, res) => {
 });
 
 // Upload du logo de signature email : sauvegarde le fichier sur disque (persistant via volume Docker)
-// et stocke son URL absolue (BACKEND_URL) sur SystemSettings, pour qu'elle reste résolvable depuis
-// la boîte mail du destinataire (pas seulement depuis le navigateur de l'admin).
+// et stocke son URL absolue sur SystemSettings, pour qu'elle reste résolvable depuis la boîte mail
+// du destinataire (pas seulement depuis le navigateur de l'admin). L'URL de base utilisée vient du
+// réglage UI "URL du serveur" si configuré, sinon de BACKEND_URL, sinon localhost.
 router.post(
   '/signature-logo',
   requirePermission('automation.manage', ['ADMIN']),
@@ -51,10 +53,10 @@ router.post(
   async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu' });
 
-    const backendUrl = process.env.BACKEND_URL || 'http://localhost:4000';
+    const settings = await getOrCreateSettings();
+    const backendUrl = resolveBackendUrl(settings);
     const logoUrl = `${backendUrl}/uploads/signature-logo/${req.file.filename}`;
 
-    await getOrCreateSettings();
     const updated = await prisma.systemSettings.update({ where: { id: 1 }, data: { signatureLogoUrl: logoUrl } });
     return res.json(updated);
   }
@@ -64,12 +66,6 @@ router.patch(
   '/',
   requirePermission('automation.manage', ['ADMIN']),
   [
-    body('autoApproveGlpiSolutions').optional().isBoolean(),
-    body('autoSendAiEmails').optional().isBoolean(),
-    body('glpiTicketsSyncIntervalSeconds').optional().isInt({ min: 0, max: 3600 }),
-    body('emailSyncIntervalSeconds').optional().isInt({ min: 0, max: 3600 }),
-    body('glpiTeamsCategoriesSyncIntervalMinutes').optional().isInt({ min: 0, max: 1440 }),
-    body('aiModelsSyncIntervalHours').optional().isInt({ min: 0, max: 168 }),
     body('draftReminderEnabled').optional().isBoolean(),
     body('draftReminderDelayMinutes').optional().isInt({ min: 1, max: 1440 }),
     body('acknowledgementMessage').optional({ nullable: true }).isString().isLength({ max: 2000 }),
@@ -88,12 +84,6 @@ router.patch(
     await getOrCreateSettings();
 
     const data = {};
-    if (req.body.autoApproveGlpiSolutions !== undefined) data.autoApproveGlpiSolutions = req.body.autoApproveGlpiSolutions;
-    if (req.body.autoSendAiEmails !== undefined) data.autoSendAiEmails = req.body.autoSendAiEmails;
-    if (req.body.glpiTicketsSyncIntervalSeconds !== undefined) data.glpiTicketsSyncIntervalSeconds = req.body.glpiTicketsSyncIntervalSeconds;
-    if (req.body.emailSyncIntervalSeconds !== undefined) data.emailSyncIntervalSeconds = req.body.emailSyncIntervalSeconds;
-    if (req.body.glpiTeamsCategoriesSyncIntervalMinutes !== undefined) data.glpiTeamsCategoriesSyncIntervalMinutes = req.body.glpiTeamsCategoriesSyncIntervalMinutes;
-    if (req.body.aiModelsSyncIntervalHours !== undefined) data.aiModelsSyncIntervalHours = req.body.aiModelsSyncIntervalHours;
     if (req.body.draftReminderEnabled !== undefined) data.draftReminderEnabled = req.body.draftReminderEnabled;
     if (req.body.draftReminderDelayMinutes !== undefined) data.draftReminderDelayMinutes = req.body.draftReminderDelayMinutes;
     if (req.body.acknowledgementMessage !== undefined) data.acknowledgementMessage = req.body.acknowledgementMessage || null;
@@ -118,13 +108,6 @@ router.post('/daily-summary/test', requirePermission('automation.manage', ['ADMI
   } catch (err) {
     return res.status(502).json({ error: err.message });
   }
-});
-
-// État de santé de chaque tâche automatique planifiée (sync GLPI, emails, relances...) — voir
-// services/schedulerHealth.js. Permet de voir dans l'UI une panne avant qu'un utilisateur s'en plaigne.
-router.get('/scheduler-health', requirePermission('automation.manage', ['ADMIN']), async (req, res) => {
-  const health = await prisma.schedulerHealth.findMany({ orderBy: { name: 'asc' } });
-  return res.json(health);
 });
 
 module.exports = router;

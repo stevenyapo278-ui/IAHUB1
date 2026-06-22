@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { ADMIN_LIKE_ROLES } = require('../config/permissions');
 
 function authenticate(req, res, next) {
   const header = req.headers.authorization || '';
@@ -26,4 +27,13 @@ function authorize(...roles) {
   };
 }
 
-module.exports = { authenticate, authorize };
+// Remplace authorize('ADMIN') : couvre ADMIN et SUPERADMIN par construction (liste centralisée
+// ADMIN_LIKE_ROLES), pour ne pas avoir à éditer chaque routeur si la hiérarchie des rôles évolue.
+function authorizeAdmin(req, res, next) {
+  if (!req.user || !ADMIN_LIKE_ROLES.includes(req.user.role)) {
+    return res.status(403).json({ error: 'Accès refusé' });
+  }
+  next();
+}
+
+module.exports = { authenticate, authorize, authorizeAdmin };

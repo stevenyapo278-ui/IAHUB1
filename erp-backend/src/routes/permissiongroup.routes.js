@@ -1,12 +1,17 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authorizeAdmin } = require('../middleware/auth');
+const { requireSuperAdmin } = require('../middleware/permissions');
 const { PERMISSION_KEYS } = require('../config/permissions');
 
 const router = express.Router();
 router.use(authenticate);
-router.use(authorize('ADMIN'));
+router.use(authorizeAdmin);
+// Au-delà de la simple consultation/assignation (réservée à tout ADMIN ci-dessus), la création, la
+// modification et la suppression des groupes eux-mêmes (et de leurs permissions) sont réservées au
+// SUPERADMIN — un ADMIN ne fait qu'assigner des utilisateurs à des groupes déjà définis, il ne
+// décide pas du contenu de ces groupes.
 
 function invalidKeys(permissions) {
   return (permissions || []).filter((p) => !PERMISSION_KEYS.includes(p));
@@ -32,7 +37,7 @@ router.get('/:id', async (req, res) => {
   return res.json(group);
 });
 
-router.post('/', [body('name').notEmpty()], async (req, res) => {
+router.post('/', requireSuperAdmin, [body('name').notEmpty()], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
@@ -50,7 +55,7 @@ router.post('/', [body('name').notEmpty()], async (req, res) => {
   return res.status(201).json(group);
 });
 
-router.patch('/:id', async (req, res) => {
+router.patch('/:id', requireSuperAdmin, async (req, res) => {
   const { name, description, permissions } = req.body;
 
   if (permissions !== undefined) {
@@ -71,7 +76,7 @@ router.patch('/:id', async (req, res) => {
   }
 });
 
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireSuperAdmin, async (req, res) => {
   try {
     await prisma.permissionGroup.delete({ where: { id: Number(req.params.id) } });
     return res.status(204).send();

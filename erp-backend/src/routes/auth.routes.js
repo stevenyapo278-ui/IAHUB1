@@ -83,7 +83,7 @@ router.post(
     );
 
     let permissions = null;
-    if (user.role !== 'ADMIN') {
+    if (user.role !== 'SUPERADMIN') {
       const groupCount = await prisma.permissionGroup.count({ where: { members: { some: { id: user.id } } } });
       if (groupCount > 0) {
         permissions = Array.from(await getUserPermissions(user.id));
@@ -181,9 +181,10 @@ router.post(
 );
 
 // "permissions" : liste effective des clés de permission de l'utilisateur, calculée selon la même
-// règle que requirePermission() — ADMIN a accès à tout (toutes les clés renvoyées), sinon seules
-// les permissions des groupes auxquels il appartient (ou aucune s'il n'est dans aucun groupe et
-// que le frontend doit alors se baser sur req.user.role pour les permissions par défaut du rôle).
+// règle que requirePermission() — seul SUPERADMIN a accès à tout sans condition ; pour tous les
+// autres rôles (ADMIN inclus), si l'utilisateur appartient à au moins un groupe de droits, ce sont
+// ces permissions qui s'appliquent (null = pas de groupe, le frontend retombe alors sur les règles
+// par rôle classiques pour ne jamais casser l'accès d'un compte existant sans groupe assigné).
 router.get('/me', authenticate, async (req, res) => {
   const user = await prisma.user.findUnique({
     where: { id: req.user.sub },
@@ -194,8 +195,8 @@ router.get('/me', authenticate, async (req, res) => {
     return res.status(404).json({ error: 'Utilisateur introuvable' });
   }
 
-  let permissions = null; // null = pas de groupe, le frontend retombe sur les règles par rôle
-  if (user.role !== 'ADMIN') {
+  let permissions = null;
+  if (user.role !== 'SUPERADMIN') {
     const groupCount = await prisma.permissionGroup.count({ where: { members: { some: { id: user.id } } } });
     if (groupCount > 0) {
       permissions = Array.from(await getUserPermissions(user.id));

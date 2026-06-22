@@ -2,14 +2,35 @@ const express = require('express');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const prisma = require('../prismaClient');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authorizeAdmin } = require('../middleware/auth');
 const { sendTemporaryPasswordEmail } = require('../services/emailSender');
+const { ADMIN_LIKE_ROLES } = require('../config/permissions');
 
 const MIN_PASSWORD_LENGTH = 8;
 
+// Matrice de rôles assignables : SUPERADMIN peut tout assigner ; ADMIN ne peut assigner que
+// TECHNICIAN/REQUESTER (jamais ADMIN ni SUPERADMIN, y compris en éditant un compte déjà à ce niveau)
+// — sinon un ADMIN pourrait se créer des pairs ou des supérieurs sans validation d'un SUPERADMIN.
+const ASSIGNABLE_ROLES_BY_ACTOR = {
+  SUPERADMIN: ['SUPERADMIN', 'ADMIN', 'TECHNICIAN', 'REQUESTER'],
+  ADMIN: ['TECHNICIAN', 'REQUESTER'],
+};
+
+function canAssignRole(actorRole, targetRole) {
+  return (ASSIGNABLE_ROLES_BY_ACTOR[actorRole] || []).includes(targetRole);
+}
+
+// Un ADMIN ne doit pas pouvoir modifier/supprimer/réinitialiser un compte ADMIN ou SUPERADMIN
+// existant, même sans toucher au champ role — sinon il pourrait par ex. désactiver ou supprimer un
+// SUPERADMIN. SUPERADMIN n'a aucune restriction de cible.
+function canActOnTarget(actorRole, targetRole) {
+  if (actorRole === 'SUPERADMIN') return true;
+  return !ADMIN_LIKE_ROLES.includes(targetRole);
+}
+
 const router = express.Router();
 router.use(authenticate);
-router.use(authorize('ADMIN'));
+router.use(authorizeAdmin);
 
 // Génère un mot de passe temporaire lisible (évite les caractères ambigus 0/O/1/l/I) mais
 // suffisamment fort, respectant le minimum de 8 caractères imposé partout ailleurs.
@@ -42,12 +63,16 @@ router.get('/', async (req, res) => {
 
 router.post('/', async (req, res) => {
   const { email, password, fullName, role, teamId } = req.body;
+  const targetRole = role || 'REQUESTER';
 
   if (!email || !password || !fullName) {
     return res.status(400).json({ error: 'Email, mot de passe et nom complet sont requis' });
   }
   if (password.length < MIN_PASSWORD_LENGTH) {
     return res.status(400).json({ error: `Le mot de passe doit contenir au moins ${MIN_PASSWORD_LENGTH} caractères` });
+  }
+  if (!canAssignRole(req.user.role, targetRole)) {
+    return res.status(403).json({ error: `Vous ne pouvez pas créer un compte avec le rôle ${targetRole}` });
   }
 
   const existing = await prisma.user.findUnique({ where: { email } });
@@ -60,7 +85,7 @@ router.post('/', async (req, res) => {
       email,
       passwordHash,
       fullName,
-      role: role || 'REQUESTER',
+      role: targetRole,
       teamId: teamId || null,
     },
     select: userSelect,
@@ -80,6 +105,16 @@ router.get('/:id', async (req, res) => {
 
 router.patch('/:id', async (req, res) => {
   const { email, fullName, role, teamId, isActive, receiveDraftAlerts, password } = req.body;
+
+  const target = await prisma.user.findUnique({ where: { id: Number(req.params.id) }, select: { role: true } });
+  if (!target) return res.status(404).json({ error: 'Utilisateur introuvable' });
+  if (!canActOnTarget(req.user.role, target.role)) {
+    return res.status(403).json({ error: 'Vous ne pouvez pas modifier un compte administrateur ou super-administrateur' });
+  }
+  if (role !== undefined && !canAssignRole(req.user.role, role)) {
+    return res.status(403).json({ error: `Vous ne pouvez pas attribuer le rôle ${role}` });
+  }
+
   const data = {};
   if (email !== undefined) {
     const existing = await prisma.user.findUnique({ where: { email } });
@@ -118,6 +153,9 @@ router.patch('/:id', async (req, res) => {
 router.post('/:id/reset-password', async (req, res) => {
   const user = await prisma.user.findUnique({ where: { id: Number(req.params.id) } });
   if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
+  if (!canActOnTarget(req.user.role, user.role)) {
+    return res.status(403).json({ error: 'Vous ne pouvez pas réinitialiser le mot de passe d\'un compte administrateur ou super-administrateur' });
+  }
 
   const temporaryPassword = generateTemporaryPassword();
   const passwordHash = await bcrypt.hash(temporaryPassword, 10);
@@ -137,6 +175,12 @@ router.post('/:id/reset-password', async (req, res) => {
 });
 
 router.delete('/:id', async (req, res) => {
+  const target = await prisma.user.findUnique({ where: { id: Number(req.params.id) }, select: { role: true } });
+  if (!target) return res.status(404).json({ error: 'Utilisateur introuvable' });
+  if (!canActOnTarget(req.user.role, target.role)) {
+    return res.status(403).json({ error: 'Vous ne pouvez pas supprimer un compte administrateur ou super-administrateur' });
+  }
+
   try {
     await prisma.user.delete({ where: { id: Number(req.params.id) } });
     return res.status(204).send();
@@ -146,3 +190,5 @@ router.delete('/:id', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.canAssignRole = canAssignRole;
+module.exports.canActOnTarget = canActOnTarget;

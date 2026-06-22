@@ -8,6 +8,7 @@ datasource db {
 }
 
 enum Role {
+  SUPERADMIN
   ADMIN
   TECHNICIAN
   REQUESTER
@@ -280,6 +281,15 @@ model SystemSettings {
   id                     Int      @id @default(1)
   autoApproveGlpiSolutions Boolean @default(false) // approuve automatiquement la validation de solution GLPI dès qu'un ticket passe Résolu
   autoSendAiEmails       Boolean  @default(false) // envoie directement les emails générés par l'IA sans passer par le circuit d'approbation humaine AiEmailDraft
+
+  // URLs absolues du serveur, utilisées pour générer des liens/ressources dans les emails sortants
+  // (logo de signature, lien d'approbation de brouillon, lien de réinitialisation de mot de passe).
+  // Configurables ici plutôt que seulement via BACKEND_URL/FRONTEND_URL (variables d'environnement
+  // Docker) pour permettre de pointer vers l'IP réseau réelle du serveur sans rebuild — utile dès
+  // que le serveur est accédé autrement qu'en localhost. Laisser vide = retombe sur la variable
+  // d'environnement, puis sur localhost en dernier recours.
+  backendUrl  String? @db.Text
+  frontendUrl String? @db.Text
   // Fréquences de synchronisation automatique (Paramètres > Automatisation > Fréquences de synchronisation).
   // Toutes désactivables individuellement en mettant 0 — le bouton manuel correspondant (s'il existe) reste alors le seul moyen de forcer une synchro.
   glpiTicketsSyncIntervalSeconds         Int @default(20)   // tickets GLPI + pièces jointes + approbations auto
