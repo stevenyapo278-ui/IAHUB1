@@ -1,36 +1,36 @@
 services:
-
   # Base de données PostgreSQL avec pgvector
   postgres:
     image: pgvector/pgvector:pg16
-    restart: unless-stopped
+    restart: always
     environment:
-      POSTGRES_USER: erp_user
-      POSTGRES_PASSWORD: erp_password
-      POSTGRES_DB: erp_itsm
+      POSTGRES_USER: ${POSTGRES_USER:-erp_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-erp_itsm}
     volumes:
-      - ../files/postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
       - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U erp_user -d erp_itsm"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-erp_user} -d ${POSTGRES_DB:-erp_itsm}"]
+      interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 5
+      start_period: 10s
     networks:
-      - dokploy-network
+      - ia-hub-network
 
   # API Backend
   backend:
     build:
       context: ./erp-backend
       dockerfile: Dockerfile
-    restart: unless-stopped
+    restart: always
     depends_on:
       postgres:
         condition: service_healthy
     environment:
       PORT: 4000
-      DATABASE_URL: postgresql://erp_user:erp_password@postgres:5432/erp_itsm?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-erp_itsm}?schema=public
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: 8h
       CORS_ORIGIN: "*"
@@ -41,9 +41,9 @@ services:
       GLPI_APP_TOKEN: ${GLPI_APP_TOKEN:-}
       GLPI_USER_TOKEN: ${GLPI_USER_TOKEN:-}
     volumes:
-      - ../files/backend_uploads:/app/uploads
+      - backend_uploads:/app/uploads
     networks:
-      - dokploy-network
+      - ia-hub-network
 
   # Frontend React (Nginx en prod)
   frontend:
@@ -52,15 +52,15 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_URL: ${VITE_API_URL}
-    restart: unless-stopped
+    restart: always
     depends_on:
       - backend
     networks:
-      - dokploy-network
+      - ia-hub-network
 
 networks:
-  dokploy-network:
-    external: true
+  ia-hub-network:
+    driver: bridge
 
 volumes:
   postgres_data:
