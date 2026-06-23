@@ -706,3 +706,81 @@ model N8nWorkflow {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
+
+// Mapping entre emails (Outlook) et tickets (GLPI/ERP) — pour le workflow ITSM
+model TicketMapping {
+  id               Int      @id @default(autoincrement())
+  provider         String   // "outlook", "gmail", etc.
+  conversationId   String?  @db.Text
+  messageId        String?  @db.Text
+  requesterEmail   String?
+  ticketId         Int?     // ID du ticket dans le système (GLPI ou ERP)
+  status           String?  // "open", "solved", "closed"
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([conversationId])
+  @@index([messageId])
+}
+
+// Historique des événements de mail pour le workflow ITSM
+model MailEvent {
+  id               Int      @id @default(autoincrement())
+  messageId        String   @db.Text
+  conversationId   String?  @db.Text
+  fromEmail        String
+  subject          String
+  bodyHash         String
+  decision         Json
+  relatedTicketId  Int?
+  createdAt        DateTime @default(now())
+
+  @@index([messageId])
+  @@index([conversationId])
+}
+
+// File d'attente des erreurs de workflow ITSM
+model MailError {
+  id                     Int       @id @default(autoincrement())
+  messageId              String    @db.Text
+  conversationId         String?   @db.Text
+  fromEmail              String
+  subject                String
+  bodyHash               String
+  errorStage             String
+  errorDetails           String?   @db.Text
+  rawSubworkflowOutput   String?   @db.Text
+  failedAt               DateTime  @default(now())
+  createdAt              DateTime  @default(now())
+
+  @@index([messageId])
+  @@index([conversationId])
+}
+
+// Équipes support pour le mapping entre l'IA et GLPI
+model SupportTeam {
+  id               Int       @id @default(autoincrement())
+  teamName         String    @unique
+  glpiGroupName    String?   // Nom du groupe correspondant dans GLPI
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+// Index de similarité sémantique des tickets (pour la détection de doublons dans le workflow)
+model TicketSimilarityIndex {
+  id               Int                     @id @default(autoincrement())
+  ticketId         Int
+  summary          String
+  bodyShort        String
+  content          String
+  embedding        Unsupported("vector(1024)")?
+  status           String
+  requesterEmail   String
+  metadata         Json?
+  openedAt         DateTime                @default(now())
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  @@index([ticketId])
+  @@index([requesterEmail])
+}
