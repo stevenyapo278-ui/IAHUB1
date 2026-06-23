@@ -50,6 +50,22 @@ services:
     networks:
       - ia-hub-network
 
+  # n8n pour les workflows ITSM
+  n8n:
+    image: n8nio/n8n:latest
+    restart: always
+    environment:
+      - N8N_PORT=5678
+      - N8N_HOST=0.0.0.0
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:-}
+      - N8N_DIAGNOSTICS_ENABLED=false
+    volumes:
+      - n8n_data:/home/node/.n8n
+    ports:
+      - "5678:5678"
+    networks:
+      - ia-hub-network
+
 networks:
   ia-hub-network:
     driver: bridge
@@ -57,3 +73,4 @@ networks:
 volumes:
   postgres_data:
   app_uploads:
+  n8n_data:
