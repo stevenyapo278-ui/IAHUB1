@@ -608,10 +608,14 @@ model KnowledgeDocument {
   filename    String?
   status      KnowledgeDocumentStatus @default(PROCESSING)
   error       String?
+  category    String?                 // Catégorie du document (ex: "Réseau", "Logiciel", "Matériel")
+  tags        String[]                // Tags pour filtrage
+  author      String?                 // Auteur du document
   createdAt   DateTime                @default(now())
   updatedAt   DateTime                @updatedAt
 
   chunks      KnowledgeChunk[]
+  feedbacks   KnowledgeFeedback[]
 }
 
 // Fragment de texte d'un document, avec son embedding pour la recherche de similarité (pgvector)
@@ -625,6 +629,25 @@ model KnowledgeChunk {
   createdAt   DateTime          @default(now())
 
   @@index([documentId])
+}
+
+// Feedback sur un résultat de recherche de la base de connaissances
+enum KnowledgeFeedbackRating {
+  NOT_RELEVANT
+  SOMEWHAT_RELEVANT
+  VERY_RELEVANT
+}
+
+model KnowledgeFeedback {
+  id         Int                      @id @default(autoincrement())
+  document   KnowledgeDocument        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId Int
+  chunkId    Int?                     // ID du chunk spécifique si applicable
+  query      String                   // La requête de recherche qui a généré ce résultat
+  rating     KnowledgeFeedbackRating  // Note de pertinence
+  comment    String?                  // Commentaire optionnel
+  userEmail  String?                  // Email de l'utilisateur qui a donné le feedback
+  createdAt  DateTime                 @default(now())
 }
 
 enum KnowledgeDraftStatus {
@@ -644,6 +667,8 @@ model KnowledgeDraft {
   cause       String
   solution    String
   keywords    String[]
+  category    String?              // Catégorie proposée pour l'article
+  tags        String[]             // Tags proposés pour l'article
 
   status      KnowledgeDraftStatus @default(PENDING)
   reviewedBy  User?                @relation(fields: [reviewedById], references: [id])

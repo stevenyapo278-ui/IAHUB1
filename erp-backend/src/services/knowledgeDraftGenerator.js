@@ -45,6 +45,8 @@ async function generateKnowledgeDraft({ ticketId, resolutionNote, technicianEmai
       cause: draft.cause,
       solution: draft.solution,
       keywords: draft.keywords || [],
+      category: draft.category || ticket.category,
+      tags: draft.tags || [],
       status: 'PENDING',
     },
   });

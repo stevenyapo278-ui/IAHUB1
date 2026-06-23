@@ -12,10 +12,16 @@ const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); // 20 Mo max
 
 router.use(authenticate);
 
-// Liste des documents de la base de connaissances
+// Liste des documents de la base de connaissances (avec filtres)
 router.get('/documents', async (req, res) => {
+  const { category, tag, status } = req.query;
+  const where = {};
+  if (status) where.status = status;
+  if (category) where.category = category;
+  if (tag) where.tags = { has: tag };
   const documents = await prisma.knowledgeDocument.findMany({
-    include: { _count: { select: { chunks: true } } },
+    where,
+    include: { _count: { select: { chunks: true, feedbacks: true } } },
     orderBy: { createdAt: 'desc' },
   });
   return res.json(documents);
@@ -28,12 +34,19 @@ router.post('/documents', requirePermission('knowledge.manage', ['ADMIN', 'TECHN
   const ext = (req.file.originalname.split('.').pop() || '').toLowerCase();
   const sourceType = ext === 'pdf' ? 'pdf' : ext === 'docx' ? 'docx' : 'markdown';
 
+  // Parse metadata from request body
+  const { category, tags, author } = req.body;
+  const parsedTags = tags ? (Array.isArray(tags) ? tags : JSON.parse(tags)) : [];
+
   const document = await prisma.knowledgeDocument.create({
     data: {
       title: req.body.title || req.file.originalname,
       sourceType,
       filename: req.file.originalname,
       status: 'PROCESSING',
+      category,
+      tags: parsedTags,
+      author,
     },
   });
 
@@ -154,30 +167,112 @@ router.delete('/documents/:id', requirePermission('knowledge.manage', ['ADMIN', 
   }
 });
 
-// Recherche par similarité : retourne les 5 fragments les plus pertinents pour une requête
+// Recherche hybride : combine similarité sémantique + recherche par mots-clés + filtres
 router.post('/search', async (req, res) => {
-  const { query, limit } = req.body;
+  const { query, limit, category, tags, useHybrid = true } = req.body;
   if (!query) return res.status(400).json({ error: 'query est requis' });
 
   try {
     const embedding = await generateEmbedding(query);
     const topK = Math.min(Number(limit) || 5, 20);
 
-    const results = await prisma.$queryRawUnsafe(
-      `SELECT c.id, c."documentId", c."chunkIndex", c.content, d.title, d."sourceType",
-              1 - (c.embedding <=> $1::vector) AS similarity
-       FROM "KnowledgeChunk" c
-       JOIN "KnowledgeDocument" d ON d.id = c."documentId"
-       WHERE d.status = 'READY'
-       ORDER BY c.embedding <=> $1::vector
-       LIMIT $2`,
-      toVectorLiteral(embedding),
-      topK
-    );
+    // Build where clause for metadata filters
+    const metadataFilters = [];
+    const filterParams = [];
+    let paramIndex = 3;
+
+    if (category) {
+      metadataFilters.push(`d.category = $${paramIndex}`);
+      filterParams.push(category);
+      paramIndex++;
+    }
+
+    if (tags && tags.length > 0) {
+      metadataFilters.push(`d.tags && $${paramIndex}`);
+      filterParams.push(tags);
+      paramIndex++;
+    }
+
+    const whereClause = metadataFilters.length > 0 
+      ? `WHERE d.status = 'READY' AND ${metadataFilters.join(' AND ')}`
+      : `WHERE d.status = 'READY'`;
+
+    // Hybrid search: combine vector similarity with full-text search (if enabled)
+    let results;
+    if (useHybrid) {
+      results = await prisma.$queryRawUnsafe(
+        `SELECT c.id, c."documentId", c."chunkIndex", c.content, d.title, d."sourceType", d.category, d.tags,
+                1 - (c.embedding <=> $1::vector) AS similarity,
+                ts_rank(to_tsvector('french', c.content), plainto_tsquery('french', $2)) AS text_rank,
+                (0.7 * (1 - (c.embedding <=> $1::vector)) + 0.3 * ts_rank(to_tsvector('french', c.content), plainto_tsquery('french', $2))) AS combined_score
+         FROM "KnowledgeChunk" c
+         JOIN "KnowledgeDocument" d ON d.id = c."documentId"
+         ${whereClause}
+         ORDER BY combined_score DESC
+         LIMIT $3`,
+        toVectorLiteral(embedding),
+        query,
+        topK,
+        ...filterParams
+      );
+    } else {
+      results = await prisma.$queryRawUnsafe(
+        `SELECT c.id, c."documentId", c."chunkIndex", c.content, d.title, d."sourceType", d.category, d.tags,
+                1 - (c.embedding <=> $1::vector) AS similarity,
+                0 AS text_rank,
+                (1 - (c.embedding <=> $1::vector)) AS combined_score
+         FROM "KnowledgeChunk" c
+         JOIN "KnowledgeDocument" d ON d.id = c."documentId"
+         ${whereClause}
+         ORDER BY combined_score DESC
+         LIMIT $2`,
+        toVectorLiteral(embedding),
+        topK,
+        ...filterParams
+      );
+    }
 
     return res.json(results);
   } catch (err) {
     return res.status(502).json({ error: err.message || 'Erreur lors de la recherche' });
+  }
+});
+
+// Ajouter un feedback sur un résultat de recherche
+router.post('/feedback', async (req, res) => {
+  const { documentId, chunkId, query, rating, comment, userEmail } = req.body;
+  if (!documentId || !query || !rating) {
+    return res.status(400).json({ error: 'documentId, query et rating sont requis' });
+  }
+
+  try {
+    const feedback = await prisma.knowledgeFeedback.create({
+      data: {
+        documentId,
+        chunkId,
+        query,
+        rating,
+        comment,
+        userEmail,
+      },
+    });
+    return res.status(201).json(feedback);
+  } catch (err) {
+    return res.status(500).json({ error: err.message || 'Erreur lors de l\'enregistrement du feedback' });
+  }
+});
+
+// Obtenir les feedbacks pour un document
+router.get('/documents/:id/feedbacks', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const feedbacks = await prisma.knowledgeFeedback.findMany({
+      where: { documentId: Number(id) },
+      orderBy: { createdAt: 'desc' },
+    });
+    return res.json(feedbacks);
+  } catch (err) {
+    return res.status(500).json({ error: err.message || 'Erreur lors de la récupération des feedbacks' });
   }
 });
 
