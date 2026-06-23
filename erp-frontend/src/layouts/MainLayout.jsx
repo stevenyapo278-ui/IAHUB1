@@ -1,4 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import ForcePasswordChange from '../components/ForcePasswordChange';
@@ -34,13 +35,23 @@ export default function MainLayout() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
-      <nav className="fixed left-0 top-0 h-full w-64 bg-surface-container-lowest border-r border-outline-variant flex flex-col z-20 transition-all duration-300">
+      <motion.nav
+        initial={{ x: -64, opacity: 0 }}
+        animate={{ x: 0, opacity: 1 }}
+        transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+        className="fixed left-0 top-0 h-full w-64 bg-surface-container-lowest border-r border-outline-variant flex flex-col z-20"
+      >
         <div className="p-lg flex items-center gap-sm">
-          <div className="w-10 h-10 rounded-none border border-outline-variant bg-on-surface flex items-center justify-center shrink-0">
+          <motion.div
+            initial={{ scale: 0.8, rotate: -5 }}
+            animate={{ scale: 1, rotate: 0 }}
+            transition={{ duration: 0.4, type: "spring", bounce: 0.5, delay: 0.1 }}
+            className="w-10 h-10 rounded-none border border-outline-variant bg-on-surface flex items-center justify-center shrink-0"
+          >
             <span className="material-symbols-outlined text-surface" style={{ fontVariationSettings: "'FILL' 1" }}>
               dashboard
             </span>
-          </div>
+          </motion.div>
           <div>
             <h1 className="font-headline-lg text-headline-lg font-bold text-on-surface">ERP ITSM</h1>
             <p className="font-body-sm text-body-sm text-on-surface-variant">Management Console</p>
@@ -48,13 +59,15 @@ export default function MainLayout() {
         </div>
 
         <div className="px-md pb-md">
-          <button
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
             onClick={() => navigate('/tickets?new=1')}
-            className="w-full bg-on-surface text-surface py-sm rounded-none font-label-md hover:opacity-80 transition-colors flex items-center justify-center gap-sm"
+            className="w-full bg-on-surface text-surface py-sm rounded-none font-label-md hover:opacity-80 transition-all flex items-center justify-center gap-sm"
           >
             <span className="material-symbols-outlined">add</span>
             Nouveau ticket
-          </button>
+          </motion.button>
         </div>
 
         <ul className="flex-1 overflow-y-auto py-sm px-sm space-y-xs">
@@ -64,28 +77,33 @@ export default function MainLayout() {
               const keys = Array.isArray(item.permission) ? item.permission : [item.permission];
               return keys.some((key) => hasPermission(user, key, item.fallbackRoles));
             })
-            .map((item) => (
-              <li key={item.to}>
+            .map((item, index) => (
+              <motion.li
+                key={item.to}
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.3, delay: 0.15 + index * 0.05 }}
+              >
                 <NavLink
                   to={item.to}
                   end={item.end}
                   className={({ isActive }) =>
-                    `flex items-center gap-md px-md py-sm rounded-none font-body-md text-body-md transition-colors duration-200 ${
+                    `flex items-center gap-md px-md py-sm rounded-none font-body-md text-body-md transition-all duration-300 ease-out ${
                       isActive
                         ? 'bg-surface-container-high text-on-surface font-headline-sm text-headline-sm'
-                        : 'text-on-surface-variant hover:bg-surface-container-high'
+                        : 'text-on-surface-variant hover:bg-surface-container-high hover:translate-x-1'
                     }`
                   }
                 >
                   <span
-                    className="material-symbols-outlined"
+                    className="material-symbols-outlined transition-transform duration-300"
                     style={{ fontVariationSettings: `'FILL' ${item.icon === 'dashboard' ? 1 : 0}` }}
                   >
                     {item.icon}
                   </span>
                   {item.label}
                 </NavLink>
-              </li>
+              </motion.li>
             ))}
         </ul>
 
@@ -94,15 +112,17 @@ export default function MainLayout() {
             <p className="font-body-md text-body-md text-on-surface font-medium truncate">{user?.fullName}</p>
             <p className="font-body-sm text-body-sm text-on-surface-variant">{user?.role}</p>
           </div>
-          <button
+          <motion.button
+            whileHover={{ scale: 1.02, backgroundColor: "rgb(var(--md-sys-color-surface-container-high))" }}
+            whileTap={{ scale: 0.98 }}
             onClick={handleLogout}
-            className="w-full flex items-center gap-md px-md py-sm rounded-lg text-on-surface-variant font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200"
+            className="w-full flex items-center gap-md px-md py-sm rounded-lg text-on-surface-variant font-body-md text-body-md transition-all duration-300"
           >
             <span className="material-symbols-outlined">logout</span>
             Déconnexion
-          </button>
+          </motion.button>
         </div>
-      </nav>
+      </motion.nav>
 
       <main className="ml-64 flex-1 h-full overflow-y-auto p-container-margin w-full">
         <Outlet />

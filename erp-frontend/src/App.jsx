@@ -1,6 +1,8 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, useLocation } from 'react-router-dom';
+import { AnimatePresence } from 'framer-motion';
 import MainLayout from './layouts/MainLayout';
 import ProtectedRoute from './components/ProtectedRoute';
+import PageTransition from './components/PageTransition';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Tickets from './pages/Tickets';
@@ -18,60 +20,64 @@ import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 
 export default function App() {
+  const location = useLocation();
+
   return (
-    <Routes>
-      <Route path="/login" element={<Login />} />
-      <Route path="/approve/:token" element={<ApprovalPage />} />
-      <Route path="/forgot-password" element={<ForgotPassword />} />
-      <Route path="/reset-password/:token" element={<ResetPassword />} />
-      <Route
-        path="/"
-        element={
-          <ProtectedRoute>
-            <MainLayout />
-          </ProtectedRoute>
-        }
-      >
-        <Route index element={<Dashboard />} />
-        <Route path="tickets" element={<Tickets />} />
-        <Route path="tickets/:id" element={<TicketDetail />} />
-        <Route path="teams" element={<Teams />} />
-        <Route path="knowledge-base" element={<KnowledgeBase />} />
-        <Route path="inbox" element={<Inbox />} />
-        <Route path="email-drafts" element={<AiEmailDrafts />} />
+    <AnimatePresence mode="wait">
+      <Routes key={location.pathname} location={location}>
+        <Route path="/login" element={<PageTransition><Login /></PageTransition>} />
+        <Route path="/approve/:token" element={<PageTransition><ApprovalPage /></PageTransition>} />
+        <Route path="/forgot-password" element={<PageTransition><ForgotPassword /></PageTransition>} />
+        <Route path="/reset-password/:token" element={<PageTransition><ResetPassword /></PageTransition>} />
         <Route
-          path="users"
+          path="/"
           element={
-            <ProtectedRoute roles={['ADMIN']}>
-              <Users />
+            <ProtectedRoute>
+              <MainLayout />
             </ProtectedRoute>
           }
-        />
-        <Route
-          path="permission-groups"
-          element={
-            <ProtectedRoute roles={['ADMIN']}>
-              <PermissionGroups />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="settings"
-          element={
-            <ProtectedRoute roles={['ADMIN']}>
-              <Settings />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="prompts"
-          element={
-            <ProtectedRoute roles={['ADMIN']}>
-              <Prompts />
-            </ProtectedRoute>
-          }
-        />
-      </Route>
-    </Routes>
+        >
+          <Route index element={<PageTransition><Dashboard /></PageTransition>} />
+          <Route path="tickets" element={<PageTransition><Tickets /></PageTransition>} />
+          <Route path="tickets/:id" element={<PageTransition><TicketDetail /></PageTransition>} />
+          <Route path="teams" element={<PageTransition><Teams /></PageTransition>} />
+          <Route path="knowledge-base" element={<PageTransition><KnowledgeBase /></PageTransition>} />
+          <Route path="inbox" element={<PageTransition><Inbox /></PageTransition>} />
+          <Route path="email-drafts" element={<PageTransition><AiEmailDrafts /></PageTransition>} />
+          <Route
+            path="users"
+            element={
+              <ProtectedRoute roles={['ADMIN']}>
+                <PageTransition><Users /></PageTransition>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="permission-groups"
+            element={
+              <ProtectedRoute roles={['ADMIN']}>
+                <PageTransition><PermissionGroups /></PageTransition>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="settings"
+            element={
+              <ProtectedRoute roles={['ADMIN']}>
+                <PageTransition><Settings /></PageTransition>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="prompts"
+            element={
+              <ProtectedRoute roles={['ADMIN']}>
+                <PageTransition><Prompts /></PageTransition>
+              </ProtectedRoute>
+            }
+          />
+        </Route>
+      </Routes>
+    </AnimatePresence>
   );
 }
