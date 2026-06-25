@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
 import { hasPermission } from '../utils/permissions';
 import ForcePasswordChange from '../components/ForcePasswordChange';
 import { useVoiceAlerts } from '../hooks/useVoiceAlerts';
@@ -23,6 +24,7 @@ const navItems = [
 
 export default function MainLayout() {
   const { user, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   // Tourne en arrière-plan sur toutes les pages (pas seulement le Dashboard) tant qu'un utilisateur
   // est connecté — sinon l'alerte vocale ne se déclencherait que pendant que cette page est ouverte.
@@ -112,11 +114,33 @@ export default function MainLayout() {
             <p className="font-body-md text-body-md text-on-surface font-medium truncate">{user?.fullName}</p>
             <p className="font-body-sm text-body-sm text-on-surface-variant">{user?.role}</p>
           </div>
+
+          {/* ── Bouton dark / light mode ── */}
           <motion.button
-            whileHover={{ scale: 1.02, backgroundColor: "rgb(var(--md-sys-color-surface-container-high))" }}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={toggleTheme}
+            title={theme === 'dark' ? 'Passer en mode clair' : 'Passer en mode sombre'}
+            className="w-full flex items-center gap-md px-md py-sm rounded-lg text-on-surface-variant font-body-md text-body-md transition-all duration-300 hover:bg-surface-container-high hover:text-on-surface mb-xs"
+          >
+            <motion.span
+              key={theme}
+              initial={{ rotate: -30, opacity: 0 }}
+              animate={{ rotate: 0, opacity: 1 }}
+              transition={{ duration: 0.3 }}
+              className="material-symbols-outlined"
+              style={{ fontVariationSettings: "'FILL' 1" }}
+            >
+              {theme === 'dark' ? 'light_mode' : 'dark_mode'}
+            </motion.span>
+            {theme === 'dark' ? 'Mode clair' : 'Mode sombre'}
+          </motion.button>
+
+          <motion.button
+            whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             onClick={handleLogout}
-            className="w-full flex items-center gap-md px-md py-sm rounded-lg text-on-surface-variant font-body-md text-body-md transition-all duration-300"
+            className="w-full flex items-center gap-md px-md py-sm rounded-lg text-on-surface-variant font-body-md text-body-md transition-all duration-300 hover:bg-surface-container-high hover:text-on-surface"
           >
             <span className="material-symbols-outlined">logout</span>
             Déconnexion
