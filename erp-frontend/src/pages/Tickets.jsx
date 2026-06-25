@@ -23,26 +23,26 @@ const URGENCY_IMPACT_OPTIONS = [
 ];
 
 const STATUS_STYLES = {
-  NEW: 'border border-outline-variant text-on-surface',
-  OPEN: 'border border-outline-variant text-on-surface',
-  PENDING: 'border border-outline-variant text-on-surface',
-  SOLVED: 'border border-outline-variant text-on-surface',
-  CLOSED: 'bg-surface-container-high text-on-surface',
+  NEW: 'bg-primary/10 text-primary border border-primary/20',
+  OPEN: 'bg-secondary/10 text-secondary border border-secondary/20',
+  PENDING: 'bg-tertiary/10 text-tertiary border border-tertiary/20',
+  SOLVED: 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20',
+  CLOSED: 'bg-slate-500/10 text-slate-600 border border-slate-500/20',
 };
 
 const STATUS_DOT = {
-  NEW: 'bg-on-surface',
-  OPEN: 'bg-on-surface',
-  PENDING: 'bg-on-surface-variant',
-  SOLVED: 'bg-outline',
-  CLOSED: 'bg-outline',
+  NEW: 'bg-primary',
+  OPEN: 'bg-secondary',
+  PENDING: 'bg-tertiary',
+  SOLVED: 'bg-emerald-500',
+  CLOSED: 'bg-slate-500',
 };
 
 const PRIORITY_STYLES = {
-  P1: 'border-error/20 text-error bg-error/5',
-  P2: 'border-outline-variant text-on-surface',
-  P3: 'border-outline-variant text-on-surface-variant',
-  P4: 'border-outline-variant text-on-surface-variant',
+  P1: 'border border-error/25 text-error bg-error/5 rounded-full px-2.5 py-0.5',
+  P2: 'border border-tertiary/25 text-tertiary bg-tertiary/5 rounded-full px-2.5 py-0.5',
+  P3: 'border border-secondary/25 text-secondary bg-secondary/5 rounded-full px-2.5 py-0.5',
+  P4: 'border border-emerald-500/25 text-emerald-600 bg-emerald-500/5 rounded-full px-2.5 py-0.5',
 };
 
 const EMPTY_FORM = {
@@ -200,63 +200,63 @@ export default function Tickets() {
       </header>
 
       {error && (
-        <div className="border border-outline-variant text-on-surface p-md rounded-none">{error}</div>
+        <div className="border border-red-500/20 bg-red-500/5 text-red-500 p-md rounded-xl font-body-md">{error}</div>
       )}
 
       {showForm && (
         <form
           onSubmit={handleCreate}
-          className="bg-surface-container-lowest rounded-none border border-outline-variant p-lg flex flex-col gap-lg"
+          className="bg-surface-container-lowest rounded-2xl border border-outline-variant/60 card-shadow p-lg flex flex-col gap-lg"
         >
-          <h3 className="font-headline-md text-headline-md text-on-background">Nouveau ticket</h3>
+          <h3 className="font-headline-md text-headline-md text-on-background font-semibold">Nouveau ticket</h3>
 
           <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-lg">
             {/* Colonne gauche : titre, description, pièce jointe */}
             <div className="flex flex-col gap-md">
               <label className="flex flex-col gap-xs">
-                <span className="font-label-md text-label-md text-on-surface uppercase">Titre</span>
+                <span className="font-label-md text-label-md text-on-surface-variant uppercase">Titre</span>
                 <input
-                  className="h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface"
+                  className="w-full h-10 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 font-body-md text-body-md text-on-surface"
                   value={form.title}
                   onChange={(e) => setForm({ ...form, title: e.target.value })}
                   required
                 />
               </label>
               <label className="flex flex-col gap-xs">
-                <span className="font-label-md text-label-md text-on-surface uppercase">Description</span>
+                <span className="font-label-md text-label-md text-on-surface-variant uppercase">Description</span>
                 <textarea
-                  className="px-sm py-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface min-h-[160px]"
+                  className="w-full px-sm py-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 font-body-md text-body-md text-on-surface min-h-[160px]"
                   value={form.content}
                   onChange={(e) => setForm({ ...form, content: e.target.value })}
                   required
                 />
               </label>
               <label className="flex flex-col gap-xs">
-                <span className="font-label-md text-label-md text-on-surface uppercase">Pièce jointe (2 Mio maximum)</span>
+                <span className="font-label-md text-label-md text-on-surface-variant uppercase">Pièce jointe (2 Mio maximum)</span>
                 <input
                   type="file"
-                  className="font-body-sm text-body-sm text-on-surface-variant"
+                  className="font-body-sm text-body-sm text-on-surface-variant file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer"
                   onChange={(e) => setAttachment(e.target.files?.[0] || null)}
                 />
               </label>
             </div>
 
             {/* Colonne droite : champs façon GLPI */}
-            <div className="flex flex-col gap-md bg-surface-bright border border-outline-variant p-md">
-              <h4 className="font-headline-sm text-headline-sm text-on-background">Ticket</h4>
+            <div className="flex flex-col gap-md bg-surface-bright/35 border border-outline-variant/65 p-lg rounded-2xl">
+              <h4 className="font-headline-sm text-headline-sm text-on-background font-semibold">Ticket</h4>
               <label className="flex flex-col gap-xs">
-                <span className="font-label-md text-label-md text-on-surface uppercase">Date d'ouverture</span>
+                <span className="font-label-md text-label-md text-on-surface-variant uppercase">Date d'ouverture</span>
                 <input
                   type="datetime-local"
-                  className="h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface"
+                  className="h-10 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 font-body-md text-body-md text-on-surface"
                   value={form.openedAt}
                   onChange={(e) => setForm({ ...form, openedAt: e.target.value })}
                 />
               </label>
               <label className="flex flex-col gap-xs">
-                <span className="font-label-md text-label-md text-on-surface uppercase">Type</span>
+                <span className="font-label-md text-label-md text-on-surface-variant uppercase">Type</span>
                 <select
-                  className="h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface"
+                  className="h-10 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 font-body-md text-body-md text-on-surface"
                   value={form.type}
                   onChange={(e) => setForm({ ...form, type: e.target.value })}
                 >
@@ -266,9 +266,9 @@ export default function Tickets() {
                 </select>
               </label>
               <label className="flex flex-col gap-xs">
-                <span className="font-label-md text-label-md text-on-surface uppercase">Catégorie</span>
+                <span className="font-label-md text-label-md text-on-surface-variant uppercase">Catégorie</span>
                 <select
-                  className="h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface"
+                  className="h-10 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 font-body-md text-body-md text-on-surface"
                   value={form.category}
                   onChange={(e) => setForm({ ...form, category: e.target.value })}
                 >
@@ -280,9 +280,9 @@ export default function Tickets() {
               </label>
               {canAssign && (
                 <label className="flex flex-col gap-xs">
-                  <span className="font-label-md text-label-md text-on-surface uppercase">Statut</span>
+                  <span className="font-label-md text-label-md text-on-surface-variant uppercase">Statut</span>
                   <select
-                    className="h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface"
+                    className="h-10 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 font-body-md text-body-md text-on-surface"
                     value={form.status}
                     onChange={(e) => setForm({ ...form, status: e.target.value })}
                   >
@@ -293,9 +293,9 @@ export default function Tickets() {
                 </label>
               )}
               <label className="flex flex-col gap-xs">
-                <span className="font-label-md text-label-md text-on-surface uppercase">Source de la demande</span>
+                <span className="font-label-md text-label-md text-on-surface-variant uppercase">Source de la demande</span>
                 <select
-                  className="h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface"
+                  className="h-10 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 font-body-md text-body-md text-on-surface"
                   value={form.source}
                   onChange={(e) => setForm({ ...form, source: e.target.value })}
                 >
@@ -305,9 +305,9 @@ export default function Tickets() {
                 </select>
               </label>
               <label className="flex flex-col gap-xs">
-                <span className="font-label-md text-label-md text-on-surface uppercase">Urgence</span>
+                <span className="font-label-md text-label-md text-on-surface-variant uppercase">Urgence</span>
                 <select
-                  className="h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface"
+                  className="h-10 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 font-body-md text-body-md text-on-surface"
                   value={form.urgency}
                   onChange={(e) => setForm({ ...form, urgency: e.target.value })}
                 >
@@ -317,9 +317,9 @@ export default function Tickets() {
                 </select>
               </label>
               <label className="flex flex-col gap-xs">
-                <span className="font-label-md text-label-md text-on-surface uppercase">Impact</span>
+                <span className="font-label-md text-label-md text-on-surface-variant uppercase">Impact</span>
                 <select
-                  className="h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface"
+                  className="h-10 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 font-body-md text-body-md text-on-surface"
                   value={form.impact}
                   onChange={(e) => setForm({ ...form, impact: e.target.value })}
                 >
@@ -329,9 +329,9 @@ export default function Tickets() {
                 </select>
               </label>
               <label className="flex flex-col gap-xs">
-                <span className="font-label-md text-label-md text-on-surface uppercase">Priorité</span>
+                <span className="font-label-md text-label-md text-on-surface-variant uppercase">Priorité</span>
                 <select
-                  className="h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface"
+                  className="h-10 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 font-body-md text-body-md text-on-surface"
                   value={form.priority}
                   onChange={(e) => setForm({ ...form, priority: e.target.value })}
                 >
@@ -341,9 +341,9 @@ export default function Tickets() {
                 </select>
               </label>
               <label className="flex flex-col gap-xs">
-                <span className="font-label-md text-label-md text-on-surface uppercase">ID externe</span>
+                <span className="font-label-md text-label-md text-on-surface-variant uppercase">ID externe</span>
                 <input
-                  className="h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface"
+                  className="h-10 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 font-body-md text-body-md text-on-surface"
                   value={form.externalId}
                   onChange={(e) => setForm({ ...form, externalId: e.target.value })}
                 />
@@ -351,11 +351,11 @@ export default function Tickets() {
 
               {canAssign && (
                 <>
-                  <h4 className="font-headline-sm text-headline-sm text-on-background mt-md">Acteurs</h4>
+                  <h4 className="font-headline-sm text-headline-sm text-on-background mt-md font-semibold">Acteurs</h4>
                   <label className="flex flex-col gap-xs">
-                    <span className="font-label-md text-label-md text-on-surface uppercase">Demandeur</span>
+                    <span className="font-label-md text-label-md text-on-surface-variant uppercase">Demandeur</span>
                     <select
-                      className="h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface"
+                      className="h-10 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 font-body-md text-body-md text-on-surface"
                       value={form.requesterId}
                       onChange={(e) => setForm({ ...form, requesterId: e.target.value })}
                     >
@@ -366,10 +366,10 @@ export default function Tickets() {
                     </select>
                   </label>
                   <label className="flex flex-col gap-xs">
-                    <span className="font-label-md text-label-md text-on-surface uppercase">Observateur(s)</span>
+                    <span className="font-label-md text-label-md text-on-surface-variant uppercase">Observateur(s)</span>
                     <select
                       multiple
-                      className="px-sm py-1 rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface min-h-[80px]"
+                      className="px-sm py-2 rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 font-body-md text-body-md text-on-surface min-h-[80px]"
                       value={form.observerIds}
                       onChange={(e) => setForm({ ...form, observerIds: Array.from(e.target.selectedOptions, (o) => o.value) })}
                     >
@@ -379,9 +379,9 @@ export default function Tickets() {
                     </select>
                   </label>
                   <label className="flex flex-col gap-xs">
-                    <span className="font-label-md text-label-md text-on-surface uppercase">Attribué à</span>
+                    <span className="font-label-md text-label-md text-on-surface-variant uppercase">Attribué à</span>
                     <select
-                      className="h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface"
+                      className="h-10 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 font-body-md text-body-md text-on-surface"
                       value={form.assignedToId}
                       onChange={(e) => setForm({ ...form, assignedToId: e.target.value })}
                     >
@@ -392,9 +392,9 @@ export default function Tickets() {
                     </select>
                   </label>
                   <label className="flex flex-col gap-xs">
-                    <span className="font-label-md text-label-md text-on-surface uppercase">Équipe</span>
+                    <span className="font-label-md text-label-md text-on-surface-variant uppercase">Équipe</span>
                     <select
-                      className="h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface"
+                      className="h-10 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 font-body-md text-body-md text-on-surface"
                       value={form.teamId}
                       onChange={(e) => setForm({ ...form, teamId: e.target.value })}
                     >
@@ -407,10 +407,10 @@ export default function Tickets() {
                 </>
               )}
 
-              <label className="flex items-center gap-xs font-body-sm text-body-sm text-on-surface-variant mt-md">
+              <label className="flex items-center gap-xs font-body-sm text-body-sm text-on-surface-variant mt-md cursor-pointer select-none">
                 <input
                   type="checkbox"
-                  className="w-4 h-4 accent-on-surface border-outline-variant"
+                  className="w-4 h-4 rounded border-outline-variant text-primary focus:ring-primary/20 accent-primary"
                   checked={form.requiresApproval}
                   onChange={(e) => setForm({ ...form, requiresApproval: e.target.checked })}
                 />
@@ -419,17 +419,17 @@ export default function Tickets() {
             </div>
           </div>
 
-          <div className="flex gap-sm">
+          <div className="flex gap-sm pt-4 border-t border-outline-variant/50">
             <button
               type="submit"
-              className="px-4 py-2 rounded-none border border-outline-variant bg-on-surface text-surface font-body-sm text-body-sm font-semibold hover:opacity-80 transition-all"
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-semibold text-body-sm shadow-md shadow-primary/20 hover:shadow-lg transition-all duration-300"
             >
               Créer
             </button>
             <button
               type="button"
               onClick={toggleForm}
-              className="px-4 py-2 rounded-none border border-outline-variant text-on-surface font-body-sm text-body-sm hover:bg-surface-container-low transition-colors"
+              className="px-5 py-2.5 rounded-xl border border-outline-variant text-on-surface font-semibold text-body-sm hover:bg-surface-container-low transition-colors"
             >
               Annuler
             </button>
@@ -437,10 +437,10 @@ export default function Tickets() {
         </form>
       )}
 
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-surface-container-lowest p-md rounded-none border border-outline-variant">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-surface-container-lowest p-md rounded-2xl border border-outline-variant/60 card-shadow">
         <div className="flex flex-wrap items-center gap-3">
           <select
-            className="px-3 py-1.5 rounded-none border border-outline-variant bg-surface text-on-surface font-body-sm text-body-sm hover:bg-surface-container-low transition-colors focus:outline-none"
+            className="px-3.5 py-1.8 rounded-xl border border-outline-variant bg-surface text-on-surface font-body-sm text-body-sm hover:bg-surface-container-low transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
             value={filters.status}
             onChange={(e) => setFilters({ ...filters, status: e.target.value })}
           >
@@ -450,7 +450,7 @@ export default function Tickets() {
             ))}
           </select>
           <select
-            className="px-3 py-1.5 rounded-none border border-outline-variant bg-surface text-on-surface font-body-sm text-body-sm hover:bg-surface-container-low transition-colors focus:outline-none"
+            className="px-3.5 py-1.8 rounded-xl border border-outline-variant bg-surface text-on-surface font-body-sm text-body-sm hover:bg-surface-container-low transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
             value={filters.priority}
             onChange={(e) => setFilters({ ...filters, priority: e.target.value })}
           >
@@ -460,7 +460,7 @@ export default function Tickets() {
             ))}
           </select>
           <select
-            className="px-3 py-1.5 rounded-none border border-outline-variant bg-surface text-on-surface font-body-sm text-body-sm hover:bg-surface-container-low transition-colors focus:outline-none"
+            className="px-3.5 py-1.8 rounded-xl border border-outline-variant bg-surface text-on-surface font-body-sm text-body-sm hover:bg-surface-container-low transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
             value={filters.source}
             onChange={(e) => setFilters({ ...filters, source: e.target.value })}
           >
@@ -474,7 +474,7 @@ export default function Tickets() {
             <button
               onClick={askDeleteSelected}
               disabled={deleting}
-              className="flex items-center gap-2 px-4 py-2 rounded-none border border-error/30 text-error font-body-sm text-body-sm font-semibold hover:bg-error/5 transition-colors whitespace-nowrap disabled:opacity-50"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl border border-error/30 text-error font-body-sm text-body-sm font-semibold hover:bg-error/5 transition-colors whitespace-nowrap disabled:opacity-50"
             >
               <span className="material-symbols-outlined text-[18px]">delete</span>
               Supprimer la sélection ({selectedIds.length})
@@ -482,7 +482,7 @@ export default function Tickets() {
           )}
           <button
             onClick={toggleForm}
-            className="flex items-center gap-2 px-4 py-2 rounded-none border border-outline-variant bg-on-surface text-surface font-body-sm text-body-sm font-semibold hover:opacity-80 transition-all whitespace-nowrap"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-body-sm text-body-sm font-semibold shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 whitespace-nowrap"
           >
             <span className="material-symbols-outlined text-[18px]">{showForm ? 'close' : 'add'}</span>
             {showForm ? 'Annuler' : 'Nouveau ticket'}
@@ -490,18 +490,18 @@ export default function Tickets() {
         </div>
       </div>
 
-      <div className="bg-surface-container-lowest rounded-none border border-outline-variant overflow-hidden flex flex-col">
+      <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/60 card-shadow overflow-hidden flex flex-col">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[900px]">
             <thead>
-              <tr className="bg-surface-bright border-b border-outline-variant">
+              <tr className="bg-surface-bright/50 border-b border-outline-variant/60">
                 {showSelectionColumn && (
                   <th className="px-md py-3 w-10">
                     <input
                       type="checkbox"
                       checked={tickets.length > 0 && selectedIds.length === tickets.length}
                       onChange={toggleSelectAll}
-                      className="cursor-pointer"
+                      className="cursor-pointer accent-primary"
                     />
                   </th>
                 )}
@@ -517,16 +517,16 @@ export default function Tickets() {
                 {canDelete && <th className="px-md py-3 w-12"></th>}
               </tr>
             </thead>
-            <tbody className="divide-y divide-outline-variant font-body-sm text-body-sm">
+            <tbody className="divide-y divide-outline-variant/40 font-body-sm text-body-sm">
               {tickets.map((t) => (
-                <tr key={t.id} className="hover:bg-surface-container-low transition-colors">
+                <tr key={t.id} className="hover:bg-surface-container-low/70 transition-colors">
                   {showSelectionColumn && (
                     <td className="px-md py-3">
                       <input
                         type="checkbox"
                         checked={selectedIds.includes(t.id)}
                         onChange={() => toggleSelect(t.id)}
-                        className="cursor-pointer"
+                        className="cursor-pointer accent-primary"
                       />
                     </td>
                   )}
@@ -542,7 +542,7 @@ export default function Tickets() {
                     {t.aiProcessed && (
                       <span
                         title="Traité par l'agent IA"
-                        className="inline-flex items-center gap-1 px-2 py-1 border border-outline-variant text-on-surface-variant font-medium text-[11px]"
+                        className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border border-primary/20 bg-primary/5 text-primary font-medium text-[11px]"
                       >
                         <span className="material-symbols-outlined text-[14px]">smart_toy</span>
                         IA
@@ -553,13 +553,13 @@ export default function Tickets() {
                     {t.glpiTicketId ? (
                       <span
                         title="Synchronisé avec GLPI"
-                        className="inline-flex items-center gap-1 px-2 py-1 border border-outline-variant text-on-surface-variant font-medium text-[11px]"
+                        className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border border-outline-variant bg-surface-container-low text-on-surface-variant font-medium text-[11px]"
                       >
                         <span className="material-symbols-outlined text-[14px]">sync</span>
                         #{t.glpiTicketId}
                       </span>
                     ) : (
-                      <span title="Ticket interne, non synchronisé avec GLPI" className="text-outline italic text-[11px]">
+                      <span title="Ticket interne, non synchronisé avec GLPI" className="text-outline/60 italic text-[11px]">
                         Interne
                       </span>
                     )}
@@ -571,19 +571,19 @@ export default function Tickets() {
                     </span>
                   </td>
                   <td className="px-md py-3">
-                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-none border font-medium text-[11px] ${PRIORITY_STYLES[t.priority] || ''}`}>
+                    <span className={`inline-flex items-center font-medium text-[11px] ${PRIORITY_STYLES[t.priority] || ''}`}>
                       {t.priority}
                     </span>
                   </td>
                   <td className="px-md py-3 text-on-surface-variant">{t.team?.name || '-'}</td>
-                  <td className="px-md py-3 text-on-surface">{t.assignedTo?.fullName || <span className="text-outline italic">Non assigné</span>}</td>
+                  <td className="px-md py-3 text-on-surface">{t.assignedTo?.fullName || <span className="text-outline/65 italic">Non assigné</span>}</td>
                   <td className="px-md py-3 text-on-surface-variant">{t.requester?.fullName || '-'}</td>
                   {canDelete && (
                     <td className="px-md py-3">
                       <button
                         onClick={() => askDeleteOne(t.id)}
                         title="Supprimer ce ticket"
-                        className="text-outline hover:text-error transition-colors"
+                        className="text-outline/60 hover:text-error transition-colors"
                       >
                         <span className="material-symbols-outlined text-[18px]">delete</span>
                       </button>
@@ -593,7 +593,7 @@ export default function Tickets() {
               ))}
               {tickets.length === 0 && (
                 <tr>
-                  <td colSpan={9 + (showSelectionColumn ? 1 : 0) + (canDelete ? 1 : 0)} className="px-md py-8 text-center text-on-surface-variant">
+                  <td colSpan={9 + (showSelectionColumn ? 1 : 0) + (canDelete ? 1 : 0)} className="px-md py-8 text-center text-on-surface-variant italic">
                     Aucun ticket trouvé.
                   </td>
                 </tr>

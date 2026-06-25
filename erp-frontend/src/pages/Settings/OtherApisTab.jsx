@@ -5,7 +5,7 @@ import { hasPermission } from '../../utils/permissions';
 import ConfirmDialog from '../../components/ConfirmDialog';
 
 const inputClass =
-  'h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface';
+  'bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300';
 
 export default function OtherApisTab() {
   const { user } = useAuth();
@@ -219,16 +219,25 @@ export default function OtherApisTab() {
   return (
     <div className="space-y-lg">
       <p className="font-body-md text-body-md text-on-surface-variant">
-        Gère les autres intégrations externes (Supabase, GLPI, etc.) utilisées par l'ERP et le workflow n8n.
+        Gérez les autres intégrations externes (Supabase, GLPI, etc.) utilisées par l'ERP et le workflow n8n.
       </p>
-      {error && <div className="border border-outline-variant text-on-surface p-md rounded-none">{error}</div>}
-      {info && <div className="border border-outline-variant text-on-surface p-md rounded-none">{info}</div>}
 
-      <div className="bg-surface-container-lowest border border-outline-variant rounded-none p-lg">
-        <h3 className="font-headline-md text-headline-md text-on-surface mb-md">Ajouter une intégration</h3>
+      {error && (
+        <div className="border border-red-500/20 bg-red-500/5 text-red-500 p-md rounded-xl font-body-md">
+          {error}
+        </div>
+      )}
+      {info && (
+        <div className="border border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 p-md rounded-xl font-body-md">
+          {info}
+        </div>
+      )}
+
+      <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg">
+        <h3 className="font-headline-sm text-headline-sm text-on-surface font-bold mb-md">Ajouter une intégration</h3>
         <form onSubmit={handleCreate} className="grid grid-cols-1 md:grid-cols-3 gap-md items-end">
           <label className="flex flex-col gap-xs">
-            <span className="font-label-md text-label-md text-on-surface uppercase">Nom du service</span>
+            <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Nom du service</span>
             <input
               className={inputClass}
               value={form.serviceName}
@@ -238,18 +247,18 @@ export default function OtherApisTab() {
             />
           </label>
           <label className="flex flex-col gap-xs">
-            <span className="font-label-md text-label-md text-on-surface uppercase">URL de base</span>
+            <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">URL de base</span>
             <input className={inputClass} value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} placeholder="https://..." />
           </label>
           <label className="flex flex-col gap-xs">
-            <span className="font-label-md text-label-md text-on-surface uppercase">
+            <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">
               Clé API{form.serviceName === 'glpi' ? ' (User Token)' : ''}
             </span>
             <input className={inputClass} type="password" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} />
           </label>
           {form.serviceName === 'glpi' && (
             <label className="flex flex-col gap-xs">
-              <span className="font-label-md text-label-md text-on-surface uppercase">App Token (GLPI)</span>
+              <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">App Token (GLPI)</span>
               <input
                 className={inputClass}
                 type="password"
@@ -259,134 +268,144 @@ export default function OtherApisTab() {
               />
             </label>
           )}
-          <div className="md:col-span-3">
+          <div className="md:col-span-3 flex justify-end mt-2">
             <button
               type="submit"
-              className="px-md py-sm rounded-none border border-outline-variant text-on-surface font-headline-sm text-headline-sm hover:bg-surface-container-low transition-colors"
+              className="bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-semibold py-2.5 px-6 rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm"
             >
-              Ajouter
+              Ajouter l'intégration
             </button>
           </div>
         </form>
       </div>
 
-      <div className="bg-surface-container-lowest border border-outline-variant rounded-none overflow-hidden">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="bg-surface-container-low border-b border-outline-variant">
-              <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm">Service</th>
-              <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm">URL de base</th>
-              <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm">Clé API</th>
-              <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm">App Token</th>
-              <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm w-36">Statut</th>
-              <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm w-24 text-center">Active</th>
-              <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm w-32"></th>
-              <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm w-16"></th>
-            </tr>
-          </thead>
-          <tbody className="font-body-md text-body-md text-on-surface">
-            {configs.map((c) => (
-              <tr key={c.id} className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low transition-colors">
-                <td className="p-sm font-medium">{c.serviceName}</td>
-                <td className="p-sm">
-                  <input
-                    className={`${inputClass} w-full`}
-                    defaultValue={c.baseUrl || ''}
-                    onBlur={(e) => handleUpdate(c.id, 'baseUrl', e.target.value)}
-                  />
-                </td>
-                <td className="p-sm">
-                  <input
-                    className={`${inputClass} w-full`}
-                    type="password"
-                    placeholder={c.apiKey || 'Non définie'}
-                    onBlur={(e) => {
-                      if (e.target.value) handleUpdate(c.id, 'apiKey', e.target.value);
-                    }}
-                  />
-                </td>
-                <td className="p-sm">
-                  {c.serviceName === 'glpi' ? (
+      <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow overflow-hidden flex flex-col">
+        <div className="p-md border-b border-outline-variant/40 bg-surface-container-low/20 flex justify-between items-center">
+          <span className="font-headline-sm text-headline-sm text-on-surface font-semibold">Intégrations configurées</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-surface-bright/50 border-b border-outline-variant/60">
+                <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3 w-32">Service</th>
+                <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3">URL de base</th>
+                <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3 w-40">Clé API</th>
+                <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3 w-40">App Token</th>
+                <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3 w-36">Statut</th>
+                <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3 w-24 text-center">Active</th>
+                <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3 w-40 text-center">Actions</th>
+                <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3 w-16"></th>
+              </tr>
+            </thead>
+            <tbody className="font-body-sm text-body-sm text-on-surface divide-y divide-outline-variant/40">
+              {configs.map((c) => (
+                <tr key={c.id} className="hover:bg-surface-container-low/40 transition-colors">
+                  <td className="p-3 font-semibold uppercase text-primary">{c.serviceName}</td>
+                  <td className="p-3">
+                    <input
+                      className={`${inputClass} w-full`}
+                      defaultValue={c.baseUrl || ''}
+                      onBlur={(e) => handleUpdate(c.id, 'baseUrl', e.target.value)}
+                    />
+                  </td>
+                  <td className="p-3">
                     <input
                       className={`${inputClass} w-full`}
                       type="password"
-                      placeholder={c.extra?.appToken ? 'Défini' : 'Non défini'}
-                      onBlur={(e) => handleUpdateAppToken(c.id, c.extra, e.target.value)}
+                      placeholder={c.apiKey || 'Non définie'}
+                      onBlur={(e) => {
+                        if (e.target.value) handleUpdate(c.id, 'apiKey', e.target.value);
+                      }}
                     />
-                  ) : (
-                    <span className="text-outline">-</span>
-                  )}
-                </td>
-                <td className="p-sm">
-                  {REQUIRED_FIELDS[c.serviceName] && (
-                    <button
-                      onClick={() => handleTestConnection(c)}
-                      disabled={testingId === c.id}
-                      title="Tester la connexion"
-                      className="inline-flex items-center gap-1.5 px-2 py-1 border border-outline-variant rounded-none text-[11px] font-medium hover:bg-surface-container-low transition-colors disabled:opacity-50"
-                    >
-                      {testingId === c.id ? (
-                        <span className="text-on-surface-variant">Test...</span>
-                      ) : connectionStatus[c.id]?.connected ? (
-                        <>
-                          <span className="w-2 h-2 rounded-full bg-green-500"></span>
-                          <span className="text-on-surface">Connecté</span>
-                        </>
-                      ) : connectionStatus[c.id] ? (
-                        <>
-                          <span className="w-2 h-2 rounded-full bg-red-500"></span>
-                          <span className="text-error" title={connectionStatus[c.id].error}>Non connecté</span>
-                        </>
-                      ) : (
-                        <span className="text-on-surface-variant">Tester</span>
-                      )}
+                  </td>
+                  <td className="p-3">
+                    {c.serviceName === 'glpi' ? (
+                      <input
+                        className={`${inputClass} w-full`}
+                        type="password"
+                        placeholder={c.extra?.appToken ? 'Défini' : 'Non défini'}
+                        onBlur={(e) => handleUpdateAppToken(c.id, c.extra, e.target.value)}
+                      />
+                    ) : (
+                      <span className="text-on-surface-variant/60 italic p-2 block">-</span>
+                    )}
+                  </td>
+                  <td className="p-3">
+                    {REQUIRED_FIELDS[c.serviceName] && (
+                      <button
+                        onClick={() => handleTestConnection(c)}
+                        disabled={testingId === c.id}
+                        title="Tester la connexion"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-outline-variant/60 rounded-xl text-[11px] font-semibold bg-surface hover:bg-surface-container-high transition-colors disabled:opacity-50 shadow-sm"
+                      >
+                        {testingId === c.id ? (
+                          <span className="text-on-surface-variant">Test...</span>
+                        ) : connectionStatus[c.id]?.connected ? (
+                          <>
+                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/20"></span>
+                            <span className="text-on-surface">Connecté</span>
+                          </>
+                        ) : connectionStatus[c.id] ? (
+                          <>
+                            <span className="w-2.5 h-2.5 rounded-full bg-red-500 shadow-sm shadow-red-500/20"></span>
+                            <span className="text-error" title={connectionStatus[c.id].error}>Échec</span>
+                          </>
+                        ) : (
+                          <span className="text-on-surface-variant">Tester</span>
+                        )}
+                      </button>
+                    )}
+                    {connectionStatus[c.id]?.error && (
+                      <div className="text-[10px] text-error mt-1 max-w-[180px] bg-error/5 border border-error/15 px-2 py-0.5 rounded-lg font-medium">{connectionStatus[c.id].error}</div>
+                    )}
+                  </td>
+                  <td className="p-3 text-center">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 accent-primary cursor-pointer"
+                      checked={c.isActive}
+                      onChange={(e) => handleUpdate(c.id, 'isActive', e.target.checked)}
+                    />
+                  </td>
+                  <td className="p-3 text-center">
+                    {c.serviceName === 'glpi' && canManageGlpi && (
+                      <button
+                        onClick={handleSyncGlpi}
+                        disabled={syncingGlpi}
+                        className="px-3.5 py-1.5 rounded-xl border border-outline-variant/60 text-on-surface font-semibold text-body-sm hover:bg-surface-container-high transition-colors disabled:opacity-50 shadow-sm flex items-center gap-1 mx-auto"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">sync</span>
+                        {syncingGlpi ? 'Synchro...' : 'Synchroniser GLPI'}
+                      </button>
+                    )}
+                  </td>
+                  <td className="p-3 text-right">
+                    <button onClick={() => askDelete(c.id)} className="text-on-surface-variant hover:text-error transition-colors p-1">
+                      <span className="material-symbols-outlined text-[18px]">delete</span>
                     </button>
-                  )}
-                  {connectionStatus[c.id]?.error && (
-                    <div className="text-[11px] text-error mt-1 max-w-[180px]">{connectionStatus[c.id].error}</div>
-                  )}
-                </td>
-                <td className="p-sm text-center">
-                  <input
-                    type="checkbox"
-                    className="w-4 h-4 accent-on-surface border-outline-variant"
-                    checked={c.isActive}
-                    onChange={(e) => handleUpdate(c.id, 'isActive', e.target.checked)}
-                  />
-                </td>
-                <td className="p-sm">
-                  {c.serviceName === 'glpi' && canManageGlpi && (
-                    <button
-                      onClick={handleSyncGlpi}
-                      disabled={syncingGlpi}
-                      className="px-3 py-1.5 rounded-none border border-outline-variant text-on-surface font-body-sm text-body-sm hover:bg-surface-container-low transition-colors disabled:opacity-50"
-                    >
-                      {syncingGlpi ? 'Synchro...' : 'Synchroniser GLPI'}
-                    </button>
-                  )}
-                </td>
-                <td className="p-sm text-right">
-                  <button onClick={() => askDelete(c.id)} className="text-on-surface-variant hover:text-error">
-                    <span className="material-symbols-outlined text-sm">delete</span>
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {configs.length === 0 && (
-              <tr><td colSpan={8} className="p-sm text-center text-on-surface-variant">Aucune intégration configurée</td></tr>
-            )}
-          </tbody>
-        </table>
+                  </td>
+                </tr>
+              ))}
+              {configs.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="p-6 text-center text-on-surface-variant italic font-body-md">Aucune intégration configurée.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      <div className="bg-surface-container-lowest border border-outline-variant rounded-none p-lg">
-        <h3 className="font-headline-md text-headline-md text-on-surface mb-md">Workflows n8n</h3>
-        <p className="font-body-sm text-body-sm text-on-surface-variant mb-md">
-          Déclenche des workflows n8n (webhooks) directement depuis l'ERP, par exemple pour synchroniser GLPI ou notifier une équipe.
-        </p>
+      <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg flex flex-col gap-md">
+        <div className="border-b border-outline-variant/40 pb-md mb-xs">
+          <h3 className="font-headline-md text-headline-md text-on-surface font-bold">Workflows n8n</h3>
+          <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5">
+            Déclenchez des workflows n8n (webhooks) directement depuis l'ERP, par exemple pour synchroniser GLPI ou notifier une équipe.
+          </p>
+        </div>
         <form onSubmit={handleCreateWorkflow} className="grid grid-cols-1 md:grid-cols-3 gap-md items-end mb-lg">
           <label className="flex flex-col gap-xs">
-            <span className="font-label-md text-label-md text-on-surface uppercase">Nom</span>
+            <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Nom</span>
             <input
               className={inputClass}
               value={workflowForm.name}
@@ -396,7 +415,7 @@ export default function OtherApisTab() {
             />
           </label>
           <label className="flex flex-col gap-xs">
-            <span className="font-label-md text-label-md text-on-surface uppercase">URL du webhook</span>
+            <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">URL du webhook</span>
             <input
               className={inputClass}
               value={workflowForm.webhookUrl}
@@ -406,7 +425,7 @@ export default function OtherApisTab() {
             />
           </label>
           <label className="flex flex-col gap-xs">
-            <span className="font-label-md text-label-md text-on-surface uppercase">Description</span>
+            <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Description</span>
             <input
               className={inputClass}
               value={workflowForm.description}
@@ -414,71 +433,73 @@ export default function OtherApisTab() {
               placeholder="Optionnel"
             />
           </label>
-          <div className="md:col-span-3">
+          <div className="md:col-span-3 flex justify-end mt-2">
             <button
               type="submit"
-              className="px-md py-sm rounded-none border border-outline-variant text-on-surface font-headline-sm text-headline-sm hover:bg-surface-container-low transition-colors"
+              className="bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-semibold py-2.5 px-6 rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm"
             >
-              Ajouter
+              Ajouter le workflow
             </button>
           </div>
         </form>
 
-        <div className="border border-outline-variant rounded-none overflow-hidden">
+        <div className="border border-outline-variant/60 rounded-xl overflow-hidden">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-surface-container-low border-b border-outline-variant">
-                <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm">Nom</th>
-                <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm">Webhook</th>
-                <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm">Dernière exécution</th>
-                <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm w-24 text-center">Active</th>
-                <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm w-40"></th>
+              <tr className="bg-surface-bright/50 border-b border-outline-variant/60">
+                <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3">Nom</th>
+                <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3">Webhook</th>
+                <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3">Dernière exécution</th>
+                <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3 w-24 text-center">Active</th>
+                <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3 w-40 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="font-body-md text-body-md text-on-surface">
+            <tbody className="font-body-sm text-body-sm text-on-surface divide-y divide-outline-variant/40">
               {workflows.map((w) => (
-                <tr key={w.id} className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low transition-colors">
-                  <td className="p-sm font-medium">
+                <tr key={w.id} className="hover:bg-surface-container-low/40 transition-colors">
+                  <td className="p-3 font-semibold">
                     {w.name}
-                    {w.description && <div className="font-body-sm text-body-sm text-on-surface-variant">{w.description}</div>}
+                    {w.description && <div className="font-body-xs text-xs text-on-surface-variant mt-0.5 font-normal">{w.description}</div>}
                   </td>
-                  <td className="p-sm font-mono-sm text-mono-sm text-on-surface-variant truncate max-w-xs">{w.webhookUrl}</td>
-                  <td className="p-sm">
+                  <td className="p-3 font-mono-sm text-mono-sm text-on-surface-variant truncate max-w-xs">{w.webhookUrl}</td>
+                  <td className="p-3 font-medium">
                     {w.lastRunAt ? (
-                      <span className={w.lastStatus === 'success' ? 'text-on-surface' : 'text-error'}>
+                      <span className={w.lastStatus === 'success' ? 'text-emerald-600 dark:text-emerald-400' : 'text-error'}>
                         {new Date(w.lastRunAt).toLocaleString('fr-FR')} ({w.lastStatus})
                       </span>
                     ) : (
-                      <span className="text-on-surface-variant">Jamais exécuté</span>
+                      <span className="text-on-surface-variant/60 italic">Jamais exécuté</span>
                     )}
                   </td>
-                  <td className="p-sm text-center">
+                  <td className="p-3 text-center">
                     <input
                       type="checkbox"
-                      className="w-4 h-4 accent-on-surface border-outline-variant"
+                      className="w-4 h-4 accent-primary cursor-pointer"
                       checked={w.isActive}
                       onChange={(e) => handleUpdateWorkflow(w.id, 'isActive', e.target.checked)}
                     />
                   </td>
-                  <td className="p-sm text-right">
-                    <div className="flex items-center justify-end gap-sm">
+                  <td className="p-3 text-right">
+                    <div className="flex items-center justify-end gap-2">
                       <button
                         onClick={() => handleTrigger(w.id)}
                         disabled={!w.isActive || triggering === w.id}
-                        className="flex items-center gap-1 border border-outline-variant text-on-surface px-sm py-1 rounded-none font-label-md text-label-md hover:bg-surface-container-low transition-colors disabled:opacity-50"
+                        className="flex items-center gap-1 border border-outline-variant/60 text-on-surface px-3 py-1.5 rounded-xl font-semibold text-body-sm hover:bg-surface-container-high transition-colors disabled:opacity-50 shadow-sm"
                       >
-                        <span className="material-symbols-outlined text-sm">play_arrow</span>
+                        <span className="material-symbols-outlined text-[16px]">play_arrow</span>
                         {triggering === w.id ? '...' : 'Lancer'}
                       </button>
-                      <button onClick={() => askDeleteWorkflow(w.id)} className="text-on-surface-variant hover:text-error">
-                        <span className="material-symbols-outlined text-sm">delete</span>
+                      <button onClick={() => askDeleteWorkflow(w.id)} className="text-on-surface-variant hover:text-error transition-colors p-1">
+                        <span className="material-symbols-outlined text-[18px]">delete</span>
                       </button>
                     </div>
                   </td>
                 </tr>
               ))}
               {workflows.length === 0 && (
-                <tr><td colSpan={5} className="p-sm text-center text-on-surface-variant">Aucun workflow configuré</td></tr>
+                <tr>
+                  <td colSpan={5} className="p-6 text-center text-on-surface-variant italic font-body-md">Aucun workflow configuré.</td>
+                </tr>
               )}
             </tbody>
           </table>

@@ -36,22 +36,22 @@ export default function Settings() {
 
   return (
     <div className="flex flex-col gap-lg">
-      <header className="flex flex-col md:flex-row md:justify-between md:items-end gap-md">
+      <header className="flex flex-col xl:flex-row xl:justify-between xl:items-end gap-md">
         <div>
-          <h2 className="font-display-lg text-display-lg text-on-background">Paramètres avancés</h2>
-          <p className="font-body-lg text-body-lg text-on-surface-variant mt-xs">
-            Gère les intégrations externes et les fournisseurs d'intelligence artificielle.
+          <h2 className="font-display-lg text-display-lg text-on-background font-bold">Paramètres avancés</h2>
+          <p className="font-body-lg text-body-lg text-on-surface-variant mt-1">
+            Gérez les intégrations externes, l'automatisation et les fournisseurs d'intelligence artificielle.
           </p>
         </div>
-        <div className="flex bg-surface-container-low p-xs rounded-none border border-outline-variant">
+        <div className="flex flex-wrap bg-surface-container-lowest p-md rounded-2xl border border-outline-variant/60 card-shadow gap-sm">
           {TABS.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-lg py-sm rounded-none font-headline-sm text-headline-sm transition-all ${
+              className={`px-4 py-2 rounded-xl border font-body-sm text-body-sm font-semibold transition-all duration-300 ${
                 activeTab === tab.id
-                  ? 'bg-surface-container-lowest border border-outline-variant text-on-surface'
-                  : 'text-on-surface-variant hover:text-on-surface'
+                  ? 'border-primary bg-primary/10 text-primary shadow-sm shadow-primary/5'
+                  : 'border-outline-variant/60 text-on-surface-variant hover:bg-surface-container-high/60 hover:text-on-surface'
               }`}
             >
               {tab.label}
@@ -60,7 +60,7 @@ export default function Settings() {
         </div>
       </header>
 
-      <div>
+      <div className="mt-md">
         {activeTab === 'ai' && <AiProvidersTab />}
         {activeTab === 'email' && <EmailAccountsTab />}
         {activeTab === 'other' && <OtherApisTab />}

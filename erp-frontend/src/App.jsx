@@ -1,5 +1,4 @@
-import { Routes, Route, useLocation } from 'react-router-dom';
-import { AnimatePresence } from 'framer-motion';
+import { Routes, Route } from 'react-router-dom';
 import MainLayout from './layouts/MainLayout';
 import ProtectedRoute from './components/ProtectedRoute';
 import PageTransition from './components/PageTransition';
@@ -18,13 +17,13 @@ import Prompts from './pages/Prompts';
 import ApprovalPage from './pages/ApprovalPage';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
+import Supervision from './pages/Supervision';
 
 export default function App() {
-  const location = useLocation();
-
+  // Les transitions de pages sont gérées dans MainLayout (Outlet uniquement).
+  // La sidebar ne re-monte plus à chaque navigation.
   return (
-    <AnimatePresence mode="wait">
-      <Routes key={location.pathname} location={location}>
+    <Routes>
         <Route path="/login" element={<PageTransition><Login /></PageTransition>} />
         <Route path="/approve/:token" element={<PageTransition><ApprovalPage /></PageTransition>} />
         <Route path="/forgot-password" element={<PageTransition><ForgotPassword /></PageTransition>} />
@@ -37,18 +36,26 @@ export default function App() {
             </ProtectedRoute>
           }
         >
-          <Route index element={<PageTransition><Dashboard /></PageTransition>} />
-          <Route path="tickets" element={<PageTransition><Tickets /></PageTransition>} />
-          <Route path="tickets/:id" element={<PageTransition><TicketDetail /></PageTransition>} />
-          <Route path="teams" element={<PageTransition><Teams /></PageTransition>} />
-          <Route path="knowledge-base" element={<PageTransition><KnowledgeBase /></PageTransition>} />
-          <Route path="inbox" element={<PageTransition><Inbox /></PageTransition>} />
-          <Route path="email-drafts" element={<PageTransition><AiEmailDrafts /></PageTransition>} />
+          <Route index element={<Dashboard />} />
+          <Route path="tickets" element={<Tickets />} />
+          <Route path="tickets/:id" element={<TicketDetail />} />
+          <Route path="teams" element={<Teams />} />
+          <Route path="knowledge-base" element={<KnowledgeBase />} />
+          <Route path="inbox" element={<Inbox />} />
+          <Route path="email-drafts" element={<AiEmailDrafts />} />
+          <Route
+            path="supervision"
+            element={
+              <ProtectedRoute roles={['ADMIN', 'TECHNICIAN']}>
+                <Supervision />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="users"
             element={
               <ProtectedRoute roles={['ADMIN']}>
-                <PageTransition><Users /></PageTransition>
+                <Users />
               </ProtectedRoute>
             }
           />
@@ -56,7 +63,7 @@ export default function App() {
             path="permission-groups"
             element={
               <ProtectedRoute roles={['ADMIN']}>
-                <PageTransition><PermissionGroups /></PageTransition>
+                <PermissionGroups />
               </ProtectedRoute>
             }
           />
@@ -64,7 +71,7 @@ export default function App() {
             path="settings"
             element={
               <ProtectedRoute roles={['ADMIN']}>
-                <PageTransition><Settings /></PageTransition>
+                <Settings />
               </ProtectedRoute>
             }
           />
@@ -72,12 +79,12 @@ export default function App() {
             path="prompts"
             element={
               <ProtectedRoute roles={['ADMIN']}>
-                <PageTransition><Prompts /></PageTransition>
+                <Prompts />
               </ProtectedRoute>
             }
           />
         </Route>
       </Routes>
-    </AnimatePresence>
   );
 }
+

@@ -9,21 +9,25 @@ import {
   VOICE_ALERT_LANGUAGES,
 } from '../../utils/voiceAlertPreference';
 
+const inputClass =
+  'bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300';
+
 function Toggle({ checked, onChange, disabled }) {
   return (
     <button
       type="button"
       onClick={() => onChange(!checked)}
       disabled={disabled}
-      className={`relative w-12 h-6 rounded-none border border-outline-variant transition-colors ${
-        checked ? 'bg-on-surface' : 'bg-surface-container-low'
-      } disabled:opacity-50`}
+      className={`relative w-12 h-6 rounded-full border transition-all duration-300 outline-none ${
+        checked
+          ? 'bg-primary border-primary/60 shadow-sm shadow-primary/20'
+          : 'bg-surface-container-high border-outline-variant/60'
+      } disabled:opacity-50 disabled:cursor-not-allowed`}
     >
       <span
-        className={`absolute top-0.5 left-0.5 w-4.5 h-4.5 rounded-none transition-transform ${
-          checked ? 'translate-x-6 bg-surface' : 'translate-x-0 bg-on-surface-variant'
+        className={`absolute top-[2px] left-[2px] w-[18px] h-[18px] rounded-full transition-transform duration-300 shadow-sm ${
+          checked ? 'translate-x-6 bg-white' : 'translate-x-0 bg-on-surface-variant/80'
         }`}
-        style={{ width: '18px', height: '18px' }}
       />
     </button>
   );
@@ -31,12 +35,14 @@ function Toggle({ checked, onChange, disabled }) {
 
 function SettingRow({ title, description, checked, onChange, disabled }) {
   return (
-    <div className="flex items-center justify-between gap-lg p-lg border border-outline-variant bg-surface-container-lowest">
+    <div className="flex items-center justify-between gap-lg p-lg border border-outline-variant/60 bg-surface-container-lowest rounded-2xl card-shadow transition-all duration-300 hover:border-outline-variant/90">
       <div>
-        <div className="font-headline-sm text-headline-sm text-on-surface">{title}</div>
-        <p className="font-body-sm text-body-sm text-on-surface-variant mt-1">{description}</p>
+        <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">{title}</div>
+        <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5">{description}</p>
       </div>
-      <Toggle checked={checked} onChange={onChange} disabled={disabled} />
+      <div className="shrink-0">
+        <Toggle checked={checked} onChange={onChange} disabled={disabled} />
+      </div>
     </div>
   );
 }
@@ -66,10 +72,10 @@ function buildAckPreviewHtml(customMessage, signature, logoUrl, logoHeight) {
 
 function IntervalRow({ title, description, value, onChange, disabled, max, unit }) {
   return (
-    <div className="flex items-center justify-between gap-lg p-lg border border-outline-variant bg-surface-container-lowest">
+    <div className="flex items-center justify-between gap-lg p-lg border border-outline-variant/60 bg-surface-container-lowest rounded-2xl card-shadow transition-all duration-300 hover:border-outline-variant/90">
       <div>
-        <div className="font-headline-sm text-headline-sm text-on-surface">{title}</div>
-        <p className="font-body-sm text-body-sm text-on-surface-variant mt-1">{description}</p>
+        <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">{title}</div>
+        <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5">{description}</p>
       </div>
       <div className="flex items-center gap-sm shrink-0">
         <input
@@ -79,9 +85,9 @@ function IntervalRow({ title, description, value, onChange, disabled, max, unit 
           value={value}
           onChange={(e) => onChange(Math.max(0, Math.min(max, Number(e.target.value) || 0)))}
           disabled={disabled}
-          className="w-20 border border-outline-variant rounded-none px-3 py-2 text-body-sm text-on-surface bg-surface disabled:opacity-50"
+          className={`${inputClass} w-24 text-center disabled:opacity-50`}
         />
-        <span className="font-body-sm text-body-sm text-on-surface-variant">{unit}</span>
+        <span className="font-body-sm text-body-sm text-on-surface-variant font-medium">{unit}</span>
       </div>
     </div>
   );
@@ -205,26 +211,38 @@ export default function AutomationTab() {
     return <p className="font-body-sm text-body-sm text-on-surface-variant">{error || 'Chargement...'}</p>;
   }
 
+  const isAckChanged = ackMessageDraft !== (settings.acknowledgementMessage || '') || signatureDraft !== (settings.emailSignature || '');
+
   return (
-    <div className="flex flex-col gap-md">
+    <div className="space-y-lg">
       <p className="font-body-md text-body-md text-on-surface-variant">
         Contrôle les actions que l'intelligence artificielle peut effectuer sans validation humaine. Désactivés par défaut.
       </p>
 
-      {error && <div className="border border-outline-variant rounded-none p-md text-on-surface bg-surface-container-low">{error}</div>}
+      {error && (
+        <div className="border border-red-500/20 bg-red-500/5 text-red-500 p-md rounded-xl font-body-md">
+          {error}
+        </div>
+      )}
 
-      <div className="mt-md">
-        <h3 className="font-headline-sm text-headline-sm text-on-surface mb-1">Texte de l'accusé de réception et signature</h3>
-        <p className="font-body-sm text-body-sm text-on-surface-variant mb-md">
-          Message et signature envoyés automatiquement au demandeur quand un nouveau ticket est créé par email (la même
-          signature est aussi utilisée pour les relances et notifications d'incident). Placeholders disponibles dans le
-          message : <code>{'{ticketId}'}</code>, <code>{'{subject}'}</code>, <code>{'{toName}'}</code>. Laisser vide pour
-          utiliser le texte par défaut.
-        </p>
-        <div className="grid grid-cols-2 gap-md">
-          <div className="flex flex-col gap-md">
-            <div className="flex flex-col gap-sm p-lg border border-outline-variant bg-surface-container-lowest">
-              <span className="font-label-sm text-label-sm text-on-surface-variant uppercase">Message d'accueil</span>
+      {/* Accusé de réception et Signature */}
+      <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg space-y-md">
+        <div>
+          <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold mb-1">Accusé de réception et signature</h3>
+          <p className="font-body-sm text-body-sm text-on-surface-variant">
+            Message et signature envoyés automatiquement au demandeur quand un nouveau ticket est créé par email (la même
+            signature est aussi utilisée pour les relances et notifications d'incident). Placeholders disponibles dans le
+            message : <code className="bg-surface-container-high px-1 rounded font-mono text-[11px]">{'{ticketId}'}</code>,{' '}
+            <code className="bg-surface-container-high px-1 rounded font-mono text-[11px]">{'{subject}'}</code>,{' '}
+            <code className="bg-surface-container-high px-1 rounded font-mono text-[11px]">{'{toName}'}</code>. Laisser vide pour
+            utiliser le texte par défaut.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-lg">
+          <div className="space-y-md">
+            <div className="flex flex-col gap-sm">
+              <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Message d'accueil</span>
               <textarea
                 value={ackMessageDraft}
                 onChange={(e) => setAckMessageDraft(e.target.value)}
@@ -232,12 +250,13 @@ export default function AutomationTab() {
                 rows={4}
                 maxLength={2000}
                 placeholder={DEFAULT_ACK_MESSAGE}
-                className="border border-outline-variant rounded-none px-3 py-2 text-body-sm text-on-surface bg-surface disabled:opacity-50 resize-none flex-1"
+                className={`${inputClass} resize-none w-full min-h-[100px]`}
               />
             </div>
-            <div className="flex flex-col gap-sm p-lg border border-outline-variant bg-surface-container-lowest">
-              <span className="font-label-sm text-label-sm text-on-surface-variant uppercase">
-                Signature (HTML — colle ici ta signature Outlook)
+
+            <div className="flex flex-col gap-sm">
+              <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">
+                Signature (HTML — Outlook compatible)
               </span>
               <textarea
                 value={signatureDraft}
@@ -246,31 +265,32 @@ export default function AutomationTab() {
                 rows={4}
                 maxLength={2000}
                 placeholder={DEFAULT_SIGNATURE}
-                className="border border-outline-variant rounded-none px-3 py-2 text-body-sm text-on-surface bg-surface disabled:opacity-50 resize-none flex-1 font-mono"
+                className={`${inputClass} resize-none w-full font-mono min-h-[100px]`}
               />
             </div>
-            <div className="flex flex-col gap-sm p-lg border border-outline-variant bg-surface-container-lowest">
-              <span className="font-label-sm text-label-sm text-on-surface-variant uppercase">Logo de signature</span>
+
+            <div className="flex flex-col gap-sm p-md border border-outline-variant/60 bg-surface-container-low/20 rounded-xl">
+              <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Logo de signature</span>
               {settings.signatureLogoUrl ? (
-                <div className="flex flex-col gap-sm">
+                <div className="flex flex-col gap-md">
                   <div className="flex items-center gap-md">
                     <img
                       src={settings.signatureLogoUrl}
                       alt="Logo actuel"
                       style={{ height: `${settings.signatureLogoHeight || 60}px` }}
-                      className="border border-outline-variant"
+                      className="border border-outline-variant/60 rounded-lg p-1 bg-white max-h-20 object-contain"
                     />
                     <button
                       type="button"
                       onClick={removeLogo}
                       disabled={saving || uploadingLogo}
-                      className="px-3 py-2 border border-outline-variant text-on-surface-variant hover:bg-surface-container-high transition-colors disabled:opacity-50"
+                      className="px-3 py-2 border border-red-500/20 bg-red-500/5 hover:bg-red-500/10 text-red-500 rounded-xl transition-colors disabled:opacity-50 text-body-sm font-semibold"
                     >
                       Retirer le logo
                     </button>
                   </div>
                   <div className="flex items-center gap-sm">
-                    <span className="font-body-sm text-body-sm text-on-surface-variant shrink-0">Taille</span>
+                    <span className="font-body-sm text-body-sm text-on-surface-variant shrink-0 font-medium">Hauteur</span>
                     <input
                       type="range"
                       min={16}
@@ -278,67 +298,72 @@ export default function AutomationTab() {
                       value={settings.signatureLogoHeight || 60}
                       onChange={(e) => updateSetting('signatureLogoHeight', Number(e.target.value))}
                       disabled={saving}
-                      className="flex-1"
+                      className="flex-1 accent-primary"
                     />
-                    <span className="font-body-sm text-body-sm text-on-surface-variant shrink-0 w-12 text-right">
+                    <span className="font-body-sm text-body-sm text-on-surface font-semibold shrink-0 w-12 text-right">
                       {settings.signatureLogoHeight || 60}px
                     </span>
                   </div>
                 </div>
               ) : (
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/gif,image/svg+xml,image/webp"
-                  onChange={handleLogoUpload}
-                  disabled={uploadingLogo}
-                  className="font-body-sm text-body-sm text-on-surface-variant disabled:opacity-50"
-                />
+                <div className="flex flex-col gap-sm">
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/gif,image/svg+xml,image/webp"
+                    onChange={handleLogoUpload}
+                    disabled={uploadingLogo}
+                    className="font-body-sm text-body-sm text-on-surface-variant disabled:opacity-50 cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-body-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 file:transition-all"
+                  />
+                  {uploadingLogo && <span className="font-body-sm text-body-sm text-on-surface-variant italic">Envoi en cours...</span>}
+                </div>
               )}
-              {uploadingLogo && <span className="font-body-sm text-body-sm text-on-surface-variant">Envoi en cours...</span>}
             </div>
           </div>
-          <div className="flex flex-col gap-sm p-lg border border-outline-variant bg-surface">
-            <span className="font-label-sm text-label-sm text-on-surface-variant uppercase">Aperçu de l'email envoyé</span>
+
+          <div className="flex flex-col gap-sm p-lg border border-outline-variant/60 bg-surface-container-low/20 rounded-2xl card-shadow">
+            <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Aperçu de l'email envoyé</span>
             <div
-              className="text-body-sm text-on-surface flex-1 overflow-auto"
+              className="text-body-sm text-on-surface flex-1 overflow-auto bg-surface border border-outline-variant/60 rounded-xl p-md min-h-[250px]"
               dangerouslySetInnerHTML={{ __html: buildAckPreviewHtml(ackMessageDraft, signatureDraft, settings.signatureLogoUrl, settings.signatureLogoHeight) }}
             />
           </div>
         </div>
-        <div className="flex flex-col gap-sm p-lg border border-outline-variant bg-surface-container-lowest mt-sm">
-          <div className="flex justify-end gap-sm">
-            <button
-              type="button"
-              onClick={() => {
-                setAckMessageDraft(settings.acknowledgementMessage || '');
-                setSignatureDraft(settings.emailSignature || '');
-              }}
-              disabled={saving || (ackMessageDraft === (settings.acknowledgementMessage || '') && signatureDraft === (settings.emailSignature || ''))}
-              className="px-3 py-2 border border-outline-variant text-on-surface-variant hover:bg-surface-container-high transition-colors disabled:opacity-50"
-            >
-              Annuler
-            </button>
-            <button
-              type="button"
-              onClick={async () => {
-                await updateSetting('acknowledgementMessage', ackMessageDraft);
-                await updateSetting('emailSignature', signatureDraft);
-              }}
-              disabled={saving || (ackMessageDraft === (settings.acknowledgementMessage || '') && signatureDraft === (settings.emailSignature || ''))}
-              className="px-3 py-2 bg-on-surface text-surface hover:opacity-80 transition-colors disabled:opacity-50"
-            >
-              Enregistrer
-            </button>
-          </div>
+
+        <div className="flex justify-end gap-sm pt-sm border-t border-outline-variant/40">
+          <button
+            type="button"
+            onClick={() => {
+              setAckMessageDraft(settings.acknowledgementMessage || '');
+              setSignatureDraft(settings.emailSignature || '');
+            }}
+            disabled={saving || !isAckChanged}
+            className="px-4 py-2 border border-outline-variant/60 text-on-surface-variant hover:bg-surface-container-high rounded-xl transition-colors disabled:opacity-50 text-body-sm font-semibold"
+          >
+            Annuler
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              await updateSetting('acknowledgementMessage', ackMessageDraft);
+              await updateSetting('emailSignature', signatureDraft);
+            }}
+            disabled={saving || !isAckChanged}
+            className="px-4 py-2 bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-semibold rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm disabled:opacity-50"
+          >
+            {saving ? 'Enregistrement...' : 'Enregistrer'}
+          </button>
         </div>
       </div>
 
-      <div className="mt-md">
-        <h3 className="font-headline-sm text-headline-sm text-on-surface mb-1">Relance des brouillons en attente</h3>
-        <p className="font-body-sm text-body-sm text-on-surface-variant mb-md">
-          Quand une réponse IA reste en attente de validation trop longtemps, un email de relance est envoyé aux
-          responsables ayant activé « Recevoir les alertes de brouillons » (page Utilisateurs).
-        </p>
+      {/* Relance des brouillons en attente */}
+      <div className="space-y-md">
+        <div>
+          <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold mb-1">Relance des brouillons en attente</h3>
+          <p className="font-body-sm text-body-sm text-on-surface-variant">
+            Quand une réponse IA reste en attente de validation trop longtemps, un email de relance est envoyé aux
+            responsables ayant activé « Recevoir les alertes de brouillons » (page Utilisateurs).
+          </p>
+        </div>
         <div className="flex flex-col gap-md">
           <SettingRow
             title="Relance email des brouillons en attente"
@@ -359,14 +384,17 @@ export default function AutomationTab() {
         </div>
       </div>
 
+      {/* Relance des tickets en attente de réponse */}
       {reminderConfig && (
-        <div className="mt-md">
-          <h3 className="font-headline-sm text-headline-sm text-on-surface mb-1">Relance des tickets en attente de réponse</h3>
-          <p className="font-body-sm text-body-sm text-on-surface-variant mb-md">
-            Pour les tickets créés par email et en attente de réponse du demandeur (statut « En attente
-            utilisateur ») : relances automatiques, puis clôture automatique si toujours sans réponse.
-            Vérifié toutes les heures.
-          </p>
+        <div className="space-y-md">
+          <div>
+            <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold mb-1">Relance des tickets en attente de réponse</h3>
+            <p className="font-body-sm text-body-sm text-on-surface-variant">
+              Pour les tickets créés par email et en attente de réponse du demandeur (statut « En attente
+              utilisateur ») : relances automatiques, puis clôture automatique si toujours sans réponse.
+              Vérifié toutes les heures.
+            </p>
+          </div>
           <div className="flex flex-col gap-md">
             <SettingRow
               title="Relance et clôture automatique des tickets en attente"
@@ -415,12 +443,15 @@ export default function AutomationTab() {
         </div>
       )}
 
-      <div className="mt-md">
-        <h3 className="font-headline-sm text-headline-sm text-on-surface mb-1">Récapitulatif quotidien des tickets ouverts</h3>
-        <p className="font-body-sm text-body-sm text-on-surface-variant mb-md">
-          Envoie chaque jour à l'heure choisie un email listant tous les tickets ouverts (répartition par
-          priorité, statut, assignation, ancienneté) aux adresses email configurées ci-dessous.
-        </p>
+      {/* Récapitulatif quotidien */}
+      <div className="space-y-md">
+        <div>
+          <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold mb-1">Récapitulatif quotidien des tickets ouverts</h3>
+          <p className="font-body-sm text-body-sm text-on-surface-variant">
+            Envoie chaque jour à l'heure choisie un email listant tous les tickets ouverts (répartition par
+            priorité, statut, assignation, ancienneté) aux adresses email configurées ci-dessous.
+          </p>
+        </div>
         <div className="flex flex-col gap-md">
           <SettingRow
             title="Récapitulatif quotidien"
@@ -429,113 +460,143 @@ export default function AutomationTab() {
             onChange={(v) => updateSetting('dailySummaryEnabled', v)}
             disabled={saving}
           />
-          <div className="flex items-center justify-between gap-lg p-lg border border-outline-variant bg-surface-container-lowest">
+
+          <div className="flex items-center justify-between gap-lg p-lg border border-outline-variant/60 bg-surface-container-lowest rounded-2xl card-shadow transition-all duration-300 hover:border-outline-variant/90">
             <div>
-              <div className="font-headline-sm text-headline-sm text-on-surface">Heure d'envoi</div>
-              <p className="font-body-sm text-body-sm text-on-surface-variant mt-1">Heure locale du serveur, au format 24h.</p>
+              <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">Heure d'envoi</div>
+              <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 font-medium">Heure locale du serveur, au format 24h.</p>
             </div>
             <input
               type="time"
               value={settings.dailySummaryTime}
               onChange={(e) => updateSetting('dailySummaryTime', e.target.value)}
               disabled={saving || !settings.dailySummaryEnabled}
-              className="border border-outline-variant rounded-none px-3 py-2 text-body-sm text-on-surface bg-surface disabled:opacity-50"
+              className={`${inputClass} disabled:opacity-50`}
             />
           </div>
-          <div className="flex flex-col gap-sm p-lg border border-outline-variant bg-surface-container-lowest">
-            <span className="font-label-sm text-label-sm text-on-surface-variant uppercase">Destinataires</span>
+
+          <div className="flex flex-col gap-sm p-lg border border-outline-variant/60 bg-surface-container-lowest rounded-2xl card-shadow">
+            <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Destinataires</span>
             <div className="flex items-center gap-sm">
               <input
                 type="email"
                 value={summaryRecipientInput}
                 onChange={(e) => setSummaryRecipientInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addSummaryRecipient(); } }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addSummaryRecipient();
+                  }
+                }}
                 placeholder="adresse@exemple.com"
                 disabled={saving}
-                className="flex-1 border border-outline-variant rounded-none px-3 py-2 text-body-sm text-on-surface bg-surface disabled:opacity-50"
+                className={`${inputClass} flex-1`}
               />
               <button
                 type="button"
                 onClick={addSummaryRecipient}
                 disabled={saving}
-                className="px-3 py-2 border border-outline-variant text-on-surface-variant hover:bg-surface-container-high transition-colors disabled:opacity-50"
+                className="px-4 py-2 bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-semibold rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm disabled:opacity-50 shrink-0"
               >
                 Ajouter
               </button>
             </div>
             {(settings.dailySummaryRecipients || []).length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-1">
+              <div className="flex flex-wrap gap-2 mt-2">
                 {settings.dailySummaryRecipients.map((email) => (
-                  <span key={email} className="flex items-center gap-1 px-2 py-0.5 border border-outline-variant text-on-surface-variant text-xs">
+                  <span
+                    key={email}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 bg-surface-container-high border border-outline-variant/60 rounded-full text-on-surface text-xs font-semibold shadow-sm"
+                  >
                     {email}
-                    <button onClick={() => removeSummaryRecipient(email)} disabled={saving} className="hover:text-error">
-                      <span className="material-symbols-outlined text-[12px]">close</span>
+                    <button
+                      onClick={() => removeSummaryRecipient(email)}
+                      disabled={saving}
+                      className="text-on-surface-variant hover:text-error transition-colors flex items-center"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">close</span>
                     </button>
                   </span>
                 ))}
               </div>
             )}
           </div>
-          <div className="flex flex-col gap-sm p-lg border border-outline-variant bg-surface-container-lowest">
-            <div className="flex items-center justify-between">
-              <span className="font-body-sm text-body-sm text-on-surface-variant">
+
+          <div className="flex flex-col gap-sm p-lg border border-outline-variant/60 bg-surface-container-lowest rounded-2xl card-shadow">
+            <div className="flex items-center justify-between gap-md flex-wrap md:flex-nowrap">
+              <span className="font-body-sm text-body-sm text-on-surface-variant font-medium">
                 Envoyer un récapitulatif de test maintenant, sans attendre l'heure configurée.
               </span>
               <button
                 type="button"
                 onClick={testDailySummary}
                 disabled={testingSummary || (settings.dailySummaryRecipients || []).length === 0}
-                className="px-3 py-2 border border-outline-variant text-on-surface-variant hover:bg-surface-container-high transition-colors disabled:opacity-50 shrink-0"
+                className="px-4 py-2 border border-outline-variant/60 text-on-surface hover:bg-surface-container-high rounded-xl font-semibold text-body-sm transition-all disabled:opacity-50 shrink-0 shadow-sm"
               >
                 {testingSummary ? 'Envoi...' : 'Tester maintenant'}
               </button>
             </div>
             {summaryTestResult && (
-              <p className="font-body-sm text-body-sm text-on-surface-variant">
+              <div className="p-md rounded-xl border border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 font-body-sm mt-2">
                 {summaryTestResult.sent
-                  ? `Envoyé : ${summaryTestResult.ticketCount} ticket(s) à ${summaryTestResult.recipientCount} destinataire(s).`
+                  ? `Envoyé avec succès : ${summaryTestResult.ticketCount} ticket(s) à ${summaryTestResult.recipientCount} destinataire(s).`
                   : summaryTestResult.reason}
-              </p>
+              </div>
             )}
           </div>
         </div>
       </div>
 
-      <SettingRow
-        title="Alerte vocale (ce navigateur uniquement)"
-        description="Quand activé, une voix annonce dans ce navigateur l'arrivée d'une nouvelle réponse IA à valider ou d'un ticket nécessitant une revue humaine. Préférence locale, non partagée avec les autres utilisateurs."
-        checked={voiceAlerts}
-        onChange={toggleVoiceAlerts}
-      />
-
-      <div className="flex items-center justify-between gap-lg p-lg border border-outline-variant bg-surface-container-lowest">
+      {/* Alerte Vocale */}
+      <div className="space-y-md">
         <div>
-          <div className="font-headline-sm text-headline-sm text-on-surface">Langue de l'alerte vocale</div>
-          <p className="font-body-sm text-body-sm text-on-surface-variant mt-1">
-            Langue utilisée par la synthèse vocale de ce navigateur pour annoncer les alertes.
+          <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold mb-1">Alertes sonores</h3>
+          <p className="font-body-sm text-body-sm text-on-surface-variant">
+            Configurez des alertes vocales interactives pour vous avertir instantanément en cas d'activité nécessitant votre attention.
           </p>
         </div>
-        <div className="flex items-center gap-sm">
-          <select
-            value={voiceLang}
-            onChange={(e) => changeVoiceLang(e.target.value)}
-            disabled={!voiceAlerts}
-            className="border border-outline-variant rounded-none px-3 py-2 text-body-sm text-on-surface bg-surface disabled:opacity-50"
-          >
-            {VOICE_ALERT_LANGUAGES.map((l) => (
-              <option key={l.code} value={l.code}>{l.label}</option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={() => speakTest(voiceLang)}
-            disabled={!voiceAlerts}
-            className="px-3 py-2 border border-outline-variant text-on-surface-variant hover:bg-surface-container-high transition-colors disabled:opacity-50"
-          >
-            Tester
-          </button>
+        <div className="flex flex-col gap-md">
+          <SettingRow
+            title="Alerte vocale (ce navigateur uniquement)"
+            description="Quand activé, une voix annonce dans ce navigateur l'arrivée d'une nouvelle réponse IA à valider ou d'un ticket nécessitant une revue humaine. Préférence locale, non partagée avec les autres utilisateurs."
+            checked={voiceAlerts}
+            onChange={toggleVoiceAlerts}
+          />
+
+          <div className="flex items-center justify-between gap-lg p-lg border border-outline-variant/60 bg-surface-container-lowest rounded-2xl card-shadow transition-all duration-300 hover:border-outline-variant/90">
+            <div>
+              <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">Langue de l'alerte vocale</div>
+              <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 font-medium">
+                Langue utilisée par la synthèse vocale de ce navigateur pour annoncer les alertes.
+              </p>
+            </div>
+            <div className="flex items-center gap-sm">
+              <select
+                value={voiceLang}
+                onChange={(e) => changeVoiceLang(e.target.value)}
+                disabled={!voiceAlerts}
+                className={`${inputClass} disabled:opacity-50`}
+              >
+                {VOICE_ALERT_LANGUAGES.map((l) => (
+                  <option key={l.code} value={l.code}>
+                    {l.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => speakTest(voiceLang)}
+                disabled={!voiceAlerts}
+                className="px-4 py-2 border border-outline-variant/60 text-on-surface hover:bg-surface-container-high rounded-xl font-semibold text-body-sm transition-all disabled:opacity-50 shadow-sm flex items-center gap-1.5"
+              >
+                <span className="material-symbols-outlined text-[16px]">volume_up</span>
+                Tester
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   );
 }
+

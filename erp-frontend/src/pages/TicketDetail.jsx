@@ -22,10 +22,10 @@ const URGENCY_IMPACT_OPTIONS = [
 ];
 
 const PRIORITY_BADGE = {
-  P1: 'bg-error-container text-on-error-container',
-  P2: 'border border-outline-variant text-on-surface',
-  P3: 'border border-outline-variant text-on-surface-variant',
-  P4: 'border border-outline-variant text-on-surface-variant',
+  P1: 'bg-error/10 text-error border border-error/20 rounded-full px-2.5 py-0.5',
+  P2: 'bg-tertiary/10 text-tertiary border border-tertiary/20 rounded-full px-2.5 py-0.5',
+  P3: 'bg-secondary/10 text-secondary border border-secondary/20 rounded-full px-2.5 py-0.5',
+  P4: 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 rounded-full px-2.5 py-0.5',
 };
 
 function initials(name) {
@@ -56,9 +56,9 @@ function AttachmentThumbnail({ ticketId, attachment }) {
   }, [ticketId, attachment.id]);
 
   if (!blobUrl) {
-    return <div className="h-24 w-24 border border-outline-variant bg-surface-container-low animate-pulse" />;
+    return <div className="h-24 w-24 border border-outline-variant bg-surface-container-low rounded-xl animate-pulse" />;
   }
-  return <img src={blobUrl} alt={attachment.filename} className="h-24 w-24 object-cover border border-outline-variant" />;
+  return <img src={blobUrl} alt={attachment.filename} className="h-24 w-24 object-cover border border-outline-variant/60 rounded-xl shadow-sm hover:shadow-md transition-all duration-300" />;
 }
 
 export default function TicketDetail() {
@@ -186,10 +186,10 @@ export default function TicketDetail() {
   }
 
   if (error) {
-    return <div className="border border-outline-variant text-on-surface p-md rounded-none">{error}</div>;
+    return <div className="border border-red-500/20 bg-red-500/5 text-red-500 p-md rounded-xl font-body-md">{error}</div>;
   }
   if (!ticket) {
-    return <p className="font-body-md text-body-md text-on-surface-variant">Chargement...</p>;
+    return <p className="font-body-md text-body-md text-on-surface-variant italic">Chargement...</p>;
   }
 
   return (
@@ -201,10 +201,10 @@ export default function TicketDetail() {
       </div>
 
       {syncFailures.length > 0 && (
-        <div className="border border-error text-error bg-error-container/30 rounded-none p-md mb-lg flex items-start gap-sm">
-          <span className="material-symbols-outlined">sync_problem</span>
+        <div className="border border-red-500/20 text-red-500 bg-red-500/5 rounded-xl p-md mb-lg flex items-start gap-sm">
+          <span className="material-symbols-outlined text-red-500">sync_problem</span>
           <div>
-            <div className="font-headline-sm text-headline-sm">Synchronisation GLPI incomplète</div>
+            <div className="font-headline-sm text-headline-sm font-semibold">Synchronisation GLPI incomplète</div>
             <ul className="font-body-sm text-body-sm mt-1 list-disc pl-md">
               {syncFailures.map((e) => (
                 <li key={e.id}>
@@ -218,25 +218,25 @@ export default function TicketDetail() {
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-lg">
         <div className="xl:col-span-8 flex flex-col gap-lg">
-          <div className="bg-surface-container-lowest border border-outline-variant rounded-none p-lg">
+          <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg">
             <div className="flex items-start justify-between mb-md">
               <div>
                 <div className="flex items-center gap-sm mb-xs">
-                  <span className={`font-label-md text-label-md px-2 py-1 rounded-none uppercase tracking-wide ${PRIORITY_BADGE[ticket.priority] || ''}`}>
+                  <span className={`font-label-md text-label-md px-2.5 py-0.5 rounded-full uppercase tracking-wide font-medium ${PRIORITY_BADGE[ticket.priority] || ''}`}>
                     {ticket.priority}
                   </span>
                   {ticket.category && (
-                    <span className="bg-surface-container-high text-on-surface-variant font-label-md text-label-md px-2 py-1 rounded-none uppercase tracking-wide">
+                    <span className="bg-surface-container-high/60 text-on-surface-variant border border-outline-variant font-label-md text-[11px] px-2.5 py-0.5 rounded-full uppercase tracking-wider font-medium">
                       {ticket.category}
                     </span>
                   )}
                 </div>
-                <h2 className="font-display-lg text-display-lg text-on-surface mb-sm flex items-center gap-sm">
+                <h2 className="font-display-lg text-display-lg text-on-surface mb-sm flex items-center gap-sm font-bold">
                   {ticket.title}
                   {ticket.aiProcessed && (
                     <span
                       title="Traité par l'agent IA"
-                      className="inline-flex items-center gap-1 px-2 py-1 border border-outline-variant text-on-surface-variant font-medium text-[11px]"
+                      className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border border-primary/20 bg-primary/5 text-primary font-medium text-[11px]"
                     >
                       <span className="material-symbols-outlined text-[14px]">smart_toy</span>
                       IA
@@ -245,19 +245,19 @@ export default function TicketDetail() {
                 </h2>
               </div>
               <div className="flex flex-col items-end shrink-0 ml-md">
-                <span className="font-headline-md text-headline-md text-on-surface">#{ticket.id}</span>
-                <span className="font-body-sm text-body-sm text-on-surface-variant">
+                <span className="font-headline-md text-headline-md text-on-surface font-semibold">#{ticket.id}</span>
+                <span className="font-body-sm text-body-sm text-on-surface-variant italic">
                   {new Date(ticket.createdAt).toLocaleString('fr-FR')}
                 </span>
               </div>
             </div>
-            <div className="font-body-md text-body-md text-on-surface-variant border-t border-outline-variant pt-md mt-md whitespace-pre-wrap">
+            <div className="font-body-md text-body-md text-on-surface-variant border-t border-outline-variant/40 pt-md mt-md whitespace-pre-wrap leading-relaxed">
               {ticket.content}
             </div>
 
             {ticket.attachments?.length > 0 && (
-              <div className="border-t border-outline-variant pt-md mt-md">
-                <h4 className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-sm">Pièces jointes</h4>
+              <div className="border-t border-outline-variant/40 pt-md mt-md">
+                <h4 className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-sm font-semibold">Pièces jointes</h4>
                 <div className="flex flex-wrap gap-sm">
                   {ticket.attachments.map((a) => {
                     const isImage = a.mimeType?.startsWith('image/');
@@ -268,11 +268,11 @@ export default function TicketDetail() {
                         type="button"
                         onClick={() => downloadAttachment(a)}
                         title={fromEmail ? `${a.filename} (reçu par email)` : a.filename}
-                        className="relative"
+                        className="relative hover:opacity-90 transition-opacity"
                       >
                         <AttachmentThumbnail ticketId={ticket.id} attachment={a} />
                         {fromEmail && (
-                          <span className="material-symbols-outlined text-[14px] absolute top-1 right-1 bg-surface rounded-full p-0.5 text-on-surface-variant">mail</span>
+                          <span className="material-symbols-outlined text-[14px] absolute top-1.5 right-1.5 bg-surface rounded-full p-1 text-on-surface-variant shadow-sm border border-outline-variant/30">mail</span>
                         )}
                       </button>
                     ) : (
@@ -281,7 +281,7 @@ export default function TicketDetail() {
                         type="button"
                         onClick={() => downloadAttachment(a)}
                         title={fromEmail ? 'Reçu par email' : undefined}
-                        className="flex items-center gap-xs px-3 py-2 border border-outline-variant text-on-surface font-body-sm text-body-sm hover:bg-surface-container-high transition-colors"
+                        className="flex items-center gap-xs px-3.5 py-1.5 border border-outline-variant/60 text-on-surface font-body-sm text-body-sm rounded-xl hover:bg-surface-container-high transition-colors"
                       >
                         <span className="material-symbols-outlined text-[16px]">{fromEmail ? 'mail' : 'attach_file'}</span>
                         {a.filename}
@@ -293,9 +293,9 @@ export default function TicketDetail() {
             )}
           </div>
 
-          <div className="bg-surface-container-lowest border border-outline-variant rounded-none p-lg">
-            <h3 className="font-headline-md text-headline-md border-b border-outline-variant pb-sm mb-md flex items-center gap-sm">
-              <span className="material-symbols-outlined">forum</span>
+          <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg">
+            <h3 className="font-headline-md text-headline-md border-b border-outline-variant/60 pb-md mb-md flex items-center gap-sm font-semibold">
+              <span className="material-symbols-outlined text-primary">forum</span>
               Suivi
             </h3>
 
@@ -307,41 +307,41 @@ export default function TicketDetail() {
                 ].sort((a, b) => new Date(a.date) - new Date(b.date));
 
                 if (timeline.length === 0) {
-                  return <p className="font-body-sm text-body-sm text-on-surface-variant">Aucun commentaire pour le moment.</p>;
+                  return <p className="font-body-sm text-body-sm text-on-surface-variant italic">Aucun commentaire pour le moment.</p>;
                 }
 
                 return timeline.map((item) =>
                   item.kind === 'followup' ? (
-                    <div key={`f-${item.data.id}`} className="p-md rounded-none border border-outline-variant bg-surface-container-low flex gap-md">
-                      <div className="w-9 h-9 rounded-full border border-outline-variant text-on-surface flex items-center justify-center font-label-md text-label-md font-bold shrink-0">
+                    <div key={`f-${item.data.id}`} className="p-md rounded-2xl border border-outline-variant/50 bg-surface-container-low/60 flex gap-md">
+                      <div className="w-9 h-9 rounded-full border border-outline-variant/75 text-on-surface bg-surface-container-high flex items-center justify-center font-label-md text-label-md font-bold shrink-0 shadow-sm">
                         {initials(item.data.author?.fullName)}
                       </div>
                       <div className="flex-1">
                         <div className="flex items-center justify-between mb-1">
-                          <div className="font-headline-sm text-headline-sm text-on-surface">{item.data.author?.fullName || 'Inconnu'}</div>
-                          <time className="font-mono-sm text-mono-sm text-on-surface-variant">
+                          <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">{item.data.author?.fullName || 'Inconnu'}</div>
+                          <time className="font-mono-sm text-mono-sm text-on-surface-variant bg-surface-container-lowest border border-outline-variant/30 px-2 py-0.5 rounded-full">
                             {new Date(item.data.createdAt).toLocaleString('fr-FR')}
                           </time>
                         </div>
-                        <div className="font-body-sm text-body-sm text-on-surface-variant whitespace-pre-wrap">{item.data.content}</div>
+                        <div className="font-body-sm text-body-sm text-on-surface-variant whitespace-pre-wrap leading-relaxed">{item.data.content}</div>
                       </div>
                     </div>
                   ) : (
-                    <div key={`m-${item.data.id}`} className="p-md rounded-none border border-outline-variant bg-surface-container-lowest flex gap-md">
-                      <div className="w-9 h-9 rounded-full border border-outline-variant text-on-surface-variant flex items-center justify-center shrink-0">
+                    <div key={`m-${item.data.id}`} className="p-md rounded-2xl border border-outline-variant/50 bg-surface-container-lowest flex gap-md">
+                      <div className="w-9 h-9 rounded-full border border-outline-variant/70 bg-surface-container-low text-on-surface-variant flex items-center justify-center shrink-0 shadow-sm">
                         <span className="material-symbols-outlined text-[18px]">mail</span>
                       </div>
                       <div className="flex-1">
                         <div className="flex items-center justify-between mb-1">
-                          <div className="font-headline-sm text-headline-sm text-on-surface">
+                          <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">
                             {item.data.direction === 'INBOUND' ? `Email de ${item.data.sender}` : `Email envoyé à ${item.data.recipients?.join(', ')}`}
                           </div>
-                          <time className="font-mono-sm text-mono-sm text-on-surface-variant">
+                          <time className="font-mono-sm text-mono-sm text-on-surface-variant bg-surface-container-low/70 px-2 py-0.5 rounded-full">
                             {new Date(item.data.timestamp).toLocaleString('fr-FR')}
                           </time>
                         </div>
-                        <div className="text-xs text-outline mb-1">{item.data.subject}</div>
-                        <div className="font-body-sm text-body-sm text-on-surface-variant whitespace-pre-wrap">{item.data.body}</div>
+                        <div className="text-xs text-outline mb-1 font-medium italic">{item.data.subject}</div>
+                        <div className="font-body-sm text-body-sm text-on-surface-variant whitespace-pre-wrap leading-relaxed">{item.data.body}</div>
                       </div>
                     </div>
                   )
@@ -349,9 +349,9 @@ export default function TicketDetail() {
               })()}
             </div>
 
-            <form onSubmit={handleAddFollowup} className="mt-lg pt-md border-t border-outline-variant">
+            <form onSubmit={handleAddFollowup} className="mt-lg pt-md border-t border-outline-variant/60">
               <textarea
-                className="w-full bg-surface-container-low border border-outline-variant rounded-none p-sm font-body-sm text-body-sm text-on-surface placeholder-on-surface-variant focus:outline-none focus:border-on-surface resize-y"
+                className="w-full bg-surface border border-outline-variant/60 rounded-xl p-md font-body-sm text-body-sm text-on-surface placeholder-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 resize-y"
                 placeholder="Ajouter un commentaire..."
                 rows={3}
                 value={followup}
@@ -360,7 +360,7 @@ export default function TicketDetail() {
               <div className="flex justify-end mt-sm">
                 <button
                   type="submit"
-                  className="bg-on-surface text-surface hover:opacity-80 transition-colors duration-200 rounded-none px-md py-sm font-headline-sm text-headline-sm"
+                  className="bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-semibold shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 rounded-xl px-5 py-2.5 text-body-sm"
                 >
                   Envoyer
                 </button>
@@ -371,22 +371,22 @@ export default function TicketDetail() {
 
         <div className="xl:col-span-4 flex flex-col gap-lg">
           {ticket.sourceEmail && (
-            <div className="bg-surface-container-lowest border border-outline-variant rounded-none p-lg">
-              <h3 className="font-headline-sm text-headline-sm text-on-surface mb-md uppercase tracking-wider flex items-center gap-sm">
-                <span className="material-symbols-outlined text-[18px]">mail</span>
+            <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg">
+              <h3 className="font-headline-sm text-headline-sm text-on-surface mb-md uppercase tracking-wider flex items-center gap-sm font-semibold">
+                <span className="material-symbols-outlined text-[18px] text-primary">mail</span>
                 Email d'origine
               </h3>
               <dl className="flex flex-col gap-xs font-body-sm text-body-sm">
                 <div className="flex justify-between gap-sm">
                   <dt className="text-on-surface-variant">De</dt>
-                  <dd className="text-on-surface text-right truncate">
+                  <dd className="text-on-surface text-right truncate font-medium">
                     {ticket.sourceName ? `${ticket.sourceName} <${ticket.sourceEmail}>` : ticket.sourceEmail}
                   </dd>
                 </div>
                 {ticket.sourceSubject && (
-                  <div className="flex justify-between gap-sm">
+                  <div className="flex justify-between gap-sm border-t border-outline-variant/40 pt-2 mt-1">
                     <dt className="text-on-surface-variant">Sujet</dt>
-                    <dd className="text-on-surface text-right truncate">{ticket.sourceSubject}</dd>
+                    <dd className="text-on-surface text-right truncate font-medium">{ticket.sourceSubject}</dd>
                   </div>
                 )}
               </dl>
@@ -394,26 +394,26 @@ export default function TicketDetail() {
           )}
 
           {ticket.aiSuggestions?.length > 0 && (
-            <div className="bg-surface-container-lowest border border-outline-variant rounded-none p-lg">
-              <h3 className="font-headline-sm text-headline-sm text-on-surface mb-md uppercase tracking-wider flex items-center gap-sm">
-                <span className="material-symbols-outlined text-[18px]">smart_toy</span>
+            <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg">
+              <h3 className="font-headline-sm text-headline-sm text-on-surface mb-md uppercase tracking-wider flex items-center gap-sm font-semibold">
+                <span className="material-symbols-outlined text-[18px] text-primary">smart_toy</span>
                 Suggestions IA
               </h3>
               <div className="flex flex-col gap-sm">
                 {ticket.aiSuggestions.map((s) => (
-                  <div key={s.id} className="border border-outline-variant p-sm">
+                  <div key={s.id} className="border border-outline-variant/60 bg-surface-container-low/30 rounded-xl p-sm">
                     <div className="flex items-start justify-between gap-sm">
-                      <p className="font-body-sm text-body-sm text-on-surface">{s.suggestion}</p>
+                      <p className="font-body-sm text-body-sm text-on-surface leading-relaxed">{s.suggestion}</p>
                       <button
                         onClick={() => handleDismissSuggestion(s.id)}
                         title="Ignorer"
-                        className="text-on-surface-variant hover:text-on-surface shrink-0"
+                        className="text-on-surface-variant hover:text-error shrink-0 transition-colors"
                       >
                         <span className="material-symbols-outlined text-[16px]">close</span>
                       </button>
                     </div>
                     {s.reason && (
-                      <p className="font-body-sm text-body-sm text-on-surface-variant mt-xs">{s.reason}</p>
+                      <p className="font-body-sm text-body-sm text-on-surface-variant mt-xs border-t border-outline-variant/30 pt-1.5 italic">{s.reason}</p>
                     )}
                   </div>
                 ))}
@@ -422,14 +422,18 @@ export default function TicketDetail() {
           )}
 
           {ticket.approvalStatus !== 'NOT_REQUIRED' && (
-            <div className="bg-surface-container-lowest border border-outline-variant rounded-none p-lg">
-              <h3 className="font-headline-sm text-headline-sm text-on-surface mb-md uppercase tracking-wider flex items-center gap-sm">
-                <span className="material-symbols-outlined text-[18px]">fact_check</span>
+            <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg">
+              <h3 className="font-headline-sm text-headline-sm text-on-surface mb-md uppercase tracking-wider flex items-center gap-sm font-semibold">
+                <span className="material-symbols-outlined text-[18px] text-primary">fact_check</span>
                 Approbation
               </h3>
 
-              <div className={`px-3 py-2 mb-md font-label-md text-label-md uppercase tracking-wide text-center border border-outline-variant ${
-                ticket.approvalStatus === 'REJECTED' ? 'bg-error-container text-on-error-container' : 'text-on-surface'
+              <div className={`px-3 py-2 mb-md font-label-md text-label-md uppercase tracking-wide text-center rounded-xl border ${
+                ticket.approvalStatus === 'REJECTED' 
+                  ? 'bg-error/10 text-error border-error/20' 
+                  : ticket.approvalStatus === 'APPROVED'
+                  ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
+                  : 'bg-surface-container border-outline-variant text-on-surface-variant'
               }`}>
                 {ticket.approvalStatus === 'PENDING' && 'En attente d\'approbation'}
                 {ticket.approvalStatus === 'APPROVED' && 'Approuvé'}
@@ -437,7 +441,7 @@ export default function TicketDetail() {
               </div>
 
               {ticket.approvedBy && (
-                <p className="font-body-sm text-body-sm text-on-surface-variant mb-md">
+                <p className="font-body-sm text-body-sm text-on-surface-variant mb-md italic">
                   Par {ticket.approvedBy.fullName} le {new Date(ticket.approvedAt).toLocaleString('fr-FR')}
                 </p>
               )}
@@ -446,14 +450,14 @@ export default function TicketDetail() {
                 <div className="flex gap-2">
                   <button
                     onClick={handleApprove}
-                    className="flex-1 flex items-center justify-center gap-2 bg-on-surface text-surface hover:opacity-80 transition-opacity py-sm font-headline-sm text-headline-sm rounded-none"
+                    className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-semibold py-2 rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm"
                   >
                     <span className="material-symbols-outlined text-[18px]">check</span>
                     Approuver
                   </button>
                   <button
                     onClick={handleReject}
-                    className="flex-1 flex items-center justify-center gap-2 bg-transparent border border-error text-error hover:bg-error-container transition-colors py-sm font-headline-sm text-headline-sm rounded-none"
+                    className="flex-1 flex items-center justify-center gap-2 bg-transparent border border-error text-error hover:bg-error-container transition-colors py-2 rounded-xl font-semibold text-body-sm"
                   >
                     <span className="material-symbols-outlined text-[18px]">close</span>
                     Rejeter
@@ -464,7 +468,7 @@ export default function TicketDetail() {
               {canApprove && ticket.approvalStatus !== 'PENDING' && (
                 <button
                   onClick={handleRequestApproval}
-                  className="w-full text-on-surface font-headline-sm text-body-sm hover:underline"
+                  className="w-full text-primary font-semibold text-body-sm hover:underline"
                 >
                   Remettre en attente d'approbation
                 </button>
@@ -473,34 +477,34 @@ export default function TicketDetail() {
           )}
 
           {canApprove && ticket.approvalStatus === 'NOT_REQUIRED' && (
-            <div className="bg-surface-container-lowest border border-outline-variant rounded-none p-lg">
-              <h3 className="font-headline-sm text-headline-sm text-on-surface mb-md uppercase tracking-wider flex items-center gap-sm">
-                <span className="material-symbols-outlined text-[18px]">fact_check</span>
+            <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg">
+              <h3 className="font-headline-sm text-headline-sm text-on-surface mb-md uppercase tracking-wider flex items-center gap-sm font-semibold">
+                <span className="material-symbols-outlined text-[18px] text-primary">fact_check</span>
                 Approbation
               </h3>
               <button
                 onClick={handleRequestApproval}
-                className="w-full bg-surface-container-low border border-outline-variant text-on-surface hover:bg-surface-container py-sm font-headline-sm text-headline-sm rounded-none transition-colors"
+                className="w-full bg-surface-container hover:bg-surface-container-high text-on-surface py-2.5 rounded-xl border border-outline-variant/60 font-semibold text-body-sm transition-all duration-300"
               >
                 Soumettre pour approbation
               </button>
             </div>
           )}
 
-          <div className="bg-surface-container-lowest border border-outline-variant rounded-none p-lg relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-1 bg-on-surface"></div>
-            <h3 className="font-headline-sm text-headline-sm text-on-surface mb-md uppercase tracking-wider">Propriétés du ticket</h3>
+          <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-1 bg-primary"></div>
+            <h3 className="font-headline-sm text-headline-sm text-on-surface mb-md uppercase tracking-wider font-semibold">Propriétés du ticket</h3>
             <div className="space-y-md">
               <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Date d'ouverture</label>
-                <div className="w-full bg-surface-container-low border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface-variant">
+                <div className="w-full bg-surface-container-low/60 border border-outline-variant/60 rounded-xl py-2.5 px-3.5 font-body-sm text-body-sm text-on-surface-variant">
                   {new Date(ticket.createdAt).toLocaleString('fr-FR')}
                 </div>
               </div>
               <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Type</label>
                 <select
-                  className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface disabled:opacity-60"
+                  className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
                   value={ticket.type}
                   disabled={!canAssign}
                   onChange={(e) => updateField('type', e.target.value)}
@@ -513,7 +517,7 @@ export default function TicketDetail() {
               <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Statut</label>
                 <select
-                  className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface disabled:opacity-60"
+                  className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
                   value={ticket.status}
                   disabled={!canAssign}
                   onChange={(e) => updateField('status', e.target.value)}
@@ -526,7 +530,7 @@ export default function TicketDetail() {
               <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Source de la demande</label>
                 <select
-                  className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface disabled:opacity-60"
+                  className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
                   value={ticket.source || ''}
                   disabled={!canAssign}
                   onChange={(e) => updateField('source', e.target.value)}
@@ -540,7 +544,7 @@ export default function TicketDetail() {
               <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Urgence</label>
                 <select
-                  className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface disabled:opacity-60"
+                  className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
                   value={ticket.urgency}
                   disabled={!canAssign}
                   onChange={(e) => updateField('urgency', e.target.value)}
@@ -553,7 +557,7 @@ export default function TicketDetail() {
               <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Impact</label>
                 <select
-                  className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface disabled:opacity-60"
+                  className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
                   value={ticket.impact}
                   disabled={!canAssign}
                   onChange={(e) => updateField('impact', e.target.value)}
@@ -566,7 +570,7 @@ export default function TicketDetail() {
               <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Priorité</label>
                 <select
-                  className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface disabled:opacity-60"
+                  className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
                   value={ticket.priority}
                   disabled={!canAssign}
                   onChange={(e) => updateField('priority', e.target.value)}
@@ -579,7 +583,7 @@ export default function TicketDetail() {
               <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">ID externe</label>
                 <input
-                  className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface disabled:opacity-60"
+                  className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
                   defaultValue={ticket.externalId || ''}
                   disabled={!canAssign}
                   onBlur={(e) => updateField('externalId', e.target.value)}
@@ -589,7 +593,7 @@ export default function TicketDetail() {
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Équipe</label>
                 {canAssign ? (
                   <select
-                    className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface"
+                    className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300"
                     value={ticket.teamId || ''}
                     onChange={(e) => updateField('teamId', e.target.value ? Number(e.target.value) : null)}
                   >
@@ -599,7 +603,7 @@ export default function TicketDetail() {
                     ))}
                   </select>
                 ) : (
-                  <div className="w-full bg-surface-container-low border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface-variant">
+                  <div className="w-full bg-surface-container-low/60 border border-outline-variant/60 rounded-xl py-2.5 px-3.5 font-body-sm text-body-sm text-on-surface-variant">
                     {ticket.team?.name || 'Non assignée'}
                   </div>
                 )}
@@ -608,7 +612,7 @@ export default function TicketDetail() {
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Attribué à</label>
                 {canAssign ? (
                   <select
-                    className="w-full bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-on-surface"
+                    className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300"
                     value={ticket.assignedToId || ''}
                     onChange={(e) => updateField('assignedToId', e.target.value ? Number(e.target.value) : null)}
                   >
@@ -618,16 +622,16 @@ export default function TicketDetail() {
                     ))}
                   </select>
                 ) : (
-                  <div className="w-full flex items-center gap-2 bg-surface-container-low border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface">
+                  <div className="w-full flex items-center gap-2 bg-surface-container-low/60 border border-outline-variant/60 rounded-xl py-2.5 px-3.5 font-body-sm text-body-sm text-on-surface">
                     {ticket.assignedTo ? (
                       <>
-                        <div className="w-6 h-6 rounded-full border border-outline-variant text-on-surface flex items-center justify-center text-[10px] font-bold shrink-0">
+                        <div className="w-6 h-6 rounded-full border border-outline-variant/70 bg-surface-container-low text-on-surface flex items-center justify-center text-[10px] font-bold shrink-0 shadow-sm">
                           {initials(ticket.assignedTo.fullName)}
                         </div>
                         {ticket.assignedTo.fullName}
                       </>
                     ) : (
-                      <span className="text-outline italic">Non assigné</span>
+                      <span className="text-outline/65 italic">Non assigné</span>
                     )}
                   </div>
                 )}
@@ -635,7 +639,7 @@ export default function TicketDetail() {
               {ticket.observers?.length > 0 && (
                 <div>
                   <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Observateur(s)</label>
-                  <div className="w-full bg-surface-container-low border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface-variant">
+                  <div className="w-full bg-surface-container-low/60 border border-outline-variant/60 rounded-xl py-2.5 px-3.5 font-body-sm text-body-sm text-on-surface-variant">
                     {ticket.observers.map((o) => o.fullName).join(', ')}
                   </div>
                 </div>
@@ -643,7 +647,7 @@ export default function TicketDetail() {
               {ticket.glpiTicketId && (
                 <div>
                   <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Ticket GLPI</label>
-                  <div className="w-full bg-surface-container-low border border-outline-variant rounded-none py-2 px-3 font-body-sm text-body-sm text-on-surface-variant">
+                  <div className="w-full bg-surface-container-low/60 border border-outline-variant/60 rounded-xl py-2.5 px-3.5 font-body-sm text-body-sm text-on-surface-variant">
                     #{ticket.glpiTicketId}
                   </div>
                 </div>
@@ -651,17 +655,17 @@ export default function TicketDetail() {
             </div>
           </div>
 
-          <div className="bg-surface-container-lowest border border-outline-variant rounded-none p-lg">
-            <h3 className="font-headline-sm text-headline-sm text-on-surface mb-md uppercase tracking-wider flex items-center gap-sm">
-              <span className="material-symbols-outlined text-[18px]">account_circle</span>
+          <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg">
+            <h3 className="font-headline-sm text-headline-sm text-on-surface mb-md uppercase tracking-wider flex items-center gap-sm font-semibold">
+              <span className="material-symbols-outlined text-[18px] text-primary">account_circle</span>
               Demandeur
             </h3>
             <div className="flex items-start gap-md">
-              <div className="w-12 h-12 rounded-none border border-outline-variant text-on-surface flex items-center justify-center font-headline-md text-headline-md font-bold shrink-0">
+              <div className="w-12 h-12 rounded-xl border border-outline-variant/60 bg-surface-container-low text-on-surface flex items-center justify-center font-headline-md text-headline-md font-bold shrink-0 shadow-sm">
                 {initials(ticket.requester?.fullName)}
               </div>
               <div>
-                <div className="font-headline-sm text-headline-sm text-on-surface">{ticket.requester?.fullName || '-'}</div>
+                <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">{ticket.requester?.fullName || '-'}</div>
                 <div className="font-body-sm text-body-sm text-on-surface-variant mb-2">{ticket.requester?.email}</div>
               </div>
             </div>
@@ -671,7 +675,7 @@ export default function TicketDetail() {
             <div className="pt-lg border-t border-outline-variant border-dashed">
               <button
                 onClick={() => setShowDeleteConfirm(true)}
-                className="w-full flex items-center justify-center gap-2 bg-transparent border border-error text-error hover:bg-error-container transition-colors duration-200 rounded-lg py-sm font-headline-sm text-headline-sm"
+                className="w-full flex items-center justify-center gap-2 bg-transparent border border-error text-error hover:bg-error/5 transition-all duration-300 rounded-xl py-2.5 font-semibold text-body-sm"
               >
                 <span className="material-symbols-outlined text-[18px]">delete</span>
                 Supprimer le ticket

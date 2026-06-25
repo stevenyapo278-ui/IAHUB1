@@ -12,7 +12,7 @@ function Toggle({ checked, onChange }) {
 }
 
 const inputClass =
-  'h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface';
+  'bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300';
 
 export default function AiProvidersTab() {
   const [providers, setProviders] = useState([]);
@@ -165,6 +165,16 @@ export default function AiProvidersTab() {
     }
   }
 
+  // Surcharge pour utiliser le style standard de Toggle ou un input checkbox de base plus soigné
+  function CustomToggle({ checked, onChange }) {
+    return (
+      <label className="relative inline-flex items-center cursor-pointer">
+        <input checked={checked} onChange={(e) => onChange(e.target.checked)} className="sr-only peer" type="checkbox" />
+        <div className="w-11 h-6 bg-surface-container-high rounded-full peer peer-focus:ring-2 peer-focus:ring-primary/20 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-outline-variant/60 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+      </label>
+    );
+  }
+
   function askDeleteKey(keyId) {
     setPendingDelete({ type: 'key', id: keyId });
   }
@@ -186,18 +196,27 @@ export default function AiProvidersTab() {
   return (
     <div className="space-y-lg">
       <p className="font-body-md text-body-md text-on-surface-variant">
-        Configure les fournisseurs d'IA, leurs modèles, et les clés API associées. Tu peux ajouter
+        Configurez les fournisseurs d'IA, leurs modèles, et les clés API associées. Vous pouvez ajouter
         plusieurs clés pour un même fournisseur ou un même modèle (rotation, comptes différents),
         et choisir laquelle est utilisée par défaut.
       </p>
-      {error && <div className="border border-outline-variant p-md rounded-none text-on-surface">{error}</div>}
-      {info && <div className="border border-outline-variant p-md rounded-none text-on-surface">{info}</div>}
 
-      <div className="bg-surface-container-lowest border border-outline-variant rounded-none p-lg">
-        <h3 className="font-headline-md text-headline-md text-on-surface mb-md">Ajouter un fournisseur</h3>
+      {error && (
+        <div className="border border-red-500/20 bg-red-500/5 text-red-500 p-md rounded-xl font-body-md">
+          {error}
+        </div>
+      )}
+      {info && (
+        <div className="border border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 p-md rounded-xl font-body-md">
+          {info}
+        </div>
+      )}
+
+      <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg">
+        <h3 className="font-headline-sm text-headline-sm text-on-surface font-bold mb-md">Ajouter un fournisseur</h3>
         <form onSubmit={handleCreateProvider} className="grid grid-cols-1 md:grid-cols-3 gap-md items-end">
           <label className="flex flex-col gap-xs">
-            <span className="font-label-md text-label-md text-on-surface uppercase">Identifiant technique</span>
+            <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Identifiant technique</span>
             <input
               className={inputClass}
               value={providerForm.name}
@@ -207,7 +226,7 @@ export default function AiProvidersTab() {
             />
           </label>
           <label className="flex flex-col gap-xs">
-            <span className="font-label-md text-label-md text-on-surface uppercase">Nom affiché</span>
+            <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Nom affiché</span>
             <input
               className={inputClass}
               value={providerForm.label}
@@ -217,7 +236,7 @@ export default function AiProvidersTab() {
             />
           </label>
           <label className="flex flex-col gap-xs">
-            <span className="font-label-md text-label-md text-on-surface uppercase">URL de base (optionnel)</span>
+            <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">URL de base (optionnel)</span>
             <input
               className={inputClass}
               value={providerForm.baseUrl}
@@ -225,10 +244,10 @@ export default function AiProvidersTab() {
               placeholder="https://api.openai.com/v1"
             />
           </label>
-          <div className="md:col-span-3">
+          <div className="md:col-span-3 flex justify-end">
             <button
               type="submit"
-              className="px-md py-sm rounded-none border border-outline-variant text-on-surface font-headline-sm text-headline-sm hover:bg-surface-container-low transition-colors"
+              className="bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-semibold py-2.5 px-6 rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm"
             >
               Ajouter le fournisseur
             </button>
@@ -236,112 +255,114 @@ export default function AiProvidersTab() {
         </form>
       </div>
 
-      <h3 className="font-headline-md text-headline-md text-on-surface">Fournisseurs configurés</h3>
+      <h3 className="font-headline-md text-headline-md text-on-surface font-bold">Fournisseurs configurés</h3>
 
       {providers.map((provider) => (
-        <div key={provider.id} className="bg-surface-container-lowest border border-outline-variant rounded-none p-xl">
-          <div className="flex justify-between items-start border-b border-outline-variant pb-md mb-md">
+        <div key={provider.id} className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg flex flex-col gap-lg">
+          <div className="flex justify-between items-start border-b border-outline-variant/40 pb-md">
             <div className="flex items-center gap-md">
-              <div className="w-12 h-12 bg-surface-container rounded-none border border-outline-variant flex items-center justify-center">
-                <span className="material-symbols-outlined text-on-surface text-2xl">memory</span>
+              <div className="w-12 h-12 bg-surface-container-low rounded-xl border border-outline-variant/60 flex items-center justify-center shadow-sm">
+                <span className="material-symbols-outlined text-primary text-2xl">memory</span>
               </div>
-              <div>
-                <h4 className="font-headline-md text-headline-md text-on-surface flex items-center gap-sm">
+              <div className="space-y-1">
+                <h4 className="font-headline-md text-headline-md text-on-surface flex items-center gap-sm font-semibold">
                   {provider.label}
-                  <span className="border border-outline-variant text-on-surface-variant px-xs py-[2px] rounded-none font-label-md text-[10px] uppercase">{provider.name}</span>
+                  <span className="border border-outline-variant/60 text-on-surface-variant px-2.5 py-0.5 rounded-full font-label-md text-[10px] uppercase font-semibold">{provider.name}</span>
                   {provider.isActive && (
-                    <span className="border border-outline-variant text-on-surface-variant px-xs py-[2px] rounded-none font-label-md text-[10px] uppercase">Actif</span>
+                    <span className="bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 px-2.5 py-0.5 rounded-full font-label-md text-[10px] uppercase font-bold dark:bg-emerald-500/15 dark:text-emerald-400">Actif</span>
                   )}
                 </h4>
                 <input
                   defaultValue={provider.baseUrl || ''}
                   onBlur={(e) => handleUpdateProvider(provider.id, 'baseUrl', e.target.value)}
                   placeholder="URL de base"
-                  className="font-mono-sm text-mono-sm text-on-surface-variant mt-xs bg-transparent border-b border-transparent hover:border-outline-variant focus:border-on-surface focus:outline-none w-full max-w-md"
+                  className="font-mono-sm text-mono-sm text-on-surface bg-surface border border-outline-variant/60 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 w-full max-w-md"
                 />
               </div>
             </div>
             <div className="flex items-center gap-md">
-              <Toggle checked={provider.isActive} onChange={(v) => handleUpdateProvider(provider.id, 'isActive', v)} />
-              <button onClick={() => askDeleteProvider(provider.id)} className="text-on-surface-variant hover:text-error transition-colors">
+              <CustomToggle checked={provider.isActive} onChange={(v) => handleUpdateProvider(provider.id, 'isActive', v)} />
+              <button onClick={() => askDeleteProvider(provider.id)} className="text-on-surface-variant hover:text-error transition-colors p-1">
                 <span className="material-symbols-outlined">delete</span>
               </button>
             </div>
           </div>
 
-          <div className="mb-lg">
+          <div>
             <div className="flex items-center justify-between mb-sm">
-              <h5 className="font-headline-sm text-headline-sm text-on-surface">Modèles</h5>
+              <h5 className="font-headline-sm text-headline-sm text-on-surface font-semibold">Modèles</h5>
               <button
                 onClick={() => handleSyncModels(provider.id)}
                 disabled={syncing === provider.id}
-                className="flex items-center gap-1 text-on-surface font-headline-sm text-body-sm hover:underline disabled:opacity-50"
+                className="flex items-center gap-1 text-primary font-semibold text-body-sm hover:underline disabled:opacity-50 transition-colors"
               >
                 <span className="material-symbols-outlined text-sm">sync</span>
                 {syncing === provider.id ? 'Synchronisation...' : 'Synchroniser les modèles'}
               </button>
             </div>
-            <div className="border border-outline-variant rounded-none overflow-hidden">
+            <div className="border border-outline-variant/60 rounded-xl overflow-hidden">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="bg-surface-container-low border-b border-outline-variant">
-                    <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm">Nom</th>
-                    <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm">Libellé</th>
-                    <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm w-28">Type</th>
-                    <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm w-24 text-center">Par défaut</th>
-                    <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm w-24 text-center">Actif</th>
-                    <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm w-16"></th>
+                  <tr className="bg-surface-bright/50 border-b border-outline-variant/60">
+                    <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3">Nom</th>
+                    <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3">Libellé</th>
+                    <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3 w-28">Type</th>
+                    <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3 w-24 text-center">Par défaut</th>
+                    <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3 w-24 text-center">Actif</th>
+                    <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3 w-16 text-right"></th>
                   </tr>
                 </thead>
-                <tbody className="font-body-md text-body-md text-on-surface">
+                <tbody className="font-body-sm text-body-sm text-on-surface divide-y divide-outline-variant/40">
                   {provider.models.map((m) => (
-                    <tr key={m.id} className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low transition-colors">
-                      <td className="p-sm">{m.name}</td>
-                      <td className="p-sm text-on-surface-variant">{m.label || '-'}</td>
-                      <td className="p-sm text-on-surface-variant">
-                        <span className="border border-outline-variant px-xs py-[2px] rounded-none text-[10px] uppercase">
+                    <tr key={m.id} className="hover:bg-surface-container-low/40 transition-colors">
+                      <td className="p-3 font-semibold">{m.name}</td>
+                      <td className="p-3 text-on-surface-variant">{m.label || '-'}</td>
+                      <td className="p-3 text-on-surface-variant">
+                        <span className="border border-outline-variant/60 px-2 py-0.5 rounded-full text-[10px] uppercase font-semibold">
                           {m.type === 'EMBEDDING' ? 'Embedding' : 'Chat'}
                         </span>
                       </td>
-                      <td className="p-sm text-center" title="Par défaut pour ce type (chat ou embedding)">
+                      <td className="p-3 text-center">
                         <input
                           type="radio"
-                          className="accent-on-surface w-4 h-4"
+                          className="accent-primary w-4 h-4 cursor-pointer"
                           name={`default-model-${provider.id}-${m.type}`}
                           checked={m.isDefault}
                           onChange={() => handleSetDefaultModel(m.id, true)}
                         />
                       </td>
-                      <td className="p-sm text-center">
+                      <td className="p-3 text-center">
                         <input
                           type="checkbox"
-                          className="w-4 h-4 accent-on-surface border-outline-variant"
+                          className="w-4 h-4 accent-primary cursor-pointer"
                           checked={m.isActive}
                           onChange={(e) => api.patch(`/ai-providers/models/${m.id}`, { isActive: e.target.checked }).then(load)}
                         />
                       </td>
-                      <td className="p-sm text-right">
-                        <button onClick={() => askDeleteModel(m.id)} className="text-on-surface-variant hover:text-error">
-                          <span className="material-symbols-outlined text-sm">delete</span>
+                      <td className="p-3 text-right">
+                        <button onClick={() => askDeleteModel(m.id)} className="text-on-surface-variant hover:text-error transition-colors">
+                          <span className="material-symbols-outlined text-[18px]">delete</span>
                         </button>
                       </td>
                     </tr>
                   ))}
                   {provider.models.length === 0 && (
-                    <tr><td colSpan={6} className="p-sm text-center text-on-surface-variant">Aucun modèle configuré</td></tr>
+                    <tr>
+                      <td colSpan={6} className="p-6 text-center text-on-surface-variant italic">Aucun modèle configuré</td>
+                    </tr>
                   )}
                 </tbody>
               </table>
             </div>
-            <form onSubmit={(e) => handleAddModel(provider.id, e)} className="flex flex-wrap gap-sm mt-sm">
+            <form onSubmit={(e) => handleAddModel(provider.id, e)} className="flex flex-wrap gap-3 mt-md">
               <input
-                className={`${inputClass} flex-1 min-w-[160px]`}
+                className={`${inputClass} flex-1 min-w-[180px]`}
                 placeholder="Nom du modèle (ex: gpt-4o)"
                 value={modelForms[provider.id]?.name || ''}
                 onChange={(e) => setModelForms({ ...modelForms, [provider.id]: { ...modelForms[provider.id], name: e.target.value } })}
               />
               <input
-                className={`${inputClass} flex-1 min-w-[160px]`}
+                className={`${inputClass} flex-1 min-w-[180px]`}
                 placeholder="Libellé (optionnel)"
                 value={modelForms[provider.id]?.label || ''}
                 onChange={(e) => setModelForms({ ...modelForms, [provider.id]: { ...modelForms[provider.id], label: e.target.value } })}
@@ -354,72 +375,78 @@ export default function AiProvidersTab() {
                 <option value="CHAT">Chat</option>
                 <option value="EMBEDDING">Embedding</option>
               </select>
-              <button type="submit" className="text-on-surface font-headline-sm text-body-sm hover:underline flex items-center gap-xs px-sm">
-                <span className="material-symbols-outlined text-sm">add</span> Ajouter le modèle
+              <button 
+                type="submit" 
+                className="px-4 py-2 border border-outline-variant/60 rounded-xl bg-surface hover:bg-surface-container-high transition-all text-body-sm font-semibold shadow-sm flex items-center gap-xs"
+              >
+                <span className="material-symbols-outlined text-[18px]">add</span> 
+                Ajouter le modèle
               </button>
             </form>
           </div>
 
-          <div>
-            <h5 className="font-headline-sm text-headline-sm text-on-surface mb-sm">Clés API</h5>
-            <div className="border border-outline-variant rounded-none overflow-hidden">
+          <div className="border-t border-outline-variant/40 pt-md">
+            <h5 className="font-headline-sm text-headline-sm text-on-surface font-semibold mb-sm">Clés API</h5>
+            <div className="border border-outline-variant/60 rounded-xl overflow-hidden">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="bg-surface-container-low border-b border-outline-variant">
-                    <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm">Libellé</th>
-                    <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm">Clé</th>
-                    <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm">Modèle</th>
-                    <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm w-24 text-center">Par défaut</th>
-                    <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm w-24 text-center">Actif</th>
-                    <th className="font-label-md text-label-md text-on-surface-variant uppercase p-sm w-16"></th>
+                  <tr className="bg-surface-bright/50 border-b border-outline-variant/60">
+                    <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3">Libellé</th>
+                    <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3">Clé</th>
+                    <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3">Modèle</th>
+                    <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3 w-24 text-center">Par défaut</th>
+                    <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3 w-24 text-center">Actif</th>
+                    <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3 w-16 text-right"></th>
                   </tr>
                 </thead>
-                <tbody className="font-body-md text-body-md text-on-surface">
+                <tbody className="font-body-sm text-body-sm text-on-surface divide-y divide-outline-variant/40">
                   {provider.keys.map((k) => (
-                    <tr key={k.id} className="border-b border-outline-variant last:border-0 hover:bg-surface-container-low transition-colors">
-                      <td className="p-sm font-medium">{k.label}</td>
-                      <td className="p-sm font-mono-sm text-mono-sm text-on-surface-variant">{k.apiKey}</td>
-                      <td className="p-sm text-on-surface-variant">{k.model?.name || 'Tous les modèles'}</td>
-                      <td className="p-sm text-center">
+                    <tr key={k.id} className="hover:bg-surface-container-low/40 transition-colors">
+                      <td className="p-3 font-semibold">{k.label}</td>
+                      <td className="p-3 font-mono-sm text-mono-sm text-on-surface-variant truncate max-w-xs">{k.apiKey}</td>
+                      <td className="p-3 text-on-surface-variant font-medium">{k.model?.name || 'Tous les modèles'}</td>
+                      <td className="p-3 text-center">
                         <input
                           type="radio"
-                          className="accent-on-surface w-4 h-4"
+                          className="accent-primary w-4 h-4 cursor-pointer"
                           name={`default-key-${provider.id}-${k.modelId || 'none'}`}
                           checked={k.isDefault}
                           onChange={() => handleSetDefaultKey(k.id, true)}
                         />
                       </td>
-                      <td className="p-sm text-center">
+                      <td className="p-3 text-center">
                         <input
                           type="checkbox"
-                          className="w-4 h-4 accent-on-surface border-outline-variant"
+                          className="w-4 h-4 accent-primary cursor-pointer"
                           checked={k.isActive}
                           onChange={(e) => handleToggleKeyActive(k.id, e.target.checked)}
                         />
                       </td>
-                      <td className="p-sm text-right">
-                        <button onClick={() => askDeleteKey(k.id)} className="text-on-surface-variant hover:text-error">
-                          <span className="material-symbols-outlined text-sm">delete</span>
+                      <td className="p-3 text-right">
+                        <button onClick={() => askDeleteKey(k.id)} className="text-on-surface-variant hover:text-error transition-colors">
+                          <span className="material-symbols-outlined text-[18px]">delete</span>
                         </button>
                       </td>
                     </tr>
                   ))}
                   {provider.keys.length === 0 && (
-                    <tr><td colSpan={6} className="p-sm text-center text-on-surface-variant">Aucune clé configurée</td></tr>
+                    <tr>
+                      <td colSpan={6} className="p-6 text-center text-on-surface-variant italic">Aucune clé configurée</td>
+                    </tr>
                   )}
                 </tbody>
               </table>
             </div>
-            <form onSubmit={(e) => handleAddKey(provider.id, e)} className="flex flex-wrap items-center gap-sm mt-sm">
+            <form onSubmit={(e) => handleAddKey(provider.id, e)} className="flex flex-wrap items-center gap-3 mt-md">
               <input
-                className={`${inputClass} flex-1 min-w-[140px]`}
+                className={`${inputClass} flex-1 min-w-[160px]`}
                 placeholder="Libellé (ex: Clé société)"
                 value={keyForms[provider.id]?.label || ''}
                 onChange={(e) => setKeyForms({ ...keyForms, [provider.id]: { ...keyForms[provider.id], label: e.target.value } })}
               />
               <input
                 type="password"
-                className={`${inputClass} flex-1 min-w-[140px]`}
+                className={`${inputClass} flex-1 min-w-[160px]`}
                 placeholder="Clé API"
                 value={keyForms[provider.id]?.apiKey || ''}
                 onChange={(e) => setKeyForms({ ...keyForms, [provider.id]: { ...keyForms[provider.id], apiKey: e.target.value } })}
@@ -434,17 +461,21 @@ export default function AiProvidersTab() {
                   <option key={m.id} value={m.id}>{m.name}</option>
                 ))}
               </select>
-              <label className="flex items-center gap-xs font-body-sm text-body-sm text-on-surface-variant">
+              <label className="flex items-center gap-1.5 font-body-sm text-body-sm text-on-surface-variant cursor-pointer">
                 <input
                   type="checkbox"
-                  className="w-4 h-4 accent-on-surface border-outline-variant"
+                  className="w-4 h-4 accent-primary cursor-pointer"
                   checked={keyForms[provider.id]?.isDefault || false}
                   onChange={(e) => setKeyForms({ ...keyForms, [provider.id]: { ...keyForms[provider.id], isDefault: e.target.checked } })}
                 />
                 Par défaut
               </label>
-              <button type="submit" className="text-on-surface font-headline-sm text-body-sm hover:underline flex items-center gap-xs px-sm">
-                <span className="material-symbols-outlined text-sm">add</span> Ajouter la clé
+              <button 
+                type="submit" 
+                className="px-4 py-2 border border-outline-variant/60 rounded-xl bg-surface hover:bg-surface-container-high transition-all text-body-sm font-semibold shadow-sm flex items-center gap-xs"
+              >
+                <span className="material-symbols-outlined text-[18px]">add</span> 
+                Ajouter la clé
               </button>
             </form>
           </div>

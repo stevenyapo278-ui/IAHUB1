@@ -22,16 +22,16 @@ const EMPTY_FORM = {
 };
 
 const inputClass =
-  'h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface';
+  'bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300';
 
 const labelClass = 'flex flex-col gap-xs';
-const labelTextClass = 'font-label-md text-label-md text-on-surface uppercase';
+const labelTextClass = 'font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold';
 
-function Toggle({ checked, onChange }) {
+function CustomToggle({ checked, onChange }) {
   return (
     <label className="relative inline-flex items-center cursor-pointer">
       <input checked={checked} onChange={(e) => onChange(e.target.checked)} className="sr-only peer" type="checkbox" />
-      <div className="w-11 h-6 bg-surface-variant peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-on-surface after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-on-surface after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-on-surface-variant"></div>
+      <div className="w-11 h-6 bg-surface-container-high rounded-full peer peer-focus:ring-2 peer-focus:ring-primary/20 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-outline-variant/60 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
     </label>
   );
 }
@@ -112,24 +112,29 @@ export default function EmailAccountsTab() {
   return (
     <div className="space-y-lg">
       <p className="font-body-md text-body-md text-on-surface-variant">
-        Configure les boîtes mail utilisées pour la réception/réponse aux tickets (Outlook / Microsoft 365,
+        Configurez les boîtes mail utilisées pour la réception/réponse aux tickets (Outlook / Microsoft 365,
         Gmail, ou IMAP/SMTP générique). Ces informations sont utilisées par le workflow de triage automatique.
       </p>
-      {error && <div className="border border-outline-variant text-on-surface p-md rounded-none">{error}</div>}
+
+      {error && (
+        <div className="border border-red-500/20 bg-red-500/5 text-red-500 p-md rounded-xl font-body-md">
+          {error}
+        </div>
+      )}
 
       <div className="flex justify-between items-center">
-        <h3 className="font-headline-md text-headline-md text-on-surface">Comptes mail</h3>
+        <h3 className="font-headline-md text-headline-md text-on-surface font-bold">Comptes mail</h3>
         <button
           onClick={() => setShowForm((v) => !v)}
-          className="bg-surface-container-lowest text-on-surface border border-outline-variant py-sm px-md rounded-none font-headline-sm text-headline-sm flex items-center gap-xs hover:bg-surface-container-low transition-colors"
+          className="border border-outline-variant/60 py-2 px-4 rounded-xl font-semibold text-body-sm text-on-surface hover:bg-surface-container-high transition-all duration-300 shadow-sm flex items-center gap-1"
         >
-          <span className="material-symbols-outlined">{showForm ? 'close' : 'add'}</span>
+          <span className="material-symbols-outlined text-[18px]">{showForm ? 'close' : 'add'}</span>
           {showForm ? 'Annuler' : 'Ajouter un compte'}
         </button>
       </div>
 
       {showForm && (
-        <form onSubmit={handleCreate} className="bg-surface-container-lowest border border-outline-variant rounded-none p-lg space-y-md">
+        <form onSubmit={handleCreate} className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg space-y-md">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-md">
             <label className={labelClass}>
               <span className={labelTextClass}>Libellé</span>
@@ -150,8 +155,8 @@ export default function EmailAccountsTab() {
           </div>
 
           {(form.provider === 'OUTLOOK' || form.provider === 'GMAIL') && (
-            <div>
-              <h4 className="font-headline-sm text-headline-sm text-on-surface mb-sm">OAuth2</h4>
+            <div className="border-t border-outline-variant/40 pt-md">
+              <h4 className="font-headline-sm text-headline-sm text-on-surface font-semibold mb-sm">OAuth2</h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-md">
                 <label className={labelClass}>
                   <span className={labelTextClass}>Client ID</span>
@@ -176,8 +181,8 @@ export default function EmailAccountsTab() {
           )}
 
           {form.provider === 'IMAP_SMTP' && (
-            <div>
-              <h4 className="font-headline-sm text-headline-sm text-on-surface mb-sm">IMAP / SMTP</h4>
+            <div className="border-t border-outline-variant/40 pt-md">
+              <h4 className="font-headline-sm text-headline-sm text-on-surface font-semibold mb-sm">IMAP / SMTP</h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-md">
                 <label className={labelClass}>
                   <span className={labelTextClass}>Hôte IMAP</span>
@@ -204,40 +209,44 @@ export default function EmailAccountsTab() {
                   <input className={inputClass} type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
                 </label>
               </div>
-              <label className="flex items-center gap-xs font-body-sm text-body-sm text-on-surface-variant mt-sm">
-                <input type="checkbox" className="w-4 h-4 accent-on-surface border-outline-variant" checked={form.useTls} onChange={(e) => setForm({ ...form, useTls: e.target.checked })} />
+              <label className="flex items-center gap-1.5 font-body-sm text-body-sm text-on-surface-variant mt-md cursor-pointer">
+                <input type="checkbox" className="w-4 h-4 accent-primary cursor-pointer" checked={form.useTls} onChange={(e) => setForm({ ...form, useTls: e.target.checked })} />
                 Utiliser TLS
               </label>
             </div>
           )}
 
-          <label className="flex items-center gap-xs font-body-sm text-body-sm text-on-surface-variant">
-            <input type="checkbox" className="w-4 h-4 accent-on-surface border-outline-variant" checked={form.isDefault} onChange={(e) => setForm({ ...form, isDefault: e.target.checked })} />
-            Compte par défaut
-          </label>
+          <div className="flex flex-col gap-md border-t border-outline-variant/40 pt-md">
+            <label className="flex items-center gap-1.5 font-body-sm text-body-sm text-on-surface-variant cursor-pointer">
+              <input type="checkbox" className="w-4 h-4 accent-primary cursor-pointer" checked={form.isDefault} onChange={(e) => setForm({ ...form, isDefault: e.target.checked })} />
+              Compte par défaut
+            </label>
 
-          <button type="submit" className="px-md py-sm rounded-none border border-outline-variant text-on-surface font-headline-sm text-headline-sm hover:bg-surface-container-low transition-colors">
-            Enregistrer
-          </button>
+            <div className="flex justify-end">
+              <button type="submit" className="bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-semibold py-2.5 px-6 rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm">
+                Enregistrer
+              </button>
+            </div>
+          </div>
         </form>
       )}
 
       {accounts.map((acc) => (
-        <div key={acc.id} className="bg-surface-container-lowest border border-outline-variant rounded-none p-lg">
-          <div className="flex justify-between items-start border-b border-outline-variant pb-md mb-md">
+        <div key={acc.id} className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg flex flex-col gap-md">
+          <div className="flex justify-between items-start border-b border-outline-variant/40 pb-md">
             <div>
-              <h4 className="font-headline-md text-headline-md text-on-surface flex items-center gap-sm">
+              <h4 className="font-headline-md text-headline-md text-on-surface flex items-center gap-sm font-semibold">
                 {acc.label}
-                <span className="border border-outline-variant text-on-surface-variant px-xs py-[2px] rounded-none font-label-md text-[10px] uppercase">{acc.provider}</span>
+                <span className="border border-outline-variant/60 text-on-surface-variant px-2.5 py-0.5 rounded-full font-label-md text-[10px] uppercase font-bold">{acc.provider}</span>
                 {acc.isDefault && (
-                  <span className="border border-outline-variant text-on-surface-variant px-xs py-[2px] rounded-none font-label-md text-[10px] uppercase">Par défaut</span>
+                  <span className="bg-primary/10 text-primary border border-primary/20 px-2.5 py-0.5 rounded-full font-label-md text-[10px] uppercase font-bold">Par défaut</span>
                 )}
               </h4>
-              <p className="font-body-sm text-body-sm text-on-surface-variant mt-xs">{acc.emailAddress}</p>
+              <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5">{acc.emailAddress}</p>
             </div>
             <div className="flex items-center gap-md">
-              <Toggle checked={acc.isActive} onChange={(v) => handleUpdate(acc.id, 'isActive', v)} />
-              <button onClick={() => askDelete(acc.id)} className="text-on-surface-variant hover:text-error transition-colors">
+              <CustomToggle checked={acc.isActive} onChange={(v) => handleUpdate(acc.id, 'isActive', v)} />
+              <button onClick={() => askDelete(acc.id)} className="text-on-surface-variant hover:text-error transition-colors p-1">
                 <span className="material-symbols-outlined">delete</span>
               </button>
             </div>
@@ -267,13 +276,15 @@ export default function EmailAccountsTab() {
           )}
 
           {acc.provider === 'OUTLOOK' && (
-            <button
-              onClick={() => handleConnectOutlook(acc.id)}
-              className="mt-md px-md py-sm rounded-none border border-outline-variant text-on-surface font-headline-sm text-headline-sm hover:bg-surface-container-low transition-colors flex items-center gap-xs"
-            >
-              <span className="material-symbols-outlined text-[18px]">mail</span>
-              {acc.refreshToken ? 'Reconnecter Outlook' : 'Connecter Outlook'}
-            </button>
+            <div className="flex justify-start">
+              <button
+                onClick={() => handleConnectOutlook(acc.id)}
+                className="px-4 py-2 border border-outline-variant/60 text-on-surface font-semibold text-body-sm hover:bg-surface-container-high transition-colors rounded-xl shadow-sm flex items-center gap-xs"
+              >
+                <span className="material-symbols-outlined text-[18px]">mail</span>
+                {acc.refreshToken ? 'Reconnecter Outlook' : 'Connecter Outlook'}
+              </button>
+            </div>
           )}
 
           {acc.provider === 'IMAP_SMTP' && (
@@ -306,12 +317,14 @@ export default function EmailAccountsTab() {
           )}
 
           {!acc.isDefault && (
-            <button
-              onClick={() => handleUpdate(acc.id, 'isDefault', true)}
-              className="mt-md text-on-surface font-headline-sm text-body-sm hover:underline"
-            >
-              Définir par défaut
-            </button>
+            <div className="flex border-t border-outline-variant/40 pt-md mt-xs">
+              <button
+                onClick={() => handleUpdate(acc.id, 'isDefault', true)}
+                className="text-primary font-semibold text-body-sm hover:underline"
+              >
+                Définir par défaut
+              </button>
+            </div>
           )}
         </div>
       ))}

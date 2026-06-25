@@ -122,7 +122,7 @@ export default function Teams() {
           <button
             onClick={handleSyncGlpi}
             disabled={syncing}
-            className="flex items-center gap-2 px-4 py-2 rounded-none border border-outline-variant text-on-surface font-body-sm text-body-sm hover:bg-surface-container-low transition-colors disabled:opacity-50 whitespace-nowrap"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-outline-variant text-on-surface bg-surface-container-lowest font-body-sm text-body-sm hover:bg-surface-container-low transition-all duration-300 shadow-sm disabled:opacity-50 whitespace-nowrap"
           >
             <span className="material-symbols-outlined text-[18px]">sync</span>
             {syncing ? 'Synchronisation...' : 'Synchroniser depuis GLPI'}
@@ -130,33 +130,33 @@ export default function Teams() {
         )}
       </header>
 
-      {error && <div className="border border-outline-variant text-on-surface p-md rounded-none">{error}</div>}
-      {syncMessage && <div className="border border-outline-variant text-on-surface p-md rounded-none">{syncMessage}</div>}
+      {error && <div className="border border-red-500/20 bg-red-500/5 text-red-500 p-md rounded-xl font-body-md">{error}</div>}
+      {syncMessage && <div className="border border-primary/20 bg-primary/5 text-primary p-md rounded-xl font-body-md">{syncMessage}</div>}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-md">
-        <div className="bg-surface-container-lowest p-lg rounded-none border border-outline-variant flex flex-col justify-between">
+        <div className="bg-surface-container-lowest p-lg rounded-2xl border border-outline-variant/60 card-shadow hover-interactive flex flex-col justify-between">
           <div className="flex justify-between items-start mb-md">
             <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-widest">Total équipes</span>
-            <div className="w-8 h-8 rounded-none border border-outline-variant flex items-center justify-center">
-              <span className="material-symbols-outlined text-on-surface text-sm">hub</span>
+            <div className="w-10 h-10 rounded-xl bg-primary/5 text-primary border border-primary/10 flex items-center justify-center">
+              <span className="material-symbols-outlined text-sm">hub</span>
             </div>
           </div>
           <span className="font-display-lg text-display-lg text-on-surface">{teams.length}</span>
         </div>
-        <div className="bg-surface-container-lowest p-lg rounded-none border border-outline-variant flex flex-col justify-between">
+        <div className="bg-surface-container-lowest p-lg rounded-2xl border border-outline-variant/60 card-shadow hover-interactive flex flex-col justify-between">
           <div className="flex justify-between items-start mb-md">
             <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-widest">Membres actifs</span>
-            <div className="w-8 h-8 rounded-none border border-outline-variant flex items-center justify-center">
-              <span className="material-symbols-outlined text-on-surface text-sm">badge</span>
+            <div className="w-10 h-10 rounded-xl bg-secondary/5 text-secondary border border-secondary/10 flex items-center justify-center">
+              <span className="material-symbols-outlined text-sm">badge</span>
             </div>
           </div>
           <span className="font-display-lg text-display-lg text-on-surface">{totalMembers}</span>
         </div>
-        <div className="bg-surface-container-lowest p-lg rounded-none border border-outline-variant flex flex-col justify-between">
+        <div className="bg-surface-container-lowest p-lg rounded-2xl border border-outline-variant/60 card-shadow hover-interactive flex flex-col justify-between">
           <div className="flex justify-between items-start mb-md">
             <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-widest">Tickets totaux</span>
-            <div className="w-8 h-8 rounded-none border border-outline-variant flex items-center justify-center">
-              <span className="material-symbols-outlined text-on-surface text-sm">confirmation_number</span>
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/5 text-indigo-500 border border-indigo-500/10 flex items-center justify-center">
+              <span className="material-symbols-outlined text-sm">confirmation_number</span>
             </div>
           </div>
           <span className="font-display-lg text-display-lg text-on-surface">{totalTickets}</span>
@@ -166,10 +166,10 @@ export default function Teams() {
       <div className={`grid grid-cols-1 ${canManageTeams ? 'lg:grid-cols-3' : ''} gap-xl`}>
         <div className={`${canManageTeams ? 'lg:col-span-2' : ''} space-y-md`}>
           <h3 className="font-headline-md text-headline-md text-on-surface">Équipes actives</h3>
-          <div className="bg-surface-container-lowest rounded-none border border-outline-variant overflow-hidden">
+          <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/60 card-shadow overflow-hidden">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="border-b border-outline-variant bg-surface-bright">
+                <tr className="border-b border-outline-variant bg-surface-bright/50">
                   <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">Nom</th>
                   <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">Catégorie</th>
                   <th className="py-sm px-md font-label-md text-label-md text-on-surface-variant uppercase">GLPI</th>
@@ -181,62 +181,62 @@ export default function Teams() {
               <tbody className="font-body-md text-body-md text-on-surface">
                 {teams.map((t) => (
                   <Fragment key={t.id}>
-                  <tr className="border-b border-outline-variant hover:bg-surface-container-low transition-colors group">
+                  <tr className="border-b border-outline-variant/60 hover:bg-surface-container-low/70 transition-colors group">
                     <td className="py-md px-md font-headline-sm text-headline-sm">
-                      <button onClick={() => toggleTeamDetail(t.id)} className="hover:underline text-left">
+                      <button onClick={() => toggleTeamDetail(t.id)} className="hover:underline text-left text-on-surface font-semibold">
                         {t.name}
                       </button>
                     </td>
                     <td className="py-md px-md">
                       {t.category ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-none text-xs font-semibold border border-outline-variant text-on-surface">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border border-primary/20 bg-primary/5 text-primary">
                           {t.category}
                         </span>
                       ) : (
-                        <span className="text-outline">-</span>
+                        <span className="text-outline/60">-</span>
                       )}
                     </td>
                     <td className="py-md px-md">
                       {t.glpiGroupId ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-1 border border-outline-variant text-on-surface-variant font-medium text-[11px]">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border border-outline-variant bg-surface-container-low text-on-surface-variant font-medium text-[11px]">
                           <span className="material-symbols-outlined text-[14px]">sync</span>
                           #{t.glpiGroupId}
                         </span>
                       ) : (
-                        <span className="text-outline italic text-[11px]">Non lié</span>
+                        <span className="text-outline/60 italic text-[11px]">Non lié</span>
                       )}
                     </td>
-                    <td className="py-md px-md text-center">{t.members.length}</td>
+                    <td className="py-md px-md text-center font-medium">{t.members.length}</td>
                     <td className="py-md px-md text-right">
                       <div className="flex items-center justify-end gap-sm">
-                        <span>{t._count.tickets}</span>
-                        <div className="w-16 h-1.5 bg-surface-container rounded-full overflow-hidden">
-                          <div className="bg-on-surface h-full" style={{ width: `${(t._count.tickets / maxTickets) * 100}%` }}></div>
+                        <span className="font-medium">{t._count.tickets}</span>
+                        <div className="w-16 h-2 bg-surface-container/60 rounded-full overflow-hidden">
+                          <div className="bg-gradient-to-r from-primary to-indigo-500 h-full rounded-full" style={{ width: `${(t._count.tickets / maxTickets) * 100}%` }}></div>
                         </div>
                       </div>
                     </td>
                     {canManageTeams && (
                       <td className="py-md px-md text-right opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => askDelete(t.id)} className="text-on-surface-variant hover:text-error">
+                        <button onClick={() => askDelete(t.id)} className="text-on-surface-variant hover:text-error transition-colors">
                           <span className="material-symbols-outlined">delete</span>
                         </button>
                       </td>
                     )}
                   </tr>
                   {openTeamId === t.id && (
-                    <tr className="border-b border-outline-variant bg-surface-container-low">
+                    <tr className="border-b border-outline-variant/60 bg-surface-container-low/40">
                       <td colSpan={canManageTeams ? 6 : 5} className="py-md px-md">
                         {loadingDetail && <p className="text-on-surface-variant font-body-sm text-body-sm">Chargement...</p>}
                         {!loadingDetail && openTeamDetail && (
-                          <div className="flex flex-col gap-2">
+                          <div className="flex flex-col gap-3 p-xs">
                             {canManageTeams && (
-                              <div className="flex items-center gap-sm pb-md border-b border-outline-variant mb-2">
+                              <div className="flex items-center gap-sm pb-md border-b border-outline-variant/50 mb-2">
                                 <span className="font-label-md text-label-md text-on-surface-variant uppercase shrink-0">
                                   Email de groupe
                                 </span>
                                 <input
                                   type="email"
-                                  className="flex-1 h-9 px-sm rounded-none border border-outline-variant bg-surface focus:outline-none focus:border-on-surface font-body-sm text-body-sm text-on-surface"
+                                  className="flex-1 h-10 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 font-body-sm text-body-sm text-on-surface"
                                   placeholder="ex: reseau@entreprise.com"
                                   value={groupEmailDraft}
                                   onChange={(e) => setGroupEmailDraft(e.target.value)}
@@ -245,7 +245,7 @@ export default function Teams() {
                                 <button
                                   onClick={() => saveGroupEmail(t.id)}
                                   disabled={savingGroupEmail || groupEmailDraft === (openTeamDetail.groupEmail || '')}
-                                  className="px-3 py-2 border border-outline-variant text-on-surface-variant hover:bg-surface-container-high transition-colors disabled:opacity-50 shrink-0"
+                                  className="px-4 py-2 rounded-xl border border-outline-variant text-on-surface-variant hover:bg-surface-container-high transition-all duration-300 disabled:opacity-50 shrink-0 font-medium"
                                 >
                                   Enregistrer
                                 </button>
@@ -255,14 +255,14 @@ export default function Teams() {
                               Charge active par technicien (du moins au plus chargé)
                             </span>
                             {openTeamDetail.members.length === 0 && (
-                              <p className="text-on-surface-variant font-body-sm text-body-sm">Aucun membre dans cette équipe.</p>
+                              <p className="text-on-surface-variant font-body-sm text-body-sm italic">Aucun membre dans cette équipe.</p>
                             )}
-                            <div className="flex flex-col divide-y divide-outline-variant">
+                            <div className="flex flex-col divide-y divide-outline-variant/40">
                               {openTeamDetail.members.map((m) => (
-                                <div key={m.id} className="py-xs flex items-center justify-between">
+                                <div key={m.id} className="py-2 flex items-center justify-between">
                                   <div>
-                                    <span className="font-body-md text-body-md text-on-surface">{m.fullName}</span>
-                                    <span className="text-xs text-on-surface-variant ml-2">{m.role}</span>
+                                    <span className="font-body-md text-body-md text-on-surface font-semibold">{m.fullName}</span>
+                                    <span className="text-xs text-on-surface-variant ml-2 border border-outline-variant/50 px-2 py-0.5 rounded-full bg-surface-container-low">{m.role}</span>
                                   </div>
                                   <span className="font-mono-sm text-mono-sm text-on-surface-variant">
                                     {m.activeTicketCount} ticket(s) actif(s)
@@ -279,7 +279,7 @@ export default function Teams() {
                 ))}
                 {teams.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="py-8 px-md text-center text-on-surface-variant">Aucune équipe.</td>
+                    <td colSpan={6} className="py-8 px-md text-center text-on-surface-variant italic">Aucune équipe.</td>
                   </tr>
                 )}
               </tbody>
@@ -289,19 +289,19 @@ export default function Teams() {
 
         {canManageTeams && (
           <div className="lg:col-span-1">
-            <div className="bg-surface-container-lowest rounded-none border border-outline-variant sticky top-4">
-              <div className="p-lg border-b border-outline-variant">
-                <h3 className="font-headline-md text-headline-md text-on-surface flex items-center gap-sm">
-                  <span className="material-symbols-outlined text-on-surface">add_circle</span>
+            <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/60 card-shadow sticky top-4 overflow-hidden">
+              <div className="p-lg border-b border-outline-variant/60 bg-surface-bright/35">
+                <h3 className="font-headline-md text-headline-md text-on-surface flex items-center gap-sm font-semibold">
+                  <span className="material-symbols-outlined text-primary text-[22px]">add_circle</span>
                   Nouvelle équipe
                 </h3>
                 <p className="font-body-sm text-body-sm text-on-surface-variant mt-1">Définir le nom et le domaine de l'équipe.</p>
               </div>
               <form onSubmit={handleCreate} className="p-lg space-y-md">
                 <div>
-                  <label className="block font-label-md text-label-md text-on-surface mb-xs">Nom de l'équipe</label>
+                  <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Nom de l'équipe</label>
                   <input
-                    className="w-full h-10 px-sm rounded-none border border-outline-variant bg-surface focus:outline-none focus:border-on-surface font-body-sm text-body-sm text-on-surface"
+                    className="w-full h-10 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 font-body-sm text-body-sm text-on-surface"
                     placeholder="ex: Réseau L1"
                     value={form.name}
                     onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -309,31 +309,31 @@ export default function Teams() {
                   />
                 </div>
                 <div>
-                  <label className="block font-label-md text-label-md text-on-surface mb-xs">Catégorie</label>
+                  <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Catégorie</label>
                   <input
-                    className="w-full h-10 px-sm rounded-none border border-outline-variant bg-surface focus:outline-none focus:border-on-surface font-body-sm text-body-sm text-on-surface"
+                    className="w-full h-10 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 font-body-sm text-body-sm text-on-surface"
                     placeholder="ex: Infrastructure"
                     value={form.category}
                     onChange={(e) => setForm({ ...form, category: e.target.value })}
                   />
                 </div>
                 <div>
-                  <label className="block font-label-md text-label-md text-on-surface mb-xs">Email de groupe</label>
+                  <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Email de groupe</label>
                   <input
                     type="email"
-                    className="w-full h-10 px-sm rounded-none border border-outline-variant bg-surface focus:outline-none focus:border-on-surface font-body-sm text-body-sm text-on-surface"
+                    className="w-full h-10 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 font-body-sm text-body-sm text-on-surface"
                     placeholder="ex: reseau@entreprise.com"
                     value={form.groupEmail}
                     onChange={(e) => setForm({ ...form, groupEmail: e.target.value })}
                   />
-                  <p className="font-body-sm text-body-sm text-on-surface-variant mt-1">
+                  <p className="font-body-sm text-body-sm text-on-surface-variant mt-2 italic leading-relaxed">
                     Reçoit le récapitulatif quotidien des tickets de cette équipe.
                   </p>
                 </div>
-                <div className="pt-md mt-md border-t border-outline-variant flex justify-end">
+                <div className="pt-md mt-md border-t border-outline-variant/60 flex justify-end">
                   <button
                     type="submit"
-                    className="px-md py-sm rounded-none border border-outline-variant bg-on-surface text-surface font-headline-sm text-headline-sm hover:opacity-80 transition-colors"
+                    className="px-md py-sm rounded-xl bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-headline-sm text-headline-sm hover:opacity-90 shadow-md shadow-primary/20 hover:shadow-lg hover:shadow-primary/30 transition-all duration-300"
                   >
                     Créer l'équipe
                   </button>

@@ -131,46 +131,54 @@ export default function KnowledgeBase() {
   return (
     <div className="flex flex-col gap-lg">
       <header>
-        <h2 className="font-display-lg text-display-lg text-on-background">Base de connaissances</h2>
-        <p className="font-body-lg text-body-lg text-on-surface-variant">
+        <h2 className="font-display-lg text-display-lg text-on-background font-bold">Base de connaissances</h2>
+        <p className="font-body-lg text-body-lg text-on-surface-variant mt-1">
           Documents indexés pour la recherche sémantique (RAG).
         </p>
       </header>
 
       {error && (
-        <div className="border border-outline-variant text-on-surface p-md rounded-none">{error}</div>
+        <div className="border border-red-500/20 bg-red-500/5 text-red-500 p-md rounded-xl font-body-md">
+          {error}
+        </div>
       )}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-lg">
         <div className="xl:col-span-2 flex flex-col gap-lg">
-          <div className="bg-surface-container-lowest rounded-none border border-outline-variant overflow-hidden">
+          <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/60 card-shadow overflow-hidden">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-surface-bright border-b border-outline-variant">
-                  <th className="px-md py-3 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider w-10"></th>
-                  <th className="px-md py-3 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Titre</th>
-                  <th className="px-md py-3 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider w-32">Type</th>
-                  <th className="px-md py-3 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider w-24">Fragments</th>
-                  <th className="px-md py-3 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider w-32">Statut</th>
-                  {canManage && <th className="px-md py-3 w-12"></th>}
+                <tr className="bg-surface-bright/50 border-b border-outline-variant/60">
+                  <th className="px-md py-3.5 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider w-10"></th>
+                  <th className="px-md py-3.5 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Titre</th>
+                  <th className="px-md py-3.5 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider w-32">Type</th>
+                  <th className="px-md py-3.5 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider w-24">Fragments</th>
+                  <th className="px-md py-3.5 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider w-32">Statut</th>
+                  {canManage && <th className="px-md py-3.5 w-20"></th>}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-outline-variant font-body-sm text-body-sm">
+              <tbody className="divide-y divide-outline-variant/40 font-body-sm text-body-sm">
                 {documents.map((doc) => (
-                  <tr key={doc.id} className="hover:bg-surface-container-low transition-colors">
+                  <tr key={doc.id} className="hover:bg-surface-container-low/40 transition-colors">
                     <td className="px-md py-3 text-on-surface-variant">
                       <span className="material-symbols-outlined text-[18px]">{SOURCE_ICONS[doc.sourceType] || 'description'}</span>
                     </td>
-                    <td className="px-md py-3 text-on-surface font-medium">
+                    <td className="px-md py-3 text-on-surface font-semibold">
                       {doc.title}
                       {doc.status === 'ERROR' && doc.error && (
-                        <p className="font-body-sm text-body-sm text-error mt-xs">{doc.error}</p>
+                        <p className="font-body-sm text-body-sm text-error mt-xs bg-error/5 border border-error/10 px-2 py-1 rounded-lg w-fit">{doc.error}</p>
                       )}
                     </td>
-                    <td className="px-md py-3 text-on-surface-variant uppercase">{doc.sourceType}</td>
-                    <td className="px-md py-3 text-on-surface-variant">{doc._count?.chunks ?? 0}</td>
+                    <td className="px-md py-3 text-on-surface-variant font-medium uppercase">{doc.sourceType}</td>
+                    <td className="px-md py-3 text-on-surface-variant font-mono">{doc._count?.chunks ?? 0}</td>
                     <td className="px-md py-3">
-                      <span className="inline-flex items-center px-2.5 py-1 border border-outline-variant text-on-surface text-[11px] font-medium">
+                      <span className={`badge px-2.5 py-0.5 rounded-full text-[10px] font-bold border uppercase ${
+                        doc.status === 'READY' 
+                          ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' 
+                          : doc.status === 'PROCESSING'
+                          ? 'bg-primary/10 text-primary border-primary/20 animate-pulse'
+                          : 'bg-error/10 text-error border-error/20'
+                      }`}>
                         {STATUS_LABELS[doc.status] || doc.status}
                       </span>
                     </td>
@@ -181,7 +189,7 @@ export default function KnowledgeBase() {
                             onClick={() => askReplace(doc)}
                             disabled={replacingId === doc.id}
                             title="Remplacer le fichier"
-                            className="text-on-surface-variant hover:text-on-surface disabled:opacity-50"
+                            className="text-on-surface-variant hover:text-primary disabled:opacity-50 transition-colors p-1"
                           >
                             <span className="material-symbols-outlined text-[18px]">
                               {replacingId === doc.id ? 'hourglass_empty' : 'upload_file'}
@@ -190,7 +198,7 @@ export default function KnowledgeBase() {
                           <button
                             onClick={() => setConfirmDeleteId(doc.id)}
                             title="Supprimer"
-                            className="text-on-surface-variant hover:text-on-surface"
+                            className="text-on-surface-variant hover:text-error transition-colors p-1"
                           >
                             <span className="material-symbols-outlined text-[18px]">delete</span>
                           </button>
@@ -201,8 +209,8 @@ export default function KnowledgeBase() {
                 ))}
                 {documents.length === 0 && (
                   <tr>
-                    <td colSpan={canManage ? 6 : 5} className="px-md py-8 text-center text-on-surface-variant">
-                      Aucun document indexé.
+                    <td colSpan={canManage ? 6 : 5} className="px-md py-12 text-center text-on-surface-variant italic font-body-md">
+                      Aucun document indexé dans la base de connaissances.
                     </td>
                   </tr>
                 )}
@@ -210,11 +218,19 @@ export default function KnowledgeBase() {
             </table>
           </div>
 
-          <div className="bg-surface-container-lowest rounded-none border border-outline-variant p-lg">
-            <h3 className="font-headline-md text-headline-md text-on-background mb-md">Rechercher (test RAG)</h3>
-            <form onSubmit={handleSearch} className="flex gap-sm mb-md">
+          <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/60 card-shadow p-lg">
+            <div className="border-b border-outline-variant/40 pb-md mb-md">
+              <h3 className="font-headline-md text-headline-md text-on-background font-bold flex items-center gap-2">
+                <span className="material-symbols-outlined text-primary">search</span>
+                Rechercher (test RAG)
+              </h3>
+              <p className="font-body-sm text-body-sm text-on-surface-variant mt-1">
+                Interrogez sémantiquement la base de connaissances pour valider les fragments pertinents renvoyés par Gemini.
+              </p>
+            </div>
+            <form onSubmit={handleSearch} className="flex gap-3 mb-md">
               <input
-                className="flex-1 h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface"
+                className="flex-1 bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300"
                 placeholder="Ex: comment renouveler un certificat VPN ?"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -222,8 +238,9 @@ export default function KnowledgeBase() {
               <button
                 type="submit"
                 disabled={searching}
-                className="px-4 py-2 rounded-none border border-outline-variant bg-on-surface text-surface font-body-sm text-body-sm font-semibold hover:opacity-80 transition-all disabled:opacity-60"
+                className="px-5 py-2 rounded-xl bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-semibold shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 disabled:opacity-60 text-body-sm flex items-center gap-1 shrink-0"
               >
+                <span className="material-symbols-outlined text-[18px]">search</span>
                 {searching ? 'Recherche...' : 'Rechercher'}
               </button>
             </form>
@@ -231,18 +248,18 @@ export default function KnowledgeBase() {
             {results && (
               <div className="flex flex-col gap-sm">
                 {results.map((r) => (
-                  <div key={r.id} className="border border-outline-variant p-sm">
-                    <div className="flex items-center justify-between gap-sm mb-xs">
-                      <span className="font-label-md text-label-md text-on-surface uppercase">{r.title}</span>
-                      <span className="font-body-sm text-body-sm text-on-surface-variant">
-                        {(r.similarity * 100).toFixed(1)}%
+                  <div key={r.id} className="border border-outline-variant/60 bg-surface-container-low/30 rounded-xl p-md hover:border-outline transition-colors duration-300">
+                    <div className="flex items-center justify-between gap-sm mb-2">
+                      <span className="font-headline-sm text-headline-sm text-on-surface font-semibold">{r.title}</span>
+                      <span className="font-mono-sm text-[10px] text-on-surface-variant bg-surface-container-low border border-outline-variant/40 px-2.5 py-0.5 rounded-full font-medium shadow-sm">
+                        Score : {(r.similarity * 100).toFixed(1)}%
                       </span>
                     </div>
-                    <p className="font-body-sm text-body-sm text-on-surface-variant">{r.content}</p>
+                    <p className="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">{r.content}</p>
                   </div>
                 ))}
                 {results.length === 0 && (
-                  <p className="font-body-sm text-body-sm text-on-surface-variant">Aucun résultat pertinent.</p>
+                  <p className="font-body-sm text-body-sm text-on-surface-variant italic">Aucun fragment pertinent trouvé.</p>
                 )}
               </div>
             )}
@@ -250,34 +267,43 @@ export default function KnowledgeBase() {
         </div>
 
         {canManage && (
-          <div className="bg-surface-container-lowest rounded-none border border-outline-variant p-lg flex flex-col gap-md h-fit">
-            <h3 className="font-headline-md text-headline-md text-on-background">Ajouter un document</h3>
+          <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/60 card-shadow p-lg flex flex-col gap-md h-fit">
+            <div className="border-b border-outline-variant/40 pb-md">
+              <h3 className="font-headline-md text-headline-md text-on-background font-bold flex items-center gap-2">
+                <span className="material-symbols-outlined text-primary">add_circle</span>
+                Ajouter un document
+              </h3>
+              <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 leading-relaxed">
+                Importez et découpez de nouveaux documents pour enrichir les connaissances de l'IA.
+              </p>
+            </div>
             <form onSubmit={handleUpload} className="flex flex-col gap-md">
               <label className="flex flex-col gap-xs">
-                <span className="font-label-md text-label-md text-on-surface uppercase">Titre (optionnel)</span>
+                <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Titre (optionnel)</span>
                 <input
-                  className="h-10 px-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md focus:outline-none focus:border-on-surface"
+                  className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="Nom affiché du document"
                 />
               </label>
               <label className="flex flex-col gap-xs">
-                <span className="font-label-md text-label-md text-on-surface uppercase">Fichier (PDF, DOCX, Markdown)</span>
+                <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Fichier (PDF, DOCX, Markdown, TXT)</span>
                 <input
                   type="file"
                   accept=".pdf,.docx,.md,.markdown,.txt"
                   onChange={(e) => setFile(e.target.files?.[0] || null)}
-                  className="font-body-sm text-body-sm text-on-surface-variant"
+                  className="font-body-sm text-body-sm text-on-surface-variant w-full file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 transition-all cursor-pointer mt-1"
                   required
                 />
               </label>
               <button
                 type="submit"
                 disabled={uploading}
-                className="px-4 py-2 rounded-none border border-outline-variant bg-on-surface text-surface font-body-sm text-body-sm font-semibold hover:opacity-80 transition-all disabled:opacity-60"
+                className="w-full bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-semibold py-2.5 rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 disabled:opacity-60 text-body-sm flex items-center justify-center gap-1"
               >
-                {uploading ? 'Indexation en cours...' : 'Indexer'}
+                <span className="material-symbols-outlined text-[18px]">cloud_upload</span>
+                {uploading ? 'Indexation en cours...' : 'Indexer le document'}
               </button>
             </form>
           </div>

@@ -25,37 +25,37 @@ export default function Login() {
   }
 
   return (
-    <div className="bg-background text-on-background min-h-screen flex items-center justify-center p-md antialiased selection:bg-surface-container-high selection:text-on-surface">
-      <main className="w-full max-w-[420px] mx-auto">
-        <div className="flex flex-col items-center mb-xl text-center">
-          <div className="w-16 h-16 bg-on-surface rounded-none flex items-center justify-center mb-md">
-            <span className="material-symbols-outlined text-surface text-[32px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+    <div className="bg-background text-on-background min-h-screen flex items-center justify-center p-md antialiased selection:bg-primary/20 selection:text-primary">
+      <main className="w-full max-w-[420px] mx-auto space-y-md">
+        <div className="flex flex-col items-center text-center">
+          <div className="w-16 h-16 bg-gradient-to-tr from-primary to-indigo-600 rounded-2xl flex items-center justify-center mb-md shadow-lg shadow-primary/20 transition-transform duration-300 hover:scale-105">
+            <span className="material-symbols-outlined text-white text-[32px] fill-1">
               dashboard
             </span>
           </div>
-          <h1 className="font-display-lg text-display-lg text-on-background mb-xs">ERP ITSM</h1>
-          <p className="font-body-md text-body-md text-on-surface-variant">Management Console</p>
+          <h1 className="font-display-lg text-display-lg text-on-background font-bold tracking-tight mb-xs">ERP ITSM</h1>
+          <p className="font-body-md text-body-md text-on-surface-variant font-medium">Console de gestion intelligente</p>
         </div>
 
-        <div className="bg-surface-container-lowest rounded-none border border-outline-variant p-[24px]">
+        <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/60 p-[28px] card-shadow">
           <form className="space-y-md" onSubmit={handleSubmit}>
             {error && (
-              <div className="border border-outline-variant text-on-surface p-md rounded-none flex items-start space-x-sm">
+              <div className="border border-red-500/20 bg-red-500/5 text-red-500 p-md rounded-xl flex items-start gap-sm font-body-sm">
                 <span className="material-symbols-outlined text-error shrink-0">error</span>
-                <div className="font-body-sm text-body-sm mt-[2px]">
-                  <strong>Échec de connexion</strong>
-                  <p className="mt-xs text-on-surface-variant">{error}</p>
+                <div className="font-body-sm text-body-sm">
+                  <strong className="font-semibold">Échec de connexion</strong>
+                  <p className="mt-0.5 text-red-500/80">{error}</p>
                 </div>
               </div>
             )}
 
-            <div>
-              <label className="block font-label-md text-label-md text-on-surface mb-xs uppercase" htmlFor="email">
+            <div className="space-y-xs">
+              <label className="block font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold" htmlFor="email">
                 Email professionnel
               </label>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-sm flex items-center pointer-events-none">
-                  <span className="material-symbols-outlined text-outline">mail</span>
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-on-surface-variant/70">
+                  <span className="material-symbols-outlined text-[20px]">mail</span>
                 </div>
                 <input
                   id="email"
@@ -66,23 +66,23 @@ export default function Login() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="superadmin@prosuma.ci"
-                  className="w-full h-[40px] pl-[36px] pr-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md placeholder-outline transition-shadow duration-200 focus:outline-none focus:border-on-surface"
+                  className="bg-surface border border-outline-variant/60 rounded-xl pl-10 pr-3.5 py-2 h-[42px] font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 w-full placeholder-on-surface-variant/40"
                 />
               </div>
             </div>
 
-            <div>
-              <div className="flex items-center justify-between mb-xs">
-                <label className="block font-label-md text-label-md text-on-surface uppercase" htmlFor="password">
+            <div className="space-y-xs">
+              <div className="flex items-center justify-between">
+                <label className="block font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold" htmlFor="password">
                   Mot de passe
                 </label>
-                <Link to="/forgot-password" className="font-body-sm text-body-sm text-on-surface-variant hover:underline">
+                <Link to="/forgot-password" className="font-body-sm text-body-sm text-primary hover:text-primary-hover hover:underline transition-colors font-medium">
                   Mot de passe oublié ?
                 </Link>
               </div>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-sm flex items-center pointer-events-none">
-                  <span className="material-symbols-outlined text-outline">lock</span>
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-on-surface-variant/70">
+                  <span className="material-symbols-outlined text-[20px]">lock</span>
                 </div>
                 <input
                   id="password"
@@ -93,7 +93,7 @@ export default function Login() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full h-[40px] pl-[36px] pr-sm rounded-none border border-outline-variant bg-surface-container-lowest text-on-surface font-body-md text-body-md placeholder-outline transition-shadow duration-200 focus:outline-none focus:border-on-surface"
+                  className="bg-surface border border-outline-variant/60 rounded-xl pl-10 pr-3.5 py-2 h-[42px] font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 w-full placeholder-on-surface-variant/40"
                 />
               </div>
             </div>
@@ -102,12 +102,12 @@ export default function Login() {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full h-[40px] bg-on-surface hover:opacity-80 text-surface font-headline-sm text-headline-sm rounded-none flex items-center justify-center space-x-xs transition-colors duration-200 active:translate-y-[1px] focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
+                className="w-full h-[42px] bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-semibold rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm disabled:opacity-55 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {loading ? (
                   <>
                     <span className="material-symbols-outlined animate-spin text-[20px]">progress_activity</span>
-                    <span>Connexion...</span>
+                    <span>Connexion en cours...</span>
                   </>
                 ) : (
                   <>
@@ -120,12 +120,13 @@ export default function Login() {
           </form>
         </div>
 
-        <div className="mt-lg text-center">
-          <p className="font-body-sm text-body-sm text-on-surface-variant">
-            ERP ITSM &mdash; Console de gestion interne
+        <div className="text-center">
+          <p className="font-body-sm text-body-sm text-on-surface-variant/80 font-medium">
+            ERP ITSM &mdash; Système d'assistance et d'automatisations IA
           </p>
         </div>
       </main>
     </div>
   );
 }
+

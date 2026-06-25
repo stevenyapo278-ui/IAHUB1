@@ -181,33 +181,40 @@ export default function Users() {
   const activeCount = users.filter((u) => u.isActive).length;
   const inactiveCount = users.length - activeCount;
   const staffCount = users.filter((u) => u.role !== 'REQUESTER').length;
-
-  const inputClass = 'bg-surface-container-lowest border border-outline-variant rounded-none py-2 px-3 text-body-sm text-on-surface focus:border-on-surface focus:outline-none';
+  const inputClass = 'bg-surface border border-outline-variant/60 rounded-xl py-2 px-3.5 text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300';
 
   return (
     <div className="flex flex-col gap-lg">
       <header className="flex justify-between items-end gap-md">
         <div>
-          <h2 className="font-display-lg text-display-lg text-on-background">Utilisateurs</h2>
-          <p className="font-body-lg text-body-lg text-on-surface-variant">Gestion des comptes et des rôles.</p>
+          <h2 className="font-display-lg text-display-lg text-on-background font-bold">Utilisateurs</h2>
+          <p className="font-body-lg text-body-lg text-on-surface-variant mt-1">Gestion des comptes et des rôles.</p>
         </div>
         <button
           onClick={() => { setShowForm((v) => !v); setError(''); }}
-          className="border border-outline-variant rounded-none py-2 px-4 font-label-md text-label-md text-on-surface hover:bg-surface-container-low transition-colors"
+          className="border border-outline-variant/60 rounded-xl py-2 px-4 font-semibold text-body-sm text-on-surface hover:bg-surface-container-high transition-all duration-300 shadow-sm"
         >
           {showForm ? 'Annuler' : '+ Nouvel utilisateur'}
         </button>
       </header>
 
-      {error && <div className="border border-outline-variant rounded-none p-md text-on-surface bg-surface-container-low">{error}</div>}
-      {resetMessage && <div className="border border-outline-variant rounded-none p-md text-on-surface bg-surface-container-low">{resetMessage}</div>}
+      {error && (
+        <div className="border border-red-500/20 bg-red-500/5 text-red-500 p-md rounded-xl font-body-md">
+          {error}
+        </div>
+      )}
+      {resetMessage && (
+        <div className="border border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 p-md rounded-xl font-body-md">
+          {resetMessage}
+        </div>
+      )}
 
       {showForm && (
-        <form onSubmit={handleCreate} className="bg-surface-container-lowest border border-outline-variant rounded-none p-lg flex flex-col gap-md">
-          <span className="font-headline-sm text-headline-sm text-on-surface">Créer un utilisateur</span>
+        <form onSubmit={handleCreate} className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg flex flex-col gap-md">
+          <span className="font-headline-sm text-headline-sm text-on-surface font-semibold">Créer un utilisateur</span>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-md">
             <div className="flex flex-col gap-1">
-              <label className="font-label-md text-label-md text-on-surface-variant uppercase">Nom complet</label>
+              <label className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Nom complet</label>
               <input
                 required
                 className={inputClass}
@@ -216,7 +223,7 @@ export default function Users() {
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label className="font-label-md text-label-md text-on-surface-variant uppercase">Email</label>
+              <label className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Email</label>
               <input
                 required
                 type="email"
@@ -226,7 +233,7 @@ export default function Users() {
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label className="font-label-md text-label-md text-on-surface-variant uppercase">Mot de passe</label>
+              <label className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Mot de passe</label>
               <input
                 required
                 type="password"
@@ -238,7 +245,7 @@ export default function Users() {
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label className="font-label-md text-label-md text-on-surface-variant uppercase">Équipe</label>
+              <label className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Équipe</label>
               <select
                 className={inputClass}
                 value={form.teamId}
@@ -251,8 +258,8 @@ export default function Users() {
               </select>
             </div>
             <div className="flex flex-col gap-1 md:col-span-2">
-              <label className="font-label-md text-label-md text-on-surface-variant uppercase">Rôle / droits</label>
-              <div className="flex flex-col gap-2">
+              <label className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold mb-1">Rôle / droits</label>
+              <div className="flex flex-col gap-2 bg-surface-container-low/40 border border-outline-variant/60 rounded-xl p-md">
                 {ROLES.map((r) => (
                   <label key={r} className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -261,19 +268,19 @@ export default function Users() {
                       value={r}
                       checked={form.role === r}
                       onChange={() => setForm({ ...form, role: r })}
-                      className="accent-on-surface"
+                      className="accent-primary"
                     />
-                    <span className="text-body-sm text-on-surface">{ROLE_LABELS[r]}</span>
+                    <span className="text-body-sm text-on-surface font-medium">{ROLE_LABELS[r]}</span>
                   </label>
                 ))}
               </div>
             </div>
           </div>
-          <div>
+          <div className="flex justify-end mt-2">
             <button
               type="submit"
               disabled={submitting}
-              className="border border-outline-variant rounded-none py-2 px-4 font-label-md text-label-md text-on-surface hover:bg-surface-container-low transition-colors disabled:opacity-50"
+              className="bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-semibold py-2.5 px-6 rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 disabled:opacity-50 text-body-sm"
             >
               {submitting ? 'Création…' : 'Créer'}
             </button>
@@ -282,23 +289,23 @@ export default function Users() {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-md">
-        <div className="bg-surface-container-lowest border border-outline-variant rounded-none p-lg flex flex-col gap-2">
-          <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Total utilisateurs</span>
-          <span className="font-display-lg text-display-lg text-on-surface">{users.length}</span>
+        <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg flex flex-col gap-2 hover-interactive">
+          <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Total utilisateurs</span>
+          <span className="font-display-lg text-display-lg text-on-surface font-bold">{users.length}</span>
         </div>
-        <div className="bg-surface-container-lowest border border-outline-variant rounded-none p-lg flex flex-col gap-2">
-          <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Admins &amp; Techniciens</span>
-          <span className="font-display-lg text-display-lg text-on-surface">{staffCount}</span>
+        <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg flex flex-col gap-2 hover-interactive">
+          <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Admins &amp; Techniciens</span>
+          <span className="font-display-lg text-display-lg text-on-surface font-bold">{staffCount}</span>
         </div>
-        <div className="bg-surface-container-lowest border border-outline-variant rounded-none p-lg flex flex-col gap-2">
-          <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Comptes inactifs</span>
-          <span className="font-display-lg text-display-lg text-on-surface">{inactiveCount}</span>
+        <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg flex flex-col gap-2 hover-interactive">
+          <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Comptes inactifs</span>
+          <span className="font-display-lg text-display-lg text-on-surface font-bold">{inactiveCount}</span>
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 bg-surface-container-lowest p-md rounded-none border border-outline-variant">
+      <div className="flex flex-wrap items-center gap-3 bg-surface-container-lowest p-md rounded-2xl border border-outline-variant/60 card-shadow">
         <select
-          className="px-3 py-1.5 rounded-none border border-outline-variant bg-surface text-on-surface font-body-sm text-body-sm focus:outline-none"
+          className="bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300"
           value={assignGroupId}
           onChange={(e) => setAssignGroupId(e.target.value)}
           disabled={selectedIds.length === 0}
@@ -311,77 +318,79 @@ export default function Users() {
         <button
           onClick={handleAssignToGroup}
           disabled={!assignGroupId || selectedIds.length === 0 || assigning}
-          className="flex items-center gap-2 px-4 py-2 rounded-none border border-outline-variant bg-on-surface text-surface font-body-sm text-body-sm font-semibold hover:opacity-80 transition-all disabled:opacity-50 whitespace-nowrap"
+          className="flex items-center gap-2 px-4 py-2 rounded-xl border border-outline-variant/60 bg-surface hover:bg-surface-container-high transition-colors font-semibold text-body-sm shadow-sm disabled:opacity-40 whitespace-nowrap"
         >
           <span className="material-symbols-outlined text-[18px]">group_add</span>
           Assigner à un groupe de droits ({selectedIds.length})
         </button>
       </div>
 
-      <div className="bg-surface-container-lowest border border-outline-variant rounded-none overflow-hidden flex flex-col">
-        <div className="p-md border-b border-outline-variant flex justify-between items-center">
-          <span className="font-headline-sm text-headline-sm text-on-surface">Annuaire</span>
-          <span className="text-on-surface-variant text-xs font-mono-sm">{users.length} utilisateurs</span>
+      <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow overflow-hidden flex flex-col">
+        <div className="p-md border-b border-outline-variant/40 bg-surface-container-low/20 flex justify-between items-center">
+          <span className="font-headline-sm text-headline-sm text-on-surface font-semibold">Annuaire</span>
+          <span className="text-on-surface-variant text-xs font-mono-sm bg-surface-container border border-outline-variant/50 px-2.5 py-0.5 rounded-full font-medium">
+            {users.length} utilisateurs
+          </span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-surface-container-lowest border-b border-outline-variant">
+              <tr className="bg-surface-bright/50 border-b border-outline-variant/60">
                 <th className="p-md w-10">
                   <input
                     type="checkbox"
                     checked={users.length > 0 && selectedIds.length === users.length}
                     onChange={toggleSelectAll}
-                    className="cursor-pointer"
+                    className="cursor-pointer accent-primary"
                   />
                 </th>
-                <th className="p-md font-label-md text-label-md text-on-surface-variant uppercase">Utilisateur</th>
-                <th className="p-md font-label-md text-label-md text-on-surface-variant uppercase">Rôle</th>
-                <th className="p-md font-label-md text-label-md text-on-surface-variant uppercase">Équipe</th>
-                <th className="p-md font-label-md text-label-md text-on-surface-variant uppercase text-center w-24">Actif</th>
-                <th className="p-md font-label-md text-label-md text-on-surface-variant uppercase text-center w-32" title="Reçoit un email si un brouillon de réponse IA attend trop longtemps une validation">Alertes brouillons</th>
-                <th className="p-md font-label-md text-label-md text-on-surface-variant uppercase text-right w-24">Actions</th>
+                <th className="p-md font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Utilisateur</th>
+                <th className="p-md font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Rôle</th>
+                <th className="p-md font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Équipe</th>
+                <th className="p-md font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold text-center w-24">Actif</th>
+                <th className="p-md font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold text-center w-32" title="Reçoit un email si un brouillon de réponse IA attend trop longtemps une validation">Alertes brouillons</th>
+                <th className="p-md font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold text-right w-24">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-outline-variant font-body-sm text-body-sm text-on-surface">
+            <tbody className="divide-y divide-outline-variant/40 font-body-sm text-body-sm text-on-surface">
               {users.map((u) => (
-                <tr key={u.id} className="hover:bg-surface-container-low transition-colors group">
+                <tr key={u.id} className="hover:bg-surface-container-low/40 transition-colors group">
                   <td className="p-md">
                     <input
                       type="checkbox"
                       checked={selectedIds.includes(u.id)}
                       onChange={() => toggleSelect(u.id)}
-                      className="cursor-pointer"
+                      className="cursor-pointer accent-primary"
                     />
                   </td>
                   <td className="p-md">
                     {editingId === u.id ? (
-                      <div className="flex flex-col gap-1">
+                      <div className="flex flex-col gap-2 max-w-xs">
                         <input
                           value={editForm.fullName}
                           onChange={(e) => setEditForm({ ...editForm, fullName: e.target.value })}
                           placeholder="Nom complet"
-                          className="border border-outline-variant rounded-none px-2 py-1 text-body-sm text-on-surface bg-surface focus:outline-none focus:border-on-surface"
+                          className="border border-outline-variant/60 rounded-xl px-3 py-1.5 text-body-sm text-on-surface bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300"
                         />
                         <input
                           type="email"
                           value={editForm.email}
                           onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
                           placeholder="Email"
-                          className="border border-outline-variant rounded-none px-2 py-1 text-body-sm text-on-surface bg-surface focus:outline-none focus:border-on-surface"
+                          className="border border-outline-variant/60 rounded-xl px-3 py-1.5 text-body-sm text-on-surface bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300"
                         />
-                        <div className="flex gap-1 mt-1">
+                        <div className="flex gap-2 mt-1">
                           <button
                             onClick={() => saveEdit(u.id)}
                             disabled={savingEdit}
-                            className="text-xs px-2 py-1 border border-outline-variant bg-on-surface text-surface hover:opacity-80 disabled:opacity-50"
+                            className="text-xs px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-primary to-indigo-600 text-white font-semibold shadow-sm hover:shadow transition-all disabled:opacity-50"
                           >
                             {savingEdit ? 'Enregistrement...' : 'Enregistrer'}
                           </button>
                           <button
                             onClick={() => setEditingId(null)}
                             disabled={savingEdit}
-                            className="text-xs px-2 py-1 border border-outline-variant text-on-surface-variant hover:bg-surface-container-high"
+                            className="text-xs px-2.5 py-1.5 rounded-lg border border-outline-variant/60 text-on-surface hover:bg-surface-container-high transition-all"
                           >
                             Annuler
                           </button>
@@ -389,11 +398,11 @@ export default function Users() {
                       </div>
                     ) : (
                       <button onClick={() => startEdit(u)} className="flex items-center gap-3 text-left hover:opacity-80 transition-opacity">
-                        <div className="w-8 h-8 rounded-full border border-outline-variant flex items-center justify-center font-headline-sm text-xs font-bold shrink-0 text-on-surface">
+                        <div className="w-8 h-8 rounded-full border border-outline-variant/60 bg-surface-container-low text-on-surface flex items-center justify-center font-semibold shrink-0 shadow-sm">
                           {initials(u.fullName)}
                         </div>
                         <div>
-                          <div className="font-headline-sm text-headline-sm text-on-surface">{u.fullName}</div>
+                          <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">{u.fullName}</div>
                           <div className="text-on-surface-variant text-xs">{u.email}</div>
                         </div>
                       </button>
@@ -402,24 +411,21 @@ export default function Users() {
                   <td className="p-md">
                     {currentUser?.role === 'SUPERADMIN' || !ADMIN_LIKE_ROLES.includes(u.role) ? (
                       <select
-                        className="appearance-none bg-transparent border border-outline-variant rounded-none py-1.5 px-2 text-body-sm cursor-pointer"
+                        className="bg-surface border border-outline-variant/60 rounded-xl px-2.5 py-1.5 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 cursor-pointer"
                         value={u.role}
                         onChange={(e) => updateField(u.id, 'role', e.target.value)}
                       >
-                        {/* Le rôle actuel de la cible doit toujours être présent dans la liste, même
-                            si l'acteur ne pourrait pas l'assigner à un AUTRE compte (ex: SUPERADMIN
-                            visualisant un ADMIN) — sinon le <select> afficherait une valeur absente. */}
                         {Array.from(new Set([...ROLES, u.role])).map((r) => (
                           <option key={r} value={r}>{r}</option>
                         ))}
                       </select>
                     ) : (
-                      <span className="text-on-surface-variant" title="Seul un super-administrateur peut modifier ce rôle">{u.role}</span>
+                      <span className="text-on-surface-variant font-medium" title="Seul un super-administrateur peut modifier ce rôle">{u.role}</span>
                     )}
                   </td>
                   <td className="p-md">
                     <select
-                      className="appearance-none bg-transparent border border-outline-variant rounded-none py-1.5 px-2 text-body-sm cursor-pointer"
+                      className="bg-surface border border-outline-variant/60 rounded-xl px-2.5 py-1.5 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 cursor-pointer"
                       value={u.teamId || ''}
                       onChange={(e) => updateField(u.id, 'teamId', e.target.value ? Number(e.target.value) : null)}
                     >
@@ -432,7 +438,7 @@ export default function Users() {
                   <td className="p-md text-center">
                     <input
                       type="checkbox"
-                      className="w-4 h-4 border-outline-variant cursor-pointer"
+                      className="w-4 h-4 border-outline-variant cursor-pointer accent-primary"
                       checked={u.isActive}
                       onChange={(e) => updateField(u.id, 'isActive', e.target.checked)}
                     />
@@ -441,7 +447,7 @@ export default function Users() {
                     {u.role !== 'REQUESTER' && (
                       <input
                         type="checkbox"
-                        className="w-4 h-4 border-outline-variant cursor-pointer"
+                        className="w-4 h-4 border-outline-variant cursor-pointer accent-primary"
                         checked={u.receiveDraftAlerts}
                         onChange={(e) => updateField(u.id, 'receiveDraftAlerts', e.target.checked)}
                       />
@@ -453,7 +459,7 @@ export default function Users() {
                         <button
                           onClick={() => askResetPassword(u.id)}
                           title="Réinitialiser le mot de passe"
-                          className="text-on-surface-variant hover:text-on-surface transition-colors p-1"
+                          className="text-on-surface-variant hover:text-primary transition-colors p-1"
                         >
                           <span className="material-symbols-outlined text-[18px]">lock_reset</span>
                         </button>
@@ -467,7 +473,7 @@ export default function Users() {
               ))}
               {users.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="p-md text-center text-on-surface-variant">Aucun utilisateur.</td>
+                  <td colSpan={7} className="p-md text-center text-on-surface-variant italic font-body-md">Aucun utilisateur trouvé.</td>
                 </tr>
               )}
             </tbody>
