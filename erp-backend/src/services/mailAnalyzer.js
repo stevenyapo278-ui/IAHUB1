@@ -107,10 +107,60 @@ async function callProvider(provider, prompt) {
   throw new Error(lastError || `Toutes les clés ${provider.label} ont échoué`);
 }
 
+async function getFewShotExamples(subject, body) {
+  const textQuery = `${subject || ''} ${body?.substring(0, 300) || ''}`.trim();
+  if (!textQuery) return '';
+
+  try {
+    const similarTickets = await prisma.$queryRawUnsafe(`
+      SELECT t.title, t.content, t.category, t.priority, tm.name as team_name
+      FROM "Ticket" t
+      LEFT JOIN "Team" tm ON tm.id = t."teamId"
+      WHERE t.status IN ('SOLVED', 'CLOSED') 
+        AND t.category IS NOT NULL 
+        AND t.priority IS NOT NULL
+      ORDER BY ts_rank(to_tsvector('french', COALESCE(t.title, '') || ' ' || COALESCE(t.content, '')), plainto_tsquery('french', $1)) DESC
+      LIMIT 3
+    `, textQuery);
+
+    if (similarTickets.length === 0) return '';
+
+    let examplesText = "\nVoici des exemples de tickets réels déjà résolus et validés par nos techniciens :\n";
+    for (const ticket of similarTickets) {
+      examplesText += `
+---
+Email reçu :
+Sujet : ${ticket.title}
+Corps : ${ticket.content?.substring(0, 300) || ''}
+
+Classification attendue :
+{
+  "summary": "${(ticket.title || '').replace(/"/g, '\\"')}",
+  "category": "${ticket.category}",
+  "priority": "${ticket.priority}",
+  "team": "${(ticket.team_name || '').replace(/"/g, '\\"')}"
+}
+`;
+    }
+    examplesText += "---\nApplique la même logique pour classer l'email ci-dessous :\n";
+    return examplesText;
+  } catch (err) {
+    console.error('[mailAnalyzer] Échec de la récupération des exemples Few-Shot :', err.message);
+    return '';
+  }
+}
+
 // Analyse un email brut via le provider IA actif et retourne les métadonnées ITSM structurées
 async function analyzeEmail({ subject, body, from, fromName }) {
   const provider = await getActiveProvider();
   if (!provider) throw new Error('Aucun provider IA configuré (Settings → Intelligence Artificielle)');
+
+  const { getSystemSettings } = require('./systemSettings');
+  const settings = await getSystemSettings();
+  let fewShotExamples = '';
+  if (settings?.enableFewShotTriage) {
+    fewShotExamples = await getFewShotExamples(subject, body);
+  }
 
   const { getPrompt } = require('./promptTemplates');
   const prompt = await getPrompt('analyzeEmail', {
@@ -118,6 +168,7 @@ async function analyzeEmail({ subject, body, from, fromName }) {
     from,
     subject,
     body: body?.substring(0, 2000) || '',
+    fewShotExamples,
   });
 
   const raw = await callProvider(provider, prompt);
@@ -129,3 +180,4 @@ async function analyzeEmail({ subject, body, from, fromName }) {
 }
 
 module.exports = { analyzeEmail, getActiveProvider, callProvider };
+

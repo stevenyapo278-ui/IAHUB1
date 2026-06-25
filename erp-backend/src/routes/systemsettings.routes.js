@@ -68,6 +68,7 @@ router.patch(
   [
     body('draftReminderEnabled').optional().isBoolean(),
     body('draftReminderDelayMinutes').optional().isInt({ min: 1, max: 1440 }),
+    body('enableFewShotTriage').optional().isBoolean(),
     body('acknowledgementMessage').optional({ nullable: true }).isString().isLength({ max: 2000 }),
     body('emailSignature').optional({ nullable: true }).isString().isLength({ max: 2000 }),
     body('signatureLogoUrl').optional({ nullable: true }).isString(),
@@ -86,6 +87,7 @@ router.patch(
     const data = {};
     if (req.body.draftReminderEnabled !== undefined) data.draftReminderEnabled = req.body.draftReminderEnabled;
     if (req.body.draftReminderDelayMinutes !== undefined) data.draftReminderDelayMinutes = req.body.draftReminderDelayMinutes;
+    if (req.body.enableFewShotTriage !== undefined) data.enableFewShotTriage = req.body.enableFewShotTriage;
     if (req.body.acknowledgementMessage !== undefined) data.acknowledgementMessage = req.body.acknowledgementMessage || null;
     if (req.body.emailSignature !== undefined) data.emailSignature = req.body.emailSignature || null;
     if (req.body.signatureLogoUrl !== undefined) data.signatureLogoUrl = req.body.signatureLogoUrl || null;
@@ -95,6 +97,7 @@ router.patch(
     if (req.body.dailySummaryRecipients !== undefined) data.dailySummaryRecipients = req.body.dailySummaryRecipients;
 
     const updated = await prisma.systemSettings.update({ where: { id: 1 }, data });
+
     return res.json(updated);
   }
 );

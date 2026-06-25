@@ -28,7 +28,9 @@ Règles de priorité :
 - P1 : service totalement indisponible, impact critique sur la production
 - P2 : dégradation majeure, plusieurs utilisateurs impactés
 - P3 : problème limité à un utilisateur, contournement possible
-- P4 : demande d'information, amélioration, question générale`,
+- P4 : demande d'information, amélioration, question générale
+
+{{fewShotExamples}}`,
   },
   analyzeIntent: {
     label: "Analyse de l'intention d'une réponse email sur un ticket existant",

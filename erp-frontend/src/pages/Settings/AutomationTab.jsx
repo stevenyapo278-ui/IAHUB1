@@ -355,7 +355,27 @@ export default function AutomationTab() {
         </div>
       </div>
 
+      {/* Entraînement et classification IA */}
+      <div className="space-y-md">
+        <div>
+          <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold mb-1">Entraînement et classification IA</h3>
+          <p className="font-body-sm text-body-sm text-on-surface-variant">
+            Permet à l'IA d'apprendre des décisions passées en injectant des exemples de tickets résolus similaires dans ses prompts.
+          </p>
+        </div>
+        <div className="flex flex-col gap-md">
+          <SettingRow
+            title="Apprentissage Few-Shot par historique"
+            description="Quand activé, l'IA utilise les tickets résolus ou clos par les techniciens comme modèles de référence pour classer les nouveaux tickets (catégorie, priorité, équipe)."
+            checked={settings.enableFewShotTriage}
+            onChange={(v) => updateSetting('enableFewShotTriage', v)}
+            disabled={saving}
+          />
+        </div>
+      </div>
+
       {/* Relance des brouillons en attente */}
+
       <div className="space-y-md">
         <div>
           <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold mb-1">Relance des brouillons en attente</h3>
