@@ -319,7 +319,7 @@ export default function AiProvidersTab() {
                       <td className="p-3 text-on-surface-variant">{m.label || '-'}</td>
                       <td className="p-3 text-on-surface-variant">
                         <span className="border border-outline-variant/60 px-2 py-0.5 rounded-full text-[10px] uppercase font-semibold">
-                          {m.type === 'EMBEDDING' ? 'Embedding' : 'Chat'}
+                          {m.type === 'EMBEDDING' ? 'Embedding' : m.type === 'RERANK' ? 'Reranker' : 'Chat'}
                         </span>
                       </td>
                       <td className="p-3 text-center">
@@ -374,6 +374,7 @@ export default function AiProvidersTab() {
               >
                 <option value="CHAT">Chat</option>
                 <option value="EMBEDDING">Embedding</option>
+                <option value="RERANK">Reranker</option>
               </select>
               <button 
                 type="submit" 

@@ -6,6 +6,7 @@ const { requirePermission } = require('../middleware/permissions');
 const { extractText } = require('../utils/documentExtract');
 const { chunkText } = require('../utils/chunking');
 const { generateEmbedding, toVectorLiteral } = require('../utils/embeddings');
+const { rerank, listRerankCandidates } = require('../utils/reranking');
 
 const router = express.Router();
 const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); // 20 Mo max
@@ -174,7 +175,12 @@ router.post('/search', async (req, res) => {
 
   try {
     const embedding = await generateEmbedding(query);
-    const topK = Math.min(Number(limit) || 5, 20);
+    const userLimit = Number(limit) || 5;
+
+    // Si un Reranker est actif, on récupère plus de candidats pour l'étape de tri secondaire
+    const rerankCandidates = await listRerankCandidates();
+    const hasActiveReranker = rerankCandidates.length > 0;
+    const dbLimit = hasActiveReranker ? Math.max(30, userLimit * 3) : Math.min(userLimit, 20);
 
     // Build where clause for metadata filters
     const metadataFilters = [];
@@ -212,7 +218,7 @@ router.post('/search', async (req, res) => {
          LIMIT $3`,
         toVectorLiteral(embedding),
         query,
-        topK,
+        dbLimit,
         ...filterParams
       );
     } else {
@@ -227,12 +233,18 @@ router.post('/search', async (req, res) => {
          ORDER BY combined_score DESC
          LIMIT $2`,
         toVectorLiteral(embedding),
-        topK,
+        dbLimit,
         ...filterParams
       );
     }
 
-    return res.json(results);
+    let finalResults = results;
+    if (hasActiveReranker) {
+      const reranked = await rerank(query, results);
+      finalResults = reranked.slice(0, userLimit);
+    }
+
+    return res.json(finalResults);
   } catch (err) {
     return res.status(502).json({ error: err.message || 'Erreur lors de la recherche' });
   }

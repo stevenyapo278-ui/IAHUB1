@@ -353,6 +353,7 @@ model AiProvider {
 enum AiModelType {
   CHAT
   EMBEDDING
+  RERANK
 }
 
 model AiModel {
