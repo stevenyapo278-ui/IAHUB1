@@ -8,12 +8,12 @@ const router = express.Router();
 
 const GRAPH_SCOPES = ['offline_access', 'User.Read', 'Mail.Read', 'Mail.ReadWrite', 'Mail.Send'].join(' ');
 
-function authorizeUrl(account, state) {
+function authorizeUrl(account, state, redirectUri) {
   const base = `https://login.microsoftonline.com/${account.tenantId}/oauth2/v2.0/authorize`;
   const params = new URLSearchParams({
     client_id: account.clientId,
     response_type: 'code',
-    redirect_uri: process.env.MICROSOFT_REDIRECT_URI,
+    redirect_uri: redirectUri,
     response_mode: 'query',
     scope: GRAPH_SCOPES,
     state,
@@ -29,8 +29,13 @@ router.get('/email-accounts/:id/oauth/connect', authenticate, requirePermission(
     return res.status(400).json({ error: 'Client ID, Tenant ID et Client Secret sont requis avant de connecter le compte' });
   }
 
+  const { getSystemSettings, resolveBackendUrl } = require('../services/systemSettings');
+  const settings = await getSystemSettings();
+  const backendUrl = resolveBackendUrl(settings);
+  const redirectUri = process.env.MICROSOFT_REDIRECT_URI || `${backendUrl}/api/oauth/outlook/callback`;
+
   const state = jwt.sign({ accountId: account.id }, process.env.JWT_SECRET, { expiresIn: '10m' });
-  return res.json({ url: authorizeUrl(account, state) });
+  return res.json({ url: authorizeUrl(account, state, redirectUri) });
 });
 
 // Callback Microsoft : échange le code contre un refresh token et le sauvegarde
@@ -54,6 +59,11 @@ router.get('/oauth/outlook/callback', async (req, res) => {
   const account = await prisma.emailAccount.findUnique({ where: { id: payload.accountId } });
   if (!account) return res.status(404).send('Compte introuvable');
 
+  const { getSystemSettings, resolveBackendUrl } = require('../services/systemSettings');
+  const settings = await getSystemSettings();
+  const backendUrl = resolveBackendUrl(settings);
+  const redirectUri = process.env.MICROSOFT_REDIRECT_URI || `${backendUrl}/api/oauth/outlook/callback`;
+
   try {
     const tokenRes = await fetch(`https://login.microsoftonline.com/${account.tenantId}/oauth2/v2.0/token`, {
       method: 'POST',
@@ -63,7 +73,7 @@ router.get('/oauth/outlook/callback', async (req, res) => {
         client_secret: account.clientSecret,
         grant_type: 'authorization_code',
         code,
-        redirect_uri: process.env.MICROSOFT_REDIRECT_URI,
+        redirect_uri: redirectUri,
         scope: GRAPH_SCOPES,
       }),
     });
