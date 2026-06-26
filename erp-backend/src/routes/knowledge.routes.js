@@ -33,6 +33,10 @@ router.post('/documents', requirePermission('knowledge.manage', ['ADMIN', 'TECHN
   if (!req.file) return res.status(400).json({ error: 'Fichier requis' });
 
   const ext = (req.file.originalname.split('.').pop() || '').toLowerCase();
+  if (!['pdf', 'docx', 'md', 'markdown', 'txt'].includes(ext)) {
+    return res.status(400).json({ error: 'Format de fichier non supporté. PDF, DOCX, MD ou TXT requis.' });
+  }
+
   const sourceType = ext === 'pdf' ? 'pdf' : ext === 'docx' ? 'docx' : 'markdown';
 
   // Parse metadata from request body
@@ -63,8 +67,18 @@ router.post('/documents', requirePermission('knowledge.manage', ['ADMIN', 'TECHN
       return res.status(422).json({ error: 'Aucun contenu exploitable dans le document' });
     }
 
+    const docTitle = document.title;
+    const docCategory = category || '';
+    const docTags = parsedTags.join(', ');
+
     for (let i = 0; i < chunks.length; i++) {
-      const embedding = await generateEmbedding(chunks[i]);
+      // Build enriched text for vector embedding logic
+      let enrichedText = `Document: ${docTitle}`;
+      if (docCategory) enrichedText += ` | Catégorie: ${docCategory}`;
+      if (docTags) enrichedText += ` | Tags: ${docTags}`;
+      enrichedText += `\nContenu: ${chunks[i]}`;
+
+      const embedding = await generateEmbedding(enrichedText);
       await prisma.$executeRawUnsafe(
         `INSERT INTO "KnowledgeChunk" (id, "documentId", "chunkIndex", content, embedding, "createdAt")
          VALUES (DEFAULT, $1, $2, $3, $4::vector, now())`,
@@ -101,14 +115,19 @@ router.put('/documents/:id/replace', requirePermission('knowledge.manage', ['ADM
   if (!document) return res.status(404).json({ error: 'Document introuvable' });
 
   const ext = (req.file.originalname.split('.').pop() || '').toLowerCase();
+  if (!['pdf', 'docx', 'md', 'markdown', 'txt'].includes(ext)) {
+    return res.status(400).json({ error: 'Format de fichier non supporté. PDF, DOCX, MD ou TXT requis.' });
+  }
+
   const sourceType = ext === 'pdf' ? 'pdf' : ext === 'docx' ? 'docx' : 'markdown';
+  const newTitle = req.body.title || document.title;
 
   await prisma.knowledgeDocument.update({
     where: { id: document.id },
     data: {
       sourceType,
       filename: req.file.originalname,
-      title: req.body.title || document.title,
+      title: newTitle,
       status: 'PROCESSING',
       error: null,
     },
@@ -130,8 +149,17 @@ router.put('/documents/:id/replace', requirePermission('knowledge.manage', ['ADM
     // nouveau contenu dans la recherche sémantique le temps de la réindexation.
     await prisma.knowledgeChunk.deleteMany({ where: { documentId: document.id } });
 
+    const docCategory = document.category || '';
+    const docTags = (document.tags || []).join(', ');
+
     for (let i = 0; i < chunks.length; i++) {
-      const embedding = await generateEmbedding(chunks[i]);
+      // Build enriched text for vector embedding logic
+      let enrichedText = `Document: ${newTitle}`;
+      if (docCategory) enrichedText += ` | Catégorie: ${docCategory}`;
+      if (docTags) enrichedText += ` | Tags: ${docTags}`;
+      enrichedText += `\nContenu: ${chunks[i]}`;
+
+      const embedding = await generateEmbedding(enrichedText);
       await prisma.$executeRawUnsafe(
         `INSERT INTO "KnowledgeChunk" (id, "documentId", "chunkIndex", content, embedding, "createdAt")
          VALUES (DEFAULT, $1, $2, $3, $4::vector, now())`,

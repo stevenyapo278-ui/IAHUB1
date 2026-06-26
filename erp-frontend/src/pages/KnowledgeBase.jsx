@@ -89,11 +89,37 @@ export default function KnowledgeBase() {
   const [results, setResults] = useState(null);
   const [searching, setSearching] = useState(false);
   const [showSearchFilters, setShowSearchFilters] = useState(false);
-  const [searchCategory, setSearchCategory] = useState('');
-  const [searchTags, setSearchTags] = useState([]);
+  const [searchCategory, setSearchCategory] = useState(() => localStorage.getItem('kb_search_category') || '');
+  const [searchTags, setSearchTags] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('kb_search_tags')) || [];
+    } catch {
+      return [];
+    }
+  });
   const [searchTagInput, setSearchTagInput] = useState('');
-  const [searchLimit, setSearchLimit] = useState(5);
-  const [useHybrid, setUseHybrid] = useState(true);
+  const [searchLimit, setSearchLimit] = useState(() => Number(localStorage.getItem('kb_search_limit')) || 5);
+  const [useHybrid, setUseHybrid] = useState(() => {
+    const saved = localStorage.getItem('kb_use_hybrid');
+    return saved !== null ? saved === 'true' : true;
+  });
+
+  // Persist search filters in localStorage
+  useEffect(() => {
+    localStorage.setItem('kb_search_category', searchCategory);
+  }, [searchCategory]);
+
+  useEffect(() => {
+    localStorage.setItem('kb_search_tags', JSON.stringify(searchTags));
+  }, [searchTags]);
+
+  useEffect(() => {
+    localStorage.setItem('kb_search_limit', searchLimit);
+  }, [searchLimit]);
+
+  useEffect(() => {
+    localStorage.setItem('kb_use_hybrid', useHybrid);
+  }, [useHybrid]);
 
   // Feedback states
   const [feedbackSent, setFeedbackSent] = useState({}); // { [chunkId]: rating }
@@ -118,6 +144,15 @@ export default function KnowledgeBase() {
   }
 
   useEffect(load, []);
+
+  // Polling for processing documents
+  useEffect(() => {
+    const hasProcessing = documents.some((doc) => doc.status === 'PROCESSING');
+    if (hasProcessing) {
+      const interval = setInterval(load, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [documents]);
 
   // Stats calculation
   const totalDocs = documents.length;
