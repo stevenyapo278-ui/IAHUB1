@@ -53,6 +53,34 @@ export default {
         tertiary: 'var(--color-tertiary)',
         error: 'var(--color-error)',
         'tertiary-fixed': 'var(--color-tertiary-fixed)',
+        
+        // Shadcn UI colors
+        foreground: 'var(--foreground)',
+        'primary-foreground': 'var(--primary-foreground)',
+        'secondary-foreground': 'var(--secondary-foreground)',
+        border: 'var(--border)',
+        input: 'var(--input)',
+        ring: 'var(--ring)',
+        card: {
+          DEFAULT: 'var(--card)',
+          foreground: 'var(--card-foreground)',
+        },
+        popover: {
+          DEFAULT: 'var(--popover)',
+          foreground: 'var(--popover-foreground)',
+        },
+        muted: {
+          DEFAULT: 'var(--muted)',
+          foreground: 'var(--muted-foreground)',
+        },
+        accent: {
+          DEFAULT: 'var(--accent)',
+          foreground: 'var(--accent-foreground)',
+        },
+        destructive: {
+          DEFAULT: 'var(--destructive)',
+          foreground: 'var(--destructive-foreground)',
+        },
       },
       borderRadius: {
         DEFAULT: '0.25rem',
