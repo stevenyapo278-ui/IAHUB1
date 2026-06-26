@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import confetti from 'canvas-confetti';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
@@ -48,6 +49,8 @@ export default function KnowledgeBase() {
   
   // Upload states
   const [uploading, setUploading] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [file, setFile] = useState(null);
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('');
@@ -55,6 +58,31 @@ export default function KnowledgeBase() {
   const [tags, setTags] = useState([]);
   const [tagInput, setTagInput] = useState('');
   const [dragActive, setDragActive] = useState(false);
+
+  // Simulated progress logic for document indexing stages
+  useEffect(() => {
+    let interval;
+    if (uploading) {
+      setProgress(0);
+      interval = setInterval(() => {
+        setProgress((prev) => {
+          if (prev < 20) {
+            return prev + Math.floor(Math.random() * 4) + 3; // Upload phase
+          } else if (prev < 45) {
+            return prev + Math.floor(Math.random() * 3) + 2; // Extraction & Analysis
+          } else if (prev < 85) {
+            return prev + Math.floor(Math.random() * 2) + 1; // Vectorization & Embedding
+          } else if (prev < 96) {
+            return prev + (Math.random() > 0.7 ? 1 : 0); // Almost done
+          }
+          return prev;
+        });
+      }, 250);
+    } else {
+      setProgress(0);
+    }
+    return () => clearInterval(interval);
+  }, [uploading]);
 
   // Search/RAG states
   const [query, setQuery] = useState('');
@@ -176,12 +204,30 @@ export default function KnowledgeBase() {
       await api.post('/knowledge/documents', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
+
+      // Complete progress bar simulation
+      setProgress(100);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
       setTitle('');
       setCategory('');
       setTags([]);
       setFile(null);
       if (e.target.reset) e.target.reset();
       load();
+
+      // Trigger success celebration and screen
+      setSuccess(true);
+      confetti({
+        particleCount: 120,
+        spread: 80,
+        origin: { y: 0.65 }
+      });
+
+      setTimeout(() => {
+        setSuccess(false);
+      }, 2500);
+
     } catch (err) {
       setError(err.response?.data?.error || "Erreur lors de l'upload");
     } finally {
@@ -709,143 +755,293 @@ export default function KnowledgeBase() {
 
         {/* Right column: indexing / adding document (canManage) */}
         {canManage && (
-          <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/60 card-shadow p-lg flex flex-col gap-md h-fit">
-            <div className="border-b border-outline-variant/40 pb-md">
-              <h3 className="font-headline-sm text-headline-sm text-on-background font-bold flex items-center gap-2">
-                <span className="material-symbols-outlined text-primary">add_circle</span>
-                Ajouter un document
-              </h3>
-              <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 leading-relaxed">
-                Importez et découpez de nouveaux documents pour enrichir les connaissances de l'IA.
-              </p>
-            </div>
-            
-            <form onSubmit={handleUpload} className="flex flex-col gap-md">
-              
-              {/* Drag and Drop Zone */}
-              <div
-                onDragEnter={handleDrag}
-                onDragOver={handleDrag}
-                onDragLeave={handleDrag}
-                onDrop={handleDrop}
-                onClick={() => document.getElementById('kb-file-input').click()}
-                className={`cursor-pointer border-2 border-dashed rounded-2xl p-md text-center transition-all min-h-[140px] flex flex-col items-center justify-center gap-xs ${
-                  dragActive 
-                    ? 'border-primary bg-primary/5 text-primary scale-[0.98]' 
-                    : file 
-                    ? 'border-emerald-500/40 bg-emerald-500/5 text-on-surface' 
-                    : 'border-outline-variant/60 hover:bg-surface-container-low text-on-surface-variant'
-                }`}
-              >
-                <input
-                  id="kb-file-input"
-                  type="file"
-                  accept=".pdf,.docx,.md,.markdown,.txt"
-                  onChange={(e) => {
-                    const chosen = e.target.files?.[0] || null;
-                    setFile(chosen);
-                    if (chosen && !title) {
-                      setTitle(chosen.name.substring(0, chosen.name.lastIndexOf('.')) || chosen.name);
-                    }
-                  }}
-                  className="hidden"
-                />
-                
-                <span className={`material-symbols-outlined text-[36px] ${file ? 'text-emerald-500' : 'text-primary'}`}>
-                  {file ? 'check_circle' : 'cloud_upload'}
-                </span>
-                
-                {file ? (
-                  <div className="flex flex-col gap-1 w-full max-w-[200px] overflow-hidden">
-                    <p className="text-[12px] font-bold text-emerald-500 truncate" title={file.name}>{file.name}</p>
-                    <p className="text-[10px] text-on-surface-variant">{(file.size / 1024).toFixed(1)} KB</p>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setFile(null);
-                        setTitle('');
-                      }}
-                      className="text-[10px] text-red-500 font-semibold hover:underline mt-1"
-                    >
-                      Supprimer
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <p className="text-body-sm font-semibold text-on-surface">Déposez votre fichier ici</p>
-                    <p className="text-[10px] text-on-surface-variant mt-0.5">ou cliquez pour parcourir</p>
-                    <p className="text-[9px] text-on-surface-variant font-medium uppercase mt-2">PDF, DOCX, Markdown, TXT</p>
-                  </>
-                )}
-              </div>
-
-              <label className="flex flex-col gap-xs">
-                <span className="font-label-sm text-label-sm text-on-surface-variant uppercase font-semibold">Titre de l'index</span>
-                <input
-                  className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Nom affiché dans la base"
-                  required
-                />
-              </label>
-
-              <label className="flex flex-col gap-xs">
-                <span className="font-label-sm text-label-sm text-on-surface-variant uppercase font-semibold">Catégorie</span>
-                <select
-                  className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300"
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
+          <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/60 card-shadow p-lg flex flex-col gap-md h-fit relative overflow-hidden min-h-[460px]">
+            <AnimatePresence mode="wait">
+              {uploading ? (
+                <motion.div
+                  key="uploading"
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -15 }}
+                  transition={{ duration: 0.25 }}
+                  className="flex flex-col items-center justify-center py-6 text-center gap-6 h-full min-h-[380px]"
                 >
-                  <option value="">Aucune catégorie</option>
-                  {CATEGORIES.map((cat) => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                </select>
-              </label>
-
-              <div className="flex flex-col gap-xs">
-                <span className="font-label-sm text-label-sm text-on-surface-variant uppercase font-semibold">Tags (mots-clés RAG)</span>
-                <input
-                  type="text"
-                  className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300"
-                  placeholder="Ajouter un tag (Entrée)..."
-                  value={tagInput}
-                  onChange={(e) => setTagInput(e.target.value)}
-                  onKeyDown={handleAddTag}
-                />
-                {tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-1.5">
-                    {tags.map((tag, idx) => (
-                      <span key={idx} className="badge bg-primary/10 text-primary border-primary/20 py-0.5 px-2 text-[10px] lowercase flex items-center gap-1">
-                        #{tag}
-                        <button type="button" onClick={() => handleRemoveTag(idx)} className="hover:opacity-85 text-[12px]"><span className="material-symbols-outlined text-[12px]">close</span></button>
-                      </span>
-                    ))}
+                  <div className="relative flex items-center justify-center w-20 h-20">
+                    <div className="absolute inset-0 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
+                    <span className="material-symbols-outlined text-[32px] text-primary animate-pulse">
+                      sync_saved_locally
+                    </span>
                   </div>
-                )}
-              </div>
 
-              <label className="flex flex-col gap-xs">
-                <span className="font-label-sm text-label-sm text-on-surface-variant uppercase font-semibold">Auteur</span>
-                <input
-                  className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300"
-                  value={author}
-                  onChange={(e) => setAuthor(e.target.value)}
-                  placeholder="Auteur du document"
-                />
-              </label>
+                  <div className="flex flex-col gap-1.5 w-full">
+                    <h4 className="font-headline-sm text-headline-sm text-on-background font-bold">
+                      Indexation en cours
+                    </h4>
+                    <p className="text-body-sm text-on-surface-variant max-w-[280px] mx-auto">
+                      Gemini découpe et analyse votre document pour la base vectorielle.
+                    </p>
+                  </div>
 
-              <button
-                type="submit"
-                disabled={uploading || !file}
-                className="w-full bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-semibold py-2.5 rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 disabled:opacity-60 text-body-sm flex items-center justify-center gap-1.5 mt-2"
-              >
-                <span className="material-symbols-outlined text-[18px]">cloud_upload</span>
-                {uploading ? 'Indexation en cours...' : 'Indexer le document'}
-              </button>
-            </form>
+                  {/* Progress Bar */}
+                  <div className="w-full max-w-[280px] flex flex-col gap-1.5 mt-2">
+                    <div className="w-full bg-surface-variant/40 h-2.5 rounded-full overflow-hidden border border-outline-variant/30">
+                      <div 
+                        className="bg-gradient-to-r from-primary to-indigo-600 h-full rounded-full transition-all duration-300 ease-out"
+                        style={{ width: `${progress}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between items-center text-[10px] font-mono text-on-surface-variant px-0.5">
+                      <span>
+                        {progress < 20 
+                          ? "Téléversement..." 
+                          : progress < 45 
+                          ? "Analyse & Extraction..." 
+                          : progress < 85 
+                          ? "Découpage & Vectorisation..." 
+                          : "Stockage pgvector..."}
+                      </span>
+                      <span className="font-bold text-primary">{progress}%</span>
+                    </div>
+                  </div>
+
+                  {/* Step-by-step Status List */}
+                  <div className="flex flex-col gap-3 text-left w-full max-w-[260px] border-t border-outline-variant/30 pt-4 mt-2 font-body-sm text-body-sm">
+                    <div className="flex items-center gap-3">
+                      {progress >= 20 ? (
+                        <span className="material-symbols-outlined text-emerald-500 text-[18px]">check_circle</span>
+                      ) : (
+                        <span className="material-symbols-outlined text-primary text-[18px] animate-spin">sync</span>
+                      )}
+                      <span className={progress >= 20 ? "text-on-surface-variant line-through opacity-70" : "text-on-surface font-semibold"}>
+                        1. Téléversement du fichier
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      {progress >= 45 ? (
+                        <span className="material-symbols-outlined text-emerald-500 text-[18px]">check_circle</span>
+                      ) : progress >= 20 ? (
+                        <span className="material-symbols-outlined text-primary text-[18px] animate-spin">sync</span>
+                      ) : (
+                        <span className="material-symbols-outlined text-on-surface-variant/40 text-[18px]">circle</span>
+                      )}
+                      <span className={progress >= 45 ? "text-on-surface-variant line-through opacity-70" : progress >= 20 ? "text-on-surface font-semibold" : "text-on-surface-variant/60"}>
+                        2. Extraction & Analyse du texte
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      {progress >= 85 ? (
+                        <span className="material-symbols-outlined text-emerald-500 text-[18px]">check_circle</span>
+                      ) : progress >= 45 ? (
+                        <span className="material-symbols-outlined text-primary text-[18px] animate-spin">sync</span>
+                      ) : (
+                        <span className="material-symbols-outlined text-on-surface-variant/40 text-[18px]">circle</span>
+                      )}
+                      <span className={progress >= 85 ? "text-on-surface-variant line-through opacity-70" : progress >= 45 ? "text-on-surface font-semibold" : "text-on-surface-variant/60"}>
+                        3. Découpage & Vectorisation
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      {progress >= 100 ? (
+                        <span className="material-symbols-outlined text-emerald-500 text-[18px]">check_circle</span>
+                      ) : progress >= 85 ? (
+                        <span className="material-symbols-outlined text-primary text-[18px] animate-spin">sync</span>
+                      ) : (
+                        <span className="material-symbols-outlined text-on-surface-variant/40 text-[18px]">circle</span>
+                      )}
+                      <span className={progress >= 100 ? "text-on-surface-variant line-through opacity-70" : progress >= 85 ? "text-on-surface font-semibold" : "text-on-surface-variant/60"}>
+                        4. Indexation pgvector
+                      </span>
+                    </div>
+                  </div>
+                </motion.div>
+              ) : success ? (
+                <motion.div
+                  key="success"
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  transition={{ type: 'spring', damping: 20, stiffness: 100 }}
+                  className="flex flex-col items-center justify-center py-6 text-center gap-md h-full min-h-[380px]"
+                >
+                  <motion.div
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ type: 'spring', delay: 0.15, damping: 10 }}
+                    className="w-20 h-20 rounded-full bg-emerald-500/10 border-2 border-emerald-500/20 flex items-center justify-center text-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.25)]"
+                  >
+                    <motion.span 
+                      initial={{ scale: 0.5, rotate: -45 }}
+                      animate={{ scale: 1, rotate: 0 }}
+                      transition={{ type: 'spring', stiffness: 200, damping: 10, delay: 0.25 }}
+                      className="material-symbols-outlined text-[48px]"
+                    >
+                      check_circle
+                    </motion.span>
+                  </motion.div>
+
+                  <div className="flex flex-col gap-1.5 px-4 mt-2">
+                    <h4 className="font-headline-sm text-headline-sm text-on-background font-bold">
+                      Document indexé !
+                    </h4>
+                    <p className="text-body-sm text-on-surface-variant max-w-[280px] mx-auto leading-relaxed">
+                      Le document a été découpé et rendu disponible pour la recherche sémantique avec succès.
+                    </p>
+                  </div>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="form"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="flex flex-col gap-md"
+                >
+                  <div className="border-b border-outline-variant/40 pb-md">
+                    <h3 className="font-headline-sm text-headline-sm text-on-background font-bold flex items-center gap-2">
+                      <span className="material-symbols-outlined text-primary">add_circle</span>
+                      Ajouter un document
+                    </h3>
+                    <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 leading-relaxed">
+                      Importez et découpez de nouveaux documents pour enrichir les connaissances de l'IA.
+                    </p>
+                  </div>
+                  
+                  <form onSubmit={handleUpload} className="flex flex-col gap-md">
+                    
+                    {/* Drag and Drop Zone */}
+                    <motion.div
+                      onDragEnter={handleDrag}
+                      onDragOver={handleDrag}
+                      onDragLeave={handleDrag}
+                      onDrop={handleDrop}
+                      onClick={() => document.getElementById('kb-file-input').click()}
+                      whileHover={{ scale: 1.01 }}
+                      whileTap={{ scale: 0.99 }}
+                      animate={dragActive ? { scale: 0.98 } : { scale: 1 }}
+                      className={`cursor-pointer border-2 border-dashed rounded-2xl p-md text-center transition-all min-h-[140px] flex flex-col items-center justify-center gap-xs ${
+                        dragActive 
+                          ? 'border-primary bg-primary/5 text-primary' 
+                          : file 
+                          ? 'border-emerald-500/40 bg-emerald-500/5 text-on-surface' 
+                          : 'border-outline-variant/60 hover:bg-surface-container-low text-on-surface-variant'
+                      }`}
+                    >
+                      <input
+                        id="kb-file-input"
+                        type="file"
+                        accept=".pdf,.docx,.md,.markdown,.txt"
+                        onChange={(e) => {
+                          const chosen = e.target.files?.[0] || null;
+                          setFile(chosen);
+                          if (chosen && !title) {
+                            setTitle(chosen.name.substring(0, chosen.name.lastIndexOf('.')) || chosen.name);
+                          }
+                        }}
+                        className="hidden"
+                      />
+                      
+                      <span className={`material-symbols-outlined text-[36px] ${file ? 'text-emerald-500' : 'text-primary'}`}>
+                        {file ? 'check_circle' : 'cloud_upload'}
+                      </span>
+                      
+                      {file ? (
+                        <div className="flex flex-col gap-1 w-full max-w-[200px] overflow-hidden">
+                          <p className="text-[12px] font-bold text-emerald-500 truncate" title={file.name}>{file.name}</p>
+                          <p className="text-[10px] text-on-surface-variant">{(file.size / 1024).toFixed(1)} KB</p>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setFile(null);
+                              setTitle('');
+                            }}
+                            className="text-[10px] text-red-500 font-semibold hover:underline mt-1"
+                          >
+                            Supprimer
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="text-body-sm font-semibold text-on-surface">Déposez votre fichier ici</p>
+                          <p className="text-[10px] text-on-surface-variant mt-0.5">ou cliquez pour parcourir</p>
+                          <p className="text-[9px] text-on-surface-variant font-medium uppercase mt-2">PDF, DOCX, Markdown, TXT</p>
+                        </>
+                      )}
+                    </motion.div>
+
+                    <label className="flex flex-col gap-xs">
+                      <span className="font-label-sm text-label-sm text-on-surface-variant uppercase font-semibold">Titre de l'index</span>
+                      <input
+                        className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300"
+                        value={title}
+                        onChange={(e) => setTitle(e.target.value)}
+                        placeholder="Nom affiché dans la base"
+                        required
+                      />
+                    </label>
+
+                    <label className="flex flex-col gap-xs">
+                      <span className="font-label-sm text-label-sm text-on-surface-variant uppercase font-semibold">Catégorie</span>
+                      <select
+                        className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300"
+                        value={category}
+                        onChange={(e) => setCategory(e.target.value)}
+                      >
+                        <option value="">Aucune catégorie</option>
+                        {CATEGORIES.map((cat) => (
+                          <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <div className="flex flex-col gap-xs">
+                      <span className="font-label-sm text-label-sm text-on-surface-variant uppercase font-semibold">Tags (mots-clés RAG)</span>
+                      <input
+                        type="text"
+                        className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300"
+                        placeholder="Ajouter un tag (Entrée)..."
+                        value={tagInput}
+                        onChange={(e) => setTagInput(e.target.value)}
+                        onKeyDown={handleAddTag}
+                      />
+                      {tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-1.5">
+                          {tags.map((tag, idx) => (
+                            <span key={idx} className="badge bg-primary/10 text-primary border-primary/20 py-0.5 px-2 text-[10px] lowercase flex items-center gap-1">
+                              #{tag}
+                              <button type="button" onClick={() => handleRemoveTag(idx)} className="hover:opacity-85 text-[12px]"><span className="material-symbols-outlined text-[12px]">close</span></button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <label className="flex flex-col gap-xs">
+                      <span className="font-label-sm text-label-sm text-on-surface-variant uppercase font-semibold">Auteur</span>
+                      <input
+                        className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300"
+                        value={author}
+                        onChange={(e) => setAuthor(e.target.value)}
+                        placeholder="Auteur du document"
+                      />
+                    </label>
+
+                    <button
+                      type="submit"
+                      disabled={uploading || !file}
+                      className="w-full bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-semibold py-2.5 rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 disabled:opacity-60 text-body-sm flex items-center justify-center gap-1.5 mt-2"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">cloud_upload</span>
+                      {uploading ? 'Indexation en cours...' : 'Indexer le document'}
+                    </button>
+                  </form>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         )}
       </div>
