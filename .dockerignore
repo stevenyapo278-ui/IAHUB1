@@ -1,0 +1,52 @@
+# =============================================================================
+# Docker ignore — réduit le contexte de build pour des builds plus rapides
+# =============================================================================
+
+# Versionning
+.git/
+.gitignore
+.gitattributes
+
+# Environnement
+.env
+.env.local
+.env.production
+
+# Dépendances (installées dans le Dockerfile)
+node_modules/
+erp-backend/node_modules/
+erp-frontend/node_modules/
+mcp-glpi/node_modules/
+
+# Logs
+logs/
+erp-backend/logs/
+*.log
+
+# Build artifacts
+erp-frontend/dist/
+mcp-glpi/dist/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose*.yml
+start.sh
+*.md
+
+# Tests (inutiles dans l'image de production)
+erp-backend/src/**/*.test.js
+erp-backend/coverage/
+
+# GLPI (inutile dans l'image)
+glpi-config/
+
+# n8n data
+n8n-data/

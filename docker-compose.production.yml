@@ -1,0 +1,74 @@
+# =============================================================================
+# IA Hub — Docker Compose Production (optimisé pour Dokploy)
+# Usage : docker compose -f docker-compose.production.yml up -d --build
+# =============================================================================
+# Ce fichier est une version minimaliste du docker-compose.yml principal,
+# conçue pour les environnements de production comme Dokploy.
+#
+# Différences avec docker-compose.yml :
+#   - Sans n8n (service optionnel, pas nécessaire au fonctionnement de l'ERP)
+#   - Sans GLPI (service séparé, configuré depuis l'interface)
+#   - Ports non exposés pour PostgreSQL (sécurité)
+#   - Restart policy cohérente
+# =============================================================================
+
+services:
+  # Base de données PostgreSQL avec pgvector
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-erp_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-erp_password}
+      POSTGRES_DB: ${POSTGRES_DB:-erp_itsm}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-erp_user} -d ${POSTGRES_DB:-erp_itsm}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    # Pas d'exposition de port en production — seul le backend y accède via le réseau interne
+    expose:
+      - "5432"
+    networks:
+      - ia-hub-network
+
+  # Application principale (backend + frontend React servis par Express)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD:-erp_password}@postgres:5432/${POSTGRES_DB:-erp_itsm}?schema=public
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: 8h
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      MICROSOFT_REDIRECT_URI: ${MICROSOFT_REDIRECT_URI}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:4000}
+      BACKEND_URL: ${BACKEND_URL:-http://localhost:4000}
+      GLPI_URL: ${GLPI_URL:-}
+      GLPI_APP_TOKEN: ${GLPI_APP_TOKEN:-}
+      GLPI_USER_TOKEN: ${GLPI_USER_TOKEN:-}
+    volumes:
+      - app_uploads:/app/erp-backend/uploads
+    ports:
+      - "${PORT:-4000}:4000"
+    networks:
+      - ia-hub-network
+
+networks:
+  ia-hub-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  app_uploads:
