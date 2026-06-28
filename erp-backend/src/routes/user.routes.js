@@ -1,6 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
+const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { authenticate, authorizeAdmin } = require('../middleware/auth');
 const { sendTemporaryPasswordEmail } = require('../services/emailSender');
@@ -61,38 +62,45 @@ router.get('/', async (req, res) => {
   return res.json(users);
 });
 
-router.post('/', async (req, res) => {
-  const { email, password, fullName, role, teamId } = req.body;
-  const targetRole = role || 'REQUESTER';
+router.post(
+  '/',
+  [
+    body('email').trim().isEmail().withMessage('Email invalide'),
+    body('password').isLength({ min: MIN_PASSWORD_LENGTH }).withMessage(`Le mot de passe doit contenir au moins ${MIN_PASSWORD_LENGTH} caractères`),
+    body('fullName').trim().notEmpty().withMessage('Le nom complet est requis'),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
 
-  if (!email || !password || !fullName) {
-    return res.status(400).json({ error: 'Email, mot de passe et nom complet sont requis' });
+    const { email, password, fullName, role, teamId } = req.body;
+    const targetRole = role || 'REQUESTER';
+
+    if (!canAssignRole(req.user.role, targetRole)) {
+      return res.status(403).json({ error: `Vous ne pouvez pas créer un compte avec le rôle ${targetRole}` });
+    }
+
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) return res.status(409).json({ error: 'Un utilisateur avec cet email existe déjà' });
+
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    const user = await prisma.user.create({
+      data: {
+        email,
+        passwordHash,
+        fullName,
+        role: targetRole,
+        teamId: teamId || null,
+      },
+      select: userSelect,
+    });
+
+    return res.status(201).json(user);
   }
-  if (password.length < MIN_PASSWORD_LENGTH) {
-    return res.status(400).json({ error: `Le mot de passe doit contenir au moins ${MIN_PASSWORD_LENGTH} caractères` });
-  }
-  if (!canAssignRole(req.user.role, targetRole)) {
-    return res.status(403).json({ error: `Vous ne pouvez pas créer un compte avec le rôle ${targetRole}` });
-  }
-
-  const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) return res.status(409).json({ error: 'Un utilisateur avec cet email existe déjà' });
-
-  const passwordHash = await bcrypt.hash(password, 10);
-
-  const user = await prisma.user.create({
-    data: {
-      email,
-      passwordHash,
-      fullName,
-      role: targetRole,
-      teamId: teamId || null,
-    },
-    select: userSelect,
-  });
-
-  return res.status(201).json(user);
-});
+);
 
 router.get('/:id', async (req, res) => {
   const user = await prisma.user.findUnique({
@@ -103,49 +111,60 @@ router.get('/:id', async (req, res) => {
   return res.json(user);
 });
 
-router.patch('/:id', async (req, res) => {
-  const { email, fullName, role, teamId, isActive, receiveDraftAlerts, password } = req.body;
-
-  const target = await prisma.user.findUnique({ where: { id: Number(req.params.id) }, select: { role: true } });
-  if (!target) return res.status(404).json({ error: 'Utilisateur introuvable' });
-  if (!canActOnTarget(req.user.role, target.role)) {
-    return res.status(403).json({ error: 'Vous ne pouvez pas modifier un compte administrateur ou super-administrateur' });
-  }
-  if (role !== undefined && !canAssignRole(req.user.role, role)) {
-    return res.status(403).json({ error: `Vous ne pouvez pas attribuer le rôle ${role}` });
-  }
-
-  const data = {};
-  if (email !== undefined) {
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing && existing.id !== Number(req.params.id)) {
-      return res.status(409).json({ error: 'Un autre utilisateur utilise déjà cet email' });
+router.patch(
+  '/:id',
+  [
+    body('email').optional().trim().isEmail().withMessage('Email invalide'),
+    body('fullName').optional().trim().notEmpty().withMessage('Le nom complet ne peut pas être vide'),
+    body('password').optional().isLength({ min: MIN_PASSWORD_LENGTH }).withMessage(`Le mot de passe doit contenir au moins ${MIN_PASSWORD_LENGTH} caractères`),
+    body('teamId').optional({ values: 'null' }).isInt({ min: 1 }).withMessage('teamId doit être un entier positif'),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
     }
-    data.email = email;
-  }
-  if (fullName !== undefined) data.fullName = fullName;
-  if (role !== undefined) data.role = role;
-  if (teamId !== undefined) data.teamId = teamId;
-  if (isActive !== undefined) data.isActive = isActive;
-  if (receiveDraftAlerts !== undefined) data.receiveDraftAlerts = receiveDraftAlerts;
-  if (password) {
-    if (password.length < MIN_PASSWORD_LENGTH) {
-      return res.status(400).json({ error: `Le mot de passe doit contenir au moins ${MIN_PASSWORD_LENGTH} caractères` });
-    }
-    data.passwordHash = await bcrypt.hash(password, 10);
-  }
 
-  try {
-    const user = await prisma.user.update({
-      where: { id: Number(req.params.id) },
-      data,
-      select: userSelect,
-    });
-    return res.json(user);
-  } catch (err) {
-    return res.status(404).json({ error: 'Utilisateur introuvable' });
+    const { email, fullName, role, teamId, isActive, receiveDraftAlerts, password } = req.body;
+
+    const target = await prisma.user.findUnique({ where: { id: Number(req.params.id) }, select: { role: true } });
+    if (!target) return res.status(404).json({ error: 'Utilisateur introuvable' });
+    if (!canActOnTarget(req.user.role, target.role)) {
+      return res.status(403).json({ error: 'Vous ne pouvez pas modifier un compte administrateur ou super-administrateur' });
+    }
+    if (role !== undefined && !canAssignRole(req.user.role, role)) {
+      return res.status(403).json({ error: `Vous ne pouvez pas attribuer le rôle ${role}` });
+    }
+
+    const data = {};
+    if (email !== undefined) {
+      const existing = await prisma.user.findUnique({ where: { email } });
+      if (existing && existing.id !== Number(req.params.id)) {
+        return res.status(409).json({ error: 'Un autre utilisateur utilise déjà cet email' });
+      }
+      data.email = email;
+    }
+    if (fullName !== undefined) data.fullName = fullName;
+    if (role !== undefined) data.role = role;
+    if (teamId !== undefined) data.teamId = teamId;
+    if (isActive !== undefined) data.isActive = isActive;
+    if (receiveDraftAlerts !== undefined) data.receiveDraftAlerts = receiveDraftAlerts;
+    if (password) {
+      data.passwordHash = await bcrypt.hash(password, 10);
+    }
+
+    try {
+      const user = await prisma.user.update({
+        where: { id: Number(req.params.id) },
+        data,
+        select: userSelect,
+      });
+      return res.json(user);
+    } catch (err) {
+      return res.status(404).json({ error: 'Utilisateur introuvable' });
+    }
   }
-});
+);
 
 // Réinitialise le mot de passe d'un utilisateur : génère un mot de passe temporaire, le hash et
 // l'enregistre, force mustChangePassword (l'utilisateur devra le changer dès sa prochaine

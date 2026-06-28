@@ -9,15 +9,36 @@ const { runDraftReminderScheduler } = require('./services/draftReminderScheduler
 const { runReminderScheduler } = require('./services/reminderScheduler');
 const { checkAndSendDailySummary } = require('./services/dailySummary');
 const { withHealthTracking } = require('./services/schedulerHealth');
+const { logger } = require('./utils/logger');
+
+// Validation des variables d'environnement critiques au démarrage
+const REQUIRED_ENV_VARS = ['JWT_SECRET', 'DATABASE_URL'];
+const missing = REQUIRED_ENV_VARS.filter((v) => !process.env[v]);
+if (missing.length > 0) {
+  logger.error(`Variables d'environnement manquantes : ${missing.join(', ')}`);
+  logger.error('Copiez .env.example vers .env et remplissez les valeurs requises.');
+  process.exit(1);
+}
 
 const PORT = process.env.PORT || 4000;
+
+// Vérifications supplémentaires non-bloquantes
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 16) {
+  logger.warn('JWT_SECRET est court (< 16 caractères) — utilisez une chaîne longue et aléatoire en production.');
+}
+if (process.env.CORS_ORIGIN === '*') {
+  logger.warn('CORS_ORIGIN=* — restreignez ceci en production pour des raisons de sécurité.');
+}
 const FALLBACK_CHECK_DELAY_MS = 60 * 1000; // si l'intervalle configuré est 0 (désactivé), on revérifie le réglage chaque minute
 const DRAFT_REMINDER_CHECK_INTERVAL_MS = 5 * 60 * 1000; // vérifie toutes les 5 min quels brouillons dépassent le délai configuré (draftReminderDelayMinutes)
 const TICKET_REMINDER_CHECK_INTERVAL_MS = 60 * 60 * 1000; // vérifie toutes les heures quels tickets WAITING_FOR_USER dépassent les délais de ReminderConfig (en jours, donc pas besoin d'une fréquence plus fine)
 const DAILY_SUMMARY_CHECK_INTERVAL_MS = 60 * 1000; // vérifie chaque minute si l'heure configurée (dailySummaryTime, ex "18:00") est atteinte
 
 app.listen(PORT, () => {
-  console.log(`ERP backend listening on port ${PORT}`);
+  logger.info(`Backend ERP démarré sur le port ${PORT}`);
+  if (process.env.NODE_ENV === 'production') {
+    logger.info(`Frontend attendu sur : ${process.env.FRONTEND_URL || 'http://localhost:' + PORT}`);
+  }
 });
 
 async function syncGlpiTeamsAndCategories() {
@@ -42,7 +63,7 @@ function scheduleSync(name, syncFn, getIntervalSeconds) {
         await trackedSyncFn();
       }
     } catch (err) {
-      console.error(`Erreur synchro ${name}:`, err);
+      logger.error(`Erreur synchro ${name}:`, { error: err.message, stack: err.stack });
     } finally {
       const nextDelayMs = intervalSeconds > 0 ? intervalSeconds * 1000 : FALLBACK_CHECK_DELAY_MS;
       setTimeout(tick, nextDelayMs);
@@ -61,18 +82,18 @@ scheduleSync('modèles IA', syncAllProviders, (s) => s.aiModelsSyncIntervalHours
 // tourne à fréquence fixe (5 min) : c'est runDraftReminderScheduler qui décide, par brouillon,
 // si le délai configuré est dépassé.
 const trackedDraftReminder = withHealthTracking('relance brouillons IA', runDraftReminderScheduler);
-trackedDraftReminder().catch((err) => console.error('Erreur relance brouillons IA:', err));
+trackedDraftReminder().catch((err) => logger.error('Erreur relance brouillons IA:', { error: err.message, stack: err.stack }));
 setInterval(() => {
-  trackedDraftReminder().catch((err) => console.error('Erreur relance brouillons IA:', err));
+  trackedDraftReminder().catch((err) => logger.error('Erreur relance brouillons IA:', { error: err.message, stack: err.stack }));
 }, DRAFT_REMINDER_CHECK_INTERVAL_MS);
 
 // Relance des tickets WAITING_FOR_USER selon ReminderConfig (J+2/J+5/J+10/J+15) — moteur déjà
 // existant et complet (relance, pré-clôture, clôture auto), mais jusqu'ici jamais déclenché
 // automatiquement : seulement via le bouton manuel "Lancer le scheduler" (Paramètres > Automatisation).
 const trackedTicketReminder = withHealthTracking('relance tickets en attente', runReminderScheduler);
-trackedTicketReminder().catch((err) => console.error('Erreur relance tickets en attente:', err));
+trackedTicketReminder().catch((err) => logger.error('Erreur relance tickets en attente:', { error: err.message, stack: err.stack }));
 setInterval(() => {
-  trackedTicketReminder().catch((err) => console.error('Erreur relance tickets en attente:', err));
+  trackedTicketReminder().catch((err) => logger.error('Erreur relance tickets en attente:', { error: err.message, stack: err.stack }));
 }, TICKET_REMINDER_CHECK_INTERVAL_MS);
 
 // Récapitulatif quotidien des tickets ouverts (Paramètres > Automatisation > Récapitulatif
@@ -81,5 +102,5 @@ setInterval(() => {
 // d'une minute pendant l'heure cible, ou redémarre le même jour après l'heure prévue).
 const trackedDailySummary = withHealthTracking('récapitulatif quotidien', checkAndSendDailySummary);
 setInterval(() => {
-  trackedDailySummary().catch((err) => console.error('Erreur récapitulatif quotidien:', err));
+  trackedDailySummary().catch((err) => logger.error('Erreur récapitulatif quotidien:', { error: err.message, stack: err.stack }));
 }, DAILY_SUMMARY_CHECK_INTERVAL_MS);

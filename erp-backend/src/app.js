@@ -26,10 +26,33 @@ const advancedSettingsRoutes = require('./routes/advancedsettings.routes');
 const promptTemplateRoutes = require('./routes/prompttemplate.routes');
 const draftApprovalRoutes = require('./routes/draftapproval.routes');
 
+const { requestId } = require('./middleware/requestId');
+const { logger, childLogger } = require('./utils/logger');
+
 const app = express();
 
 app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
 app.use(express.json());
+app.use(requestId);
+
+// Middleware de logging HTTP : enregistre chaque requête avec son temps d'exécution
+app.use((req, res, next) => {
+  const start = Date.now();
+  const log = childLogger(req.requestId);
+
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
+    log[level](`${req.method} ${req.originalUrl} → ${res.statusCode} (${duration}ms)`, {
+      method: req.method,
+      url: req.originalUrl,
+      statusCode: res.statusCode,
+      duration,
+    });
+  });
+
+  next();
+});
 
 // Fichiers persistants servis statiquement (ex: logo de signature email, voir systemsettings.routes.js)
 app.use('/uploads', express.static('uploads'));
@@ -74,17 +97,22 @@ if (isProduction) {
             }
             res.sendFile(path.join(distPath, 'index.html'));
         });
-        console.log(`✅ Serving frontend from: ${distPath}`);
+        logger.info(`Frontend servis depuis : ${distPath}`);
     } else {
-        console.warn(`⚠️ Frontend dist directory not found at: ${distPath}`);
+        logger.warn(`Dossier frontend introuvable : ${distPath}`);
     }
 }
 
-app.use((req, res) => res.status(404).json({ error: 'Route introuvable' }));
+app.use((req, res) => {
+  const log = childLogger(req.requestId);
+  log.warn(`Route introuvable : ${req.method} ${req.originalUrl}`);
+  res.status(404).json({ error: 'Route introuvable' });
+});
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
-  console.error(err);
+  const log = childLogger(req.requestId);
+  log.error('Erreur non gérée', { error: err.message, stack: err.stack });
   res.status(500).json({ error: 'Erreur interne du serveur' });
 });
 

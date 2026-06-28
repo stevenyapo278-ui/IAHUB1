@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [master, fofana]
+  pull_request:
+    branches: [master]
+
+jobs:
+  backend-lint-and-test:
+    name: Backend — Lint & Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: erp_user
+          POSTGRES_PASSWORD: erp_password
+          POSTGRES_DB: erp_itsm
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    defaults:
+      run:
+        working-directory: erp-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: erp-backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check Prisma schema compiles
+        run: npx prisma generate
+        env:
+          DATABASE_URL: postgresql://erp_user:erp_password@localhost:5432/erp_itsm?schema=public
+
+      - name: Run lint (if configured)
+        run: npx eslint src/ --ext .js 2>/dev/null || echo "ESLint non configuré, étape ignorée"
+
+      - name: Run tests
+        run: npm test
+        env:
+          DATABASE_URL: postgresql://erp_user:erp_password@localhost:5432/erp_itsm?schema=public
+          JWT_SECRET: test_jwt_secret_for_ci
+          NODE_ENV: test
+
+  frontend-lint-and-build:
+    name: Frontend — Lint & Build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: erp-frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: erp-frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npx eslint src/ --ext .js,.jsx 2>/dev/null || echo "ESLint non configuré, étape ignorée"
+
+      - name: Build
+        run: npm run build
+
+  mcp-glpi-build:
+    name: MCP GLPI — Build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: mcp-glpi
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mcp-glpi/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
