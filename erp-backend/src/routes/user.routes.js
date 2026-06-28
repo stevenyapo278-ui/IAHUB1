@@ -117,7 +117,7 @@ router.patch(
     body('email').optional().trim().isEmail().withMessage('Email invalide'),
     body('fullName').optional().trim().notEmpty().withMessage('Le nom complet ne peut pas être vide'),
     body('password').optional().isLength({ min: MIN_PASSWORD_LENGTH }).withMessage(`Le mot de passe doit contenir au moins ${MIN_PASSWORD_LENGTH} caractères`),
-    body('teamId').optional({ values: 'null' }).isInt({ min: 1 }).withMessage('teamId doit être un entier positif'),
+    body('teamId').optional({ values: 'null' }).customSanitizer(value => value === null ? null : Number(value)).isInt({ min: 1 }).withMessage('teamId doit être un entier positif ou null'),
   ],
   async (req, res) => {
     const errors = validationResult(req);

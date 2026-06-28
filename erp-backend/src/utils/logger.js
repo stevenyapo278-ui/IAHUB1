@@ -29,7 +29,7 @@ const logFormat = winston.format.combine(
       info.stack = err.stack;
     }
     return info;
-  })(),
+  }),
 );
 
 // Format console : coloré, lisible en développement
