@@ -1,6 +1,7 @@
 import { Routes, Route } from 'react-router-dom';
 import MainLayout from './layouts/MainLayout';
 import ProtectedRoute from './components/ProtectedRoute';
+import ErrorBoundary from './components/ErrorBoundary';
 import PageTransition from './components/PageTransition';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -23,6 +24,7 @@ export default function App() {
   // Les transitions de pages sont gérées dans MainLayout (Outlet uniquement).
   // La sidebar ne re-monte plus à chaque navigation.
   return (
+    <ErrorBoundary>
     <Routes>
         <Route path="/login" element={<PageTransition><Login /></PageTransition>} />
         <Route path="/approve/:token" element={<PageTransition><ApprovalPage /></PageTransition>} />
@@ -85,6 +87,7 @@ export default function App() {
           />
         </Route>
       </Routes>
+    </ErrorBoundary>
   );
 }
 

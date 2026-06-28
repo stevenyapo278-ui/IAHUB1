@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
@@ -70,7 +71,9 @@ export default function Inbox() {
       const { data } = await api.post('/inbox/sync');
       load(1, filter);
       setError('');
-      alert(`Sync terminé : ${data.processed} email(s) traité(s)`);
+      toast.success('Synchronisation terminée', {
+        description: `${data.processed} email(s) traité(s) par l\'agent IA.`,
+      });
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors du sync');
     } finally {
