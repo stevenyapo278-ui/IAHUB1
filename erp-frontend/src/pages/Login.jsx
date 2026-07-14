@@ -231,7 +231,7 @@ export default function Login() {
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="superadmin@prosuma.ci"
+                    placeholder="nom@entreprise.ci"
                     aria-describedby={error ? 'login-error' : undefined}
                   />
                   <InputGroupAddon align="inline-start" aria-hidden="true">
@@ -262,7 +262,7 @@ export default function Login() {
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
+                    placeholder="Votre mot de passe"
                     aria-describedby={error ? 'login-error' : undefined}
                   />
                   <InputGroupAddon align="inline-start" aria-hidden="true">
