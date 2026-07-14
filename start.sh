@@ -85,7 +85,6 @@ esac
 # Charge les ports personnalisés depuis le .env si définis
 if [ -f "$ENV_FILE" ]; then
   PORT=$(grep -E "^PORT=" "$ENV_FILE" | cut -d'=' -f2- | tr -d '\r' || true)
-  GLPI_PORT=$(grep -E "^GLPI_PORT=" "$ENV_FILE" | cut -d'=' -f2- | tr -d '\r' || true)
   MCP_GLPI_PORT=$(grep -E "^MCP_GLPI_PORT=" "$ENV_FILE" | cut -d'=' -f2- | tr -d '\r' || true)
 fi
 
@@ -94,7 +93,7 @@ echo "=== Stack démarrée ==="
 echo "Dashboard ERP : http://localhost:${PORT:-4000}"
 
 if [ "$LAUNCH_LOCAL_GLPI" = true ]; then
-  echo "GLPI          : http://localhost:${GLPI_PORT:-8080}"
+  echo "GLPI          : http://localhost:80"
   if [ "$choice" = "1" ]; then
     echo "MCP GLPI      : http://localhost:${MCP_GLPI_PORT:-3333}"
   fi
@@ -104,8 +103,8 @@ if [ "$LAUNCH_LOCAL_GLPI" = true ]; then
   echo "  Password : 12345678"
   echo ""
   echo "GLPI (première installation) :"
-  echo "  1. Ouvre http://localhost:${GLPI_PORT:-8080}"
-  echo "  2. Suis l'assistant MySQL : host=glpi-db, user=glpi, password=glpi_pass, db=glpi"
+  echo "  1. Ouvre http://localhost:80"
+  echo "  2. L'installation est automatique (env vars chargées depuis le .env)"
   echo "  3. Active l'API REST : Configuration > Générale > API"
   echo "  4. Génére App Token et User Token, puis connecte depuis Paramètres > Autres intégrations"
   echo ""

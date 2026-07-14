@@ -5,7 +5,7 @@
 # Cette stack inclut :
 #   postgres   — Base de données PostgreSQL + pgvector
 #   app        — Application ERP (backend + frontend React)
-#   glpi-db    — Base de données MariaDB pour GLPI ITSM
+#   db         — Base de données MySQL pour GLPI ITSM
 #   glpi       — GLPI (Gestionnaire Libre de Parc Informatique)
 #   glpi-mcp   — Pont MCP (Model Context Protocol) vers GLPI
 # =============================================================================
