@@ -69,7 +69,7 @@ async function main() {
     {
       name: 'gemini',
       label: 'Google Gemini',
-      baseUrl: 'https://generativelanguage.googleapis.com',
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
       models: ['gemini-1.5-pro', 'gemini-1.5-flash'],
     },
     {
@@ -89,7 +89,7 @@ async function main() {
   for (const p of providers) {
     const provider = await prisma.aiProvider.upsert({
       where: { name: p.name },
-      update: {},
+      update: { baseUrl: p.baseUrl },
       create: { name: p.name, label: p.label, baseUrl: p.baseUrl },
     });
 
