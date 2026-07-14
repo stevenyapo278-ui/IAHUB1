@@ -4,7 +4,8 @@ erp-backend/node_modules/
 erp-frontend/node_modules/
 mcp-glpi/node_modules/
 
-erp-frontend/dist/
+# erp-frontend/dist/ — pré-compilé et commité pour le déploiement production (évite npm run build sur le serveur)
+# mcp-glpi/dist/ — idem
 mcp-glpi/dist/
 *.log
 logs/
