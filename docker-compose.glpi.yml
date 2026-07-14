@@ -41,7 +41,7 @@ services:
         condition: service_healthy
     env_file: .env
     ports:
-      - "80:80"
+      - "${GLPI_PORT:-8080}:80"
     volumes:
       - ./storage/glpi:/var/glpi:rw
       # Pour les plugins du marketplace (GLPI 10+), décommentez la ligne ci-dessous :
