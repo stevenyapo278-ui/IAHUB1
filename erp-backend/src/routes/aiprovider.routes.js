@@ -94,15 +94,13 @@ router.post('/:id/sync-models', async (req, res) => {
   const provider = await prisma.aiProvider.findUnique({ where: { id: providerId } });
   if (!provider) return res.status(404).json({ error: 'Fournisseur introuvable' });
 
-  const added = await syncProviderModels(providerId);
+  const result = await syncProviderModels(providerId);
 
-  if (added === null) {
-    return res.status(422).json({
-      error: "Synchronisation impossible : aucune clé API active ou fournisseur non pris en charge",
-    });
+  if (result.error) {
+    return res.status(422).json({ error: result.error });
   }
 
-  return res.json({ added });
+  return res.json({ added: result.added });
 });
 
 // --- Models ---
