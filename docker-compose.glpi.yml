@@ -31,12 +31,29 @@ services:
       retries: 5
       start_period: 30s
 
+  # Init container : corrige les permissions des dossiers avant le démarrage de GLPI
+  # GLPI tourne avec l'utilisateur www-data (UID 33) et a besoin d'écrire dans
+  # ./storage/glpi monté sur /var/glpi. Sur l'hôte, le dossier appartient souvent
+  # à un autre utilisateur → Permission denied sans ce correctif.
+  glpi-permissions:
+    image: alpine:latest
+    container_name: ia-hub-glpi-permissions
+    restart: "no"
+    volumes:
+      - ./storage/glpi:/var/glpi:rw
+    # Exec form directe : pas de shell, exit code 0 = succès, non-zero = erreur
+    command: ["chown", "-R", "33:33", "/var/glpi"]
+    networks:
+      - ia-hub-network
+
   # GLPI (Gestionnaire Libre de Parc Informatique) — image officielle
   glpi:
     image: glpi/glpi:latest
     container_name: ia-hub-glpi
     restart: unless-stopped
     depends_on:
+      glpi-permissions:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
     env_file: .env
