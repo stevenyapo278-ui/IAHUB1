@@ -14,30 +14,43 @@ fi
 
 echo "=== IA Hub — Démarrage ==="
 echo ""
-echo "1) Démarrer toute la stack avec un GLPI local (conteneurs glpi + glpi-db)"
-echo "2) Démarrer la stack sans GLPI (si vous l'installez vous-même en externe)"
-echo "3) Démarrer en mode PRODUCTION (stack minimale, sans GLPI, optimisé Dokploy)"
+echo "1) Démarrer toute la stack (postgres + app + glpi-mcp) avec GLPI local"
+echo "2) Démarrer la stack sans GLPI (si GLPI est installé en externe)"
+echo "3) Démarrer en mode PRODUCTION (postgres + app, sans GLPI, optimisé)"
+echo "4) Démarrer en mode PRODUCTION avec GLPI local (recommande)"
 echo ""
-read -rp "Choix [1/2/3] : " choice
+read -rp "Choix [1/2/3/4] : " choice
+
+COMPOSE_FILES=""
 
 case "$choice" in
   1)
     echo ""
     echo "Démarrage avec GLPI local (conteneurs glpi + glpi-db)..."
-    docker compose -f docker-compose.yml -f docker-compose.glpi.yml up -d --build
+    COMPOSE_FILES="-f docker-compose.yml -f docker-compose.glpi.yml"
+    docker compose $COMPOSE_FILES up -d --build
     LAUNCH_LOCAL_GLPI=true
     ;;
   2)
     echo ""
     echo "Démarrage de la stack sans GLPI..."
-    docker compose up -d --build
+    COMPOSE_FILES="-f docker-compose.yml"
+    docker compose $COMPOSE_FILES up -d --build
     LAUNCH_LOCAL_GLPI=false
     ;;
   3)
     echo ""
     echo "Démarrage en mode PRODUCTION (stack minimale)..."
-    docker compose -f docker-compose.production.yml up -d --build
+    COMPOSE_FILES="-f docker-compose.production.yml"
+    docker compose $COMPOSE_FILES up -d --build
     LAUNCH_LOCAL_GLPI=false
+    ;;
+  4)
+    echo ""
+    echo "Démarrage en mode PRODUCTION avec GLPI local..."
+    COMPOSE_FILES="-f docker-compose.production.yml -f docker-compose.glpi.yml"
+    docker compose $COMPOSE_FILES up -d --build
+    LAUNCH_LOCAL_GLPI=true
     ;;
   *)
     echo "Choix invalide."
@@ -58,7 +71,9 @@ echo "Dashboard ERP : http://localhost:${PORT:-4000}"
 
 if [ "$LAUNCH_LOCAL_GLPI" = true ]; then
   echo "GLPI          : http://localhost:${GLPI_PORT:-8080}"
-  echo "MCP GLPI      : http://localhost:${MCP_GLPI_PORT:-3333}"
+  if [ "$choice" = "1" ]; then
+    echo "MCP GLPI      : http://localhost:${MCP_GLPI_PORT:-3333}"
+  fi
   echo ""
   echo "Identifiants par défaut :"
   echo "  Email    : superadmin@prosuma.ci"
@@ -70,13 +85,15 @@ if [ "$LAUNCH_LOCAL_GLPI" = true ]; then
   echo "  3. Active l'API REST : Configuration > Générale > API"
   echo "  4. Génére App Token et User Token, puis connecte depuis Paramètres > Autres intégrations"
   echo ""
-  echo "Arrêter : docker compose -f docker-compose.yml -f docker-compose.glpi.yml down"
+  echo "Arrêter : docker compose $COMPOSE_FILES down"
 elif [ "$LAUNCH_LOCAL_GLPI" = false ]; then
-  echo "MCP GLPI      : http://localhost:${MCP_GLPI_PORT:-3333}" 2>/dev/null || true
+  if [ "$choice" != "3" ]; then
+    echo "MCP GLPI      : http://localhost:${MCP_GLPI_PORT:-3333}" 2>/dev/null || true
+  fi
   echo ""
   echo "Identifiants par défaut :"
   echo "  Email    : superadmin@prosuma.ci"
   echo "  Password : 12345678"
   echo ""
-  echo "Arrêter : docker compose down"
+  echo "Arrêter : docker compose $COMPOSE_FILES down"
 fi
