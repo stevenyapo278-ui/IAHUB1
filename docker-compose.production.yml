@@ -8,6 +8,7 @@
 # Différences avec docker-compose.yml :
 #   - Sans n8n (service optionnel, pas nécessaire au fonctionnement de l'ERP)
 #   - Sans GLPI (service séparé, configuré depuis l'interface)
+#   - Sans MCP GLPI (service séparé)
 #   - Ports non exposés pour PostgreSQL (sécurité)
 #   - Restart policy cohérente
 # =============================================================================
@@ -41,6 +42,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api}
     restart: always
     depends_on:
       postgres:
@@ -51,13 +54,14 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD:-erp_password}@postgres:5432/${POSTGRES_DB:-erp_itsm}?schema=public
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: 8h
-      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:4000}
       MICROSOFT_REDIRECT_URI: ${MICROSOFT_REDIRECT_URI}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:4000}
       BACKEND_URL: ${BACKEND_URL:-http://localhost:4000}
       GLPI_URL: ${GLPI_URL:-}
       GLPI_APP_TOKEN: ${GLPI_APP_TOKEN:-}
       GLPI_USER_TOKEN: ${GLPI_USER_TOKEN:-}
+      FRONTEND_DIST_PATH: /app/erp-frontend/dist
     volumes:
       - app_uploads:/app/erp-backend/uploads
     ports:

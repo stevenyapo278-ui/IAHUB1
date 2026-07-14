@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import {
@@ -9,6 +10,28 @@ import {
 } from '@/components/ui/input-group';
 import { FloatingPaths } from '@/components/floating-paths';
 import { MailIcon, LockIcon, ArrowRightIcon, RefreshCwIcon, AlertTriangleIcon } from 'lucide-react';
+
+/* ── Variants d'animation ──────────────────────────────────────────────────── */
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: { staggerChildren: 0.08, delayChildren: 0.15 },
+  },
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 16 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] } },
+};
+
+const cardVariants = {
+  hidden: { opacity: 0, y: 24, scale: 0.97 },
+  visible: {
+    opacity: 1, y: 0, scale: 1,
+    transition: { duration: 0.55, ease: [0.16, 1, 0.3, 1], delay: 0.2 },
+  },
+};
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -34,57 +57,168 @@ export default function Login() {
 
   return (
     <main className="relative md:h-screen md:overflow-hidden lg:grid lg:grid-cols-2 bg-background antialiased selection:bg-primary/20 selection:text-primary">
-      {/* Left panel (Hidden on small screens) */}
-      <div className="relative hidden h-full flex-col border-r bg-zinc-950 p-10 lg:flex justify-between">
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* PANEL GAUCHE — Marque & Animation */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.8 }}
+        className="relative hidden h-full flex-col border-r bg-zinc-950 p-10 lg:flex justify-between overflow-hidden"
+      >
+        {/* Overlay gradient */}
         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/20" />
-        
-        <div className="flex items-center gap-2 z-10 text-white">
-          <span className="material-symbols-outlined text-primary text-[28px] fill-1">dashboard</span>
-          <span className="font-bold text-xl tracking-tight">ERP ITSM</span>
-        </div>
 
+        {/* Fond animé */}
         <div className="absolute inset-0">
           <FloatingPaths position={1} />
           <FloatingPaths position={-1} />
         </div>
-      </div>
 
-      {/* Right panel */}
-      <div className="relative flex min-h-screen flex-col justify-center px-6 sm:px-12 lg:px-16">
-        {/* Top Shades background effects */}
-        <div aria-hidden className="absolute inset-0 isolate -z-10 opacity-60 contain-strict pointer-events-none">
+        {/* Logo / Marque */}
+        <motion.div
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.6, delay: 0.1 }}
+          className="flex items-center gap-2.5 z-10 text-white"
+        >
+          <motion.span
+            initial={{ scale: 0.8, rotate: -10 }}
+            animate={{ scale: 1, rotate: 0 }}
+            transition={{ duration: 0.5, type: 'spring', bounce: 0.5, delay: 0.2 }}
+            className="material-symbols-outlined text-primary text-[30px]"
+            style={{ fontVariationSettings: "'FILL' 1" }}
+          >
+            dashboard
+          </motion.span>
+          <span className="font-bold text-xl tracking-tight">ERP ITSM</span>
+        </motion.div>
+
+        {/* Tagline centrée */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.7, delay: 0.4 }}
+          className="z-10 text-center max-w-md mx-auto"
+        >
+          <h2 className="text-3xl font-bold text-white tracking-tight mb-3">
+            Gestion IT<br/>Intelligente
+          </h2>
+          <p className="text-zinc-400 text-sm leading-relaxed">
+            Plateforme ITSM nouvelle génération avec orchestration IA,
+            synchronisation GLPI et automatisations avancées.
+          </p>
+        </motion.div>
+
+        {/* Footer */}
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.5, delay: 0.7 }}
+          className="z-10 text-xs text-zinc-600"
+        >
+          &copy; {new Date().getFullYear()} ERP ITSM — Tous droits réservés
+        </motion.p>
+      </motion.div>
+
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* PANEL DROIT — Formulaire de connexion */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.6 }}
+        className="relative flex min-h-screen flex-col justify-center px-6 sm:px-12 lg:px-16"
+      >
+        {/* Effets de fond — radial gradients */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 0.6 }}
+          transition={{ duration: 1, delay: 0.3 }}
+          aria-hidden
+          className="absolute inset-0 isolate -z-10 opacity-60 contain-strict pointer-events-none"
+        >
           <div className="absolute top-0 right-0 h-320 w-140 -translate-y-87.5 rounded-full bg-[radial-gradient(68.54%_68.72%_at_55.02%_31.46%,--theme(--color-foreground/.06)_0,hsla(0,0%,55%,.02)_50%,--theme(--color-foreground/.01)_80%)]" />
           <div className="absolute top-0 right-0 h-320 w-60 rounded-full bg-[radial-gradient(50%_50%_at_50%_50%,--theme(--color-foreground/.04)_0,--theme(--color-foreground/.01)_80%,transparent_100%)] [translate:5%_-50%]" />
           <div className="absolute top-0 right-0 h-320 w-60 -translate-y-87.5 rounded-full bg-[radial-gradient(50%_50%_at_50%_50%,--theme(--color-foreground/.04)_0,--theme(--color-foreground/.01)_80%,transparent_100%)]" />
-        </div>
+        </motion.div>
 
-        <div className="mx-auto w-full max-w-[420px] space-y-6">
-          <div className="flex flex-col items-center text-center space-y-2">
-            <div className="flex items-center gap-2 lg:hidden mb-2 text-on-surface">
-              <span className="material-symbols-outlined text-primary text-[28px] fill-1">dashboard</span>
+        <motion.div
+          className="mx-auto w-full max-w-[420px] space-y-6"
+          variants={containerVariants}
+          initial="hidden"
+          animate="visible"
+        >
+          {/* ── En-tête ──────────────────────────────────────────────────────── */}
+          <motion.div variants={itemVariants} className="flex flex-col items-center text-center space-y-2">
+            <motion.div
+              initial={{ scale: 0.8 }}
+              animate={{ scale: 1 }}
+              transition={{ duration: 0.4, type: 'spring', bounce: 0.4 }}
+              className="flex items-center gap-2 lg:hidden mb-2 text-on-surface"
+            >
+              <span className="material-symbols-outlined text-primary text-[28px]"
+                style={{ fontVariationSettings: "'FILL' 1" }}
+              >
+                dashboard
+              </span>
               <span className="font-bold text-xl tracking-tight">ERP ITSM</span>
-            </div>
-            <h1 className="font-bold text-3xl tracking-tight text-on-surface">
+            </motion.div>
+
+            <motion.h1
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, delay: 0.1 }}
+              className="font-bold text-3xl tracking-tight text-on-surface"
+            >
               Connexion
-            </h1>
-            <p className="text-sm text-muted-foreground">
+            </motion.h1>
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.4, delay: 0.15 }}
+              className="text-sm text-muted-foreground"
+            >
               Accédez à la console de gestion intelligente ERP ITSM
-            </p>
-          </div>
+            </motion.p>
+          </motion.div>
 
-          <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/60 p-[28px] card-shadow">
-            <form className="space-y-4" onSubmit={handleSubmit}>
-              {error && (
-                <div className="border border-red-500/20 bg-red-500/5 text-red-500 p-4 rounded-xl flex items-start gap-3 font-body-sm animate-in fade-in slide-in-from-top-1 duration-200">
-                  <AlertTriangleIcon className="h-5 w-5 shrink-0 text-red-500 mt-0.5" />
-                  <div>
-                    <strong className="font-semibold text-sm">Échec de connexion</strong>
-                    <p className="mt-0.5 text-xs text-red-500/80">{error}</p>
-                  </div>
-                </div>
-              )}
+          {/* ── Carte formulaire (bento glass) ────────────────────────────────── */}
+          <motion.div
+            variants={cardVariants}
+            className="bg-surface-container-lowest rounded-2xl border border-outline-variant/60 p-[28px] card-shadow"
+          >
+            <motion.form
+              className="space-y-4"
+              onSubmit={handleSubmit}
+              variants={containerVariants}
+              initial="hidden"
+              animate="visible"
+            >
+              {/* ── Message d'erreur animé ────────────────────────────────────── */}
+              <AnimatePresence>
+                {error && (
+                  <motion.div
+                    key="login-error"
+                    initial={{ opacity: 0, y: -8, height: 0 }}
+                    animate={{ opacity: 1, y: 0, height: 'auto' }}
+                    exit={{ opacity: 0, y: -8, height: 0 }}
+                    transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+                    id="login-error"
+                    role="alert"
+                    className="border border-red-500/20 bg-red-500/5 text-red-500 p-4 rounded-xl flex items-start gap-3 font-body-sm"
+                  >
+                    <AlertTriangleIcon className="h-5 w-5 shrink-0 text-red-500 mt-0.5" />
+                    <div>
+                      <strong className="font-semibold text-sm">Échec de connexion</strong>
+                      <p className="mt-0.5 text-xs text-red-500/80">{error}</p>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
-              <div className="space-y-1.5">
+              {/* ── Champ Email ────────────────────────────────────────────────── */}
+              <motion.div variants={itemVariants} className="space-y-1.5">
                 <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground" htmlFor="email">
                   Identifiant / Email professionnel
                 </label>
@@ -98,14 +232,16 @@ export default function Login() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="superadmin@prosuma.ci"
+                    aria-describedby={error ? 'login-error' : undefined}
                   />
-                  <InputGroupAddon align="inline-start">
+                  <InputGroupAddon align="inline-start" aria-hidden="true">
                     <MailIcon className="h-4 w-4" />
                   </InputGroupAddon>
                 </InputGroup>
-              </div>
+              </motion.div>
 
-              <div className="space-y-1.5">
+              {/* ── Champ Mot de passe ────────────────────────────────────────── */}
+              <motion.div variants={itemVariants} className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground" htmlFor="password">
                     Mot de passe
@@ -127,34 +263,56 @@ export default function Login() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
+                    aria-describedby={error ? 'login-error' : undefined}
                   />
-                  <InputGroupAddon align="inline-start">
+                  <InputGroupAddon align="inline-start" aria-hidden="true">
                     <LockIcon className="h-4 w-4" />
                   </InputGroupAddon>
                 </InputGroup>
-              </div>
+              </motion.div>
 
-              <Button className="w-full h-10 mt-6" type="submit" disabled={loading}>
-                {loading ? (
-                  <>
-                    <RefreshCwIcon className="h-4 w-4 animate-spin mr-2" />
-                    Connexion en cours...
-                  </>
-                ) : (
-                  <>
-                    Se connecter
-                    <ArrowRightIcon className="h-4 w-4 ml-2" />
-                  </>
-                )}
-              </Button>
-            </form>
-          </div>
+              {/* ── Bouton de connexion animé ──────────────────────────────────── */}
+              <motion.div variants={itemVariants}>
+                <Button
+                  className="w-full h-10 mt-6 transition-all duration-300 active:scale-[0.98] group"
+                  type="submit"
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <motion.span
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="flex items-center gap-2"
+                    >
+                      <RefreshCwIcon className="h-4 w-4 animate-spin" />
+                      Connexion en cours...
+                    </motion.span>
+                  ) : (
+                    <span className="flex items-center gap-2">
+                      Se connecter
+                      <motion.span
+                        initial={{ x: 0 }}
+                        whileHover={{ x: 3 }}
+                        transition={{ duration: 0.2 }}
+                      >
+                        <ArrowRightIcon className="h-4 w-4" />
+                      </motion.span>
+                    </span>
+                  )}
+                </Button>
+              </motion.div>
+            </motion.form>
+          </motion.div>
 
-          <p className="mt-8 text-center text-xs text-muted-foreground/80 font-medium">
+          {/* ── Footer ────────────────────────────────────────────────────────── */}
+          <motion.p
+            variants={itemVariants}
+            className="mt-8 text-center text-xs text-muted-foreground/80 font-medium"
+          >
             ERP ITSM &mdash; Système d'assistance et d'automatisations IA
-          </p>
-        </div>
-      </div>
+          </motion.p>
+        </motion.div>
+      </motion.div>
     </main>
   );
 }

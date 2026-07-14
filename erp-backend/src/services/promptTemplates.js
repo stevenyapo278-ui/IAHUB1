@@ -14,15 +14,28 @@ Corps : {{body}}
 
 Retourne ce JSON :
 {
-  "summary": "résumé du problème en 1-2 phrases",
+  "summary": "description factuelle de la demande ou du problème en 1-2 phrases",
   "category": "Logiciel|Matériel|Réseau|Téléphonie|Système",
   "priority": "P1|P2|P3|P4",
   "team": "nom de l'équipe concernée",
   "confidence": 0.0-1.0,
-  "suggestedTitle": "titre court pour le ticket (max 80 caractères)",
+  "suggestedTitle": "titre court et explicite pour le ticket (max 80 caractères), doit refléter l'action demandée (ex: 'Ouverture des ports USB - Transmission fiscale')",
+  "suggestedSkill": "nom exact de la compétence parmi la liste ci-dessous, ou null si aucune ne correspond",
   "isSpam": false,
   "language": "fr|en|autre"
 }
+
+Liste des compétences techniciens disponibles :
+{{availableSkills}}
+
+Règles pour suggestedSkill :
+- Compare le sujet et le corps de l'email avec chaque compétence disponible.
+- Si la demande correspond clairement à une compétence (ex: "ouvrir les ports USB" → "PORT USB", "problème VPN" → "VPN"), retourne ce nom exact.
+- Si aucune compétence ne correspond précisément, retourne null.
+
+Règles pour isSpam :
+- true si l'email est un message d'absence, publicité, newsletter, accusé de réception automatique, email de bienvenue ou tout message ne demandant PAS une action de support IT.
+- false si l'email contient une vraie demande de support ou de service informatique.
 
 Règles de priorité :
 - P1 : service totalement indisponible, impact critique sur la production

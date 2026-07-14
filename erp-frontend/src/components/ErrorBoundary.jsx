@@ -47,7 +47,7 @@ export default class ErrorBoundary extends Component {
             <div className="flex items-center gap-3">
               <button
                 onClick={this.handleReset}
-                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-semibold shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm"
+                className="px-5 py-2.5 rounded-xl btn-gradient font-semibold shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm"
               >
                 Réessayer
               </button>

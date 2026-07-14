@@ -88,6 +88,14 @@ router.get('/oauth/outlook/callback', async (req, res) => {
       data: { refreshToken: tokenData.refresh_token, isActive: true },
     });
 
+    // Auto-définit comme compte par défaut si aucun autre compte Outlook par défaut n'existe
+    await prisma.emailAccount.updateMany({
+      where: { id: account.id, isDefault: false },
+      data: { isDefault: true },
+    });
+    // Si un autre compte par défaut existait déjà, updateMany n'aura rien fait (isDefault était déjà false)
+    // — ce qui préserve le choix explicite de l'utilisateur.
+
     return res.send('<html><body><h2>Compte Outlook connecté avec succès.</h2><p>Vous pouvez fermer cette fenêtre et retourner au dashboard.</p></body></html>');
   } catch (err) {
     return res.status(502).send(`Erreur lors de la connexion : ${err.message}`);

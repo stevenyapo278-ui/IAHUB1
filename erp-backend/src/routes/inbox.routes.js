@@ -8,13 +8,24 @@ const { analyzeEmail } = require('../services/mailAnalyzer');
 const router = express.Router();
 router.use(authenticate);
 
-// Liste des emails reçus avec pagination
+// Liste des emails reçus avec pagination + recherche
 router.get('/', async (req, res) => {
   const page = Math.max(1, parseInt(req.query.page) || 1);
   const limit = Math.min(50, parseInt(req.query.limit) || 20);
   const status = req.query.status || undefined;
+  const q = req.query.q?.trim() || undefined;
 
-  const where = status ? { status } : {};
+  const where = {
+    ...(status ? { status } : {}),
+    ...(q ? {
+      OR: [
+        { subject: { contains: q, mode: 'insensitive' } },
+        { fromEmail: { contains: q, mode: 'insensitive' } },
+        { fromName: { contains: q, mode: 'insensitive' } },
+      ],
+    } : {}),
+  };
+
   const [items, total] = await Promise.all([
     prisma.incomingEmail.findMany({
       where,

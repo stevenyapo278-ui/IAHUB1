@@ -193,7 +193,7 @@ export default function TicketDetail() {
   }
 
   return (
-    <div className="flex flex-col gap-lg">
+    <div className="p-lg flex flex-col gap-lg">
       <div className="flex items-center gap-sm text-on-surface-variant font-body-sm text-body-sm">
         <Link to="/tickets" className="hover:text-on-surface hover:underline transition-colors">Tickets</Link>
         <span className="material-symbols-outlined text-[16px]">chevron_right</span>
@@ -360,7 +360,7 @@ export default function TicketDetail() {
               <div className="flex justify-end mt-sm">
                 <button
                   type="submit"
-                  className="bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-semibold shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 rounded-xl px-5 py-2.5 text-body-sm"
+                  className="btn-gradient font-semibold shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 rounded-xl px-5 py-2.5 text-body-sm"
                 >
                   Envoyer
                 </button>
@@ -450,7 +450,7 @@ export default function TicketDetail() {
                 <div className="flex gap-2">
                   <button
                     onClick={handleApprove}
-                    className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-semibold py-2 rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm"
+                    className="flex-1 flex items-center justify-center gap-2 btn-gradient font-semibold py-2 rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm"
                   >
                     <span className="material-symbols-outlined text-[18px]">check</span>
                     Approuver

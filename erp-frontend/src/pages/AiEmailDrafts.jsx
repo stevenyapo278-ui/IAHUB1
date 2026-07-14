@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { toast } from 'sonner';
 import api from '../api/client';
 import ConfirmDialog from '../components/ConfirmDialog';
 
@@ -9,7 +10,6 @@ const MAX_AI_EXCHANGES_PER_TICKET = 3; // doit rester aligné avec followupEscal
 export default function AiEmailDrafts() {
   const [drafts, setDrafts] = useState([]);
   const [status, setStatus] = useState('PENDING');
-  const [error, setError] = useState('');
   const [selected, setSelected] = useState(null);
   const [editedContent, setEditedContent] = useState('');
   const [editedRecipient, setEditedRecipient] = useState('');
@@ -49,7 +49,7 @@ export default function AiEmailDrafts() {
     api
       .get('/ai-email-drafts', { params: status ? { status } : {} })
       .then(({ data }) => setDrafts(data))
-      .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
+      .catch((err) => toast.error(err.response?.data?.error || 'Erreur de chargement'));
   }
 
   useEffect(load, [status]);
@@ -80,7 +80,6 @@ export default function AiEmailDrafts() {
   async function confirmActionRun() {
     if (!confirmAction) return;
     setSubmitting(true);
-    setError('');
     try {
       if (confirmAction.type === 'approve') {
         await api.post(`/ai-email-drafts/${confirmAction.id}/approve`, {
@@ -88,37 +87,34 @@ export default function AiEmailDrafts() {
           recipientEmail: editedRecipient,
           ccRecipients: editedCc,
         });
+        toast.success('Email envoyé avec succès');
       } else if (confirmAction.type === 'restore') {
         await api.post(`/ai-email-drafts/${confirmAction.id}/restore`);
         setStatus('PENDING');
+        toast.success('Brouillon restauré, il repasse en attente de validation');
       } else {
         await api.post(`/ai-email-drafts/${confirmAction.id}/reject`, { reviewNote: reviewNote || undefined });
+        toast.success('Brouillon rejeté');
       }
       setConfirmAction(null);
       setSelected(null);
       setReviewNote('');
       load();
     } catch (err) {
-      setError(err.response?.data?.error || "Erreur lors de l'action");
+      toast.error(err.response?.data?.error || "Erreur lors de l'action");
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <div className="flex flex-col gap-lg">
+    <div className="p-lg flex flex-col gap-lg">
       <header>
         <h2 className="font-display-lg text-display-lg text-on-background font-bold">Réponses à valider</h2>
         <p className="font-body-lg text-body-lg text-on-surface-variant mt-1">
           Brouillons générés automatiquement par le pipeline email, en attente d'approbation avant envoi.
         </p>
       </header>
-
-      {error && (
-        <div className="border border-red-500/20 bg-red-500/5 text-red-500 p-md rounded-xl font-body-md">
-          {error}
-        </div>
-      )}
 
       <div className="flex items-center gap-3 bg-surface-container-lowest p-md rounded-2xl border border-outline-variant/60 card-shadow">
         {STATUS_OPTIONS.map((s) => (
@@ -276,7 +272,7 @@ export default function AiEmailDrafts() {
                 <div className="flex gap-sm border-t border-outline-variant/40 pt-md mt-xs">
                   <button
                     onClick={askApprove}
-                    className="flex-1 bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-semibold py-2.5 rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm flex items-center justify-center gap-1"
+                    className="flex-1 btn-gradient font-semibold py-2.5 rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm flex items-center justify-center gap-1"
                   >
                     <span className="material-symbols-outlined text-[18px]">check</span>
                     Approuver & envoyer

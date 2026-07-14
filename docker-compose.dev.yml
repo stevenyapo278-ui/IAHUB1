@@ -7,6 +7,22 @@ services:
     build:
       context: ./erp-backend
     command: npm run dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      DATABASE_URL: postgresql://erp_user:erp_password@postgres:5432/erp_itsm?schema=public
+      JWT_SECRET: ${JWT_SECRET:-dev_jwt_secret_change_in_production}
+      JWT_EXPIRES_IN: 8h
+      CORS_ORIGIN: "*"
+      FRONTEND_URL: http://localhost:5173
+      BACKEND_URL: http://localhost:4000
+    ports:
+      - "4000:4000"
+    networks:
+      - ia-hub-network
     volumes:
       - ./erp-backend/src:/app/src
       - ./erp-backend/prisma:/app/prisma
@@ -22,3 +38,8 @@ services:
       VITE_API_URL: http://localhost:4000/api
     volumes:
       - ./erp-frontend/src:/app/src
+      - ./erp-frontend/public:/app/public
+      - ./erp-frontend/tailwind.config.js:/app/tailwind.config.js
+      - ./erp-frontend/postcss.config.js:/app/postcss.config.js
+      - ./erp-frontend/vite.config.js:/app/vite.config.js
+      - ./erp-frontend/index.html:/app/index.html

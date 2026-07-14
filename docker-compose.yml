@@ -1,5 +1,18 @@
+# =============================================================================
+# IA Hub — Stack complète unifiée
+# Usage : docker compose up -d --build
+# =============================================================================
+# Cette stack inclut :
+#   postgres   — Base de données PostgreSQL + pgvector
+#   app        — Application ERP (backend + frontend React)
+#   glpi-db    — Base de données MariaDB pour GLPI ITSM
+#   glpi       — GLPI (Gestionnaire Libre de Parc Informatique)
+#   glpi-mcp   — Pont MCP (Model Context Protocol) vers GLPI
+# =============================================================================
+
 services:
-  # Base de données PostgreSQL avec pgvector
+
+  # ── Base de données PostgreSQL avec pgvector ─────────────────────────────
   postgres:
     image: pgvector/pgvector:pg16
     restart: always
@@ -17,52 +30,62 @@ services:
       retries: 5
       start_period: 10s
     ports:
-      - "5432:5432"
+      - "5433:5432"
     networks:
       - ia-hub-network
 
-  # Application principale (frontend + backend)
+  # ── Application principale (backend Express + frontend React) ────────────
   app:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api}
     restart: always
     depends_on:
       postgres:
         condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       NODE_ENV: production
       PORT: 4000
       DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD:-erp_password}@postgres:5432/${POSTGRES_DB:-erp_itsm}?schema=public
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: 8h
-      CORS_ORIGIN: "*"
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
       MICROSOFT_REDIRECT_URI: ${MICROSOFT_REDIRECT_URI}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:4000}
       BACKEND_URL: ${BACKEND_URL:-http://localhost:4000}
-      GLPI_URL: ${GLPI_URL:-}
+      GLPI_URL: ${GLPI_URL:-http://glpi/apirest.php}
       GLPI_APP_TOKEN: ${GLPI_APP_TOKEN:-}
       GLPI_USER_TOKEN: ${GLPI_USER_TOKEN:-}
+      FRONTEND_DIST_PATH: /app/erp-frontend/dist
     volumes:
       - app_uploads:/app/erp-backend/uploads
     ports:
-      - "4000:4000"
+      - "${PORT:-4000}:4000"
     networks:
       - ia-hub-network
 
-  # n8n pour les workflows ITSM
-  n8n:
-    image: n8nio/n8n:latest
-    restart: always
+  # ── Pont MCP GLPI (Model Context Protocol) ──────────────────────────────
+  # Sert d'interface entre les assistants IA (Claude, etc.) et l'API REST GLPI
+  glpi-mcp:
+    build:
+      context: ./mcp-glpi
+      dockerfile: Dockerfile
+    container_name: ia-hub-glpi-mcp
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      - N8N_PORT=5678
-      - N8N_HOST=0.0.0.0
-      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:-}
-      - N8N_DIAGNOSTICS_ENABLED=false
-    volumes:
-      - n8n_data:/home/node/.n8n
+      GLPI_URL: ${GLPI_URL:-http://glpi/apirest.php}
+      GLPI_APP_TOKEN: ${GLPI_APP_TOKEN:-}
+      GLPI_USER_TOKEN: ${GLPI_USER_TOKEN:-}
+      MCP_TRANSPORT: http
+      MCP_PORT: 3333
     ports:
-      - "5678:5678"
+      - "${MCP_GLPI_PORT:-3333}:3333"
     networks:
       - ia-hub-network
 
@@ -73,4 +96,3 @@ networks:
 volumes:
   postgres_data:
   app_uploads:
-  n8n_data:

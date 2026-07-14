@@ -234,4 +234,233 @@ router.delete('/keys/:keyId', async (req, res) => {
   }
 });
 
+// ── Test de connectivité d'une clé API ─────────────────────────────────────
+// Appelle l'endpoint /models du fournisseur avec la clé réelle (non masquée)
+// pour vérifier que la clé est valide et que le fournisseur répond.
+router.post('/keys/:keyId/test', async (req, res) => {
+  const keyId = Number(req.params.keyId);
+
+  const key = await prisma.aiKey.findUnique({
+    where: { id: keyId },
+    include: { provider: true },
+  });
+  if (!key) return res.status(404).json({ ok: false, error: 'Clé introuvable' });
+
+  const provider = key.provider;
+  const apiKey = key.apiKey; // valeur réelle (non masquée) en base
+
+  const t0 = Date.now();
+  try {
+    let modelCount = null;
+
+    switch (provider.name) {
+      case 'openai': {
+        const r = await fetch(`${provider.baseUrl || 'https://api.openai.com/v1'}/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+        });
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          return res.json({ ok: false, error: body.error?.message || `HTTP ${r.status}` });
+        }
+        const data = await r.json();
+        modelCount = data.data?.length ?? null;
+        break;
+      }
+      case 'mistral': {
+        const r = await fetch(`${provider.baseUrl || 'https://api.mistral.ai/v1'}/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+        });
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          return res.json({ ok: false, error: body.message || `HTTP ${r.status}` });
+        }
+        const data = await r.json();
+        modelCount = data.data?.length ?? null;
+        break;
+      }
+      case 'anthropic': {
+        const r = await fetch(`${provider.baseUrl || 'https://api.anthropic.com/v1'}/models`, {
+          headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        });
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          return res.json({ ok: false, error: body.error?.message || `HTTP ${r.status}` });
+        }
+        const data = await r.json();
+        modelCount = data.data?.length ?? null;
+        break;
+      }
+      case 'gemini': {
+        const base = provider.baseUrl || 'https://generativelanguage.googleapis.com/v1beta';
+        const r = await fetch(`${base}/models?key=${apiKey}`);
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          return res.json({ ok: false, error: body.error?.message || `HTTP ${r.status}` });
+        }
+        const data = await r.json();
+        modelCount = data.models?.length ?? null;
+        break;
+      }
+      default: {
+        // Fournisseur générique : tente GET /models avec Authorization Bearer
+        const baseUrl = provider.baseUrl;
+        if (!baseUrl) {
+          return res.json({ ok: false, error: 'URL de base non configurée pour ce fournisseur' });
+        }
+        const r = await fetch(`${baseUrl}/models`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+        });
+        if (!r.ok) {
+          return res.json({ ok: false, error: `HTTP ${r.status}` });
+        }
+        break;
+      }
+    }
+
+    return res.json({ ok: true, latencyMs: Date.now() - t0, modelCount });
+  } catch (err) {
+    return res.json({ ok: false, error: err.message });
+  }
+});
+
+// ── Test de connectivité d'un modèle IA ─────────────────────────────────────
+// Appelle l'API du fournisseur pour tester le modèle spécifique
+router.post('/models/:modelId/test', async (req, res) => {
+  const modelId = Number(req.params.modelId);
+
+  try {
+    const model = await prisma.aiModel.findUnique({
+      where: { id: modelId },
+      include: { provider: true },
+    });
+    if (!model) return res.status(404).json({ ok: false, error: 'Modèle introuvable' });
+
+    const provider = model.provider;
+
+    // Trouver une clé active pour ce fournisseur
+    // 1. Clé spécifiquement liée à ce modèle
+    // 2. Clé par défaut (sans modèle spécifique)
+    // 3. N'importe quelle clé active du fournisseur
+    const activeKeys = await prisma.aiKey.findMany({
+      where: { providerId: provider.id, isActive: true },
+      orderBy: [
+        { isDefault: 'desc' },
+        { id: 'asc' }
+      ]
+    });
+
+    const key = activeKeys.find(k => k.modelId === model.id) ||
+                activeKeys.find(k => !k.modelId) ||
+                activeKeys[0];
+
+    if (!key) {
+      return res.status(400).json({ ok: false, error: 'Aucune clé API active configurée pour ce fournisseur' });
+    }
+
+    const apiKey = key.apiKey;
+    const t0 = Date.now();
+
+    switch (provider.name) {
+      case 'openai':
+      case 'mistral':
+      case 'nvidia': {
+        const baseUrl = provider.baseUrl || (
+          provider.name === 'openai' ? 'https://api.openai.com/v1' :
+          provider.name === 'mistral' ? 'https://api.mistral.ai/v1' :
+          provider.name === 'nvidia' ? 'https://integrate.api.nvidia.com/v1' : ''
+        );
+        const r = await fetch(`${baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: model.name,
+            messages: [{ role: 'user', content: 'Ping' }],
+            max_tokens: 5,
+            temperature: 0.1,
+          }),
+        });
+
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          const errDetail = body.error?.message || body.message || `HTTP ${r.status}`;
+          return res.json({ ok: false, error: errDetail });
+        }
+        break;
+      }
+      case 'anthropic': {
+        const baseUrl = provider.baseUrl || 'https://api.anthropic.com';
+        const r = await fetch(`${baseUrl}/v1/messages`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({
+            model: model.name,
+            messages: [{ role: 'user', content: 'Ping' }],
+            max_tokens: 5,
+          }),
+        });
+
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          const errDetail = body.error?.message || body.message || `HTTP ${r.status}`;
+          return res.json({ ok: false, error: errDetail });
+        }
+        break;
+      }
+      case 'gemini': {
+        const base = provider.baseUrl || 'https://generativelanguage.googleapis.com/v1beta';
+        const r = await fetch(`${base}/models/${model.name}:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: 'Ping' }] }],
+            generationConfig: { maxOutputTokens: 5, temperature: 0.1 },
+          }),
+        });
+
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          const errDetail = body.error?.message || body.message || `HTTP ${r.status}`;
+          return res.json({ ok: false, error: errDetail });
+        }
+        break;
+      }
+      default: {
+        // Fournisseur générique : tente chat/completions compatible OpenAI
+        const baseUrl = provider.baseUrl;
+        if (!baseUrl) {
+          return res.json({ ok: false, error: 'URL de base non configurée pour ce fournisseur' });
+        }
+        const r = await fetch(`${baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: model.name,
+            messages: [{ role: 'user', content: 'Ping' }],
+            max_tokens: 5,
+          }),
+        });
+
+        if (!r.ok) {
+          return res.json({ ok: false, error: `HTTP ${r.status}` });
+        }
+        break;
+      }
+    }
+
+    return res.json({ ok: true, latencyMs: Date.now() - t0 });
+  } catch (err) {
+    return res.json({ ok: false, error: err.message });
+  }
+});
+
 module.exports = router;

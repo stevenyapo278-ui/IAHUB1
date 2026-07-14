@@ -36,8 +36,16 @@ async function fetchRemoteModelNames(provider, apiKey) {
       const data = await res.json();
       return (data.models || []).map((m) => m.name.replace(/^models\//, ''));
     }
+    case 'nvidia': {
+      const res = await fetch(`${provider.baseUrl || 'https://integrate.api.nvidia.com/v1'}/models`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.data.map((m) => m.id);
+    }
     default:
-      // Fournisseur sans endpoint "list models" connu (ex: nvidia) -> ignoré
+      // Fournisseur sans endpoint "list models" connu -> ignoré
       return null;
   }
 }

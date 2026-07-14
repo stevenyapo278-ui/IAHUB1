@@ -24,7 +24,11 @@ const ticketIntelligenceRoutes = require('./routes/ticketintelligence.routes');
 const systemSettingsRoutes = require('./routes/systemsettings.routes');
 const advancedSettingsRoutes = require('./routes/advancedsettings.routes');
 const promptTemplateRoutes = require('./routes/prompttemplate.routes');
+const skillRoutes = require('./routes/skill.routes');
+const reassignmentRoutes = require('./routes/reassignment.routes');
+const notificationRoutes = require('./routes/notification.routes');
 const draftApprovalRoutes = require('./routes/draftapproval.routes');
+const triageRuleRoutes = require('./routes/triageRule.routes');
 
 const { requestId } = require('./middleware/requestId');
 const { logger, childLogger } = require('./utils/logger');
@@ -81,6 +85,10 @@ app.use('/api', ticketIntelligenceRoutes);
 app.use('/api/system-settings', systemSettingsRoutes);
 app.use('/api/advanced-settings', advancedSettingsRoutes);
 app.use('/api/prompt-templates', promptTemplateRoutes);
+app.use('/api/skills', skillRoutes);
+app.use('/api/reassignments', reassignmentRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/triage-rules', triageRuleRoutes);
 
 // Serve frontend static files in production
 const isProduction = process.env.NODE_ENV === 'production';

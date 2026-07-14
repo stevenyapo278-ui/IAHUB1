@@ -1,36 +1,53 @@
+# =============================================================================
+# IA Hub — Override Docker Compose pour GLPI local
+# Usage : docker compose -f docker-compose.yml -f docker-compose.glpi.yml up -d
+# =============================================================================
+# Ce fichier est un override optionnel qui ajoute les services GLPI (GLPI + sa
+# base MariaDB) à la stack principale définie dans docker-compose.yml.
+#
+# Utilisé par ./start.sh (option 1) et par docker compose -f docker-compose.yml
+# -f docker-compose.glpi.yml up -d --build.
+# =============================================================================
+
 services:
 
-  # Base de données GLPI
+  # Base de données MariaDB pour GLPI
   glpi-db:
     image: mariadb:10.11
     container_name: ia-hub-glpi-db
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: root_pass
-      MYSQL_DATABASE: glpi
-      MYSQL_USER: glpi
-      MYSQL_PASSWORD: glpi_pass
+      MYSQL_ROOT_PASSWORD: ${GLPI_ROOT_PASSWORD:-root_pass}
+      MYSQL_DATABASE: ${GLPI_DB_NAME:-glpi}
+      MYSQL_USER: ${GLPI_DB_USER:-glpi}
+      MYSQL_PASSWORD: ${GLPI_DB_PASSWORD:-glpi_pass}
     volumes:
       - glpi_mysql_data:/var/lib/mysql
+    networks:
+      - ia-hub-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${GLPI_ROOT_PASSWORD:-root_pass}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
-  # GLPI (ITSM)
+  # GLPI (Gestionnaire Libre de Parc Informatique)
   glpi:
     image: diouxx/glpi:latest
     container_name: ia-hub-glpi
     restart: unless-stopped
     depends_on:
-      - glpi-db
+      glpi-db:
+        condition: service_healthy
     environment:
       TIMEZONE: Europe/Paris
     ports:
-      - "8080:80"
+      - "${GLPI_PORT:-8080}:80"
     volumes:
       - glpi_config:/var/www/html/glpi/config
-
-  backend:
-    depends_on:
-      glpi:
-        condition: service_started
+    networks:
+      - ia-hub-network
 
 volumes:
   glpi_mysql_data:

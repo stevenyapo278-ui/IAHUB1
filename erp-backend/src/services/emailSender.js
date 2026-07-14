@@ -39,9 +39,15 @@ function getLogoAttachmentIfReferenced(bodyHtml, signatureLogoUrl) {
 // affiche la réponse comme un email totalement séparé du fil de conversation de l'utilisateur,
 // au lieu de s'enchaîner avec "RE:" au même endroit que les échanges précédents.
 async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo = null, conversationId = null, inReplyToGraphMessageId = null, saveAsMessage = true }) {
-  const account = await prisma.emailAccount.findFirst({
+  // Priorité au compte par défaut, sinon on prend n'importe quel compte Outlook actif connecté
+  let account = await prisma.emailAccount.findFirst({
     where: { provider: 'OUTLOOK', isActive: true, isDefault: true, refreshToken: { not: null } },
   });
+  if (!account) {
+    account = await prisma.emailAccount.findFirst({
+      where: { provider: 'OUTLOOK', isActive: true, refreshToken: { not: null } },
+    });
+  }
   if (!account) throw new Error('Aucun compte Outlook configuré et connecté');
 
   const settings = await getSystemSettings();
@@ -52,8 +58,12 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
     : [{ emailAddress: { address: to } }];
   const ccRecipientsPayload = cc && cc.length > 0 ? cc.map((addr) => ({ emailAddress: { address: addr } })) : [];
 
+  // Les IDs commençant par "SIM-" sont des IDs de messages simulés (endpoint /inbox/simulate) qui
+  // n'existent pas dans Outlook — on ne peut pas faire de createReply dessus. On crée un nouveau message.
+  const isSimulatedId = typeof inReplyToGraphMessageId === 'string' && inReplyToGraphMessageId.startsWith('SIM-');
+
   let draft;
-  if (inReplyToGraphMessageId) {
+  if (inReplyToGraphMessageId && !isSimulatedId) {
     draft = await graphFetch(account, `/me/messages/${inReplyToGraphMessageId}/createReply`, { method: 'POST', body: JSON.stringify({}) });
     await graphFetch(account, `/me/messages/${draft.id}`, {
       method: 'PATCH',
@@ -221,6 +231,30 @@ ${signature}
   }
 }
 
+// Envoie un email de notification au technicien quand un ticket lui est automatiquement assigné.
+// Utilisé par glpiTicketCreator.js et emailPipeline.js après autoAssignTechnicianWithAI,
+// uniquement si le réglage notifyTechnicianOnAssignment est activé.
+async function sendAssignmentNotificationEmail({ ticketId, glpiTicketId, ticketTitle, priority, technicianEmail, technicianName, category }) {
+  const subject = `[Ticket #${glpiTicketId || ticketId}] Nouvelle assignation — ${ticketTitle}`;
+  const signature = await getEmailSignature();
+  const priorityLabel = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' }[priority] || priority;
+  const priorityColor = { P1: '#dc2626', P2: '#d97706', P3: '#2563eb', P4: '#16a34a' }[priority] || '#666';
+  const bodyHtml = `
+<p>Bonjour ${technicianName || ''},</p>
+<p>Un nouveau ticket vient de vous être <strong>assigné automatiquement</strong> par notre système d'analyse IA.</p>
+<table style="border-collapse:collapse;margin:16px 0">
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Numéro de ticket</td><td><strong>#${glpiTicketId || ticketId}</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Sujet</td><td>${ticketTitle}</td></tr>
+  ${category ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Catégorie</td><td>${category}</td></tr>` : ''}
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Priorité</td><td style="color:${priorityColor};font-weight:600">${priorityLabel}</td></tr>
+</table>
+<p>Connectez-vous à l'application pour consulter le détail et prendre en charge ce ticket.</p>
+${signature || DEFAULT_EMAIL_SIGNATURE}
+`.trim();
+
+  return sendEmail({ ticketId, to: technicianEmail, subject, bodyHtml, saveAsMessage: false });
+}
+
 // Relance un responsable (admin/technicien) qu'un brouillon AiEmailDraft attend toujours sa
 // validation humaine depuis trop longtemps (Paramètres > Automatisation > Relance des brouillons).
 // saveAsMessage: false car ce mail s'adresse au responsable interne, pas au demandeur d'origine
@@ -289,6 +323,7 @@ module.exports = {
   sendDraftPendingReminderEmail,
   sendPasswordResetLinkEmail,
   sendTemporaryPasswordEmail,
+  sendAssignmentNotificationEmail,
   buildAcknowledgementHtml,
   buildKnownIncidentNotificationHtml,
   getEmailSignature,

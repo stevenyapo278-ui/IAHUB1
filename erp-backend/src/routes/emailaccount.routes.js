@@ -116,4 +116,64 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+// ── Test de connectivité d'un compte mail ──────────────────────────────────
+// Outlook/M365 : tente un rafraîchissement du token OAuth2 + appel /me/mailFolders/inbox
+// IMAP générique : teste la connexion TCP sur imapHost:imapPort
+router.post('/:id/test', async (req, res) => {
+  const id = Number(req.params.id);
+  const account = await prisma.emailAccount.findUnique({ where: { id } });
+  if (!account) return res.status(404).json({ ok: false, error: 'Compte introuvable' });
+
+  const t0 = Date.now();
+
+  try {
+    if (account.provider === 'OUTLOOK' || account.provider === 'GMAIL') {
+      // Utilise graphFetch (même chemin que le poller) : rafraîchit le token et fait un appel léger
+      const { graphFetch } = require('../utils/graphClient');
+
+      let folderData;
+      try {
+        folderData = await graphFetch(account, '/me/mailFolders/inbox?$select=id,displayName,totalItemCount');
+      } catch (graphErr) {
+        return res.json({ ok: false, error: graphErr.message });
+      }
+
+      return res.json({
+        ok: true,
+        latencyMs: Date.now() - t0,
+        details: `Boîte "${folderData?.displayName || 'Inbox'}" accessible — ${folderData?.totalItemCount ?? '?'} message(s)`,
+      });
+    }
+
+    // IMAP/SMTP générique : test TCP sur imapHost:imapPort
+    if (account.provider === 'IMAP' || account.provider === 'GENERIC') {
+      const net = require('net');
+      const host = account.imapHost;
+      const port = account.imapPort || 993;
+
+      if (!host) {
+        return res.json({ ok: false, error: 'Hôte IMAP non configuré' });
+      }
+
+      await new Promise((resolve, reject) => {
+        const socket = net.createConnection({ host, port, timeout: 8000 }, () => {
+          socket.destroy();
+          resolve();
+        });
+        socket.on('error', (err) => reject(err));
+        socket.on('timeout', () => {
+          socket.destroy();
+          reject(new Error(`Connexion expirée après 8s (${host}:${port})`));
+        });
+      });
+
+      return res.json({ ok: true, latencyMs: Date.now() - t0, details: `Connexion TCP réussie sur ${host}:${port}` });
+    }
+
+    return res.json({ ok: false, error: `Type de fournisseur non pris en charge pour le test : ${account.provider}` });
+  } catch (err) {
+    return res.json({ ok: false, error: err.message });
+  }
+});
+
 module.exports = router;

@@ -116,6 +116,7 @@ model User {
   followups       Followup[]
   aiEmailDraftsReviewed AiEmailDraft[]
   knowledgeDraftsReviewed KnowledgeDraft[]
+  skills          UserSkill[]
   permissionGroups PermissionGroup[] @relation("UserPermissionGroups")
 }
 
@@ -305,6 +306,10 @@ model SystemSettings {
   // Texte de l'accusé de réception automatique (Paramètres > Automatisation > Emails).
   // Placeholders disponibles : {ticketId}, {subject}, {toName}. Laisser vide = texte par défaut codé en dur.
   acknowledgementMessage String? @db.Text
+
+  // Notifier le technicien par email quand un ticket lui est automatiquement assigné
+  // (Paramètres > Automatisation > Notifications internes).
+  notifyTechnicianOnAssignment Boolean @default(false)
 
   // Signature HTML insérée en bas de tous les emails automatiques (accusé de réception, relance,
   // notification d'incident connu), à la place du "Cordialement, Support IT" codé en dur. Laisser vide = défaut.
@@ -582,6 +587,65 @@ model EmailApprovalToken {
   createdAt   DateTime      @default(now())
 }
 
+// ── Compétences métier des techniciens ─────────────────────────────────────
+// Une compétence est un domaine d'expertise ("Réseau", "VPN", "Active Directory", "Linux", etc.)
+// qui peut être assigné à un technicien avec un niveau de maîtrise (1-5).
+// Utilisé par ticketAutoAssign.js pour l'assignation intelligente des tickets.
+model Skill {
+  id          Int         @id @default(autoincrement())
+  name        String      @unique
+  description String?
+  category    String?     // Catégorie parente pour regrouper les compétences (ex: "Infrastructure")
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  userSkills  UserSkill[]
+}
+
+// Niveau de compétence d'un technicien pour un domaine donné
+model UserSkill {
+  id        Int      @id @default(autoincrement())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+  skill     Skill    @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  skillId   Int
+  level     Int      @default(3) // 1 = débutant, 5 = expert
+  createdAt DateTime @default(now())
+
+  @@unique([userId, skillId])
+}
+
+// Journal des réassignations de tickets — utilisé par le système d'auto-apprentissage
+// pour mesurer la précision des assignations automatiques et améliorer les futures suggestions.
+model ReassignmentLog {
+  id                    Int      @id @default(autoincrement())
+  ticketId              Int      // ticket concerné
+  previousTechnicianId  Int?     // technicien avant réassignation (null = non assigné)
+  newTechnicianId       Int?     // nouveau technicien (null = désassigné)
+  reason                String?  // raison donnée par l'humain : "surcharge", "compétence", "disponibilité", "autre"
+  wasAutoAssigned       Boolean  @default(false) // true si le ticket avait été assigné automatiquement
+  assignedByUserId      Int?     // utilisateur qui a fait la réassignation
+  createdAt             DateTime @default(now())
+}
+
+// ── Notifications temps réel ────────────────────────────────────────────
+// Notification persistante affichée dans le volet de notification de la navbar,
+// créée automatiquement lors des événements socket (ticket créé, assigné, mis à jour).
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int      // destinataire de la notification
+  type      String   // "ticket_created" | "ticket_assigned" | "ticket_updated"
+  title     String   // titre court affiché dans le volet
+  message   String   // message détaillé
+  link      String?  // lien de navigation (ex: "/tickets/42")
+  metadata  Json?    // données supplémentaires (priorité, méthode d'assignation, etc.)
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+}
+
 // Lien "mot de passe oublié" envoyé par email à l'utilisateur — token opaque à usage unique,
 // expire après un délai court, comme EmailApprovalToken mais volontairement séparé : ce token
 // donne accès à la définition d'un mot de passe de connexion complet, un niveau de sensibilité
@@ -786,3 +850,22 @@ model TicketSimilarityIndex {
   @@index([ticketId])
   @@index([requesterEmail])
 }
+
+// Règles de triage automatique déterminant l'assignation des tickets sans appeler l'IA
+model TriageRule {
+  id             Int      @id @default(autoincrement())
+  isActive       Boolean  @default(true)
+  priority       Int      @default(0)   // plus élevé = évalué en premier
+  matchField     String   // 'subject' | 'body' | 'subject_or_body' | 'from'
+  matchType      String   // 'contains' | 'regex' | 'equals' | 'starts_with'
+  matchValue     String   // valeur à chercher (insensible à la casse)
+  category       String?  // catégorie ITSM assignée (ex: "Matériel", "VPN", etc.)
+  skillName      String?  // compétence cible (ex: "PORT USB")
+  teamName       String?  // équipe cible (ex: "Sécurité")
+  ticketPriority String?  // P1|P2|P3|P4
+  isSpam         Boolean  @default(false)
+  label          String   // Description humaine de la règle
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+

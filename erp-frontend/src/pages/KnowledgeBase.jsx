@@ -13,13 +13,7 @@ const STATUS_LABELS = {
 };
 
 const CATEGORIES = [
-  'Réseau',
-  'Système',
-  'Sécurité',
-  'Applicatif',
-  'Logiciel',
-  'Matériel',
-  'Téléphonie',
+  'Réseau', 'Système', 'Sécurité', 'Applicatif', 'Logiciel', 'Matériel', 'Téléphonie',
 ];
 
 const SOURCE_ICONS = {
@@ -39,14 +33,19 @@ const CATEGORY_COLORS = {
   Téléphonie: 'bg-cyan-500/10 text-cyan-600 border-cyan-500/20 dark:text-cyan-400',
 };
 
+const itemVariants = {
+  hidden: { opacity: 0, y: 12 },
+  visible: { opacity: 1, y: 0 },
+};
+
 export default function KnowledgeBase() {
   const { user } = useAuth();
   const canManage = hasPermission(user, 'knowledge.manage');
-  
+
   // Data states
   const [documents, setDocuments] = useState([]);
   const [error, setError] = useState('');
-  
+
   // Upload states
   const [uploading, setUploading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -66,15 +65,10 @@ export default function KnowledgeBase() {
       setProgress(0);
       interval = setInterval(() => {
         setProgress((prev) => {
-          if (prev < 20) {
-            return prev + Math.floor(Math.random() * 4) + 3; // Upload phase
-          } else if (prev < 45) {
-            return prev + Math.floor(Math.random() * 3) + 2; // Extraction & Analysis
-          } else if (prev < 85) {
-            return prev + Math.floor(Math.random() * 2) + 1; // Vectorization & Embedding
-          } else if (prev < 96) {
-            return prev + (Math.random() > 0.7 ? 1 : 0); // Almost done
-          }
+          if (prev < 20) return prev + Math.floor(Math.random() * 4) + 3;
+          if (prev < 45) return prev + Math.floor(Math.random() * 3) + 2;
+          if (prev < 85) return prev + Math.floor(Math.random() * 2) + 1;
+          if (prev < 96) return prev + (Math.random() > 0.7 ? 1 : 0);
           return prev;
         });
       }, 250);
@@ -90,46 +84,20 @@ export default function KnowledgeBase() {
   const [searching, setSearching] = useState(false);
   const [showSearchFilters, setShowSearchFilters] = useState(false);
   const [searchCategory, setSearchCategory] = useState(() => localStorage.getItem('kb_search_category') || '');
-  const [searchTags, setSearchTags] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('kb_search_tags')) || [];
-    } catch {
-      return [];
-    }
-  });
+  const [searchTags, setSearchTags] = useState(() => { try { return JSON.parse(localStorage.getItem('kb_search_tags')) || []; } catch { return []; } });
   const [searchTagInput, setSearchTagInput] = useState('');
   const [searchLimit, setSearchLimit] = useState(() => Number(localStorage.getItem('kb_search_limit')) || 5);
-  const [useHybrid, setUseHybrid] = useState(() => {
-    const saved = localStorage.getItem('kb_use_hybrid');
-    return saved !== null ? saved === 'true' : true;
-  });
+  const [useHybrid, setUseHybrid] = useState(() => { const saved = localStorage.getItem('kb_use_hybrid'); return saved !== null ? saved === 'true' : true; });
 
-  // Persist search filters in localStorage
-  useEffect(() => {
-    localStorage.setItem('kb_search_category', searchCategory);
-  }, [searchCategory]);
+  useEffect(() => { localStorage.setItem('kb_search_category', searchCategory); }, [searchCategory]);
+  useEffect(() => { localStorage.setItem('kb_search_tags', JSON.stringify(searchTags)); }, [searchTags]);
+  useEffect(() => { localStorage.setItem('kb_search_limit', searchLimit); }, [searchLimit]);
+  useEffect(() => { localStorage.setItem('kb_use_hybrid', useHybrid); }, [useHybrid]);
 
-  useEffect(() => {
-    localStorage.setItem('kb_search_tags', JSON.stringify(searchTags));
-  }, [searchTags]);
-
-  useEffect(() => {
-    localStorage.setItem('kb_search_limit', searchLimit);
-  }, [searchLimit]);
-
-  useEffect(() => {
-    localStorage.setItem('kb_use_hybrid', useHybrid);
-  }, [useHybrid]);
-
-  // Feedback states
-  const [feedbackSent, setFeedbackSent] = useState({}); // { [chunkId]: rating }
-  const [feedbackComment, setFeedbackComment] = useState({}); // { [chunkId]: comment }
+  const [feedbackSent, setFeedbackSent] = useState({});
+  const [feedbackComment, setFeedbackComment] = useState({});
   const [activeCommentId, setActiveCommentId] = useState(null);
-
-  // local list filter state
   const [localFilter, setLocalFilter] = useState('');
-
-  // Delete/Replace states
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [replacingId, setReplacingId] = useState(null);
@@ -137,15 +105,13 @@ export default function KnowledgeBase() {
   const replaceTargetRef = useRef(null);
 
   function load() {
-    api
-      .get('/knowledge/documents')
+    api.get('/knowledge/documents')
       .then(({ data }) => setDocuments(data))
       .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
   }
 
   useEffect(load, []);
 
-  // Polling for processing documents
   useEffect(() => {
     const hasProcessing = documents.some((doc) => doc.status === 'PROCESSING');
     if (hasProcessing) {
@@ -154,21 +120,16 @@ export default function KnowledgeBase() {
     }
   }, [documents]);
 
-  // Stats calculation
   const totalDocs = documents.length;
   const totalChunks = documents.reduce((acc, doc) => acc + (doc._count?.chunks ?? 0), 0);
   const totalFeedbacks = documents.reduce((acc, doc) => acc + (doc._count?.feedbacks ?? 0), 0);
   const totalErrors = documents.filter((doc) => doc.status === 'ERROR').length;
 
-  // Drag and drop handlers
   function handleDrag(e) {
     e.preventDefault();
     e.stopPropagation();
-    if (e.type === 'dragenter' || e.type === 'dragover') {
-      setDragActive(true);
-    } else if (e.type === 'dragleave') {
-      setDragActive(false);
-    }
+    if (e.type === 'dragenter' || e.type === 'dragover') setDragActive(true);
+    else if (e.type === 'dragleave') setDragActive(false);
   }
 
   function handleDrop(e) {
@@ -180,23 +141,18 @@ export default function KnowledgeBase() {
       const ext = droppedFile.name.split('.').pop().toLowerCase();
       if (['pdf', 'docx', 'md', 'markdown', 'txt'].includes(ext)) {
         setFile(droppedFile);
-        if (!title) {
-          setTitle(droppedFile.name.substring(0, droppedFile.name.lastIndexOf('.')) || droppedFile.name);
-        }
+        if (!title) setTitle(droppedFile.name.substring(0, droppedFile.name.lastIndexOf('.')) || droppedFile.name);
       } else {
         setError('Format de fichier non supporté. PDF, DOCX, MD ou TXT requis.');
       }
     }
   }
 
-  // Tags input handlers
   function handleAddTag(e) {
     if (e.key === 'Enter' && tagInput.trim()) {
       e.preventDefault();
       const val = tagInput.trim().toLowerCase();
-      if (!tags.includes(val)) {
-        setTags([...tags, val]);
-      }
+      if (!tags.includes(val)) setTags([...tags, val]);
       setTagInput('');
     }
   }
@@ -209,9 +165,7 @@ export default function KnowledgeBase() {
     if (e.key === 'Enter' && searchTagInput.trim()) {
       e.preventDefault();
       const val = searchTagInput.trim().toLowerCase();
-      if (!searchTags.includes(val)) {
-        setSearchTags([...searchTags, val]);
-      }
+      if (!searchTags.includes(val)) setSearchTags([...searchTags, val]);
       setSearchTagInput('');
     }
   }
@@ -231,16 +185,13 @@ export default function KnowledgeBase() {
     if (title) formData.append('title', title);
     if (category) formData.append('category', category);
     if (author) formData.append('author', author);
-    if (tags.length > 0) {
-      formData.append('tags', JSON.stringify(tags));
-    }
+    if (tags.length > 0) formData.append('tags', JSON.stringify(tags));
 
     try {
       await api.post('/knowledge/documents', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
-      // Complete progress bar simulation
       setProgress(100);
       await new Promise((resolve) => setTimeout(resolve, 500));
 
@@ -251,18 +202,9 @@ export default function KnowledgeBase() {
       if (e.target.reset) e.target.reset();
       load();
 
-      // Trigger success celebration and screen
       setSuccess(true);
-      confetti({
-        particleCount: 120,
-        spread: 80,
-        origin: { y: 0.65 }
-      });
-
-      setTimeout(() => {
-        setSuccess(false);
-      }, 2500);
-
+      confetti({ particleCount: 120, spread: 80, origin: { y: 0.65 } });
+      setTimeout(() => setSuccess(false), 2500);
     } catch (err) {
       setError(err.response?.data?.error || "Erreur lors de l'upload");
     } finally {
@@ -290,23 +232,21 @@ export default function KnowledgeBase() {
   }
 
   async function handleReplaceFileChosen(e) {
-    const file = e.target.files?.[0];
+    const f = e.target.files?.[0];
     const doc = replaceTargetRef.current;
     e.target.value = '';
-    if (!file || !doc) return;
-
+    if (!f || !doc) return;
     setError('');
     setReplacingId(doc.id);
     const formData = new FormData();
-    formData.append('file', file);
-
+    formData.append('file', f);
     try {
       await api.put(`/knowledge/documents/${doc.id}/replace`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       load();
     } catch (err) {
-      setError(err.response?.data?.error || 'Erreur lors du remplacement');
+      setError(err.response?.data?.error || 'Erreur remplacement');
     } finally {
       setReplacingId(null);
     }
@@ -323,18 +263,13 @@ export default function KnowledgeBase() {
     setActiveCommentId(null);
 
     try {
-      const searchBody = {
-        query,
-        limit: Number(searchLimit),
-        useHybrid,
-      };
+      const searchBody = { query, limit: Number(searchLimit), useHybrid };
       if (searchCategory) searchBody.category = searchCategory;
       if (searchTags.length > 0) searchBody.tags = searchTags;
-
       const { data } = await api.post('/knowledge/search', searchBody);
       setResults(data);
     } catch (err) {
-      setError(err.response?.data?.error || 'Erreur lors de la recherche');
+      setError(err.response?.data?.error || 'Erreur recherche');
     } finally {
       setSearching(false);
     }
@@ -353,98 +288,104 @@ export default function KnowledgeBase() {
       });
       setFeedbackSent((prev) => ({ ...prev, [result.id]: rating }));
       setActiveCommentId(null);
-      load(); // Refresh to update feedback count in dashboard/table
+      load();
     } catch (err) {
-      setError(err.response?.data?.error || "Erreur lors de l'enregistrement du feedback");
+      setError(err.response?.data?.error || "Erreur feedback");
     }
   }
 
-  // Local filtering of documents list
   const filteredDocuments = documents.filter((doc) => {
-    const filter = localFilter.toLowerCase();
-    const titleMatch = doc.title.toLowerCase().includes(filter);
-    const filenameMatch = doc.filename?.toLowerCase().includes(filter) || false;
-    const catMatch = doc.category?.toLowerCase().includes(filter) || false;
-    const tagMatch = doc.tags?.some((t) => t.toLowerCase().includes(filter)) || false;
-    return titleMatch || filenameMatch || catMatch || tagMatch;
+    const f = localFilter.toLowerCase();
+    return doc.title.toLowerCase().includes(f) ||
+      doc.filename?.toLowerCase().includes(f) ||
+      doc.category?.toLowerCase().includes(f) ||
+      doc.tags?.some((t) => t.toLowerCase().includes(f));
   });
 
   return (
-    <div className="flex flex-col gap-lg pb-12">
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-md border-b border-outline-variant/40 pb-lg">
+    <motion.div
+      initial="hidden"
+      animate="visible"
+      variants={{ visible: { transition: { staggerChildren: 0.04 } } }}
+      className="p-lg flex flex-col gap-lg pb-12"
+    >
+      <motion.header variants={itemVariants} className="flex flex-col md:flex-row md:items-center justify-between gap-md border-b border-outline-variant/40 pb-lg">
         <div>
           <h2 className="font-display-lg text-display-lg text-on-background font-bold tracking-tight">Base de connaissances</h2>
           <p className="font-body-lg text-body-lg text-on-surface-variant mt-1">
             Documents indexés pour la recherche sémantique (RAG).
           </p>
         </div>
-      </header>
+      </motion.header>
 
-      {error && (
-        <div className="border border-red-500/20 bg-red-500/5 text-red-500 p-md rounded-xl font-body-md flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-red-500">error</span>
-            <span>{error}</span>
-          </div>
-          <button onClick={() => setError('')} className="hover:opacity-75">
-            <span className="material-symbols-outlined text-[18px]">close</span>
-          </button>
-        </div>
-      )}
+      <AnimatePresence>
+        {error && (
+          <motion.div
+            key="kb-error"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="border border-red-500/20 bg-red-500/5 text-red-500 p-md rounded-xl font-body-md flex items-center justify-between overflow-hidden"
+          >
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-red-500">error</span>
+              <span>{error}</span>
+            </div>
+            <motion.button onClick={() => setError('')} whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} className="hover:opacity-75">
+              <span className="material-symbols-outlined text-[18px]">close</span>
+            </motion.button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* KPI / Dashboard Panel */}
-      <section className="grid grid-cols-2 lg:grid-cols-4 gap-md">
-        <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl p-md flex items-center gap-md card-shadow">
-          <div className="p-sm bg-blue-500/10 text-blue-500 rounded-xl">
-            <span className="material-symbols-outlined text-[30px]">library_books</span>
-          </div>
-          <div>
-            <p className="text-on-surface-variant font-label-md text-label-md uppercase tracking-wider">Documents</p>
-            <h4 className="text-headline-lg font-display-lg font-bold text-on-surface">{totalDocs}</h4>
-          </div>
-        </div>
-        <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl p-md flex items-center gap-md card-shadow">
-          <div className="p-sm bg-purple-500/10 text-purple-500 rounded-xl">
-            <span className="material-symbols-outlined text-[30px]">analytics</span>
-          </div>
-          <div>
-            <p className="text-on-surface-variant font-label-md text-label-md uppercase tracking-wider">Fragments RAG</p>
-            <h4 className="text-headline-lg font-display-lg font-bold text-on-surface">{totalChunks}</h4>
-          </div>
-        </div>
-        <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl p-md flex items-center gap-md card-shadow">
-          <div className="p-sm bg-emerald-500/10 text-emerald-500 rounded-xl">
-            <span className="material-symbols-outlined text-[30px]">reviews</span>
-          </div>
-          <div>
-            <p className="text-on-surface-variant font-label-md text-label-md uppercase tracking-wider">Feedbacks</p>
-            <h4 className="text-headline-lg font-display-lg font-bold text-on-surface">{totalFeedbacks}</h4>
-          </div>
-        </div>
-        <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl p-md flex items-center gap-md card-shadow">
-          <div className={`p-sm rounded-xl ${totalErrors > 0 ? 'bg-red-500/10 text-red-500' : 'bg-slate-500/10 text-slate-500'}`}>
-            <span className="material-symbols-outlined text-[30px]">{totalErrors > 0 ? 'warning' : 'check_circle'}</span>
-          </div>
-          <div>
-            <p className="text-on-surface-variant font-label-md text-label-md uppercase tracking-wider">Erreurs</p>
-            <h4 className="text-headline-lg font-display-lg font-bold text-on-surface">{totalErrors}</h4>
-          </div>
-        </div>
-      </section>
+      <motion.section
+        variants={itemVariants}
+        className="grid grid-cols-2 lg:grid-cols-4 gap-gutter"
+      >
+        {[
+          { label: 'Documents', value: totalDocs, icon: 'library_books', color: 'text-blue-500 dark:text-zinc-300', bg: 'bg-blue-500/10 dark:bg-zinc-500/10' },
+          { label: 'Fragments RAG', value: totalChunks, icon: 'analytics', color: 'text-purple-500 dark:text-zinc-300', bg: 'bg-purple-500/10 dark:bg-zinc-500/10' },
+          { label: 'Feedbacks', value: totalFeedbacks, icon: 'reviews', color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+          { label: 'Erreurs', value: totalErrors, icon: totalErrors > 0 ? 'warning' : 'check_circle', color: totalErrors > 0 ? 'text-red-500' : 'text-slate-500', bg: totalErrors > 0 ? 'bg-red-500/10' : 'bg-slate-500/10', critical: totalErrors > 0 },
+        ].map((stat) => (
+          <motion.div
+            key={stat.label}
+            variants={itemVariants}
+            whileHover={{ y: -2 }}
+            className={`bento-card p-md flex items-center gap-md ${stat.critical ? 'stat-card-glow' : ''}`}
+          >
+            <div className={`p-sm ${stat.bg} ${stat.color} rounded-xl`}>
+              <span className="material-symbols-outlined text-[30px]">{stat.icon}</span>
+            </div>
+            <div>
+              <p className="text-on-surface-variant font-label-md text-label-md uppercase tracking-wider">{stat.label}</p>
+              <motion.h4
+                key={stat.value}
+                initial={{ scale: 1.3, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: 'spring', stiffness: 200, damping: 15 }}
+                className="text-headline-lg font-display-lg font-bold text-on-surface"
+              >
+                {stat.value}
+              </motion.h4>
+            </div>
+          </motion.div>
+        ))}
+      </motion.section>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-lg">
-        {/* Left column: documents & testing RAG */}
         <div className="xl:col-span-2 flex flex-col gap-lg">
-          
           {/* Documents index panel */}
-          <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/60 card-shadow overflow-hidden flex flex-col">
-            <div className="p-md border-b border-outline-variant/60 flex flex-col md:flex-row md:items-center justify-between gap-sm">
-              <h3 className="font-headline-sm text-headline-sm text-on-background font-bold flex items-center gap-2">
+          <motion.div variants={itemVariants} className="bento-card overflow-hidden flex flex-col">
+            <div className="bento-card-header p-md flex-col md:flex-row gap-sm">
+              <h3 className="font-headline-sm text-headline-sm text-on-background font-bold flex items-center gap-2 shrink-0">
                 <span className="material-symbols-outlined text-primary">menu_book</span>
                 Index documentaire
               </h3>
-              <div className="relative max-w-xs w-full">
-                <input
+              <div className="relative max-w-xs w-full md:ml-auto">
+                <motion.input
+                  whileFocus={{ scale: 1.01 }}
                   type="text"
                   placeholder="Rechercher localement..."
                   value={localFilter}
@@ -454,7 +395,7 @@ export default function KnowledgeBase() {
                 <span className="material-symbols-outlined text-on-surface-variant text-[18px] absolute left-2.5 top-1/2 -translate-y-1/2">search</span>
               </div>
             </div>
-            
+
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
@@ -476,6 +417,7 @@ export default function KnowledgeBase() {
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, scale: 0.95 }}
                         transition={{ duration: 0.2 }}
+                        layout
                         className="hover:bg-surface-container-low/40 transition-colors"
                       >
                         <td className="px-md py-4 text-on-surface-variant align-top">
@@ -485,27 +427,20 @@ export default function KnowledgeBase() {
                           <div className="font-semibold text-on-surface">{doc.title}</div>
                           {doc.filename && <div className="text-[11px] text-on-surface-variant font-mono mt-0.5">{doc.filename}</div>}
                           {doc.author && <div className="text-[11px] text-on-surface-variant mt-0.5 flex items-center gap-1"><span className="material-symbols-outlined text-[12px]">person</span> {doc.author}</div>}
-                          
-                          {/* Tags list */}
                           {doc.tags && doc.tags.length > 0 && (
                             <div className="flex flex-wrap gap-1 mt-2">
                               {doc.tags.map((t, idx) => (
-                                <span key={idx} className="text-[10px] px-1.5 py-0.5 bg-surface-variant text-on-surface-variant border border-outline-variant/40 rounded">
-                                  #{t}
-                                </span>
+                                <span key={idx} className="text-[10px] px-1.5 py-0.5 bg-surface-variant text-on-surface-variant border border-outline-variant/40 rounded">#{t}</span>
                               ))}
                             </div>
                           )}
-
                           {doc.status === 'ERROR' && doc.error && (
                             <p className="font-body-sm text-body-sm text-error mt-xs bg-error/5 border border-error/10 px-2 py-1 rounded-lg w-fit">{doc.error}</p>
                           )}
                         </td>
                         <td className="px-md py-4 align-top">
                           {doc.category ? (
-                            <span className={`badge border text-[10px] font-bold ${CATEGORY_COLORS[doc.category] || 'bg-slate-500/10 text-slate-600'}`}>
-                              {doc.category}
-                            </span>
+                            <span className={`badge border text-[10px] font-bold ${CATEGORY_COLORS[doc.category] || 'bg-slate-500/10 text-slate-600'}`}>{doc.category}</span>
                           ) : (
                             <span className="text-on-surface-variant italic text-[11px]">Aucune</span>
                           )}
@@ -513,8 +448,8 @@ export default function KnowledgeBase() {
                         <td className="px-md py-4 text-on-surface-variant font-mono align-top">{doc._count?.chunks ?? 0}</td>
                         <td className="px-md py-4 align-top">
                           <span className={`badge px-2.5 py-0.5 rounded-full text-[10px] font-bold border uppercase ${
-                            doc.status === 'READY' 
-                              ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' 
+                            doc.status === 'READY'
+                              ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
                               : doc.status === 'PROCESSING'
                               ? 'bg-primary/10 text-primary border-primary/20 animate-pulse'
                               : 'bg-error/10 text-error border-error/20'
@@ -525,23 +460,25 @@ export default function KnowledgeBase() {
                         {canManage && (
                           <td className="px-md py-4 text-right align-top">
                             <div className="flex items-center justify-end gap-sm">
-                              <button
+                              <motion.button
                                 onClick={() => askReplace(doc)}
                                 disabled={replacingId === doc.id}
                                 title="Remplacer le fichier"
-                                className="text-on-surface-variant hover:text-primary disabled:opacity-50 transition-colors p-1"
+                                whileHover={{ scale: 1.15, color: 'var(--color-primary)' }}
+                                whileTap={{ scale: 0.9 }}
+                                className="text-on-surface-variant disabled:opacity-50 transition-colors p-1"
                               >
-                                <span className="material-symbols-outlined text-[18px]">
-                                  {replacingId === doc.id ? 'hourglass_empty' : 'upload_file'}
-                                </span>
-                              </button>
-                              <button
+                                <span className="material-symbols-outlined text-[18px]">{replacingId === doc.id ? 'hourglass_empty' : 'upload_file'}</span>
+                              </motion.button>
+                              <motion.button
                                 onClick={() => setConfirmDeleteId(doc.id)}
                                 title="Supprimer"
-                                className="text-on-surface-variant hover:text-error transition-colors p-1"
+                                whileHover={{ scale: 1.15, color: 'var(--color-error)' }}
+                                whileTap={{ scale: 0.9 }}
+                                className="text-on-surface-variant transition-colors p-1"
                               >
                                 <span className="material-symbols-outlined text-[18px]">delete</span>
-                              </button>
+                              </motion.button>
                             </div>
                           </td>
                         )}
@@ -558,35 +495,37 @@ export default function KnowledgeBase() {
                 </tbody>
               </table>
             </div>
-          </div>
+          </motion.div>
 
-          {/* Test RAG Search Box */}
-          <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/60 card-shadow p-lg flex flex-col gap-md">
-            <div className="border-b border-outline-variant/40 pb-md">
-              <div className="flex items-center justify-between">
+          {/* Test RAG Search */}
+          <motion.div variants={itemVariants} className="bento-card p-lg flex flex-col gap-md">
+            <div className="bento-card-header px-0 py-0 pb-md border-b border-outline-variant/40">
+              <div className="flex items-center justify-between w-full">
                 <h3 className="font-headline-sm text-headline-sm text-on-background font-bold flex items-center gap-2">
                   <span className="material-symbols-outlined text-primary">search</span>
                   Recherche test RAG
                 </h3>
-                <button
+                <motion.button
                   type="button"
                   onClick={() => setShowSearchFilters(!showSearchFilters)}
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.96 }}
                   className={`flex items-center gap-1.5 px-3 py-1 rounded-xl border text-body-sm font-semibold transition-all ${
-                    showSearchFilters 
-                      ? 'bg-primary/10 text-primary border-primary/20' 
+                    showSearchFilters
+                      ? 'bg-primary/10 text-primary border-primary/20'
                       : 'hover:bg-surface-container-low text-on-surface-variant border-outline-variant/60'
                   }`}
                 >
                   <span className="material-symbols-outlined text-[18px]">tune</span>
                   Filtres
-                </button>
+                </motion.button>
               </div>
               <p className="font-body-sm text-body-sm text-on-surface-variant mt-1">
                 Interrogez sémantiquement la base de connaissances pour valider les fragments pertinents renvoyés par Gemini.
               </p>
             </div>
 
-            {/* Advanced search filters panel */}
+            {/* Advanced search filters */}
             <AnimatePresence>
               {showSearchFilters && (
                 <motion.div
@@ -599,46 +538,26 @@ export default function KnowledgeBase() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-md">
                     <label className="flex flex-col gap-xs">
                       <span className="font-label-sm text-label-sm text-on-surface-variant uppercase font-semibold">Filtrer par catégorie</span>
-                      <select
-                        className="bg-surface border border-outline-variant/60 rounded-xl px-3 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                        value={searchCategory}
-                        onChange={(e) => setSearchCategory(e.target.value)}
-                      >
+                      <select className="bg-surface border border-outline-variant/60 rounded-xl px-3 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" value={searchCategory} onChange={(e) => setSearchCategory(e.target.value)}>
                         <option value="">Toutes les catégories</option>
-                        {CATEGORIES.map((cat) => (
-                          <option key={cat} value={cat}>{cat}</option>
-                        ))}
+                        {CATEGORIES.map((cat) => (<option key={cat} value={cat}>{cat}</option>))}
                       </select>
                     </label>
                     <label className="flex flex-col gap-xs">
-                      <span className="font-label-sm text-label-sm text-on-surface-variant uppercase font-semibold">Résultats maximum (limit: {searchLimit})</span>
-                      <input
-                        type="range"
-                        min="1"
-                        max="20"
-                        className="accent-primary h-2 w-full mt-3 cursor-pointer"
-                        value={searchLimit}
-                        onChange={(e) => setSearchLimit(e.target.value)}
-                      />
+                      <span className="font-label-sm text-label-sm text-on-surface-variant uppercase font-semibold">Résultats max ({searchLimit})</span>
+                      <input type="range" min="1" max="20" className="accent-primary h-2 w-full mt-3 cursor-pointer" value={searchLimit} onChange={(e) => setSearchLimit(e.target.value)} />
                     </label>
                   </div>
 
                   <div className="flex flex-col gap-xs">
                     <span className="font-label-sm text-label-sm text-on-surface-variant uppercase font-semibold">Filtrer par tags</span>
-                    <input
-                      type="text"
-                      className="bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-1.5 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                      placeholder="Ajouter un tag de filtre (Entrée)..."
-                      value={searchTagInput}
-                      onChange={(e) => setSearchTagInput(e.target.value)}
-                      onKeyDown={handleAddSearchTag}
-                    />
+                    <input type="text" className="bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-1.5 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" placeholder="Ajouter un tag (Entrée)..." value={searchTagInput} onChange={(e) => setSearchTagInput(e.target.value)} onKeyDown={handleAddSearchTag} />
                     {searchTags.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 mt-1.5">
                         {searchTags.map((tag, idx) => (
                           <span key={idx} className="badge bg-slate-500/10 text-slate-600 border-slate-500/20 py-0.5 px-2 text-[10px] lowercase flex items-center gap-1">
                             #{tag}
-                            <button type="button" onClick={() => handleRemoveSearchTag(idx)} className="hover:opacity-85 text-[12px]"><span className="material-symbols-outlined text-[12px]">close</span></button>
+                            <button type="button" onClick={() => handleRemoveSearchTag(idx)} className="hover:opacity-85"><span className="material-symbols-outlined text-[12px]">close</span></button>
                           </span>
                         ))}
                       </div>
@@ -646,12 +565,7 @@ export default function KnowledgeBase() {
                   </div>
 
                   <label className="flex items-center gap-2 cursor-pointer mt-1">
-                    <input
-                      type="checkbox"
-                      checked={useHybrid}
-                      onChange={(e) => setUseHybrid(e.target.checked)}
-                      className="rounded border-outline-variant/60 text-primary focus:ring-primary/20 w-4 h-4 cursor-pointer"
-                    />
+                    <motion.input type="checkbox" checked={useHybrid} onChange={(e) => setUseHybrid(e.target.checked)} whileTap={{ scale: 1.2 }} className="rounded border-outline-variant/60 text-primary focus:ring-primary/20 w-4 h-4 cursor-pointer" />
                     <span className="font-body-sm text-body-sm text-on-surface font-semibold">Recherche hybride (sémantique + mots-clés)</span>
                   </label>
                 </motion.div>
@@ -659,23 +573,26 @@ export default function KnowledgeBase() {
             </AnimatePresence>
 
             <form onSubmit={handleSearch} className="flex gap-3">
-              <input
+              <motion.input
+                whileFocus={{ scale: 1.01 }}
                 className="flex-1 bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300"
                 placeholder="Ex: comment renouveler un certificat VPN ?"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
-              <button
+              <motion.button
                 type="submit"
                 disabled={searching}
-                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-semibold shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 disabled:opacity-60 text-body-sm flex items-center gap-1.5 shrink-0"
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.96 }}
+                className="px-5 py-2.5 rounded-xl btn-gradient font-semibold shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 disabled:opacity-60 text-body-sm flex items-center gap-1.5 shrink-0"
               >
                 <span className="material-symbols-outlined text-[18px]">search</span>
                 {searching ? 'Recherche...' : 'Rechercher'}
-              </button>
+              </motion.button>
             </form>
 
-            {/* Results with interactive feedbacks */}
+            {/* Results */}
             {results && (
               <div className="flex flex-col gap-md mt-md">
                 <AnimatePresence>
@@ -685,95 +602,85 @@ export default function KnowledgeBase() {
                       initial={{ opacity: 0, y: 8 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.25, delay: index * 0.05 }}
-                      className="border border-outline-variant/60 bg-surface-container-low/30 rounded-2xl p-md hover:border-outline transition-colors duration-300 flex flex-col gap-sm"
+                      className="bento-card p-md flex flex-col gap-sm"
                     >
                       <div className="flex items-center justify-between gap-sm border-b border-outline-variant/40 pb-2">
                         <span className="font-headline-sm text-headline-sm text-on-surface font-bold">{r.title}</span>
                         <div className="flex items-center gap-2">
-                          {r.category && (
-                            <span className={`badge border text-[9px] font-bold ${CATEGORY_COLORS[r.category] || 'bg-slate-500/10 text-slate-600'}`}>
-                              {r.category}
-                            </span>
-                          )}
-                          <span className="font-mono-sm text-[10px] text-on-surface-variant bg-surface-container-low border border-outline-variant/40 px-2.5 py-0.5 rounded-full font-medium shadow-sm">
-                            Score : {(r.combined_score * 100).toFixed(1)}%
-                          </span>
+                          {r.category && <span className={`badge border text-[9px] font-bold ${CATEGORY_COLORS[r.category] || 'bg-slate-500/10 text-slate-600'}`}>{r.category}</span>}
+                          <span className="font-mono-sm text-[10px] text-on-surface-variant bg-surface-container-low border border-outline-variant/40 px-2.5 py-0.5 rounded-full font-medium shadow-sm">Score : {(r.combined_score * 100).toFixed(1)}%</span>
                         </div>
                       </div>
-                      
+
                       <p className="font-body-sm text-body-sm text-on-surface-variant leading-relaxed font-mono whitespace-pre-wrap select-all p-xs rounded-xl bg-surface-bright/50 border border-outline-variant/30">{r.content}</p>
-                      
-                      {/* Evaluation / Feedback Component */}
+
+                      {/* Feedback */}
                       <div className="flex flex-col md:flex-row md:items-center justify-between gap-sm border-t border-outline-variant/30 pt-md mt-sm text-body-sm">
                         <span className="text-on-surface-variant font-medium flex items-center gap-1">
                           <span className="material-symbols-outlined text-[18px]">rate_review</span>
-                          Évaluer la pertinence de ce fragment :
+                          Évaluer la pertinence :
                         </span>
-                        
+
                         {feedbackSent[r.id] ? (
                           <div className="flex items-center gap-1.5 text-emerald-500 font-semibold text-[13px] bg-emerald-500/5 px-3 py-1 rounded-xl border border-emerald-500/15">
                             <span className="material-symbols-outlined text-[16px]">check_circle</span>
-                            Merci pour votre retour ! (
-                            {feedbackSent[r.id] === 'VERY_RELEVANT' && 'Utile'}
-                            {feedbackSent[r.id] === 'SOMEWHAT_RELEVANT' && 'Moyen'}
-                            {feedbackSent[r.id] === 'NOT_RELEVANT' && 'Inutile'}
-                            )
+                            Merci ! ({feedbackSent[r.id] === 'VERY_RELEVANT' ? 'Utile' : feedbackSent[r.id] === 'SOMEWHAT_RELEVANT' ? 'Moyen' : 'Inutile'})
                           </div>
                         ) : (
                           <div className="flex items-center gap-md">
-                            {/* Smiley buttons */}
                             <div className="flex items-center gap-2">
-                              <button
-                                onClick={() => handleFeedbackSubmit(r, 'VERY_RELEVANT')}
-                                className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-outline-variant/60 hover:bg-emerald-500/10 hover:text-emerald-500 hover:border-emerald-500/20 text-on-surface-variant font-medium transition-all"
-                                title="Très pertinent / Utile"
-                              >
-                                <span>👍</span>
-                                <span className="hidden sm:inline">Utile</span>
-                              </button>
-                              <button
-                                onClick={() => handleFeedbackSubmit(r, 'SOMEWHAT_RELEVANT')}
-                                className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-outline-variant/60 hover:bg-amber-500/10 hover:text-amber-500 hover:border-amber-500/20 text-on-surface-variant font-medium transition-all"
-                                title="Moyennement pertinent"
-                              >
-                                <span>😐</span>
-                                <span className="hidden sm:inline">Moyen</span>
-                              </button>
-                              <button
-                                onClick={() => handleFeedbackSubmit(r, 'NOT_RELEVANT')}
-                                className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-outline-variant/60 hover:bg-red-500/10 hover:text-red-500 hover:border-red-500/20 text-on-surface-variant font-medium transition-all"
-                                title="Non pertinent / Inutile"
-                              >
-                                <span>👎</span>
-                                <span className="hidden sm:inline">Inutile</span>
-                              </button>
+                              {[
+                                { value: 'VERY_RELEVANT', icon: '👍', label: 'Utile', hover: 'hover:bg-emerald-500/10 hover:text-emerald-500 hover:border-emerald-500/20' },
+                                { value: 'SOMEWHAT_RELEVANT', icon: '😐', label: 'Moyen', hover: 'hover:bg-amber-500/10 hover:text-amber-500 hover:border-amber-500/20' },
+                                { value: 'NOT_RELEVANT', icon: '👎', label: 'Inutile', hover: 'hover:bg-red-500/10 hover:text-red-500 hover:border-red-500/20' },
+                              ].map((opt) => (
+                                <motion.button
+                                  key={opt.value}
+                                  onClick={() => handleFeedbackSubmit(r, opt.value)}
+                                  whileHover={{ scale: 1.05 }}
+                                  whileTap={{ scale: 0.95 }}
+                                  className={`flex items-center gap-1 px-3 py-1.5 rounded-xl border border-outline-variant/60 ${opt.hover} text-on-surface-variant font-medium transition-all`}
+                                >
+                                  <span>{opt.icon}</span>
+                                  <span className="hidden sm:inline">{opt.label}</span>
+                                </motion.button>
+                              ))}
                             </div>
 
-                            {/* Optional comment button toggle */}
-                            {activeCommentId !== r.id ? (
-                              <button
-                                onClick={() => setActiveCommentId(r.id)}
-                                className="text-[12px] text-primary hover:underline font-semibold"
-                              >
-                                Ajouter un commentaire
-                              </button>
-                            ) : (
-                              <div className="flex items-center gap-sm max-w-xs w-full">
-                                <input
-                                  type="text"
-                                  placeholder="Pourquoi ?"
-                                  value={feedbackComment[r.id] || ''}
-                                  onChange={(e) => setFeedbackComment({ ...feedbackComment, [r.id]: e.target.value })}
-                                  className="w-full bg-surface border border-outline-variant/60 rounded-xl px-2 py-1 text-xs text-on-surface focus:outline-none"
-                                />
-                                <button
-                                  onClick={() => setActiveCommentId(null)}
-                                  className="text-on-surface-variant hover:text-on-surface"
+                            <AnimatePresence mode="wait">
+                              {activeCommentId !== r.id ? (
+                                <motion.button
+                                  key="add-comment"
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: 1 }}
+                                  exit={{ opacity: 0 }}
+                                  onClick={() => setActiveCommentId(r.id)}
+                                  whileHover={{ scale: 1.03 }}
+                                  className="text-[12px] text-primary hover:underline font-semibold"
                                 >
-                                  <span className="material-symbols-outlined text-[16px]">close</span>
-                                </button>
-                              </div>
-                            )}
+                                  Commentaire
+                                </motion.button>
+                              ) : (
+                                <motion.div
+                                  key="comment-input"
+                                  initial={{ opacity: 0, width: 0 }}
+                                  animate={{ opacity: 1, width: 'auto' }}
+                                  exit={{ opacity: 0, width: 0 }}
+                                  className="flex items-center gap-sm"
+                                >
+                                  <input
+                                    type="text"
+                                    placeholder="Pourquoi ?"
+                                    value={feedbackComment[r.id] || ''}
+                                    onChange={(e) => setFeedbackComment({ ...feedbackComment, [r.id]: e.target.value })}
+                                    className="w-40 bg-surface border border-outline-variant/60 rounded-xl px-2 py-1 text-xs text-on-surface focus:outline-none"
+                                  />
+                                  <motion.button onClick={() => setActiveCommentId(null)} whileHover={{ scale: 1.1 }} className="text-on-surface-variant hover:text-on-surface">
+                                    <span className="material-symbols-outlined text-[16px]">close</span>
+                                  </motion.button>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
                           </div>
                         )}
                       </div>
@@ -785,12 +692,12 @@ export default function KnowledgeBase() {
                 )}
               </div>
             )}
-          </div>
+          </motion.div>
         </div>
 
-        {/* Right column: indexing / adding document (canManage) */}
+        {/* Right column: upload */}
         {canManage && (
-          <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/60 card-shadow p-lg flex flex-col gap-md h-fit relative overflow-hidden min-h-[460px]">
+          <motion.div variants={itemVariants} className="bento-card p-lg flex flex-col gap-md h-fit relative overflow-hidden min-h-[460px]">
             <AnimatePresence mode="wait">
               {uploading ? (
                 <motion.div
@@ -803,93 +710,48 @@ export default function KnowledgeBase() {
                 >
                   <div className="relative flex items-center justify-center w-20 h-20">
                     <div className="absolute inset-0 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
-                    <span className="material-symbols-outlined text-[32px] text-primary animate-pulse">
-                      sync_saved_locally
-                    </span>
+                    <span className="material-symbols-outlined text-[32px] text-primary animate-pulse">sync_saved_locally</span>
                   </div>
-
                   <div className="flex flex-col gap-1.5 w-full">
-                    <h4 className="font-headline-sm text-headline-sm text-on-background font-bold">
-                      Indexation en cours
-                    </h4>
-                    <p className="text-body-sm text-on-surface-variant max-w-[280px] mx-auto">
-                      Gemini découpe et analyse votre document pour la base vectorielle.
-                    </p>
+                    <h4 className="font-headline-sm text-headline-sm text-on-background font-bold">Indexation en cours</h4>
+                    <p className="text-body-sm text-on-surface-variant max-w-[280px] mx-auto">Gemini découpe et analyse votre document.</p>
                   </div>
 
-                  {/* Progress Bar */}
                   <div className="w-full max-w-[280px] flex flex-col gap-1.5 mt-2">
                     <div className="w-full bg-surface-variant/40 h-2.5 rounded-full overflow-hidden border border-outline-variant/30">
-                      <div 
-                        className="bg-gradient-to-r from-primary to-indigo-600 h-full rounded-full transition-all duration-300 ease-out"
-                        style={{ width: `${progress}%` }}
+                      <motion.div
+                        animate={{ width: `${progress}%` }}
+                        className="progress-gradient h-full rounded-full transition-all duration-300 ease-out"
                       />
                     </div>
                     <div className="flex justify-between items-center text-[10px] font-mono text-on-surface-variant px-0.5">
-                      <span>
-                        {progress < 20 
-                          ? "Téléversement..." 
-                          : progress < 45 
-                          ? "Analyse & Extraction..." 
-                          : progress < 85 
-                          ? "Découpage & Vectorisation..." 
-                          : "Stockage pgvector..."}
-                      </span>
+                      <span>{progress < 20 ? 'Téléversement...' : progress < 45 ? 'Analyse & Extraction...' : progress < 85 ? 'Découpage & Vectorisation...' : 'Stockage pgvector...'}</span>
                       <span className="font-bold text-primary">{progress}%</span>
                     </div>
                   </div>
 
-                  {/* Step-by-step Status List */}
                   <div className="flex flex-col gap-3 text-left w-full max-w-[260px] border-t border-outline-variant/30 pt-4 mt-2 font-body-sm text-body-sm">
-                    <div className="flex items-center gap-3">
-                      {progress >= 20 ? (
-                        <span className="material-symbols-outlined text-emerald-500 text-[18px]">check_circle</span>
-                      ) : (
-                        <span className="material-symbols-outlined text-primary text-[18px] animate-spin">sync</span>
-                      )}
-                      <span className={progress >= 20 ? "text-on-surface-variant line-through opacity-70" : "text-on-surface font-semibold"}>
-                        1. Téléversement du fichier
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      {progress >= 45 ? (
-                        <span className="material-symbols-outlined text-emerald-500 text-[18px]">check_circle</span>
-                      ) : progress >= 20 ? (
-                        <span className="material-symbols-outlined text-primary text-[18px] animate-spin">sync</span>
-                      ) : (
-                        <span className="material-symbols-outlined text-on-surface-variant/40 text-[18px]">circle</span>
-                      )}
-                      <span className={progress >= 45 ? "text-on-surface-variant line-through opacity-70" : progress >= 20 ? "text-on-surface font-semibold" : "text-on-surface-variant/60"}>
-                        2. Extraction & Analyse du texte
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      {progress >= 85 ? (
-                        <span className="material-symbols-outlined text-emerald-500 text-[18px]">check_circle</span>
-                      ) : progress >= 45 ? (
-                        <span className="material-symbols-outlined text-primary text-[18px] animate-spin">sync</span>
-                      ) : (
-                        <span className="material-symbols-outlined text-on-surface-variant/40 text-[18px]">circle</span>
-                      )}
-                      <span className={progress >= 85 ? "text-on-surface-variant line-through opacity-70" : progress >= 45 ? "text-on-surface font-semibold" : "text-on-surface-variant/60"}>
-                        3. Découpage & Vectorisation
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      {progress >= 100 ? (
-                        <span className="material-symbols-outlined text-emerald-500 text-[18px]">check_circle</span>
-                      ) : progress >= 85 ? (
-                        <span className="material-symbols-outlined text-primary text-[18px] animate-spin">sync</span>
-                      ) : (
-                        <span className="material-symbols-outlined text-on-surface-variant/40 text-[18px]">circle</span>
-                      )}
-                      <span className={progress >= 100 ? "text-on-surface-variant line-through opacity-70" : progress >= 85 ? "text-on-surface font-semibold" : "text-on-surface-variant/60"}>
-                        4. Indexation pgvector
-                      </span>
-                    </div>
+                    {[
+                      { label: '1. Téléversement du fichier', threshold: 20 },
+                      { label: '2. Extraction & Analyse', threshold: 45 },
+                      { label: '3. Découpage & Vectorisation', threshold: 85 },
+                      { label: '4. Indexation pgvector', threshold: 100 },
+                    ].map((step) => {
+                      const done = progress >= step.threshold;
+                      const active = !done && progress >= (step.threshold === 100 ? 85 : step.threshold - 20);
+                      return (
+                        <div key={step.label} className="flex items-center gap-3">
+                          {done ? (
+                            <span className="material-symbols-outlined text-emerald-500 text-[18px]">check_circle</span>
+                          ) : active ? (
+                            <motion.span animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }} className="material-symbols-outlined text-primary text-[18px]">sync</motion.span>
+                          ) : (
+                            <span className="material-symbols-outlined text-on-surface-variant/40 text-[18px]">circle</span>
+                          )}
+                          <span className={done ? 'text-on-surface-variant line-through opacity-70' : active ? 'text-on-surface font-semibold' : 'text-on-surface-variant/60'}>{step.label}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </motion.div>
               ) : success ? (
@@ -907,7 +769,7 @@ export default function KnowledgeBase() {
                     transition={{ type: 'spring', delay: 0.15, damping: 10 }}
                     className="w-20 h-20 rounded-full bg-emerald-500/10 border-2 border-emerald-500/20 flex items-center justify-center text-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.25)]"
                   >
-                    <motion.span 
+                    <motion.span
                       initial={{ scale: 0.5, rotate: -45 }}
                       animate={{ scale: 1, rotate: 0 }}
                       transition={{ type: 'spring', stiffness: 200, damping: 10, delay: 0.25 }}
@@ -916,14 +778,9 @@ export default function KnowledgeBase() {
                       check_circle
                     </motion.span>
                   </motion.div>
-
                   <div className="flex flex-col gap-1.5 px-4 mt-2">
-                    <h4 className="font-headline-sm text-headline-sm text-on-background font-bold">
-                      Document indexé !
-                    </h4>
-                    <p className="text-body-sm text-on-surface-variant max-w-[280px] mx-auto leading-relaxed">
-                      Le document a été découpé et rendu disponible pour la recherche sémantique avec succès.
-                    </p>
+                    <h4 className="font-headline-sm text-headline-sm text-on-background font-bold">Document indexé !</h4>
+                    <p className="text-body-sm text-on-surface-variant max-w-[280px] mx-auto leading-relaxed">Le document est disponible pour la recherche sémantique.</p>
                   </div>
                 </motion.div>
               ) : (
@@ -935,7 +792,7 @@ export default function KnowledgeBase() {
                   transition={{ duration: 0.2 }}
                   className="flex flex-col gap-md"
                 >
-                  <div className="border-b border-outline-variant/40 pb-md">
+                  <div className="bento-card-header px-0 py-0 pb-md border-b border-outline-variant/40 flex-col items-start">
                     <h3 className="font-headline-sm text-headline-sm text-on-background font-bold flex items-center gap-2">
                       <span className="material-symbols-outlined text-primary">add_circle</span>
                       Ajouter un document
@@ -944,10 +801,8 @@ export default function KnowledgeBase() {
                       Importez et découpez de nouveaux documents pour enrichir les connaissances de l'IA.
                     </p>
                   </div>
-                  
+
                   <form onSubmit={handleUpload} className="flex flex-col gap-md">
-                    
-                    {/* Drag and Drop Zone */}
                     <motion.div
                       onDragEnter={handleDrag}
                       onDragOver={handleDrag}
@@ -958,46 +813,16 @@ export default function KnowledgeBase() {
                       whileTap={{ scale: 0.99 }}
                       animate={dragActive ? { scale: 0.98 } : { scale: 1 }}
                       className={`cursor-pointer border-2 border-dashed rounded-2xl p-md text-center transition-all min-h-[140px] flex flex-col items-center justify-center gap-xs ${
-                        dragActive 
-                          ? 'border-primary bg-primary/5 text-primary' 
-                          : file 
-                          ? 'border-emerald-500/40 bg-emerald-500/5 text-on-surface' 
-                          : 'border-outline-variant/60 hover:bg-surface-container-low text-on-surface-variant'
+                        dragActive ? 'border-primary bg-primary/5 text-primary' : file ? 'border-emerald-500/40 bg-emerald-500/5 text-on-surface' : 'border-outline-variant/60 hover:bg-surface-container-low text-on-surface-variant'
                       }`}
                     >
-                      <input
-                        id="kb-file-input"
-                        type="file"
-                        accept=".pdf,.docx,.md,.markdown,.txt"
-                        onChange={(e) => {
-                          const chosen = e.target.files?.[0] || null;
-                          setFile(chosen);
-                          if (chosen && !title) {
-                            setTitle(chosen.name.substring(0, chosen.name.lastIndexOf('.')) || chosen.name);
-                          }
-                        }}
-                        className="hidden"
-                      />
-                      
-                      <span className={`material-symbols-outlined text-[36px] ${file ? 'text-emerald-500' : 'text-primary'}`}>
-                        {file ? 'check_circle' : 'cloud_upload'}
-                      </span>
-                      
+                      <input id="kb-file-input" type="file" accept=".pdf,.docx,.md,.markdown,.txt" onChange={(e) => { const chosen = e.target.files?.[0] || null; setFile(chosen); if (chosen && !title) setTitle(chosen.name.substring(0, chosen.name.lastIndexOf('.')) || chosen.name); }} className="hidden" />
+                      <span className={`material-symbols-outlined text-[36px] ${file ? 'text-emerald-500' : 'text-primary'}`}>{file ? 'check_circle' : 'cloud_upload'}</span>
                       {file ? (
                         <div className="flex flex-col gap-1 w-full max-w-[200px] overflow-hidden">
                           <p className="text-[12px] font-bold text-emerald-500 truncate" title={file.name}>{file.name}</p>
                           <p className="text-[10px] text-on-surface-variant">{(file.size / 1024).toFixed(1)} KB</p>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setFile(null);
-                              setTitle('');
-                            }}
-                            className="text-[10px] text-red-500 font-semibold hover:underline mt-1"
-                          >
-                            Supprimer
-                          </button>
+                          <motion.button type="button" onClick={(e) => { e.stopPropagation(); setFile(null); setTitle(''); }} whileHover={{ scale: 1.03 }} className="text-[10px] text-red-500 font-semibold hover:underline mt-1">Supprimer</motion.button>
                         </div>
                       ) : (
                         <>
@@ -1010,45 +835,26 @@ export default function KnowledgeBase() {
 
                     <label className="flex flex-col gap-xs">
                       <span className="font-label-sm text-label-sm text-on-surface-variant uppercase font-semibold">Titre de l'index</span>
-                      <input
-                        className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300"
-                        value={title}
-                        onChange={(e) => setTitle(e.target.value)}
-                        placeholder="Nom affiché dans la base"
-                        required
-                      />
+                      <motion.input whileFocus={{ scale: 1.01 }} className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Nom affiché" required />
                     </label>
 
                     <label className="flex flex-col gap-xs">
                       <span className="font-label-sm text-label-sm text-on-surface-variant uppercase font-semibold">Catégorie</span>
-                      <select
-                        className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300"
-                        value={category}
-                        onChange={(e) => setCategory(e.target.value)}
-                      >
+                      <select className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300" value={category} onChange={(e) => setCategory(e.target.value)}>
                         <option value="">Aucune catégorie</option>
-                        {CATEGORIES.map((cat) => (
-                          <option key={cat} value={cat}>{cat}</option>
-                        ))}
+                        {CATEGORIES.map((cat) => (<option key={cat} value={cat}>{cat}</option>))}
                       </select>
                     </label>
 
                     <div className="flex flex-col gap-xs">
                       <span className="font-label-sm text-label-sm text-on-surface-variant uppercase font-semibold">Tags (mots-clés RAG)</span>
-                      <input
-                        type="text"
-                        className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300"
-                        placeholder="Ajouter un tag (Entrée)..."
-                        value={tagInput}
-                        onChange={(e) => setTagInput(e.target.value)}
-                        onKeyDown={handleAddTag}
-                      />
+                      <motion.input whileFocus={{ scale: 1.01 }} type="text" className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300" placeholder="Ajouter un tag (Entrée)..." value={tagInput} onChange={(e) => setTagInput(e.target.value)} onKeyDown={handleAddTag} />
                       {tags.length > 0 && (
                         <div className="flex flex-wrap gap-1.5 mt-1.5">
                           {tags.map((tag, idx) => (
                             <span key={idx} className="badge bg-primary/10 text-primary border-primary/20 py-0.5 px-2 text-[10px] lowercase flex items-center gap-1">
                               #{tag}
-                              <button type="button" onClick={() => handleRemoveTag(idx)} className="hover:opacity-85 text-[12px]"><span className="material-symbols-outlined text-[12px]">close</span></button>
+                              <button type="button" onClick={() => handleRemoveTag(idx)} className="hover:opacity-85"><span className="material-symbols-outlined text-[12px]">close</span></button>
                             </span>
                           ))}
                         </div>
@@ -1057,48 +863,39 @@ export default function KnowledgeBase() {
 
                     <label className="flex flex-col gap-xs">
                       <span className="font-label-sm text-label-sm text-on-surface-variant uppercase font-semibold">Auteur</span>
-                      <input
-                        className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300"
-                        value={author}
-                        onChange={(e) => setAuthor(e.target.value)}
-                        placeholder="Auteur du document"
-                      />
+                      <motion.input whileFocus={{ scale: 1.01 }} className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300" value={author} onChange={(e) => setAuthor(e.target.value)} placeholder="Auteur" />
                     </label>
 
-                    <button
+                    <motion.button
                       type="submit"
                       disabled={uploading || !file}
-                      className="w-full bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-semibold py-2.5 rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 disabled:opacity-60 text-body-sm flex items-center justify-center gap-1.5 mt-2"
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.96 }}
+                      className="w-full btn-gradient font-semibold py-2.5 rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 disabled:opacity-60 text-body-sm flex items-center justify-center gap-1.5 mt-2"
                     >
                       <span className="material-symbols-outlined text-[18px]">cloud_upload</span>
-                      {uploading ? 'Indexation en cours...' : 'Indexer le document'}
-                    </button>
+                      Indexer le document
+                    </motion.button>
                   </form>
                 </motion.div>
               )}
             </AnimatePresence>
-          </div>
+          </motion.div>
         )}
       </div>
 
-      <input
-        ref={replaceInputRef}
-        type="file"
-        accept=".pdf,.docx,.md,.markdown,.txt"
-        onChange={handleReplaceFileChosen}
-        className="hidden"
-      />
+      <input ref={replaceInputRef} type="file" accept=".pdf,.docx,.md,.markdown,.txt" onChange={handleReplaceFileChosen} className="hidden" />
 
       <ConfirmDialog
         open={!!confirmDeleteId}
         title="Supprimer ce document"
-        message="Le document et tous ses fragments indexés seront supprimés définitivement de la base de connaissances. Cette action est irréversible."
+        message="Le document et tous ses fragments seront supprimés définitivement de la base de connaissances."
         confirmLabel="Supprimer"
         danger
         loading={deleting}
         onConfirm={confirmDelete}
         onCancel={() => setConfirmDeleteId(null)}
       />
-    </div>
+    </motion.div>
   );
 }

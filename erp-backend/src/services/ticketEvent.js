@@ -1,7 +1,7 @@
 const prisma = require('../prismaClient');
 
-async function logEvent(ticketId, type, actor = 'SYSTEM', payload = null) {
-  return prisma.ticketEvent.create({
+async function logEvent(ticketId, type, actor = 'SYSTEM', payload = null, tx = prisma) {
+  return tx.ticketEvent.create({
     data: { ticketId, type, actor, payload },
   });
 }

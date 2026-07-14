@@ -55,7 +55,17 @@ const userSelect = {
 };
 
 router.get('/', async (req, res) => {
+  const { search, limit } = req.query;
+  const where = {};
+  if (search) {
+    where.OR = [
+      { fullName: { contains: search, mode: 'insensitive' } },
+      { email: { contains: search, mode: 'insensitive' } }
+    ];
+  }
   const users = await prisma.user.findMany({
+    where,
+    take: limit ? Number(limit) : undefined,
     select: userSelect,
     orderBy: { fullName: 'asc' },
   });

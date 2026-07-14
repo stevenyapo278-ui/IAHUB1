@@ -182,7 +182,7 @@ async function deleteGlpiTicket(glpiTicketId) {
 // Crée un ticket dans GLPI depuis les données d'un email analysé par l'IA,
 // puis crée ou met à jour l'entrée correspondante dans la table Ticket de l'ERP.
 // Si GLPI n'est pas configuré, le ticket est créé uniquement dans l'ERP.
-async function createTicketFromEmail({ subject, body, from, fromName, analysis, emailAccountId }) {
+async function createTicketFromEmail({ subject, body, from, fromName, analysis, emailAccountId, tx = prisma }) {
   const title = analysis.suggestedTitle || subject;
   const content = `${body || ''}\n\n---\nAnalyse IA : ${analysis.summary}\nConfiance : ${Math.round((analysis.confidence || 0) * 100)}%`;
   const followupNote = from ? `Email original de ${fromName || from} &lt;${from}&gt;\nSujet : ${subject}` : null;
@@ -194,7 +194,7 @@ async function createTicketFromEmail({ subject, body, from, fromName, analysis, 
     console.error('[glpiTicketCreator] Création GLPI échouée:', err.message);
   }
 
-  const erpTicket = await prisma.ticket.create({
+  const erpTicket = await tx.ticket.create({
     data: {
       ...(glpiTicketId ? { glpiTicketId } : {}),
       title,
@@ -210,13 +210,37 @@ async function createTicketFromEmail({ subject, body, from, fromName, analysis, 
     },
   });
 
-  // Assigne automatiquement le technicien le moins chargé de l'équipe correspondant à la
-  // catégorie détectée par l'IA — best-effort, un ticket sans équipe connue reste non assigné.
+  // Assigne automatiquement le meilleur technicien : d'abord par compétence (domaine d'expertise),
+  // puis par équipe (fallback). L'assignation est journalisée dans ReassignmentLog pour le suivi
+  // de précision et l'apprentissage futur.
   try {
-    const { autoAssignTechnician } = require('./ticketAutoAssign');
-    const assigned = await autoAssignTechnician(erpTicket.id, analysis.category);
+    const { autoAssignTechnicianWithAI } = require('./ticketAutoAssign');
+    const { sendAssignmentNotificationEmail } = require('./emailSender');
+    const { getSystemSettings } = require('./systemSettings');
+    // Priorité : compétence exacte suggérée par l'IA (ex: "PORT USB") > catégorie générale (ex: "Matériel")
+    const skillHint = analysis.suggestedSkill || analysis.category;
+    const assigned = await autoAssignTechnicianWithAI(erpTicket.id, analysis.category, skillHint);
     if (assigned && glpiTicketId) {
       await updateGlpiTicket(glpiTicketId, { assignedToGlpiId: assigned.glpiId });
+    }
+
+    // Envoyer un email au technicien si le réglage est activé
+    if (assigned) {
+      const fullUser = await tx.user.findUnique({ where: { id: assigned.id } });
+      if (fullUser?.email) {
+        const settings = await getSystemSettings();
+        if (settings.notifyTechnicianOnAssignment) {
+          await sendAssignmentNotificationEmail({
+            ticketId: erpTicket.id,
+            glpiTicketId,
+            ticketTitle: erpTicket.title,
+            priority: erpTicket.priority,
+            technicianEmail: fullUser.email,
+            technicianName: fullUser.fullName,
+            category: analysis.category,
+          }).catch((err) => console.error('[glpiTicketCreator] Échec envoi notification assignation:', err.message));
+        }
+      }
     }
   } catch (err) {
     console.error('[glpiTicketCreator] Auto-assignation échouée:', err.message);

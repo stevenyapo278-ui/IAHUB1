@@ -1,4 +1,5 @@
 const prisma = require('../prismaClient');
+const { getIO } = require('../utils/socket');
 const { pollAllAccounts } = require('./emailPoller');
 const { analyzeEmail } = require('./mailAnalyzer');
 const { createTicketFromEmail, addGlpiFollowup } = require('./glpiTicketCreator');
@@ -12,6 +13,7 @@ const { processIncomingAttachments } = require('./emailAttachmentProcessor');
 const { stripSignature } = require('./signatureStripper');
 const { logEvent } = require('./ticketEvent');
 const { getSystemSettings } = require('./systemSettings');
+const { emitTicketCreated, emitTicketAssigned } = require('../utils/socket');
 const { tryHandleReminderReply } = require('./draftReplyApproval');
 
 // Selon le réglage "Auto-envoi des emails sans validation humaine" (Paramètres > Automatisation) :
@@ -75,6 +77,11 @@ async function processMessage(message, account) {
       ccRecipients, hasAttachments,
     },
   });
+
+  const io = getIO();
+  if (io) {
+    io.emit('email_received', incoming);
+  }
 
   try {
     // Étape 1 : chercher un ticket existant par conversation
@@ -206,23 +213,65 @@ async function processMessage(message, account) {
         await prisma.ticket.update({ where: { id: match.ticketId }, data: { status: 'OPEN', closedAt: null } });
       }
 
-      await prisma.incomingEmail.update({
+      const updated = await prisma.incomingEmail.update({
         where: { id: incoming.id },
         data: { status: 'DONE', erpTicketId: match.ticketId, isNewTicket: false, aiIntent: intentResult.intent },
       });
 
-      return prisma.incomingEmail.findUnique({ where: { id: incoming.id } });
+      if (io) io.emit('email_updated', updated);
+      return updated;
     }
 
-    // Étape 2 : analyse IA pour nouveau ticket
-    const analysis = await analyzeEmail({ subject, body: cleanBody, from: fromEmail, fromName });
+    // Couche 1 : Pré-filtre spam déterministe (sans appel LLM)
+    const { checkEmailSpam } = require('./emailSpamFilter');
+    const spamCheck = checkEmailSpam(headers, subject, bodyPreview, fromEmail);
+    if (spamCheck.isSpam) {
+      console.log(`[emailPipeline] Spam détecté par filtre déterministe: ${spamCheck.reason}`);
+      const updated = await prisma.incomingEmail.update({
+        where: { id: incoming.id },
+        data: { status: 'SPAM', aiSummary: `Spam filtré : ${spamCheck.reason}`, aiIsSpam: true, aiConfidence: 1.0 },
+      });
+      if (io) io.emit('email_updated', updated);
+      return updated;
+    }
+
+    // Couche 2 : Moteur de règles déterministe (sans appel LLM)
+    const { evaluateRules } = require('./emailRuleEngine');
+    const ruleMatch = await evaluateRules(subject, bodyPreview, fromEmail);
+
+    let analysis;
+    if (ruleMatch) {
+      console.log(`[emailPipeline] Correspondance avec la règle de triage: "${ruleMatch.label}"`);
+      if (ruleMatch.isSpam) {
+        const updated = await prisma.incomingEmail.update({
+          where: { id: incoming.id },
+          data: { status: 'SPAM', aiSummary: `Spam filtré (règle) : ${ruleMatch.label}`, aiIsSpam: true, aiConfidence: 1.0 },
+        });
+        if (io) io.emit('email_updated', updated);
+        return updated;
+      }
+
+      analysis = {
+        summary: `Règle de triage appliquée : "${ruleMatch.label}"`,
+        category: ruleMatch.category,
+        priority: ruleMatch.ticketPriority || 'P3',
+        suggestedTitle: subject.substring(0, 80),
+        suggestedSkill: ruleMatch.skillName,
+        confidence: 1.0,
+        isSpam: false
+      };
+    } else {
+      // Couche 3 : Fallback analyse IA pour nouveau ticket
+      analysis = await analyzeEmail({ subject, body: cleanBody, from: fromEmail, fromName });
+    }
 
     if (analysis.isSpam) {
-      await prisma.incomingEmail.update({
+      const updated = await prisma.incomingEmail.update({
         where: { id: incoming.id },
         data: { status: 'SPAM', aiSummary: analysis.summary, aiIsSpam: true, aiConfidence: analysis.confidence },
       });
-      return prisma.incomingEmail.findUnique({ where: { id: incoming.id } });
+      if (io) io.emit('email_updated', updated);
+      return updated;
     }
 
     // Étape 2b : détecter un incident similaire déjà ouvert (même problème, autre site/magasin)
@@ -306,7 +355,7 @@ async function processMessage(message, account) {
         outlookConversationId: conversationId,
       });
 
-      await prisma.incomingEmail.update({
+      const updated = await prisma.incomingEmail.update({
         where: { id: incoming.id },
         data: {
           status: 'DONE',
@@ -322,37 +371,44 @@ async function processMessage(message, account) {
         },
       });
 
-      return prisma.incomingEmail.findUnique({ where: { id: incoming.id } });
+      if (io) io.emit('email_updated', updated);
+      return updated;
     }
 
-    // Étape 3 : créer ticket GLPI + ERP — on garde le corps brut complet (bodyPreview) comme
-    // contenu du ticket, pour ne jamais perdre d'information par rapport à l'email d'origine.
-    const { glpiTicketId, erpTicketId } = await createTicketFromEmail({
-      subject, body: bodyPreview, from: fromEmail, fromName, analysis, emailAccountId: account.id,
-    });
+    // Étape 3 : créer ticket GLPI + ERP dans une transaction pour éviter l'incohérence
+    const { glpiTicketId, erpTicketId } = await prisma.$transaction(async (tx) => {
+      const created = await createTicketFromEmail({
+        subject, body: bodyPreview, from: fromEmail, fromName, analysis, emailAccountId: account.id, tx
+      });
 
-    // Étape 4 : stocker conversationId + aiSummary sur le ticket ERP (immédiatement pour la détection future)
-    await prisma.ticket.update({
-      where: { id: erpTicketId },
-      data: {
-        aiSummary: analysis.summary,
-        ...(conversationId ? { outlookConversationId: conversationId, status: 'WAITING_FOR_USER', lastUserReplyAt: receivedAt } : {}),
-      },
-    });
+      // Étape 4 : stocker conversationId + aiSummary sur le ticket ERP
+      await tx.ticket.update({
+        where: { id: created.erpTicketId },
+        data: {
+          aiSummary: analysis.summary,
+          ...(conversationId ? { outlookConversationId: conversationId, status: 'WAITING_FOR_USER', lastUserReplyAt: receivedAt } : {}),
+        },
+      });
 
-    // Étape 5 : enregistrer le message entrant
-    await prisma.ticketMessage.create({
-      data: {
-        ticketId: erpTicketId,
-        direction: 'INBOUND',
-        sender: fromEmail,
-        recipients: toRecipients,
-        ccRecipients,
-        subject, body: bodyPreview, bodyHtml,
-        outlookMessageId: graphMessageId,
-        internetMessageId, inReplyTo, conversationId,
-        timestamp: receivedAt,
-      },
+      // Étape 5 : enregistrer le message entrant
+      await tx.ticketMessage.create({
+        data: {
+          ticketId: created.erpTicketId,
+          direction: 'INBOUND',
+          sender: fromEmail,
+          recipients: toRecipients,
+          ccRecipients,
+          subject, body: bodyPreview, bodyHtml,
+          outlookMessageId: graphMessageId,
+          internetMessageId, inReplyTo, conversationId,
+          timestamp: receivedAt,
+        },
+      });
+
+      await logEvent(created.erpTicketId, 'CREATED', fromEmail, { glpiTicketId: created.glpiTicketId, source: 'EMAIL' }, tx);
+      await logEvent(created.erpTicketId, 'AI_ANALYZED', 'AI', { analysis }, tx);
+
+      return created;
     });
 
     await processIncomingAttachments({
@@ -362,8 +418,21 @@ async function processMessage(message, account) {
       bodyText: cleanBody,
     });
 
-    await logEvent(erpTicketId, 'CREATED', fromEmail, { glpiTicketId, source: 'EMAIL' });
-    await logEvent(erpTicketId, 'AI_ANALYZED', 'AI', { analysis });
+    // Émettre l'événement temps réel pour les notifications
+    try {
+      const fullTicket = await prisma.ticket.findUnique({
+        where: { id: erpTicketId },
+        select: { id: true, title: true, priority: true, status: true, category: true, createdAt: true, assignedToId: true },
+      });
+      if (fullTicket) {
+        emitTicketCreated(fullTicket);
+        if (fullTicket.assignedToId) {
+          emitTicketAssigned(fullTicket.id, fullTicket.title, fullTicket.assignedToId, 'ai_skills');
+        }
+      }
+    } catch (err) {
+      console.error('[emailPipeline] Échec émission socket:', err.message);
+    }
 
     // Sauvegarder l'embedding pour la détection future d'incidents similaires
     await saveTicketEmbedding(erpTicketId, subject, cleanBody);
@@ -390,7 +459,7 @@ async function processMessage(message, account) {
       outlookConversationId: conversationId,
     });
 
-    await prisma.incomingEmail.update({
+    const updated = await prisma.incomingEmail.update({
       where: { id: incoming.id },
       data: {
         status: 'DONE', glpiTicketId, erpTicketId, isNewTicket: true,
@@ -399,11 +468,21 @@ async function processMessage(message, account) {
         aiConfidence: analysis.confidence, aiIsSpam: false,
       },
     });
+    if (io) io.emit('email_updated', updated);
   } catch (err) {
-    await prisma.incomingEmail.update({ where: { id: incoming.id }, data: { status: 'ERROR', error: err.message } });
+    const updated = await prisma.incomingEmail.update({ where: { id: incoming.id }, data: { status: 'ERROR', error: err.message } });
+    if (io) io.emit('email_updated', updated);
   }
 
   return prisma.incomingEmail.findUnique({ where: { id: incoming.id } });
+}
+
+function chunkArray(array, size) {
+  const chunked = [];
+  for (let i = 0; i < array.length; i += size) {
+    chunked.push(array.slice(i, i + size));
+  }
+  return chunked;
 }
 
 async function runEmailPipeline() {
@@ -415,9 +494,21 @@ async function runEmailPipeline() {
       results.push({ accountId: account.id, error });
       continue;
     }
-    for (const message of messages) {
-      const result = await processMessage(message, account);
-      results.push({ accountId: account.id, emailId: result?.id, status: result?.status });
+    
+    // Parallélisation par lots de 5 pour éviter d'engorger la boucle événementielle et la BDD
+    const chunks = chunkArray(messages, 5);
+    for (const chunk of chunks) {
+      const chunkPromises = chunk.map(m => processMessage(m, account));
+      const settled = await Promise.allSettled(chunkPromises);
+      
+      for (const res of settled) {
+        if (res.status === 'fulfilled') {
+          results.push({ accountId: account.id, emailId: res.value?.id, status: res.value?.status });
+        } else {
+          console.error(`[emailPipeline] Erreur traitement lot (${account.emailAddress}):`, res.reason);
+          results.push({ accountId: account.id, error: res.reason?.message || res.reason });
+        }
+      }
     }
   }
   return results;

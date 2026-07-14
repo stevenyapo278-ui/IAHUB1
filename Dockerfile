@@ -6,6 +6,8 @@
 # Stage 1: Build frontend
 FROM node:20-alpine AS frontend-builder
 
+ARG VITE_API_URL=
+
 WORKDIR /app/erp-frontend
 
 # Copy frontend package files
@@ -17,7 +19,8 @@ RUN npm ci
 # Copy frontend source
 COPY erp-frontend ./
 
-# Build frontend
+# Build frontend with API URL for production (empty = relative /api calls)
+ENV VITE_API_URL=${VITE_API_URL:-/api}
 RUN npm run build
 
 # ==========================================

@@ -77,6 +77,7 @@ router.patch(
     body('dailySummaryTime').optional().matches(/^([01]\d|2[0-3]):([0-5]\d)$/),
     body('dailySummaryRecipients').optional().isArray(),
     body('dailySummaryRecipients.*').optional().isEmail(),
+    body('notifyTechnicianOnAssignment').optional().isBoolean(),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -95,6 +96,7 @@ router.patch(
     if (req.body.dailySummaryEnabled !== undefined) data.dailySummaryEnabled = req.body.dailySummaryEnabled;
     if (req.body.dailySummaryTime !== undefined) data.dailySummaryTime = req.body.dailySummaryTime;
     if (req.body.dailySummaryRecipients !== undefined) data.dailySummaryRecipients = req.body.dailySummaryRecipients;
+    if (req.body.notifyTechnicianOnAssignment !== undefined) data.notifyTechnicianOnAssignment = req.body.notifyTechnicianOnAssignment;
 
     const updated = await prisma.systemSettings.update({ where: { id: 1 }, data });
 

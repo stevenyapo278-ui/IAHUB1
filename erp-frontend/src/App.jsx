@@ -19,6 +19,8 @@ import ApprovalPage from './pages/ApprovalPage';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import Supervision from './pages/Supervision';
+import Documentation from './pages/Documentation';
+import SkillsManagement from './pages/SkillsManagement';
 
 export default function App() {
   // Les transitions de pages sont gérées dans MainLayout (Outlet uniquement).
@@ -82,6 +84,18 @@ export default function App() {
             element={
               <ProtectedRoute roles={['ADMIN']}>
                 <Prompts />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="documentation"
+            element={<Documentation />}
+          />
+          <Route
+            path="skills"
+            element={
+              <ProtectedRoute roles={['ADMIN', 'TECHNICIAN']}>
+                <SkillsManagement />
               </ProtectedRoute>
             }
           />

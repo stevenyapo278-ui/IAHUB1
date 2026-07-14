@@ -76,7 +76,7 @@ async function main() {
       name: 'nvidia',
       label: 'NVIDIA NIM (Nemotron)',
       baseUrl: 'https://integrate.api.nvidia.com/v1',
-      models: ['nvidia/llama-3.1-nemotron-70b-instruct'],
+      models: ['nvidia/llama-3.3-nemotron-super-49b-v1.5'],
     },
     {
       name: 'mistral',

@@ -23,6 +23,7 @@ async function callOpenAICompat(provider, apiKey, model, prompt) {
   const baseUrl = provider.baseUrl || 'https://api.openai.com/v1';
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
+    signal: AbortSignal.timeout(15000),
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
@@ -46,6 +47,7 @@ async function callGemini(provider, apiKey, prompt) {
     `${base}/models/gemini-flash-lite-latest:generateContent?key=${apiKey}`,
     {
       method: 'POST',
+      signal: AbortSignal.timeout(15000),
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
@@ -63,6 +65,7 @@ async function callAnthropic(provider, apiKey, prompt) {
   const baseUrl = provider.baseUrl || 'https://api.anthropic.com';
   const res = await fetch(`${baseUrl}/v1/messages`, {
     method: 'POST',
+    signal: AbortSignal.timeout(15000),
     headers: {
       'Content-Type': 'application/json',
       'x-api-key': apiKey,
@@ -150,6 +153,49 @@ Classification attendue :
   }
 }
 
+// Récupère toutes les compétences en base (noms + id)
+async function getAllSkills() {
+  try {
+    return await prisma.skill.findMany({ select: { name: true }, orderBy: { name: 'asc' } });
+  } catch (err) {
+    console.error('[mailAnalyzer] Échec récupération compétences:', err.message);
+    return [];
+  }
+}
+
+// Construit la chaîne de compétences pour le prompt
+function formatSkillsForPrompt(skills) {
+  if (skills.length === 0) return 'Aucune compétence configurée.';
+  return skills.map((s) => `- ${s.name}`).join('\n');
+}
+
+// Fallback : si le LLM n'a pas retourné suggestedSkill, tente une correspondance
+// par mots-clés entre le texte de l'email et les noms de compétences en base.
+// Score = nombre de mots de la compétence présents dans le texte (insensible à la casse, sans accents).
+function guessSkillFromText(subject, body, skills) {
+  if (!skills.length) return null;
+  const normalize = (s) =>
+    (s || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+  const text = normalize(`${subject || ''} ${body || ''}`);
+
+  let best = null;
+  let bestScore = 0;
+
+  for (const skill of skills) {
+    const words = normalize(skill.name).split(/[\s\-_/]+/).filter((w) => w.length >= 3);
+    const score = words.filter((w) => text.includes(w)).length;
+    if (score > bestScore) {
+      bestScore = score;
+      best = skill.name;
+    }
+  }
+
+  return bestScore > 0 ? best : null;
+}
+
 // Analyse un email brut via le provider IA actif et retourne les métadonnées ITSM structurées
 async function analyzeEmail({ subject, body, from, fromName }) {
   const provider = await getActiveProvider();
@@ -162,6 +208,10 @@ async function analyzeEmail({ subject, body, from, fromName }) {
     fewShotExamples = await getFewShotExamples(subject, body);
   }
 
+  // Injecter la liste des compétences disponibles pour guider l'IA dans l'assignation
+  const skills = await getAllSkills();
+  const availableSkills = formatSkillsForPrompt(skills);
+
   const { getPrompt } = require('./promptTemplates');
   const prompt = await getPrompt('analyzeEmail', {
     fromName: fromName || '',
@@ -169,6 +219,7 @@ async function analyzeEmail({ subject, body, from, fromName }) {
     subject,
     body: body?.substring(0, 2000) || '',
     fewShotExamples,
+    availableSkills,
   });
 
   const raw = await callProvider(provider, prompt);
@@ -176,8 +227,21 @@ async function analyzeEmail({ subject, body, from, fromName }) {
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error(`${provider.label} n'a pas retourné de JSON valide : ${raw.substring(0, 200)}`);
 
-  return JSON.parse(jsonMatch[0]);
+  const result = JSON.parse(jsonMatch[0]);
+
+  // Fallback : si le LLM n'a pas retourné suggestedSkill (ou a retourné null),
+  // on tente une correspondance par mot-clé sur le texte brut de l'email.
+  if (!result.suggestedSkill) {
+    const guessed = guessSkillFromText(subject, body, skills);
+    if (guessed) {
+      result.suggestedSkill = guessed;
+      console.log(`[mailAnalyzer] suggestedSkill deviné par mot-clé : "${guessed}"`);
+    }
+  }
+
+  return result;
 }
 
 module.exports = { analyzeEmail, getActiveProvider, callProvider };
+
 

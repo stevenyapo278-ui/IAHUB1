@@ -57,7 +57,7 @@ export default function Prompts() {
   const selected = prompts.find((p) => p.key === selectedKey);
 
   return (
-    <div className="flex flex-col gap-lg">
+    <div className="p-lg flex flex-col gap-lg">
       <header>
         <h2 className="font-display-lg text-display-lg text-on-background font-bold">Prompts IA</h2>
         <p className="font-body-lg text-body-lg text-on-surface-variant mt-1">
@@ -111,7 +111,7 @@ export default function Prompts() {
                 <button
                   onClick={save}
                   disabled={saving || draft === selected.template}
-                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-semibold shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 disabled:opacity-50 text-body-sm flex items-center gap-1"
+                  className="px-5 py-2.5 rounded-xl btn-gradient font-semibold shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 disabled:opacity-50 text-body-sm flex items-center gap-1"
                 >
                   <span className="material-symbols-outlined text-[18px]">save</span>
                   Enregistrer

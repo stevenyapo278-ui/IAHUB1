@@ -1,22 +1,47 @@
 import { motion } from 'framer-motion';
 
+/**
+ * Variants directionnels — la page entre depuis la droite (forward) ou la gauche (back).
+ * Combiné à un scale subtil pour un effet « depth » plus premium qu'un simple slide.
+ *
+ * direction = 1  → forward (clic lien) : entre par la droite, sort par la gauche
+ * direction = -1 → backward (retour)   : entre par la gauche, sort par la droite
+ */
 const variants = {
-  initial: { opacity: 0, x: 24, filter: 'blur(4px)' },
-  animate: { opacity: 1, x: 0,  filter: 'blur(0px)' },
-  exit:    { opacity: 0, x: -16, filter: 'blur(4px)' },
+  enter: {
+    opacity: 0,
+    y: 12,
+    scale: 0.985,
+  },
+  center: {
+    opacity: 1,
+    y: 0,
+    scale: 1,
+  },
+  exit: {
+    opacity: 0,
+    y: -12,
+    scale: 0.985,
+  },
 };
 
 const transition = {
-  duration: 0.28,
-  ease: [0.32, 0.72, 0, 1],
+  default: {
+    duration: 0.3,
+    ease: [0.22, 1, 0.36, 1],
+  },
+  opacity: {
+    duration: 0.25,
+    ease: [0.22, 1, 0.36, 1],
+  },
 };
 
 export default function PageTransition({ children }) {
   return (
     <motion.div
       variants={variants}
-      initial="initial"
-      animate="animate"
+      initial="enter"
+      animate="center"
       exit="exit"
       transition={transition}
       style={{ willChange: 'transform, opacity' }}

@@ -9,7 +9,17 @@ const router = express.Router();
 router.use(authenticate);
 
 router.get('/', async (req, res) => {
+  const { search, limit } = req.query;
+  const where = {};
+  if (search) {
+    where.OR = [
+      { name: { contains: search, mode: 'insensitive' } },
+      { category: { contains: search, mode: 'insensitive' } }
+    ];
+  }
   const teams = await prisma.team.findMany({
+    where,
+    take: limit ? Number(limit) : undefined,
     include: {
       members: { select: { id: true, fullName: true, email: true, role: true } },
       _count: { select: { tickets: true } },

@@ -1,5 +1,7 @@
 require('dotenv').config();
 const app = require('./app');
+const http = require('http');
+const { initSocket } = require('./utils/socket');
 const { syncAllProviders } = require('./utils/modelSync');
 const { syncGlpiTickets } = require('./utils/glpiSync');
 const { runEmailPipeline } = require('./services/emailPipeline');
@@ -34,7 +36,10 @@ const DRAFT_REMINDER_CHECK_INTERVAL_MS = 5 * 60 * 1000; // vérifie toutes les 5
 const TICKET_REMINDER_CHECK_INTERVAL_MS = 60 * 60 * 1000; // vérifie toutes les heures quels tickets WAITING_FOR_USER dépassent les délais de ReminderConfig (en jours, donc pas besoin d'une fréquence plus fine)
 const DAILY_SUMMARY_CHECK_INTERVAL_MS = 60 * 1000; // vérifie chaque minute si l'heure configurée (dailySummaryTime, ex "18:00") est atteinte
 
-app.listen(PORT, () => {
+const server = http.createServer(app);
+initSocket(server);
+
+server.listen(PORT, () => {
   logger.info(`Backend ERP démarré sur le port ${PORT}`);
   if (process.env.NODE_ENV === 'production') {
     logger.info(`Frontend attendu sur : ${process.env.FRONTEND_URL || 'http://localhost:' + PORT}`);

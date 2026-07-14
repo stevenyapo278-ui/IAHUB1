@@ -131,7 +131,7 @@ export default function PermissionGroups() {
   );
 
   return (
-    <div className="flex flex-col gap-lg">
+    <div className="p-lg flex flex-col gap-lg">
       <header className="flex justify-between items-end gap-md">
         <div>
           <h2 className="font-display-lg text-display-lg text-on-background font-bold">Groupes de droits</h2>
@@ -198,7 +198,7 @@ export default function PermissionGroups() {
             <button
               type="submit"
               disabled={submitting}
-              className="bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-semibold py-2.5 px-6 rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 disabled:opacity-50 text-body-sm"
+              className="btn-gradient font-semibold py-2.5 px-6 rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 disabled:opacity-50 text-body-sm"
             >
               {submitting ? 'Création…' : 'Créer le groupe'}
             </button>
@@ -292,7 +292,7 @@ export default function PermissionGroups() {
                 <button
                   onClick={() => saveGroupDetail(openGroup)}
                   disabled={savingDetail || (detailForm.name === openGroup.name && detailForm.description === (openGroup.description || ''))}
-                  className="bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white font-semibold py-2 px-5 rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 disabled:opacity-50 text-body-sm"
+                  className="btn-gradient font-semibold py-2 px-5 rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 disabled:opacity-50 text-body-sm"
                 >
                   {savingDetail ? 'Enregistrement...' : 'Enregistrer les modifications'}
                 </button>

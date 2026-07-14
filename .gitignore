@@ -1,3 +1,13 @@
 .env
 node_modules/
+erp-backend/node_modules/
+erp-frontend/node_modules/
+mcp-glpi/node_modules/
+
+erp-frontend/dist/
+mcp-glpi/dist/
+*.log
+logs/
+
 glpi-config/
+n8n-data/

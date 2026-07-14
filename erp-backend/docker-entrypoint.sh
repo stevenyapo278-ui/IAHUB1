@@ -2,7 +2,12 @@
 set -e
 
 echo "Attente de PostgreSQL..."
-until pg_isready -h postgres -U erp_user -d erp_itsm > /dev/null 2>&1; do
+
+# Attente de PostgreSQL : on utilise psql avec l'URL complète plutôt que pg_isready
+# qui ne supporte pas bien les connexions via DATABASE_URL (mots de passe complexes,
+# ports personnalisés, schémas...).
+# La variable PGPASSWORD est automatiquement extraite par psql de l'URL.
+until PGCONNECT_TIMEOUT=5 psql "${DATABASE_URL}" -c "SELECT 1" > /dev/null 2>&1; do
   sleep 2
 done
 echo "PostgreSQL prêt."

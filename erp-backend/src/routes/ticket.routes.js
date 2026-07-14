@@ -7,6 +7,7 @@ const { getGlpiConfig, glpiInitSession, glpiKillSession } = require('../utils/gl
 const { notifyMajorIncidentResolved } = require('../services/emailSender');
 const { createGlpiTicket, updateGlpiTicket, deleteGlpiTicket, uploadGlpiAttachment, addGlpiFollowup } = require('../services/glpiTicketCreator');
 const { logEvent } = require('../services/ticketEvent');
+const { emitTicketCreated, emitTicketUpdated, emitTicketAssigned } = require('../utils/socket');
 const multer = require('multer');
 
 const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); // 20 Mo max
@@ -15,10 +16,19 @@ router.use(authenticate);
 
 // List tickets (with optional filters)
 router.get('/', async (req, res) => {
-  const { status, priority, teamId, assignedToId, mine } = req.query;
+  const { status, priority, teamId, assignedToId, mine, title, search, limit } = req.query;
+  const searchQuery = title || search || req.query.query;
 
   const where = {};
-  if (status) where.status = status;
+  if (status) {
+    if (status === 'OPEN_GROUP') {
+      where.status = { in: ['NEW', 'OPEN', 'PENDING'] };
+    } else if (status === 'CLOSED_GROUP') {
+      where.status = { in: ['SOLVED', 'CLOSED'] };
+    } else {
+      where.status = status;
+    }
+  }
   if (priority) where.priority = priority;
   if (teamId) where.teamId = Number(teamId);
   if (assignedToId) where.assignedToId = Number(assignedToId);
@@ -38,8 +48,22 @@ router.get('/', async (req, res) => {
   if (req.query.source === 'glpi') where.glpiTicketId = { not: null };
   if (req.query.source === 'erp') where.glpiTicketId = null;
 
+  if (searchQuery) {
+    const numericId = parseInt(searchQuery, 10);
+    const orConditions = [
+      { title: { contains: searchQuery, mode: 'insensitive' } },
+      { content: { contains: searchQuery, mode: 'insensitive' } }
+    ];
+    if (!isNaN(numericId)) {
+      orConditions.push({ id: numericId });
+      orConditions.push({ glpiTicketId: numericId });
+    }
+    where.OR = orConditions;
+  }
+
   const tickets = await prisma.ticket.findMany({
     where,
+    take: limit ? Number(limit) : undefined,
     include: {
       requester: { select: { id: true, fullName: true, email: true } },
       assignedTo: { select: { id: true, fullName: true, email: true } },
@@ -217,7 +241,15 @@ router.post(
       }
     }
 
+    // Émettre événement temps réel pour les notifications
     const finalTicket = await prisma.ticket.findUnique({ where: { id: ticket.id } });
+    if (finalTicket) {
+      emitTicketCreated(finalTicket);
+      if (finalTicket.assignedToId) {
+        emitTicketAssigned(finalTicket.id, finalTicket.title, finalTicket.assignedToId, finalTicket.category ? 'by_category' : 'manual');
+      }
+    }
+
     return res.status(201).json(finalTicket);
   }
 );
@@ -296,9 +328,67 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
       });
     }
 
+    // Émettre événement temps réel
+    emitTicketUpdated(ticket, { status, priority, category, assignedToId });
+
     return res.json(ticket);
   } catch (err) {
     return res.status(404).json({ error: 'Ticket introuvable' });
+  }
+});
+
+// ── Réassignation intelligente avec compétences ──────────────────────────
+// Met à jour l'assignation, journalise dans ReassignmentLog et émet socket event.
+router.patch('/:id/reassign', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+  const id = Number(req.params.id);
+  const { assignedToId, reason } = req.body;
+
+  if (!assignedToId) return res.status(400).json({ error: 'assignedToId requis' });
+
+  try {
+    const before = await prisma.ticket.findUnique({
+      where: { id },
+      select: { assignedToId: true, title: true, category: true },
+    });
+    if (!before) return res.status(404).json({ error: 'Ticket introuvable' });
+
+    const ticket = await prisma.ticket.update({
+      where: { id },
+      data: { assignedToId: Number(assignedToId) },
+    });
+
+    // Journaliser la réassignation
+    await prisma.reassignmentLog.create({
+      data: {
+        ticketId: id,
+        previousTechnicianId: before.assignedToId || null,
+        newTechnicianId: Number(assignedToId),
+        reason: reason || (before.assignedToId ? 'reassignation_manuelle' : 'assignation_manuelle'),
+        wasAutoAssigned: false,
+        assignedByUserId: req.user.sub,
+      },
+    });
+
+    // Émettre l'événement socket
+    const { emitTicketAssigned } = require('../utils/socket');
+    emitTicketAssigned(id, ticket.title, Number(assignedToId), 'manual');
+
+    // Mettre à jour GLPI si synchronisé
+    if (ticket.glpiTicketId) {
+      try {
+        const assignee = await prisma.user.findUnique({ where: { id: Number(assignedToId) }, select: { glpiId: true } });
+        if (assignee?.glpiId) {
+          await updateGlpiTicket(ticket.glpiTicketId, { assignedToGlpiId: assignee.glpiId });
+        }
+      } catch (err) {
+        console.error('[ticket.routes] Mise à jour GLPI échouée:', err.message);
+        await logEvent(id, 'GLPI_SYNC_FAILED', 'SYSTEM', { action: 'reassign', error: err.message });
+      }
+    }
+
+    return res.json(ticket);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
   }
 });
 
