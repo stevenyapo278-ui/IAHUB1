@@ -36,13 +36,15 @@ services:
   # ./storage/glpi monté sur /var/glpi. Sur l'hôte, le dossier appartient souvent
   # à un autre utilisateur → Permission denied sans ce correctif.
   glpi-permissions:
-    image: alpine:latest
+    # Utilise l'image GLPI déjà présente localement (pas besoin de pull Docker Hub)
+    # On override entrypoint car l'image a un script d'entrée qui n'est pas utile ici.
+    image: glpi/glpi:latest
     container_name: ia-hub-glpi-permissions
     restart: "no"
+    user: "0:0"
     volumes:
       - ./storage/glpi:/var/glpi:rw
-    # Exec form directe : pas de shell, exit code 0 = succès, non-zero = erreur
-    command: ["chown", "-R", "33:33", "/var/glpi"]
+    entrypoint: ["chown", "-R", "33:33", "/var/glpi"]
     networks:
       - ia-hub-network
 
