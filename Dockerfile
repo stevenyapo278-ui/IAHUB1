@@ -1,32 +1,10 @@
 # ==========================================
 # Projet IA Hub - Production Dockerfile
-# Multi-stage build for optimized image
+# Single-stage : le frontend est pré-compilé sur l'hôte
+# (pour éviter les OOM pendant npm run build dans Docker)
 # ==========================================
 
-# Stage 1: Build frontend
-FROM node:20-alpine AS frontend-builder
-
-ARG VITE_API_URL=
-
-WORKDIR /app/erp-frontend
-
-# Copy frontend package files
-COPY erp-frontend/package*.json ./
-
-# Install frontend dependencies
-RUN npm ci
-
-# Copy frontend source
-COPY erp-frontend ./
-
-# Build frontend with API URL for production (empty = relative /api calls)
-ENV VITE_API_URL=${VITE_API_URL:-/api}
-RUN npm run build
-
-# ==========================================
-# Stage 2: Production image
-# ==========================================
-FROM node:20-slim AS production
+FROM node:20-slim
 
 # Install required system packages (for Prisma and PostgreSQL client)
 RUN apt-get update && apt-get install -y \
@@ -58,8 +36,8 @@ COPY erp-backend/docker-entrypoint.sh ./
 # Make entrypoint executable
 RUN chmod +x docker-entrypoint.sh
 
-# Copy frontend build from previous stage
-COPY --from=frontend-builder /app/erp-frontend/dist /app/erp-frontend/dist
+# Copy pre-built frontend dist from host (construit via start.sh ou npm run build)
+COPY erp-frontend/dist /app/erp-frontend/dist
 
 # Create uploads directory and set permissions
 RUN mkdir -p /app/erp-backend/uploads \

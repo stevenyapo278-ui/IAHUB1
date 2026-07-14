@@ -24,7 +24,7 @@ erp-backend/logs/
 *.log
 
 # Build artifacts
-erp-frontend/dist/
+# erp-frontend/dist/ (pre-compiled on host)
 mcp-glpi/dist/
 
 # IDE / OS

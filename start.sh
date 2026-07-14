@@ -21,10 +21,31 @@ echo "4) Démarrer en mode PRODUCTION avec GLPI local (recommande)"
 echo ""
 read -rp "Choix [1/2/3/4] : " choice
 
+# ── Construction du frontend pour les modes production ───────────────────
+# Le frontend doit être pré-compilé sur l'hôte pour éviter les OOM dans Docker.
+build_frontend() {
+  if [ ! -f "erp-frontend/dist/index.html" ]; then
+    if ! command -v node &>/dev/null || ! command -v npm &>/dev/null; then
+      echo ""
+      echo "ERREUR: Node.js et npm sont requis pour compiler le frontend."
+      echo "  - Sur le serveur : apt install nodejs npm"
+      echo "  - Ou copiez erp-frontend/dist/ depuis une machine avec Node.js"
+      exit 1
+    fi
+    echo ""
+    echo "Construction du frontend (hôte) pour la production..."
+    (cd erp-frontend && npm ci && VITE_API_URL=/api npm run build)
+    echo "✓ Frontend compilé avec succès"
+  else
+    echo "✓ Frontend déjà compilé"
+  fi
+}
+
 COMPOSE_FILES=""
 
 case "$choice" in
   1)
+    build_frontend
     echo ""
     echo "Démarrage avec GLPI local (conteneurs glpi + glpi-db)..."
     COMPOSE_FILES="-f docker-compose.yml -f docker-compose.glpi.yml"
@@ -32,6 +53,7 @@ case "$choice" in
     LAUNCH_LOCAL_GLPI=true
     ;;
   2)
+    build_frontend
     echo ""
     echo "Démarrage de la stack sans GLPI..."
     COMPOSE_FILES="-f docker-compose.yml"
@@ -39,6 +61,7 @@ case "$choice" in
     LAUNCH_LOCAL_GLPI=false
     ;;
   3)
+    build_frontend
     echo ""
     echo "Démarrage en mode PRODUCTION (stack minimale)..."
     COMPOSE_FILES="-f docker-compose.production.yml"
@@ -46,6 +69,7 @@ case "$choice" in
     LAUNCH_LOCAL_GLPI=false
     ;;
   4)
+    build_frontend
     echo ""
     echo "Démarrage en mode PRODUCTION avec GLPI local..."
     COMPOSE_FILES="-f docker-compose.production.yml -f docker-compose.glpi.yml"
