@@ -10,6 +10,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import GlobalSearch from '../components/GlobalSearch';
 import PageTransition from '../components/PageTransition';
 import NotificationPanel from '../components/NotificationPanel';
+import ChatWidget from '../components/ChatWidget';
 import { useNotifications } from '../context/NotificationContext';
 
 // permission: null = visible à tout utilisateur connecté, quel que soit son rôle/groupe (ex:
@@ -407,6 +408,8 @@ export default function MainLayout() {
         onConfirm={confirmLogout}
         onCancel={() => setShowLogoutConfirm(false)}
       />
+
+      <ChatWidget />
     </div>
   );
 }
