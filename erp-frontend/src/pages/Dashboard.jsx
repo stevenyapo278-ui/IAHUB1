@@ -36,7 +36,7 @@ const PRIORITY_LABELS = {
   P4: 'P4 - Basse',
 };
 
-const PIE_COLORS = ['#a1a1aa', '#71717a', '#52525b', '#3f3f46', '#27272a'];
+const PIE_COLORS = ['#2563EB', '#3B82F6', '#60A5FA', '#93C5FD', '#BFDBFE'];
 const PERIODS = ['7 Jours', '1 Mois', '3 Mois', '6 Mois'];
 
 /* ── Tooltip personnalisé ────────────────────────────────────────────────────── */

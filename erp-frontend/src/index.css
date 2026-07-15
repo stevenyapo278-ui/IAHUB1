@@ -47,7 +47,7 @@
 :root {
   --color-surface-container-high:      #eef3ff;
   --color-on-secondary-container:      #003550;
-  --color-tertiary-container:          #ffd2be;
+  --color-tertiary-container:          #FED7AA;
   --color-on-background:               #070d19;
   --color-surface-container-lowest:    #ffffff;
   --color-on-tertiary-fixed:           #351000;
@@ -55,19 +55,19 @@
   --color-primary-fixed:               #e2dfff;
   --color-on-error-container:          #410002;
   --color-inverse-on-surface:          #f0f4ff;
-  --color-background:                  #F8F5EE;
+  --color-background:                  #F8FAFC;
   --color-on-surface:                  #070d19;
   --color-inverse-primary:             #c3c0ff;
-  --color-secondary:                   #006699;
-  --color-secondary-container:         #cbe6ff;
-  --color-primary-container:           #e0e0ff;
+  --color-secondary:                   #3B82F6;
+  --color-secondary-container:         #E0F2FE;
+  --color-primary-container:           #DBEAFE;
   --color-primary-fixed-dim:           #c3c0ff;
   --color-surface-container-highest:   #e2ecfc;
   --color-on-tertiary-fixed-variant:   #7b2f00;
   --color-surface-container:           #e9f0ff;
-  --color-surface-tint:                #4d44e3;
+  --color-surface-tint:                #2563EB;
   --color-surface:                     #f4f7ff;
-  --color-on-primary-container:        #110066;
+  --color-on-primary-container:        #1E3A5F;
   --color-on-secondary-fixed:          #001e2f;
   --color-on-tertiary-container:       #351000;
   --color-on-primary-fixed:            #0f0069;
@@ -87,9 +87,9 @@
   --color-on-tertiary:                 #ffffff;
   --color-on-primary:                  #ffffff;
   --color-on-secondary-fixed-variant:  #004c6e;
-  --color-primary:                     #A94F2E;
+  --color-primary:                     #2563EB;
   --color-on-primary-fixed-variant:    #3323cc;
-  --color-tertiary:                    #b94700;
+  --color-tertiary:                    #F97316;
   --color-error:                       #dc2626;
   --color-tertiary-fixed:              #ffdbcc;
 }
@@ -107,33 +107,33 @@
   --color-surface-container-highest:   #2a2a2a;
   --color-surface-bright:              #1a1a1a;
   --color-surface-variant:             #1e1e1e;
-  --color-surface-tint:                #d4d4d8;
+  --color-surface-tint:                #60A5FA;
 
-  --color-primary:                     #fafafa;
+  --color-primary:                     #60A5FA;
   --color-on-primary:                  #0a0a0a;
-  --color-primary-container:           #2a2a2a;
-  --color-on-primary-container:        #fafafa;
+  --color-primary-container:           #1E3A5F;
+  --color-on-primary-container:        #DBEAFE;
   --color-primary-fixed:               #e4e4e7;
   --color-primary-fixed-dim:           #d4d4d8;
   --color-on-primary-fixed:            #0a0a0a;
   --color-on-primary-fixed-variant:    #1a1a1a;
   --color-inverse-primary:             #1a1a1a;
 
-  --color-secondary:                   #d4d4d8;
+  --color-secondary:                   #93C5FD;
   --color-on-secondary:                #0a0a0a;
-  --color-secondary-container:         #272727;
-  --color-on-secondary-container:      #d4d4d8;
-  --color-secondary-fixed:             #d4d4d8;
-  --color-secondary-fixed-dim:         #a1a1aa;
+  --color-secondary-container:         #1E3A5F;
+  --color-on-secondary-container:      #93C5FD;
+  --color-secondary-fixed:             #93C5FD;
+  --color-secondary-fixed-dim:         #60A5FA;
   --color-on-secondary-fixed:          #0a0a0a;
   --color-on-secondary-fixed-variant:  #1a1a1a;
 
-  --color-tertiary:                    #a1a1aa;
+  --color-tertiary:                    #FB923C;
   --color-on-tertiary:                 #0a0a0a;
-  --color-tertiary-container:          #272727;
-  --color-on-tertiary-container:       #d4d4d8;
-  --color-tertiary-fixed:              #a1a1aa;
-  --color-tertiary-fixed-dim:          #7a7a7a;
+  --color-tertiary-container:          #431407;
+  --color-on-tertiary-container:       #FDBA74;
+  --color-tertiary-fixed:              #FB923C;
+  --color-tertiary-fixed-dim:          #F97316;
   --color-on-tertiary-fixed:           #0a0a0a;
   --color-on-tertiary-fixed-variant:   #1a1a1a;
 
@@ -156,7 +156,7 @@
 
 /* ─── Variables Efferd Dashboard ─────────────────────────────────────────────── */
 :root {
-  --efferd-bg:             #F8F5EE;
+  --efferd-bg:             #F8FAFC;
   --efferd-card:           #ffffff;
   --efferd-card-hover:     #fafafa;
   --efferd-border:         #ECECEC;
@@ -171,8 +171,8 @@
   --efferd-text-muted:     #6B7280;
   --efferd-sidebar:        #ffffff;
   --efferd-sidebar-border: #ECECEC;
-  --nav-active-bg:         #A94F2E;
-  --nav-search-bg:         #F3F0E6;
+  --nav-active-bg:         #2563EB;
+  --nav-search-bg:         #F1F5F9;
   --nav-search-border:     #ECECEC;
   --nav-search-text:       #1F2937;
   --nav-search-kbd-bg:     #FFFFFF;
@@ -194,7 +194,7 @@
   --efferd-text-muted:     #71717a;
   --efferd-sidebar:        #0a0a0a;
   --efferd-sidebar-border: rgba(255, 255, 255, 0.05);
-  --nav-active-bg:         #A94F2E;
+  --nav-active-bg:         #3B82F6;
   --nav-search-bg:         #1E1E1E;
   --nav-search-border:     #2D2D2D;
   --nav-search-text:       #FAFAFA;
@@ -341,82 +341,82 @@
 @layer components {
   /* ─── Bouton gradient primary — indigo (light) / monochrome blanc (dark) ─ */
   .btn-gradient {
-    background-image: linear-gradient(to right, var(--color-primary), #4338ca);
+    background-image: linear-gradient(to right, var(--color-primary), #1D4ED8);
     color: #ffffff;
   }
   .btn-gradient:hover {
-    background-image: linear-gradient(to right, #4338ca, var(--color-primary));
+    background-image: linear-gradient(to right, #1D4ED8, var(--color-primary));
   }
   .dark .btn-gradient {
-    background-image: linear-gradient(to right, #fafafa, #e4e4e7);
-    color: #0a0a0a;
+    background-image: linear-gradient(to right, #3B82F6, #2563EB);
+    color: #ffffff;
   }
   .dark .btn-gradient:hover {
-    background-image: linear-gradient(to right, #e4e4e7, #d4d4d8);
+    background-image: linear-gradient(to right, #2563EB, #3B82F6);
   }
 
   /* ─── Gradient logo — indigo (light) / monochrome (dark) ─────────────── */
   .logo-gradient {
-    background-image: linear-gradient(135deg, var(--color-primary), #6366f1, #4f46e5);
+    background-image: linear-gradient(135deg, var(--color-primary), #3B82F6, #1D4ED8);
     color: #ffffff;
   }
   .dark .logo-gradient {
-    background-image: linear-gradient(135deg, #fafafa, #e4e4e7, #d4d4d8);
-    color: #0a0a0a;
+    background-image: linear-gradient(135deg, #60A5FA, #3B82F6, #2563EB);
+    color: #ffffff;
   }
 
   /* ─── Gradient avatar — indigo (light) / monochrome (dark) ───────────── */
   .avatar-gradient {
-    background-image: linear-gradient(135deg, var(--color-primary), #6366f1);
+    background-image: linear-gradient(135deg, var(--color-primary), #3B82F6);
     color: #ffffff;
   }
   .dark .avatar-gradient {
-    background-image: linear-gradient(135deg, #fafafa, #d4d4d8);
-    color: #0a0a0a;
+    background-image: linear-gradient(135deg, #60A5FA, #3B82F6);
+    color: #ffffff;
   }
 
   /* ─── Gradient progress bar — indigo (light) / monochrome (dark) ─────── */
   .progress-gradient {
-    background-image: linear-gradient(to right, var(--color-primary), #4f46e5);
+    background-image: linear-gradient(to right, var(--color-primary), #1D4ED8);
   }
   .dark .progress-gradient {
-    background-image: linear-gradient(to right, #fafafa, #e4e4e7);
+    background-image: linear-gradient(to right, #60A5FA, #3B82F6);
   }
 
   /* ─── Gradient edge nav — indigo (light) / monochrome (dark) ─────────── */
   .edge-gradient {
-    background-image: linear-gradient(to bottom, var(--color-primary), #6366f1);
+    background-image: linear-gradient(to bottom, var(--color-primary), #3B82F6);
   }
   .dark .edge-gradient {
-    background-image: linear-gradient(to bottom, #fafafa, #d4d4d8);
+    background-image: linear-gradient(to bottom, #60A5FA, #3B82F6);
   }
 
   /* ─── Gradient button via — indigo (light) / monochrome (dark) ───────── */
   .btn-gradient-via {
-    background-image: linear-gradient(to right, var(--color-primary), #6366f1, #4f46e5);
+    background-image: linear-gradient(to right, var(--color-primary), #3B82F6, #1D4ED8);
     color: #ffffff;
   }
   .dark .btn-gradient-via {
-    background-image: linear-gradient(to right, #fafafa, #e4e4e7, #d4d4d8);
-    color: #0a0a0a;
+    background-image: linear-gradient(to right, #60A5FA, #3B82F6, #2563EB);
+    color: #ffffff;
   }
 
   /* ─── Gradient icon stat-card — indigo (light) / monochrome (dark) ───── */
   .stat-icon-gradient {
-    background-image: linear-gradient(135deg, rgba(99,102,241,0.1), rgba(168,85,247,0.1));
-    color: #6366f1;
-    border-color: rgba(99,102,241,0.2);
+    background-image: linear-gradient(135deg, rgba(37,99,235,0.1), rgba(59,130,246,0.1));
+    color: #2563EB;
+    border-color: rgba(37,99,235,0.2);
   }
   .dark .stat-icon-gradient {
-    background-image: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
-    color: #d4d4d8;
-    border-color: rgba(255,255,255,0.1);
+    background-image: linear-gradient(135deg, rgba(96,165,250,0.12), rgba(59,130,246,0.06));
+    color: #60A5FA;
+    border-color: rgba(96,165,250,0.2);
   }
 
   /* ─── Nav pill active — indigo (light) / monochrome (dark) ────────────── */
   .nav-pill-active {
-    background: linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(99,102,241,0.06) 100%);
-    box-shadow: inset 0 1px 0 rgba(99,102,241,0.15);
+    background: linear-gradient(135deg, rgba(37,99,235,0.12) 0%, rgba(37,99,235,0.06) 100%);
+    box-shadow: inset 0 1px 0 rgba(37,99,235,0.15);
   }
   .dark .nav-pill-active {
     background: linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.04) 100%);
@@ -897,7 +897,7 @@
 .nav-logo-icon {
   width: 24px;
   height: 24px;
-  background: linear-gradient(135deg, var(--color-primary), #bf5c30);
+  background: linear-gradient(135deg, var(--color-primary), #3B82F6);
   border-radius: 6px;
   display: flex;
   align-items: center;
@@ -935,7 +935,7 @@
   color: #ffffff !important;
   padding: 8px 18px;
   font-weight: 600;
-  box-shadow: 0 4px 12px rgba(169, 79, 46, 0.15);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);
 }
 
 .nav-pill-item.icon-only {
@@ -1071,7 +1071,7 @@
   box-shadow: 0 0 0 1px var(--efferd-border);
   cursor: pointer;
   transition: all 0.2s ease;
-  background: linear-gradient(135deg, var(--color-primary), #bf5c30);
+  background: linear-gradient(135deg, var(--color-primary), #3B82F6);
   display: flex;
   align-items: center;
   justify-content: center;
