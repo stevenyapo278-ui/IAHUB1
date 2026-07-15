@@ -20,9 +20,9 @@ async function callAI(provider, prompt, maxTokens = 10) {
 
   if (provider.name === 'gemini') {
     const base = provider.baseUrl || 'https://generativelanguage.googleapis.com/v1beta';
-    const res = await fetch(`${base}/models/gemini-flash-lite-latest:generateContent?key=${key}`, {
+    const res = await fetch(`${base}/models/gemini-flash-lite-latest:generateContent`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { temperature: 0, maxOutputTokens: maxTokens, thinkingConfig: { thinkingBudget: 0 } },

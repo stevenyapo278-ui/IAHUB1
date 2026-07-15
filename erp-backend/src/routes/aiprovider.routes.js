@@ -290,7 +290,9 @@ router.post('/keys/:keyId/test', async (req, res) => {
       }
       case 'gemini': {
         const base = provider.baseUrl || 'https://generativelanguage.googleapis.com/v1beta';
-        const r = await fetch(`${base}/models?key=${apiKey}`);
+        const r = await fetch(`${base}/models`, {
+          headers: { 'x-goog-api-key': apiKey },
+        });
         if (!r.ok) {
           const body = await r.json().catch(() => ({}));
           return res.json({ ok: false, error: body.error?.message || `HTTP ${r.status}` });
@@ -413,9 +415,9 @@ router.post('/models/:modelId/test', async (req, res) => {
       }
       case 'gemini': {
         const base = provider.baseUrl || 'https://generativelanguage.googleapis.com/v1beta';
-        const r = await fetch(`${base}/models/${model.name}:generateContent?key=${apiKey}`, {
+        const r = await fetch(`${base}/models/${model.name}:generateContent`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
           body: JSON.stringify({
             contents: [{ parts: [{ text: 'Ping' }] }],
             generationConfig: { maxOutputTokens: 5, temperature: 0.1 },

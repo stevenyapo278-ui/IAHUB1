@@ -44,11 +44,11 @@ async function callOpenAICompat(provider, apiKey, model, prompt) {
 async function callGemini(provider, apiKey, prompt) {
   const base = provider.baseUrl || 'https://generativelanguage.googleapis.com/v1beta';
   const res = await fetch(
-    `${base}/models/gemini-flash-lite-latest:generateContent?key=${apiKey}`,
+    `${base}/models/gemini-flash-lite-latest:generateContent`,
     {
       method: 'POST',
       signal: AbortSignal.timeout(15000),
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { temperature: 0.1, maxOutputTokens: 2048, thinkingConfig: { thinkingBudget: 0 } },

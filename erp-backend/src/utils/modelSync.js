@@ -41,7 +41,9 @@ async function fetchRemoteModelNames(provider, apiKey) {
     }
     case 'gemini': {
       const base = provider.baseUrl || 'https://generativelanguage.googleapis.com/v1beta';
-      const res = await fetch(`${base}/models?key=${apiKey}`);
+      const res = await fetch(`${base}/models`, {
+        headers: { 'x-goog-api-key': apiKey },
+      });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error?.message || `HTTP ${res.status}`);

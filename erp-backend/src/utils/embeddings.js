@@ -59,9 +59,9 @@ async function getEmbeddingProvider() {
 
 async function embedWithGemini(config, text) {
   const baseUrl = config.baseUrl || 'https://generativelanguage.googleapis.com/v1beta';
-  const res = await fetch(`${baseUrl}/models/${config.model}:embedContent?key=${config.apiKey}`, {
+  const res = await fetch(`${baseUrl}/models/${config.model}:embedContent`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.apiKey },
     body: JSON.stringify({ model: `models/${config.model}`, content: { parts: [{ text }] } }),
   });
   if (!res.ok) throw new Error(`Échec de la génération d'embedding Gemini (${res.status})`);
