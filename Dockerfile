@@ -6,6 +6,8 @@
 
 # ── Stage 1 : Build du frontend ────────────────────────────────────────────
 FROM node:20-slim AS build-frontend
+ARG VITE_API_URL=/api
+ENV VITE_API_URL=${VITE_API_URL}
 
 WORKDIR /app/erp-frontend
 
