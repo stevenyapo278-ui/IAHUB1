@@ -6,6 +6,7 @@ import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import ConfirmDialog from '../components/ConfirmDialog';
+import EmptyState from '../components/EmptyState';
 
 const STATUS_OPTIONS = ['NEW', 'OPEN', 'PENDING', 'SOLVED', 'CLOSED'];
 const PRIORITY_OPTIONS = ['P1', 'P2', 'P3', 'P4'];
@@ -76,6 +77,7 @@ export default function Tickets() {
   const [error, setError] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
   const [deleting, setDeleting] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [actorSearch, setActorSearch] = useState('');
   const searchTerm = actorSearch.toLowerCase().trim();
   const filteredUsers = !searchTerm
@@ -154,6 +156,7 @@ export default function Tickets() {
   async function handleCreate(e) {
     e.preventDefault();
     setError('');
+    setCreating(true);
     try {
       const payload = new FormData();
       Object.entries(form).forEach(([key, value]) => {
@@ -172,6 +175,8 @@ export default function Tickets() {
       loadTickets();
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la création');
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -179,6 +184,13 @@ export default function Tickets() {
     setShowForm((v) => !v);
     setSearchParams({});
   }
+
+  useEffect(() => {
+    if (!showForm) return;
+    const onKey = (e) => { if (e.key === 'Escape') toggleForm(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showForm]);
 
   return (
     <motion.div
@@ -446,10 +458,11 @@ export default function Tickets() {
                   >
                     Annuler
                   </motion.button>
-                  <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} type="submit"
-                    className="px-5 py-2.5 rounded-xl btn-gradient font-semibold text-body-sm shadow-md shadow-primary/20 hover:shadow-lg transition-all"
+                  <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} type="submit" disabled={creating}
+                    className="px-5 py-2.5 rounded-xl btn-gradient font-semibold text-body-sm shadow-md shadow-primary/20 hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                   >
-                    Créer le ticket
+                    {creating && <span className="material-symbols-outlined animate-spin text-[16px]">progress_activity</span>}
+                    {creating ? 'Création...' : 'Créer le ticket'}
                   </motion.button>
                 </div>
               </div>
@@ -487,6 +500,15 @@ export default function Tickets() {
               ]} />
           </div>
           <div className="flex items-center gap-2.5">
+            {(filters.status || filters.priority || filters.source) && (
+              <button
+                onClick={() => { setFilters({ status: '', priority: '', source: '' }); }}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-body-sm font-semibold hover:bg-primary/20 transition-colors"
+              >
+                <span className="material-symbols-outlined text-[14px]">filter_alt_off</span>
+                Effacer les filtres
+              </button>
+            )}
             {canBulkDelete && selectedIds.length > 0 && (
               <motion.button
                 initial={{ opacity: 0, scale: 0.9 }}
@@ -633,11 +655,11 @@ export default function Tickets() {
                   <td colSpan={10 + (showSelectionColumn ? 1 : 0) + (canDelete ? 1 : 0)}
                     className="px-md py-12 text-center"
                   >
-                    <div className="flex flex-col items-center gap-3 text-on-surface-variant">
-                      <span className="material-symbols-outlined text-[40px] text-outline/40" aria-hidden="true">confirmation_number</span>
-                      <p className="font-body-md text-body-md italic">Aucun ticket trouvé.</p>
-                      <p className="font-body-sm text-body-sm">Modifie les filtres ou crée un nouveau ticket.</p>
-                    </div>
+                    <EmptyState
+                      icon="tickets"
+                      title="Aucun ticket trouvé"
+                      description="Modifie les filtres ou crée un nouveau ticket."
+                    />
                   </td>
                 </motion.tr>
               )}
@@ -738,10 +760,17 @@ const DOT_COLORS = {
 };
 
 function StatusBadge({ status }) {
+  const STATUS_LABEL = {
+    NEW: 'Nouveau',
+    OPEN: 'Ouvert',
+    PENDING: 'En attente',
+    RESOLVED: 'Résolu',
+    CLOSED: 'Fermé',
+  };
   return (
     <span className={`badge ${BADGE_COLORS[status] || ''}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${DOT_COLORS[status] || ''} animate-pulse-soft shrink-0`} />
-      {status}
+      {STATUS_LABEL[status] || status}
     </span>
   );
 }

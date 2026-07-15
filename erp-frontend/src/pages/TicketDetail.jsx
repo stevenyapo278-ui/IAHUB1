@@ -71,6 +71,7 @@ export default function TicketDetail() {
   const [teams, setTeams] = useState([]);
   const [users, setUsers] = useState([]);
   const [syncFailures, setSyncFailures] = useState([]);
+  const [savingField, setSavingField] = useState(null);
 
   const canAssign = hasPermission(user, 'tickets.assign');
   const canApprove = hasPermission(user, 'tickets.approve');
@@ -101,7 +102,12 @@ export default function TicketDetail() {
     try {
       const { data } = await api.get(`/tickets/${id}/attachments/${attachment.id}/file`, { responseType: 'blob' });
       const url = URL.createObjectURL(data);
-      window.open(url, '_blank');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = attachment.filename || 'attachment';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch {
       setError('Échec du téléchargement de la pièce jointe');
@@ -116,10 +122,13 @@ export default function TicketDetail() {
 
   async function updateField(field, value) {
     try {
+      setSavingField(field);
       await api.patch(`/tickets/${id}`, { [field]: value });
       load();
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la mise à jour');
+    } finally {
+      setSavingField(null);
     }
   }
 
@@ -186,10 +195,43 @@ export default function TicketDetail() {
   }
 
   if (error) {
-    return <div className="border border-red-500/20 bg-red-500/5 text-red-500 p-md rounded-xl font-body-md">{error}</div>;
+    return (
+      <div className="p-lg flex flex-col items-center gap-3">
+        <div className="border border-red-500/20 bg-red-500/5 text-red-500 p-md rounded-xl font-body-md">{error}</div>
+        <button onClick={load} className="px-4 py-1.5 rounded-lg text-sm font-semibold bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20 transition-colors">
+          Réessayer
+        </button>
+      </div>
+    );
   }
   if (!ticket) {
-    return <p className="font-body-md text-body-md text-on-surface-variant italic">Chargement...</p>;
+    return (
+      <div className="p-lg flex flex-col gap-lg animate-pulse">
+        <div className="flex items-center gap-sm">
+          <div className="h-4 w-16 bg-surface-container-high/60 rounded" />
+          <div className="h-4 w-8 bg-surface-container-high/60 rounded" />
+          <div className="h-4 w-12 bg-surface-container-high/60 rounded" />
+        </div>
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-lg">
+          <div className="xl:col-span-8 flex flex-col gap-lg">
+            <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl p-lg space-y-4">
+              <div className="h-6 w-48 bg-surface-container-high/60 rounded-xl" />
+              <div className="h-4 w-full bg-surface-container-high/40 rounded" />
+              <div className="h-4 w-3/4 bg-surface-container-high/40 rounded" />
+              <div className="h-20 w-full bg-surface-container-high/30 rounded-xl" />
+            </div>
+          </div>
+          <div className="xl:col-span-4 flex flex-col gap-lg">
+            <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl p-lg space-y-3">
+              <div className="h-5 w-32 bg-surface-container-high/60 rounded" />
+              <div className="h-4 w-full bg-surface-container-high/40 rounded" />
+              <div className="h-4 w-full bg-surface-container-high/40 rounded" />
+              <div className="h-4 w-2/3 bg-surface-container-high/40 rounded" />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -352,10 +394,11 @@ export default function TicketDetail() {
             <form onSubmit={handleAddFollowup} className="mt-lg pt-md border-t border-outline-variant/60">
               <textarea
                 className="w-full bg-surface border border-outline-variant/60 rounded-xl p-md font-body-sm text-body-sm text-on-surface placeholder-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 resize-y"
-                placeholder="Ajouter un commentaire..."
+                placeholder="Ajouter un commentaire... (Ctrl+Entrée pour envoyer)"
                 rows={3}
                 value={followup}
                 onChange={(e) => setFollowup(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleAddFollowup(e); } }}
               />
               <div className="flex justify-end mt-sm">
                 <button
@@ -506,7 +549,7 @@ export default function TicketDetail() {
                 <select
                   className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
                   value={ticket.type}
-                  disabled={!canAssign}
+                  disabled={!canAssign || savingField === 'type'}
                   onChange={(e) => updateField('type', e.target.value)}
                 >
                   {TYPE_OPTIONS.map((t) => (
@@ -519,7 +562,7 @@ export default function TicketDetail() {
                 <select
                   className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
                   value={ticket.status}
-                  disabled={!canAssign}
+                  disabled={!canAssign || savingField === 'status'}
                   onChange={(e) => updateField('status', e.target.value)}
                 >
                   {STATUS_OPTIONS.map((s) => (
@@ -532,7 +575,7 @@ export default function TicketDetail() {
                 <select
                   className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
                   value={ticket.source || ''}
-                  disabled={!canAssign}
+                  disabled={!canAssign || savingField === 'source'}
                   onChange={(e) => updateField('source', e.target.value)}
                 >
                   <option value="">-----</option>
@@ -546,7 +589,7 @@ export default function TicketDetail() {
                 <select
                   className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
                   value={ticket.urgency}
-                  disabled={!canAssign}
+                  disabled={!canAssign || savingField === 'urgency'}
                   onChange={(e) => updateField('urgency', e.target.value)}
                 >
                   {URGENCY_IMPACT_OPTIONS.map((o) => (
@@ -559,7 +602,7 @@ export default function TicketDetail() {
                 <select
                   className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
                   value={ticket.impact}
-                  disabled={!canAssign}
+                  disabled={!canAssign || savingField === 'impact'}
                   onChange={(e) => updateField('impact', e.target.value)}
                 >
                   {URGENCY_IMPACT_OPTIONS.map((o) => (
@@ -572,7 +615,7 @@ export default function TicketDetail() {
                 <select
                   className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
                   value={ticket.priority}
-                  disabled={!canAssign}
+                  disabled={!canAssign || savingField === 'priority'}
                   onChange={(e) => updateField('priority', e.target.value)}
                 >
                   {PRIORITY_OPTIONS.map((p) => (
@@ -593,8 +636,9 @@ export default function TicketDetail() {
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Équipe</label>
                 {canAssign ? (
                   <select
-                    className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300"
+                    className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
                     value={ticket.teamId || ''}
+                    disabled={savingField === 'teamId'}
                     onChange={(e) => updateField('teamId', e.target.value ? Number(e.target.value) : null)}
                   >
                     <option value="">Aucune</option>
@@ -612,8 +656,9 @@ export default function TicketDetail() {
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Attribué à</label>
                 {canAssign ? (
                   <select
-                    className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300"
+                    className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
                     value={ticket.assignedToId || ''}
+                    disabled={savingField === 'assignedToId'}
                     onChange={(e) => updateField('assignedToId', e.target.value ? Number(e.target.value) : null)}
                   >
                     <option value="">Non assigné</option>

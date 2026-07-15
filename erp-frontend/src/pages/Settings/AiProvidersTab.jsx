@@ -50,6 +50,7 @@ export default function AiProvidersTab() {
   const [info, setInfo] = useState('');
   const [pendingDelete, setPendingDelete] = useState(null); // { type: 'provider'|'model'|'key', id }
   const [deleting, setDeleting] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [testResults, setTestResults] = useState({}); // { [keyId]: { loading, ok, latencyMs, modelCount, error } }
   const [testModelResults, setTestModelResults] = useState({}); // { [modelId]: { loading, ok, latencyMs, error } }
 
@@ -75,12 +76,15 @@ export default function AiProvidersTab() {
   async function handleCreateProvider(e) {
     e.preventDefault();
     setError('');
+    setSubmitting(true);
     try {
       await api.post('/ai-providers', providerForm);
       setProviderForm({ name: '', label: '', baseUrl: '' });
       load();
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la création');
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -130,12 +134,15 @@ export default function AiProvidersTab() {
     e.preventDefault();
     const form = modelForms[providerId] || { name: '', label: '', type: 'CHAT' };
     if (!form.name) return;
+    setSubmitting(true);
     try {
       await api.post(`/ai-providers/${providerId}/models`, { ...form, type: form.type || 'CHAT' });
       setModelForms({ ...modelForms, [providerId]: { name: '', label: '', type: 'CHAT' } });
       load();
     } catch (err) {
       setError(err.response?.data?.error || "Erreur lors de l'ajout du modèle");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -170,6 +177,7 @@ export default function AiProvidersTab() {
     e.preventDefault();
     const form = keyForms[providerId] || { label: '', apiKey: '', modelId: '', isDefault: false };
     if (!form.label || !form.apiKey) return;
+    setSubmitting(true);
     try {
       await api.post(`/ai-providers/${providerId}/keys`, {
         label: form.label,
@@ -181,6 +189,8 @@ export default function AiProvidersTab() {
       load();
     } catch (err) {
       setError(err.response?.data?.error || "Erreur lors de l'ajout de la clé");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -318,9 +328,11 @@ export default function AiProvidersTab() {
               type="submit"
               whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.96 }}
-              className="btn-gradient font-semibold py-2.5 px-6 rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm"
+              disabled={submitting}
+              className="btn-gradient font-semibold py-2.5 px-6 rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
-              Ajouter le fournisseur
+              {submitting && <span className="material-symbols-outlined animate-spin text-[16px]">progress_activity</span>}
+              {submitting ? 'Ajout...' : 'Ajouter le fournisseur'}
             </motion.button>
           </div>
         </form>
@@ -385,6 +397,10 @@ export default function AiProvidersTab() {
             <div className="border border-outline-variant/60 rounded-2xl p-md bg-surface/20">
               <div
                 onClick={() => toggleSection(provider.id, 'models')}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSection(provider.id, 'models'); } }}
+                tabIndex={0}
+                role="button"
+                aria-expanded={isModelsExpanded}
                 className="flex items-center justify-between cursor-pointer select-none group"
               >
                 <div className="flex items-center gap-2">
@@ -434,8 +450,8 @@ export default function AiProvidersTab() {
                     className="overflow-hidden"
                   >
                     <div className="pt-md space-y-md">
-                      <div className="border border-outline-variant/60 rounded-xl overflow-hidden bg-surface-container-lowest">
-                        <table className="w-full text-left border-collapse">
+                      <div className="border border-outline-variant/60 rounded-xl overflow-hidden bg-surface-container-lowest overflow-x-auto">
+                        <table className="w-full text-left border-collapse min-w-[600px]">
                           <thead>
                             <tr className="bg-surface-bright/50 border-b border-outline-variant/60">
                               <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3">Nom</th>
@@ -560,9 +576,10 @@ export default function AiProvidersTab() {
                           type="submit"
                           whileHover={{ scale: 1.03 }}
                           whileTap={{ scale: 0.96 }}
-                          className="px-4 py-2 border border-outline-variant/60 rounded-xl bg-surface hover:bg-surface-container-high transition-all text-body-sm font-semibold shadow-sm flex items-center gap-xs"
+                          disabled={submitting}
+                          className="px-4 py-2 border border-outline-variant/60 rounded-xl bg-surface hover:bg-surface-container-high transition-all text-body-sm font-semibold shadow-sm flex items-center gap-xs disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          <span className="material-symbols-outlined text-[18px]">add</span>
+                          {submitting ? <span className="material-symbols-outlined text-[18px] animate-spin">progress_activity</span> : <span className="material-symbols-outlined text-[18px]">add</span>}
                           Ajouter le modèle
                         </motion.button>
                       </form>
@@ -576,6 +593,10 @@ export default function AiProvidersTab() {
             <div className="border border-outline-variant/60 rounded-2xl p-md bg-surface/20">
               <div
                 onClick={() => toggleSection(provider.id, 'keys')}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSection(provider.id, 'keys'); } }}
+                tabIndex={0}
+                role="button"
+                aria-expanded={isKeysExpanded}
                 className="flex items-center justify-between cursor-pointer select-none group"
               >
                 <div className="flex items-center gap-2">
@@ -606,8 +627,8 @@ export default function AiProvidersTab() {
                     className="overflow-hidden"
                   >
                     <div className="pt-md space-y-md">
-                      <div className="border border-outline-variant/60 rounded-xl overflow-hidden bg-surface-container-lowest">
-                        <table className="w-full text-left border-collapse">
+                      <div className="border border-outline-variant/60 rounded-xl overflow-hidden bg-surface-container-lowest overflow-x-auto">
+                        <table className="w-full text-left border-collapse min-w-[600px]">
                           <thead>
                             <tr className="bg-surface-bright/50 border-b border-outline-variant/60">
                               <th className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold p-3">Libellé</th>
@@ -738,9 +759,10 @@ export default function AiProvidersTab() {
                           type="submit"
                           whileHover={{ scale: 1.03 }}
                           whileTap={{ scale: 0.96 }}
-                          className="px-4 py-2 border border-outline-variant/60 rounded-xl bg-surface hover:bg-surface-container-high transition-all text-body-sm font-semibold shadow-sm flex items-center gap-xs"
+                          disabled={submitting}
+                          className="px-4 py-2 border border-outline-variant/60 rounded-xl bg-surface hover:bg-surface-container-high transition-all text-body-sm font-semibold shadow-sm flex items-center gap-xs disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          <span className="material-symbols-outlined text-[18px]">add</span>
+                          {submitting ? <span className="material-symbols-outlined text-[18px] animate-spin">progress_activity</span> : <span className="material-symbols-outlined text-[18px]">add</span>}
                           Ajouter la clé
                         </motion.button>
                       </form>

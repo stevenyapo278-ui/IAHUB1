@@ -239,6 +239,7 @@ export default function Inbox() {
               <button
                 type="button"
                 onClick={() => setSearch('')}
+                aria-label="Effacer la recherche"
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface p-0.5 rounded-full hover:bg-surface-container-high transition-colors"
               >
                 <span className="material-symbols-outlined text-[18px]">close</span>
@@ -375,7 +376,7 @@ export default function Inbox() {
                   animate={{ scale: 1, opacity: 1 }}
                   className="px-md font-body-sm text-body-sm text-on-surface-variant font-medium"
                 >
-                  Page {page}
+                  Page {page} / {Math.ceil(total / 20)}
                 </motion.span>
                 <motion.button
                   disabled={page * 20 >= total}

@@ -62,7 +62,7 @@ export default function ConfirmDialog({
                     : 'btn-gradient shadow-primary/10 hover:shadow-primary/25'
                 }`}
               >
-                {loading ? '...' : confirmLabel}
+                {loading ? <span className="material-symbols-outlined animate-spin text-[16px]">progress_activity</span> : confirmLabel}
               </button>
             </div>
           </motion.div>

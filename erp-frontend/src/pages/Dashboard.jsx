@@ -402,11 +402,13 @@ export default function Dashboard() {
   /* ── Etats d'erreur et chargement ── */
   if (error) {
     return (
-      <div
-        className="m-6 p-4 rounded-xl text-sm"
+      <div className="m-6 p-4 rounded-xl flex flex-col items-center gap-3 text-center"
         style={{ backgroundColor: 'var(--efferd-red-bg)', border: '1px solid var(--efferd-red)', color: 'var(--efferd-red)' }}
       >
-        {error}
+        <span className="font-body-md">{error}</span>
+        <button onClick={load} className="px-4 py-1.5 rounded-lg text-xs font-semibold border border-current hover:opacity-80 transition-opacity">
+          Réessayer
+        </button>
       </div>
     );
   }
@@ -548,18 +550,6 @@ export default function Dashboard() {
               {reportLoading ? 'hourglass_empty' : 'download'}
             </span>
             {reportLoading ? 'Génération...' : 'Télécharger rapport'}
-          </button>
-          <button
-            className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors"
-            style={{
-              backgroundColor: 'var(--efferd-card)',
-              border: '1px solid var(--efferd-border)',
-              color: 'var(--efferd-muted)',
-            }}
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: '16px', width: '16px', height: '16px' }}>
-              more_horiz
-            </span>
           </button>
         </div>
       </motion.div>
@@ -896,20 +886,6 @@ export default function Dashboard() {
                 table_rows
               </span>
               <h3 className="text-[13px] font-semibold" style={{ color: 'var(--efferd-text)' }}>Tickets récents</h3>
-            </div>
-            {/* Search bar */}
-            <div
-              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg"
-              style={{
-                backgroundColor: 'var(--efferd-card-hover)',
-                border: '1px solid var(--efferd-border)',
-                minWidth: 180,
-              }}
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: '13px', width: '13px', height: '13px', color: 'var(--efferd-muted)' }}>
-                search
-              </span>
-              <span className="text-[12px]" style={{ color: 'var(--efferd-muted)' }}>Rechercher...</span>
             </div>
           </div>
 
