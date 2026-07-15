@@ -9,7 +9,6 @@ import {
   InputGroupInput,
 } from '@/components/ui/input-group';
 import { FloatingPaths } from '@/components/floating-paths';
-import { MailIcon, LockIcon, ArrowRightIcon, RefreshCwIcon, AlertTriangleIcon } from 'lucide-react';
 
 /* ── Variants d'animation ──────────────────────────────────────────────────── */
 const containerVariants = {
@@ -208,7 +207,7 @@ export default function Login() {
                     role="alert"
                     className="border border-red-500/20 bg-red-500/5 text-red-500 p-4 rounded-xl flex items-start gap-3 font-body-sm"
                   >
-                    <AlertTriangleIcon className="h-5 w-5 shrink-0 text-red-500 mt-0.5" />
+                    <span className="material-symbols-outlined text-red-500 shrink-0" style={{ fontSize: '20px' }}>warning</span>
                     <div>
                       <strong className="font-semibold text-sm">Échec de connexion</strong>
                       <p className="mt-0.5 text-xs text-red-500/80">{error}</p>
@@ -235,7 +234,7 @@ export default function Login() {
                     aria-describedby={error ? 'login-error' : undefined}
                   />
                   <InputGroupAddon align="inline-start" aria-hidden="true">
-                    <MailIcon className="h-4 w-4" />
+                    <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>mail</span>
                   </InputGroupAddon>
                 </InputGroup>
               </motion.div>
@@ -266,7 +265,7 @@ export default function Login() {
                     aria-describedby={error ? 'login-error' : undefined}
                   />
                   <InputGroupAddon align="inline-start" aria-hidden="true">
-                    <LockIcon className="h-4 w-4" />
+                    <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>lock</span>
                   </InputGroupAddon>
                 </InputGroup>
               </motion.div>
@@ -284,7 +283,7 @@ export default function Login() {
                       animate={{ opacity: 1 }}
                       className="flex items-center gap-2"
                     >
-                      <RefreshCwIcon className="h-4 w-4 animate-spin" />
+                      <span className="material-symbols-outlined animate-spin" style={{ fontSize: '16px' }}>progress_activity</span>
                       Connexion en cours...
                     </motion.span>
                   ) : (
@@ -295,7 +294,7 @@ export default function Login() {
                         whileHover={{ x: 3 }}
                         transition={{ duration: 0.2 }}
                       >
-                        <ArrowRightIcon className="h-4 w-4" />
+                        <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>arrow_forward</span>
                       </motion.span>
                     </span>
                   )}

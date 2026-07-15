@@ -46,14 +46,14 @@ function EfferdTooltip({ active, payload, label }) {
     <div
       className="px-3 py-2 rounded-lg shadow-xl text-sm"
       style={{
-        backgroundColor: 'var(--efferd-card)',
-        border: '1px solid var(--efferd-border)',
-        color: 'var(--efferd-text)',
+        backgroundColor: 'var(--color-surface-container-lowest)',
+        border: '1px solid var(--color-outline-variant)',
+        color: 'var(--color-on-surface)',
       }}
     >
-      <p className="font-semibold mb-1" style={{ color: 'var(--efferd-muted)', fontSize: '11px' }}>{label}</p>
+      <p className="font-semibold mb-1" style={{ color: 'var(--color-on-surface-variant)', fontSize: '11px' }}>{label}</p>
       {payload.map((p, i) => (
-        <p key={i} className="font-bold" style={{ color: 'var(--efferd-text)' }}>
+        <p key={i} className="font-bold" style={{ color: 'var(--color-on-surface)' }}>
           {p.value}
         </p>
       ))}
@@ -61,36 +61,32 @@ function EfferdTooltip({ active, payload, label }) {
   );
 }
 
-/* ── KPI Card style Efferd ───────────────────────────────────────────────────── */
+/* ── KPI Card style M3 ──────────────────────────────────────────────────────── */
 function KpiCard({ label, value, icon, trendUp, trendValue, critical }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-      className="efferd-kpi-card"
+      className="bento-card"
+      style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}
     >
-      {/* Ligne supérieure : label + icon */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          <span
-            className="material-symbols-outlined"
-            style={{ fontSize: '14px', width: '14px', height: '14px', color: 'var(--efferd-muted)' }}
-          >
-            {icon}
-          </span>
-          <span className="text-[12px] font-medium uppercase tracking-wide" style={{ color: 'var(--efferd-muted)' }}>
+        <div className="flex items-center gap-2">
+          <div className="stat-icon-gradient" style={{ width: 36, height: 36, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>{icon}</span>
+          </div>
+          <span className="text-[12px] font-medium uppercase tracking-wide" style={{ color: 'var(--color-on-surface-variant)' }}>
             {label}
           </span>
         </div>
         {trendValue !== undefined && (
           <span className={trendUp ? 'efferd-trend-up' : 'efferd-trend-down'}>
-            {trendUp ? '▲' : '▼'} {trendValue}
+            {trendUp ? '\u25B2' : '\u25BC'} {trendValue}
           </span>
         )}
       </div>
 
-      {/* Valeur principale */}
       <motion.div
         initial={{ opacity: 0, scale: 0.92 }}
         animate={{ opacity: 1, scale: 1 }}
@@ -99,17 +95,16 @@ function KpiCard({ label, value, icon, trendUp, trendValue, critical }) {
         style={{
           fontSize: '2rem',
           lineHeight: 1.1,
-          color: critical ? 'var(--efferd-red)' : 'var(--efferd-text)',
+          color: critical ? 'var(--color-error)' : 'var(--color-on-surface)',
         }}
       >
         {value}
       </motion.div>
 
-      {/* Indicateur critique */}
       {critical && (
         <div className="flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" style={{ flexShrink: 0 }} />
-          <span className="text-[11px]" style={{ color: 'var(--efferd-red)' }}>Nécessite une attention immédiate</span>
+          <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ flexShrink: 0, backgroundColor: 'var(--color-error)' }} />
+          <span className="text-[11px]" style={{ color: 'var(--color-error)' }}>Necessite une attention immediate</span>
         </div>
       )}
     </motion.div>
@@ -124,50 +119,47 @@ function LoadingSkeleton() {
         {[1, 2, 3, 4].map((i) => (
           <div
             key={i}
-            className="rounded-xl p-5 animate-pulse"
-            style={{ backgroundColor: 'var(--efferd-card)', border: '1px solid var(--efferd-border)', height: 100 }}
+            className="bento-card animate-pulse"
+            style={{ height: 100 }}
           />
         ))}
       </div>
       <div
-        className="rounded-xl animate-pulse"
-        style={{ backgroundColor: 'var(--efferd-card)', border: '1px solid var(--efferd-border)', height: 280 }}
+        className="bento-card animate-pulse"
+        style={{ height: 280 }}
       />
     </div>
   );
 }
 
-/* ── Section Card Efferd ─────────────────────────────────────────────────────── */
+/* ── Section Card M3 ────────────────────────────────────────────────────────── */
 function SectionCard({ title, icon, action, children, className = '' }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35 }}
-      className={`efferd-card overflow-hidden ${className}`}
+      className={`bento-card overflow-hidden ${className}`}
     >
-      {/* Header */}
       <div
         className="flex items-center justify-between px-4 py-3"
-        style={{ borderBottom: '1px solid var(--efferd-border)' }}
+        style={{ borderBottom: '1px solid var(--color-outline-variant)' }}
       >
         <div className="flex items-center gap-2">
           {icon && (
             <span
               className="material-symbols-outlined"
-              style={{ fontSize: '15px', width: '15px', height: '15px', color: 'var(--efferd-muted)' }}
+              style={{ fontSize: '15px', color: 'var(--color-on-surface-variant)' }}
             >
               {icon}
             </span>
           )}
-          <h3 className="text-[13px] font-semibold" style={{ color: 'var(--efferd-text)' }}>
+          <h3 className="text-[13px] font-semibold" style={{ color: 'var(--color-on-surface)' }}>
             {title}
           </h3>
         </div>
         {action}
       </div>
-
-      {/* Body */}
       <div className="p-4">{children}</div>
     </motion.div>
   );
@@ -176,25 +168,25 @@ function SectionCard({ title, icon, action, children, className = '' }) {
 /* ── Badge statut pour le tableau ───────────────────────────────────────────── */
 function StatusBadge({ status }) {
   const cfg = {
-    NEW:     { cls: 'efferd-badge-pending', label: 'Nouveau' },
-    OPEN:    { cls: 'efferd-badge-success', label: 'Ouvert' },
-    PENDING: { cls: 'efferd-badge-pending', label: 'En attente' },
-    SOLVED:  { cls: 'efferd-badge-muted',   label: 'Résolu' },
-    CLOSED:  { cls: 'efferd-badge-muted',   label: 'Fermé' },
-  }[status] || { cls: 'efferd-badge-muted', label: status };
+    NEW:     { cls: 'badge-status-new', label: 'Nouveau' },
+    OPEN:    { cls: 'badge-status-open', label: 'Ouvert' },
+    PENDING: { cls: 'badge-status-pending', label: 'En attente' },
+    SOLVED:  { cls: 'badge-status-closed', label: 'Resolu' },
+    CLOSED:  { cls: 'badge-status-closed', label: 'Ferme' },
+  }[status] || { cls: 'badge-status-closed', label: status };
 
-  return <span className={cfg.cls}>{cfg.label}</span>;
+  return <span className={`badge ${cfg.cls}`}>{cfg.label}</span>;
 }
 
 function PriorityBadge({ priority }) {
   const cfg = {
-    P1: { cls: 'efferd-badge-critical', label: 'P1' },
-    P2: { cls: 'efferd-badge-pending',  label: 'P2' },
-    P3: { cls: 'efferd-badge-muted',    label: 'P3' },
-    P4: { cls: 'efferd-badge-muted',    label: 'P4' },
-  }[priority] || { cls: 'efferd-badge-muted', label: priority };
+    P1: { cls: 'badge-priority-p1', label: 'P1' },
+    P2: { cls: 'badge-priority-p2',  label: 'P2' },
+    P3: { cls: 'badge-priority-p3',    label: 'P3' },
+    P4: { cls: 'badge-priority-p4',    label: 'P4' },
+  }[priority] || { cls: 'badge-status-closed', label: priority };
 
-  return <span className={cfg.cls}>{cfg.label}</span>;
+  return <span className={`badge ${cfg.cls}`}>{cfg.label}</span>;
 }
 
 /* ── Connection Dot ─────────────────────────────────────────────────────────── */
@@ -203,12 +195,12 @@ function ConnectionDot({ connected }) {
     <span className="relative inline-flex items-center justify-center">
       <span
         className="inline-block w-1.5 h-1.5 rounded-full"
-        style={{ backgroundColor: connected ? 'var(--efferd-green)' : 'var(--efferd-muted)' }}
+        style={{ backgroundColor: connected ? '#16a34a' : 'var(--color-on-surface-variant)' }}
       />
       {connected && (
         <span
           className="absolute inset-0 w-1.5 h-1.5 rounded-full animate-ping"
-          style={{ backgroundColor: 'var(--efferd-green)', opacity: 0.4 }}
+          style={{ backgroundColor: '#16a34a', opacity: 0.4 }}
         />
       )}
     </span>
@@ -220,19 +212,19 @@ function IntegrationGroup({ label, items, getConnected, suffix }) {
   if (!items?.length) return null;
   return (
     <div>
-      <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--efferd-muted)' }}>
+      <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--color-on-surface-variant)' }}>
         {label}
       </p>
       <div className="space-y-1">
         {items.map((item) => (
           <div key={item.id} className="flex items-center justify-between py-1">
-            <span className="text-[12px] font-medium truncate capitalize" style={{ color: 'var(--efferd-text)' }}>
+            <span className="text-[12px] font-medium truncate capitalize" style={{ color: 'var(--color-on-surface)' }}>
               {item.name || item.label}
             </span>
             <div className="flex items-center gap-1.5 shrink-0 ml-2">
               <ConnectionDot connected={getConnected(item)} />
-              <span className="text-[10px] uppercase" style={{ color: 'var(--efferd-muted)' }}>
-                {suffix ? suffix(item) : getConnected(item) ? 'Connecté' : 'Non connecté'}
+              <span className="text-[10px] uppercase" style={{ color: 'var(--color-on-surface-variant)' }}>
+                {suffix ? suffix(item) : getConnected(item) ? 'Connecte' : 'Non connecte'}
               </span>
             </div>
           </div>
@@ -403,11 +395,11 @@ export default function Dashboard() {
   if (error) {
     return (
       <div className="m-6 p-4 rounded-xl flex flex-col items-center gap-3 text-center"
-        style={{ backgroundColor: 'var(--efferd-red-bg)', border: '1px solid var(--efferd-red)', color: 'var(--efferd-red)' }}
+        style={{ backgroundColor: 'rgba(220,38,38,0.05)', border: '1px solid rgba(220,38,38,0.2)', color: 'var(--color-error)' }}
       >
         <span className="font-body-md">{error}</span>
-        <button onClick={load} className="px-4 py-1.5 rounded-lg text-xs font-semibold border border-current hover:opacity-80 transition-opacity">
-          Réessayer
+        <button onClick={loadAll} className="px-4 py-1.5 rounded-lg text-xs font-semibold border border-current hover:opacity-80 transition-opacity">
+          Reessayer
         </button>
       </div>
     );
@@ -451,10 +443,10 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="p-6 space-y-5 min-h-screen" style={{ backgroundColor: 'var(--efferd-bg)' }}>
+    <div className="p-6 space-y-5 min-h-screen" style={{ backgroundColor: 'var(--color-background)' }}>
 
       {/* ══════════════════════════════════════════════════════════════════════ */}
-      {/* HEADER — filtres de période + action                                  */}
+      {/* HEADER — filtres de periode + action                                  */}
       {/* ══════════════════════════════════════════════════════════════════════ */}
       <motion.div
         initial={{ opacity: 0, y: -8 }}
@@ -462,11 +454,11 @@ export default function Dashboard() {
         transition={{ duration: 0.3 }}
         className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
       >
-        {/* Filtres de période & Date range */}
+        {/* Filtres de periode & Date range */}
         <div className="flex flex-wrap items-center gap-3">
           <div
             className="flex items-center gap-1 p-1 rounded-lg"
-            style={{ backgroundColor: 'var(--efferd-card)', border: '1px solid var(--efferd-border)' }}
+            style={{ backgroundColor: 'var(--color-surface-container-lowest)', border: '1px solid var(--color-outline-variant)' }}
           >
             {PERIODS.map((p) => (
               <button
@@ -485,10 +477,10 @@ export default function Dashboard() {
 
           <div
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm"
-            style={{ backgroundColor: 'var(--efferd-card)', border: '1px solid var(--efferd-border)', color: 'var(--efferd-text)' }}
+            style={{ backgroundColor: 'var(--color-surface-container-lowest)', border: '1px solid var(--color-outline-variant)', color: 'var(--color-on-surface)' }}
           >
             <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--efferd-muted)' }}>Du</span>
+              <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-on-surface-variant)' }}>Du</span>
               <input
                 type="date"
                 value={customStartDate}
@@ -497,12 +489,12 @@ export default function Dashboard() {
                   setActivePeriod('');
                 }}
                 className="bg-transparent border-none text-xs focus:outline-none cursor-pointer"
-                style={{ color: 'var(--efferd-text)', colorScheme: 'dark' }}
+                style={{ color: 'var(--color-on-surface)', colorScheme: 'dark' }}
               />
             </div>
-            <div className="w-[1px] h-4 bg-[var(--efferd-border)]" style={{ backgroundColor: 'var(--efferd-border)' }} />
+            <div className="w-[1px] h-4" style={{ backgroundColor: 'var(--color-outline-variant)' }} />
             <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--efferd-muted)' }}>Au</span>
+              <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-on-surface-variant)' }}>Au</span>
               <input
                 type="date"
                 value={customEndDate}
@@ -511,7 +503,7 @@ export default function Dashboard() {
                   setActivePeriod('');
                 }}
                 className="bg-transparent border-none text-xs focus:outline-none cursor-pointer"
-                style={{ color: 'var(--efferd-text)', colorScheme: 'dark' }}
+                style={{ color: 'var(--color-on-surface)', colorScheme: 'dark' }}
               />
             </div>
             {(customStartDate || customEndDate) && (
@@ -522,7 +514,7 @@ export default function Dashboard() {
                   setActivePeriod('1 Mois');
                 }}
                 className="ml-1 text-[16px] material-symbols-outlined hover:text-red-500 cursor-pointer flex items-center"
-                title="Réinitialiser"
+                title="Reinitialiser"
               >
                 close
               </button>
@@ -537,19 +529,17 @@ export default function Dashboard() {
             disabled={reportLoading}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[13px] font-medium transition-colors"
             style={{
-              backgroundColor: 'var(--efferd-card)',
-              border: '1px solid var(--efferd-border)',
-              color: reportLoading ? 'var(--efferd-muted)' : 'var(--efferd-text)',
+              backgroundColor: 'var(--color-surface-container-lowest)',
+              border: '1px solid var(--color-outline-variant)',
+              color: reportLoading ? 'var(--color-on-surface-variant)' : 'var(--color-on-surface)',
               cursor: reportLoading ? 'not-allowed' : 'pointer',
               opacity: reportLoading ? 0.7 : 1,
             }}
-            onMouseEnter={(e) => { if (!reportLoading) e.currentTarget.style.backgroundColor = 'var(--efferd-card-hover)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'var(--efferd-card)'; }}
           >
-            <span className="material-symbols-outlined" style={{ fontSize: '15px', width: '15px', height: '15px' }}>
+            <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>
               {reportLoading ? 'hourglass_empty' : 'download'}
             </span>
-            {reportLoading ? 'Génération...' : 'Télécharger rapport'}
+            {reportLoading ? 'Generation...' : 'Telecharger rapport'}
           </button>
         </div>
       </motion.div>
@@ -596,19 +586,19 @@ export default function Dashboard() {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.1 }}
-        className="efferd-card overflow-hidden"
+        className="bento-card overflow-hidden"
       >
         {/* Header du graphique */}
         <div
           className="flex items-center justify-between px-5 pt-4 pb-2"
-          style={{ borderBottom: '1px solid var(--efferd-border)' }}
+          style={{ borderBottom: '1px solid var(--color-outline-variant)' }}
         >
           <div className="flex items-center gap-3">
-            <span className="text-[13px] font-semibold" style={{ color: 'var(--efferd-text)' }}>
-              Activité des tickets
+            <span className="text-[13px] font-semibold" style={{ color: 'var(--color-on-surface)' }}>
+              Activite des tickets
             </span>
             <span className={globalTrendUp ? 'efferd-trend-up' : 'efferd-trend-down'}>
-              {globalTrendUp ? '▲' : '▼'} {trendTicketsSum} tickets sur {activePeriod.toLowerCase()}
+              {globalTrendUp ? '\u25B2' : '\u25BC'} {trendTicketsSum} tickets sur {activePeriod.toLowerCase()}
             </span>
           </div>
         </div>
@@ -616,29 +606,29 @@ export default function Dashboard() {
         {/* Area Chart */}
         <div style={{ padding: '1rem 1rem 0' }}>
           {trendData.length === 0 ? (
-            <div className="flex items-center justify-center h-[260px] text-[13px]" style={{ color: 'var(--efferd-muted)' }}>
-              Aucune activité sur la période
+            <div className="flex items-center justify-center h-[260px] text-[13px]" style={{ color: 'var(--color-on-surface-variant)' }}>
+              Aucune activite sur la periode
             </div>
           ) : (
           <ResponsiveContainer width="100%" height={260}>
             <AreaChart data={trendData} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
               <defs>
                 <linearGradient id="ticketGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="var(--efferd-text)" stopOpacity={0.08} />
-                  <stop offset="95%" stopColor="var(--efferd-text)" stopOpacity={0} />
+                  <stop offset="5%" stopColor="var(--color-primary)" stopOpacity={0.12} />
+                  <stop offset="95%" stopColor="var(--color-primary)" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid
                 strokeDasharray="3 3"
                 vertical={false}
-                stroke="var(--efferd-border)"
+                stroke="var(--color-outline-variant)"
                 strokeOpacity={1}
               />
               <XAxis
                 dataKey="day"
                 axisLine={false}
                 tickLine={false}
-                tick={{ fill: 'var(--efferd-muted)', fontSize: 11 }}
+                tick={{ fill: 'var(--color-on-surface-variant)', fontSize: 11 }}
                 tickFormatter={(v) => `Jour ${v}`}
                 interval={4}
               />
@@ -646,29 +636,29 @@ export default function Dashboard() {
                 allowDecimals={false}
                 axisLine={false}
                 tickLine={false}
-                tick={{ fill: 'var(--efferd-muted)', fontSize: 11 }}
+                tick={{ fill: 'var(--color-on-surface-variant)', fontSize: 11 }}
                 tickFormatter={(v) => `${v}`}
               />
               <Tooltip content={<EfferdTooltip />} />
               <Area
                 type="monotone"
                 dataKey="tickets"
-                stroke="var(--efferd-text)"
+                stroke="var(--color-primary)"
                 strokeWidth={1.5}
                 fill="url(#ticketGradient)"
                 dot={false}
-                activeDot={{ r: 4, fill: 'var(--efferd-text)', strokeWidth: 0 }}
+                activeDot={{ r: 4, fill: 'var(--color-primary)', strokeWidth: 0 }}
                 animationDuration={800}
               />
               <Area
                 type="monotone"
                 dataKey="resolved"
-                stroke="var(--efferd-green)"
+                stroke="#16a34a"
                 strokeWidth={1}
                 fill="none"
                 dot={false}
                 strokeDasharray="3 3"
-                activeDot={{ r: 3, fill: 'var(--efferd-green)', strokeWidth: 0 }}
+                activeDot={{ r: 3, fill: '#16a34a', strokeWidth: 0 }}
                 animationDuration={800}
               />
             </AreaChart>
@@ -688,7 +678,7 @@ export default function Dashboard() {
           icon="pie_chart"
           action={
             <button className="text-[12px] font-medium flex items-center gap-1 transition-opacity hover:opacity-70"
-              style={{ color: 'var(--efferd-muted)' }}>
+              style={{ color: 'var(--color-on-surface-variant)' }}>
               Détails →
             </button>
           }
@@ -715,7 +705,7 @@ export default function Dashboard() {
                   </Pie>
                 </PieChart>
               </ResponsiveContainer>
-              <p className="text-center text-[10px] mt-0.5" style={{ color: 'var(--efferd-muted)' }}>
+              <p className="text-center text-[10px] mt-0.5" style={{ color: 'var(--color-on-surface-variant)' }}>
                 {totalTeamTickets} tickets
               </p>
             </div>
@@ -729,15 +719,15 @@ export default function Dashboard() {
                       className="w-2 h-2 rounded-sm shrink-0"
                       style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}
                     />
-                    <span className="text-[12px] truncate" style={{ color: 'var(--efferd-text)' }}>{t.name}</span>
+                    <span className="text-[12px] truncate" style={{ color: 'var(--color-on-surface)' }}>{t.name}</span>
                   </div>
-                  <span className="text-[12px] font-semibold ml-2 shrink-0" style={{ color: 'var(--efferd-text)' }}>
+                  <span className="text-[12px] font-semibold ml-2 shrink-0" style={{ color: 'var(--color-on-surface)' }}>
                     {t.value}
                   </span>
                 </div>
               ))}
               {teamData.length === 0 && (
-                <p className="text-[12px] italic" style={{ color: 'var(--efferd-muted)' }}>Aucune équipe</p>
+                <p className="text-[12px] italic" style={{ color: 'var(--color-on-surface-variant)' }}>Aucune équipe</p>
               )}
             </div>
           </div>
@@ -749,21 +739,21 @@ export default function Dashboard() {
           icon="trending_up"
           action={
             <Link to="/tickets" className="text-[12px] font-medium flex items-center gap-1 transition-opacity hover:opacity-70"
-              style={{ color: 'var(--efferd-muted)' }}>
+              style={{ color: 'var(--color-on-surface-variant)' }}>
               Voir les tickets →
             </Link>
           }
         >
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <span className="text-[28px] font-bold leading-none" style={{ color: 'var(--efferd-text)' }}>
+              <span className="text-[28px] font-bold leading-none" style={{ color: 'var(--color-on-surface)' }}>
                 {trendTicketsSum}
               </span>
               <span className={globalTrendUp ? 'efferd-trend-up' : 'efferd-trend-down'}>
                 {globalTrendUp ? '▲' : '▼'} sur {activePeriod.toLowerCase()}
               </span>
             </div>
-            <p className="text-[11px]" style={{ color: 'var(--efferd-muted)' }}>
+            <p className="text-[11px]" style={{ color: 'var(--color-on-surface-variant)' }}>
               {resolvedTotal > 0 && `${resolvedTotal} résolus · `}{stats.open} ouverts actuellement
             </p>
             {/* Sparkline réelle */}
@@ -774,7 +764,7 @@ export default function Dashboard() {
                     <Line
                       type="monotone"
                       dataKey="tickets"
-                      stroke="var(--efferd-text)"
+                      stroke="var(--color-on-surface)"
                       strokeWidth={1.5}
                       dot={false}
                       animationDuration={600}
@@ -782,7 +772,7 @@ export default function Dashboard() {
                   </LineChart>
                 </ResponsiveContainer>
               ) : (
-                <div className="h-[60px] flex items-center justify-center text-[11px]" style={{ color: 'var(--efferd-muted)' }}>
+                <div className="h-[60px] flex items-center justify-center text-[11px]" style={{ color: 'var(--color-on-surface-variant)' }}>
                   Pas encore de données
                 </div>
               )}
@@ -796,7 +786,7 @@ export default function Dashboard() {
           icon="smart_toy"
           action={
             <Link to="/supervision" className="text-[12px] font-medium transition-opacity hover:opacity-70"
-              style={{ color: 'var(--efferd-muted)' }}>
+              style={{ color: 'var(--color-on-surface-variant)' }}>
               Supervision →
             </Link>
           }
@@ -810,8 +800,8 @@ export default function Dashboard() {
                 { label: 'Approbation', value: pendingApprovals.length, icon: 'fact_check' },
               ].map((m) => (
                 <div key={m.label}>
-                  <p className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--efferd-muted)' }}>{m.label}</p>
-                  <p className="text-[20px] font-bold leading-tight mt-0.5" style={{ color: 'var(--efferd-text)' }}>
+                  <p className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--color-on-surface-variant)' }}>{m.label}</p>
+                  <p className="text-[20px] font-bold leading-tight mt-0.5" style={{ color: 'var(--color-on-surface)' }}>
                     {m.value}
                   </p>
                 </div>
@@ -821,12 +811,12 @@ export default function Dashboard() {
             {/* Progress bar style "Spend vs return mix" Efferd */}
             <div>
               <div className="flex justify-between items-center mb-1">
-                <p className="text-[11px]" style={{ color: 'var(--efferd-muted)' }}>Charge IA vs humain</p>
-                <p className="text-[11px] font-semibold" style={{ color: 'var(--efferd-muted)' }}>
+                <p className="text-[11px]" style={{ color: 'var(--color-on-surface-variant)' }}>Charge IA vs humain</p>
+                <p className="text-[11px] font-semibold" style={{ color: 'var(--color-on-surface-variant)' }}>
                   {stats.total > 0 ? `${Math.round(((pendingAiDrafts.length + needsReview.length) / Math.max(stats.total, 1)) * 100)}% IA` : '0%'}
                 </p>
               </div>
-              <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--efferd-border)' }}>
+              <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--color-outline-variant)' }}>
                 <motion.div
                   initial={{ width: 0 }}
                   animate={{
@@ -834,7 +824,7 @@ export default function Dashboard() {
                   }}
                   transition={{ duration: 0.8, ease: 'easeOut' }}
                   className="h-full rounded-full"
-                  style={{ backgroundColor: 'var(--efferd-text)' }}
+                  style={{ backgroundColor: 'var(--color-on-surface)' }}
                 />
               </div>
             </div>
@@ -843,19 +833,19 @@ export default function Dashboard() {
             <div className="flex justify-between">
               <div>
                 <div className="flex items-center gap-1.5 mb-0.5">
-                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--efferd-muted)' }} />
-                  <span className="text-[10px]" style={{ color: 'var(--efferd-muted)' }}>IA traitée</span>
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--color-on-surface-variant)' }} />
+                  <span className="text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>IA traitée</span>
                 </div>
-                <p className="text-[14px] font-bold" style={{ color: 'var(--efferd-text)' }}>
+                <p className="text-[14px] font-bold" style={{ color: 'var(--color-on-surface)' }}>
                   {pendingAiDrafts.length + needsReview.length}
                 </p>
               </div>
               <div>
                 <div className="flex items-center gap-1.5 mb-0.5">
-                  <span className="w-2 h-2 rounded-full border" style={{ borderColor: 'var(--efferd-muted)' }} />
-                  <span className="text-[10px]" style={{ color: 'var(--efferd-muted)' }}>Humain requis</span>
+                  <span className="w-2 h-2 rounded-full border" style={{ borderColor: 'var(--color-on-surface-variant)' }} />
+                  <span className="text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>Humain requis</span>
                 </div>
-                <p className="text-[14px] font-bold" style={{ color: 'var(--efferd-text)' }}>
+                <p className="text-[14px] font-bold" style={{ color: 'var(--color-on-surface)' }}>
                   {pendingApprovals.length}
                 </p>
               </div>
@@ -874,24 +864,24 @@ export default function Dashboard() {
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.15 }}
-          className="efferd-card overflow-hidden lg:col-span-2"
+          className="bento-card overflow-hidden lg:col-span-2"
         >
           {/* Header tableau */}
           <div
             className="flex items-center justify-between px-4 py-3"
-            style={{ borderBottom: '1px solid var(--efferd-border)' }}
+            style={{ borderBottom: '1px solid var(--color-outline-variant)' }}
           >
             <div className="flex items-center gap-2">
-              <span className="material-symbols-outlined" style={{ fontSize: '15px', width: '15px', height: '15px', color: 'var(--efferd-muted)' }}>
+              <span className="material-symbols-outlined" style={{ fontSize: '15px', width: '15px', height: '15px', color: 'var(--color-on-surface-variant)' }}>
                 table_rows
               </span>
-              <h3 className="text-[13px] font-semibold" style={{ color: 'var(--efferd-text)' }}>Tickets récents</h3>
+              <h3 className="text-[13px] font-semibold" style={{ color: 'var(--color-on-surface)' }}>Tickets récents</h3>
             </div>
           </div>
 
           {/* Tableau */}
           <div className="overflow-x-auto">
-            <table className="efferd-table">
+            <table className="w-full border-collapse">
               <thead>
                 <tr>
                   <th>
@@ -900,7 +890,7 @@ export default function Dashboard() {
                       className="rounded"
                       checked={selectedRows.size === recentActivity.length && recentActivity.length > 0}
                       onChange={toggleAll}
-                      style={{ accentColor: 'var(--efferd-text)', cursor: 'pointer' }}
+                      style={{ accentColor: 'var(--color-on-surface)', cursor: 'pointer' }}
                     />
                   </th>
                   {['ID ↕', 'Demandeur ↕', 'Titre ↕', 'Statut ↕', 'Priorité ↕', 'Assigné ↕', 'Actions'].map((h) => (
@@ -911,7 +901,7 @@ export default function Dashboard() {
               <tbody>
                 {recentActivity.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="text-center py-8 text-[12px]" style={{ color: 'var(--efferd-muted)' }}>
+                    <td colSpan={8} className="text-center py-8 text-[12px]" style={{ color: 'var(--color-on-surface-variant)' }}>
                       Aucune activité récente
                     </td>
                   </tr>
@@ -924,16 +914,16 @@ export default function Dashboard() {
                         className="rounded"
                         checked={selectedRows.has(t.id)}
                         onChange={() => toggleRow(t.id)}
-                        style={{ accentColor: 'var(--efferd-text)', cursor: 'pointer' }}
+                        style={{ accentColor: 'var(--color-on-surface)', cursor: 'pointer' }}
                       />
                     </td>
                     <td>
-                      <span className="font-mono text-[11px]" style={{ color: 'var(--efferd-muted)' }}>
+                      <span className="font-mono text-[11px]" style={{ color: 'var(--color-on-surface-variant)' }}>
                         #{t.id}
                       </span>
                     </td>
                     <td>
-                      <span className="font-semibold text-[12px]" style={{ color: 'var(--efferd-text)' }}>
+                      <span className="font-semibold text-[12px]" style={{ color: 'var(--color-on-surface)' }}>
                         {t.requester?.fullName || t.assignedTo?.fullName || '—'}
                       </span>
                     </td>
@@ -941,7 +931,7 @@ export default function Dashboard() {
                       <Link
                         to={`/tickets/${t.id}`}
                         className="text-[12px] hover:underline truncate max-w-[140px] block"
-                        style={{ color: 'var(--efferd-text)' }}
+                        style={{ color: 'var(--color-on-surface)' }}
                       >
                         {t.title}
                       </Link>
@@ -949,7 +939,7 @@ export default function Dashboard() {
                     <td><StatusBadge status={t.status} /></td>
                     <td><PriorityBadge priority={t.priority} /></td>
                     <td>
-                      <span className="text-[12px]" style={{ color: 'var(--efferd-muted)' }}>
+                      <span className="text-[12px]" style={{ color: 'var(--color-on-surface-variant)' }}>
                         {t.assignedTo?.fullName || '—'}
                       </span>
                     </td>
@@ -957,9 +947,9 @@ export default function Dashboard() {
                       <Link
                         to={`/tickets/${t.id}`}
                         className="w-7 h-7 rounded flex items-center justify-center transition-colors"
-                        style={{ color: 'var(--efferd-muted)' }}
-                        onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--efferd-text)'; e.currentTarget.style.backgroundColor = 'var(--efferd-card-hover)'; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--efferd-muted)'; e.currentTarget.style.backgroundColor = 'transparent'; }}
+                        style={{ color: 'var(--color-on-surface-variant)' }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-on-surface)'; e.currentTarget.style.backgroundColor = 'var(--color-surface-container-high)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-on-surface-variant)'; e.currentTarget.style.backgroundColor = 'transparent'; }}
                       >
                         <span className="material-symbols-outlined" style={{ fontSize: '16px', width: '16px', height: '16px' }}>
                           more_horiz
@@ -982,22 +972,22 @@ export default function Dashboard() {
               {statusData.map((s) => (
                 <div key={s.name}>
                   <div className="flex justify-between items-center mb-1">
-                    <span className="text-[11px]" style={{ color: 'var(--efferd-muted)' }}>{s.name}</span>
-                    <span className="text-[12px] font-semibold" style={{ color: 'var(--efferd-text)' }}>{s.value}</span>
+                    <span className="text-[11px]" style={{ color: 'var(--color-on-surface-variant)' }}>{s.name}</span>
+                    <span className="text-[12px] font-semibold" style={{ color: 'var(--color-on-surface)' }}>{s.value}</span>
                   </div>
-                  <div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--efferd-border)' }}>
+                  <div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--color-outline-variant)' }}>
                     <motion.div
                       initial={{ width: 0 }}
                       animate={{ width: `${stats.total > 0 ? (s.value / stats.total) * 100 : 0}%` }}
                       transition={{ duration: 0.7, ease: 'easeOut' }}
                       className="h-full rounded-full"
-                      style={{ backgroundColor: 'var(--efferd-text)' }}
+                      style={{ backgroundColor: 'var(--color-on-surface)' }}
                     />
                   </div>
                 </div>
               ))}
               {statusData.length === 0 && (
-                <p className="text-[12px] italic" style={{ color: 'var(--efferd-muted)' }}>Aucun ticket</p>
+                <p className="text-[12px] italic" style={{ color: 'var(--color-on-surface-variant)' }}>Aucun ticket</p>
               )}
             </div>
           </SectionCard>
@@ -1009,7 +999,7 @@ export default function Dashboard() {
             action={
               <span
                 className="text-[11px] font-semibold px-2 py-0.5 rounded-full"
-                style={{ backgroundColor: 'var(--efferd-border)', color: 'var(--efferd-muted)' }}
+                style={{ backgroundColor: 'var(--color-outline-variant)', color: 'var(--color-on-surface-variant)' }}
               >
                 {pendingApprovals.length}
               </span>
@@ -1017,20 +1007,20 @@ export default function Dashboard() {
           >
             <div className="space-y-1">
               {pendingApprovals.length === 0 && (
-                <p className="text-[12px] italic" style={{ color: 'var(--efferd-muted)' }}>Aucun ticket en attente.</p>
+                <p className="text-[12px] italic" style={{ color: 'var(--color-on-surface-variant)' }}>Aucun ticket en attente.</p>
               )}
               {pendingApprovals.slice(0, 5).map((t) => (
                 <Link
                   key={t.id}
                   to={`/tickets/${t.id}`}
                   className="flex items-center justify-between py-1.5 px-2 rounded-lg transition-colors"
-                  style={{ color: 'var(--efferd-text)' }}
-                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--efferd-card-hover)'; }}
+                  style={{ color: 'var(--color-on-surface)' }}
+                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--color-surface-container-high)'; }}
                   onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
                 >
                   <div className="min-w-0 flex-1">
                     <p className="text-[12px] font-medium truncate">#{t.id} {t.title}</p>
-                    <p className="text-[10px] mt-0.5" style={{ color: 'var(--efferd-muted)' }}>
+                    <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-on-surface-variant)' }}>
                       {t.requester?.fullName || '—'}
                     </p>
                   </div>
@@ -1048,7 +1038,7 @@ export default function Dashboard() {
                 <IntegrationGroup label="Modèles IA" items={integrations.aiProviders} getConnected={(p) => p.connected} suffix={(p) => p.connected ? `${p.activeKeys} clé(s)` : 'Non connecté'} />
               </div>
             ) : (
-              <p className="text-[12px] italic" style={{ color: 'var(--efferd-muted)' }}>Chargement...</p>
+              <p className="text-[12px] italic" style={{ color: 'var(--color-on-surface-variant)' }}>Chargement...</p>
             )}
           </SectionCard>
         </div>

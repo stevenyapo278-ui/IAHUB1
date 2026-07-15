@@ -132,13 +132,13 @@ export default function GlobalSearch() {
             <div
               className="rounded-2xl shadow-2xl border overflow-hidden"
               style={{
-                backgroundColor: 'var(--efferd-card)',
-                borderColor: 'var(--efferd-border)',
+                backgroundColor: 'var(--color-surface-container-lowest)',
+                borderColor: 'var(--color-outline-variant)',
               }}
             >
               {/* Input */}
-              <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: 'var(--efferd-border)' }}>
-                <span className="material-symbols-outlined text-on-surface-variant" style={{ fontSize: '20px' }}>
+              <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: 'var(--color-outline-variant)' }}>
+                <span className="material-symbols-outlined" style={{ fontSize: '20px', color: 'var(--color-on-surface-variant)' }}>
                   search
                 </span>
                 <input
@@ -147,9 +147,9 @@ export default function GlobalSearch() {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder="Rechercher tickets, utilisateurs, équipes..."
-                  className="flex-1 bg-transparent border-none outline-none text-[14px] font-medium placeholder-on-surface-variant/50"
-                  style={{ color: 'var(--efferd-text)' }}
+                  placeholder="Rechercher tickets, utilisateurs, equipes..."
+                  className="flex-1 bg-transparent border-none outline-none text-[14px] font-medium"
+                  style={{ color: 'var(--color-on-surface)' }}
                 />
                 {loading && (
                   <motion.span
@@ -164,9 +164,9 @@ export default function GlobalSearch() {
                 <kbd
                   className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium"
                   style={{
-                    color: 'var(--efferd-muted)',
-                    backgroundColor: 'var(--efferd-bg)',
-                    border: '1px solid var(--efferd-border)',
+                    color: 'var(--color-on-surface-variant)',
+                    backgroundColor: 'var(--color-surface-container)',
+                    border: '1px solid var(--color-outline-variant)',
                   }}
                 >
                   ESC
@@ -185,16 +185,16 @@ export default function GlobalSearch() {
 
                 {!query.trim() && (
                   <div className="py-8 text-center">
-                    <p className="text-[13px] font-medium" style={{ color: 'var(--efferd-muted)' }}>
+                    <p className="text-[13px] font-medium" style={{ color: 'var(--color-on-surface-variant)' }}>
                       Tapez pour rechercher...
                     </p>
-                    <div className="flex items-center justify-center gap-3 mt-3 text-[10px]" style={{ color: 'var(--efferd-muted)' }}>
+                    <div className="flex items-center justify-center gap-3 mt-3 text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>
                       <span className="flex items-center gap-1">
-                        <kbd className="px-1.5 py-0.5 rounded text-[9px] font-bold" style={{ backgroundColor: 'var(--efferd-bg)', border: '1px solid var(--efferd-border)' }}>↑↓</kbd>
+                        <kbd className="px-1.5 py-0.5 rounded text-[9px] font-bold" style={{ backgroundColor: 'var(--color-surface-container)', border: '1px solid var(--color-outline-variant)' }}>↑↓</kbd>
                         Naviguer
                       </span>
                       <span className="flex items-center gap-1">
-                        <kbd className="px-1.5 py-0.5 rounded text-[9px] font-bold" style={{ backgroundColor: 'var(--efferd-bg)', border: '1px solid var(--efferd-border)' }}>↵</kbd>
+                        <kbd className="px-1.5 py-0.5 rounded text-[9px] font-bold" style={{ backgroundColor: 'var(--color-surface-container)', border: '1px solid var(--color-outline-variant)' }}>↵</kbd>
                         Ouvrir
                       </span>
                     </div>
@@ -204,7 +204,7 @@ export default function GlobalSearch() {
                 {sections.map((section) =>
                   section.items.length > 0 ? (
                     <div key={section.type}>
-                      <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--efferd-muted)' }}>
+                      <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-on-surface-variant)' }}>
                         {section.label}
                       </p>
                       {allResults
@@ -252,17 +252,17 @@ function ResultItemComponent({ item, isSelected, onSelect }) {
       onClick={() => onSelect(item)}
       className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors text-[13px]"
       style={{
-        backgroundColor: isSelected ? 'var(--efferd-hover)' : 'transparent',
-        color: 'var(--efferd-text)',
+        backgroundColor: isSelected ? 'var(--color-surface-container-high)' : 'transparent',
+        color: 'var(--color-on-surface)',
       }}
     >
-      <span className="material-symbols-outlined shrink-0" style={{ fontSize: '16px', width: '16px', color: 'var(--efferd-muted)' }}>
+      <span className="material-symbols-outlined shrink-0" style={{ fontSize: '16px', width: '16px', color: 'var(--color-on-surface-variant)' }}>
         {iconMap[item.type] || 'search'}
       </span>
       <div className="flex-1 min-w-0">
         <span className="font-medium truncate block">{item.label}</span>
         {item.sublabel && (
-          <span className="text-[11px]" style={{ color: 'var(--efferd-muted)' }}>{item.sublabel}</span>
+          <span className="text-[11px]" style={{ color: 'var(--color-on-surface-variant)' }}>{item.sublabel}</span>
         )}
       </div>
       {item.type === 'ticket' && item.priority && (
