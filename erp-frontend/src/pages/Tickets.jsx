@@ -531,6 +531,7 @@ export default function Tickets() {
                   </th>
                 )}
                 <TH>ID</TH>
+                <TH>Date</TH>
                 <TH>Titre</TH>
                 <TH className="w-16">IA</TH>
                 <TH className="w-28">GLPI</TH>
@@ -565,6 +566,9 @@ export default function Tickets() {
                       <Link to={`/tickets/${t.id}`}
                         className="font-mono-sm text-mono-sm text-outline hover:text-on-surface hover:underline transition-colors focus-visible:outline-2 focus-visible:outline-primary rounded px-1"
                       >#{t.id}</Link>
+                    </td>
+                    <td className="px-md py-3.5 text-on-surface-variant text-body-sm whitespace-nowrap">
+                      {new Date(t.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                     </td>
                     <td className="px-md py-3.5">
                       <Link to={`/tickets/${t.id}`}
@@ -626,7 +630,7 @@ export default function Tickets() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                 >
-                  <td colSpan={9 + (showSelectionColumn ? 1 : 0) + (canDelete ? 1 : 0)}
+                  <td colSpan={10 + (showSelectionColumn ? 1 : 0) + (canDelete ? 1 : 0)}
                     className="px-md py-12 text-center"
                   >
                     <div className="flex flex-col items-center gap-3 text-on-surface-variant">
