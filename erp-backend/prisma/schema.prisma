@@ -103,7 +103,7 @@ model User {
   teamId        Int?
   isActive      Boolean  @default(true)
   glpiId        Int?     @unique // identifiant de l'utilisateur correspondant dans GLPI
-  receiveDraftAlerts Boolean @default(true) // reçoit l'email de relance quand un AiEmailDraft attend trop longtemps une validation humaine
+  receiveDraftAlerts Boolean @default(false) // reçoit l'email de relance quand un AiEmailDraft attend trop longtemps une validation humaine (opt-in, activé par un admin)
   mustChangePassword Boolean @default(false) // force l'affichage de l'écran de changement de mot de passe à la prochaine connexion (ex: après réinitialisation par un admin)
   passwordResetTokens PasswordResetToken[]
   createdAt     DateTime @default(now())
