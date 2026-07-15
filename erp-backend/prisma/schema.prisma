@@ -117,6 +117,7 @@ model User {
   aiEmailDraftsReviewed AiEmailDraft[]
   knowledgeDraftsReviewed KnowledgeDraft[]
   skills          UserSkill[]
+  chatMessages    ChatMessage[]
   permissionGroups PermissionGroup[] @relation("UserPermissionGroups")
 }
 
@@ -867,5 +868,18 @@ model TriageRule {
   label          String   // Description humaine de la règle
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+}
+
+model ChatMessage {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  role      String   // 'user' | 'assistant'
+  content   String
+  sources   Json?    // [{ title, id }]
+  rating    Int?     // 1 = utile, -1 = pas utile
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
 }
 
