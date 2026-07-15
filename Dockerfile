@@ -1,12 +1,24 @@
 # ==========================================
-# Projet IA Hub - Production Dockerfile
-# Single-stage : le frontend est pré-compilé sur l'hôte
-# (pour éviter les OOM pendant npm run build dans Docker)
+# Projet IA Hub — Multi-stage Dockerfile
+# Stage 1 : Build du frontend React (Vite)
+# Stage 2 : Image de production (backend + frontend dist)
 # ==========================================
 
+# ── Stage 1 : Build du frontend ────────────────────────────────────────────
+FROM node:20-slim AS build-frontend
+
+WORKDIR /app/erp-frontend
+
+COPY erp-frontend/package*.json ./
+RUN npm ci
+
+COPY erp-frontend/ ./
+RUN npm run build
+
+
+# ── Stage 2 : Image de production ──────────────────────────────────────────
 FROM node:20-slim
 
-# Install required system packages (for Prisma and PostgreSQL client)
 RUN apt-get update && apt-get install -y \
     openssl \
     postgresql-client \
@@ -15,45 +27,36 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Set production environment
 ENV NODE_ENV=production
 
-# Copy backend package files
+# Backend deps
 COPY erp-backend/package*.json ./erp-backend/
-
-# Install backend production dependencies
 WORKDIR /app/erp-backend
 RUN npm ci --only=production
 
-# Generate Prisma Client
+# Prisma
 COPY erp-backend/prisma ./prisma
 RUN npx prisma generate
 
-# Copy backend source
+# Backend source
 COPY erp-backend/src ./src
 COPY erp-backend/docker-entrypoint.sh ./
-
-# Make entrypoint executable
 RUN chmod +x docker-entrypoint.sh
 
-# Copy pre-built frontend dist from host (construit via start.sh ou npm run build)
-COPY erp-frontend/dist /app/erp-frontend/dist
+# Frontend dist depuis le stage 1
+COPY --from=build-frontend /app/erp-frontend/dist /app/erp-frontend/dist
 
-# Create uploads directory and set permissions
+# Uploads directory
 RUN mkdir -p /app/erp-backend/uploads \
     && chown -R node:node /app
 
-# Switch to non-root user
 USER node
 
-# Set working directory back to backend
 WORKDIR /app/erp-backend
 
 EXPOSE 4000
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:4000/health || exit 1
 
-# Entrypoint
 ENTRYPOINT ["./docker-entrypoint.sh"]
