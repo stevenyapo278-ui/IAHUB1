@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -125,6 +125,32 @@ export default function Tickets() {
   }
 
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [hoveredTicket, setHoveredTicket] = useState(null);
+  const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
+  const hoverTimer = useRef(null);
+  const leaveTimer = useRef(null);
+
+  const handleRowEnter = useCallback((ticket, e) => {
+    clearTimeout(leaveTimer.current);
+    const rect = e.currentTarget.getBoundingClientRect();
+    hoverTimer.current = setTimeout(() => {
+      setHoveredTicket(ticket);
+      setHoverPos({ x: rect.right + 12, y: rect.top });
+    }, 400);
+  }, []);
+
+  const handleRowLeave = useCallback(() => {
+    clearTimeout(hoverTimer.current);
+    leaveTimer.current = setTimeout(() => setHoveredTicket(null), 200);
+  }, []);
+
+  const handlePreviewEnter = useCallback(() => {
+    clearTimeout(leaveTimer.current);
+  }, []);
+
+  const handlePreviewLeave = useCallback(() => {
+    leaveTimer.current = setTimeout(() => setHoveredTicket(null), 150);
+  }, []);
 
   const ticketStats = (() => {
     const total = tickets.length;
@@ -617,8 +643,11 @@ export default function Tickets() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, x: -20 }}
                     transition={{ duration: 0.25, delay: idx * 0.02, ease: [0.16, 1, 0.3, 1] }}
-                    className="hover:bg-surface-container-low/60 transition-colors group"
+                    className="hover:bg-surface-container-low/60 transition-colors group cursor-pointer"
                     layout
+                    onMouseEnter={(e) => handleRowEnter(t, e)}
+                    onMouseLeave={handleRowLeave}
+                    onClick={() => window.location.href = `/tickets/${t.id}`}
                   >
                     {showSelectionColumn && (
                       <td className="px-md py-3.5">
@@ -710,6 +739,81 @@ export default function Tickets() {
           </table>
         </div>
       </motion.div>
+
+      {/* ── Ticket Hover Preview ─────────────────────────────────────────────── */}
+      {createPortal(
+        <AnimatePresence>
+          {hoveredTicket && (
+            <motion.div
+              initial={{ opacity: 0, x: -8, scale: 0.97 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: -8, scale: 0.97 }}
+              transition={{ duration: 0.15 }}
+              className="ticket-preview-panel"
+              style={{ top: hoverPos.y, left: hoverPos.x }}
+              onMouseEnter={handlePreviewEnter}
+              onMouseLeave={handlePreviewLeave}
+            >
+              <div className="ticket-preview-header">
+                <span className="font-mono text-[11px] text-primary font-bold">#{hoveredTicket.id}</span>
+                <StatusBadge status={hoveredTicket.status} />
+                <PriorityBadge priority={hoveredTicket.priority} />
+              </div>
+              <h4 className="ticket-preview-title">{hoveredTicket.title}</h4>
+              {hoveredTicket.content && (
+                <p className="ticket-preview-content">{hoveredTicket.content}</p>
+              )}
+              <div className="ticket-preview-meta">
+                {hoveredTicket.category && (
+                  <div className="ticket-preview-meta-row">
+                    <span className="material-symbols-outlined text-[13px]">category</span>
+                    <span>{hoveredTicket.category}</span>
+                  </div>
+                )}
+                {hoveredTicket.type && (
+                  <div className="ticket-preview-meta-row">
+                    <span className="material-symbols-outlined text-[13px]">label</span>
+                    <span>{hoveredTicket.type === 'INCIDENT' ? 'Incident' : 'Demande'}</span>
+                  </div>
+                )}
+                {hoveredTicket.source && (
+                  <div className="ticket-preview-meta-row">
+                    <span className="material-symbols-outlined text-[13px]">input</span>
+                    <span>{hoveredTicket.source}</span>
+                  </div>
+                )}
+                {hoveredTicket.requester?.fullName && (
+                  <div className="ticket-preview-meta-row">
+                    <span className="material-symbols-outlined text-[13px]">person</span>
+                    <span>{hoveredTicket.requester.fullName}</span>
+                  </div>
+                )}
+                {hoveredTicket.assignedTo?.fullName && (
+                  <div className="ticket-preview-meta-row">
+                    <span className="material-symbols-outlined text-[13px]">person_pin</span>
+                    <span>{hoveredTicket.assignedTo.fullName}</span>
+                  </div>
+                )}
+                {hoveredTicket.team?.name && (
+                  <div className="ticket-preview-meta-row">
+                    <span className="material-symbols-outlined text-[13px]">groups</span>
+                    <span>{hoveredTicket.team.name}</span>
+                  </div>
+                )}
+                <div className="ticket-preview-meta-row">
+                  <span className="material-symbols-outlined text-[13px]">schedule</span>
+                  <span>{new Date(hoveredTicket.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                </div>
+              </div>
+              <div className="ticket-preview-footer">
+                <span className="material-symbols-outlined text-[12px] text-primary">arrow_forward</span>
+                <span className="text-[11px] text-primary font-semibold">Voir les détails</span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
 
       {/* ── ConfirmDialog ──────────────────────────────────────────────────── */}
       <ConfirmDialog
