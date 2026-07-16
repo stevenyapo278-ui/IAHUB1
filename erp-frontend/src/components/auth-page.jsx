@@ -12,7 +12,6 @@ import {
 } from "@/components/ui/input-group";
 import { AuthDivider } from "@/components/auth-divider";
 import { FloatingPaths } from "@/components/floating-paths";
-import { ChevronLeftIcon, AtSignIcon } from "lucide-react";
 
 export function AuthPage() {
 	return (
@@ -54,7 +53,7 @@ export function AuthPage() {
 				</div>
 				<Button asChild className="absolute top-7 left-5" variant="ghost">
 					<a href="#">
-						<ChevronLeftIcon data-icon="inline-start" />
+						<span className="material-symbols-outlined" style={{ fontSize: '18px' }}>arrow_back</span>
 						Home
 					</a>
 				</Button>
@@ -93,7 +92,7 @@ export function AuthPage() {
 						<InputGroup>
 							<InputGroupInput placeholder="your.email@example.com" type="email" />
 							<InputGroupAddon align="inline-start">
-								<AtSignIcon />
+								<span className="material-symbols-outlined" style={{ fontSize: '18px' }}>alternate_email</span>
 							</InputGroupAddon>
 						</InputGroup>
 
