@@ -95,18 +95,18 @@
 }
 
 /* ─── Variables de couleur — Mode sombre ─────────────────────────────────────── */
-/* Deep black monochrome — plus aucune teinte bleue                              */
+/* Dark navy-black — inspiré du NOC Supervision                                  */
 .dark {
-  --color-background:                  #000000;
-  --color-surface:                     #000000;
-  --color-surface-dim:                 #000000;
-  --color-surface-container-lowest:    #0a0a0a;
-  --color-surface-container-low:       #111111;
-  --color-surface-container:           #1a1a1a;
-  --color-surface-container-high:      #222222;
-  --color-surface-container-highest:   #2a2a2a;
-  --color-surface-bright:              #1a1a1a;
-  --color-surface-variant:             #1e1e1e;
+  --color-background:                  #060a14;
+  --color-surface:                     #060a14;
+  --color-surface-dim:                 #040710;
+  --color-surface-container-lowest:    #0a0e1a;
+  --color-surface-container-low:       #0e1220;
+  --color-surface-container:           #121626;
+  --color-surface-container-high:      #181c2e;
+  --color-surface-container-highest:   #1e2236;
+  --color-surface-bright:              #1a1e30;
+  --color-surface-variant:             #161a28;
   --color-surface-tint:                #60A5FA;
 
   --color-primary:                     #60A5FA;
@@ -703,7 +703,7 @@
   bottom: 0;
   z-index: 40;
   width: 64px;
-  background: #0f172a;
+  background: var(--color-surface-container-lowest);
   display: flex;
   flex-direction: column;
   transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1);
@@ -906,7 +906,7 @@
 .sidebar-tooltip {
   position: fixed;
   z-index: 200;
-  background: #1e293b;
+  background: var(--color-surface-container);
   border: 1px solid rgba(148, 163, 184, 0.15);
   color: #e2e8f0;
   padding: 6px 10px;
@@ -937,7 +937,7 @@
   top: 0;
   margin-left: 8px;
   width: 200px;
-  background: #1e293b;
+  background: var(--color-surface-container);
   border: 1px solid rgba(148, 163, 184, 0.15);
   border-radius: 12px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
@@ -982,7 +982,7 @@
 
 .noc-container {
   min-height: 100vh;
-  background: #060a14;
+  background: var(--color-background);
   padding: 20px;
   display: flex;
   flex-direction: column;
