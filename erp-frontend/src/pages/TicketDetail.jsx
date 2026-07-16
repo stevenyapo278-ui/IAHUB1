@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -96,6 +96,13 @@ export default function TicketDetail() {
   const canApprove = hasPermission(user, 'tickets.approve');
   const canDelete = hasPermission(user, 'tickets.delete');
 
+  // Référence au conteneur des suivis pour post-traiter les images GLPI
+  const followupContainerRef = useRef(null);
+  // Référence persistante aux blob URLs pour le nettoyage entre les cycles de rendu — évite
+  // les fuites mémoire quand le useEffect se re-déclenche (auto-refresh) avant que toutes les
+  // requêtes images soient résolues.
+  const followupBlobUrlsRef = useRef([]);
+
   function load() {
     api
       .get(`/tickets/${id}`)
@@ -116,6 +123,50 @@ export default function TicketDetail() {
     const intervalId = setInterval(load, 15000);
     return () => clearInterval(intervalId);
   }, [id]);
+
+  // Post-traite les images des suivis GLPI : les balises <img src="/glpi/document/X/file"> sont
+  // chargées via axios (qui envoie le JWT dans Authorization header) et converties en blob URLs.
+  // Sans ce contournement, le navigateur tente de les charger directement mais reçoit une 401
+  // car une balise <img> est incapable d'envoyer des en-têtes d'authentification personnalisés.
+  // Note : le chemin est /glpi/... (sans /api) car l'instance axios a baseURL = .../api, donc
+  // axios résout /glpi/document/X/file en {baseURL}/glpi/document/X/file.
+  useEffect(() => {
+    const container = followupContainerRef.current;
+    if (!container) return;
+
+    // NE PAS révoquer les blob URLs du cycle précédent ici : React préserve le DOM quand le
+    // contenu __html de dangerouslySetInnerHTML n'a pas changé (optimisation de React). Les
+    // anciennes images référencent encore leurs blob URLs. Les révoquer les briserait.
+    // Les blob URLs accumulées sont nettoyées UNIQUEMENT au démontage du composant (return).
+
+    container.querySelectorAll('img[src^="/glpi/document/"]').forEach((img) => {
+      if (img.getAttribute('data-blob-processed')) return;
+      img.setAttribute('data-blob-processed', 'true');
+
+      const src = img.getAttribute('src');
+      if (!src) return;
+
+      api
+        .get(src, { responseType: 'blob' })
+        .then(({ data }) => {
+          const url = URL.createObjectURL(data);
+          followupBlobUrlsRef.current.push(url);
+          img.setAttribute('data-blob-url', url);
+          img.src = url;
+        })
+        .catch(() => {
+          // Silencieux : si le proxy échoue, l'image reste cassée mais n'empêche pas
+          // l'affichage du reste du suivi.
+        });
+    });
+
+    // Nettoyage UNIQUEMENT au démontage du composant — ne JAMAIS révoquer entre les cycles
+    // (cf. explication ci-dessus sur la préservation du DOM par React).
+    return () => {
+      followupBlobUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+      followupBlobUrlsRef.current = [];
+    };
+  }, [ticket?.followups]);
 
   async function downloadAttachment(attachment) {
     try {
@@ -360,7 +411,7 @@ export default function TicketDetail() {
               Suivi
             </h3>
 
-            <div className="space-y-md">
+            <div className="space-y-md" ref={followupContainerRef}>
               {(() => {
                 const timeline = [
                   ...ticket.followups.map((f) => ({ kind: 'followup', date: f.createdAt, data: f })),

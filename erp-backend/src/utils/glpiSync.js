@@ -349,9 +349,12 @@ async function syncTicketAttachments(config, sessionToken, glpiTicketId, ticketI
 function rewriteGlpiDocumentUrls(html, config, ticketId) {
   // Réécrit les URLs de documents GLPI (/document.send.php?docid=X) vers le proxy ERP
   // pour que les images/pièces jointes des suivis restent accessibles depuis l'ERP.
+  // Note : le chemin est /glpi/... (sans /api) car l'instance axios du frontend a
+  // baseURL = http://localhost:4000/api, donc axios résout /glpi/document/X/file en
+  // http://localhost:4000/api/glpi/document/X/file.
   return html.replace(
     /(["'])(?:https?:\/\/[^"']*?|\/?[^"']*?)\/document\.send\.php\?(?:[^"']*?&)?docid=(\d+)(?:&[^"']*?)?\1/gi,
-    (match, quote, docId) => `${quote}/api/glpi/document/${docId}/file${quote}`
+    (match, quote, docId) => `${quote}/glpi/document/${docId}/file${quote}`
   );
 }
 
