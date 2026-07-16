@@ -7,6 +7,7 @@ import {
   getVoiceAlertLang,
   setVoiceAlertLang,
   speakTest,
+  isSpeechSynthesisAvailable,
   VOICE_ALERT_LANGUAGES,
 } from '../../utils/voiceAlertPreference';
 
@@ -688,6 +689,18 @@ export default function AutomationTab() {
               onChange={toggleVoiceAlerts}
             />
 
+            {!isSpeechSynthesisAvailable() && voiceAlerts && (
+              <div className="bento-card p-md flex items-start gap-3" style={{ borderLeft: '3px solid #f59e0b' }}>
+                <span className="material-symbols-outlined text-amber-500 shrink-0" style={{ fontSize: '20px', fontVariationSettings: "'FILL' 1" }}>warning</span>
+                <div>
+                  <p className="text-[13px] font-semibold text-on-surface">Synthèse vocale indisponible</p>
+                  <p className="text-[12px] text-on-surface-variant mt-0.5">
+                    Le navigateur bloque la synthèse vocale sur HTTP non sécurisé. Ouvrez l'application via <strong>https</strong> ou sur <strong>localhost</strong> pour activer les alertes vocales.
+                  </p>
+                </div>
+              </div>
+            )}
+
             <motion.div
               variants={itemVariants}
               whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
@@ -715,7 +728,7 @@ export default function AutomationTab() {
                 <motion.button
                   type="button"
                   onClick={() => speakTest(voiceLang)}
-                  disabled={!voiceAlerts}
+                  disabled={!voiceAlerts || !isSpeechSynthesisAvailable()}
                   whileHover={{ scale: 1.03 }}
                   whileTap={{ scale: 0.96 }}
                   className="px-4 py-2 border border-outline-variant/60 text-on-surface hover:bg-surface-container-high rounded-xl font-semibold text-body-sm transition-all disabled:opacity-50 shadow-sm flex items-center gap-1.5"

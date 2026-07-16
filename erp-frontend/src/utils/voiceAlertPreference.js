@@ -26,6 +26,15 @@ export function setVoiceAlertLang(lang) {
   localStorage.setItem(LANG_KEY, lang);
 }
 
+export function isSpeechSynthesisAvailable() {
+  if (typeof window === 'undefined') return false;
+  if (!window.speechSynthesis) return false;
+  if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    return false;
+  }
+  return true;
+}
+
 const TEST_MESSAGES = {
   'fr-FR': "Ceci est un test de l'alerte vocale.",
   'en-US': 'This is a test of the voice alert.',
@@ -42,20 +51,29 @@ function getSynth() {
 
 export function speakTest(lang) {
   const synth = getSynth();
-  if (!synth) return;
+  if (!synth) return false;
 
   synth.cancel();
+  synth.resume();
 
   const msg = TEST_MESSAGES[lang] || TEST_MESSAGES['fr-FR'];
   const utterance = new SpeechSynthesisUtterance(msg);
   utterance.lang = lang;
   utterance.rate = 1;
   utterance.pitch = 1;
+  utterance.volume = 1;
 
   const voices = synth.getVoices();
-  const match = voices.find((v) => v.lang === lang);
+  const match = voices.find((v) => v.lang === lang) || voices.find((v) => v.lang.startsWith(lang.split('-')[0]));
   if (match) utterance.voice = match;
 
-  utterance.onstart = () => synth.resume();
   synth.speak(utterance);
+
+  return new Promise((resolve) => {
+    let resolved = false;
+    const done = () => { if (!resolved) { resolved = true; resolve(true); } };
+    utterance.onend = done;
+    utterance.onerror = (e) => { if (!resolved) { resolved = true; resolve(e.error !== 'canceled'); } };
+    setTimeout(done, 3000);
+  });
 }
