@@ -745,12 +745,16 @@
   letter-spacing: 0.03em;
   color: #ffffff;
   opacity: 0;
-  transition: opacity 0.15s ease;
+  max-width: 0;
+  overflow: hidden;
+  transition: opacity 0.15s ease, max-width 0.15s ease;
+  white-space: nowrap;
 }
 
 .app-sidebar:hover .sidebar-logo-text,
 .app-sidebar.expanded .sidebar-logo-text {
   opacity: 1;
+  max-width: 100px;
 }
 
 /* Sidebar nav groups */
@@ -772,13 +776,16 @@
   color: rgba(148, 163, 184, 0.5);
   white-space: nowrap;
   opacity: 0;
-  transition: opacity 0.15s ease;
+  max-width: 0;
+  overflow: hidden;
+  transition: opacity 0.15s ease, max-width 0.15s ease;
   text-align: center;
 }
 
 .app-sidebar:hover .sidebar-group-label,
 .app-sidebar.expanded .sidebar-group-label {
   opacity: 1;
+  max-width: 200px;
 }
 
 .sidebar-item {
@@ -791,10 +798,10 @@
   font-weight: 500;
   font-size: 13px;
   color: #94a3b8;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
   position: relative;
-  overflow: hidden;
   white-space: nowrap;
+  overflow: visible;
 }
 
 .sidebar-item:hover {
@@ -828,13 +835,18 @@
 
 .sidebar-item-label {
   opacity: 0;
-  transition: opacity 0.15s ease;
-  padding-left: 4px;
+  max-width: 0;
+  overflow: hidden;
+  transition: opacity 0.15s ease, max-width 0.15s ease;
+  padding-left: 0;
+  white-space: nowrap;
 }
 
 .app-sidebar:hover .sidebar-item-label,
 .app-sidebar.expanded .sidebar-item-label {
   opacity: 1;
+  max-width: 160px;
+  padding-left: 4px;
 }
 
 .sidebar-separator {
@@ -852,7 +864,7 @@
   border-top: 1px solid rgba(148, 163, 184, 0.1);
   cursor: pointer;
   transition: background 0.15s ease;
-  overflow: hidden;
+  overflow: visible;
   white-space: nowrap;
   position: relative;
   justify-content: center;
@@ -878,12 +890,16 @@
 
 .sidebar-user-info {
   opacity: 0;
-  transition: opacity 0.15s ease;
+  max-width: 0;
+  overflow: hidden;
+  transition: opacity 0.15s ease, max-width 0.15s ease;
+  white-space: nowrap;
 }
 
 .app-sidebar:hover .sidebar-user-info,
 .app-sidebar.expanded .sidebar-user-info {
   opacity: 1;
+  max-width: 160px;
 }
 
 /* Sidebar tooltip on collapsed hover */

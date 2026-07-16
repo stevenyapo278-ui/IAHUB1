@@ -333,7 +333,7 @@ function SidebarItem({ item, user, isSidebarExpanded }) {
       to={item.to}
       end={item.end}
       className={({ isActive }) =>
-        `sidebar-item ${isActive ? 'active' : ''} ${!isSidebarExpanded ? 'justify-center' : ''}`
+        `sidebar-item ${isActive ? 'active' : ''}`
       }
     >
       <span className="sidebar-item-icon">
