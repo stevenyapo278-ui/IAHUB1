@@ -703,7 +703,7 @@
   bottom: 0;
   z-index: 40;
   width: 64px;
-  background: var(--color-surface-container-lowest);
+  background: #0a0e1a;
   display: flex;
   flex-direction: column;
   transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1);
@@ -906,7 +906,7 @@
 .sidebar-tooltip {
   position: fixed;
   z-index: 200;
-  background: var(--color-surface-container);
+  background: #1a1e30;
   border: 1px solid rgba(148, 163, 184, 0.15);
   color: #e2e8f0;
   padding: 6px 10px;
@@ -937,7 +937,7 @@
   top: 0;
   margin-left: 8px;
   width: 200px;
-  background: var(--color-surface-container);
+  background: #1a1e30;
   border: 1px solid rgba(148, 163, 184, 0.15);
   border-radius: 12px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
