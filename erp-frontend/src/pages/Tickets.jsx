@@ -129,28 +129,33 @@ export default function Tickets() {
   const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
   const hoverTimer = useRef(null);
   const leaveTimer = useRef(null);
+  const mousePos = useRef({ x: 0, y: 0 });
 
-  const handleRowEnter = useCallback((ticket, e) => {
+  const handleMouseMove = useCallback((e) => {
+    mousePos.current = { x: e.clientX, y: e.clientY };
+  }, []);
+
+  const handleRowEnter = useCallback((ticket) => {
     clearTimeout(leaveTimer.current);
-    const rect = e.currentTarget.getBoundingClientRect();
     const panelW = 340;
     const panelH = 420;
-    const gap = 12;
+    const gap = 14;
     hoverTimer.current = setTimeout(() => {
+      const { x: mx, y: my } = mousePos.current;
       setHoveredTicket(ticket);
-      let x = rect.right + gap;
-      let y = rect.top;
-      if (x + panelW > window.innerWidth - 16) x = rect.left - panelW - gap;
-      if (x < 16) x = 16;
-      if (y + panelH > window.innerHeight - 16) y = window.innerHeight - panelH - 16;
-      if (y < 16) y = 16;
-      setHoverPos({ x, y });
-    }, 400);
+      let px = mx + gap;
+      let py = my - 20;
+      if (px + panelW > window.innerWidth - 16) px = mx - panelW - gap;
+      if (px < 16) px = 16;
+      if (py + panelH > window.innerHeight - 16) py = window.innerHeight - panelH - 16;
+      if (py < 16) py = 16;
+      setHoverPos({ x: px, y: py });
+    }, 250);
   }, []);
 
   const handleRowLeave = useCallback(() => {
     clearTimeout(hoverTimer.current);
-    leaveTimer.current = setTimeout(() => setHoveredTicket(null), 200);
+    leaveTimer.current = setTimeout(() => setHoveredTicket(null), 150);
   }, []);
 
   const handlePreviewEnter = useCallback(() => {
@@ -654,7 +659,8 @@ export default function Tickets() {
                     transition={{ duration: 0.25, delay: idx * 0.02, ease: [0.16, 1, 0.3, 1] }}
                     className="hover:bg-surface-container-low/60 transition-colors group cursor-pointer"
                     layout
-                    onMouseEnter={(e) => handleRowEnter(t, e)}
+                    onMouseMove={handleMouseMove}
+                    onMouseEnter={() => handleRowEnter(t)}
                     onMouseLeave={handleRowLeave}
                     onClick={() => window.location.href = `/tickets/${t.id}`}
                   >
