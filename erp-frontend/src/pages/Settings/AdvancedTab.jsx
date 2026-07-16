@@ -363,7 +363,7 @@ export default function AdvancedTab() {
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* SECTION 4 : REIMPORT GLPI */}
+      {/* SECTION 4 : REIMPORT GLPI & EMAILS */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       <GlpiReimportSection />
 
@@ -376,18 +376,16 @@ export default function AdvancedTab() {
 }
 
 function GlpiReimportSection() {
+  const [activeTab, setActiveTab] = useState('glpi');
   const [reimporting, setReimporting] = useState(false);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
 
-  async function handleReimport() {
-    if (!confirm('Supprimer les tickets GLPI existants dans l\'ERP et tout réimporter depuis GLPI ? Cette action est réversible (vous pouvez réimporter à nouveau).')) return;
-
-    setReimporting(true);
-    setResult(null);
-    setError(null);
+  async function handleGlpiReimport() {
+    if (!confirm('Supprimer les tickets GLPI existants dans l\'ERP et tout réimporter depuis GLPI ? Cette action est réversible.')) return;
+    setReimporting(true); setResult(null); setError(null);
     try {
       const payload = {};
       if (dateFrom) payload.dateFrom = dateFrom;
@@ -401,59 +399,88 @@ function GlpiReimportSection() {
     }
   }
 
+  async function handleEmailReimport() {
+    if (!confirm('Réimporter les emails de la plage de dates sélectionnée ? Les emails déjà traités seront ignorés (pas de doublons).')) return;
+    setReimporting(true); setResult(null); setError(null);
+    try {
+      const payload = {};
+      if (dateFrom) payload.dateFrom = dateFrom;
+      if (dateTo) payload.dateTo = dateTo;
+      const { data } = await api.post('/inbox/reimport', payload);
+      setResult(data);
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+    } finally {
+      setReimporting(false);
+    }
+  }
+
+  const isGlpi = activeTab === 'glpi';
+
   return (
     <div className="space-y-md">
       <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
         <span className="material-symbols-outlined text-primary text-2xl">download</span>
-        <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Réimport depuis GLPI</h4>
+        <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Réimport de données</h4>
+      </div>
+
+      {/* Tab selector */}
+      <div className="flex gap-1 p-1 rounded-xl bg-surface-container-high/50 w-fit">
+        <button
+          onClick={() => { setActiveTab('glpi'); setResult(null); setError(null); }}
+          className={`px-4 py-2 rounded-lg text-[13px] font-semibold transition-all ${isGlpi ? 'bg-primary text-white shadow-sm' : 'text-on-surface-variant hover:text-on-surface'}`}
+        >
+          <span className="material-symbols-outlined text-[16px] mr-1.5 align-middle">link</span>
+          GLPI
+        </button>
+        <button
+          onClick={() => { setActiveTab('email'); setResult(null); setError(null); }}
+          className={`px-4 py-2 rounded-lg text-[13px] font-semibold transition-all ${!isGlpi ? 'bg-primary text-white shadow-sm' : 'text-on-surface-variant hover:text-on-surface'}`}
+        >
+          <span className="material-symbols-outlined text-[16px] mr-1.5 align-middle">mail</span>
+          Emails
+        </button>
       </div>
 
       <motion.div variants={itemVariants} className="bento-card p-lg space-y-md">
         <p className="font-body-sm text-body-sm text-on-surface-variant">
-          Supprime les tickets synchronisés depuis GLPI dans l'ERP et les réimporte depuis la source.
-          Le GLPI source n'est <strong>jamais modifié</strong> — cette opération est 100% lecture seule.
+          {isGlpi
+            ? 'Supprime les tickets synchronisés depuis GLPI dans l\'ERP et les réimporte depuis la source. Le GLPI source n\'est <strong>jamais modifié</strong>.'
+            : 'Récupère les emails Outlook de la plage de dates et les traite via le pipeline IA. Les emails déjà traités sont ignorés (pas de doublons). Outlook n\'est <strong>jamais modifié</strong>.'}
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-md">
           <label className="flex flex-col gap-xs">
             <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Date de début (optionnel)</span>
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className={inputClass}
-            />
-            <span className="text-[11px] text-on-surface-variant">Laisser vide = tous les tickets</span>
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={inputClass} />
+            <span className="text-[11px] text-on-surface-variant">Laisser vide = tout récupérer</span>
           </label>
           <label className="flex flex-col gap-xs">
             <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Date de fin (optionnel)</span>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className={inputClass}
-            />
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={inputClass} />
             <span className="text-[11px] text-on-surface-variant">Laisser vide = jusqu'à aujourd'hui</span>
           </label>
         </div>
 
         <div className="flex items-center gap-sm">
           <motion.button
-            onClick={handleReimport}
+            onClick={isGlpi ? handleGlpiReimport : handleEmailReimport}
             disabled={reimporting}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.97 }}
             className="px-5 py-2.5 bg-red-500/10 text-red-500 border border-red-500/30 hover:bg-red-500/20 rounded-xl font-semibold text-body-sm transition-all disabled:opacity-50 flex items-center gap-2"
           >
             <span className="material-symbols-outlined text-[18px]">{reimporting ? 'sync' : 'restart_alt'}</span>
-            {reimporting ? 'Réimport en cours...' : 'Réinitialiser et réimporter'}
+            {reimporting ? 'Réimport en cours...' : isGlpi ? 'Réinitialiser et réimporter GLPI' : 'Réimporter les emails'}
           </motion.button>
         </div>
 
         {result && (
           <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[13px] text-emerald-600 flex items-center gap-2">
             <span className="material-symbols-outlined" style={{ fontSize: '18px', fontVariationSettings: "'FILL' 1" }}>check_circle</span>
-            {result.deleted} tickets supprimés, {result.imported} tickets réimportés depuis GLPI.
+            {isGlpi
+              ? `${result.deleted} tickets supprimés, ${result.imported} tickets réimportés depuis GLPI.`
+              : `${result.totalFetched} emails récupérés, ${result.totalProcessed} traités, ${result.totalSkipped} déjà existants.`}
           </div>
         )}
 

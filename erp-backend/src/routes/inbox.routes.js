@@ -1,8 +1,10 @@
 const express = require('express');
+const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { runEmailPipeline, processMessage } = require('../services/emailPipeline');
+const { fetchEmailsByDateRange } = require('../services/emailPoller');
 const { analyzeEmail } = require('../services/mailAnalyzer');
 
 const router = express.Router();
@@ -105,5 +107,71 @@ router.post('/simulate', requirePermission('inbox.sync', ['ADMIN', 'TECHNICIAN']
     res.status(502).json({ error: err.message });
   }
 });
+
+// Réimport d'emails par plage de dates depuis Microsoft Graph.
+// Les emails déjà traités (graphMessageId existant dans IncomingEmail) sont ignorés — pas de doublons.
+router.post(
+  '/reimport',
+  requirePermission('inbox.sync', ['ADMIN', 'TECHNICIAN']),
+  [
+    body('dateFrom').optional({ nullable: true }).isISO8601().withMessage('Format YYYY-MM-DD requis'),
+    body('dateTo').optional({ nullable: true }).isISO8601().withMessage('Format YYYY-MM-DD requis'),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const { dateFrom, dateTo } = req.body;
+    try {
+      const accounts = await prisma.emailAccount.findMany({
+        where: { provider: 'OUTLOOK', isActive: true, refreshToken: { not: null } },
+      });
+
+      if (accounts.length === 0) {
+        return res.status(422).json({ error: 'Aucun compte Outlook actif configuré' });
+      }
+
+      let totalFetched = 0;
+      let totalProcessed = 0;
+      let totalSkipped = 0;
+      const accountResults = [];
+
+      for (const account of accounts) {
+        const messages = await fetchEmailsByDateRange(account, dateFrom, dateTo);
+        totalFetched += messages.length;
+
+        let processed = 0;
+        let skipped = 0;
+
+        for (const msg of messages) {
+          const existing = await prisma.incomingEmail.findUnique({ where: { graphMessageId: msg.id } });
+          if (existing) {
+            skipped++;
+            continue;
+          }
+          try {
+            await processMessage(msg, account);
+            processed++;
+          } catch (err) {
+            console.error(`[inbox/reimport] Erreur traitement email ${msg.id}:`, err.message);
+          }
+        }
+
+        totalProcessed += processed;
+        totalSkipped += skipped;
+        accountResults.push({
+          account: account.emailAddress,
+          fetched: messages.length,
+          processed,
+          skipped,
+        });
+      }
+
+      return res.json({ totalFetched, totalProcessed, totalSkipped, accounts: accountResults });
+    } catch (err) {
+      return res.status(502).json({ error: err.message || 'Erreur de réimport emails' });
+    }
+  }
+);
 
 module.exports = router;

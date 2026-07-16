@@ -63,4 +63,26 @@ async function fetchMessageAttachments(account, messageId) {
   return (res.value || []).filter((a) => a['@odata.type'] === '#microsoft.graph.fileAttachment');
 }
 
-module.exports = { fetchNewMessages, pollAllAccounts, fetchMessageAttachments, MESSAGE_SELECT };
+// Récupère les emails d'un compte dans une plage de dates via l'API Graph (pas le delta).
+// Utilise $filter=receivedDateTime ge/le pour ne récupérer que les emails de la période.
+async function fetchEmailsByDateRange(account, dateFrom, dateTo) {
+  const filterParts = [];
+  if (dateFrom) filterParts.push(`receivedDateTime ge ${dateFrom}T00:00:00Z`);
+  if (dateTo) filterParts.push(`receivedDateTime le ${dateTo}T23:59:59Z`);
+  const filter = filterParts.length > 0 ? `&$filter=${encodeURIComponent(filterParts.join(' and '))}` : '';
+
+  let url = `/me/mailFolders/inbox/messages?$select=${MESSAGE_SELECT}&$top=50${filter}`;
+  const messages = [];
+
+  do {
+    const page = await graphFetch(account, url);
+    for (const item of page.value || []) {
+      messages.push(item);
+    }
+    url = page['@odata.nextLink'] || null;
+  } while (url);
+
+  return messages;
+}
+
+module.exports = { fetchNewMessages, pollAllAccounts, fetchMessageAttachments, fetchEmailsByDateRange, MESSAGE_SELECT };
