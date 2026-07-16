@@ -2,15 +2,11 @@ const prisma = require('../prismaClient');
 const { GLPI_AI_REQUESTER_ID, glpiIdToCategory } = require('./glpiMapping');
 const { getSystemSettings } = require('../services/systemSettings');
 
-// Statut GLPI "TicketValidation" : 2 = en attente, 3 = approuvé, 4 = refusé (constantes ITIL standard GLPI).
 const VALIDATION_STATUS_WAITING = 2;
 const VALIDATION_STATUS_APPROVED = 3;
-
-// Statut GLPI "ITILSolution" — même échelle que CommonITILValidation (1=NONE, 2=WAITING, 3=ACCEPTED, 4=REFUSED).
 const SOLUTION_STATUS_ACCEPTED = 3;
 const TICKET_STATUS_SOLVED = 5;
 
-// Statuts GLPI -> statuts ERP (cf. doc API GLPI : 1=Nouveau, 2=En cours (assigné), 3=En cours (planifié), 4=En attente, 5=Résolu, 6=Clos)
 const GLPI_STATUS_MAP = {
   1: 'NEW',
   2: 'OPEN',
@@ -20,7 +16,6 @@ const GLPI_STATUS_MAP = {
   6: 'CLOSED',
 };
 
-// Priorités GLPI (1=Très basse ... 6=Majeure) -> priorités ERP (P1=urgent ... P4=faible)
 function glpiPriorityToErp(priority) {
   if (priority >= 5) return 'P1';
   if (priority === 4) return 'P2';
@@ -58,32 +53,83 @@ async function glpiKillSession(config, sessionToken) {
   });
 }
 
-// Récupère les tickets GLPI et les importe/met à jour dans la table Ticket de l'ERP.
-// Retourne { imported, updated } ou null si GLPI n'est pas configuré.
+// Récupère les tickets GLPI avec pagination et filtre optionnel par date.
+// Si dateFrom/dateTo sont fournis, utilise les filtres GLPI criteria pour ne récupérer
+// que les tickets créés/modifiés dans cet intervalle.
+async function fetchAllGlpiTickets(config, sessionToken, { dateFrom, dateTo } = {}) {
+  const PAGE_SIZE = 100;
+  let offset = 0;
+  const allTickets = [];
+
+  while (true) {
+    let url = `${config.baseUrl}/Ticket?range=${offset}-${offset + PAGE_SIZE - 1}`;
+
+    const fetchOptions = {
+      headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
+    };
+
+    // Si des dates sont fournies, utiliser la requête POST avec criteria (API GLPI avancée)
+    if (dateFrom || dateTo) {
+      const criteria = [
+        { field: 1, searchtype: 2, value: '%' },
+      ];
+      if (dateFrom) {
+        criteria.push({ field: 19, searchtype: 2, value: dateFrom });
+      }
+      if (dateTo) {
+        criteria.push({ field: 19, searchtype: 3, value: dateTo });
+      }
+
+      const postRes = await fetch(`${config.baseUrl}/search/Ticket`, {
+        method: 'POST',
+        headers: {
+          'App-Token': config.appToken,
+          'Session-Token': sessionToken,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          criteria,
+          range: `${offset}-${offset + PAGE_SIZE - 1}`,
+        }),
+      });
+
+      if (!postRes.ok) break;
+      const data = await postRes.json();
+      const tickets = data.data || data || [];
+      if (tickets.length === 0) break;
+      allTickets.push(...tickets);
+      if (tickets.length < PAGE_SIZE) break;
+      offset += PAGE_SIZE;
+    } else {
+      const res = await fetch(url, {
+        headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
+      });
+      if (!res.ok) break;
+      const tickets = await res.json();
+      if (!Array.isArray(tickets) || tickets.length === 0) break;
+      allTickets.push(...tickets);
+      if (tickets.length < PAGE_SIZE) break;
+      offset += PAGE_SIZE;
+    }
+  }
+
+  return allTickets;
+}
+
+// Sync standard : import incrémental (upsert par glpiTicketId), sans dates = tout récupérer
 async function syncGlpiTickets() {
   const config = await getGlpiConfig();
   if (!config) return null;
 
   const sessionToken = await glpiInitSession(config);
   try {
-    const res = await fetch(`${config.baseUrl}/Ticket?range=0-99`, {
-      headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
-    });
-    if (!res.ok) throw new Error(`GLPI Ticket list a échoué (${res.status})`);
-    const tickets = await res.json();
-
+    const tickets = await fetchAllGlpiTickets(config, sessionToken);
     let imported = 0;
     let updated = 0;
 
     for (const t of tickets) {
       const existing = await prisma.ticket.findUnique({ where: { glpiTicketId: t.id } });
 
-      // WAITING_FOR_USER est un statut piloté côté ERP par l'analyse IA des réponses email
-      // (intentAnalyzer, followupEscalation) — il signale qu'un humain doit intervenir (confiance
-      // basse, conversation IA escaladée, etc.), une information que GLPI ne connaît pas. Le statut
-      // brut GLPI ("En cours", "Nouveau"...) ne doit donc jamais l'écraser lors d'une simple
-      // resynchronisation, sinon le ticket sort silencieusement de la file de revue humaine dès le
-      // prochain cycle de sync — seule une résolution/clôture réelle côté GLPI doit y mettre fin.
       const glpiStatus = GLPI_STATUS_MAP[t.status] || 'NEW';
       const status = (existing?.status === 'WAITING_FOR_USER' && glpiStatus !== 'SOLVED' && glpiStatus !== 'CLOSED')
         ? 'WAITING_FOR_USER'
@@ -120,9 +166,44 @@ async function syncGlpiTickets() {
   }
 }
 
-// Si le réglage "Auto-approbation des solutions GLPI" (Paramètres > Automatisation) est activé,
-// approuve automatiquement toute demande de validation de solution en attente sur ce ticket.
-// Best-effort : une erreur ici ne doit jamais interrompre la synchro globale des tickets.
+// Réimport complet : supprime tous les tickets GLPI-syncés de l'ERP puis réimporte
+// depuis GLPI avec filtre optionnel par date.
+// NE TOUCHE PAS à GLPI — c'est une lecture seule.
+async function fullReimportFromGlpi({ dateFrom, dateTo } = {}) {
+  const config = await getGlpiConfig();
+  if (!config) return null;
+
+  // 1. Supprimer les tickets GLPI-syncés de l'ERP
+  const deleted = await prisma.ticket.deleteMany({ where: { glpiTicketId: { not: null } } });
+  console.log(`[glpiSync] ${deleted.count} tickets GLPI supprimés de l'ERP pour réimport`);
+
+  // 2. Réimporter depuis GLPI
+  const sessionToken = await glpiInitSession(config);
+  try {
+    const tickets = await fetchAllGlpiTickets(config, sessionToken, { dateFrom, dateTo });
+    let imported = 0;
+
+    for (const t of tickets) {
+      const data = {
+        title: t.name,
+        content: t.content || '',
+        status: GLPI_STATUS_MAP[t.status] || 'NEW',
+        priority: glpiPriorityToErp(t.priority),
+        category: await glpiIdToCategory(t.itilcategories_id),
+        aiProcessed: t.users_id_recipient === GLPI_AI_REQUESTER_ID,
+      };
+
+      const created = await prisma.ticket.create({ data: { ...data, glpiTicketId: t.id } });
+      await syncTicketAttachments(config, sessionToken, t.id, created.id);
+      imported += 1;
+    }
+
+    return { deleted: deleted.count, imported };
+  } finally {
+    await glpiKillSession(config, sessionToken);
+  }
+}
+
 async function maybeAutoApproveValidation(config, sessionToken, glpiTicketId) {
   try {
     const settings = await getSystemSettings();
@@ -149,14 +230,6 @@ async function maybeAutoApproveValidation(config, sessionToken, glpiTicketId) {
   }
 }
 
-// Cas réel observé en production : un ticket peut passer au statut "Résolu" SANS qu'aucune
-// ITILSolution n'ait jamais été soumise (le technicien clôt sans remplir le champ solution).
-// GLPI affiche alors un panneau "Approbation de la solution" vide en attente côté demandeur,
-// mais il n'existe aucune ligne TicketValidation correspondante — l'auto-approbation classique
-// (maybeAutoApproveValidation, ci-dessus) ne trouve donc jamais rien à approuver dans ce cas.
-// Ici, on crée nous-mêmes la solution ET on l'approuve dans la même requête, en utilisant
-// _do_not_compute_status pour contourner le garde-fou GLPI qui refuse normalement d'ajouter une
-// solution sur un ticket déjà résolu (cf. ITILSolution::prepareInputForAdd côté GLPI).
 async function maybeAutoApproveSolution(config, sessionToken, ticket) {
   if (ticket.status !== TICKET_STATUS_SOLVED) return;
 
@@ -170,7 +243,6 @@ async function maybeAutoApproveSolution(config, sessionToken, ticket) {
     const solutions = await res.json();
     if (!Array.isArray(solutions)) return;
 
-    // Une solution accordée existe déjà (créée par un technicien ou un cycle précédent) : rien à faire.
     if (solutions.some((s) => s.status === SOLUTION_STATUS_ACCEPTED)) return;
 
     await fetch(`${config.baseUrl}/Ticket/${ticket.id}/ITILSolution`, {
@@ -193,7 +265,6 @@ async function maybeAutoApproveSolution(config, sessionToken, ticket) {
   }
 }
 
-// Récupère les pièces jointes (Document_Item) d'un ticket GLPI et les enregistre dans TicketAttachment
 async function syncTicketAttachments(config, sessionToken, glpiTicketId, ticketId) {
   const res = await fetch(`${config.baseUrl}/Ticket/${glpiTicketId}/Document_Item`, {
     headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
@@ -222,4 +293,4 @@ async function syncTicketAttachments(config, sessionToken, glpiTicketId, ticketI
   }
 }
 
-module.exports = { syncGlpiTickets, getGlpiConfig, glpiInitSession, glpiKillSession };
+module.exports = { syncGlpiTickets, fullReimportFromGlpi, getGlpiConfig, glpiInitSession, glpiKillSession };

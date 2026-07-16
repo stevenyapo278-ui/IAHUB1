@@ -363,10 +363,108 @@ export default function AdvancedTab() {
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* SECTION 4 : REGLES DE TRIAGE AUTOMATIQUE */}
+      {/* SECTION 4 : REIMPORT GLPI */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      <GlpiReimportSection />
+
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* SECTION 5 : REGLES DE TRIAGE AUTOMATIQUE */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       <TriageRulesSection saving={saving} setSaving={setSaving} setError={setError} />
     </motion.div>
+  );
+}
+
+function GlpiReimportSection() {
+  const [reimporting, setReimporting] = useState(false);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+
+  async function handleReimport() {
+    if (!confirm('Supprimer les tickets GLPI existants dans l\'ERP et tout réimporter depuis GLPI ? Cette action est réversible (vous pouvez réimporter à nouveau).')) return;
+
+    setReimporting(true);
+    setResult(null);
+    setError(null);
+    try {
+      const payload = {};
+      if (dateFrom) payload.dateFrom = dateFrom;
+      if (dateTo) payload.dateTo = dateTo;
+      const { data } = await api.post('/glpi/reimport', payload);
+      setResult(data);
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+    } finally {
+      setReimporting(false);
+    }
+  }
+
+  return (
+    <div className="space-y-md">
+      <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
+        <span className="material-symbols-outlined text-primary text-2xl">download</span>
+        <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Réimport depuis GLPI</h4>
+      </div>
+
+      <motion.div variants={itemVariants} className="bento-card p-lg space-y-md">
+        <p className="font-body-sm text-body-sm text-on-surface-variant">
+          Supprime les tickets synchronisés depuis GLPI dans l'ERP et les réimporte depuis la source.
+          Le GLPI source n'est <strong>jamais modifié</strong> — cette opération est 100% lecture seule.
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-md">
+          <label className="flex flex-col gap-xs">
+            <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Date de début (optionnel)</span>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className={inputClass}
+            />
+            <span className="text-[11px] text-on-surface-variant">Laisser vide = tous les tickets</span>
+          </label>
+          <label className="flex flex-col gap-xs">
+            <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Date de fin (optionnel)</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className={inputClass}
+            />
+            <span className="text-[11px] text-on-surface-variant">Laisser vide = jusqu'à aujourd'hui</span>
+          </label>
+        </div>
+
+        <div className="flex items-center gap-sm">
+          <motion.button
+            onClick={handleReimport}
+            disabled={reimporting}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.97 }}
+            className="px-5 py-2.5 bg-red-500/10 text-red-500 border border-red-500/30 hover:bg-red-500/20 rounded-xl font-semibold text-body-sm transition-all disabled:opacity-50 flex items-center gap-2"
+          >
+            <span className="material-symbols-outlined text-[18px]">{reimporting ? 'sync' : 'restart_alt'}</span>
+            {reimporting ? 'Réimport en cours...' : 'Réinitialiser et réimporter'}
+          </motion.button>
+        </div>
+
+        {result && (
+          <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[13px] text-emerald-600 flex items-center gap-2">
+            <span className="material-symbols-outlined" style={{ fontSize: '18px', fontVariationSettings: "'FILL' 1" }}>check_circle</span>
+            {result.deleted} tickets supprimés, {result.imported} tickets réimportés depuis GLPI.
+          </div>
+        )}
+
+        {error && (
+          <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-[13px] text-red-500 flex items-center gap-2">
+            <span className="material-symbols-outlined" style={{ fontSize: '18px', fontVariationSettings: "'FILL' 1" }}>error</span>
+            {error}
+          </div>
+        )}
+      </motion.div>
+    </div>
   );
 }
 
