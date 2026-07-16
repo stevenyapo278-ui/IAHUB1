@@ -285,6 +285,7 @@ model SystemSettings {
   autoSendAiEmails       Boolean  @default(false) // envoie directement les emails générés par l'IA sans passer par le circuit d'approbation humaine AiEmailDraft
   enableFewShotTriage    Boolean  @default(true)  // active l'apprentissage Few-Shot par historique pour la classification de tickets
   enableGlpiTicketCreation Boolean @default(true)  // active la création automatique de tickets GLPI lors de la création de tickets ERP
+  activeGlpiInstance     String   @default("glpi") // serviceName de l'instance GLPI utilisée pour la création de tickets (ex: "glpi" ou "glpi_dev")
 
   // URLs absolues du serveur, utilisées pour générer des liens/ressources dans les emails sortants
   // (logo de signature, lien d'approbation de brouillon, lien de réinitialisation de mot de passe).

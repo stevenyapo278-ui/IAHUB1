@@ -1,20 +1,13 @@
 const FormData = require('form-data');
 const prisma = require('../prismaClient');
 const { categoryToGlpiId, GLPI_AI_REQUESTER_ID } = require('../utils/glpiMapping');
+const { getActiveGlpiConfig } = require('../utils/glpiSync');
 
 const GLPI_STATUS_MAP = { NEW: 1, OPEN: 2, PENDING: 4, WAITING_FOR_USER: 4, SOLVED: 5, CLOSED: 6 };
 const ERP_PRIORITY_MAP = { P1: 6, P2: 4, P3: 3, P4: 2 };
 const GLPI_TYPE_MAP = { INCIDENT: 1, REQUEST: 2 };
 const GLPI_URGENCY_IMPACT_MAP = { VERY_LOW: 1, LOW: 2, MEDIUM: 3, HIGH: 4, VERY_HIGH: 5, MAJOR: 6 };
 const GLPI_SOURCE_MAP = { Helpdesk: 1, Email: 4, Téléphone: 2 };
-
-async function getGlpiConfig() {
-  const config = await prisma.apiConfig.findUnique({ where: { serviceName: 'glpi' } });
-  if (!config || !config.isActive || !config.baseUrl || !config.apiKey) return null;
-  const appToken = config.extra?.appToken;
-  if (!appToken) return null;
-  return { baseUrl: config.baseUrl, userToken: config.apiKey, appToken };
-}
 
 async function withGlpiSession(config, fn) {
   const sessionRes = await fetch(`${config.baseUrl}/initSession`, {
@@ -38,7 +31,7 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
   const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
   if (settings && settings.enableGlpiTicketCreation === false) return null;
 
-  const config = await getGlpiConfig();
+  const config = await getActiveGlpiConfig();
   if (!config) return null;
 
   return withGlpiSession(config, async (sessionToken) => {
@@ -91,7 +84,7 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
 // catégorie, assignation). N'envoie que les champs fournis (undefined = inchangé).
 // Ne fait rien si le ticket n'a pas de glpiTicketId ou si GLPI n'est pas configuré.
 async function updateGlpiTicket(glpiTicketId, { status, priority, category, type, urgency, impact, assignedToGlpiId, teamGlpiId }) {
-  const config = await getGlpiConfig();
+  const config = await getActiveGlpiConfig();
   if (!config || !glpiTicketId) return;
 
   const input = {};
@@ -145,7 +138,7 @@ async function updateGlpiTicket(glpiTicketId, { status, priority, category, type
 // réponse email ultérieure de l'utilisateur, et pas seulement le mail d'origine à la création.
 // Ne fait rien si GLPI n'est pas configuré ou si le ticket n'a pas de glpiTicketId.
 async function addGlpiFollowup(glpiTicketId, content, { isPrivate = false } = {}) {
-  const config = await getGlpiConfig();
+  const config = await getActiveGlpiConfig();
   if (!config || !glpiTicketId || !content) return null;
 
   return withGlpiSession(config, async (sessionToken) => {
@@ -170,7 +163,7 @@ async function addGlpiFollowup(glpiTicketId, content, { isPrivate = false } = {}
 // Supprime (purge) un ticket dans GLPI. Ne fait rien si GLPI n'est pas configuré
 // ou si le ticket n'a pas de glpiTicketId. Échec silencieux (best-effort).
 async function deleteGlpiTicket(glpiTicketId) {
-  const config = await getGlpiConfig();
+  const config = await getActiveGlpiConfig();
   if (!config || !glpiTicketId) return false;
 
   return withGlpiSession(config, async (sessionToken) => {
@@ -255,7 +248,7 @@ async function createTicketFromEmail({ subject, body, from, fromName, analysis, 
 // Upload un fichier vers GLPI et l'attache à un ticket existant (Document + Document_Item).
 // Retourne l'id du Document GLPI créé, ou null si GLPI n'est pas configuré.
 async function uploadGlpiAttachment({ glpiTicketId, buffer, filename, mimeType }) {
-  const config = await getGlpiConfig();
+  const config = await getActiveGlpiConfig();
   if (!config || !glpiTicketId) return null;
 
   return withGlpiSession(config, async (sessionToken) => {
@@ -302,7 +295,7 @@ async function uploadGlpiAttachment({ glpiTicketId, buffer, filename, mimeType }
 // dans l'ERP, en les liant via glpiGroupId. Retourne le nombre de groupes synchronisés,
 // ou null si GLPI n'est pas configuré/accessible.
 async function syncTeamsFromGlpi() {
-  const config = await getGlpiConfig();
+  const config = await getActiveGlpiConfig();
   if (!config) return null;
 
   return withGlpiSession(config, async (sessionToken) => {
@@ -342,7 +335,7 @@ async function syncTeamsFromGlpi() {
 // GLPI_CATEGORIES (glpiMapping.js) qui se désynchronisait silencieusement si la liste changeait
 // côté GLPI. Retourne le nombre de catégories synchronisées, ou null si GLPI n'est pas configuré.
 async function syncCategoriesFromGlpi() {
-  const config = await getGlpiConfig();
+  const config = await getActiveGlpiConfig();
   if (!config) return null;
 
   return withGlpiSession(config, async (sessionToken) => {

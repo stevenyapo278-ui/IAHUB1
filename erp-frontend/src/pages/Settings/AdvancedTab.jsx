@@ -251,6 +251,38 @@ export default function AdvancedTab() {
             disabled={saving}
           />
         </div>
+
+        {/* Sélecteur d'instance GLPI */}
+        {settings.enableGlpiTicketCreation !== false && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            variants={itemVariants}
+            className="bento-card p-lg"
+          >
+            <div className="flex items-center justify-between gap-lg">
+              <div>
+                <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">Instance GLPI cible</div>
+                <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5">
+                  Choisissez l'instance GLPI vers laquelle les nouveaux tickets ERP sont envoyés.
+                </p>
+              </div>
+              <div className="flex items-center gap-sm">
+                <select
+                  value={settings.activeGlpiInstance || 'glpi'}
+                  onChange={(e) => updateSetting('activeGlpiInstance', e.target.value)}
+                  disabled={saving}
+                  className={`${inputClass} min-w-[200px]`}
+                >
+                  <option value="glpi">GLPI Production</option>
+                  <option value="glpi_dev">GLPI Développement</option>
+                </select>
+                <div className={`w-2 h-2 rounded-full ${(settings.activeGlpiInstance || 'glpi') === 'glpi' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+              </div>
+            </div>
+          </motion.div>
+        )}
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}

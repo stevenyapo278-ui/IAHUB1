@@ -3,7 +3,7 @@ const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
-const { getGlpiConfig, glpiInitSession, glpiKillSession } = require('../utils/glpiSync');
+const { getActiveGlpiConfig, glpiInitSession, glpiKillSession } = require('../utils/glpiSync');
 const { notifyMajorIncidentResolved } = require('../services/emailSender');
 const { createGlpiTicket, updateGlpiTicket, deleteGlpiTicket, uploadGlpiAttachment, addGlpiFollowup } = require('../services/glpiTicketCreator');
 const { logEvent } = require('../services/ticketEvent');
@@ -108,7 +108,7 @@ router.get('/:id/attachments/:attachmentId/file', async (req, res) => {
   });
   if (!attachment) return res.status(404).json({ error: 'Pièce jointe introuvable' });
 
-  const config = await getGlpiConfig();
+  const config = await getActiveGlpiConfig();
   if (!config) return res.status(422).json({ error: 'GLPI non configuré' });
 
   const sessionToken = await glpiInitSession(config);

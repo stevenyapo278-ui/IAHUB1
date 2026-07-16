@@ -23,12 +23,20 @@ function glpiPriorityToErp(priority) {
   return 'P4';
 }
 
-async function getGlpiConfig() {
-  const config = await prisma.apiConfig.findUnique({ where: { serviceName: 'glpi' } });
+async function getGlpiConfig(serviceName) {
+  const name = serviceName || 'glpi';
+  const config = await prisma.apiConfig.findUnique({ where: { serviceName: name } });
   if (!config || !config.isActive || !config.baseUrl || !config.apiKey) return null;
   const appToken = config.extra?.appToken;
   if (!appToken) return null;
   return { baseUrl: config.baseUrl, userToken: config.apiKey, appToken };
+}
+
+// Récupère la config GLPI active pour la création de tickets (selon SystemSettings.activeGlpiInstance)
+async function getActiveGlpiConfig() {
+  const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+  const activeInstance = settings?.activeGlpiInstance || 'glpi';
+  return getGlpiConfig(activeInstance);
 }
 
 async function glpiInitSession(config) {
@@ -293,4 +301,4 @@ async function syncTicketAttachments(config, sessionToken, glpiTicketId, ticketI
   }
 }
 
-module.exports = { syncGlpiTickets, fullReimportFromGlpi, getGlpiConfig, glpiInitSession, glpiKillSession };
+module.exports = { syncGlpiTickets, fullReimportFromGlpi, getGlpiConfig, getActiveGlpiConfig, glpiInitSession, glpiKillSession };

@@ -1,11 +1,33 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
+const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { syncGlpiTickets, fullReimportFromGlpi } = require('../utils/glpiSync');
 
 const router = express.Router();
 router.use(authenticate);
+
+// Liste les instances GLPI configurées
+router.get('/instances', requirePermission('glpi.manage', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+  const configs = await prisma.apiConfig.findMany({
+    where: { serviceName: { in: ['glpi', 'glpi_dev'] } },
+    select: { serviceName: true, baseUrl: true, isActive: true, extra: true },
+  });
+
+  const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+
+  res.json({
+    instances: configs.map((c) => ({
+      id: c.serviceName,
+      label: c.serviceName === 'glpi' ? 'GLPI Production' : 'GLPI Développement',
+      baseUrl: c.baseUrl,
+      isActive: c.isActive,
+      isConfigured: !!(c.baseUrl && c.extra?.appToken),
+    })),
+    activeInstance: settings?.activeGlpiInstance || 'glpi',
+  });
+});
 
 // Sync standard (incrémental)
 router.post('/sync', requirePermission('glpi.manage', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
