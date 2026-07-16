@@ -133,9 +133,18 @@ export default function Tickets() {
   const handleRowEnter = useCallback((ticket, e) => {
     clearTimeout(leaveTimer.current);
     const rect = e.currentTarget.getBoundingClientRect();
+    const panelW = 340;
+    const panelH = 420;
+    const gap = 12;
     hoverTimer.current = setTimeout(() => {
       setHoveredTicket(ticket);
-      setHoverPos({ x: rect.right + 12, y: rect.top });
+      let x = rect.right + gap;
+      let y = rect.top;
+      if (x + panelW > window.innerWidth - 16) x = rect.left - panelW - gap;
+      if (x < 16) x = 16;
+      if (y + panelH > window.innerHeight - 16) y = window.innerHeight - panelH - 16;
+      if (y < 16) y = 16;
+      setHoverPos({ x, y });
     }, 400);
   }, []);
 
