@@ -3,7 +3,7 @@ const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
-const { syncGlpiTickets, fullReimportFromGlpi } = require('../utils/glpiSync');
+const { syncGlpiTickets, fullReimportFromGlpi, getActiveGlpiConfig, glpiInitSession, glpiKillSession } = require('../utils/glpiSync');
 
 const router = express.Router();
 router.use(authenticate);
@@ -68,5 +68,40 @@ router.post(
     }
   }
 );
+
+// Proxy un document GLPI (image, PDF, etc.) via l'API REST — utilisé pour les URLs d'images
+// embarquées dans les suivis (ITILFollowup) qui contiennent des références à des documents
+// GLPI. Sans ce proxy, ces images seraient brisées dans l'ERP car les URLs originales
+// pointent vers l'interface web de GLPI, inaccessible depuis le navigateur de l'utilisateur.
+// Le document est téléchargé depuis GLPI et renvoyé avec son Content-Type original.
+router.get('/document/:docId/file', requirePermission('tickets.view', ['ADMIN', 'TECHNICIAN', 'REQUESTER']), async (req, res) => {
+  const docId = Number(req.params.docId);
+  if (!docId) return res.status(400).json({ error: 'docId invalide' });
+
+  // Cherche le document dans nos pièces jointes pour vérifier qu'il existe bien
+  const attachment = await prisma.ticketAttachment.findFirst({
+    where: { glpiDocumentId: docId },
+  });
+
+  const config = await getActiveGlpiConfig();
+  if (!config) return res.status(422).json({ error: 'GLPI non configuré' });
+
+  const sessionToken = await glpiInitSession(config);
+  try {
+    const fileRes = await fetch(
+      `${config.baseUrl}/Document/${docId}?alt=media`,
+      { headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken } }
+    );
+    if (!fileRes.ok) return res.status(502).json({ error: 'Téléchargement GLPI échoué' });
+
+    res.setHeader('Content-Type', attachment?.mimeType || fileRes.headers.get('content-type') || 'application/octet-stream');
+    res.setHeader('Content-Disposition', attachment?.filename ? `inline; filename="${attachment.filename}"` : 'inline');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    const buffer = Buffer.from(await fileRes.arrayBuffer());
+    return res.send(buffer);
+  } finally {
+    await glpiKillSession(config, sessionToken);
+  }
+});
 
 module.exports = router;

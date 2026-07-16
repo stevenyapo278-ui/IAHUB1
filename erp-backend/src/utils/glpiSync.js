@@ -303,6 +303,27 @@ async function syncTicketAttachments(config, sessionToken, glpiTicketId, ticketI
   }
 }
 
+function rewriteGlpiDocumentUrls(html, config, ticketId) {
+  // Réécrit les URLs de documents GLPI (/document.send.php?docid=X) vers le proxy ERP
+  // pour que les images/pièces jointes des suivis restent accessibles depuis l'ERP.
+  return html.replace(
+    /(["'])(?:https?:\/\/[^"']*?|\/?[^"']*?)\/document\.send\.php\?(?:[^"']*?&)?docid=(\d+)(?:&[^"']*?)?\1/gi,
+    (match, quote, docId) => `${quote}/api/glpi/document/${docId}/file${quote}`
+  );
+}
+
+function sanitizeGlpiHtml(html) {
+  // Nettoie le HTML GLPI : supprime les balises <script> et les attributs on* (event handlers)
+  // pour éviter toute injection XSS — GLPI est un système de confiance, mais on ne prend pas de risque.
+  return html
+    .replace(/<script\b[^<]*(?:<\/script>|<\/script\s*>)/gi, '')
+    .replace(/<script(\s[^>]*)?>/gi, '')
+    .replace(/<\/script>/gi, '')
+    .replace(/\son\w+="[^"]*"/gi, '')
+    .replace(/\son\w+='[^']*'/gi, '')
+    .replace(/\son\w+=\S+/gi, '');
+}
+
 async function syncGlpiFollowups(config, sessionToken, glpiTicketId, ticketId) {
   const res = await fetch(`${config.baseUrl}/Ticket/${glpiTicketId}/ITILFollowup`, {
     headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
@@ -313,7 +334,18 @@ async function syncGlpiFollowups(config, sessionToken, glpiTicketId, ticketId) {
 
   for (const fu of followups) {
     if (!fu.id || !fu.content) continue;
-    const content = fu.content.replace(/<[^>]*>/g, '').trim();
+
+    // Conserve le HTML original de GLPI au lieu de le stripper : les suivis peuvent contenir
+    // des images embarquées (copies d'écran, captures), des tableaux, du formatage riche, etc.
+    // Désormais aussi, tout document GLPI référencé via document.send.php?docid=X dans le HTML
+    // est automatiquement réécrit vers notre proxy interne pour rester accessible depuis l'ERP.
+    let content = fu.content.trim();
+    if (!content) continue;
+
+    // Réécrit les URLs des documents GLPI vers le proxy ERP
+    content = rewriteGlpiDocumentUrls(content, config, ticketId);
+    // Nettoie les scripts et event handlers (GLPI de confiance, mais par sécurité)
+    content = sanitizeGlpiHtml(content);
     if (!content) continue;
 
     try {
