@@ -1,7 +1,6 @@
 const ENABLED_KEY = 'voiceAlertsEnabled';
 const LANG_KEY = 'voiceAlertsLang';
 
-// Langues proposées dans l'UI — code BCP 47 utilisé directement par SpeechSynthesisUtterance.lang.
 export const VOICE_ALERT_LANGUAGES = [
   { code: 'fr-FR', label: 'Français' },
   { code: 'en-US', label: 'Anglais (US)' },
@@ -11,8 +10,6 @@ export const VOICE_ALERT_LANGUAGES = [
   { code: 'ar-SA', label: 'Arabe' },
 ];
 
-// Préférences purement locales au navigateur (pas envoyées au backend) : chaque utilisateur peut
-// activer/désactiver l'alerte vocale et choisir sa langue sur son propre poste, sans affecter les autres.
 export function isVoiceAlertEnabled() {
   return localStorage.getItem(ENABLED_KEY) !== 'false';
 }
@@ -38,9 +35,27 @@ const TEST_MESSAGES = {
   'ar-SA': 'هذا اختبار للتنبيه الصوتي.',
 };
 
+function getSynth() {
+  if (typeof window === 'undefined') return null;
+  return window.speechSynthesis || null;
+}
+
 export function speakTest(lang) {
-  if (typeof window === 'undefined' || !window.speechSynthesis) return;
-  const utterance = new SpeechSynthesisUtterance(TEST_MESSAGES[lang] || TEST_MESSAGES['fr-FR']);
+  const synth = getSynth();
+  if (!synth) return;
+
+  synth.cancel();
+
+  const msg = TEST_MESSAGES[lang] || TEST_MESSAGES['fr-FR'];
+  const utterance = new SpeechSynthesisUtterance(msg);
   utterance.lang = lang;
-  window.speechSynthesis.speak(utterance);
+  utterance.rate = 1;
+  utterance.pitch = 1;
+
+  const voices = synth.getVoices();
+  const match = voices.find((v) => v.lang === lang);
+  if (match) utterance.voice = match;
+
+  utterance.onstart = () => synth.resume();
+  synth.speak(utterance);
 }

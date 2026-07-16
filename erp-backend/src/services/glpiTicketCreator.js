@@ -35,6 +35,9 @@ async function withGlpiSession(config, fn) {
 // Retourne l'id du ticket GLPI créé, ou null si GLPI n'est pas configuré.
 // followupNote : texte optionnel ajouté en suivi privé (ex: contexte de l'email d'origine).
 async function createGlpiTicket({ title, content, priority, category, type, urgency, impact, source, followupNote }) {
+  const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+  if (settings && settings.enableGlpiTicketCreation === false) return null;
+
   const config = await getGlpiConfig();
   if (!config) return null;
 

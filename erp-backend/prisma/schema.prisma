@@ -284,6 +284,7 @@ model SystemSettings {
   autoApproveGlpiSolutions Boolean @default(false) // approuve automatiquement la validation de solution GLPI dès qu'un ticket passe Résolu
   autoSendAiEmails       Boolean  @default(false) // envoie directement les emails générés par l'IA sans passer par le circuit d'approbation humaine AiEmailDraft
   enableFewShotTriage    Boolean  @default(true)  // active l'apprentissage Few-Shot par historique pour la classification de tickets
+  enableGlpiTicketCreation Boolean @default(true)  // active la création automatique de tickets GLPI lors de la création de tickets ERP
 
   // URLs absolues du serveur, utilisées pour générer des liens/ressources dans les emails sortants
   // (logo de signature, lien d'approbation de brouillon, lien de réinitialisation de mot de passe).

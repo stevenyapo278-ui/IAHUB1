@@ -242,6 +242,14 @@ export default function AdvancedTab() {
             onChange={(v) => updateSetting('autoApproveGlpiSolutions', v)}
             disabled={saving}
           />
+
+          <SettingRow
+            title="Création de tickets GLPI"
+            description="Lorsqu'un ticket est créé dans l'ERP, un ticket correspondant est automatiquement créé dans GLPI."
+            checked={settings.enableGlpiTicketCreation !== false}
+            onChange={(v) => updateSetting('enableGlpiTicketCreation', v)}
+            disabled={saving}
+          />
         </div>
       </div>
 

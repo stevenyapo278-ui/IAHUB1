@@ -43,6 +43,7 @@ router.patch(
   [
     body('autoApproveGlpiSolutions').optional().isBoolean(),
     body('autoSendAiEmails').optional().isBoolean(),
+    body('enableGlpiTicketCreation').optional().isBoolean(),
     body('glpiTicketsSyncIntervalSeconds').optional().isInt({ min: 0, max: 3600 }),
     body('emailSyncIntervalSeconds').optional().isInt({ min: 0, max: 3600 }),
     body('glpiTeamsCategoriesSyncIntervalMinutes').optional().isInt({ min: 0, max: 1440 }),
@@ -59,6 +60,7 @@ router.patch(
     const data = {};
     if (req.body.autoApproveGlpiSolutions !== undefined) data.autoApproveGlpiSolutions = req.body.autoApproveGlpiSolutions;
     if (req.body.autoSendAiEmails !== undefined) data.autoSendAiEmails = req.body.autoSendAiEmails;
+    if (req.body.enableGlpiTicketCreation !== undefined) data.enableGlpiTicketCreation = req.body.enableGlpiTicketCreation;
     if (req.body.glpiTicketsSyncIntervalSeconds !== undefined) data.glpiTicketsSyncIntervalSeconds = req.body.glpiTicketsSyncIntervalSeconds;
     if (req.body.emailSyncIntervalSeconds !== undefined) data.emailSyncIntervalSeconds = req.body.emailSyncIntervalSeconds;
     if (req.body.glpiTeamsCategoriesSyncIntervalMinutes !== undefined) data.glpiTeamsCategoriesSyncIntervalMinutes = req.body.glpiTeamsCategoriesSyncIntervalMinutes;
