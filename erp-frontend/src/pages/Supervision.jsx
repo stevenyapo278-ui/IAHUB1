@@ -1,32 +1,76 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { AreaChart, Area, ResponsiveContainer } from 'recharts';
+import { motion, AnimatePresence, useMotionValue, useTransform } from 'framer-motion';
+import { AreaChart, Area, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
 import api from '../api/client';
 import { useSocket } from '../context/SocketContext';
 
-const PIPELINE_STEPS = [
-  { id: 'reception', label: 'Réception', icon: 'mail' },
-  { id: 'signature', label: 'Signature', icon: 'ink_eraser' },
-  { id: 'antispam', label: 'Anti-Spam', icon: 'shield' },
-  { id: 'thread', label: 'Fil', icon: 'link' },
-  { id: 'dedup', label: 'Doublon', icon: 'filter_alt' },
-  { id: 'intent', label: 'Intention', icon: 'psychology' },
-  { id: 'ticket', label: 'Ticket', icon: 'confirmation_number' },
-  { id: 'reply', label: 'Réponse', icon: 'auto_awesome' },
-  { id: 'finalize', label: 'Final', icon: 'check_circle' },
-];
-
 const EVENT_TYPES = {
   ticket_created: { icon: 'add_task', color: '#3B82F6', label: 'Ticket créé' },
-  ticket_assigned: { icon: 'person_pin', color: '#8B5CF6', label: 'Ticket assigné' },
+  ticket_assigned: { icon: 'person_pin', color: '#8B5CF6', label: 'Assigné' },
   email_received: { icon: 'mail', color: '#F97316', label: 'Email reçu' },
   email_updated: { icon: 'mark_email_read', color: '#10B981', label: 'Email traité' },
 };
 
-const itemVariants = {
-  hidden: { opacity: 0, y: 8 },
-  visible: { opacity: 1, y: 0 },
-};
+/* ═══════════════════════════════════════════════════════════════════════════════ */
+/* ANIMATED COMPONENTS                                                           */
+/* ═══════════════════════════════════════════════════════════════════════════════ */
+
+function AnimatedNumber({ value, color }) {
+  const [display, setDisplay] = useState(0);
+  useEffect(() => {
+    const num = typeof value === 'number' ? value : parseInt(value) || 0;
+    const diff = num - display;
+    if (diff === 0) return;
+    const step = diff > 0 ? 1 : -1;
+    const steps = Math.abs(diff);
+    const interval = Math.max(20, Math.min(60, 300 / steps));
+    let current = display;
+    const timer = setInterval(() => {
+      current += step;
+      if ((step > 0 && current >= num) || (step < 0 && current <= num)) {
+        current = num;
+        clearInterval(timer);
+      }
+      setDisplay(current);
+    }, interval);
+    return () => clearInterval(timer);
+  }, [value]);
+  return <span style={{ color }}>{display}</span>;
+}
+
+function PulseRing({ active, color = '#10B981' }) {
+  return (
+    <span className="relative flex h-3 w-3 shrink-0">
+      {active && (
+        <motion.span
+          animate={{ scale: [1, 2.2], opacity: [0.6, 0] }}
+          transition={{ duration: 1.5, repeat: Infinity, ease: 'easeOut' }}
+          className="absolute inline-flex h-full w-full rounded-full"
+          style={{ backgroundColor: color }}
+        />
+      )}
+      <span
+        className="relative inline-flex rounded-full h-3 w-3"
+        style={{ backgroundColor: active ? color : '#52525b' }}
+      />
+    </span>
+  );
+}
+
+function StatusChip({ label, ok, detail }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className="flex items-center gap-2 px-3 py-1.5 rounded-lg"
+      style={{ background: ok ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)' }}
+    >
+      <PulseRing active={ok} color={ok ? '#10B981' : '#EF4444'} />
+      <span className="text-[11px] font-semibold text-white/80">{label}</span>
+      {detail && <span className="text-[10px] text-white/35">{detail}</span>}
+    </motion.div>
+  );
+}
 
 function LiveClock() {
   const [time, setTime] = useState(new Date());
@@ -35,20 +79,26 @@ function LiveClock() {
     return () => clearInterval(t);
   }, []);
   return (
-    <span className="font-mono text-sm tabular-nums">
+    <motion.span
+      key={time.getSeconds()}
+      initial={{ opacity: 0.7 }}
+      animate={{ opacity: 1 }}
+      className="font-mono text-sm tabular-nums text-white/70"
+    >
       {time.toLocaleTimeString('fr-FR')}
-    </span>
+    </motion.span>
   );
 }
 
-function Sparkline({ data, color }) {
+function Sparkline({ data, color, height = 28 }) {
   if (!data || data.length < 2) return null;
+  const id = `sp-${color.replace('#', '')}-${Math.random().toString(36).slice(2, 6)}`;
   return (
-    <ResponsiveContainer width="100%" height={32}>
+    <ResponsiveContainer width="100%" height={height}>
       <AreaChart data={data} margin={{ top: 2, right: 0, left: 0, bottom: 2 }}>
         <defs>
-          <linearGradient id={`spark-${color.replace('#', '')}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity={0.3} />
+          <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity={0.25} />
             <stop offset="100%" stopColor={color} stopOpacity={0} />
           </linearGradient>
         </defs>
@@ -57,389 +107,265 @@ function Sparkline({ data, color }) {
           dataKey="v"
           stroke={color}
           strokeWidth={1.5}
-          fill={`url(#spark-${color.replace('#', '')})`}
+          fill={`url(#${id})`}
           dot={false}
-          isAnimationActive={false}
+          isAnimationActive={true}
+          animationDuration={800}
         />
       </AreaChart>
     </ResponsiveContainer>
   );
 }
 
-function StatusIndicator({ ok, label, detail }) {
+function KpiCard({ label, value, prevValue, icon, color, sparkData, suffix = '' }) {
+  const trend = prevValue != null && prevValue !== 0
+    ? Math.round(((value - prevValue) / prevValue) * 100)
+    : null;
+  const trendUp = trend !== null && trend >= 0;
+
   return (
-    <div className="flex items-center gap-2">
-      <span
-        className="relative flex h-2.5 w-2.5 shrink-0"
-      >
-        {ok && (
-          <span
-            className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
-            style={{ backgroundColor: '#10B981' }}
-          />
+    <motion.div
+      initial={{ opacity: 0, y: 16, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      whileHover={{ y: -3, scale: 1.02 }}
+      transition={{ type: 'spring', stiffness: 200, damping: 20 }}
+      className="noc-kpi-card group"
+      style={{ borderTop: `2px solid ${color}20` }}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-white/35">{label}</span>
+        <motion.div
+          whileHover={{ rotate: 15, scale: 1.15 }}
+          className="w-7 h-7 rounded-lg flex items-center justify-center"
+          style={{ backgroundColor: `${color}15` }}
+        >
+          <span className="material-symbols-outlined text-[16px]" style={{ color }}>{icon}</span>
+        </motion.div>
+      </div>
+      <div className="flex items-end justify-between">
+        <div>
+          <motion.span
+            key={value}
+            initial={{ y: 8, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="text-2xl font-bold tabular-nums leading-none"
+            style={{ color }}
+          >
+            {typeof value === 'number' ? <AnimatedNumber value={value} color={color} /> : value}
+          </motion.span>
+          {suffix && <span className="text-[11px] text-white/30 ml-1">{suffix}</span>}
+        </div>
+        {sparkData && (
+          <div className="w-16 h-7 opacity-60 group-hover:opacity-100 transition-opacity">
+            <Sparkline data={sparkData} color={color} height={28} />
+          </div>
         )}
-        <span
-          className="relative inline-flex rounded-full h-2.5 w-2.5"
-          style={{ backgroundColor: ok ? '#10B981' : '#EF4444' }}
-        />
-      </span>
-      <span className="text-[11px] font-semibold text-white/80">{label}</span>
-      {detail && (
-        <span className="text-[10px] text-white/40">{detail}</span>
+      </div>
+      {trend !== null && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.3 }}
+          className="flex items-center gap-1 mt-2"
+        >
+          <span className="material-symbols-outlined text-[11px]" style={{ color: trendUp ? '#10B981' : '#EF4444' }}>
+            {trendUp ? 'trending_up' : 'trending_down'}
+          </span>
+          <span className="text-[10px] font-semibold" style={{ color: trendUp ? '#10B981' : '#EF4444' }}>
+            {trendUp ? '+' : ''}{trend}%
+          </span>
+          <span className="text-[9px] text-white/20 ml-0.5">vs hier</span>
+        </motion.div>
       )}
+    </motion.div>
+  );
+}
+
+function EventItem({ event, index }) {
+  const meta = EVENT_TYPES[event.type] || { icon: 'info', color: '#94A3B8', label: event.type };
+  const ts = new Date(event.time).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, x: -20, height: 0 }}
+      animate={{ opacity: 1, x: 0, height: 'auto' }}
+      exit={{ opacity: 0, x: 20, height: 0 }}
+      transition={{ type: 'spring', stiffness: 300, damping: 25, delay: index * 0.03 }}
+      className="noc-event-row"
+    >
+      <div className="flex items-center gap-2 shrink-0 w-20">
+        <motion.span
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          transition={{ type: 'spring', stiffness: 400, delay: index * 0.03 + 0.1 }}
+          className="material-symbols-outlined text-[13px]"
+          style={{ color: meta.color }}
+        >
+          {meta.icon}
+        </motion.span>
+        <span className="text-[10px] font-mono text-white/25 tabular-nums">{ts}</span>
+      </div>
+      <div className="min-w-0 flex-1">
+        <span className="text-[11px] font-semibold" style={{ color: meta.color }}>{meta.label}</span>
+        <span className="text-[11px] text-white/35 ml-1.5 truncate inline-block max-w-[180px]">
+          #{event.id} {event.title || event.subject || ''}
+        </span>
+      </div>
+      {event.priority && (
+        <motion.span
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full shrink-0"
+          style={{
+            color: event.priority === 'P1' ? '#EF4444' : event.priority === 'P2' ? '#F97316' : '#94A3B8',
+            backgroundColor: event.priority === 'P1' ? 'rgba(239,68,68,0.12)' : event.priority === 'P2' ? 'rgba(249,115,22,0.12)' : 'rgba(148,163,184,0.06)',
+          }}
+        >
+          {event.priority}
+        </motion.span>
+      )}
+    </motion.div>
+  );
+}
+
+function TrendBar({ data, label, color }) {
+  if (!data || data.length === 0) return null;
+  return (
+    <div className="noc-trend-block">
+      <p className="text-[10px] font-bold uppercase tracking-widest text-white/30 mb-2">{label}</p>
+      <ResponsiveContainer width="100%" height={90}>
+        <BarChart data={data} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+          <XAxis
+            dataKey="date"
+            tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.2)' }}
+            axisLine={false}
+            tickLine={false}
+            tickFormatter={(d) => d?.slice(5)}
+          />
+          <Tooltip
+            contentStyle={{
+              background: '#1a1e30',
+              border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: 8,
+              fontSize: 11,
+              color: '#e2e8f0',
+            }}
+          />
+          <Bar dataKey="tickets" fill={color} radius={[3, 3, 0, 0]} opacity={0.7} />
+          <Bar dataKey="resolved" fill="#10B981" radius={[3, 3, 0, 0]} opacity={0.9} />
+        </BarChart>
+      </ResponsiveContainer>
     </div>
   );
 }
 
-function KpiCard({ label, value, icon, color, trend, trendUp, sparkData }) {
-  return (
-    <motion.div
-      variants={itemVariants}
-      whileHover={{ y: -2 }}
-      className="noc-kpi-card"
-    >
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-[10px] font-bold uppercase tracking-widest text-white/40">{label}</span>
-        <span className="material-symbols-outlined text-[18px]" style={{ color }}>{icon}</span>
-      </div>
-      <div className="flex items-end justify-between">
-        <motion.span
-          key={value}
-          initial={{ scale: 1.2, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          className="text-2xl font-bold tabular-nums"
-          style={{ color }}
-        >
-          {value}
-        </motion.span>
-        {sparkData && (
-          <div className="w-20 h-8">
-            <Sparkline data={sparkData} color={color} />
-          </div>
-        )}
-      </div>
-      {trend !== undefined && (
-        <div className="flex items-center gap-1 mt-1">
-          <span
-            className="material-symbols-outlined text-[12px]"
-            style={{ color: trendUp ? '#10B981' : '#EF4444' }}
-          >
-            {trendUp ? 'trending_up' : 'trending_down'}
-          </span>
-          <span
-            className="text-[10px] font-semibold"
-            style={{ color: trendUp ? '#10B981' : '#EF4444' }}
-          >
-            {trendUp ? '+' : ''}{trend}%
-          </span>
-          <span className="text-[10px] text-white/30 ml-1">vs hier</span>
-        </div>
-      )}
-    </motion.div>
-  );
-}
-
-function EventFeedItem({ event, index }) {
-  const meta = EVENT_TYPES[event.type] || { icon: 'info', color: '#94A3B8', label: event.type };
-  const timeStr = new Date(event.time).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  return (
-    <motion.div
-      initial={{ opacity: 0, x: -12, height: 0 }}
-      animate={{ opacity: 1, x: 0, height: 'auto' }}
-      transition={{ delay: index * 0.02, duration: 0.3 }}
-      className="noc-event-item"
-    >
-      <div className="flex items-center gap-2 shrink-0">
-        <span className="material-symbols-outlined text-[14px]" style={{ color: meta.color }}>
-          {meta.icon}
-        </span>
-        <span className="text-[10px] font-mono text-white/30 tabular-nums">{timeStr}</span>
-      </div>
-      <div className="min-w-0 flex-1">
-        <span className="text-[11px] font-semibold text-white/70">{meta.label}</span>
-        <span className="text-[11px] text-white/40 ml-2 truncate">
-          #{event.id} — {event.title || event.subject || ''}
-        </span>
-      </div>
-      {event.priority && (
-        <span
-          className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full shrink-0"
-          style={{
-            color: event.priority === 'P1' ? '#EF4444' : event.priority === 'P2' ? '#F97316' : '#94A3B8',
-            backgroundColor: event.priority === 'P1' ? 'rgba(239,68,68,0.12)' : event.priority === 'P2' ? 'rgba(249,115,22,0.12)' : 'rgba(148,163,184,0.08)',
-          }}
-        >
-          {event.priority}
-        </span>
-      )}
-    </motion.div>
-  );
-}
-
-function PipelineMini({ email, pipelineState }) {
-  const state = pipelineState[email.id];
-  if (!state) return null;
-  const percent = state.percent || 0;
-  const isSpam = email.aiIsSpam || email.status === 'SPAM';
-  const isError = email.status === 'ERROR';
-  const isDone = email.status === 'DONE';
-
-  let barColor = '#3B82F6';
-  if (isSpam) barColor = '#F97316';
-  else if (isError) barColor = '#EF4444';
-  else if (isDone) barColor = '#10B981';
-
-  return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      className="noc-pipeline-item"
-    >
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-[11px] font-mono text-white/50 truncate max-w-[70%]">
-          <span className="text-blue-400 font-bold">#{email.id}</span>{' '}
-          <span className="text-white/70">{email.subject?.slice(0, 50)}</span>
-        </span>
-        <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full" style={{
-          color: isSpam ? '#F97316' : isError ? '#EF4444' : isDone ? '#10B981' : '#3B82F6',
-          backgroundColor: isSpam ? 'rgba(249,115,22,0.12)' : isError ? 'rgba(239,68,68,0.12)' : isDone ? 'rgba(16,185,129,0.12)' : 'rgba(59,130,246,0.12)',
-        }}>
-          {isSpam ? 'SPAM' : isError ? 'ERR' : isDone ? 'DONE' : `${percent}%`}
-        </span>
-      </div>
-      <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
-        <motion.div
-          initial={{ width: 0 }}
-          animate={{ width: `${percent}%` }}
-          transition={{ duration: 0.6, ease: 'easeInOut' }}
-          className="h-full rounded-full"
-          style={{ backgroundColor: barColor }}
-        />
-      </div>
-      <div className="flex gap-1 mt-2 flex-wrap">
-        {PIPELINE_STEPS.map((step, idx) => {
-          const stepState = state.stepStates?.[idx] || 'pending';
-          let bg = 'rgba(255,255,255,0.04)';
-          let tc = 'rgba(255,255,255,0.2)';
-          if (stepState === 'done') { bg = 'rgba(16,185,129,0.1)'; tc = '#10B981'; }
-          else if (stepState === 'running') { bg = 'rgba(59,130,246,0.15)'; tc = '#3B82F6'; }
-          else if (stepState === 'failed') { bg = 'rgba(239,68,68,0.1)'; tc = '#EF4444'; }
-          return (
-            <div
-              key={step.id}
-              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px]"
-              style={{ backgroundColor: bg, color: tc }}
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: '10px' }}>
-                {stepState === 'failed' ? 'cancel' : step.icon}
-              </span>
-              <span className="hidden md:inline">{step.label}</span>
-            </div>
-          );
-        })}
-      </div>
-      {email.aiSummary && isDone && (
-        <p className="text-[10px] text-white/30 mt-2 line-clamp-1 italic">
-          "{email.aiSummary}"
-        </p>
-      )}
-    </motion.div>
-  );
-}
+/* ═══════════════════════════════════════════════════════════════════════════════ */
+/* MAIN COMPONENT                                                                */
+/* ═══════════════════════════════════════════════════════════════════════════════ */
 
 export default function Supervision() {
   const [emails, setEmails] = useState([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState(null);
-  const [pipelineStates, setPipelineStates] = useState({});
   const [systemHealth, setSystemHealth] = useState({ daemon: false, ai: false, glpi: false, mail: false });
-  const [dashboardStats, setDashboardStats] = useState(null);
   const [accuracyStats, setAccuracyStats] = useState(null);
   const [activityTrend, setActivityTrend] = useState([]);
-  const [aiLatency, setAiLatency] = useState(null);
+  const [dashboardStats, setDashboardStats] = useState(null);
   const [events, setEvents] = useState([]);
   const [bootDone, setBootDone] = useState(false);
   const socket = useSocket();
-  const pageLoadTime = useRef(new Date());
-  const maxEvents = 50;
+  const maxEvents = 30;
 
   const addEvent = useCallback((type, data) => {
-    setEvents(prev => {
-      const next = [{ type, time: Date.now(), ...data }, ...prev];
-      return next.slice(0, maxEvents);
-    });
+    setEvents(prev => [{ type, time: Date.now(), ...data }, ...prev].slice(0, maxEvents));
   }, []);
 
+  /* ── Data Loading ──────────────────────────────────────────────────────────── */
   useEffect(() => {
     const loadAll = async () => {
       try {
-        const [emailRes, dashRes, healthRes, accRes, trendRes, aiRes] = await Promise.allSettled([
+        const results = await Promise.allSettled([
           api.get('/inbox?page=1&limit=100'),
           api.get('/dashboard/stats'),
-          api.get('/advanced-settings/scheduler-health'),
-          api.get('/skills/stats/accuracy?days=30'),
           api.get('/dashboard/activity-trend?days=7'),
+          api.get('/skills/stats/accuracy?days=30'),
+          api.get('/advanced-settings/scheduler-health'),
           api.get('/ai-providers'),
         ]);
-
-        if (emailRes.status === 'fulfilled') setEmails(emailRes.value.data.items || []);
-        if (dashRes.status === 'fulfilled') setDashboardStats(dashRes.value.data);
-        if (healthRes.status === 'fulfilled') {
-          const schedulers = healthRes.value.data || [];
-          setSystemHealth(prev => ({
-            ...prev,
-            daemon: schedulers.some(s => s.name?.includes('inbox') || s.name?.includes('triage')),
-          }));
+        const [inbox, dash, trend, acc, health, ai] = results;
+        if (inbox.status === 'fulfilled') setEmails(inbox.value.data.items || []);
+        if (dash.status === 'fulfilled') setDashboardStats(dash.value.data);
+        if (trend.status === 'fulfilled') setActivityTrend(trend.value.data || []);
+        if (acc.status === 'fulfilled') setAccuracyStats(acc.value.data);
+        if (health.status === 'fulfilled') {
+          const schedulers = health.value.data || [];
+          setSystemHealth(prev => ({ ...prev, daemon: schedulers.length > 0 }));
         }
-        if (accRes.status === 'fulfilled') setAccuracyStats(accRes.value.data);
-        if (trendRes.status === 'fulfilled') setActivityTrend(trendRes.value.data || []);
-        if (aiRes.status === 'fulfilled') {
-          const providers = aiRes.value.data || [];
-          const active = providers.some(p => p.isActive && p.keys?.some(k => k.isActive));
-          setSystemHealth(prev => ({ ...prev, ai: active }));
+        if (ai.status === 'fulfilled') {
+          const providers = ai.value.data || [];
+          setSystemHealth(prev => ({ ...prev, ai: providers.some(p => p.isActive) }));
         }
-
         setSystemHealth(prev => ({ ...prev, mail: true }));
-        setTimeout(() => setBootDone(true), 800);
-      } catch {
-        setError('Erreur chargement initial');
-      } finally {
-        setLoading(false);
-      }
+        setTimeout(() => setBootDone(true), 600);
+      } catch { setError('Erreur chargement'); }
+      finally { setLoading(false); }
     };
     loadAll();
   }, []);
 
+  /* ── Auto-refresh ──────────────────────────────────────────────────────────── */
   useEffect(() => {
     if (!bootDone) return;
-    const interval = setInterval(async () => {
+    const id = setInterval(async () => {
       try {
-        const res = await api.get('/inbox?page=1&limit=100');
-        setEmails(res.data.items || []);
-      } catch { /* retry next interval */ }
+        const [inboxRes, dashRes] = await Promise.allSettled([
+          api.get('/inbox?page=1&limit=100'),
+          api.get('/dashboard/stats'),
+        ]);
+        if (inboxRes.status === 'fulfilled') setEmails(inboxRes.value.data.items || []);
+        if (dashRes.status === 'fulfilled') setDashboardStats(dashRes.value.data);
+      } catch { /* next interval */ }
     }, 8000);
-    return () => clearInterval(interval);
+    return () => clearInterval(id);
   }, [bootDone]);
 
-  useEffect(() => {
-    if (emails.length === 0) return;
-    setPipelineStates(prev => {
-      const next = { ...prev };
-      let updated = false;
-      emails.forEach(email => {
-        if (!next[email.id]) {
-          const isOld = new Date(email.createdAt) < pageLoadTime.current;
-          const final = computePipelineState(email);
-          next[email.id] = isOld ? final : { ...final, isAnimating: true, activeStepIndex: 0, stepStates: PIPELINE_STEPS.map(() => 'pending') };
-          updated = true;
-        } else if (!next[email.id].isAnimating) {
-          const final = computePipelineState(email);
-          if (next[email.id].percent !== final.percent) { next[email.id] = final; updated = true; }
-        }
-      });
-      return updated ? next : prev;
-    });
-  }, [emails]);
-
-  useEffect(() => {
-    const animatingIds = Object.keys(pipelineStates).filter(id => pipelineStates[id].isAnimating);
-    if (animatingIds.length === 0) return;
-    const interval = setInterval(() => {
-      setPipelineStates(prev => {
-        const next = { ...prev };
-        let updated = false;
-        animatingIds.forEach(id => {
-          const s = next[id];
-          if (!s || !s.isAnimating) return;
-          const states = [...s.stepStates];
-          if (s.activeStepIndex > 0 && states[s.activeStepIndex - 1] === 'running') states[s.activeStepIndex - 1] = 'done';
-          const target = s.targetState || computePipelineState(emails.find(e => e.id === id));
-          if (s.activeStepIndex < target.activeStepIndex) {
-            states[s.activeStepIndex] = 'running';
-            next[id] = { ...s, percent: Math.round(((s.activeStepIndex + 1) / PIPELINE_STEPS.length) * 100), activeStepIndex: s.activeStepIndex + 1, stepStates: states };
-            updated = true;
-          } else {
-            next[id] = { ...target, isAnimating: false };
-            updated = true;
-          }
-        });
-        return updated ? next : prev;
-      });
-    }, 400);
-    return () => clearInterval(interval);
-  }, [pipelineStates, emails]);
-
+  /* ── Socket Events ─────────────────────────────────────────────────────────── */
   useEffect(() => {
     if (!socket) return;
-    const onCreated = (t) => { addEvent('ticket_created', t); refreshStats(); };
-    const onAssigned = (d) => { addEvent('ticket_assigned', d); };
-    const onEmail = (e) => { addEvent('email_received', e); };
-    const onEmailUpd = (e) => { addEvent('email_updated', e); };
-    socket.on('ticket_created', onCreated);
-    socket.on('ticket_assigned', onAssigned);
-    socket.on('email_received', onEmail);
-    socket.on('email_updated', onEmailUpd);
-    return () => {
-      socket.off('ticket_created', onCreated);
-      socket.off('ticket_assigned', onAssigned);
-      socket.off('email_received', onEmail);
-      socket.off('email_updated', onEmailUpd);
+    const handlers = {
+      ticket_created: (t) => addEvent('ticket_created', t),
+      ticket_assigned: (d) => addEvent('ticket_assigned', d),
+      email_received: (e) => addEvent('email_received', e),
+      email_updated: (e) => addEvent('email_updated', e),
     };
+    Object.entries(handlers).forEach(([ev, fn]) => socket.on(ev, fn));
+    return () => Object.entries(handlers).forEach(([ev, fn]) => socket.off(ev, fn));
   }, [socket, addEvent]);
 
-  useEffect(() => {
-    if (!bootDone) return;
-    const interval = setInterval(async () => {
-      try {
-        const res = await api.get('/advanced-settings/scheduler-health');
-        const schedulers = res.data || [];
-        setSystemHealth(prev => ({
-          ...prev,
-          daemon: schedulers.some(s => s.name?.includes('inbox') || s.name?.includes('triage')),
-        }));
-      } catch { /* ignore */ }
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [bootDone]);
+  /* ── Computed Stats ────────────────────────────────────────────────────────── */
+  const stats = useMemo(() => {
+    const total = emails.length;
+    const done = emails.filter(e => e.status === 'DONE').length;
+    const pending = emails.filter(e => e.status === 'PENDING' || e.status === 'PROCESSING').length;
+    const errors = emails.filter(e => e.status === 'ERROR').length;
+    const spam = emails.filter(e => e.status === 'SPAM' || e.aiIsSpam).length;
+    const aiProcessed = emails.filter(e => e.aiCategory).length;
+    const accuracy = accuracyStats?.accuracy ?? null;
+    const totalAssign = accuracyStats?.totalAssignments ?? 0;
+    const tickets = dashboardStats?.total ?? 0;
+    const openTickets = dashboardStats?.open ?? 0;
+    return { total, done, pending, errors, spam, aiProcessed, accuracy, totalAssign, tickets, openTickets };
+  }, [emails, accuracyStats, dashboardStats]);
 
-  useEffect(() => {
-    if (!bootDone) return;
-    const interval = setInterval(async () => {
-      try {
-        const res = await api.post('/ai-providers/keys/test-all').catch(() => null);
-        if (res?.data) setAiLatency(res.data);
-      } catch { /* ignore */ }
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [bootDone]);
+  const globalStatus = useMemo(() => {
+    if (stats.errors > 0 || !systemHealth.daemon) return { level: 'critical', label: 'ALERTE', color: '#EF4444' };
+    if (stats.pending > 2 || !systemHealth.ai) return { level: 'warning', label: 'ATTENTION', color: '#F97316' };
+    return { level: 'ok', label: 'OPERATIONNEL', color: '#10B981' };
+  }, [stats, systemHealth]);
 
-  const refreshStats = async () => {
-    try {
-      const [dashRes, accRes] = await Promise.allSettled([
-        api.get('/dashboard/stats'),
-        api.get('/skills/stats/accuracy?days=30'),
-      ]);
-      if (dashRes.status === 'fulfilled') setDashboardStats(dashRes.value.data);
-      if (accRes.status === 'fulfilled') setAccuracyStats(accRes.value.data);
-    } catch { /* ignore */ }
-  };
-
-  function computePipelineState(email) {
-    if (!email) return { percent: 0, activeStepIndex: 0, stepStates: PIPELINE_STEPS.map(() => 'pending') };
-    const isSpam = email.aiIsSpam || email.status === 'SPAM';
-    const isError = email.status === 'ERROR';
-    if (isSpam) {
-      const states = PIPELINE_STEPS.map((_, i) => (i <= 1 ? 'done' : i === 2 ? 'failed' : 'skipped'));
-      return { percent: 33, activeStepIndex: 2, stepStates: states };
-    }
-    if (isError) {
-      const states = PIPELINE_STEPS.map((_, i) => (i < 6 ? 'done' : i === 6 ? 'failed' : 'skipped'));
-      return { percent: 77, activeStepIndex: 6, stepStates: states };
-    }
-    return { percent: 100, activeStepIndex: PIPELINE_STEPS.length, stepStates: PIPELINE_STEPS.map(() => 'done') };
-  }
+  const sparkTrend = useMemo(() => activityTrend.map(d => ({ v: d.tickets || 0 })), [activityTrend]);
+  const sparkResolved = useMemo(() => activityTrend.map(d => ({ v: d.resolved || 0 })), [activityTrend]);
 
   const handleSync = async () => {
     setSyncing(true);
@@ -447,60 +373,49 @@ export default function Supervision() {
       await api.post('/inbox/sync');
       const res = await api.get('/inbox?page=1&limit=100');
       setEmails(res.data.items || []);
-    } catch (err) {
-      setError(err.response?.data?.error || 'Erreur sync');
-    } finally {
-      setSyncing(false);
-    }
+    } catch (err) { setError(err.response?.data?.error || 'Erreur sync'); }
+    finally { setSyncing(false); }
   };
 
-  const kpiData = useMemo(() => {
-    const done = emails.filter(e => e.status === 'DONE').length;
-    const pending = emails.filter(e => e.status === 'PENDING' || e.status === 'PROCESSING').length;
-    const errors = emails.filter(e => e.status === 'ERROR').length;
-    const drafts = emails.filter(e => e.aiCategory).length;
-    return [
-      { label: 'Emails', value: emails.length, icon: 'inbox', color: '#3B82F6', sparkData: activityTrend.map(d => ({ v: d.tickets || 0 })) },
-      { label: 'Traités', value: done, icon: 'check_circle', color: '#10B981', sparkData: activityTrend.map(d => ({ v: d.resolved || 0 })) },
-      { label: 'En attente', value: pending, icon: 'hourglass_empty', color: '#F97316' },
-      { label: 'Erreurs', value: errors, icon: 'error', color: '#EF4444' },
-      { label: 'Précision', value: accuracyStats?.accuracy != null ? `${accuracyStats.accuracy}%` : '—', icon: 'psychology', color: '#8B5CF6' },
-      { label: 'Assignations', value: accuracyStats?.totalAssignments || 0, icon: 'group', color: '#06B6D4' },
-    ];
-  }, [emails, accuracyStats, activityTrend]);
-
+  /* ── Loading Screen ────────────────────────────────────────────────────────── */
   if (loading) {
     return (
       <div className="noc-container">
-        <div className="flex items-center justify-center h-full">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="text-center"
-          >
-            <div className="noc-radar-container mb-6">
-              <svg className="noc-radar" viewBox="0 0 200 200">
+        <div className="flex items-center justify-center h-[80vh]">
+          <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} className="text-center">
+            <div className="relative w-32 h-32 mx-auto mb-6">
+              <svg viewBox="0 0 120 120" className="w-full h-full">
                 <defs>
-                  <radialGradient id="nocRadarGlow" cx="50%" cy="50%" r="50%">
-                    <stop offset="0%" stopColor="#3B82F6" stopOpacity="0.4" />
+                  <radialGradient id="loadGlow" cx="50%" cy="50%" r="50%">
+                    <stop offset="0%" stopColor="#3B82F6" stopOpacity="0.3" />
                     <stop offset="100%" stopColor="#3B82F6" stopOpacity="0" />
                   </radialGradient>
                 </defs>
-                <circle cx="100" cy="100" r="90" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="0.5" />
-                <circle cx="100" cy="100" r="65" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="0.5" strokeDasharray="4,4" />
-                <circle cx="100" cy="100" r="40" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="0.5" />
-                <circle cx="100" cy="100" r="15" fill="url(#nocRadarGlow)" />
-                <circle cx="100" cy="100" r="4" fill="#3B82F6" />
+                <circle cx="60" cy="60" r="55" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="0.5" />
+                <circle cx="60" cy="60" r="40" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="0.5" strokeDasharray="3,3" />
+                <circle cx="60" cy="60" r="12" fill="url(#loadGlow)" />
+                <motion.circle
+                  cx="60" cy="60" r="4"
+                  fill="#3B82F6"
+                  animate={{ scale: [1, 1.4, 1] }}
+                  transition={{ repeat: Infinity, duration: 1.5 }}
+                />
                 <motion.g
                   animate={{ rotate: 360 }}
-                  transition={{ repeat: Infinity, duration: 4, ease: 'linear' }}
-                  style={{ transformOrigin: '100px 100px' }}
+                  transition={{ repeat: Infinity, duration: 3, ease: 'linear' }}
+                  style={{ transformOrigin: '60px 60px' }}
                 >
-                  <line x1="100" y1="100" x2="100" y2="10" stroke="#3B82F6" strokeWidth="1.5" strokeLinecap="round" opacity="0.6" />
+                  <line x1="60" y1="60" x2="60" y2="5" stroke="#3B82F6" strokeWidth="1" strokeLinecap="round" opacity="0.5" />
                 </motion.g>
               </svg>
             </div>
-            <p className="text-white/60 text-sm font-mono">Initialisation système...</p>
+            <motion.p
+              animate={{ opacity: [0.4, 0.8, 0.4] }}
+              transition={{ repeat: Infinity, duration: 2 }}
+              className="text-white/40 text-xs font-mono"
+            >
+              Initialisation système...
+            </motion.p>
           </motion.div>
         </div>
       </div>
@@ -509,36 +424,37 @@ export default function Supervision() {
 
   return (
     <div className="noc-container">
-      {/* ─── HEADER ─── */}
+      {/* ═══ HEADER ═══ */}
       <motion.header
-        initial={{ opacity: 0, y: -10 }}
+        initial={{ opacity: 0, y: -16 }}
         animate={{ opacity: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 150, damping: 20 }}
         className="noc-header"
       >
         <div className="flex items-center gap-3">
-          <span className="material-symbols-outlined text-[22px] text-blue-400">monitor_heart</span>
+          <motion.div
+            animate={{ rotate: [0, 5, -5, 0] }}
+            transition={{ repeat: Infinity, duration: 4, ease: 'easeInOut' }}
+          >
+            <span className="material-symbols-outlined text-[22px] text-blue-400">monitor_heart</span>
+          </motion.div>
           <div>
             <h1 className="text-white font-bold text-lg leading-tight">Supervision IA</h1>
-            <p className="text-[11px] text-white/30">Command Center — Triage Automatique</p>
+            <p className="text-[11px] text-white/25">Command Center — Triage Automatique</p>
           </div>
         </div>
         <div className="flex items-center gap-4">
           <LiveClock />
-          <div className="noc-status-dot-group">
-            <span className={`noc-status-dot ${systemHealth.daemon ? 'active' : ''}`} />
-            <span className={`noc-status-dot ${systemHealth.ai ? 'active' : ''}`} />
-            <span className={`noc-status-dot ${systemHealth.glpi ? 'active' : ''}`} />
-          </div>
           <motion.button
             onClick={handleSync}
             disabled={syncing}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
+            whileHover={{ scale: 1.08 }}
+            whileTap={{ scale: 0.92 }}
             className="noc-sync-btn"
           >
             <motion.span
               animate={syncing ? { rotate: 360 } : {}}
-              transition={syncing ? { repeat: Infinity, duration: 1, ease: 'linear' } : {}}
+              transition={syncing ? { repeat: Infinity, duration: 0.8, ease: 'linear' } : {}}
               className="material-symbols-outlined text-[16px]"
             >
               sync
@@ -547,35 +463,42 @@ export default function Supervision() {
         </div>
       </motion.header>
 
-      {/* ─── HEALTH STATUS BAR ─── */}
+      {/* ═══ STATUS BAR ═══ */}
       <motion.div
-        initial={{ opacity: 0, y: -5 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1 }}
-        className="noc-health-bar"
+        initial={{ opacity: 0, scaleX: 0.95 }}
+        animate={{ opacity: 1, scaleX: 1 }}
+        transition={{ delay: 0.1, type: 'spring', stiffness: 150 }}
+        className="noc-status-bar"
+        style={{ borderLeft: `3px solid ${globalStatus.color}` }}
       >
-        <StatusIndicator ok={systemHealth.daemon} label="Daemon" detail="triage" />
-        <div className="noc-health-sep" />
-        <StatusIndicator ok={systemHealth.ai} label="Gemini" detail={aiLatency?.latencyMs ? `${aiLatency.latencyMs}ms` : ''} />
-        <div className="noc-health-sep" />
-        <StatusIndicator ok={systemHealth.mail} label="Boîtes mail" />
-        <div className="noc-health-sep" />
-        <StatusIndicator ok={systemHealth.glpi} label="GLPI" detail="sync" />
+        <div className="flex items-center gap-3">
+          <PulseRing active={globalStatus.level === 'ok'} color={globalStatus.color} />
+          <span className="text-sm font-bold" style={{ color: globalStatus.color }}>{globalStatus.label}</span>
+        </div>
+        <div className="noc-health-chips">
+          <StatusChip label="Daemon" ok={systemHealth.daemon} />
+          <StatusChip label="Gemini" ok={systemHealth.ai} />
+          <StatusChip label="Boîtes mail" ok={systemHealth.mail} />
+          <StatusChip label="GLPI" ok={systemHealth.glpi} />
+        </div>
       </motion.div>
 
-      {/* ─── KPI ROW ─── */}
+      {/* ═══ KPI GRID ═══ */}
       <motion.div
         initial="hidden"
         animate="visible"
-        variants={{ visible: { transition: { staggerChildren: 0.05 } } }}
+        variants={{ visible: { transition: { staggerChildren: 0.06 } } }}
         className="noc-kpi-grid"
       >
-        {kpiData.map(kpi => (
-          <KpiCard key={kpi.label} {...kpi} />
-        ))}
+        <KpiCard label="Tickets" value={stats.tickets} prevValue={null} icon="confirmation_number" color="#3B82F6" sparkData={sparkTrend} />
+        <KpiCard label="Ouverts" value={stats.openTickets} prevValue={null} icon="radio_button_checked" color="#F97316" />
+        <KpiCard label="Emails traités" value={stats.done} prevValue={null} icon="check_circle" color="#10B981" sparkData={sparkResolved} />
+        <KpiCard label="En attente" value={stats.pending} prevValue={null} icon="hourglass_empty" color="#EAB308" />
+        <KpiCard label="Précision IA" value={stats.accuracy != null ? `${stats.accuracy}%` : '—'} prevValue={null} icon="psychology" color="#8B5CF6" suffix={stats.totalAssign > 0 ? `(${stats.totalAssign} assig.)` : ''} />
+        <KpiCard label="Erreurs" value={stats.errors} prevValue={null} icon="error" color="#EF4444" />
       </motion.div>
 
-      {/* ─── ERROR ─── */}
+      {/* ═══ ERROR ═══ */}
       <AnimatePresence>
         {error && (
           <motion.div
@@ -586,139 +509,123 @@ export default function Supervision() {
           >
             <span className="material-symbols-outlined text-[14px]">error</span>
             {error}
+            <button onClick={() => setError(null)} className="ml-auto text-white/40 hover:text-white/70">
+              <span className="material-symbols-outlined text-[14px]">close</span>
+            </button>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ─── MAIN GRID: EVENTS + PIPELINE ─── */}
+      {/* ═══ MAIN: EVENTS + TRENDS ═══ */}
       <div className="noc-main-grid">
-        {/* EVENT FEED */}
+        {/* LIVE EVENT FEED */}
         <motion.div
-          initial={{ opacity: 0, x: -10 }}
+          initial={{ opacity: 0, x: -16 }}
           animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: 0.2 }}
+          transition={{ delay: 0.2, type: 'spring', stiffness: 120 }}
           className="noc-events-panel"
         >
           <div className="noc-panel-header">
-            <span className="material-symbols-outlined text-[14px] text-blue-400">bolt</span>
-            <span className="text-[11px] font-bold uppercase tracking-widest text-white/40">Flux événements</span>
-            <span className="text-[10px] text-white/20 ml-auto font-mono">{events.length}</span>
-          </div>
-          <div className="noc-events-list">
-            {events.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full py-8">
-                <motion.span
-                  animate={{ opacity: [0.3, 0.6, 0.3] }}
-                  transition={{ repeat: Infinity, duration: 3 }}
-                  className="material-symbols-outlined text-[32px] text-white/10 mb-2"
-                >
-                  broadcast_on_home
-                </motion.span>
-                <p className="text-[11px] text-white/20 text-center">En écoute des événements...</p>
-                <p className="text-[10px] text-white/10 text-center mt-1">Les events Socket.io apparaîtront ici</p>
-              </div>
-            ) : (
-              events.map((event, i) => (
-                <EventFeedItem key={`${event.time}-${i}`} event={event} index={i} />
-              ))
-            )}
-          </div>
-        </motion.div>
-
-        {/* PIPELINE */}
-        <motion.div
-          initial={{ opacity: 0, x: 10 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: 0.3 }}
-          className="noc-pipeline-panel"
-        >
-          <div className="noc-panel-header">
-            <span className="material-symbols-outlined text-[14px] text-green-400">route</span>
-            <span className="text-[11px] font-bold uppercase tracking-widest text-white/40">Pipeline emails</span>
-            <span className="text-[10px] text-white/20 ml-auto font-mono">{emails.length}</span>
-          </div>
-          <div className="noc-pipeline-list">
-            {emails.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full py-8">
-                <motion.div
-                  animate={{ y: [0, -6, 0] }}
-                  transition={{ repeat: Infinity, duration: 3, ease: 'easeInOut' }}
-                >
-                  <span className="material-symbols-outlined text-[40px] text-white/10">mail</span>
-                </motion.div>
-                <p className="text-[11px] text-white/20 text-center mt-3">Aucun email en pipeline</p>
-                <p className="text-[10px] text-white/10 text-center mt-1">Les emails traités apparaîtront ici</p>
-              </div>
-            ) : (
-              emails.map(email => (
-                <PipelineMini key={email.id} email={email} pipelineState={pipelineStates} />
-              ))
-            )}
-          </div>
-        </motion.div>
-      </div>
-
-      {/* ─── BOTTOM: ACCURACY CHART ─── */}
-      {accuracyStats && accuracyStats.totalAssignments > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4 }}
-          className="noc-accuracy-panel"
-        >
-          <div className="noc-panel-header">
-            <span className="material-symbols-outlined text-[14px] text-purple-400">psychology</span>
-            <span className="text-[11px] font-bold uppercase tracking-widest text-white/40">Précision IA — 30 jours</span>
-          </div>
-          <div className="noc-accuracy-content">
-            <div className="noc-accuracy-stats">
-              <div className="noc-accuracy-stat">
-                <span className="text-[10px] text-white/30 uppercase tracking-wider">Assignations</span>
-                <span className="text-xl font-bold text-white">{accuracyStats.totalAssignments}</span>
-              </div>
-              <div className="noc-accuracy-stat">
-                <span className="text-[10px] text-white/30 uppercase tracking-wider">Auto IA</span>
-                <span className="text-xl font-bold text-blue-400">{accuracyStats.autoAssigned}</span>
-              </div>
-              <div className="noc-accuracy-stat">
-                <span className="text-[10px] text-white/30 uppercase tracking-wider">Corrigées</span>
-                <span className="text-xl font-bold text-amber-400">{accuracyStats.corrected}</span>
-              </div>
-              <div className="noc-accuracy-stat">
-                <span className="text-[10px] text-white/30 uppercase tracking-wider">Précision</span>
-                <span className="text-xl font-bold" style={{
-                  color: accuracyStats.accuracy >= 80 ? '#10B981' : accuracyStats.accuracy >= 50 ? '#F97316' : '#EF4444'
-                }}>
-                  {accuracyStats.accuracy != null ? `${accuracyStats.accuracy}%` : '—'}
-                </span>
-              </div>
+            <div className="flex items-center gap-2">
+              <motion.span
+                animate={{ opacity: [0.4, 1, 0.4] }}
+                transition={{ repeat: Infinity, duration: 2 }}
+                className="material-symbols-outlined text-[14px] text-blue-400"
+              >
+                bolt
+              </motion.span>
+              <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-white/35">Flux temps réel</span>
             </div>
-            {accuracyStats.dailyStats?.length > 0 && (
-              <div className="noc-accuracy-chart">
-                <ResponsiveContainer width="100%" height={100}>
-                  <AreaChart data={accuracyStats.dailyStats.slice(-14)} margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
+            <motion.span
+              key={events.length}
+              initial={{ scale: 1.3 }}
+              animate={{ scale: 1 }}
+              className="text-[10px] font-mono text-white/20"
+            >
+              {events.length} events
+            </motion.span>
+          </div>
+          <div className="noc-events-scroll">
+            <AnimatePresence initial={false}>
+              {events.length === 0 ? (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="flex flex-col items-center justify-center py-12"
+                >
+                  <motion.div
+                    animate={{ y: [0, -8, 0], opacity: [0.2, 0.5, 0.2] }}
+                    transition={{ repeat: Infinity, duration: 3, ease: 'easeInOut' }}
+                  >
+                    <span className="material-symbols-outlined text-[40px] text-white/10">broadcast_on_home</span>
+                  </motion.div>
+                  <p className="text-[11px] text-white/15 mt-3">En écoute des événements...</p>
+                </motion.div>
+              ) : (
+                events.map((ev, i) => <EventItem key={`${ev.time}-${i}`} event={ev} index={i} />)
+              )}
+            </AnimatePresence>
+          </div>
+        </motion.div>
+
+        {/* TRENDS PANEL */}
+        <motion.div
+          initial={{ opacity: 0, x: 16 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 0.3, type: 'spring', stiffness: 120 }}
+          className="noc-trends-panel"
+        >
+          <div className="noc-panel-header">
+            <span className="material-symbols-outlined text-[14px] text-emerald-400">show_chart</span>
+            <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-white/35">Tendances 7 jours</span>
+          </div>
+          <div className="noc-trends-content">
+            <TrendBar data={activityTrend} label="Tickets créés vs résolus" color="#3B82F6" />
+            {/* AI Accuracy mini chart */}
+            {accuracyStats?.dailyStats?.length > 0 && (
+              <div className="noc-trend-block">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-white/30 mb-2">Précision IA — 14 jours</p>
+                <ResponsiveContainer width="100%" height={90}>
+                  <AreaChart data={accuracyStats.dailyStats.slice(-14)} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
                     <defs>
-                      <linearGradient id="accGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#8B5CF6" stopOpacity={0.3} />
+                      <linearGradient id="accGrad2" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#8B5CF6" stopOpacity={0.2} />
                         <stop offset="100%" stopColor="#8B5CF6" stopOpacity={0} />
                       </linearGradient>
                     </defs>
-                    <Area type="monotone" dataKey="total" stroke="#8B5CF6" strokeWidth={1.5} fill="url(#accGrad)" dot={false} />
+                    <XAxis
+                      dataKey="date"
+                      tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.2)' }}
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(d) => d?.slice(5)}
+                    />
+                    <Area type="monotone" dataKey="total" stroke="#8B5CF6" strokeWidth={1.5} fill="url(#accGrad2)" dot={false} animationDuration={800} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
             )}
           </div>
         </motion.div>
-      )}
-
-      {/* ─── FOOTER ─── */}
-      <div className="noc-footer">
-        <span className="material-symbols-outlined text-[12px] text-blue-400/50">terminal</span>
-        <span className="font-mono text-[11px] text-white/15">
-          supervision:~$ <motion.span animate={{ opacity: [1, 0] }} transition={{ repeat: Infinity, duration: 1 }} className="inline-block w-1.5 h-3 bg-blue-400/40 align-middle" />
-        </span>
       </div>
+
+      {/* ═══ FOOTER ═══ */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.5 }}
+        className="noc-footer"
+      >
+        <span className="material-symbols-outlined text-[12px] text-blue-400/30">terminal</span>
+        <span className="font-mono text-[11px] text-white/12">
+          supervision:~${' '}
+          <motion.span
+            animate={{ opacity: [1, 0] }}
+            transition={{ repeat: Infinity, duration: 0.8 }}
+            className="inline-block w-1.5 h-3 bg-blue-400/30 align-middle"
+          />
+        </span>
+      </motion.div>
     </div>
   );
 }
