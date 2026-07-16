@@ -164,6 +164,7 @@ async function syncGlpiTickets() {
       }
 
       await syncTicketAttachments(config, sessionToken, t.id, ticketId);
+      await syncGlpiFollowups(config, sessionToken, t.id, ticketId);
       await maybeAutoApproveValidation(config, sessionToken, t.id);
       await maybeAutoApproveSolution(config, sessionToken, t);
     }
@@ -203,6 +204,7 @@ async function fullReimportFromGlpi({ dateFrom, dateTo } = {}) {
 
       const created = await prisma.ticket.create({ data: { ...data, glpiTicketId: t.id } });
       await syncTicketAttachments(config, sessionToken, t.id, created.id);
+      await syncGlpiFollowups(config, sessionToken, t.id, created.id);
       imported += 1;
     }
 
@@ -301,4 +303,37 @@ async function syncTicketAttachments(config, sessionToken, glpiTicketId, ticketI
   }
 }
 
-module.exports = { syncGlpiTickets, fullReimportFromGlpi, getGlpiConfig, getActiveGlpiConfig, glpiInitSession, glpiKillSession };
+async function syncGlpiFollowups(config, sessionToken, glpiTicketId, ticketId) {
+  const res = await fetch(`${config.baseUrl}/Ticket/${glpiTicketId}/ITILFollowup`, {
+    headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
+  });
+  if (!res.ok) return;
+  const followups = await res.json();
+  if (!Array.isArray(followups)) return;
+
+  for (const fu of followups) {
+    if (!fu.id || !fu.content) continue;
+    const content = fu.content.replace(/<[^>]*>/g, '').trim();
+    if (!content) continue;
+
+    try {
+      await prisma.followup.upsert({
+        where: { glpiFollowupId: fu.id },
+        update: { content, createdAt: fu.date_creation ? new Date(fu.date_creation) : undefined },
+        create: {
+          ticketId,
+          glpiFollowupId: fu.id,
+          source: 'glpi',
+          content,
+          createdAt: fu.date_creation ? new Date(fu.date_creation) : new Date(),
+        },
+      });
+    } catch (err) {
+      if (err.code !== 'P2002') {
+        console.error(`[glpiSync] Échec sync followup GLPI ${fu.id}:`, err.message);
+      }
+    }
+  }
+}
+
+module.exports = { syncGlpiTickets, fullReimportFromGlpi, syncGlpiFollowups, getGlpiConfig, getActiveGlpiConfig, glpiInitSession, glpiKillSession };

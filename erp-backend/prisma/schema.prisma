@@ -257,13 +257,15 @@ model TicketAttachment {
 }
 
 model Followup {
-  id        Int      @id @default(autoincrement())
-  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  ticketId  Int
-  author    User?    @relation(fields: [authorId], references: [id])
-  authorId  Int?
-  content   String
-  createdAt DateTime @default(now())
+  id              Int      @id @default(autoincrement())
+  ticket          Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ticketId        Int
+  author          User?    @relation(fields: [authorId], references: [id])
+  authorId        Int?
+  content         String
+  source          String   @default("erp")
+  glpiFollowupId  Int?     @unique
+  createdAt       DateTime @default(now())
 }
 
 model ApiConfig {

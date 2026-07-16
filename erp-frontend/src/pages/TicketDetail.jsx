@@ -360,7 +360,14 @@ export default function TicketDetail() {
                       </div>
                       <div className="flex-1">
                         <div className="flex items-center justify-between mb-1">
-                          <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">{item.data.author?.fullName || 'Inconnu'}</div>
+                          <div className="flex items-center gap-2">
+                            <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">
+                              {item.data.source === 'glpi' ? 'GLPI' : (item.data.author?.fullName || 'Inconnu')}
+                            </div>
+                            {item.data.source === 'glpi' && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-600 font-medium border border-amber-500/20">GLPI</span>
+                            )}
+                          </div>
                           <time className="font-mono-sm text-mono-sm text-on-surface-variant bg-surface-container-lowest border border-outline-variant/30 px-2 py-0.5 rounded-full">
                             {new Date(item.data.createdAt).toLocaleString('fr-FR')}
                           </time>
