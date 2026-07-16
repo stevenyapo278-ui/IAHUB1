@@ -125,6 +125,17 @@ export default function Tickets() {
   }
 
   const [confirmDelete, setConfirmDelete] = useState(null);
+
+  const ticketStats = (() => {
+    const total = tickets.length;
+    const open = tickets.filter(t => t.status === 'NEW' || t.status === 'OPEN').length;
+    const pending = tickets.filter(t => t.status === 'PENDING').length;
+    const resolved = tickets.filter(t => t.status === 'SOLVED' || t.status === 'CLOSED').length;
+    const p1 = tickets.filter(t => t.priority === 'P1').length;
+    const p2 = tickets.filter(t => t.priority === 'P2').length;
+    const ai = tickets.filter(t => t.aiProcessed).length;
+    return { total, open, pending, resolved, p1, p2, ai };
+  })();
   function askDeleteOne(id) { setConfirmDelete({ mode: 'one', id }); }
   function askDeleteSelected() { if (selectedIds.length > 0) setConfirmDelete({ mode: 'bulk' }); }
 
@@ -472,6 +483,38 @@ export default function Tickets() {
         </AnimatePresence>,
         document.body
       )}
+
+      {/* ── Statistiques ─────────────────────────────────────────────────────── */}
+      <motion.div variants={itemVariants} className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+        {[
+          { label: 'Total', value: ticketStats.total, icon: 'confirmation_number', color: '#3B82F6' },
+          { label: 'Ouverts', value: ticketStats.open, icon: 'radio_button_checked', color: '#F97316' },
+          { label: 'En attente', value: ticketStats.pending, icon: 'hourglass_empty', color: '#EAB308' },
+          { label: 'Résolus', value: ticketStats.resolved, icon: 'check_circle', color: '#10B981' },
+          { label: 'P1', value: ticketStats.p1, icon: 'emergency', color: '#EF4444' },
+          { label: 'P2', value: ticketStats.p2, icon: 'report', color: '#F97316' },
+          { label: 'IA', value: ticketStats.ai, icon: 'smart_toy', color: '#8B5CF6' },
+        ].map(s => (
+          <motion.div
+            key={s.label}
+            whileHover={{ y: -1 }}
+            className="bento-card px-4 py-3 flex items-center gap-3 min-w-0"
+          >
+            <span className="material-symbols-outlined text-[20px] shrink-0" style={{ color: s.color }}>{s.icon}</span>
+            <div className="min-w-0">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant truncate">{s.label}</p>
+              <motion.p
+                key={s.value}
+                initial={{ scale: 1.15, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                className="text-lg font-bold tabular-nums text-on-surface leading-tight"
+              >
+                {s.value}
+              </motion.p>
+            </div>
+          </motion.div>
+        ))}
+      </motion.div>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       {/* BARRE DE FILTRES BENTO */}
