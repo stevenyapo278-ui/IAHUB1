@@ -464,7 +464,7 @@ export default function Supervision() {
       { label: 'Traités', value: done, icon: 'check_circle', color: '#10B981', sparkData: activityTrend.map(d => ({ v: d.resolved || 0 })) },
       { label: 'En attente', value: pending, icon: 'hourglass_empty', color: '#F97316' },
       { label: 'Erreurs', value: errors, icon: 'error', color: '#EF4444' },
-      { label: 'Précision', value: accuracyStats?.accuracy != null ? `${accuracyStats.accuracy}%` : '—', icon: 'psychology', color: '#8B5CF6', trend: null },
+      { label: 'Précision', value: accuracyStats?.accuracy != null ? `${accuracyStats.accuracy}%` : '—', icon: 'psychology', color: '#8B5CF6' },
       { label: 'Assignations', value: accuracyStats?.totalAssignments || 0, icon: 'group', color: '#06B6D4' },
     ];
   }, [emails, accuracyStats, activityTrend]);
