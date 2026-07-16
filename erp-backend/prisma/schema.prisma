@@ -156,6 +156,23 @@ model TicketCategory {
   updatedAt       DateTime @updatedAt
 }
 
+// Lieux synchronisés depuis les Location de GLPI ("Lieu" / "Locations" dans le formulaire
+// de ticket). Le glpiLocationId est stocké sur le Ticket pour conserver la référence exacte.
+model GlpiLocation {
+  id              Int      @id @default(autoincrement())
+  name            String   // nom simple ("Bâtiment A")
+  completename    String?  // nom complet hiérarchique ("Siège > Bâtiment A > Salle 201")
+  glpiLocationId  Int      @unique
+  address         String?
+  postcode        String?
+  town            String?
+  country         String?
+  building        String?
+  room            String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
 model Ticket {
   id            Int            @id @default(autoincrement())
   title         String
@@ -164,6 +181,8 @@ model Ticket {
   priority      TicketPriority @default(P3)
   category      String?
   glpiTicketId  Int?     @unique // identifiant du ticket correspondant dans GLPI, une fois synchronisé
+  glpiLocationId Int?     // identifiant du "Lieu" GLPI (locations_id), résolu en nom via la table GlpiLocation
+  glpiLocationName String? // nom complet du lieu GLPI résolu ("Siège > Bâtiment A > Salle 201")
   aiProcessed   Boolean  @default(false) // vrai si le ticket a été créé/traité par l'agent IA de triage (workflow n8n)
 
   sourceEmail   String? // adresse email de l'expéditeur du mail ayant déclenché la création du ticket (via n8n)

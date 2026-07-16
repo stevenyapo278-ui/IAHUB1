@@ -4,6 +4,7 @@ const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { syncGlpiTickets, fullReimportFromGlpi, getActiveGlpiConfig, glpiInitSession, glpiKillSession } = require('../utils/glpiSync');
+const { syncLocationsFromGlpi } = require('../services/glpiTicketCreator');
 
 const router = express.Router();
 router.use(authenticate);
@@ -68,6 +69,21 @@ router.post(
     }
   }
 );
+
+// Synchronisation des "Lieux" depuis GLPI — stocke les locations dans la table GlpiLocation
+// pour résoudre les locations_id des tickets en noms de lieux complets. Appelée automatiquement
+// avant les syncs de tickets, mais peut être déclenchée manuellement depuis les réglages.
+router.post('/sync-locations', requirePermission('glpi.manage', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+  try {
+    const result = await syncLocationsFromGlpi();
+    if (result === null) {
+      return res.status(422).json({ error: 'GLPI non configuré' });
+    }
+    return res.json({ synced: result });
+  } catch (err) {
+    return res.status(502).json({ error: err.message || 'Erreur de synchronisation des lieux GLPI' });
+  }
+});
 
 // Proxy un document GLPI (image, PDF, etc.) via l'API REST — utilisé pour les URLs d'images
 // embarquées dans les suivis (ITILFollowup) qui contiennent des références à des documents

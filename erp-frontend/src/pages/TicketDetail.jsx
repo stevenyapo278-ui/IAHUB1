@@ -53,11 +53,9 @@ function sanitizeFollowupHtml(html) {
     .replace(/src\s*=\s*'\s*javascript:/gi, "src='#");
 }
 
-// Détecte si un texte contient du HTML (tags) pour choisir le rendu approprié
-function containsHtmlTags(text) {
-  if (!text) return false;
-  return /<[a-z][\s\S]*>/i.test(text) && !/^[^<]*$/.test(text);
-}
+// Note : containsHtmlTags a été supprimée car les suivis GLPI utilisent des entités HTML
+// (&#60; &#62;) au lieu de vrais tags. On utilise systématiquement dangerouslySetInnerHTML
+// avec sanitisation — sans risque puisque la sanitisation est faite côté serveur ET client.
 
 // Les pièces jointes exigent un token JWT (Authorization header), qu'une balise <img src> ne peut pas envoyer :
 // on les récupère via axios puis on les affiche via une URL blob.
@@ -393,14 +391,10 @@ export default function TicketDetail() {
                             {new Date(item.data.createdAt).toLocaleString('fr-FR')}
                           </time>
                         </div>
-                        {containsHtmlTags(item.data.content) ? (
-                          <div
-                            className="leading-relaxed text-body-sm text-on-surface-variant [&_img]:max-w-full [&_img]:rounded-lg [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-2 [&_a]:text-primary [&_a]:underline [&_a]:hover:text-primary/80 [&_p]:mb-2 [&_p]:last:mb-0 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:mb-1 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-outline-variant/40 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-outline-variant/40 [&_th]:px-2 [&_th]:py-1 [&_th]:bg-surface-container-high/40 [&_pre]:bg-surface-container-high [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:overflow-x-auto [&_code]:bg-surface-container-high [&_code]:rounded [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-sm"
-                            dangerouslySetInnerHTML={{ __html: sanitizeFollowupHtml(item.data.content) }}
-                          />
-                        ) : (
-                          <div className="font-body-sm text-body-sm text-on-surface-variant whitespace-pre-wrap leading-relaxed">{item.data.content}</div>
-                        )}
+                        <div
+                          className="leading-relaxed text-body-sm text-on-surface-variant [&_img]:max-w-full [&_img]:rounded-lg [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-2 [&_a]:text-primary [&_a]:underline [&_a]:hover:text-primary/80 [&_p]:mb-2 [&_p]:last:mb-0 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:mb-1 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-outline-variant/40 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-outline-variant/40 [&_th]:px-2 [&_th]:py-1 [&_th]:bg-surface-container-high/40 [&_pre]:bg-surface-container-high [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:overflow-x-auto [&_code]:bg-surface-container-high [&_code]:rounded [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-sm"
+                          dangerouslySetInnerHTML={{ __html: sanitizeFollowupHtml(item.data.content) }}
+                        />
                       </div>
                     </div>
                   ) : (
@@ -721,6 +715,18 @@ export default function TicketDetail() {
                   <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Observateur(s)</label>
                   <div className="w-full bg-surface-container-low/60 border border-outline-variant/60 rounded-xl py-2.5 px-3.5 font-body-sm text-body-sm text-on-surface-variant">
                     {ticket.observers.map((o) => o.fullName).join(', ')}
+                  </div>
+                </div>
+              )}
+              {ticket.glpiLocationName && (
+                <div>
+                  <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">
+                    <span className="material-symbols-outlined text-[14px] align-middle mr-1">location_on</span>
+                    Lieu
+                  </label>
+                  <div className="w-full bg-surface-container-low/60 border border-outline-variant/60 rounded-xl py-2.5 px-3.5 font-body-sm text-body-sm text-on-surface flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[16px] text-primary">location_on</span>
+                    {ticket.glpiLocationName}
                   </div>
                 </div>
               )}

@@ -370,4 +370,53 @@ async function syncCategoriesFromGlpi() {
   });
 }
 
-module.exports = { createTicketFromEmail, createGlpiTicket, updateGlpiTicket, deleteGlpiTicket, uploadGlpiAttachment, syncTeamsFromGlpi, syncCategoriesFromGlpi, addGlpiFollowup };
+// Synchronise les "Lieux" (Location) depuis GLPI vers la table GlpiLocation de l'ERP,
+// exactement comme syncCategoriesFromGlpi pour les catégories. Les lieux sont ensuite
+// accessibles via glpiLocationId sur le Ticket, résolus en nom complet au moment de la synchro.
+// Retourne le nombre de lieux synchronisés, ou null si GLPI n'est pas configuré.
+async function syncLocationsFromGlpi() {
+  const config = await getActiveGlpiConfig();
+  if (!config) return null;
+
+  return withGlpiSession(config, async (sessionToken) => {
+    const headers = { 'App-Token': config.appToken, 'Session-Token': sessionToken };
+
+    const res = await fetch(`${config.baseUrl}/Location?range=0-500`, { headers });
+    if (!res.ok) throw new Error(`GLPI récupération des lieux échouée (${res.status})`);
+    const locations = await res.json();
+
+    let synced = 0;
+    for (const loc of locations) {
+      if (!loc.name) continue;
+
+      await prisma.glpiLocation.upsert({
+        where: { glpiLocationId: loc.id },
+        update: {
+          name: loc.name,
+          completename: loc.completename || loc.name,
+          address: loc.address || null,
+          postcode: loc.postcode || null,
+          town: loc.town || null,
+          country: loc.country || null,
+          building: loc.building || null,
+          room: loc.room || null,
+        },
+        create: {
+          glpiLocationId: loc.id,
+          name: loc.name,
+          completename: loc.completename || loc.name,
+          address: loc.address || null,
+          postcode: loc.postcode || null,
+          town: loc.town || null,
+          country: loc.country || null,
+          building: loc.building || null,
+          room: loc.room || null,
+        },
+      });
+      synced++;
+    }
+    return synced;
+  });
+}
+
+module.exports = { createTicketFromEmail, createGlpiTicket, updateGlpiTicket, deleteGlpiTicket, uploadGlpiAttachment, syncTeamsFromGlpi, syncCategoriesFromGlpi, syncLocationsFromGlpi, addGlpiFollowup };

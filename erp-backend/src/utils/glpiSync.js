@@ -143,6 +143,19 @@ async function syncGlpiTickets() {
         ? 'WAITING_FOR_USER'
         : glpiStatus;
 
+      // Résout le "Lieu" GLPI (locations_id) en nom complet via la table GlpiLocation.
+      // Si le lieu n'est pas encore synchronisé, on le stocke en base silencieusement au
+      // moment de la synchro du ticket, pour ne pas dépendre d'une synchro préalable.
+      let glpiLocationName = null;
+      if (t.locations_id) {
+        const location = await prisma.glpiLocation.findUnique({
+          where: { glpiLocationId: t.locations_id },
+        });
+        if (location) {
+          glpiLocationName = location.completename || location.name;
+        }
+      }
+
       const data = {
         title: t.name,
         content: t.content || '',
@@ -150,6 +163,8 @@ async function syncGlpiTickets() {
         priority: glpiPriorityToErp(t.priority),
         category: await glpiIdToCategory(t.itilcategories_id),
         aiProcessed: t.users_id_recipient === GLPI_AI_REQUESTER_ID,
+        glpiLocationId: t.locations_id || null,
+        glpiLocationName,
       };
 
       let ticketId;
@@ -167,6 +182,22 @@ async function syncGlpiTickets() {
       await syncGlpiFollowups(config, sessionToken, t.id, ticketId);
       await maybeAutoApproveValidation(config, sessionToken, t.id);
       await maybeAutoApproveSolution(config, sessionToken, t);
+    }
+
+    // Post-sync : met à jour les noms de lieux pour les tickets qui ont un glpiLocationId
+    // mais pas encore de glpiLocationName (cas où les lieux ont été synchronisés après les
+    // tickets).
+    try {
+      await prisma.$executeRawUnsafe(`
+        UPDATE "Ticket" t
+        SET "glpiLocationName" = l."completename"
+        FROM "GlpiLocation" l
+        WHERE t."glpiLocationId" = l."glpiLocationId"
+          AND t."glpiLocationName" IS NULL
+      `);
+    } catch (err) {
+      // La table GlpiLocation peut ne pas exister si la migration n'a pas encore été jouée —
+      // dans ce cas on ignore silencieusement l'erreur, les lieux ne seront simplement pas résolus.
     }
 
     return { imported, updated };
@@ -193,6 +224,16 @@ async function fullReimportFromGlpi({ dateFrom, dateTo } = {}) {
     let imported = 0;
 
     for (const t of tickets) {
+      let glpiLocationName = null;
+      if (t.locations_id) {
+        const location = await prisma.glpiLocation.findUnique({
+          where: { glpiLocationId: t.locations_id },
+        });
+        if (location) {
+          glpiLocationName = location.completename || location.name;
+        }
+      }
+
       const data = {
         title: t.name,
         content: t.content || '',
@@ -200,6 +241,8 @@ async function fullReimportFromGlpi({ dateFrom, dateTo } = {}) {
         priority: glpiPriorityToErp(t.priority),
         category: await glpiIdToCategory(t.itilcategories_id),
         aiProcessed: t.users_id_recipient === GLPI_AI_REQUESTER_ID,
+        glpiLocationId: t.locations_id || null,
+        glpiLocationName,
       };
 
       const created = await prisma.ticket.create({ data: { ...data, glpiTicketId: t.id } });
