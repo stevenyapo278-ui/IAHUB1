@@ -276,7 +276,7 @@ export default function Supervision() {
     const loadAll = async () => {
       try {
         const [emailRes, dashRes, healthRes, accRes, trendRes, aiRes] = await Promise.allSettled([
-          api.get('/inbox?page=1&limit=10'),
+          api.get('/inbox?page=1&limit=100'),
           api.get('/dashboard/stats'),
           api.get('/advanced-settings/scheduler-health'),
           api.get('/skills/stats/accuracy?days=30'),
@@ -316,7 +316,7 @@ export default function Supervision() {
     if (!bootDone) return;
     const interval = setInterval(async () => {
       try {
-        const res = await api.get('/inbox?page=1&limit=10');
+        const res = await api.get('/inbox?page=1&limit=100');
         setEmails(res.data.items || []);
       } catch { /* retry next interval */ }
     }, 8000);
@@ -445,7 +445,7 @@ export default function Supervision() {
     setSyncing(true);
     try {
       await api.post('/inbox/sync');
-      const res = await api.get('/inbox?page=1&limit=10');
+      const res = await api.get('/inbox?page=1&limit=100');
       setEmails(res.data.items || []);
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur sync');
