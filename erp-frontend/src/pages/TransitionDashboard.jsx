@@ -210,6 +210,145 @@ function ModeCard({ mode, isActive, onClick }) {
   );
 }
 
+/* ── Composant : Liste des attributs de tickets ──────────────────────── */
+const TICKET_ATTRS = [
+  { key: 'id', label: 'ID', icon: 'tag', width: 'w-12' },
+  { key: 'name', label: 'Titre', icon: 'badge', width: 'min-w-[120px] flex-1', truncate: true },
+  { key: 'status', label: 'Statut', icon: 'task_alt', width: 'w-20' },
+  { key: 'priority', label: 'Priorité', icon: 'signal_cellular_alt', width: 'w-16' },
+  { key: 'category', label: 'Catégorie', icon: 'category', width: 'w-24' },
+  { key: 'type', label: 'Type', icon: 'sell', width: 'w-20' },
+  { key: 'assignedTo', label: 'Assigné à', icon: 'person', width: 'w-28' },
+  { key: 'followupCount', label: 'Suivis', icon: 'comment', width: 'w-14' },
+  { key: 'date', label: 'Date', icon: 'calendar_month', width: 'w-28' },
+];
+
+const STATUS_LABELS = ['Nouveau', 'Ouvert', 'En cours', 'En attente', 'Résolu', 'Fermé'];
+const PRIORITY_LABELS = { 1: 'Faible', 2: 'Moyen', 3: 'Haut', 4: 'Urgent', 5: 'Critique' };
+const TYPE_LABELS = { 1: 'Incident', 2: 'Demande', 3: 'Projet' };
+
+function TicketAttributesPanel({ tickets, label, color, error }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'var(--color-outline-variant)' }}>
+      {/* Entête */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between p-3 hover:bg-surface-container-low/50 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${color}15` }}>
+            <span className="material-symbols-outlined text-sm" style={{ color }}>dns</span>
+          </div>
+          <span className="text-[13px] font-bold" style={{ color: 'var(--color-on-surface)' }}>{label}</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold" style={{
+            backgroundColor: `${color}10`,
+            color,
+          }}>
+            {tickets.length} tickets · {TICKET_ATTRS.length} attributs
+          </span>
+          {error && (
+            <span className="text-[10px] text-red-500 flex items-center gap-1">
+              <span className="material-symbols-outlined text-[12px]">error</span>
+              {error}
+            </span>
+          )}
+        </div>
+        <span className={`material-symbols-outlined text-sm transition-transform ${expanded ? 'rotate-180' : ''}`}
+          style={{ color: 'var(--color-on-surface-variant)' }}>expand_more</span>
+      </button>
+
+      {/* Légende des attributs */}
+      {expanded && (
+        <div className="px-3 pb-3 space-y-2">
+          {/* Badges des champs */}
+          <div className="flex flex-wrap gap-1.5 pb-2 border-b" style={{ borderColor: 'var(--color-outline-variant)' }}>
+            {TICKET_ATTRS.map(attr => (
+              <span
+                key={attr.key}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium"
+                style={{ backgroundColor: `${color}08`, color: 'var(--color-on-surface-variant)' }}
+              >
+                <span className="material-symbols-outlined text-[10px]" style={{ color }}>{attr.icon}</span>
+                {attr.label}
+              </span>
+            ))}
+          </div>
+
+          {/* Tableau des tickets */}
+          {tickets.length === 0 ? (
+            <p className="text-[11px] py-4 text-center" style={{ color: 'var(--color-on-surface-variant)' }}>
+              {error || 'Aucun ticket récupéré'}
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-[10px]">
+                <thead>
+                  <tr className="border-b" style={{ borderColor: 'var(--color-outline-variant)' }}>
+                    {TICKET_ATTRS.map(attr => (
+                      <th key={attr.key} className={`${attr.width} py-1.5 px-1 font-semibold uppercase tracking-wider`}
+                        style={{ color: 'var(--color-on-surface-variant)' }}>
+                        {attr.label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {tickets.map((t, i) => (
+                    <tr key={t.id || i} className="border-b hover:bg-surface-container-low/30 transition-colors"
+                      style={{ borderColor: 'var(--color-outline-variant)' }}>
+                      {TICKET_ATTRS.map(attr => {
+                        const val = t[attr.key];
+                        let display = val != null ? String(val) : '-';
+                        let badgeColor = null;
+
+                        // Formater selon le champ
+                        if (attr.key === 'status') {
+                          display = STATUS_LABELS[val] || val || '-';
+                          badgeColor = val >= 5 ? '#16a34a' : val >= 2 ? '#f59e0b' : '#3b82f6';
+                        } else if (attr.key === 'priority') {
+                          display = PRIORITY_LABELS[val] || val || '-';
+                          badgeColor = val >= 4 ? '#ef4444' : val >= 3 ? '#f59e0b' : '#3b82f6';
+                        } else if (attr.key === 'type') {
+                          display = TYPE_LABELS[val] || val || '-';
+                        } else if (attr.key === 'date') {
+                          display = val ? formatDate(val) : '-';
+                        } else if (attr.key === 'assignedTo') {
+                          display = val || 'Non assigné';
+                        } else if (attr.key === 'followupCount') {
+                          display = val != null ? String(val) : '0';
+                        } else if (attr.key === 'name') {
+                          display = val || '(Sans titre)';
+                        }
+
+                        return (
+                          <td key={attr.key} className={`${attr.width} py-2 px-1`} style={{ color: 'var(--color-on-surface)' }}>
+                            {badgeColor ? (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold"
+                                style={{ backgroundColor: `${badgeColor}12`, color: badgeColor }}>
+                                {display}
+                              </span>
+                            ) : attr.truncate ? (
+                              <span className="block truncate max-w-[150px]" title={display}>{display}</span>
+                            ) : (
+                              <span>{display}</span>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Section Analyse IA ──────────────────────────────────── */
 function AiAnalysisSection() {
   const [analysis, setAnalysis] = useState(null);
@@ -416,6 +555,30 @@ function AiAnalysisSection() {
               <p className="text-[12px] leading-relaxed" style={{ color: 'var(--color-on-surface-variant)' }}>{analysis.analysis.synthese}</p>
             </div>
           )}
+
+          {/* ═══════════════════════════════════════════════════ */}
+          {/* ATTRIBUTS DES TICKETS RÉCUPÉRÉS */}
+          {/* ═══════════════════════════════════════════════════ */}
+          <div>
+            <h4 className="text-[12px] font-bold mb-2 flex items-center gap-1.5" style={{ color: 'var(--color-on-surface)' }}>
+              <span className="material-symbols-outlined text-sm" style={{ color: '#8b5cf6' }}>database</span>
+              Données récupérées depuis GLPI
+            </h4>
+            <div className="space-y-2">
+              <TicketAttributesPanel
+                tickets={analysis.prodTickets || []}
+                label="GLPI Production"
+                color="#16a34a"
+                error={analysis.prodTickets?.length === 0 ? 'Aucun ticket (instance non configurée ?)' : null}
+              />
+              <TicketAttributesPanel
+                tickets={analysis.devTickets || []}
+                label="GLPI Développement"
+                color="#f59e0b"
+                error={analysis.devTickets?.length === 0 ? 'Aucun ticket (instance non configurée ?)' : null}
+              />
+            </div>
+          </div>
 
           {/* Métadonnées */}
           <div className="flex items-center justify-between text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>
