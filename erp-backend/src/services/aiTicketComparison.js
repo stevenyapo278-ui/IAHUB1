@@ -41,41 +41,54 @@ async function fetchTicketsFromInstance(instanceName, limit = 20) {
     const tickets = await ticketRes.json();
     const ticketList = Array.isArray(tickets) ? tickets : [];
 
-    // Helper : construire un nom d'affichage à partir du User GLPI
-    function formatUserName(u) {
-      if (!u || typeof u !== 'object') return null;
-      // Certaines versions de GLPI retournent un tableau [{...}] au lieu d'un objet
-      if (Array.isArray(u)) u = u[0];
-      if (!u) return null;
+    // Helper : construire un nom d'affichage à partir d'un objet utilisateur GLPI expansé
+    function formatUserName(userObj) {
+      if (!userObj || typeof userObj !== 'object') return null;
+      // Si c'est un tableau [{...}] on prend le premier élément
+      if (Array.isArray(userObj)) userObj = userObj[0];
+      if (!userObj) return null;
 
-      const realname = u.realname || '';
-      const firstname = u.firstname || '';
-      const login = u.name || '';
+      const realname = userObj.realname || '';
+      const firstname = userObj.firstname || '';
+      const login = userObj.name || '';
 
-      // Priorité : "Prénom Nom" → "Nom" → "Prénom" → login → null
+      // Priorité : "Prénom Nom" → login → null
       const fullName = [firstname, realname].filter(Boolean).join(' ').trim();
       return decodeHtmlEntities(fullName || login) || null;
     }
 
-    // Helper pour résoudre un nom d'utilisateur GLPI
-    async function resolveUserName(userEntry) {
-      if (!userEntry) return null;
-
-      // Cas 1 : expand_dropdowns a déjà résolu l'utilisateur (objet { id, name, ... })
-      if (userEntry.users_id && typeof userEntry.users_id === 'object') {
-        return formatUserName(userEntry.users_id) || `ID#${userEntry.users_id.id}`;
-      }
-
-      // Cas 2 : users_id est un nombre → on appelle /User/{id}
+    // Helper pour résoudre un utilisateur depuis Ticket_User avec expand_dropdowns
+    async function resolveUsersFromTicket(ticketId) {
       try {
-        const userRes = await fetch(`${config.baseUrl}/User/${userEntry.users_id}`, { headers });
-        if (userRes.ok) {
-          const u = await userRes.json();
-          return formatUserName(u) || `ID#${userEntry.users_id}`;
-        }
-      } catch { /* best-effort */ }
+        // expand_dropdowns=true sur le sous-endpoint résout les users_id en objets
+        const usersRes = await fetch(
+          `${config.baseUrl}/Ticket/${ticketId}/Ticket_User?expand_dropdowns=true`,
+          { headers }
+        );
+        if (!usersRes.ok) return { requester: null, assignedTo: null, observer: null };
 
-      return `ID#${userEntry.users_id}`;
+        const users = await usersRes.json();
+        const userList = Array.isArray(users) ? users : [];
+
+        // Avec expand_dropdowns, users_id devient un objet { id, name, realname, firstname }
+        function extractUser(typeId) {
+          const entry = userList.find((u) => u.type === typeId);
+          if (!entry) return null;
+          if (entry.users_id && typeof entry.users_id === 'object') {
+            return formatUserName(entry.users_id);
+          }
+          // Si expand_dropdowns n'a pas fonctionné, on tombe ici (au cas où)
+          return null;
+        }
+
+        return {
+          requester: extractUser(1),
+          assignedTo: extractUser(2),
+          observer: extractUser(3),
+        };
+      } catch {
+        return { requester: null, assignedTo: null, observer: null };
+      }
     }
 
     // Enrichir chaque ticket avec l'assignation et le nombre de suivis
@@ -112,23 +125,11 @@ async function fetchTicketsFromInstance(instanceName, limit = 20) {
       }
 
       // Récupérer les utilisateurs liés au ticket (Demandeur=1, Assigné=2, Observateur=3)
-      // via une seule sous-requête Ticket_User parallélisée
-      try {
-        const usersRes = await fetch(`${config.baseUrl}/Ticket/${t.id}/Ticket_User`, { headers });
-        if (usersRes.ok) {
-          const users = await usersRes.json();
-          const userList = Array.isArray(users) ? users : [];
-
-          const [r, a, o] = await Promise.all([
-            resolveUserName(userList.find((u) => u.type === 1)),
-            resolveUserName(userList.find((u) => u.type === 2)),
-            resolveUserName(userList.find((u) => u.type === 3)),
-          ]);
-          requester = r;
-          assignedTo = a;
-          observer = o;
-        }
-      } catch { /* best-effort */ }
+      // Via Ticket_User avec expand_dropdowns=true pour que GLPI résolve les noms
+      const { requester: r, assignedTo: a, observer: o } = await resolveUsersFromTicket(t.id);
+      requester = r;
+      assignedTo = a;
+      observer = o;
 
       // Nombre de suivis via Content-Range
       try {
