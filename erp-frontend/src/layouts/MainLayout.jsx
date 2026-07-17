@@ -30,6 +30,7 @@ const systemItems = [
   { to: '/permission-groups', label: 'Groupes de droits', icon: 'shield', permission: 'users.manage', fallbackRoles: ['ADMIN'] },
   { to: '/prompts', label: 'Prompts IA', icon: 'terminal', permission: 'prompts.manage', fallbackRoles: ['ADMIN'] },
   { to: '/settings', label: 'Parametres', icon: 'settings', permission: ['settings.ai', 'settings.email', 'settings.integrations', 'automation.manage'], fallbackRoles: ['ADMIN'] },
+  { to: '/transition', label: 'Transition SOS', icon: 'swap_horiz', permission: 'glpi.manage', fallbackRoles: ['ADMIN'] },
 ];
 
 export default function MainLayout() {

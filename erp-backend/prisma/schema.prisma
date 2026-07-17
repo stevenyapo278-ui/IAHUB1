@@ -348,6 +348,35 @@ model SystemSettings {
   dailySummaryRecipients String[] @default([])      // liste libre d'adresses email, indépendante des comptes ERP
   dailySummaryLastSentDate String? // date "YYYY-MM-DD" du dernier envoi, pour ne déclencher qu'une fois par jour
 
+  // Date de mise en production de la plateforme — utilisée comme référence pour le reporting
+  // et les statistiques (tickets "pré-platforme" vs "post-platforme").
+  goLiveDate            DateTime?
+
+  // Comportement quand un email répond à un ticket fermé :
+  //   "create_new" — crée un nouveau ticket avec une référence à l'ancien (recommandé)
+  //   "reopen"      — rouvre le ticket automatiquement
+  closedTicketBehavior  String   @default("create_new")
+
+  // Seuil en jours : si un ticket fermé a été clos depuis plus longtemps que cette durée,
+  // il n'est pas rouvert — un nouveau ticket est créé à la place (même en mode "reopen").
+  reopenThresholdDays   Int      @default(90)
+
+  // Marquage des tickets GLPI créés par la plateforme pour les distinguer des tickets manuels :
+  //   "internal_note" — ajoute une note privée "Créé automatiquement via SOS Platform"
+  //   "none"          — aucun marquage
+  glpiSourceMarker      String   @default("internal_note")
+
+  // Dry-run (audit) : analyse les emails et prend des décisions, mais n'écrit RIEN dans GLPI,
+  // ni création de ticket, ni suivi, ni fermeture. Toutes les actions sont simulées et enregistrées
+  // dans le journal de transition. Correspond au Mode Audit.
+  dryRunMode            Boolean  @default(false)
+
+  // Contrôle granulaire des actions GLPI (indépendant de dryRun) :
+  //   enableGlpiFollowupCreation — permet d'ajouter des suivis aux tickets GLPI existants
+  //   enableGlpiTicketClosure    — permet de fermer/résoudre des tickets dans GLPI
+  enableGlpiFollowupCreation Boolean @default(true)
+  enableGlpiTicketClosure   Boolean @default(true)
+
   updatedAt              DateTime @updatedAt
 }
 

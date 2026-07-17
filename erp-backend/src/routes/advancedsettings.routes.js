@@ -51,6 +51,13 @@ router.patch(
     body('aiModelsSyncIntervalHours').optional().isInt({ min: 0, max: 168 }),
     body('backendUrl').optional({ nullable: true }).isString().isLength({ max: 500 }),
     body('frontendUrl').optional({ nullable: true }).isString().isLength({ max: 500 }),
+    body('goLiveDate').optional({ nullable: true }).isISO8601().withMessage('Format ISO8601 requis pour goLiveDate (ex: 2026-07-15T08:00:00Z)'),
+    body('closedTicketBehavior').optional().isString().isIn(['create_new', 'reopen']).withMessage('closedTicketBehavior doit être create_new ou reopen'),
+    body('reopenThresholdDays').optional().isInt({ min: 1, max: 730 }).withMessage('reopenThresholdDays doit être entre 1 et 730'),
+    body('glpiSourceMarker').optional().isString().isIn(['internal_note', 'none']).withMessage('glpiSourceMarker doit être internal_note ou none'),
+    body('dryRunMode').optional().isBoolean(),
+    body('enableGlpiFollowupCreation').optional().isBoolean(),
+    body('enableGlpiTicketClosure').optional().isBoolean(),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -69,6 +76,14 @@ router.patch(
     if (req.body.aiModelsSyncIntervalHours !== undefined) data.aiModelsSyncIntervalHours = req.body.aiModelsSyncIntervalHours;
     if (req.body.backendUrl !== undefined) data.backendUrl = normalizeHost(req.body.backendUrl);
     if (req.body.frontendUrl !== undefined) data.frontendUrl = normalizeHost(req.body.frontendUrl);
+
+    if (req.body.goLiveDate !== undefined) data.goLiveDate = req.body.goLiveDate ? new Date(req.body.goLiveDate) : null;
+    if (req.body.closedTicketBehavior !== undefined) data.closedTicketBehavior = req.body.closedTicketBehavior;
+    if (req.body.reopenThresholdDays !== undefined) data.reopenThresholdDays = req.body.reopenThresholdDays;
+    if (req.body.glpiSourceMarker !== undefined) data.glpiSourceMarker = req.body.glpiSourceMarker;
+    if (req.body.dryRunMode !== undefined) data.dryRunMode = req.body.dryRunMode;
+    if (req.body.enableGlpiFollowupCreation !== undefined) data.enableGlpiFollowupCreation = req.body.enableGlpiFollowupCreation;
+    if (req.body.enableGlpiTicketClosure !== undefined) data.enableGlpiTicketClosure = req.body.enableGlpiTicketClosure;
 
     const updated = await prisma.systemSettings.update({ where: { id: 1 }, data });
     return res.json(updated);

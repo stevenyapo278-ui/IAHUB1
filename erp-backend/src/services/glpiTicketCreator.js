@@ -27,9 +27,21 @@ async function withGlpiSession(config, fn) {
 // Crée un ticket dans GLPI à partir de champs génériques (titre, contenu, priorité, catégorie).
 // Retourne l'id du ticket GLPI créé, ou null si GLPI n'est pas configuré.
 // followupNote : texte optionnel ajouté en suivi privé (ex: contexte de l'email d'origine).
+// Ajoute aussi un marqueur de source selon le réglage glpiSourceMarker (internal_note | none).
+// Respecte dryRunMode : si activé, simule la création sans rien écrire dans GLPI.
 async function createGlpiTicket({ title, content, priority, category, type, urgency, impact, source, followupNote }) {
   const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
   if (settings && settings.enableGlpiTicketCreation === false) return null;
+
+  // Dry-run : ne pas écrire dans GLPI, retourner un ID fictif pour permettre la création ERP
+  if (settings?.dryRunMode) {
+    // ID négatif unique pour le dry-run : le timestamp en secondes modulo 1M + un random 0-999.
+    // Reste dans les limites d'un INTEGER PostgreSQL (4 bytes signés, max ~2,1 milliards).
+    // Date.now() brut (~1,78 billion en 2026) dépasse ces limites.
+    const fakeGlpiId = -(Math.floor(Date.now() / 1000) % 1000000 + Math.floor(Math.random() * 1000));
+    console.log(`[glpiTicketCreator][DRY-RUN] Ticket GLPI simulé avec ID fictif ${fakeGlpiId}`);
+    return fakeGlpiId;
+  }
 
   const config = await getActiveGlpiConfig();
   if (!config) return null;
@@ -64,12 +76,24 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
     if (!ticketRes.ok) throw new Error(`GLPI création ticket échoué (${ticketRes.status})`);
     const { id: glpiId } = await ticketRes.json();
 
-    if (followupNote) {
+    // Notes privées à ajouter au ticket GLPI
+    const followupParts = [];
+    if (followupNote) followupParts.push(followupNote);
+
+    // Marqueur de source : note privée indiquant que le ticket a été créé automatiquement
+    const sourceMarker = settings?.glpiSourceMarker || 'internal_note';
+    if (sourceMarker === 'internal_note') {
+      const markerText = `[Plateforme SOS] Ticket créé automatiquement via la plateforme de traitement des emails.`;
+      followupParts.push(markerText);
+    }
+
+    if (followupParts.length > 0) {
+      const combinedNote = followupParts.join('\n\n---\n\n');
       await fetch(`${config.baseUrl}/Ticket/${glpiId}/ITILFollowup`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
-          input: { items_id: glpiId, itemtype: 'Ticket', content: followupNote, is_private: 1 },
+          input: { items_id: glpiId, itemtype: 'Ticket', content: combinedNote, is_private: 1 },
         }),
       }).catch((err) => {
         console.error(`[glpiTicketCreator] Échec ajout followup initial (ticket GLPI ${glpiId}):`, err.message);
@@ -83,7 +107,22 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
 // Met à jour un ticket existant dans GLPI (statut, priorité, type, urgence, impact,
 // catégorie, assignation). N'envoie que les champs fournis (undefined = inchangé).
 // Ne fait rien si le ticket n'a pas de glpiTicketId ou si GLPI n'est pas configuré.
+// Respecte dryRunMode et enableGlpiTicketClosure pour les changements de statut.
 async function updateGlpiTicket(glpiTicketId, { status, priority, category, type, urgency, impact, assignedToGlpiId, teamGlpiId }) {
+  const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+
+  // Dry-run : ne pas écrire dans GLPI
+  if (settings?.dryRunMode) {
+    console.log(`[glpiTicketCreator][DRY-RUN] Mise à jour GLPI ${glpiTicketId} simulée (non écrite)`);
+    return;
+  }
+
+  // Fermeture de tickets désactivée
+  if (status && settings?.enableGlpiTicketClosure === false && ['SOLVED', 'CLOSED'].includes(status)) {
+    console.log(`[glpiTicketCreator] Fermeture GLPI désactivée par configuration (enableGlpiTicketClosure=false) pour le ticket ${glpiTicketId}`);
+    status = undefined;
+  }
+
   const config = await getActiveGlpiConfig();
   if (!config || !glpiTicketId) return;
 
@@ -137,7 +176,24 @@ async function updateGlpiTicket(glpiTicketId, { status, priority, category, type
 // Ajoute un suivi (ITILFollowup) à un ticket GLPI existant — utilisé pour répercuter chaque
 // réponse email ultérieure de l'utilisateur, et pas seulement le mail d'origine à la création.
 // Ne fait rien si GLPI n'est pas configuré ou si le ticket n'a pas de glpiTicketId.
+// Respecte les réglages dryRunMode et enableGlpiFollowupCreation :
+//   - dryRun = true → n'écrit rien dans GLPI, retourne un ID fictif
+//   - enableGlpiFollowupCreation = false → n'ajoute pas de suivi
 async function addGlpiFollowup(glpiTicketId, content, { isPrivate = false } = {}) {
+  const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+
+  // Dry-run : ne pas écrire dans GLPI, simuler un succès
+  if (settings?.dryRunMode) {
+    console.log(`[glpiTicketCreator][DRY-RUN] Suivi GLPI ${glpiTicketId} simulé (non écrit)`);
+    return -1;
+  }
+
+  // Création de suivis désactivée
+  if (settings?.enableGlpiFollowupCreation === false) {
+    console.log(`[glpiTicketCreator] Ajout de suivi GLPI désactivé par configuration (enableGlpiFollowupCreation=false)`);
+    return null;
+  }
+
   const config = await getActiveGlpiConfig();
   if (!config || !glpiTicketId || !content) return null;
 
