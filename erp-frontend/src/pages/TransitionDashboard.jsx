@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -735,6 +735,126 @@ function TicketAttributesPanel({ tickets, label, color, error }) {
   );
 }
 
+/* ── Chat sur l'analyse IA ──────────────────────────────── */
+function TransitionAnalysisChat({ analysis }) {
+  const [messages, setMessages] = useState([
+    { role: 'assistant', content: 'Posez-moi des questions sur l analyse ci-dessus : les ecarts PROD/DEV, les notes, les recommandations de code, ou tout autre point.' },
+  ]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const messagesEndRef = useRef(null);
+
+  // Construire le contexte de l analyse pour l envoyer au backend
+  const analysisContext = useMemo(() => {
+    if (!analysis?.analysis) return null;
+    const a = analysis.analysis;
+    return {
+      synthese: a.synthese,
+      notes: {
+        qualiteNoms: a.qualiteNoms,
+        assignations: a.assignations,
+        categoriesPriorites: a.categoriesPriorites,
+        ecartsProdDev: a.ecartsProdDev,
+      },
+      ameliorationsCode: a.ameliorationsCode,
+      stats: {
+        prodCount: analysis.prodTickets?.length || 0,
+        devCount: analysis.devTickets?.length || 0,
+        erpTotal: analysis.erp?.total || 0,
+      },
+    };
+  }, [analysis]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, loading]);
+
+  async function sendMessage() {
+    const text = input.trim();
+    if (!text || loading) return;
+    setInput('');
+    const userMsg = { role: 'user', content: text };
+    setMessages(prev => [...prev, userMsg]);
+    setLoading(true);
+    try {
+      const history = [...messages, userMsg].slice(-10).map(m => ({ role: m.role, content: m.content }));
+      const { data } = await api.post('/transition/chat', {
+        message: text,
+        history,
+        analysisContext,
+      });
+      setMessages(prev => [...prev, { role: 'assistant', content: data.reply }]);
+    } catch (err) {
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Desole, erreur de communication avec l IA. Reesayez.' }]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  }
+
+  return (
+    <div className="mt-4 pt-4 border-t" style={{ borderColor: 'var(--color-outline-variant)' }}>
+      <h4 className="text-[12px] font-bold flex items-center gap-1.5 mb-3" style={{ color: 'var(--color-on-surface)' }}>
+        <span className="material-symbols-outlined text-sm" style={{ color: '#8b5cf6' }}>chat</span>
+        Discuter de l'analyse
+      </h4>
+
+      {/* Messages */}
+      <div className="max-h-[300px] overflow-y-auto space-y-2 mb-3 pr-1">
+        {messages.map((msg, i) => (
+          <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div
+              className={`max-w-[85%] rounded-xl px-3 py-2 text-[12px] leading-relaxed ${
+                msg.role === 'user'
+                  ? 'bg-primary text-white rounded-br-sm'
+                  : 'bg-surface-container-low border border-outline-variant/40 text-on-surface rounded-bl-sm'
+              }`}
+            >
+              {msg.content}
+            </div>
+          </div>
+        ))}
+        {loading && (
+          <div className="flex justify-start">
+            <div className="bg-surface-container-low border border-outline-variant/40 rounded-xl rounded-bl-sm px-3 py-2 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 bg-primary/60 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+              <span className="w-1.5 h-1.5 bg-primary/60 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+              <span className="w-1.5 h-1.5 bg-primary/60 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+            </div>
+          </div>
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input */}
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Posez une question sur l analyse..."
+          disabled={loading}
+          className="flex-1 bg-surface border border-outline-variant/60 rounded-xl px-3 py-2 text-[12px] text-on-surface placeholder-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all disabled:opacity-50"
+        />
+        <button
+          onClick={sendMessage}
+          disabled={!input.trim() || loading}
+          className="w-8 h-8 rounded-lg bg-primary text-white flex items-center justify-center disabled:opacity-40 hover:bg-primary/90 transition-colors shrink-0"
+        >
+          <span className="material-symbols-outlined text-sm">send</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ── Section Analyse IA ──────────────────────────────────── */
 function AiAnalysisSection() {
   const [analysis, setAnalysis] = useState(null);
@@ -979,6 +1099,11 @@ function AiAnalysisSection() {
         <p className="text-[12px] py-4 text-center" style={{ color: 'var(--color-on-surface-variant)' }}>
           Lancez une analyse IA pour comparer les tickets PROD et DEV, détecter les anomalies et obtenir des recommandations d'amélioration du code.
         </p>
+      )}
+
+      {/* ── Chat sur l'analyse ──────────────────────────────────── */}
+      {analysis?.success && analysis?.analysis && (
+        <TransitionAnalysisChat analysis={analysis} />
       )}
     </motion.div>
   );

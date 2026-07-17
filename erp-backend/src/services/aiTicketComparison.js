@@ -446,4 +446,4 @@ Sois très concret et précis dans tes recommandations d'amélioration du code. 
   };
 }
 
-module.exports = { analyzeTicketDifferences };
+module.exports = { analyzeTicketDifferences, makeAIRequest };

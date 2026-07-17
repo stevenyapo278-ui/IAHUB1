@@ -316,7 +316,7 @@ router.get('/compare', async (req, res) => {
 // ── Analyse IA des tickets PROD vs DEV ───────────────────────────────────
 // Utilise le provider IA configuré pour analyser les différences entre les
 // tickets des instances GLPI (glpi + glpi_dev) et proposer des améliorations.
-const { analyzeTicketDifferences } = require('../services/aiTicketComparison');
+const { analyzeTicketDifferences, makeAIRequest } = require('../services/aiTicketComparison');
 
 router.post('/analyze', async (req, res) => {
   try {
@@ -326,6 +326,119 @@ router.post('/analyze', async (req, res) => {
     return res.json(result);
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── Chat sur l analyse IA ────────────────────────────────────────────────
+// Permet de discuter de l analyse effectuee (notes, recommandations, donnees
+// recuperees). Le contexte de l analyse (tickets PROD/DEV, synthese IA) est
+// envoye comme contexte systeme pour que l IA puisse repondre precisement.
+
+router.post('/chat', async (req, res) => {
+  try {
+    const { message, history = [], analysisContext } = req.body;
+    if (!message || !message.trim()) {
+      return res.status(400).json({ error: 'Message vide' });
+    }
+
+    // Construire le prompt systeme avec le contexte de l analyse
+    let systemPrompt = [
+      'Tu es un consultant expert ITIL specialise dans la qualite des donnees ITSM.',
+      'Tu analyses les tickets de deux instances GLPI (Production et Developpement)',
+      'et tu aides a comprendre les ecarts, les anomalies et les recommandations.',
+      'Reponds en francais, de maniere concise et technique.',
+      'Utilise le contexte ci-dessous pour etayer tes reponses.',
+      '',
+    ];
+
+    if (analysisContext) {
+      if (analysisContext.synthese) {
+        systemPrompt.push('## Synthese de l analyse');
+        systemPrompt.push(analysisContext.synthese);
+        systemPrompt.push('');
+      }
+      if (analysisContext.notes && Object.keys(analysisContext.notes).length > 0) {
+        systemPrompt.push('## Notes par domaine');
+        for (const [key, val] of Object.entries(analysisContext.notes)) {
+          if (val) {
+            systemPrompt.push(key + ' : ' + (val.note != null ? val.note + '/10' : 'N/A') + ' - ' + (val.analyse || ''));
+            if (val.problemes && val.problemes.length > 0) {
+              systemPrompt.push('  Problemes : ' + val.problemes.join(', '));
+            }
+            if (val.recommandations && val.recommandations.length > 0) {
+              systemPrompt.push('  Recommandations : ' + val.recommandations.join(', '));
+            }
+          }
+        }
+        systemPrompt.push('');
+      }
+      if (analysisContext.ameliorationsCode && analysisContext.ameliorationsCode.length > 0) {
+        systemPrompt.push('## Ameliorations de code proposees');
+        for (const am of analysisContext.ameliorationsCode) {
+          systemPrompt.push('- [' + am.impact + '] ' + am.description + ' (effort: ' + am.effort + ')');
+        }
+        systemPrompt.push('');
+      }
+      if (analysisContext.stats) {
+        systemPrompt.push('## Statistiques');
+        systemPrompt.push('- Tickets PROD analyses: ' + (analysisContext.stats.prodCount || 0));
+        systemPrompt.push('- Tickets DEV analyses: ' + (analysisContext.stats.devCount || 0));
+        systemPrompt.push('- Tickets ERP totaux: ' + (analysisContext.stats.erpTotal || 0));
+        systemPrompt.push('');
+      }
+    }
+
+    systemPrompt.push(
+      'Reponds de maniere precise en utilisant les donnees fournies.',
+      'Si tu ne trouves pas la reponse dans le contexte, dis-le franchement.'
+    );
+
+    // Appel IA en utilisant makeAIRequest depuis aiTicketComparison (support multi-provider)
+    const providers = await prisma.aiProvider.findMany({
+      where: { isActive: true },
+      include: {
+        keys: { where: { isActive: true }, orderBy: { isDefault: 'desc' } },
+        models: { where: { isActive: true, isDefault: true, type: 'CHAT' }, take: 1 },
+      },
+      orderBy: { label: 'asc' },
+    });
+
+    const activeProvider = providers.find(p => p.keys.length > 0);
+    if (!activeProvider) {
+      return res.status(422).json({ error: 'Aucun provider IA actif configure' });
+    }
+
+    const model = activeProvider.models[0]?.name;
+    const baseUrl = activeProvider.baseUrl || (
+      activeProvider.name === 'openai' ? 'https://api.openai.com/v1' :
+      activeProvider.name === 'mistral' ? 'https://api.mistral.ai/v1' :
+      activeProvider.name === 'anthropic' ? 'https://api.anthropic.com' :
+      activeProvider.name === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta' :
+      activeProvider.name === 'nvidia' ? 'https://integrate.api.nvidia.com/v1' :
+      null
+    );
+    if (!baseUrl) {
+      return res.status(422).json({ error: 'Base URL du provider non reconnue' });
+    }
+
+    // Construire le prompt complet (system + historique + message)
+    const promptParts = systemPrompt.concat([
+      '---',
+      'Historique de la conversation :',
+    ]);
+    for (const msg of (history || [])) {
+      promptParts.push((msg.role === 'user' ? 'Utilisateur' : 'Assistant') + ' : ' + (msg.content || ''));
+    }
+    promptParts.push('Utilisateur : ' + message);
+    promptParts.push('Assistant :');
+
+    const prompt = promptParts.join('\n');
+    const key = activeProvider.keys[0];
+    const reply = await makeAIRequest(activeProvider.name, baseUrl, key.apiKey, model, prompt, 2048);
+
+    return res.json({ reply });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
   }
 });
 
