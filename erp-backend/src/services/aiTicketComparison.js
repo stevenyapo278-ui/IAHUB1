@@ -41,10 +41,28 @@ async function fetchTicketsFromInstance(instanceName, limit = 20) {
     const tickets = await ticketRes.json();
     const ticketList = Array.isArray(tickets) ? tickets : [];
 
+    // Helper pour résoudre un nom d'utilisateur GLPI (expand_dropdowns ou requête User séparée)
+    async function resolveUserName(userEntry) {
+      if (!userEntry) return null;
+      if (userEntry.users_id && typeof userEntry.users_id === 'object') {
+        return decodeHtmlEntities(userEntry.users_id.name || userEntry.users_id.realname) || `User#${userEntry.users_id.id}`;
+      }
+      try {
+        const userRes = await fetch(`${config.baseUrl}/User/${userEntry.users_id}`, { headers });
+        if (userRes.ok) {
+          const u = await userRes.json();
+          return decodeHtmlEntities(u.realname || u.name) || `User#${userEntry.users_id}`;
+        }
+      } catch { /* best-effort */ }
+      return `User#${userEntry.users_id}`;
+    }
+
     // Enrichir chaque ticket avec l'assignation et le nombre de suivis
     const headers = { 'App-Token': config.appToken, 'Session-Token': sessionToken };
     const enriched = await Promise.all(ticketList.map(async (t) => {
       let assignedTo = null;
+      let requester = null;
+      let observer = null;
       let followupCount = 0;
       let category = null;
       let location = null;
@@ -72,24 +90,22 @@ async function fetchTicketsFromInstance(instanceName, limit = 20) {
         location = decodeHtmlEntities(String(t.locations_id));
       }
 
-      // Technicien assigné (type=2) via sous-requête parallélisée
+      // Récupérer les utilisateurs liés au ticket (Demandeur=1, Assigné=2, Observateur=3)
+      // via une seule sous-requête Ticket_User parallélisée
       try {
         const usersRes = await fetch(`${config.baseUrl}/Ticket/${t.id}/Ticket_User`, { headers });
         if (usersRes.ok) {
           const users = await usersRes.json();
-          const tech = (Array.isArray(users) ? users : []).find((u) => u.type === 2);
+          const userList = Array.isArray(users) ? users : [];
 
-          if (tech) {
-            if (tech.users_id && typeof tech.users_id === 'object') {
-              assignedTo = tech.users_id.name || tech.users_id.realname || `User#${tech.users_id.id}`;
-            } else {
-              const userRes = await fetch(`${config.baseUrl}/User/${tech.users_id}`, { headers });
-              if (userRes.ok) {
-                const u = await userRes.json();
-                assignedTo = u.realname || u.name || `User#${tech.users_id}`;
-              }
-            }
-          }
+          const [r, a, o] = await Promise.all([
+            resolveUserName(userList.find((u) => u.type === 1)),
+            resolveUserName(userList.find((u) => u.type === 2)),
+            resolveUserName(userList.find((u) => u.type === 3)),
+          ]);
+          requester = r;
+          assignedTo = a;
+          observer = o;
         }
       } catch { /* best-effort */ }
 
@@ -113,7 +129,9 @@ async function fetchTicketsFromInstance(instanceName, limit = 20) {
           : null,
         type: t.type,
         date: t.date_creation || t.date,
+        requester,
         assignedTo,
+        observer,
         followupCount,
         location,
         locationHierarchy: location
@@ -282,11 +300,11 @@ async function analyzeTicketDifferences({ limit = 20 } = {}) {
   const activeInstance = settings?.activeGlpiInstance || 'glpi';
 
   const prodTicketsText = prodTickets.map((t) =>
-    `  #${t.id} "${t.name}" | Priorité: ${t.priority} | Statut: ${t.status} | Assigné: ${t.assignedTo || 'N/A'} | Lieu: ${t.location || 'N/A'} | Suivis: ${t.followupCount}`
+    `  #${t.id} "${t.name}" | Demandeur: ${t.requester || 'N/A'} | Assigné: ${t.assignedTo || 'N/A'} | Observateur: ${t.observer || 'N/A'} | Priorité: ${t.priority} | Statut: ${t.status} | Lieu: ${t.location || 'N/A'} | Suivis: ${t.followupCount}`
   ).join('\n');
 
   const devTicketsText = devTickets.map((t) =>
-    `  #${t.id} "${t.name}" | Priorité: ${t.priority} | Statut: ${t.status} | Assigné: ${t.assignedTo || 'N/A'} | Lieu: ${t.location || 'N/A'} | Suivis: ${t.followupCount}`
+    `  #${t.id} "${t.name}" | Demandeur: ${t.requester || 'N/A'} | Assigné: ${t.assignedTo || 'N/A'} | Observateur: ${t.observer || 'N/A'} | Priorité: ${t.priority} | Statut: ${t.status} | Lieu: ${t.location || 'N/A'} | Suivis: ${t.followupCount}`
   ).join('\n');
 
   const prompt = `Tu es un consultant expert en ITIL et en qualité de données ITSM. Tu analyses les tickets de deux instances GLPI d'une même entreprise pour détecter des problèmes et proposer des améliorations.

@@ -531,7 +531,9 @@ const TICKET_ATTRS = [
   { key: 'category', label: 'Catégorie', icon: 'category', width: 'min-w-[140px] flex-1' },
   { key: 'location', label: 'Lieu', icon: 'pin_drop', width: 'min-w-[160px] flex-1' },
   { key: 'type', label: 'Type', icon: 'sell', width: 'w-20' },
+  { key: 'requester', label: 'Demandeur', icon: 'person_pin', width: 'w-28' },
   { key: 'assignedTo', label: 'Assigné à', icon: 'person', width: 'w-28' },
+  { key: 'observer', label: 'Observateur', icon: 'visibility', width: 'w-28' },
   { key: 'followupCount', label: 'Suivis', icon: 'comment', width: 'w-14' },
   { key: 'date', label: 'Date', icon: 'calendar_month', width: 'w-28' },
 ];
@@ -634,8 +636,12 @@ function TicketAttributesPanel({ tickets, label, color, error }) {
                         } else if (attr.key === 'location') {
                           // Hiérarchie affichée dans le <td> via locationHierarchy si multi-niveaux
                           display = val || '-';
+                        } else if (attr.key === 'requester') {
+                          display = val || 'Non renseigné';
                         } else if (attr.key === 'assignedTo') {
                           display = val || 'Non assigné';
+                        } else if (attr.key === 'observer') {
+                          display = val || 'Aucun';
                         } else if (attr.key === 'followupCount') {
                           display = val != null ? String(val) : '0';
                         } else if (attr.key === 'name') {
