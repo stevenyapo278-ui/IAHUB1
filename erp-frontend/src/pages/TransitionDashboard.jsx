@@ -528,7 +528,7 @@ const TICKET_ATTRS = [
   { key: 'name', label: 'Titre', icon: 'badge', width: 'min-w-[120px] flex-1', truncate: true },
   { key: 'status', label: 'Statut', icon: 'task_alt', width: 'w-20' },
   { key: 'priority', label: 'Priorité', icon: 'signal_cellular_alt', width: 'w-16' },
-  { key: 'category', label: 'Catégorie', icon: 'category', width: 'w-24' },
+  { key: 'category', label: 'Catégorie', icon: 'category', width: 'min-w-[140px] flex-1' },
   { key: 'location', label: 'Lieu', icon: 'pin_drop', width: 'min-w-[160px] flex-1' },
   { key: 'type', label: 'Type', icon: 'sell', width: 'w-20' },
   { key: 'assignedTo', label: 'Assigné à', icon: 'person', width: 'w-28' },
@@ -628,9 +628,11 @@ function TicketAttributesPanel({ tickets, label, color, error }) {
                           display = TYPE_LABELS[val] || val || '-';
                         } else if (attr.key === 'date') {
                           display = val ? formatDate(val) : '-';
+                        } else if (attr.key === 'category') {
+                          // Hiérarchie affichée dans le <td> via categoryHierarchy si multi-niveaux
+                          display = val || '-';
                         } else if (attr.key === 'location') {
-                          // La hiérarchie est affichée directement dans le <td>
-                          // via t.locationHierarchy si multi-niveaux
+                          // Hiérarchie affichée dans le <td> via locationHierarchy si multi-niveaux
                           display = val || '-';
                         } else if (attr.key === 'assignedTo') {
                           display = val || 'Non assigné';
@@ -642,7 +644,32 @@ function TicketAttributesPanel({ tickets, label, color, error }) {
 
                         return (
                           <td key={attr.key} className={`${attr.width} py-2 px-1`} style={{ color: 'var(--color-on-surface)' }}>
-                            {attr.key === 'location' && t.locationHierarchy?.length > 1 ? (
+                            {attr.key === 'category' && t.categoryHierarchy?.length > 1 ? (
+                              <div className="flex flex-wrap gap-1 items-center">
+                                {t.categoryHierarchy.map((level, li) => (
+                                  <span key={li} className="inline-flex items-center">
+                                    <span
+                                      className="px-1.5 py-0.5 rounded text-[9px] font-medium"
+                                      style={{
+                                        backgroundColor: li === t.categoryHierarchy.length - 1
+                                          ? 'rgba(59,130,246,0.12)'
+                                          : 'var(--color-surface-container-high)',
+                                        color: li === t.categoryHierarchy.length - 1
+                                          ? '#3b82f6'
+                                          : 'var(--color-on-surface-variant)',
+                                      }}
+                                    >
+                                      {level}
+                                    </span>
+                                    {li < t.categoryHierarchy.length - 1 && (
+                                      <span className="text-[8px] px-1" style={{ color: 'var(--color-on-surface-variant)' }}>
+                                        <span className="material-symbols-outlined text-[10px]">chevron_right</span>
+                                      </span>
+                                    )}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : attr.key === 'location' && t.locationHierarchy?.length > 1 ? (
                               <div className="flex flex-wrap gap-1 items-center">
                                 {t.locationHierarchy.map((level, li) => (
                                   <span key={li} className="inline-flex items-center">

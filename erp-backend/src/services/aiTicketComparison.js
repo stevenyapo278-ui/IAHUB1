@@ -34,8 +34,10 @@ async function fetchTicketsFromInstance(instanceName, limit = 20) {
       let location = null;
 
       // Récupérer la catégorie (expand_dropdowns la met dans un champ séparé)
+      // Le completename contient la hiérarchie : "Incident > Réseau"
       if (t.itilcategories_id && typeof t.itilcategories_id === 'object') {
-        category = t.itilcategories_id.name || t.itilcategories_id.completename || String(t.itilcategories_id);
+        const fullCat = t.itilcategories_id.completename || t.itilcategories_id.name;
+        category = fullCat || String(t.itilcategories_id);
       } else if (t.itilcategories) {
         category = typeof t.itilcategories === 'string' ? t.itilcategories : t.itilcategories.name || t.itilcategories.completename;
       } else if (t.itilcategories_id) {
@@ -88,6 +90,9 @@ async function fetchTicketsFromInstance(instanceName, limit = 20) {
         status: t.status,
         priority: t.priority,
         category,
+        categoryHierarchy: category
+          ? category.split(/\s*>\s*/).filter(Boolean).map((s) => s.trim())
+          : null,
         type: t.type,
         date: t.date_creation || t.date,
         assignedTo,
