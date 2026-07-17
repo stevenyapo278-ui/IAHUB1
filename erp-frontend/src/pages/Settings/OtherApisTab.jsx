@@ -38,13 +38,16 @@ export default function OtherApisTab() {
     setShowSecrets((p) => ({ ...p, [key]: !p[key] }));
   }
 
+  const GLPI_FIELDS = [
+    { key: 'baseUrl', label: 'URL de base' },
+    { key: 'apiKey', label: 'Clé API (User Token)' },
+    { key: 'appToken', label: 'App Token' },
+  ];
   const REQUIRED_FIELDS = {
-    glpi: [
-      { key: 'baseUrl', label: 'URL de base' },
-      { key: 'apiKey', label: 'Clé API (User Token)' },
-      { key: 'appToken', label: 'App Token' },
-    ],
+    glpi: GLPI_FIELDS,
+    glpi_dev: GLPI_FIELDS,
   };
+  const isGlpi = (name) => name === 'glpi' || name === 'glpi_dev';
 
   function getMissingFields(config) {
     const required = REQUIRED_FIELDS[config.serviceName];
@@ -342,7 +345,7 @@ export default function OtherApisTab() {
                 </label>
                 <label className="flex flex-col gap-xs">
                   <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">
-                    Clé API{form.serviceName === 'glpi' ? ' (User Token)' : ''}
+                    Clé API{isGlpi(form.serviceName) ? ' (User Token)' : ''}
                   </span>
                   <div className="relative flex items-center w-full">
                     <input
@@ -362,7 +365,7 @@ export default function OtherApisTab() {
                     </button>
                   </div>
                 </label>
-                {form.serviceName === 'glpi' && (
+                {isGlpi(form.serviceName) && (
                   <label className="flex flex-col gap-xs">
                     <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">App Token (GLPI)</span>
                     <div className="relative flex items-center w-full">
@@ -469,7 +472,7 @@ export default function OtherApisTab() {
                       </div>
                     </td>
                     <td className="p-3">
-                      {c.serviceName === 'glpi' ? (
+                      {isGlpi(c.serviceName) ? (
                         <div className="relative flex items-center">
                           <input
                             className={`${inputClass} w-full pr-10`}
@@ -546,7 +549,7 @@ export default function OtherApisTab() {
                       />
                     </td>
                     <td className="p-3 text-center">
-                      {c.serviceName === 'glpi' && canManageGlpi && (
+                      {isGlpi(c.serviceName) && canManageGlpi && (
                         <motion.button
                           onClick={handleSyncGlpi}
                           disabled={syncingGlpi}
