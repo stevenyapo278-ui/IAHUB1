@@ -21,7 +21,7 @@ export default function OtherApisTab() {
   const [workflows, setWorkflows] = useState([]);
   const [workflowForm, setWorkflowForm] = useState({ name: '', webhookUrl: '', description: '' });
   const [triggering, setTriggering] = useState(null);
-  const [syncingGlpi, setSyncingGlpi] = useState(false);
+  const [syncingGlpi, setSyncingGlpi] = useState(null); // 'tickets' | 'locations' | 'users' | null
   const [testingId, setTestingId] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState({}); // { [configId]: { connected, error } }
   const [error, setError] = useState('');
@@ -150,17 +150,23 @@ export default function OtherApisTab() {
     }
   }
 
-  async function handleSyncGlpi() {
+  async function handleSyncGlpi(type) {
     setError('');
     setInfo('');
-    setSyncingGlpi(true);
+    setSyncingGlpi(type);
+    const labels = { tickets: 'tickets', locations: 'lieux', users: 'utilisateurs' };
+    const endpoints = { tickets: '/glpi/sync', locations: '/glpi/sync-locations', users: '/glpi/sync-users' };
     try {
-      const { data } = await api.post('/glpi/sync');
-      setInfo(`Synchronisation GLPI : ${data.imported} ticket(s) importé(s), ${data.updated} mis à jour.`);
+      const { data } = await api.post(endpoints[type]);
+      if (type === 'tickets') {
+        setInfo(`Synchronisation GLPI : ${data.imported} ticket(s) importé(s), ${data.updated} mis à jour.`);
+      } else {
+        setInfo(`${data.synced} ${labels[type]} synchronisé(s) depuis GLPI.`);
+      }
     } catch (err) {
-      setError(err.response?.data?.error || 'Erreur lors de la synchronisation GLPI');
+      setError(err.response?.data?.error || `Erreur lors de la synchronisation des ${labels[type]}`);
     } finally {
-      setSyncingGlpi(false);
+      setSyncingGlpi(null);
     }
   }
 
@@ -550,22 +556,32 @@ export default function OtherApisTab() {
                     </td>
                     <td className="p-3 text-center">
                       {isGlpi(c.serviceName) && canManageGlpi && (
-                        <motion.button
-                          onClick={handleSyncGlpi}
-                          disabled={syncingGlpi}
-                          whileHover={{ scale: 1.03 }}
-                          whileTap={{ scale: 0.96 }}
-                          className="px-3.5 py-1.5 rounded-xl border border-outline-variant/60 text-on-surface font-semibold text-body-sm hover:bg-surface-container-high transition-colors disabled:opacity-50 shadow-sm flex items-center gap-1 mx-auto"
-                        >
-                          <motion.span
-                            animate={syncingGlpi ? { rotate: 360 } : { rotate: 0 }}
-                            transition={syncingGlpi ? { repeat: Infinity, duration: 1, ease: 'linear' } : {}}
-                            className="material-symbols-outlined text-[16px]"
-                          >
-                            sync
-                          </motion.span>
-                          {syncingGlpi ? 'Synchro...' : 'Synchroniser GLPI'}
-                        </motion.button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          {[
+                            { type: 'tickets', icon: 'sync', tooltip: 'Synchroniser les tickets', color: '#3b82f6' },
+                            { type: 'locations', icon: 'pin_drop', tooltip: 'Synchroniser les lieux', color: '#f59e0b' },
+                            { type: 'users', icon: 'people', tooltip: 'Synchroniser les utilisateurs', color: '#16a34a' },
+                          ].map(({ type, icon, tooltip, color }) => (
+                            <motion.button
+                              key={type}
+                              onClick={() => handleSyncGlpi(type)}
+                              disabled={syncingGlpi !== null}
+                              title={tooltip}
+                              whileHover={{ scale: 1.1 }}
+                              whileTap={{ scale: 0.9 }}
+                              className="w-8 h-8 flex items-center justify-center rounded-xl border border-outline-variant/60 hover:bg-surface-container-high transition-colors disabled:opacity-40 shadow-sm"
+                            >
+                              <motion.span
+                                animate={syncingGlpi === type ? { rotate: 360 } : { rotate: 0 }}
+                                transition={syncingGlpi === type ? { repeat: Infinity, duration: 1, ease: 'linear' } : { duration: 0.3 }}
+                                className="material-symbols-outlined text-[16px]"
+                                style={{ color: syncingGlpi === type ? 'var(--color-on-surface-variant)' : color }}
+                              >
+                                {syncingGlpi === type ? 'sync' : icon}
+                              </motion.span>
+                            </motion.button>
+                          ))}
+                        </div>
                       )}
                     </td>
                     <td className="p-3 text-right">

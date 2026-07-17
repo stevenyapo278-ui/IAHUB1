@@ -141,7 +141,7 @@ router.post(
 
     const {
       title, content, priority, category, teamId, assignedToId, requesterId, requiresApproval,
-      type, urgency, impact, source, externalId, status, openedAt,
+      type, urgency, impact, source, externalId, status, openedAt, locationId,
     } = req.body;
 
     // observerIds peut arriver en JSON (multipart) ou en tableau (JSON direct)
@@ -161,7 +161,7 @@ router.post(
     let glpiTicketId = null;
     let glpiCreationError = null;
     try {
-      glpiTicketId = await createGlpiTicket({ title, content, priority, category, type, urgency, impact, source });
+      glpiTicketId = await createGlpiTicket({ title, content, priority, category, type, urgency, impact, source, locationId });
     } catch (err) {
       console.error('[ticket.routes] Création GLPI échouée:', err.message);
       glpiCreationError = err.message;
@@ -171,9 +171,16 @@ router.post(
     const canSetStatus = ['ADMIN', 'TECHNICIAN'].includes(req.user.role);
     const finalStatus = canSetStatus && status ? status : 'NEW';
 
+    let glpiLocationName = null;
+    if (locationId) {
+      const loc = await prisma.glpiLocation.findUnique({ where: { glpiLocationId: Number(locationId) } });
+      glpiLocationName = loc?.completename || loc?.name || null;
+    }
+
     const ticket = await prisma.ticket.create({
       data: {
         ...(glpiTicketId ? { glpiTicketId } : {}),
+        ...(locationId ? { glpiLocationId: Number(locationId), glpiLocationName } : {}),
         title,
         content,
         priority: priority || 'P3',

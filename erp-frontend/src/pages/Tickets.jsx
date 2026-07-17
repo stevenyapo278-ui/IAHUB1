@@ -44,6 +44,7 @@ const EMPTY_FORM = {
   impact: 'MEDIUM',
   priority: 'P3',
   externalId: '',
+  locationId: '',
   teamId: '',
   assignedToId: '',
   requesterId: '',
@@ -70,6 +71,7 @@ export default function Tickets() {
   const [tickets, setTickets] = useState([]);
   const [teams, setTeams] = useState([]);
   const [users, setUsers] = useState([]);
+  const [locations, setLocations] = useState([]);
   const [filters, setFilters] = useState({ status: '', priority: '', source: '' });
   const [showForm, setShowForm] = useState(searchParams.get('new') === '1');
   const [form, setForm] = useState(EMPTY_FORM);
@@ -197,6 +199,10 @@ export default function Tickets() {
       setDeleting(false);
     }
   }
+
+  useEffect(() => {
+    api.get('/glpi/locations').then(({ data }) => setLocations(data)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!canAssign) return;
@@ -367,6 +373,11 @@ export default function Tickets() {
                           <select className="h-9 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-sm text-body-sm text-on-surface w-full"
                             value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}
                           ><option value="">-----</option>{CATEGORY_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}</select>
+                        </SelectRow>
+                        <SelectRow label="Lieu">
+                          <select className="h-9 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-sm text-body-sm text-on-surface w-full"
+                            value={form.locationId} onChange={(e) => setForm({ ...form, locationId: e.target.value })}
+                          ><option value="">Sélectionner un lieu</option>{locations.map((l) => <option key={l.glpiLocationId} value={l.glpiLocationId}>{l.completename || l.name}</option>)}</select>
                         </SelectRow>
                         {canAssign && (
                           <SelectRow label="Statut">

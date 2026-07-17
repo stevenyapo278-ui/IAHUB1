@@ -4,7 +4,7 @@ const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { syncGlpiTickets, fullReimportFromGlpi, getActiveGlpiConfig, glpiInitSession, glpiKillSession } = require('../utils/glpiSync');
-const { syncLocationsFromGlpi } = require('../services/glpiTicketCreator');
+const { syncLocationsFromGlpi, syncUsersFromGlpi } = require('../services/glpiTicketCreator');
 
 const router = express.Router();
 router.use(authenticate);
@@ -83,6 +83,41 @@ router.post('/sync-locations', requirePermission('glpi.manage', ['ADMIN', 'TECHN
   } catch (err) {
     return res.status(502).json({ error: err.message || 'Erreur de synchronisation des lieux GLPI' });
   }
+});
+
+// Synchronisation des "Utilisateurs" depuis GLPI — met à jour le glpiId sur les comptes ERP
+// existants en les rapprochant par email ou par nom. Appelée manuellement depuis les réglages.
+router.post('/sync-users', requirePermission('glpi.manage', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+  try {
+    const result = await syncUsersFromGlpi();
+    if (result === null) {
+      return res.status(422).json({ error: 'GLPI non configuré' });
+    }
+    return res.json({ synced: result });
+  } catch (err) {
+    return res.status(502).json({ error: err.message || 'Erreur de synchronisation des utilisateurs GLPI' });
+  }
+});
+
+// Récupère la liste des utilisateurs ayant un glpiId (synchronisés avec GLPI)
+// Pour les sélecteurs d'assignation et le mapping ERP ↔ GLPI.
+router.get('/users', async (req, res) => {
+  const users = await prisma.user.findMany({
+    where: { glpiId: { not: null } },
+    select: { id: true, glpiId: true, fullName: true, email: true },
+    orderBy: { fullName: 'asc' },
+  });
+  res.json(users);
+});
+
+// Récupère la liste des lieux synchronisés depuis GLPI (table GlpiLocation)
+// pour le sélecteur de lieu dans le formulaire de création de ticket.
+router.get('/locations', async (req, res) => {
+  const locations = await prisma.glpiLocation.findMany({
+    orderBy: { completename: 'asc' },
+    select: { id: true, glpiLocationId: true, name: true, completename: true, town: true, building: true, room: true },
+  });
+  res.json(locations);
 });
 
 // Proxy un document GLPI (image, PDF, etc.) via l'API REST — utilisé pour les URLs d'images

@@ -29,7 +29,7 @@ async function withGlpiSession(config, fn) {
 // followupNote : texte optionnel ajouté en suivi privé (ex: contexte de l'email d'origine).
 // Ajoute aussi un marqueur de source selon le réglage glpiSourceMarker (internal_note | none).
 // Respecte dryRunMode : si activé, simule la création sans rien écrire dans GLPI.
-async function createGlpiTicket({ title, content, priority, category, type, urgency, impact, source, followupNote }) {
+async function createGlpiTicket({ title, content, priority, category, type, urgency, impact, source, followupNote, locationId }) {
   const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
   if (settings && settings.enableGlpiTicketCreation === false) return null;
 
@@ -65,6 +65,7 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
         itilcategories_id: (await categoryToGlpiId(category)) || 0,
         requesttypes_id: GLPI_SOURCE_MAP[source] || 1,
         users_id_recipient: GLPI_AI_REQUESTER_ID,
+        ...(locationId ? { locations_id: Number(locationId) } : {}),
       },
     };
 
@@ -234,16 +235,22 @@ async function deleteGlpiTicket(glpiTicketId) {
 // Crée un ticket dans GLPI depuis les données d'un email analysé par l'IA,
 // puis crée ou met à jour l'entrée correspondante dans la table Ticket de l'ERP.
 // Si GLPI n'est pas configuré, le ticket est créé uniquement dans l'ERP.
-async function createTicketFromEmail({ subject, body, from, fromName, analysis, emailAccountId, tx = prisma }) {
+async function createTicketFromEmail({ subject, body, from, fromName, analysis, emailAccountId, locationId, tx = prisma }) {
   const title = analysis.suggestedTitle || subject;
   const content = `${body || ''}\n\n---\nAnalyse IA : ${analysis.summary}\nConfiance : ${Math.round((analysis.confidence || 0) * 100)}%`;
   const followupNote = from ? `Email original de ${fromName || from} &lt;${from}&gt;\nSujet : ${subject}` : null;
 
   let glpiTicketId = null;
   try {
-    glpiTicketId = await createGlpiTicket({ title, content, priority: analysis.priority, category: analysis.category, followupNote });
+    glpiTicketId = await createGlpiTicket({ title, content, priority: analysis.priority, category: analysis.category, followupNote, locationId });
   } catch (err) {
     console.error('[glpiTicketCreator] Création GLPI échouée:', err.message);
+  }
+
+  let glpiLocationName = null;
+  if (locationId) {
+    const loc = await tx.glpiLocation.findUnique({ where: { glpiLocationId: Number(locationId) } });
+    glpiLocationName = loc?.completename || loc?.name || null;
   }
 
   const erpTicket = await tx.ticket.create({
@@ -254,6 +261,7 @@ async function createTicketFromEmail({ subject, body, from, fromName, analysis, 
       status: 'NEW',
       priority: analysis.priority || 'P3',
       category: analysis.category || null,
+      ...(locationId ? { glpiLocationId: Number(locationId), glpiLocationName } : {}),
       sourceEmail: from || null,
       sourceName: fromName || null,
       sourceSubject: subject || null,
@@ -475,4 +483,56 @@ async function syncLocationsFromGlpi() {
   });
 }
 
-module.exports = { createTicketFromEmail, createGlpiTicket, updateGlpiTicket, deleteGlpiTicket, uploadGlpiAttachment, syncTeamsFromGlpi, syncCategoriesFromGlpi, syncLocationsFromGlpi, addGlpiFollowup };
+// Synchronise les utilisateurs (User) depuis GLPI vers la table User de l'ERP.
+// Les correspondances se font par email (prioritaire) puis par nom complet.
+// Les utilisateurs GLPI sans email ou sans nom sont ignorés.
+// Ne crée pas de compte si aucun utilisateur ERP existant ne correspond,
+// mais met à jour le glpiId sur les comptes ERP existants.
+// Retourne le nombre d'utilisateurs synchronisés, ou null si GLPI n'est pas configuré.
+async function syncUsersFromGlpi() {
+  const config = await getActiveGlpiConfig();
+  if (!config) return null;
+
+  return withGlpiSession(config, async (sessionToken) => {
+    const headers = { 'App-Token': config.appToken, 'Session-Token': sessionToken };
+
+    const res = await fetch(`${config.baseUrl}/User?range=0-500`, { headers });
+    if (!res.ok) throw new Error(`GLPI récupération des utilisateurs échouée (${res.status})`);
+    const users = await res.json();
+
+    let synced = 0;
+    for (const u of users) {
+      if (!u.name && !u.realname && !u.firstname) continue;
+
+      const glpiId = u.id;
+      const email = u._useremails?.[0]?.email || u.email || null;
+      const fullName = [u.realname, u.firstname].filter(Boolean).join(' ') || u.name;
+      const userName = u.name || null;
+
+      // 1. Chercher par glpiId
+      let existing = await prisma.user.findUnique({ where: { glpiId } });
+
+      // 2. Chercher par email si pas trouvé par glpiId
+      if (!existing && email) {
+        existing = await prisma.user.findUnique({ where: { email } });
+      }
+
+      if (existing) {
+        await prisma.user.update({
+          where: { id: existing.id },
+          data: {
+            glpiId,
+            ...(email ? { email } : {}),
+            fullName,
+          },
+        });
+        synced++;
+      }
+      // Ne crée pas de compte ERP ici — l'utilisateur doit d'abord exister dans l'ERP
+      // (via invitation ou inscription) pour recevoir un glpiId.
+    }
+    return synced;
+  });
+}
+
+module.exports = { createTicketFromEmail, createGlpiTicket, updateGlpiTicket, deleteGlpiTicket, uploadGlpiAttachment, syncTeamsFromGlpi, syncCategoriesFromGlpi, syncLocationsFromGlpi, syncUsersFromGlpi, addGlpiFollowup };
