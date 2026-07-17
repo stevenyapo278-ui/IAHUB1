@@ -26,13 +26,16 @@ router.get('/:id', async (req, res) => {
 });
 
 // Champs requis par service connu, pour donner un message d'erreur précis
+const GLPI_REQUIRED = [
+  { key: 'baseUrl', label: 'URL de base' },
+  { key: 'apiKey', label: 'Clé API (User Token)' },
+  { key: 'extra.appToken', label: 'App Token' },
+];
 const REQUIRED_FIELDS = {
-  glpi: [
-    { key: 'baseUrl', label: 'URL de base' },
-    { key: 'apiKey', label: 'Clé API (User Token)' },
-    { key: 'extra.appToken', label: 'App Token' },
-  ],
+  glpi: GLPI_REQUIRED,
+  glpi_dev: GLPI_REQUIRED,
 };
+const isGlpi = (name) => name === 'glpi' || name === 'glpi_dev';
 
 function getMissingFields(serviceName, { baseUrl, apiKey, extra }) {
   const required = REQUIRED_FIELDS[serviceName];
@@ -94,7 +97,7 @@ router.patch('/:id', async (req, res) => {
 
   // Changement d'instance GLPI détecté (URL différente) — on détache les anciens liens avant
   // d'enregistrer la nouvelle config, sinon la prochaine synchro mélangerait les deux instances.
-  const isGlpiUrlChange = before.serviceName === 'glpi' && baseUrl !== undefined && baseUrl !== before.baseUrl && before.baseUrl;
+  const isGlpiUrlChange = isGlpi(before.serviceName) && baseUrl !== undefined && baseUrl !== before.baseUrl && before.baseUrl;
   let detached = null;
   if (isGlpiUrlChange) {
     detached = await detachGlpiLinks();
@@ -108,7 +111,7 @@ router.patch('/:id', async (req, res) => {
   }
 });
 
-// Teste la connexion au service configuré (actuellement supporté : glpi)
+// Teste la connexion au service configuré (actuellement supporté : glpi et glpi_dev)
 router.post('/:id/test-connection', async (req, res) => {
   const config = await prisma.apiConfig.findUnique({ where: { id: Number(req.params.id) } });
   if (!config) return res.status(404).json({ error: 'Configuration introuvable' });
@@ -118,7 +121,7 @@ router.post('/:id/test-connection', async (req, res) => {
     return res.status(422).json({ connected: false, error: `Champ(s) manquant(s) : ${missing.join(', ')}` });
   }
 
-  if (config.serviceName === 'glpi') {
+  if (isGlpi(config.serviceName)) {
     try {
       const appToken = config.extra?.appToken;
       const sessionRes = await fetch(`${config.baseUrl}/initSession`, {
