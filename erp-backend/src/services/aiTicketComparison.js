@@ -1,6 +1,22 @@
 const prisma = require('../prismaClient');
 const { getGlpiConfig, glpiInitSession, glpiKillSession } = require('../utils/glpiSync');
 
+/* ── Helper : décoder les entités HTML provenant de GLPI ────────────── */
+
+function decodeHtmlEntities(str) {
+  if (!str || typeof str !== 'string') return str;
+  return str
+    .replace(/&#62;/g, '>')
+    .replace(/&gt;/g, '>')
+    .replace(/&#60;/g, '<')
+    .replace(/&lt;/g, '<')
+    .replace(/&#38;/g, '&')
+    .replace(/&amp;/g, '&')
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&#34;/g, '"');
+}
+
 /* ── Récupération des tickets des deux instances ──────────────────────── */
 
 async function fetchTicketsFromInstance(instanceName, limit = 20) {
@@ -35,23 +51,25 @@ async function fetchTicketsFromInstance(instanceName, limit = 20) {
 
       // Récupérer la catégorie (expand_dropdowns la met dans un champ séparé)
       // Le completename contient la hiérarchie : "Incident > Réseau"
+      // GLPI stocke les entités HTML (&#62; = >) → on les décode
       if (t.itilcategories_id && typeof t.itilcategories_id === 'object') {
         const fullCat = t.itilcategories_id.completename || t.itilcategories_id.name;
-        category = fullCat || String(t.itilcategories_id);
+        category = decodeHtmlEntities(fullCat) || String(t.itilcategories_id);
       } else if (t.itilcategories) {
-        category = typeof t.itilcategories === 'string' ? t.itilcategories : t.itilcategories.name || t.itilcategories.completename;
+        const raw = typeof t.itilcategories === 'string' ? t.itilcategories : t.itilcategories.name || t.itilcategories.completename;
+        category = decodeHtmlEntities(raw);
       } else if (t.itilcategories_id) {
         category = String(t.itilcategories_id);
       }
 
       // Récupérer le lieu (locations_id) — expand_dropdowns renvoie un objet { id, name, completename }
       // Le completename contient la hiérarchie complète : "Headquarters > Floor 3 > Room 301"
-      // On le parse pour obtenir les sous-lieux individuellement
+      // GLPI stocke les entités HTML (&#62; = >) → on les décode
       if (t.locations_id && typeof t.locations_id === 'object') {
         const fullName = t.locations_id.completename || t.locations_id.name;
-        location = fullName || String(t.locations_id);
+        location = decodeHtmlEntities(fullName) || String(t.locations_id);
       } else if (t.locations_id) {
-        location = String(t.locations_id);
+        location = decodeHtmlEntities(String(t.locations_id));
       }
 
       // Technicien assigné (type=2) via sous-requête parallélisée
@@ -86,7 +104,7 @@ async function fetchTicketsFromInstance(instanceName, limit = 20) {
 
       return {
         id: t.id,
-        name: t.name || '',
+        name: decodeHtmlEntities(t.name) || '',
         status: t.status,
         priority: t.priority,
         category,
