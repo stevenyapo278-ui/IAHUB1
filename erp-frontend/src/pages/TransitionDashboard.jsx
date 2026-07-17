@@ -930,7 +930,18 @@ export default function TransitionDashboard() {
 
             {/* Instance GLPI */}
             <div className="flex flex-col gap-1.5 py-1.5">
-              <div className="text-[13px] font-semibold" style={{ color: 'var(--color-on-surface)' }}>Instance GLPI cible</div>
+              <div className="flex items-center justify-between">
+                <div className="text-[13px] font-semibold" style={{ color: 'var(--color-on-surface)' }}>Instance GLPI cible</div>
+                <span
+                  className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full ${
+                    (activeSettings?.activeGlpiInstance || 'glpi') === 'glpi'
+                      ? 'bg-emerald-500/10 text-emerald-600'
+                      : 'bg-amber-500/10 text-amber-600'
+                  }`}
+                >
+                  {(activeSettings?.activeGlpiInstance || 'glpi') === 'glpi' ? 'PROD' : 'DEV'}
+                </span>
+              </div>
               <select
                 value={activeSettings?.activeGlpiInstance || 'glpi'}
                 onChange={(e) => toggleSetting('activeGlpiInstance', e.target.value)}
@@ -941,6 +952,11 @@ export default function TransitionDashboard() {
                 <option value="glpi">GLPI Production</option>
                 <option value="glpi_dev">GLPI Développement</option>
               </select>
+              <p className="text-[10px] leading-relaxed" style={{ color: 'var(--color-on-surface-variant)' }}>
+                {(activeSettings?.activeGlpiInstance || 'glpi') === 'glpi'
+                  ? 'Les tickets sont envoyés vers la base réelle des techniciens.'
+                  : 'Les tickets sont envoyés vers l\'instance de test isolée. Aucun impact sur la production.'}
+              </p>
             </div>
 
             <div className="h-px" style={{ backgroundColor: 'var(--color-outline-variant)' }} />

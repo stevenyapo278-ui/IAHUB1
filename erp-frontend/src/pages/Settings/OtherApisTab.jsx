@@ -312,9 +312,29 @@ export default function OtherApisTab() {
                     className={inputClass}
                     value={form.serviceName}
                     onChange={(e) => setForm({ ...form, serviceName: e.target.value })}
-                    placeholder="ex: supabase, glpi"
+                    placeholder="glpi, glpi_dev, supabase…"
                     required
                   />
+                  {form.serviceName === 'glpi' && (
+                    <div className="flex items-start gap-1.5 mt-1.5 p-2 rounded-lg" style={{ backgroundColor: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.15)' }}>
+                      <span className="material-symbols-outlined text-[14px] shrink-0 mt-px" style={{ color: '#3b82f6' }}>info</span>
+                      <div className="text-[10px] leading-relaxed" style={{ color: 'var(--color-on-surface-variant)' }}>
+                        <strong style={{ color: '#3b82f6' }}>GLPI Production</strong> — utilisez <code className="bg-surface-container-high px-1 rounded font-mono">glpi</code> pour l'instance de production réelle des techniciens.
+                        <br />
+                        Pour une instance de <strong style={{ color: '#f59e0b' }}>Développement / Test</strong>, créez une seconde entrée avec le nom <code className="bg-surface-container-high px-1 rounded font-mono">glpi_dev</code>.
+                      </div>
+                    </div>
+                  )}
+                  {form.serviceName === 'glpi_dev' && (
+                    <div className="flex items-start gap-1.5 mt-1.5 p-2 rounded-lg" style={{ backgroundColor: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.15)' }}>
+                      <span className="material-symbols-outlined text-[14px] shrink-0 mt-px" style={{ color: '#f59e0b' }}>info</span>
+                      <div className="text-[10px] leading-relaxed" style={{ color: 'var(--color-on-surface-variant)' }}>
+                        <strong style={{ color: '#f59e0b' }}>GLPI Développement</strong> — instance de test isolée. Aucun impact sur la production.
+                        <br />
+                        Pour l'instance de <strong style={{ color: '#16a34a' }}>Production</strong>, créez une autre entrée avec le nom <code className="bg-surface-container-high px-1 rounded font-mono">glpi</code>.
+                      </div>
+                    </div>
+                  )}
                 </label>
                 <label className="flex flex-col gap-xs">
                   <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">URL de base</span>
@@ -403,7 +423,23 @@ export default function OtherApisTab() {
                     layout
                     className="hover:bg-surface-container-low/40 transition-colors"
                   >
-                    <td className="p-3 font-bold uppercase text-primary">{c.serviceName}</td>
+                    <td className="p-3">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold uppercase text-primary">{c.serviceName}</span>
+                        {c.serviceName === 'glpi' && (
+                          <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full" style={{ backgroundColor: 'rgba(22,163,74,0.1)', color: '#16a34a' }}>PROD</span>
+                        )}
+                        {c.serviceName === 'glpi_dev' && (
+                          <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full" style={{ backgroundColor: 'rgba(245,158,11,0.1)', color: '#f59e0b' }}>DEV</span>
+                        )}
+                      </div>
+                      {c.serviceName === 'glpi' && (
+                        <div className="text-[9px] mt-0.5" style={{ color: 'var(--color-on-surface-variant)' }}>Instance de production</div>
+                      )}
+                      {c.serviceName === 'glpi_dev' && (
+                        <div className="text-[9px] mt-0.5" style={{ color: 'var(--color-on-surface-variant)' }}>Instance de développement / test</div>
+                      )}
+                    </td>
                     <td className="p-3">
                       <input
                         className={`${inputClass} w-full`}
