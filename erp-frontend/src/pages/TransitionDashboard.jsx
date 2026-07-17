@@ -223,7 +223,8 @@ const TICKET_ATTRS = [
   { key: 'date', label: 'Date', icon: 'calendar_month', width: 'w-28' },
 ];
 
-const STATUS_LABELS = ['Nouveau', 'Ouvert', 'En cours', 'En attente', 'Résolu', 'Fermé'];
+// GLPI codes : 1=Nouveau, 2=Ouvert, 3=En cours, 4=En attente, 5=Résolu, 6=Fermé
+const STATUS_LABELS = { 1: 'Nouveau', 2: 'Ouvert', 3: 'En cours', 4: 'En attente', 5: 'Résolu', 6: 'Fermé' };
 const PRIORITY_LABELS = { 1: 'Faible', 2: 'Moyen', 3: 'Haut', 4: 'Urgent', 5: 'Critique' };
 const TYPE_LABELS = { 1: 'Incident', 2: 'Demande', 3: 'Projet' };
 

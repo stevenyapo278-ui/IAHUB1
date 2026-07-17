@@ -9,47 +9,79 @@ async function fetchTicketsFromInstance(instanceName, limit = 20) {
 
   const sessionToken = await glpiInitSession(config);
   try {
-    // Utilise search/Ticket avec expand_dropdowns=true pour obtenir les assignations
-    // et les suivis en UNE SEULE requête par instance (au lieu de 1 requête par ticket).
-    const searchRes = await fetch(`${config.baseUrl}/search/Ticket`, {
-      method: 'POST',
+    // Utilise GET /Ticket (API REST standard) avec expand_dropdowns=true
+    // pour obtenir les champs avec leurs vrais noms (name, status, priority, etc.)
+    // et résoudre les IDs des listes déroulantes (catégorie, etc.)
+    const ticketRes = await fetch(`${config.baseUrl}/Ticket?expand_dropdowns=true&range=0-${limit - 1}`, {
       headers: {
         'App-Token': config.appToken,
         'Session-Token': sessionToken,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        criteria: [{ field: 1, searchtype: 2, value: '%' }],
-        range: `0-${limit - 1}`,
-        // expand_dropdowns résout les IDs en labels (user, catégorie, etc.)
-        forcedisplay: [1, 2, 3, 4, 5, 12, 14, 15, 19, 21, 22, 23, 33, 34, 65],
-      }),
     });
 
-    if (!searchRes.ok) {
-      // Fallback : simple GET /Ticket si search échoue
-      const fallbackRes = await fetch(`${config.baseUrl}/Ticket?range=0-${limit - 1}`, {
-        headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
-      });
-      if (!fallbackRes.ok) throw new Error(`HTTP ${fallbackRes.status}`);
-      const tickets = await fallbackRes.json();
-      const enriched = await enrichTicketsSimple(config, sessionToken, tickets);
-      return { instance: instanceName, tickets: enriched, error: null };
-    }
+    if (!ticketRes.ok) throw new Error(`HTTP ${ticketRes.status}`);
 
-    const data = await searchRes.json();
-    const tickets = Array.isArray(data.data) ? data.data : [];
+    const tickets = await ticketRes.json();
+    const ticketList = Array.isArray(tickets) ? tickets : [];
 
-    const enriched = tickets.map((t) => ({
-      id: t[2],
-      name: t[1] || '',
-      status: t[12],
-      priority: t[3],
-      category: t[7],
-      type: t[14],
-      date: t[15],
-      assignedTo: t[34] || null, // Technicien assigné (résolu par expand_dropdowns)
-      followupCount: t[65] || 0,  // Nombre de suivis
+    // Enrichir chaque ticket avec l'assignation et le nombre de suivis
+    const headers = { 'App-Token': config.appToken, 'Session-Token': sessionToken };
+    const enriched = await Promise.all(ticketList.map(async (t) => {
+      let assignedTo = null;
+      let followupCount = 0;
+      let category = null;
+
+      // Récupérer la catégorie (expand_dropdowns la met dans un champ séparé)
+      if (t.itilcategories_id && typeof t.itilcategories_id === 'object') {
+        category = t.itilcategories_id.name || t.itilcategories_id.completename || String(t.itilcategories_id);
+      } else if (t.itilcategories) {
+        category = typeof t.itilcategories === 'string' ? t.itilcategories : t.itilcategories.name || t.itilcategories.completename;
+      } else if (t.itilcategories_id) {
+        category = String(t.itilcategories_id);
+      }
+
+      // Technicien assigné (type=2) via sous-requête parallélisée
+      try {
+        const usersRes = await fetch(`${config.baseUrl}/Ticket/${t.id}/Ticket_User`, { headers });
+        if (usersRes.ok) {
+          const users = await usersRes.json();
+          const tech = (Array.isArray(users) ? users : []).find((u) => u.type === 2);
+
+          if (tech) {
+            if (tech.users_id && typeof tech.users_id === 'object') {
+              assignedTo = tech.users_id.name || tech.users_id.realname || `User#${tech.users_id.id}`;
+            } else {
+              const userRes = await fetch(`${config.baseUrl}/User/${tech.users_id}`, { headers });
+              if (userRes.ok) {
+                const u = await userRes.json();
+                assignedTo = u.realname || u.name || `User#${tech.users_id}`;
+              }
+            }
+          }
+        }
+      } catch { /* best-effort */ }
+
+      // Nombre de suivis via Content-Range
+      try {
+        const fuRes = await fetch(`${config.baseUrl}/Ticket/${t.id}/ITILFollowup?range=0-0`, { headers });
+        if (fuRes.ok) {
+          const contentRange = fuRes.headers.get('content-range');
+          followupCount = contentRange ? parseInt(contentRange.split('/')[1], 10) : 0;
+        }
+      } catch { /* best-effort */ }
+
+      return {
+        id: t.id,
+        name: t.name || '',
+        status: t.status,
+        priority: t.priority,
+        category,
+        type: t.type,
+        date: t.date_creation || t.date,
+        assignedTo,
+        followupCount,
+      };
     }));
 
     return { instance: instanceName, tickets: enriched, error: null };
@@ -58,54 +90,6 @@ async function fetchTicketsFromInstance(instanceName, limit = 20) {
   } finally {
     await glpiKillSession(config, sessionToken);
   }
-}
-
-// Fallback simple quand search/Ticket n'est pas disponible
-async function enrichTicketsSimple(config, sessionToken, tickets) {
-  const headers = { 'App-Token': config.appToken, 'Session-Token': sessionToken };
-  const results = [];
-
-  for (const t of Array.isArray(tickets) ? tickets : []) {
-    let assignedTo = null;
-    let followupCount = 0;
-
-    try {
-      const usersRes = await fetch(`${config.baseUrl}/Ticket/${t.id}/Ticket_User`, { headers });
-      if (usersRes.ok) {
-        const users = await usersRes.json();
-        const tech = (Array.isArray(users) ? users : []).find((u) => u.type === 2);
-        if (tech) {
-          const userRes = await fetch(`${config.baseUrl}/User/${tech.users_id}`, { headers });
-          if (userRes.ok) {
-            const u = await userRes.json();
-            assignedTo = u.realname || u.name || `User#${tech.users_id}`;
-          }
-        }
-      }
-    } catch { /* best-effort */ }
-
-    try {
-      const fuRes = await fetch(`${config.baseUrl}/Ticket/${t.id}/ITILFollowup?range=0-0`, { headers });
-      if (fuRes.ok) {
-        const contentRange = fuRes.headers.get('content-range');
-        followupCount = contentRange ? parseInt(contentRange.split('/')[1], 10) : 0;
-      }
-    } catch { /* best-effort */ }
-
-    results.push({
-      id: t.id,
-      name: t.name || '',
-      status: t.status,
-      priority: t.priority,
-      category: t.itilcategories_id,
-      type: t.type,
-      date: t.date_creation,
-      assignedTo,
-      followupCount,
-    });
-  }
-
-  return results;
 }
 
 /* ── Appel IA via le provider configuré (avec fallback multi-clés) ────── */
