@@ -313,4 +313,20 @@ router.get('/compare', async (req, res) => {
   }
 });
 
+// ── Analyse IA des tickets PROD vs DEV ───────────────────────────────────
+// Utilise le provider IA configuré pour analyser les différences entre les
+// tickets des instances GLPI (glpi + glpi_dev) et proposer des améliorations.
+const { analyzeTicketDifferences } = require('../services/aiTicketComparison');
+
+router.post('/analyze', async (req, res) => {
+  try {
+    const { limit } = req.body;
+    const ticketLimit = Math.min(Math.max(parseInt(limit) || 20, 5), 50);
+    const result = await analyzeTicketDifferences({ limit: ticketLimit });
+    return res.json(result);
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;

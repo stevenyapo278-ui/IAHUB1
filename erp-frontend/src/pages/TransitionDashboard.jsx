@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -207,6 +207,230 @@ function ModeCard({ mode, isActive, onClick }) {
         {mode.description}
       </p>
     </motion.button>
+  );
+}
+
+/* ── Section Analyse IA ──────────────────────────────────── */
+function AiAnalysisSection() {
+  const [analysis, setAnalysis] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [expandedCode, setExpandedCode] = useState(null);
+  const scrollRef = useRef(null);
+
+  async function runAnalysis() {
+    setLoading(true);
+    setError('');
+    setAnalysis(null);
+    try {
+      const { data } = await api.post('/transition/analyze', { limit: 20 });
+      setAnalysis(data);
+      // Scroll vers la section après le chargement
+      setTimeout(() => {
+        scrollRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 300);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur lors de l\'analyse IA');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function NoteBadge({ note }) {
+    const color = note >= 8 ? '#16a34a' : note >= 5 ? '#f59e0b' : '#ef4444';
+    return (
+      <span
+        className="inline-flex items-center justify-center w-7 h-7 rounded-full text-[11px] font-bold"
+        style={{ backgroundColor: `${color}15`, color }}
+      >
+        {note}/10
+      </span>
+    );
+  }
+
+  return (
+    <motion.div
+      ref={scrollRef}
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.22 }}
+      className="bento-card p-4"
+    >
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--color-on-surface)' }}>
+          <span className="material-symbols-outlined text-lg" style={{ color: '#8b5cf6' }}>psychology</span>
+          Analyse IA des tickets
+        </h3>
+        <button
+          onClick={runAnalysis}
+          disabled={loading}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl border font-semibold text-[12px] transition-all duration-300"
+          style={{
+            borderColor: loading ? 'var(--color-outline-variant)' : '#8b5cf6',
+            backgroundColor: loading ? 'transparent' : 'rgba(139,92,246,0.1)',
+            color: loading ? 'var(--color-on-surface-variant)' : '#8b5cf6',
+            cursor: loading ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {loading ? (
+            <><span className="material-symbols-outlined text-sm animate-spin">progress_activity</span> Analyse en cours...</>
+          ) : (
+            <><span className="material-symbols-outlined text-sm">psychology</span> Lancer l'analyse IA</>
+          )}
+        </button>
+      </div>
+
+      {error && (
+        <div className="p-3 mb-3 rounded-xl border border-red-500/20 bg-red-500/5 text-red-500 text-[12px] font-medium">
+          {error}
+        </div>
+      )}
+
+      {loading && !analysis && (
+        <div className="space-y-3">
+          <div className="h-16 rounded-xl animate-pulse" style={{ backgroundColor: 'var(--color-surface-container-high)' }} />
+          <div className="grid grid-cols-2 gap-3">
+            <div className="h-24 rounded-xl animate-pulse" style={{ backgroundColor: 'var(--color-surface-container-high)' }} />
+            <div className="h-24 rounded-xl animate-pulse" style={{ backgroundColor: 'var(--color-surface-container-high)' }} />
+          </div>
+        </div>
+      )}
+
+      {analysis && !analysis.success && (
+        <div>
+          <div className="p-3 rounded-xl border border-amber-500/20 bg-amber-500/5 text-amber-600 text-[12px] font-medium mb-3">
+            L'analyse IA n'a pas pu aboutir complètement
+          </div>
+          {analysis.error && <p className="text-[12px] text-red-500 mb-2">{analysis.error}</p>}
+          {analysis.raw && (
+            <pre className="text-[10px] overflow-auto max-h-32 bg-surface-container-high rounded-xl p-3">
+              {analysis.raw}
+            </pre>
+          )}
+        </div>
+      )}
+
+      {analysis?.success && analysis?.analysis && (
+        <div className="space-y-4">
+          {/* Cartes de notes */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {[
+              { key: 'qualiteNoms', label: 'Qualité des noms', icon: 'badge' },
+              { key: 'assignations', label: 'Assignations', icon: 'group' },
+              { key: 'categoriesPriorites', label: 'Catégories & Priorités', icon: 'category' },
+              { key: 'ecartsProdDev', label: 'Écarts PROD/DEV', icon: 'compare_arrows' },
+            ].map(item => {
+              const data = analysis.analysis[item.key];
+              return (
+                <div key={item.key} className="p-3 rounded-xl border" style={{ borderColor: 'var(--color-outline-variant)' }}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="material-symbols-outlined text-sm" style={{ color: 'var(--color-on-surface-variant)' }}>{item.icon}</span>
+                    <span className="text-[11px] font-semibold" style={{ color: 'var(--color-on-surface)' }}>{item.label}</span>
+                  </div>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <NoteBadge note={data?.note ?? 5} />
+                    <span className="text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>{data?.analyse?.substring(0, 80) || ''}</span>
+                  </div>
+                  {data?.problemes?.length > 0 && (
+                    <div className="mt-1.5 space-y-0.5">
+                      {data.problemes.slice(0, 2).map((p, i) => (
+                        <p key={i} className="text-[10px] flex items-start gap-1" style={{ color: '#ef4444' }}>
+                          <span className="material-symbols-outlined text-[10px] shrink-0 mt-px">circle</span>
+                          {p}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Améliorations code */}
+          {analysis.analysis.ameliorationsCode?.length > 0 && (
+            <div>
+              <h4 className="text-[12px] font-bold mb-2 flex items-center gap-1.5" style={{ color: 'var(--color-on-surface)' }}>
+                <span className="material-symbols-outlined text-sm">code</span>
+                Améliorations du code proposées
+              </h4>
+              <div className="space-y-2">
+                {analysis.analysis.ameliorationsCode.map((am, i) => (
+                  <div key={i} className="rounded-xl border overflow-hidden" style={{ borderColor: 'var(--color-outline-variant)' }}>
+                    <button
+                      onClick={() => setExpandedCode(expandedCode === i ? null : i)}
+                      className="w-full flex items-center justify-between p-3 text-left hover:bg-surface-container-low/50 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <span className="text-[11px] px-1.5 py-0.5 rounded font-semibold uppercase" style={{
+                          backgroundColor: am.impact === 'HAUT' ? 'rgba(239,68,68,0.1)' : am.impact === 'MOYEN' ? 'rgba(245,158,11,0.1)' : 'rgba(59,130,246,0.1)',
+                          color: am.impact === 'HAUT' ? '#ef4444' : am.impact === 'MOYEN' ? '#f59e0b' : '#3b82f6',
+                        }}>{am.impact}</span>
+                        <span className="text-[12px] font-semibold truncate" style={{ color: 'var(--color-on-surface)' }}>
+                          {am.description}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded" style={{
+                          backgroundColor: am.effort === 'FAIBLE' ? 'rgba(22,163,74,0.1)' : am.effort === 'MOYEN' ? 'rgba(245,158,11,0.1)' : 'rgba(239,68,68,0.1)',
+                          color: am.effort === 'FAIBLE' ? '#16a34a' : am.effort === 'MOYEN' ? '#f59e0b' : '#ef4444',
+                        }}>{am.effort}</span>
+                        <span className={`material-symbols-outlined text-sm transition-transform ${expandedCode === i ? 'rotate-180' : ''}`}
+                          style={{ color: 'var(--color-on-surface-variant)' }}>expand_more</span>
+                      </div>
+                    </button>
+                    {expandedCode === i && (
+                      <div className="px-3 pb-3 space-y-2 border-t pt-2" style={{ borderColor: 'var(--color-outline-variant)' }}>
+                        <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-on-surface-variant)' }}>
+                          {am.details}
+                        </p>
+                        {am.fichiers?.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {am.fichiers.map((f, fi) => (
+                              <span key={fi} className="text-[10px] px-2 py-0.5 rounded-full font-mono" style={{
+                                backgroundColor: 'rgba(139,92,246,0.08)',
+                                color: '#8b5cf6',
+                              }}>
+                                {f}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Synthèse */}
+          {analysis.analysis.synthese && (
+            <div className="p-3 rounded-xl border" style={{
+              borderColor: 'rgba(139,92,246,0.2)',
+              backgroundColor: 'rgba(139,92,246,0.03)',
+            }}>
+              <div className="flex items-center gap-1.5 mb-1">
+                <span className="material-symbols-outlined text-sm" style={{ color: '#8b5cf6' }}>summarize</span>
+                <span className="text-[11px] font-bold" style={{ color: 'var(--color-on-surface)' }}>Synthèse</span>
+              </div>
+              <p className="text-[12px] leading-relaxed" style={{ color: 'var(--color-on-surface-variant)' }}>{analysis.analysis.synthese}</p>
+            </div>
+          )}
+
+          {/* Métadonnées */}
+          <div className="flex items-center justify-between text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>
+            <span>Tickets PROD: {analysis.prodTickets?.length || 0} · DEV: {analysis.devTickets?.length || 0}</span>
+            <span>ERP: {analysis.erp?.total || 0} tickets (dont {analysis.erp?.last30 || 0} récents)</span>
+          </div>
+        </div>
+      )}
+
+      {!analysis && !loading && !error && (
+        <p className="text-[12px] py-4 text-center" style={{ color: 'var(--color-on-surface-variant)' }}>
+          Lancez une analyse IA pour comparer les tickets PROD et DEV, détecter les anomalies et obtenir des recommandations d'amélioration du code.
+        </p>
+      )}
+    </motion.div>
   );
 }
 
@@ -1111,6 +1335,11 @@ export default function TransitionDashboard() {
           </div>
         )}
       </motion.div>
+
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      {/* ANALYSE IA DES TICKETS */}
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      <AiAnalysisSection />
 
       {/* ══════════════════════════════════════════════════════════════════ */}
       {/* TIMELINE DES ÉVÉNEMENTS RÉCENTS */}
