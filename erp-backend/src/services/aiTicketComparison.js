@@ -31,6 +31,7 @@ async function fetchTicketsFromInstance(instanceName, limit = 20) {
       let assignedTo = null;
       let followupCount = 0;
       let category = null;
+      let location = null;
 
       // Récupérer la catégorie (expand_dropdowns la met dans un champ séparé)
       if (t.itilcategories_id && typeof t.itilcategories_id === 'object') {
@@ -39,6 +40,13 @@ async function fetchTicketsFromInstance(instanceName, limit = 20) {
         category = typeof t.itilcategories === 'string' ? t.itilcategories : t.itilcategories.name || t.itilcategories.completename;
       } else if (t.itilcategories_id) {
         category = String(t.itilcategories_id);
+      }
+
+      // Récupérer le lieu (locations_id) — expand_dropdowns renvoie un objet { id, name, completename }
+      if (t.locations_id && typeof t.locations_id === 'object') {
+        location = t.locations_id.completename || t.locations_id.name || String(t.locations_id);
+      } else if (t.locations_id) {
+        location = String(t.locations_id);
       }
 
       // Technicien assigné (type=2) via sous-requête parallélisée
@@ -81,6 +89,7 @@ async function fetchTicketsFromInstance(instanceName, limit = 20) {
         date: t.date_creation || t.date,
         assignedTo,
         followupCount,
+        location,
       };
     }));
 
@@ -244,11 +253,11 @@ async function analyzeTicketDifferences({ limit = 20 } = {}) {
   const activeInstance = settings?.activeGlpiInstance || 'glpi';
 
   const prodTicketsText = prodTickets.map((t) =>
-    `  #${t.id} "${t.name}" | Priorité: ${t.priority} | Statut: ${t.status} | Assigné: ${t.assignedTo || 'N/A'} | Suivis: ${t.followupCount}`
+    `  #${t.id} "${t.name}" | Priorité: ${t.priority} | Statut: ${t.status} | Assigné: ${t.assignedTo || 'N/A'} | Lieu: ${t.location || 'N/A'} | Suivis: ${t.followupCount}`
   ).join('\n');
 
   const devTicketsText = devTickets.map((t) =>
-    `  #${t.id} "${t.name}" | Priorité: ${t.priority} | Statut: ${t.status} | Assigné: ${t.assignedTo || 'N/A'} | Suivis: ${t.followupCount}`
+    `  #${t.id} "${t.name}" | Priorité: ${t.priority} | Statut: ${t.status} | Assigné: ${t.assignedTo || 'N/A'} | Lieu: ${t.location || 'N/A'} | Suivis: ${t.followupCount}`
   ).join('\n');
 
   const prompt = `Tu es un consultant expert en ITIL et en qualité de données ITSM. Tu analyses les tickets de deux instances GLPI d'une même entreprise pour détecter des problèmes et proposer des améliorations.

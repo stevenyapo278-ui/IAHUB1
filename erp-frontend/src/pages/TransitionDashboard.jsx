@@ -529,6 +529,7 @@ const TICKET_ATTRS = [
   { key: 'status', label: 'Statut', icon: 'task_alt', width: 'w-20' },
   { key: 'priority', label: 'Priorité', icon: 'signal_cellular_alt', width: 'w-16' },
   { key: 'category', label: 'Catégorie', icon: 'category', width: 'w-24' },
+  { key: 'location', label: 'Lieu', icon: 'pin_drop', width: 'w-28' },
   { key: 'type', label: 'Type', icon: 'sell', width: 'w-20' },
   { key: 'assignedTo', label: 'Assigné à', icon: 'person', width: 'w-28' },
   { key: 'followupCount', label: 'Suivis', icon: 'comment', width: 'w-14' },
