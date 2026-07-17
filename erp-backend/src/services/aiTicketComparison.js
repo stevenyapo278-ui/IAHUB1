@@ -41,20 +41,41 @@ async function fetchTicketsFromInstance(instanceName, limit = 20) {
     const tickets = await ticketRes.json();
     const ticketList = Array.isArray(tickets) ? tickets : [];
 
-    // Helper pour résoudre un nom d'utilisateur GLPI (expand_dropdowns ou requête User séparée)
+    // Helper : construire un nom d'affichage à partir du User GLPI
+    function formatUserName(u) {
+      if (!u || typeof u !== 'object') return null;
+      // Certaines versions de GLPI retournent un tableau [{...}] au lieu d'un objet
+      if (Array.isArray(u)) u = u[0];
+      if (!u) return null;
+
+      const realname = u.realname || '';
+      const firstname = u.firstname || '';
+      const login = u.name || '';
+
+      // Priorité : "Prénom Nom" → "Nom" → "Prénom" → login → null
+      const fullName = [firstname, realname].filter(Boolean).join(' ').trim();
+      return decodeHtmlEntities(fullName || login) || null;
+    }
+
+    // Helper pour résoudre un nom d'utilisateur GLPI
     async function resolveUserName(userEntry) {
       if (!userEntry) return null;
+
+      // Cas 1 : expand_dropdowns a déjà résolu l'utilisateur (objet { id, name, ... })
       if (userEntry.users_id && typeof userEntry.users_id === 'object') {
-        return decodeHtmlEntities(userEntry.users_id.name || userEntry.users_id.realname) || `User#${userEntry.users_id.id}`;
+        return formatUserName(userEntry.users_id) || `ID#${userEntry.users_id.id}`;
       }
+
+      // Cas 2 : users_id est un nombre → on appelle /User/{id}
       try {
         const userRes = await fetch(`${config.baseUrl}/User/${userEntry.users_id}`, { headers });
         if (userRes.ok) {
           const u = await userRes.json();
-          return decodeHtmlEntities(u.realname || u.name) || `User#${userEntry.users_id}`;
+          return formatUserName(u) || `ID#${userEntry.users_id}`;
         }
       } catch { /* best-effort */ }
-      return `User#${userEntry.users_id}`;
+
+      return `ID#${userEntry.users_id}`;
     }
 
     // Enrichir chaque ticket avec l'assignation et le nombre de suivis
