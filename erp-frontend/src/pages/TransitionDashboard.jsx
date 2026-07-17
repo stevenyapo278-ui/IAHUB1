@@ -4,6 +4,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import api from '../api/client';
 
+/* ── Helper : décoder les entités HTML (sécurité frontend) ──────────── */
+function decodeHtmlEntities(str) {
+  if (!str || typeof str !== 'string') return str;
+  const txt = document.createElement('textarea');
+  txt.innerHTML = str;
+  return txt.value;
+}
+
 /* ── Phases de la transition ──────────────────────────────────────────── */
 const TRANSITION_PHASES = [
   { id: 'AUDIT', label: 'Audit', icon: 'visibility', color: '#f59e0b', targetDays: 7, description: 'Analyse lecture seule' },
@@ -632,10 +640,12 @@ function TicketAttributesPanel({ tickets, label, color, error }) {
                           display = val ? formatDate(val) : '-';
                         } else if (attr.key === 'category') {
                           // Hiérarchie affichée dans le <td> via categoryHierarchy si multi-niveaux
-                          display = val || '-';
+                          // Sécurité : décoder les entités HTML résiduelles
+                          display = decodeHtmlEntities(val) || '-';
                         } else if (attr.key === 'location') {
                           // Hiérarchie affichée dans le <td> via locationHierarchy si multi-niveaux
-                          display = val || '-';
+                          // Sécurité : décoder les entités HTML résiduelles
+                          display = decodeHtmlEntities(val) || '-';
                         } else if (attr.key === 'requester') {
                           display = val || 'Non renseigné';
                         } else if (attr.key === 'assignedTo') {

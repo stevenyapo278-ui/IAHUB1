@@ -2,19 +2,28 @@ const prisma = require('../prismaClient');
 const { getGlpiConfig, glpiInitSession, glpiKillSession } = require('../utils/glpiSync');
 
 /* ── Helper : décoder les entités HTML provenant de GLPI ────────────── */
+// Note : GLPI stocke souvent les caractères > < & sous forme d'entités HTML
+// (&#62; = >, &#60; = <, &#38; = &). Parfois même double-encodées (ex: &amp;#62;).
+// On boucle jusqu'à stabilisation pour gérer tous les niveaux d'encodage.
 
 function decodeHtmlEntities(str) {
   if (!str || typeof str !== 'string') return str;
-  return str
-    .replace(/&#62;/g, '>')
-    .replace(/&gt;/g, '>')
-    .replace(/&#60;/g, '<')
-    .replace(/&lt;/g, '<')
-    .replace(/&#38;/g, '&')
-    .replace(/&amp;/g, '&')
-    .replace(/&#39;/g, "'")
-    .replace(/&quot;/g, '"')
-    .replace(/&#34;/g, '"');
+  let prev;
+  let result = str;
+  do {
+    prev = result;
+    result = result
+      .replace(/&amp;/g, '&')   // Doit être EN PREMIER pour gérer le double-encodage (&amp;#62; -> &#62; -> >)
+      .replace(/&#38;/g, '&')
+      .replace(/&#62;/g, '>')
+      .replace(/&gt;/g, '>')
+      .replace(/&#60;/g, '<')
+      .replace(/&lt;/g, '<')
+      .replace(/&#39;/g, "'")
+      .replace(/&quot;/g, '"')
+      .replace(/&#34;/g, '"');
+  } while (result !== prev); // Boucle jusqu'à ce qu'il n'y ait plus rien à décoder
+  return result;
 }
 
 /* ── Récupération des tickets des deux instances ──────────────────────── */
