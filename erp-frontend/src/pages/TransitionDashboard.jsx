@@ -529,7 +529,7 @@ const TICKET_ATTRS = [
   { key: 'status', label: 'Statut', icon: 'task_alt', width: 'w-20' },
   { key: 'priority', label: 'Priorité', icon: 'signal_cellular_alt', width: 'w-16' },
   { key: 'category', label: 'Catégorie', icon: 'category', width: 'w-24' },
-  { key: 'location', label: 'Lieu', icon: 'pin_drop', width: 'w-28' },
+  { key: 'location', label: 'Lieu', icon: 'pin_drop', width: 'min-w-[160px] flex-1' },
   { key: 'type', label: 'Type', icon: 'sell', width: 'w-20' },
   { key: 'assignedTo', label: 'Assigné à', icon: 'person', width: 'w-28' },
   { key: 'followupCount', label: 'Suivis', icon: 'comment', width: 'w-14' },
@@ -628,6 +628,10 @@ function TicketAttributesPanel({ tickets, label, color, error }) {
                           display = TYPE_LABELS[val] || val || '-';
                         } else if (attr.key === 'date') {
                           display = val ? formatDate(val) : '-';
+                        } else if (attr.key === 'location') {
+                          // La hiérarchie est affichée directement dans le <td>
+                          // via t.locationHierarchy si multi-niveaux
+                          display = val || '-';
                         } else if (attr.key === 'assignedTo') {
                           display = val || 'Non assigné';
                         } else if (attr.key === 'followupCount') {
@@ -638,7 +642,32 @@ function TicketAttributesPanel({ tickets, label, color, error }) {
 
                         return (
                           <td key={attr.key} className={`${attr.width} py-2 px-1`} style={{ color: 'var(--color-on-surface)' }}>
-                            {badgeColor ? (
+                            {attr.key === 'location' && t.locationHierarchy?.length > 1 ? (
+                              <div className="flex flex-wrap gap-1 items-center">
+                                {t.locationHierarchy.map((level, li) => (
+                                  <span key={li} className="inline-flex items-center">
+                                    <span
+                                      className="px-1.5 py-0.5 rounded text-[9px] font-medium"
+                                      style={{
+                                        backgroundColor: li === t.locationHierarchy.length - 1
+                                          ? 'rgba(139,92,246,0.12)'
+                                          : 'var(--color-surface-container-high)',
+                                        color: li === t.locationHierarchy.length - 1
+                                          ? '#8b5cf6'
+                                          : 'var(--color-on-surface-variant)',
+                                      }}
+                                    >
+                                      {level}
+                                    </span>
+                                    {li < t.locationHierarchy.length - 1 && (
+                                      <span className="text-[8px] px-1" style={{ color: 'var(--color-on-surface-variant)' }}>
+                                        <span className="material-symbols-outlined text-[10px]">chevron_right</span>
+                                      </span>
+                                    )}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : badgeColor ? (
                               <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold"
                                 style={{ backgroundColor: `${badgeColor}12`, color: badgeColor }}>
                                 {display}

@@ -43,8 +43,11 @@ async function fetchTicketsFromInstance(instanceName, limit = 20) {
       }
 
       // Récupérer le lieu (locations_id) — expand_dropdowns renvoie un objet { id, name, completename }
+      // Le completename contient la hiérarchie complète : "Headquarters > Floor 3 > Room 301"
+      // On le parse pour obtenir les sous-lieux individuellement
       if (t.locations_id && typeof t.locations_id === 'object') {
-        location = t.locations_id.completename || t.locations_id.name || String(t.locations_id);
+        const fullName = t.locations_id.completename || t.locations_id.name;
+        location = fullName || String(t.locations_id);
       } else if (t.locations_id) {
         location = String(t.locations_id);
       }
@@ -90,6 +93,9 @@ async function fetchTicketsFromInstance(instanceName, limit = 20) {
         assignedTo,
         followupCount,
         location,
+        locationHierarchy: location
+          ? location.split(/\s*>\s*/).filter(Boolean).map((s) => s.trim())
+          : null,
       };
     }));
 
