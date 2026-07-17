@@ -171,19 +171,38 @@ async function makeAIRequest(providerName, baseUrl, apiKey, model, prompt, maxTo
   }
 
   if (providerName === 'gemini') {
-    const m = model || 'gemini-flash-lite-latest';
-    const res = await fetch(`${baseUrl}/models/${m}:generateContent`, {
-      method: 'POST',
-      signal: AbortSignal.timeout(60000),
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: maxTokens, thinkingConfig: { thinkingBudget: 0 } },
-      }),
-    });
-    if (!res.ok) throw new Error(`Gemini ${res.status}: ${await res.text()}`);
-    const data = await res.json();
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    // Liste de modèles de secours quand le modèle configuré n'est plus disponible
+    const fallbackModels = [
+      model,                                           // Modèle configuré (d'abord)
+      'gemini-flash-lite-latest',                       // Fallback 1 : flash léger
+      'gemini-1.5-flash',                               // Fallback 2 : 1.5 flash
+      'gemini-2.0-flash',                               // Fallback 3 : 2.0 flash (nouveau)
+    ].filter(Boolean);
+
+    let lastErr = null;
+    for (const m of fallbackModels) {
+      try {
+        const res = await fetch(`${baseUrl}/models/${m}:generateContent`, {
+          method: 'POST',
+          signal: AbortSignal.timeout(60000),
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.1, maxOutputTokens: maxTokens, thinkingConfig: { thinkingBudget: 0 } },
+          }),
+        });
+        if (!res.ok) {
+          lastErr = `Gemini ${res.status}: ${await res.text()}`;
+          continue; // Essayer le prochain modèle de secours
+        }
+        const data = await res.json();
+        return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      } catch (e) {
+        lastErr = e.message;
+        continue;
+      }
+    }
+    throw new Error(lastErr || 'Tous les modèles Gemini ont échoué');
   }
 
   // OpenAI-compatible (OpenAI, Mistral, NVIDIA, etc.)
