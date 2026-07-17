@@ -4,6 +4,22 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import api from '../api/client';
 
+/* ── Phases de la transition ──────────────────────────────────────────── */
+const TRANSITION_PHASES = [
+  { id: 'AUDIT', label: 'Audit', icon: 'visibility', color: '#f59e0b', targetDays: 7, description: 'Analyse lecture seule' },
+  { id: 'SIMULATION', label: 'Simulation', icon: 'science', color: '#3b82f6', targetDays: 7, description: 'Tests en DEV' },
+  { id: 'HYBRID', label: 'Hybride', icon: 'account_tree', color: '#8b5cf6', targetDays: 7, description: 'Shadow deployment' },
+  { id: 'PRODUCTION', label: 'Production', icon: 'rocket_launch', color: '#16a34a', targetDays: 0, description: 'Go Live' },
+];
+
+function getPhaseStatus(currentModeId, phaseId) {
+  const idx = TRANSITION_PHASES.findIndex(p => p.id === phaseId);
+  const curIdx = TRANSITION_PHASES.findIndex(p => p.id === currentModeId);
+  if (idx < curIdx) return 'done';
+  if (idx === curIdx) return 'current';
+  return 'pending';
+}
+
 /* ── Constantes des modes ─────────────────────────────────────────────── */
 const MODES = [
   {
@@ -210,6 +226,302 @@ function ModeCard({ mode, isActive, onClick }) {
   );
 }
 
+/* ── Progression de la transition ────────────────────────────────────── */
+function TransitionProgressTracker({ currentModeId, goLiveDate }) {
+  const daysSinceGoLive = goLiveDate
+    ? Math.floor((Date.now() - new Date(goLiveDate).getTime()) / 86400000)
+    : null;
+  const curIdx = Math.max(0, TRANSITION_PHASES.findIndex(p => p.id === currentModeId));
+  const progress = Math.round((curIdx / (TRANSITION_PHASES.length - 1)) * 100);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.05 }}
+      className="bento-card p-4"
+    >
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-[12px] font-bold flex items-center gap-1.5" style={{ color: 'var(--color-on-surface)' }}>
+          <span className="material-symbols-outlined text-sm" style={{ color: '#8b5cf6' }}>flag</span>
+          Progression de la transition
+        </h3>
+        <div className="flex items-center gap-2 text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>
+          <span className="font-semibold" style={{ color: '#8b5cf6' }}>{progress}%</span>
+          {daysSinceGoLive !== null && (
+            <span>· {daysSinceGoLive >= 0 ? `J+${daysSinceGoLive}` : `J${daysSinceGoLive}`}</span>
+          )}
+        </div>
+      </div>
+
+      {/* Barre de progression */}
+      <div className="h-2 rounded-full mb-3 overflow-hidden" style={{ backgroundColor: 'var(--color-outline-variant)' }}>
+        <motion.div
+          initial={{ width: 0 }}
+          animate={{ width: `${progress}%` }}
+          transition={{ duration: 0.8, ease: 'easeOut' }}
+          className="h-full rounded-full"
+          style={{
+            background: 'linear-gradient(90deg, #f59e0b 0%, #3b82f6 33%, #8b5cf6 66%, #16a34a 100%)',
+          }}
+        />
+      </div>
+
+      {/* Timeline des phases */}
+      <div className="flex items-start justify-between">
+        {TRANSITION_PHASES.map((phase, i) => {
+          const status = getPhaseStatus(currentModeId, phase.id);
+          const isLast = i === TRANSITION_PHASES.length - 1;
+
+          return (
+            <div key={phase.id} className="flex-1 relative">
+              {/* Ligne de connexion entre les phases */}
+              {!isLast && (
+                <div
+                  className="absolute top-3 left-[calc(50%+12px)] right-[calc(50%-12px)] h-px"
+                  style={{
+                    backgroundColor: status === 'pending' ? 'var(--color-outline-variant)' : phase.color,
+                  }}
+                />
+              )}
+
+              <div className="flex flex-col items-center gap-1.5">
+                {/* Cercle */}
+                <div
+                  className="w-7 h-7 rounded-full flex items-center justify-center text-[12px] transition-all duration-500"
+                  style={{
+                    backgroundColor: status === 'done' ? `${phase.color}20` : status === 'current' ? `${phase.color}20` : 'var(--color-surface-container-high)',
+                    border: `2px solid ${status === 'pending' ? 'var(--color-outline-variant)' : phase.color}`,
+                    color: status === 'pending' ? 'var(--color-on-surface-variant)' : phase.color,
+                  }}
+                >
+                  {status === 'done' ? (
+                    <span className="material-symbols-outlined text-[12px]" style={{ fontVariationSettings: "'FILL' 1" }}>check</span>
+                  ) : (
+                    <span className="material-symbols-outlined text-[12px]">{phase.icon}</span>
+                  )}
+                </div>
+
+                {/* Label */}
+                <span
+                  className={`text-[9px] font-semibold text-center leading-tight ${
+                    status === 'pending' ? 'opacity-40' : ''
+                  }`}
+                  style={{ color: status === 'current' ? phase.color : 'var(--color-on-surface-variant)' }}
+                >
+                  {phase.label}
+                </span>
+
+                {/* Mini description */}
+                <span className="text-[8px] text-center leading-none" style={{ color: 'var(--color-on-surface-variant)' }}>
+                  {phase.targetDays > 0 ? `~${phase.targetDays}j` : ''}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Prochaine étape */}
+      {curIdx >= 0 && curIdx < TRANSITION_PHASES.length - 1 && (
+        <div className="mt-3 pt-3 border-t flex items-center gap-2" style={{ borderColor: 'var(--color-outline-variant)' }}>
+          <span className="material-symbols-outlined text-[14px]" style={{ color: '#8b5cf6' }}>trending_flat</span>
+          <span className="text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>
+            Prochaine étape : <strong style={{ color: TRANSITION_PHASES[curIdx + 1].color }}>{TRANSITION_PHASES[curIdx + 1].label}</strong> — {TRANSITION_PHASES[curIdx + 1].description}
+          </span>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+/* ── Qualité des décisions ───────────────────────────────────────────── */
+function DecisionQualityCard({ stats }) {
+  const rawTotal = stats.emailsProcessed || 0;
+  const newTickets = stats.emailsNewTicket || 0;
+  const followups = stats.emailsFollowup || 0;
+  const spam = stats.emailsSpam || 0;
+  const errors = stats.emailsError || 0;
+  const hasData = rawTotal > 0;
+  const total = hasData ? rawTotal : 1;
+  const success = total - errors;
+  const accuracy = hasData ? Math.round((success / total) * 100) : 0;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.1 }}
+      className="bento-card p-4"
+    >
+      <h3 className="text-[12px] font-bold flex items-center gap-1.5 mb-3" style={{ color: 'var(--color-on-surface)' }}>
+        <span className="material-symbols-outlined text-sm" style={{ color: '#16a34a' }}>speed</span>
+        Qualité des décisions
+      </h3>
+
+      {/* Anneau de précision */}
+      <div className="flex items-center gap-4 mb-3">
+        <div className="relative w-16 h-16">
+          <svg className="w-16 h-16 -rotate-90" viewBox="0 0 64 64">
+            <circle cx="32" cy="32" r="28" fill="none" stroke="var(--color-outline-variant)" strokeWidth="5" />
+            {hasData && (
+              <motion.circle
+                cx="32" cy="32" r="28" fill="none"
+                stroke={accuracy >= 90 ? '#16a34a' : accuracy >= 75 ? '#f59e0b' : '#ef4444'}
+                strokeWidth="5" strokeLinecap="round"
+                strokeDasharray={`${2 * Math.PI * 28}`}
+                initial={{ strokeDashoffset: 2 * Math.PI * 28 }}
+                animate={{ strokeDashoffset: 2 * Math.PI * 28 * (1 - accuracy / 100) }}
+                transition={{ duration: 1, ease: 'easeOut' }}
+              />
+            )}
+          </svg>
+          <div className="absolute inset-0 flex items-center justify-center">
+            {hasData ? (
+              <span className="text-sm font-bold" style={{ color: accuracy >= 90 ? '#16a34a' : accuracy >= 75 ? '#f59e0b' : '#ef4444' }}>
+                {accuracy}%
+              </span>
+            ) : (
+              <span className="text-[9px] font-semibold" style={{ color: 'var(--color-on-surface-variant)' }}>N/A</span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex-1 grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
+          <div className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#16a34a' }} />
+            <span style={{ color: 'var(--color-on-surface-variant)' }}>Nouveaux tickets: <strong style={{ color: 'var(--color-on-surface)' }}>{newTickets}</strong></span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#3b82f6' }} />
+            <span style={{ color: 'var(--color-on-surface-variant)' }}>Suivis: <strong style={{ color: 'var(--color-on-surface)' }}>{followups}</strong></span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#f59e0b' }} />
+            <span style={{ color: 'var(--color-on-surface-variant)' }}>Spams filtrés: <strong style={{ color: 'var(--color-on-surface)' }}>{spam}</strong></span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#ef4444' }} />
+            <span style={{ color: 'var(--color-on-surface-variant)' }}>Erreurs: <strong style={{ color: errors > 0 ? '#ef4444' : 'var(--color-on-surface)' }}>{errors}</strong></span>
+          </div>
+        </div>
+      </div>
+
+      {/* Mini barre de répartition */}
+      <div className="h-2 rounded-full overflow-hidden flex">
+        {[
+          { value: newTickets, color: '#16a34a' },
+          { value: followups, color: '#3b82f6' },
+          { value: spam, color: '#f59e0b' },
+          { value: errors, color: '#ef4444' },
+        ].map((item, i) => {
+          const pct = Math.round((item.value / total) * 100);
+          return pct > 0 ? (
+            <motion.div
+              key={i}
+              initial={{ width: 0 }}
+              animate={{ width: `${pct}%` }}
+              transition={{ duration: 0.6, delay: i * 0.1 }}
+              className="h-full first:rounded-l-full last:rounded-r-full"
+              style={{ backgroundColor: item.color, width: `${pct}%` }}
+            />
+          ) : null;
+        })}
+      </div>
+    </motion.div>
+  );
+}
+
+/* ── Actions recommandées ─────────────────────────────────────────────── */
+function TransitionActions({ currentModeId, onRunAnalysis, analyzing }) {
+  const curIdx = TRANSITION_PHASES.findIndex(p => p.id === currentModeId);
+
+  const recommendations = {
+    AUDIT: [
+      { icon: 'visibility', text: 'Observez les décisions de la plateforme sans risque', done: false },
+      { icon: 'compare', text: 'Comparez avec le travail réel des techniciens', done: false },
+      { icon: 'psychology', text: 'Lancez une analyse IA pour valider la qualité des données', done: true, action: 'Lancer', onClick: onRunAnalysis },
+      { icon: 'checklist', text: 'Validez le mapping des conversations', done: false },
+    ],
+    SIMULATION: [
+      { icon: 'science', text: 'Testez toute la chaîne de création dans GLPI DEV', done: false },
+      { icon: 'bug_report', text: 'Corrigez les anomalies détectées', done: false },
+      { icon: 'compare_arrows', text: 'Comparez PROD vs DEV via l\'analyse IA', done: true, action: 'Analyser', onClick: onRunAnalysis },
+      { icon: 'check_circle', text: 'Validez les règles métier et le mapping', done: false },
+    ],
+    HYBRID: [
+      { icon: 'account_tree', text: 'Mode shadow actif : la plateforme observe mais écrit en DEV', done: false },
+      { icon: 'compare_arrows', text: 'Comparez ticket par ticket les décisions PROD vs DEV', done: true, action: 'Analyser', onClick: onRunAnalysis },
+      { icon: 'speed', text: 'Mesurez le taux de précision', done: false },
+      { icon: 'rocket_launch', text: 'Préparez le passage en production', done: false },
+    ],
+    PRODUCTION: [
+      { icon: 'rocket_launch', text: 'La plateforme écrit en production', done: true },
+      { icon: 'monitoring', text: 'Surveillez les métriques en temps réel', done: false },
+      { icon: 'psychology', text: 'Analysez la qualité des données créées', done: true, action: 'Analyser', onClick: onRunAnalysis },
+      { icon: 'sync', text: 'Assurez-vous que la synchro GLPI est active', done: false },
+    ],
+  };
+
+  const items = recommendations[currentModeId] || recommendations.AUDIT;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.15 }}
+      className="bento-card p-4"
+    >
+      <h3 className="text-[12px] font-bold flex items-center gap-1.5 mb-3" style={{ color: 'var(--color-on-surface)' }}>
+        <span className="material-symbols-outlined text-sm" style={{ color: '#8b5cf6' }}>checklist</span>
+        Actions recommandées
+        <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded-full font-semibold" style={{
+          backgroundColor: 'rgba(139,92,246,0.1)',
+          color: '#8b5cf6',
+        }}>
+          {items.filter(i => i.done).length}/{items.length}
+        </span>
+      </h3>
+
+      <div className="space-y-1.5">
+        {items.map((item, i) => (
+          <div
+            key={i}
+            className="flex items-center gap-2 py-1.5 px-2 rounded-lg transition-colors"
+            style={{
+              backgroundColor: item.done ? 'rgba(22,163,74,0.04)' : 'transparent',
+              opacity: curIdx === 3 && currentModeId === 'PRODUCTION' && item.done ? 0.5 : 1,
+            }}
+          >
+            <span
+              className={`material-symbols-outlined text-sm ${item.done ? '' : ''}`}
+              style={{ color: item.done ? '#16a34a' : 'var(--color-on-surface-variant)' }}
+            >
+              {item.done ? 'check_circle' : item.icon}
+            </span>
+            <span className="text-[10px] flex-1" style={{ color: 'var(--color-on-surface-variant)' }}>
+              {item.text}
+            </span>
+            {item.action && (
+              <button
+                onClick={item.onClick}
+                disabled={analyzing}
+                className="text-[9px] px-2 py-1 rounded-lg font-semibold whitespace-nowrap transition-all"
+                style={{
+                  backgroundColor: 'rgba(139,92,246,0.1)',
+                  color: '#8b5cf6',
+                }}
+              >
+                {analyzing ? '...' : item.action}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
 /* ── Composant : Liste des attributs de tickets ──────────────────────── */
 const TICKET_ATTRS = [
   { key: 'id', label: 'ID', icon: 'tag', width: 'w-12' },
@@ -402,6 +714,7 @@ function AiAnalysisSection() {
           Analyse IA des tickets
         </h3>
         <button
+          data-run-analysis
           onClick={runAnalysis}
           disabled={loading}
           className="flex items-center gap-2 px-4 py-2 rounded-xl border font-semibold text-[12px] transition-all duration-300"
@@ -708,6 +1021,13 @@ export default function TransitionDashboard() {
   const [compareData, setCompareData] = useState(null);
   const [compareLoading, setCompareLoading] = useState(false);
   const [compareError, setCompareError] = useState('');
+
+  const scrollToAnalysis = useCallback(() => {
+    // Déclencher l'analyse IA en cliquant sur le bouton
+    // Le composant AiAnalysisSection scroll automatiquement vers lui-même à la fin
+    const btn = document.querySelector('[data-run-analysis]');
+    if (btn) btn.click();
+  }, []);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -1031,6 +1351,22 @@ export default function TransitionDashboard() {
             />
           ))}
         </div>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      {/* PROGRESSION + QUALITÉ + ACTIONS */}
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      <TransitionProgressTracker
+        currentModeId={currentMode.id}
+        goLiveDate={activeSettings?.goLiveDate}
+      />
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-lg">
+        <DecisionQualityCard stats={stats} />
+        <TransitionActions
+          currentModeId={currentMode.id}
+          onRunAnalysis={scrollToAnalysis}
+        />
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════ */}
