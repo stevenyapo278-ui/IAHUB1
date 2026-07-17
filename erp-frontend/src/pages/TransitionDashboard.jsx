@@ -210,6 +210,54 @@ function ModeCard({ mode, isActive, onClick }) {
   );
 }
 
+/* ── Analyse des écarts (composant interne) ──────────────────────────── */
+function renderDivergenceAnalysis(compareData) {
+  if (!compareData?.instances?.glpi?.configured || !compareData?.instances?.glpi_dev?.configured) return null;
+
+  const prod = compareData.instances.glpi;
+  const dev = compareData.instances.glpi_dev;
+  const diff = prod.ticketCount - dev.ticketCount;
+
+  return (
+    <div
+      className="p-3 rounded-xl border"
+      style={{
+        borderColor: 'rgba(139,92,246,0.2)',
+        backgroundColor: 'rgba(139,92,246,0.03)',
+      }}
+    >
+      <div className="flex items-center gap-2 mb-2">
+        <span className="material-symbols-outlined text-sm" style={{ color: '#8b5cf6' }}>analytics</span>
+        <span className="text-[12px] font-bold" style={{ color: 'var(--color-on-surface)' }}>
+          Analyse des écarts
+        </span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
+        <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(139,92,246,0.06)' }}>
+          <div className="font-semibold" style={{ color: 'var(--color-on-surface)' }}>
+            {diff > 0 ? `+${diff.toLocaleString()}` : diff < 0 ? diff.toLocaleString() : '0'}
+          </div>
+          <div style={{ color: 'var(--color-on-surface-variant)' }}>Écart de tickets</div>
+        </div>
+        <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(139,92,246,0.06)' }}>
+          <div className="font-semibold" style={{ color: 'var(--color-on-surface)' }}>
+            {prod.ticketCount > 0
+              ? Math.round((dev.ticketCount / prod.ticketCount) * 100) + '%'
+              : 'N/A'}
+          </div>
+          <div style={{ color: 'var(--color-on-surface-variant)' }}>DEV vs PROD</div>
+        </div>
+        <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(139,92,246,0.06)' }}>
+          <div className="font-semibold" style={{ color: 'var(--color-on-surface)' }}>
+            {compareData.erp.glpiSynced} / {compareData.erp.erpOnly}
+          </div>
+          <div style={{ color: 'var(--color-on-surface-variant)' }}>Tickets ERP (synchro/only)</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Élément de la timeline ───────────────────────────────────────────── */
 function TimelineItem({ event }) {
   const icon = EVENT_ICONS[event.type] || 'info';
@@ -269,6 +317,9 @@ export default function TransitionDashboard() {
   const [saving, setSaving] = useState(false);
   const [activeSettings, setActiveSettings] = useState(null);
   const [selectedPeriod, setSelectedPeriod] = useState(7);
+  const [compareData, setCompareData] = useState(null);
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [compareError, setCompareError] = useState('');
 
   const load = useCallback(() => {
     setLoading(true);
@@ -281,7 +332,20 @@ export default function TransitionDashboard() {
       .finally(() => setLoading(false));
   }, [selectedPeriod]);
 
+  // Fonction partagée pour charger les données de comparaison
+  const loadCompare = useCallback(() => {
+    setCompareLoading(true);
+    setCompareError('');
+    api.get('/transition/compare')
+      .then(({ data }) => setCompareData(data))
+      .catch((err) => setCompareError(err.response?.data?.error || 'Erreur chargement comparaison'))
+      .finally(() => setCompareLoading(false));
+  }, []);
+
   useEffect(() => { load(); }, [load]);
+
+  // Charger les données de comparaison PROD vs DEV
+  useEffect(() => { loadCompare(); }, [loadCompare]);
 
   // Rafraîchissement auto toutes les 15s
   useEffect(() => {
@@ -871,12 +935,190 @@ export default function TransitionDashboard() {
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════ */}
+      {/* COMPARAISON PROD vs DEV */}
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.2 }}
+        className="bento-card p-4"
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--color-on-surface)' }}>
+            <span className="material-symbols-outlined text-lg">compare_arrows</span>
+            Comparaison PROD vs DEV
+          </h3>
+          <button
+            onClick={loadCompare}
+            disabled={compareLoading}
+            className="w-8 h-8 rounded-lg border flex items-center justify-center transition-colors hover:bg-surface-container-high"
+            style={{ borderColor: 'var(--color-outline-variant)' }}
+          >
+            <span className={`material-symbols-outlined text-sm ${compareLoading ? 'animate-spin' : ''}`}
+              style={{ color: 'var(--color-on-surface-variant)' }}>refresh</span>
+          </button>
+        </div>
+
+        {/* Erreur de comparaison */}
+        {compareError && (
+          <div className="p-3 mb-3 rounded-xl border border-red-500/20 bg-red-500/5 text-red-500 text-[12px] font-medium">
+            {compareError}
+          </div>
+        )}
+
+        {compareLoading && !compareData && (
+          <div className="grid grid-cols-2 gap-4">
+            <div className="h-32 rounded-xl animate-pulse" style={{ backgroundColor: 'var(--color-surface-container-high)' }} />
+            <div className="h-32 rounded-xl animate-pulse" style={{ backgroundColor: 'var(--color-surface-container-high)' }} />
+          </div>
+        )}
+
+        {compareData && (
+          <div className="space-y-4">
+            {/* Cartes côte à côte */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {Object.entries(compareData.instances).map(([key, inst]) => {
+                const isProd = key === 'glpi';
+                const isActive = compareData.instanceActive === key;
+                return (
+                  <div
+                    key={key}
+                    className="rounded-xl border p-4 relative overflow-hidden"
+                    style={{
+                      borderColor: inst.configured
+                        ? (isActive ? 'rgba(22,163,74,0.2)' : 'var(--color-outline-variant)')
+                        : 'rgba(239,68,68,0.2)',
+                      backgroundColor: inst.configured
+                        ? 'var(--color-surface)'
+                        : 'rgba(239,68,68,0.03)',
+                    }}
+                  >
+                    {/* Badge actif */}
+                    {isActive && (
+                      <span
+                        className="absolute top-2 right-2 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full"
+                        style={{ backgroundColor: 'rgba(22,163,74,0.1)', color: '#16a34a' }}
+                      >
+                        Actif
+                      </span>
+                    )}
+
+                    <div className="flex items-center gap-2 mb-3">
+                      <span
+                        className={`w-2.5 h-2.5 rounded-full ${
+                          inst.configured ? (isActive ? 'bg-emerald-500' : 'bg-amber-500') : 'bg-red-500'
+                        }`}
+                      />
+                      <span className="text-[13px] font-bold" style={{ color: 'var(--color-on-surface)' }}>
+                        {inst.label}
+                      </span>
+                      {isProd && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 font-semibold">
+                          PROD
+                        </span>
+                      )}
+                    </div>
+
+                    {inst.error ? (
+                      <p className="text-[12px] text-red-500">{inst.error}</p>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-2 gap-2 mb-3">
+                          <div className="p-2 rounded-lg" style={{ backgroundColor: 'var(--color-surface-container-low)' }}>
+                            <div className="text-[18px] font-bold" style={{ color: 'var(--color-on-surface)' }}>
+                              {inst.ticketCount.toLocaleString()}
+                            </div>
+                            <div className="text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>Total tickets</div>
+                          </div>
+                          <div className="p-2 rounded-lg" style={{ backgroundColor: 'var(--color-surface-container-low)' }}>
+                            <div className="text-[18px] font-bold" style={{ color: 'var(--color-on-surface)' }}>
+                              {inst.recentTickets?.length || 0}
+                            </div>
+                            <div className="text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>Récents (10)</div>
+                          </div>
+                        </div>
+
+                        {/* Derniers tickets */}
+                        {inst.recentTickets?.length > 0 && (
+                          <div>
+                            <div className="text-[10px] font-semibold uppercase tracking-wider mb-1.5"
+                              style={{ color: 'var(--color-on-surface-variant)' }}>
+                              Derniers tickets
+                            </div>
+                            <div className="max-h-[180px] overflow-y-auto space-y-1 pr-1">
+                              {inst.recentTickets.map(t => (
+                                <div
+                                  key={t.id}
+                                  className="flex items-center justify-between py-1 px-2 rounded-lg text-[11px]"
+                                  style={{ backgroundColor: 'var(--color-surface-container-low)' }}
+                                >
+                                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                    <span className="font-semibold shrink-0" style={{ color: 'var(--color-on-surface)' }}>
+                                      #{t.id}
+                                    </span>
+                                    <span className="truncate" style={{ color: 'var(--color-on-surface-variant)' }}>
+                                      {t.name || '(Sans titre)'}
+                                    </span>
+                                  </div>
+                                  <span
+                                    className="shrink-0 ml-2 px-1.5 py-0.5 rounded text-[9px] font-semibold"
+                                    style={{
+                                      backgroundColor: t.status === 5 || t.status === 6
+                                        ? 'rgba(22,163,74,0.1)' : 'rgba(245,158,11,0.1)',
+                                      color: t.status === 5 || t.status === 6 ? '#16a34a' : '#f59e0b',
+                                    }}
+                                  >
+                                    {['Nouveau', 'Ouvert', 'En cours', 'En attente', 'Résolu', 'Fermé'][t.status] || t.status}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Analyse de divergence */}
+            {renderDivergenceAnalysis(compareData)}
+
+            {/* Statut de synchronisation ERP */}
+            <div
+              className="p-3 rounded-xl border flex items-center justify-between"
+              style={{ borderColor: 'var(--color-outline-variant)' }}
+            >
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-sm" style={{ color: 'var(--color-on-surface-variant)' }}>
+                  sync
+                </span>
+                <span className="text-[12px] font-semibold" style={{ color: 'var(--color-on-surface)' }}>
+                  Tickets ERP sur 30 jours
+                </span>
+              </div>
+              <div className="flex items-center gap-3 text-[11px]">
+                <span style={{ color: 'var(--color-on-surface-variant)' }}>
+                  <strong style={{ color: '#16a34a' }}>{compareData.erp.glpiSynced}</strong> synchronisés GLPI
+                </span>
+                <span className="w-px h-4" style={{ backgroundColor: 'var(--color-outline-variant)' }} />
+                <span style={{ color: 'var(--color-on-surface-variant)' }}>
+                  <strong style={{ color: '#f59e0b' }}>{compareData.erp.erpOnly}</strong> ERP uniquement
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+      </motion.div>
+
+      {/* ══════════════════════════════════════════════════════════════════ */}
       {/* TIMELINE DES ÉVÉNEMENTS RÉCENTS */}
       {/* ══════════════════════════════════════════════════════════════════ */}
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.15 }}
+        transition={{ delay: 0.25 }}
         className="bento-card p-4"
       >
         <div className="flex items-center justify-between mb-2">

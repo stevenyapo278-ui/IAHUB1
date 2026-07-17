@@ -2,6 +2,7 @@ const express = require('express');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
+const { getGlpiConfig, glpiInitSession, glpiKillSession } = require('../utils/glpiSync');
 
 const router = express.Router();
 router.use(authenticate);
@@ -192,6 +193,120 @@ router.get('/', async (req, res) => {
         payload: e.payload,
         createdAt: e.createdAt,
       })),
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Comparaison PROD vs DEV ──────────────────────────────────────────────
+// Interroge les deux instances GLPI (glpi + glpi_dev) et retourne les stats
+// côte à côte : nombre de tickets, derniers tickets créés, divergence de contenu.
+router.get('/compare', async (req, res) => {
+  try {
+    const [prodConfig, devConfig] = await Promise.all([
+      getGlpiConfig('glpi'),
+      getGlpiConfig('glpi_dev'),
+    ]);
+
+    const results = {};
+
+    for (const [instanceName, config, label] of [
+      ['glpi', prodConfig, 'GLPI Production'],
+      ['glpi_dev', devConfig, 'GLPI Développement'],
+    ]) {
+      if (!config) {
+        results[instanceName] = {
+          label,
+          configured: false,
+          ticketCount: 0,
+          recentTickets: [],
+          error: 'Instance non configurée',
+        };
+        continue;
+      }
+
+      try {
+        const sessionToken = await glpiInitSession(config);
+        try {
+          // Récupère le nombre total de tickets
+          const countRes = await fetch(`${config.baseUrl}/Ticket?range=0-0`, {
+            headers: {
+              'App-Token': config.appToken,
+              'Session-Token': sessionToken,
+              'Content-Type': 'application/json',
+            },
+          });
+          const contentRange = countRes.headers.get('content-range');
+          const totalCount = contentRange ? parseInt(contentRange.split('/')[1], 10) : 0;
+
+          // Récupère les 20 derniers tickets
+          const range = totalCount > 20 ? `${totalCount - 20}-${totalCount - 1}` : '0-19';
+          const ticketsRes = await fetch(`${config.baseUrl}/Ticket?range=${range}`, {
+            headers: {
+              'App-Token': config.appToken,
+              'Session-Token': sessionToken,
+              'Content-Type': 'application/json',
+            },
+          });
+          const recentTickets = ticketsRes.ok ? await ticketsRes.json() : [];
+          const tickets = Array.isArray(recentTickets) ? recentTickets : [];
+
+          results[instanceName] = {
+            label,
+            configured: true,
+            ticketCount: totalCount,
+            recentTickets: tickets.slice(-10).reverse().map(t => ({
+              id: t.id,
+              name: t.name,
+              status: t.status,
+              date: t.date_creation || t.date_mod,
+              priority: t.priority,
+            })),
+            error: null,
+          };
+        } finally {
+          await glpiKillSession(config, sessionToken);
+        }
+      } catch (err) {
+        results[instanceName] = {
+          label,
+          configured: true,
+          ticketCount: 0,
+          recentTickets: [],
+          error: err.message,
+        };
+      }
+    }
+
+    // Compter dans l'ERP les tickets créés par email, par instance GLPI cible
+    const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+    const activeInstance = settings?.activeGlpiInstance || 'glpi';
+
+    // Tickets ERP avec glpiTicketId > 0 (tickets réellement créés dans GLPI)
+    const erpGlpiTickets = await prisma.ticket.count({
+      where: {
+        glpiTicketId: { not: null, gt: 0 },
+        createdAt: { gte: new Date(Date.now() - 30 * 86400000) },
+      },
+    });
+
+    // Tickets ERP sans glpiTicketId (ERP uniquement, dry-run ou en attente)
+    const erpOnlyTickets = await prisma.ticket.count({
+      where: {
+        glpiTicketId: null,
+        sourceEmail: { not: null },
+        createdAt: { gte: new Date(Date.now() - 30 * 86400000) },
+      },
+    });
+
+    return res.json({
+      instances: results,
+      instanceActive: activeInstance,
+      erp: {
+        glpiSynced: erpGlpiTickets,
+        erpOnly: erpOnlyTickets,
+      },
     });
   } catch (err) {
     return res.status(500).json({ error: err.message });
