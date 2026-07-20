@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import api from '../api/client';
@@ -19,6 +19,38 @@ export default function AiEmailDrafts() {
   const [reviewNote, setReviewNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [signatureLogoUrl, setSignatureLogoUrl] = useState(null);
+  const editorRef = useRef(null);
+  const [toolbarState, setToolbarState] = useState({
+    bold: false, italic: false, underline: false,
+    h2: false, h3: false, ul: false, ol: false,
+  });
+
+  const updateToolbarState = useCallback(() => {
+    try {
+      setToolbarState({
+        bold: document.queryCommandState('bold'),
+        italic: document.queryCommandState('italic'),
+        underline: document.queryCommandState('underline'),
+        h2: document.queryCommandValue('formatBlock')?.toLowerCase() === 'h2',
+        h3: document.queryCommandValue('formatBlock')?.toLowerCase() === 'h3',
+        ul: document.queryCommandState('insertUnorderedList'),
+        ol: document.queryCommandState('insertOrderedList'),
+      });
+    } catch {}
+  }, []);
+
+  function execCmd(cmd, arg) {
+    document.execCommand(cmd, false, arg);
+    editorRef.current?.focus();
+    updateToolbarState();
+  }
+
+  function handleEditorKeyDown(e) {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      document.execCommand('insertHTML', false, '&nbsp;&nbsp;&nbsp;&nbsp;');
+    }
+  }
 
   useEffect(() => {
     api.get('/system-settings').then(({ data }) => setSignatureLogoUrl(data.signatureLogoUrl || null)).catch(() => {});
@@ -258,13 +290,112 @@ export default function AiEmailDrafts() {
 
               <div className="flex flex-col gap-1 border-t border-outline-variant/40 pt-md">
                 <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Contenu (éditable)</span>
+
+                {selected.status === 'PENDING' && (
+                  <div className="flex items-center gap-0.5 border border-outline-variant/60 rounded-t-xl border-b-0 bg-surface-container-low/30 px-1.5 py-1 flex-wrap">
+                    <button
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); execCmd('bold'); }}
+                      className={`p-1.5 rounded-lg hover:bg-surface-container-high transition-colors ${toolbarState.bold ? 'bg-primary/10 text-primary' : 'text-on-surface-variant'}`}
+                      title="Gras"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">format_bold</span>
+                    </button>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); execCmd('italic'); }}
+                      className={`p-1.5 rounded-lg hover:bg-surface-container-high transition-colors ${toolbarState.italic ? 'bg-primary/10 text-primary' : 'text-on-surface-variant'}`}
+                      title="Italique"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">format_italic</span>
+                    </button>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); execCmd('underline'); }}
+                      className={`p-1.5 rounded-lg hover:bg-surface-container-high transition-colors ${toolbarState.underline ? 'bg-primary/10 text-primary' : 'text-on-surface-variant'}`}
+                      title="Souligné"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">format_underline</span>
+                    </button>
+
+                    <span className="w-px h-5 bg-outline-variant/60 mx-1" />
+
+                    <button
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); execCmd('formatBlock', toolbarState.h2 ? '<p>' : '<h2>'); }}
+                      className={`p-1.5 rounded-lg hover:bg-surface-container-high transition-colors font-bold text-[11px] tracking-wide px-1.5 ${toolbarState.h2 ? 'bg-primary/10 text-primary' : 'text-on-surface-variant'}`}
+                      title="Titre H2"
+                    >
+                      H2
+                    </button>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); execCmd('formatBlock', toolbarState.h3 ? '<p>' : '<h3>'); }}
+                      className={`p-1.5 rounded-lg hover:bg-surface-container-high transition-colors font-bold text-[11px] tracking-wide px-1.5 ${toolbarState.h3 ? 'bg-primary/10 text-primary' : 'text-on-surface-variant'}`}
+                      title="Titre H3"
+                    >
+                      H3
+                    </button>
+
+                    <span className="w-px h-5 bg-outline-variant/60 mx-1" />
+
+                    <button
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); execCmd('insertUnorderedList'); }}
+                      className={`p-1.5 rounded-lg hover:bg-surface-container-high transition-colors ${toolbarState.ul ? 'bg-primary/10 text-primary' : 'text-on-surface-variant'}`}
+                      title="Liste à puces"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">format_list_bulleted</span>
+                    </button>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); execCmd('insertOrderedList'); }}
+                      className={`p-1.5 rounded-lg hover:bg-surface-container-high transition-colors ${toolbarState.ol ? 'bg-primary/10 text-primary' : 'text-on-surface-variant'}`}
+                      title="Liste numérotée"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">format_list_numbered</span>
+                    </button>
+
+                    <span className="w-px h-5 bg-outline-variant/60 mx-1" />
+
+                    <button
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        const url = window.prompt('URL du lien :');
+                        if (url) execCmd('createLink', url);
+                      }}
+                      className="p-1.5 rounded-lg hover:bg-surface-container-high transition-colors text-on-surface-variant"
+                      title="Ajouter un lien"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">link</span>
+                    </button>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); execCmd('removeFormat'); }}
+                      className="p-1.5 rounded-lg hover:bg-surface-container-high transition-colors text-on-surface-variant"
+                      title="Supprimer le formatage"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">format_clear</span>
+                    </button>
+                  </div>
+                )}
+
                 <div
                   key={selected.id}
-                  className="bg-surface border border-outline-variant/60 rounded-xl p-md text-body-sm text-on-surface min-h-[260px] max-h-[420px] overflow-y-auto focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 shadow-inner"
+                  ref={editorRef}
+                  className={`bg-surface border border-outline-variant/60 p-md text-body-sm text-on-surface min-h-[260px] max-h-[420px] overflow-y-auto focus:outline-none transition-all duration-300 shadow-inner ${
+                    selected.status === 'PENDING'
+                      ? 'rounded-b-xl rounded-t-none border-t-0 focus:ring-2 focus:ring-primary/20 focus:border-primary'
+                      : 'rounded-xl'
+                  }`}
                   dangerouslySetInnerHTML={{ __html: toDisplayHtml(editedContent) }}
                   contentEditable={selected.status === 'PENDING'}
                   suppressContentEditableWarning
                   onBlur={(e) => setEditedContent(fromDisplayHtml(e.currentTarget.innerHTML))}
+                  onMouseUp={updateToolbarState}
+                  onKeyUp={updateToolbarState}
+                  onKeyDown={handleEditorKeyDown}
                 />
               </div>
 
