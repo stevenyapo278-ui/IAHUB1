@@ -402,7 +402,7 @@ export default function TicketDetail() {
                 </span>
               </div>
             </div>
-            {ticket.content && ticket.content.includes('<') ? (
+            {ticket.content && (ticket.content.includes('<') || ticket.content.includes('&#') || ticket.content.includes('&lt;')) ? (
               <div
                 className="leading-relaxed text-body-md text-on-surface-variant border-t border-outline-variant/40 pt-md mt-md [&_img]:max-w-full [&_img]:rounded-lg [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-2 [&_a]:text-primary [&_a]:underline [&_a]:hover:text-primary/80 [&_p]:mb-2 [&_p]:last:mb-0"
                 dangerouslySetInnerHTML={{ __html: sanitizeFollowupHtml(ticket.content) }}
