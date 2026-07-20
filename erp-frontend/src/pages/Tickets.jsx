@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import { toast } from 'sonner';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
@@ -10,7 +11,6 @@ import EmptyState from '../components/EmptyState';
 
 const STATUS_OPTIONS = ['NEW', 'OPEN', 'PENDING', 'SOLVED', 'CLOSED'];
 const PRIORITY_OPTIONS = ['P1', 'P2', 'P3', 'P4'];
-const CATEGORY_OPTIONS = ['Logiciel', 'Matériel', 'Réseau', 'Téléphonie', 'Système'];
 const TYPE_OPTIONS = [
   { value: 'INCIDENT', label: 'Incident' },
   { value: 'REQUEST', label: 'Demande' },
@@ -68,11 +68,18 @@ export default function Tickets() {
   const canDelete = hasPermission(user, 'tickets.delete');
   const canBulkDelete = hasPermission(user, 'tickets.bulkDelete');
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [tickets, setTickets] = useState([]);
   const [teams, setTeams] = useState([]);
   const [users, setUsers] = useState([]);
   const [locations, setLocations] = useState([]);
-  const [filters, setFilters] = useState({ status: '', priority: '', source: '' });
+  const [categories, setCategories] = useState([]);
+  const [glpiUsers, setGlpiUsers] = useState([]);
+  const [filters, setFilters] = useState({
+    status: searchParams.get('status') || '',
+    priority: searchParams.get('priority') || '',
+    source: searchParams.get('source') || '',
+  });
   const [showForm, setShowForm] = useState(searchParams.get('new') === '1');
   const [form, setForm] = useState(EMPTY_FORM);
   const [attachment, setAttachment] = useState(null);
@@ -80,6 +87,27 @@ export default function Tickets() {
   const [selectedIds, setSelectedIds] = useState([]);
   const [deleting, setDeleting] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get('search') || '');
+  const [debouncedSearch, setDebouncedSearch] = useState(() => searchParams.get('search') || '');
+  const debounceRef = useRef(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams);
+    if (debouncedSearch) { params.set('search', debouncedSearch); } else { params.delete('search'); }
+    setSearchParams(params, { replace: true });
+  }, [debouncedSearch]);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+      setPage(1);
+    }, 300);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [searchQuery]);
   const [actorSearch, setActorSearch] = useState('');
   const searchTerm = actorSearch.toLowerCase().trim();
   const filteredUsers = !searchTerm
@@ -95,29 +123,50 @@ export default function Tickets() {
       );
   const showSelectionColumn = canBulkDelete;
 
+  function updateFilter(key, value) {
+    const next = { ...filters, [key]: value };
+    setFilters(next);
+    setPage(1);
+    const params = new URLSearchParams(searchParams);
+    if (value) { params.set(key, value); } else { params.delete(key); }
+    setSearchParams(params, { replace: true });
+  }
+
+  function clearFilters() {
+    setFilters({ status: '', priority: '', source: '' });
+    setPage(1);
+    const params = new URLSearchParams(searchParams);
+    params.delete('status');
+    params.delete('priority');
+    params.delete('source');
+    setSearchParams(params, { replace: true });
+  }
+
   function loadTickets() {
-    const params = {};
+    const params = { page, limit: 100 };
     if (filters.status) params.status = filters.status;
     if (filters.priority) params.priority = filters.priority;
     if (filters.source) params.source = filters.source;
+    if (debouncedSearch) params.search = debouncedSearch;
     api.get('/tickets', { params })
-      .then(({ data }) => { setTickets(data); setSelectedIds([]); })
+      .then(({ data }) => { setTickets(data.items); setTotalPages(data.pages); setTotalCount(data.total); setSelectedIds([]); })
       .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
   }
 
   function refreshTicketsSilently() {
-    const params = {};
+    const params = { page, limit: 100 };
     if (filters.status) params.status = filters.status;
     if (filters.priority) params.priority = filters.priority;
     if (filters.source) params.source = filters.source;
-    api.get('/tickets', { params }).then(({ data }) => setTickets(data)).catch(() => {});
+    if (debouncedSearch) params.search = debouncedSearch;
+    api.get('/tickets', { params }).then(({ data }) => { setTickets(data.items); setTotalPages(data.pages); }).catch(() => {});
   }
 
-  useEffect(loadTickets, [filters]);
+  useEffect(loadTickets, [filters, page, debouncedSearch]);
   useEffect(() => {
     const intervalId = setInterval(refreshTicketsSilently, 15000);
     return () => clearInterval(intervalId);
-  }, [filters]);
+  }, [filters, debouncedSearch]);
 
   function toggleSelect(id) {
     setSelectedIds((ids) => (ids.includes(id) ? ids.filter((i) => i !== id) : [...ids, id]));
@@ -169,7 +218,7 @@ export default function Tickets() {
   }, []);
 
   const ticketStats = (() => {
-    const total = tickets.length;
+    const total = totalCount;
     const open = tickets.filter(t => t.status === 'NEW' || t.status === 'OPEN').length;
     const pending = tickets.filter(t => t.status === 'PENDING').length;
     const resolved = tickets.filter(t => t.status === 'SOLVED' || t.status === 'CLOSED').length;
@@ -188,8 +237,10 @@ export default function Tickets() {
     try {
       if (confirmDelete.mode === 'one') {
         await api.delete(`/tickets/${confirmDelete.id}`);
+        toast.success('Ticket supprimé');
       } else {
         await api.post('/tickets/bulk-delete', { ids: selectedIds });
+        toast.success(`${selectedIds.length} ticket(s) supprimé(s)`);
       }
       loadTickets();
       setConfirmDelete(null);
@@ -202,6 +253,8 @@ export default function Tickets() {
 
   useEffect(() => {
     api.get('/glpi/locations').then(({ data }) => setLocations(data)).catch(() => {});
+    api.get('/glpi/categories').then(({ data }) => setCategories(data)).catch(() => {});
+    api.get('/glpi/users').then(({ data }) => setGlpiUsers(data)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -225,6 +278,7 @@ export default function Tickets() {
       });
       if (attachment) payload.append('attachment', attachment);
       await api.post('/tickets', payload, { headers: { 'Content-Type': 'multipart/form-data' } });
+      toast.success('Ticket créé');
       setForm(EMPTY_FORM);
       setAttachment(null);
       setShowForm(false);
@@ -372,7 +426,7 @@ export default function Tickets() {
                         <SelectRow label="Catégorie">
                           <select className="h-9 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-sm text-body-sm text-on-surface w-full"
                             value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}
-                          ><option value="">-----</option>{CATEGORY_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}</select>
+                          ><option value="">-----</option>{categories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}</select>
                         </SelectRow>
                         <SelectRow label="Lieu">
                           <select className="h-9 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-sm text-body-sm text-on-surface w-full"
@@ -500,7 +554,10 @@ export default function Tickets() {
                           <SelectRow label="Assigné à">
                             <select className="h-9 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-sm text-body-sm text-on-surface w-full"
                               value={form.assignedToId} onChange={(e) => setForm({ ...form, assignedToId: e.target.value })}
-                            ><option value="">Non assigné</option>{filteredUsers.map((u) => <option key={u.id} value={u.id}>{u.fullName}</option>)}</select>
+                            ><option value="">Non assigné</option>{filteredUsers.map((u) => {
+                              const isGlpi = glpiUsers.some((gu) => gu.id === u.id);
+                              return <option key={u.id} value={u.id}>{u.fullName}{isGlpi ? ' 🔗' : ''}</option>;
+                            })}</select>
                           </SelectRow>
                           <SelectRow label="Équipe">
                             <select className="h-9 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-sm text-body-sm text-on-surface w-full"
@@ -573,7 +630,36 @@ export default function Tickets() {
       <motion.div variants={itemVariants} className="bento-card">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 p-lg">
           <div className="flex flex-wrap items-end gap-4">
-            <FilterSelect value={filters.status} onChange={(v) => setFilters({ ...filters, status: v })}
+            <div className="flex flex-col gap-1">
+              <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Recherche</span>
+              <div className="relative">
+                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[16px]"
+                  style={{ color: 'var(--color-outline)' }}>search</span>
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Titre, contenu, n° ticket…"
+                  className="w-56 pl-9 pr-8 py-2 rounded-xl border outline-none font-body-sm text-body-sm transition-all"
+                  style={{
+                    borderColor: 'var(--color-outline-variant)',
+                    backgroundColor: 'var(--color-surface)',
+                    color: 'var(--color-on-surface)',
+                  }}
+                  onFocus={(e) => e.target.style.borderColor = 'var(--color-primary)'}
+                  onBlur={(e) => e.target.style.borderColor = 'var(--color-outline-variant)'}
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => { setSearchQuery(''); setDebouncedSearch(''); setPage(1); }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-outline hover:text-on-surface transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">close</span>
+                  </button>
+                )}
+              </div>
+            </div>
+            <FilterSelect value={filters.status} onChange={(v) => updateFilter('status', v)}
               label="Statut" options={[
                 { v: '', l: 'Tous' },
                 { v: 'OPEN_GROUP', l: 'Tickets ouverts' },
@@ -584,9 +670,9 @@ export default function Tickets() {
                 { v: 'SOLVED', l: 'Résolu' },
                 { v: 'CLOSED', l: 'Fermé' },
               ]} />
-            <FilterSelect value={filters.priority} onChange={(v) => setFilters({ ...filters, priority: v })}
+            <FilterSelect value={filters.priority} onChange={(v) => updateFilter('priority', v)}
               label="Priorité" options={[{ v: '', l: 'Toutes' }, ...PRIORITY_OPTIONS.map((p) => ({ v: p, l: p }))]} />
-            <FilterSelect value={filters.source} onChange={(v) => setFilters({ ...filters, source: v })}
+            <FilterSelect value={filters.source} onChange={(v) => updateFilter('source', v)}
               label="Source" options={[
                 { v: '', l: 'Toutes' },
                 { v: 'glpi', l: 'Synchronisés GLPI' },
@@ -596,7 +682,7 @@ export default function Tickets() {
           <div className="flex items-center gap-2.5">
             {(filters.status || filters.priority || filters.source) && (
               <button
-                onClick={() => { setFilters({ status: '', priority: '', source: '' }); }}
+                onClick={clearFilters}
                 className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-body-sm font-semibold hover:bg-primary/20 transition-colors"
               >
                 <span className="material-symbols-outlined text-[14px]">filter_alt_off</span>
@@ -673,7 +759,8 @@ export default function Tickets() {
                     onMouseMove={handleMouseMove}
                     onMouseEnter={() => handleRowEnter(t)}
                     onMouseLeave={handleRowLeave}
-                    onClick={() => window.location.href = `/tickets/${t.id}`}
+                    onClick={() => navigate(`/tickets/${t.id}`)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); navigate(`/tickets/${t.id}`); } }}
                   >
                     {showSelectionColumn && (
                       <td className="px-md py-3.5">
@@ -765,6 +852,61 @@ export default function Tickets() {
           </table>
         </div>
       </motion.div>
+
+      {/* ── Pagination ──────────────────────────────────────────────────────── */}
+      {totalPages > 1 && (
+        <motion.div variants={itemVariants}
+          className="flex items-center justify-between px-4 py-3 rounded-xl border"
+          style={{ borderColor: 'var(--color-outline-variant)' }}
+        >
+          <span className="text-[12px]" style={{ color: 'var(--color-on-surface-variant)' }}>
+            {totalCount} ticket{totalCount > 1 ? 's' : ''} — Page {page}/{totalPages}
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="w-8 h-8 flex items-center justify-center rounded-lg border transition-colors hover:bg-surface-container-low disabled:opacity-30 disabled:cursor-not-allowed"
+              style={{ borderColor: 'var(--color-outline-variant)' }}
+            >
+              <span className="material-symbols-outlined text-sm" style={{ color: 'var(--color-on-surface-variant)' }}>chevron_left</span>
+            </button>
+            {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+              let pageNum;
+              if (totalPages <= 7) {
+                pageNum = i + 1;
+              } else if (page <= 4) {
+                pageNum = i + 1;
+              } else if (page >= totalPages - 3) {
+                pageNum = totalPages - 6 + i;
+              } else {
+                pageNum = page - 3 + i;
+              }
+              return (
+                <button
+                  key={pageNum}
+                  onClick={() => setPage(pageNum)}
+                  className={`w-8 h-8 rounded-lg text-[12px] font-semibold transition-colors ${
+                    pageNum === page
+                      ? 'bg-primary text-white'
+                      : 'text-on-surface-variant hover:bg-surface-container-low'
+                  }`}
+                >
+                  {pageNum}
+                </button>
+              );
+            })}
+            <button
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className="w-8 h-8 flex items-center justify-center rounded-lg border transition-colors hover:bg-surface-container-low disabled:opacity-30 disabled:cursor-not-allowed"
+              style={{ borderColor: 'var(--color-outline-variant)' }}
+            >
+              <span className="material-symbols-outlined text-sm" style={{ color: 'var(--color-on-surface-variant)' }}>chevron_right</span>
+            </button>
+          </div>
+        </motion.div>
+      )}
 
       {/* ── Ticket Hover Preview ─────────────────────────────────────────────── */}
       {createPortal(

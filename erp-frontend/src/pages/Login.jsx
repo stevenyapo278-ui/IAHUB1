@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -9,6 +9,7 @@ import {
   InputGroupInput,
 } from '@/components/ui/input-group';
 import { FloatingPaths } from '@/components/floating-paths';
+import AnimatedBackground from '@/components/AnimatedBackground';
 
 /* ── Variants d'animation ──────────────────────────────────────────────────── */
 const containerVariants = {
@@ -35,18 +36,26 @@ const cardVariants = {
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, getLastLocation } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
     setLoading(true);
     try {
-      await login(email.trim(), password);
-      navigate('/');
+      const u = await login(email.trim(), password);
+      const redirectParam = searchParams.get('redirect');
+      const lastFromStorage = getLastLocation();
+      const target =
+        (redirectParam && decodeURIComponent(redirectParam)) ||
+        lastFromStorage ||
+        '/';
+      navigate(target, { replace: true });
     } catch (err) {
       setError(err.response?.data?.error || 'Email ou mot de passe incorrect.');
     } finally {
@@ -56,6 +65,7 @@ export default function Login() {
 
   return (
     <main className="relative md:h-screen md:overflow-hidden lg:grid lg:grid-cols-2 bg-background antialiased selection:bg-primary/20 selection:text-primary">
+      <AnimatedBackground />
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       {/* PANEL GAUCHE — Marque & Animation */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
@@ -256,7 +266,7 @@ export default function Login() {
                   <InputGroupInput
                     id="password"
                     name="password"
-                    type="password"
+                    type={showPassword ? 'text' : 'password'}
                     autoComplete="current-password"
                     required
                     value={password}
@@ -267,6 +277,14 @@ export default function Login() {
                   <InputGroupAddon align="inline-start" aria-hidden="true">
                     <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>lock</span>
                   </InputGroupAddon>
+                  <button type="button" tabIndex={-1} onClick={() => setShowPassword((v) => !v)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    aria-label={showPassword ? 'Masquer' : 'Afficher'}
+                  >
+                    <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>
+                      {showPassword ? 'visibility_off' : 'visibility'}
+                    </span>
+                  </button>
                 </InputGroup>
               </motion.div>
 

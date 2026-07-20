@@ -21,17 +21,21 @@ function AnimatedNumber({ value, color }) {
     const num = typeof value === 'number' ? value : parseInt(value) || 0;
     const diff = num - display;
     if (diff === 0) return;
-    const step = diff > 0 ? 1 : -1;
-    const steps = Math.abs(diff);
-    const interval = Math.max(20, Math.min(60, 300 / steps));
+    const duration = 300;
+    const steps = Math.min(30, Math.abs(diff));
+    const step = diff / steps;
+    const interval = duration / steps;
     let current = display;
+    let count = 0;
     const timer = setInterval(() => {
-      current += step;
-      if ((step > 0 && current >= num) || (step < 0 && current <= num)) {
+      count++;
+      if (count >= steps) {
         current = num;
         clearInterval(timer);
+      } else {
+        current += step;
       }
-      setDisplay(current);
+      setDisplay(Math.round(current));
     }, interval);
     return () => clearInterval(timer);
   }, [value]);

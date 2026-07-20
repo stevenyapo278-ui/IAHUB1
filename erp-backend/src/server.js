@@ -5,7 +5,7 @@ const { initSocket } = require('./utils/socket');
 const { syncAllProviders } = require('./utils/modelSync');
 const { syncGlpiTickets } = require('./utils/glpiSync');
 const { runEmailPipeline } = require('./services/emailPipeline');
-const { syncTeamsFromGlpi, syncCategoriesFromGlpi } = require('./services/glpiTicketCreator');
+const { syncTeamsFromGlpi, syncCategoriesFromGlpi, syncLocationsFromGlpi, syncUsersFromGlpi } = require('./services/glpiTicketCreator');
 const { getSystemSettings } = require('./services/systemSettings');
 const { runDraftReminderScheduler } = require('./services/draftReminderScheduler');
 const { runReminderScheduler } = require('./services/reminderScheduler');
@@ -49,6 +49,8 @@ server.listen(PORT, () => {
 async function syncGlpiTeamsAndCategories() {
   await syncTeamsFromGlpi();
   await syncCategoriesFromGlpi();
+  await syncLocationsFromGlpi();
+  await syncUsersFromGlpi();
 }
 
 // Lance périodiquement `syncFn`, en relisant à chaque cycle la fréquence configurée via

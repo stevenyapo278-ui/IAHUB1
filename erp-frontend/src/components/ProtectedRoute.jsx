@@ -1,4 +1,4 @@
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 // SUPERADMIN doit avoir accès à tout ce qu'ADMIN peut voir — on l'ajoute automatiquement dès que
@@ -10,9 +10,12 @@ function effectiveRoles(roles) {
 
 export default function ProtectedRoute({ children, roles }) {
   const { user } = useAuth();
+  const location = useLocation();
 
   if (!user) {
-    return <Navigate to="/login" replace />;
+    const from = `${location.pathname}${location.search || ''}`;
+    const redirect = from ? `?redirect=${encodeURIComponent(from)}` : '';
+    return <Navigate to={`/login${redirect}`} replace />;
   }
 
   if (roles && !effectiveRoles(roles).includes(user.role)) {

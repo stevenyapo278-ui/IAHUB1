@@ -1,4 +1,6 @@
 const FormData = require('form-data');
+const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
 const prisma = require('../prismaClient');
 const { categoryToGlpiId, GLPI_AI_REQUESTER_ID } = require('../utils/glpiMapping');
 const { getActiveGlpiConfig } = require('../utils/glpiSync');
@@ -484,12 +486,14 @@ async function syncLocationsFromGlpi() {
 }
 
 // Synchronise les utilisateurs (User) depuis GLPI vers la table User de l'ERP.
-// Les correspondances se font par email (prioritaire) puis par nom complet.
+// Les correspondances se font par glpiId (prioritaire) puis par email.
 // Les utilisateurs GLPI sans email ou sans nom sont ignorés.
-// Ne crée pas de compte si aucun utilisateur ERP existant ne correspond,
-// mais met à jour le glpiId sur les comptes ERP existants.
+// Si createMissing est true, crée automatiquement les comptes ERP manquants avec :
+//   - mot de passe aléatoire (mustChangePassword: true)
+//   - rôle TECHNICIAN
+//   - équipe déduite du groupe GLPI principal (si trouvé via Group_User)
 // Retourne le nombre d'utilisateurs synchronisés, ou null si GLPI n'est pas configuré.
-async function syncUsersFromGlpi() {
+async function syncUsersFromGlpi({ createMissing } = {}) {
   const config = await getActiveGlpiConfig();
   if (!config) return null;
 
@@ -500,6 +504,22 @@ async function syncUsersFromGlpi() {
     if (!res.ok) throw new Error(`GLPI récupération des utilisateurs échouée (${res.status})`);
     const users = await res.json();
 
+    // Fetch Group_User si createMissing pour assigner l'équipe
+    let userGroupMap = {};
+    if (createMissing) {
+      try {
+        const guRes = await fetch(`${config.baseUrl}/Group_User?range=0-500`, { headers });
+        if (guRes.ok) {
+          const groupUsers = await guRes.json();
+          for (const gu of groupUsers) {
+            const uid = gu.users_id;
+            if (!userGroupMap[uid]) userGroupMap[uid] = [];
+            userGroupMap[uid].push(gu.groups_id);
+          }
+        }
+      } catch (e) { /* ignore group fetch errors */ }
+    }
+
     let synced = 0;
     for (const u of users) {
       if (!u.name && !u.realname && !u.firstname) continue;
@@ -507,32 +527,154 @@ async function syncUsersFromGlpi() {
       const glpiId = u.id;
       const email = u._useremails?.[0]?.email || u.email || null;
       const fullName = [u.realname, u.firstname].filter(Boolean).join(' ') || u.name;
-      const userName = u.name || null;
+
+      // Skip users without email when createMissing (impossible d'avoir un compte sans email)
+      if (!email) continue;
 
       // 1. Chercher par glpiId
       let existing = await prisma.user.findUnique({ where: { glpiId } });
 
       // 2. Chercher par email si pas trouvé par glpiId
-      if (!existing && email) {
+      if (!existing) {
         existing = await prisma.user.findUnique({ where: { email } });
       }
 
       if (existing) {
         await prisma.user.update({
           where: { id: existing.id },
+          data: { glpiId, fullName },
+        });
+        synced++;
+      } else if (createMissing) {
+        // Trouver l'équipe à partir du groupe GLPI
+        const groupIds = userGroupMap[glpiId] || [];
+        let teamId = null;
+        for (const gid of groupIds) {
+          const team = await prisma.team.findUnique({ where: { glpiGroupId: gid } });
+          if (team) { teamId = team.id; break; }
+        }
+
+        const passwordHash = await bcrypt.hash(crypto.randomBytes(20).toString('hex'), 10);
+        await prisma.user.create({
           data: {
-            glpiId,
-            ...(email ? { email } : {}),
+            email,
+            passwordHash,
             fullName,
+            role: 'TECHNICIAN',
+            glpiId,
+            teamId,
+            mustChangePassword: true,
           },
         });
         synced++;
       }
-      // Ne crée pas de compte ERP ici — l'utilisateur doit d'abord exister dans l'ERP
-      // (via invitation ou inscription) pour recevoir un glpiId.
     }
     return synced;
   });
 }
 
-module.exports = { createTicketFromEmail, createGlpiTicket, updateGlpiTicket, deleteGlpiTicket, uploadGlpiAttachment, syncTeamsFromGlpi, syncCategoriesFromGlpi, syncLocationsFromGlpi, syncUsersFromGlpi, addGlpiFollowup };
+// Récupère la liste des utilisateurs GLPI non encore importés dans l'ERP.
+// Retourne un tableau d'objets { glpiId, name, firstName, realName, email }.
+async function getImportableGlpiUsers() {
+  const config = await getActiveGlpiConfig();
+  if (!config) throw new Error('GLPI non configuré');
+
+  return withGlpiSession(config, async (sessionToken) => {
+    const headers = { 'App-Token': config.appToken, 'Session-Token': sessionToken };
+
+    const res = await fetch(`${config.baseUrl}/User?range=0-500`, { headers });
+    if (!res.ok) throw new Error(`GLPI récupération des utilisateurs échouée (${res.status})`);
+    const users = await res.json();
+
+    // Récupérer les glpiId déjà présents dans l'ERP
+    const existingIds = new Set(
+      (await prisma.user.findMany({ where: { glpiId: { not: null } }, select: { glpiId: true } }))
+        .map((u) => u.glpiId)
+    );
+    // Récupérer les emails déjà présents dans l'ERP
+    const existingEmails = new Set(
+      (await prisma.user.findMany({ select: { email: true } })).map((u) => u.email)
+    );
+
+    const importable = [];
+    for (const u of users) {
+      if (!u.name && !u.realname && !u.firstname) continue;
+      const email = u._useremails?.[0]?.email || u.email || null;
+      if (!email) continue;
+      if (existingIds.has(u.id)) continue;
+      if (existingEmails.has(email)) continue;
+
+      importable.push({
+        glpiId: u.id,
+        name: u.name || null,
+        firstName: u.firstname || null,
+        realName: u.realname || null,
+        email,
+        fullName: [u.realname, u.firstname].filter(Boolean).join(' ') || u.name,
+      });
+    }
+    return importable;
+  });
+}
+
+// Importe sélectivement des utilisateurs GLPI dans l'ERP.
+// glpiUserIds : tableau des glpiId à importer.
+// Retourne { imported: nombre, errors: [...] }.
+async function importGlpiUsers(glpiUserIds) {
+  const config = await getActiveGlpiConfig();
+  if (!config) throw new Error('GLPI non configuré');
+
+  return withGlpiSession(config, async (sessionToken) => {
+    const headers = { 'App-Token': config.appToken, 'Session-Token': sessionToken };
+
+    // Récupérer les utilisateurs GLPI demandés
+    const ids = glpiUserIds.join(',');
+    const res = await fetch(`${config.baseUrl}/User?range=0-500`, { headers });
+    if (!res.ok) throw new Error(`GLPI récupération des utilisateurs échouée (${res.status})`);
+    const allUsers = await res.json();
+
+    // Filtrer ceux dont l'ID est dans la liste demandée
+    const users = allUsers.filter((u) => glpiUserIds.includes(u.id));
+
+    let imported = 0;
+    const errors = [];
+
+    for (const u of users) {
+      const email = u._useremails?.[0]?.email || u.email || null;
+      if (!email) {
+        errors.push({ glpiId: u.id, reason: 'Email manquant' });
+        continue;
+      }
+      const fullName = [u.realname, u.firstname].filter(Boolean).join(' ') || u.name;
+
+      // Vérifier qu'il n'existe pas déjà
+      const existingByGlpiId = await prisma.user.findUnique({ where: { glpiId: u.id } });
+      if (existingByGlpiId) {
+        errors.push({ glpiId: u.id, reason: 'Déjà importé' });
+        continue;
+      }
+      const existingByEmail = await prisma.user.findUnique({ where: { email } });
+      if (existingByEmail) {
+        errors.push({ glpiId: u.id, reason: `Email ${email} déjà utilisé dans l'ERP` });
+        continue;
+      }
+
+      const passwordHash = await bcrypt.hash(crypto.randomBytes(20).toString('hex'), 10);
+      await prisma.user.create({
+        data: {
+          email,
+          passwordHash,
+          fullName,
+          role: 'TECHNICIAN',
+          glpiId: u.id,
+          mustChangePassword: true,
+        },
+      });
+      imported++;
+    }
+
+    return { imported, errors };
+  });
+}
+
+module.exports = { createTicketFromEmail, createGlpiTicket, updateGlpiTicket, deleteGlpiTicket, uploadGlpiAttachment, syncTeamsFromGlpi, syncCategoriesFromGlpi, syncLocationsFromGlpi, syncUsersFromGlpi, addGlpiFollowup, getImportableGlpiUsers, importGlpiUsers };

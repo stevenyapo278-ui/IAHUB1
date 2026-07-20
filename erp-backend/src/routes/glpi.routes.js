@@ -4,7 +4,7 @@ const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { syncGlpiTickets, fullReimportFromGlpi, getActiveGlpiConfig, glpiInitSession, glpiKillSession } = require('../utils/glpiSync');
-const { syncLocationsFromGlpi, syncUsersFromGlpi } = require('../services/glpiTicketCreator');
+const { syncLocationsFromGlpi, syncUsersFromGlpi, getImportableGlpiUsers, importGlpiUsers } = require('../services/glpiTicketCreator');
 
 const router = express.Router();
 router.use(authenticate);
@@ -87,9 +87,11 @@ router.post('/sync-locations', requirePermission('glpi.manage', ['ADMIN', 'TECHN
 
 // Synchronisation des "Utilisateurs" depuis GLPI — met à jour le glpiId sur les comptes ERP
 // existants en les rapprochant par email ou par nom. Appelée manuellement depuis les réglages.
+// Body optionnel { createMissing: true } pour créer automatiquement les comptes manquants.
 router.post('/sync-users', requirePermission('glpi.manage', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   try {
-    const result = await syncUsersFromGlpi();
+    const createMissing = req.body?.createMissing === true;
+    const result = await syncUsersFromGlpi({ createMissing });
     if (result === null) {
       return res.status(422).json({ error: 'GLPI non configuré' });
     }
@@ -118,6 +120,42 @@ router.get('/locations', async (req, res) => {
     select: { id: true, glpiLocationId: true, name: true, completename: true, town: true, building: true, room: true },
   });
   res.json(locations);
+});
+
+// Récupère la liste des catégories synchronisées depuis GLPI (table TicketCategory)
+// pour le sélecteur de catégorie dynamique dans le formulaire de ticket.
+router.get('/categories', async (req, res) => {
+  const categories = await prisma.ticketCategory.findMany({
+    orderBy: { name: 'asc' },
+    select: { id: true, glpiCategoryId: true, name: true },
+  });
+  res.json(categories);
+});
+
+// Récupère la liste des utilisateurs GLPI non encore importés dans l'ERP
+// pour le bouton "Importer de GLPI" dans la vue utilisateurs.
+router.get('/importable-users', requirePermission('glpi.manage', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+  try {
+    const glpiUsers = await getImportableGlpiUsers();
+    return res.json(glpiUsers);
+  } catch (err) {
+    return res.status(502).json({ error: err.message || 'Erreur de récupération des utilisateurs GLPI' });
+  }
+});
+
+// Importe sélectivement des utilisateurs GLPI dans l'ERP (body: { userIds: [1,2,3] })
+// Crée les comptes avec mot de passe aléatoire + mustChangePassword: true.
+router.post('/import-users', requirePermission('glpi.manage', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+  try {
+    const { userIds } = req.body;
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({ error: 'La liste userIds est requise' });
+    }
+    const result = await importGlpiUsers(userIds);
+    return res.json(result);
+  } catch (err) {
+    return res.status(502).json({ error: err.message || "Erreur d'import des utilisateurs GLPI" });
+  }
 });
 
 // Proxy un document GLPI (image, PDF, etc.) via l'API REST — utilisé pour les URLs d'images

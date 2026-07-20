@@ -19,8 +19,9 @@ Retourne ce JSON :
   "priority": "P1|P2|P3|P4",
   "team": "nom de l'équipe concernée",
   "confidence": 0.0-1.0,
-  "suggestedTitle": "titre court et explicite pour le ticket (max 80 caractères), doit refléter l'action demandée (ex: 'Ouverture des ports USB - Transmission fiscale')",
+  "suggestedTitle": "titre au format 'SITE : ACTION DEMANDEE' (ex: 'CENTRALE D ACHATS : Impression fichier PDF'), max 80 caractères",
   "suggestedSkill": "nom exact de la compétence parmi la liste ci-dessous, ou null si aucune ne correspond",
+  "location": "nom complet du lieu parmi la liste ci-dessous, ou null si non déterminable",
   "isSpam": false,
   "language": "fr|en|autre"
 }
@@ -28,10 +29,25 @@ Retourne ce JSON :
 Liste des compétences techniciens disponibles :
 {{availableSkills}}
 
+Liste des lieux disponibles (utilise le nom complet exact) :
+{{availableLocations}}
+
 Règles pour suggestedSkill :
 - Compare le sujet et le corps de l'email avec chaque compétence disponible.
 - Si la demande correspond clairement à une compétence (ex: "ouvrir les ports USB" → "PORT USB", "problème VPN" → "VPN"), retourne ce nom exact.
 - Si aucune compétence ne correspond précisément, retourne null.
+
+Règles pour location :
+- Extrais le lieu à partir de l'adresse email expéditeur, de la signature, ou du corps du message.
+- L'adresse email contient souvent un indice (ex: directeur_monop_coc → MONOP COCODY, oeno_capsud → OENO CAP SUD).
+- Choisis le nom complet EXACT depuis la liste ci-dessus.
+- En l'absence d'indice clair sur le lieu, retourne null.
+
+Règles pour suggestedTitle :
+- Le titre doit suivre le format 'SITE : ACTION DEMANDEE' (ex: 'SUPER U VALLON : Panne caisse N 3', 'CENTRALE D ACHATS : Création de groupe de mail').
+- Le SITE est le lieu détecté (ou le département/service si le lieu n'est pas identifiable).
+- L'ACTION DEMANDEE doit décrire brièvement ce qui est demandé.
+- Max 80 caractères.
 
 Règles pour isSpam :
 - true si l'email est un message d'absence, publicité, newsletter, accusé de réception automatique, email de bienvenue ou tout message ne demandant PAS une action de support IT.

@@ -1,8 +1,10 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { toast } from 'sonner';
 import api from '../api/client';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 /* ── Helper : décoder les entités HTML (sécurité frontend) ──────────── */
 function decodeHtmlEntities(str) {
@@ -364,10 +366,10 @@ function DecisionQualityCard({ stats }) {
     >
       <h3 className="text-[12px] font-bold flex items-center gap-1.5 mb-3" style={{ color: 'var(--color-on-surface)' }}>
         <span className="material-symbols-outlined text-sm" style={{ color: '#16a34a' }}>speed</span>
-        Qualité des décisions
+        Traitement des emails
       </h3>
 
-      {/* Anneau de précision */}
+      {/* Anneau de répartition */}
       <div className="flex items-center gap-4 mb-3">
         <div className="relative w-16 h-16">
           <svg className="w-16 h-16 -rotate-90" viewBox="0 0 64 64">
@@ -436,6 +438,14 @@ function DecisionQualityCard({ stats }) {
           ) : null;
         })}
       </div>
+      {hasData && (
+        <p className="text-[10px] mt-1.5" style={{ color: 'var(--color-on-surface-variant)' }}>
+          {errors === 0
+            ? 'Aucune erreur technique detectee'
+            : `${errors} erreur${errors > 1 ? 's' : ''} technique${errors > 1 ? 's' : ''} sur ${total} email${total > 1 ? 's' : ''}`
+          }
+        </p>
+      )}
     </motion.div>
   );
 }
@@ -736,12 +746,24 @@ function TicketAttributesPanel({ tickets, label, color, error }) {
 }
 
 /* ── Chat sur l'analyse IA ──────────────────────────────── */
+const SUGGESTED_QUESTIONS = [
+  'Quels sont les principaux problèmes détectés ?',
+  'Que dois-je corriger en priorité ?',
+  'Résume les écarts entre PROD et DEV',
+  'Donne moi un plan d\'action par ordre de priorité',
+  'Y a-t-il des anomalies dans les assignations ?',
+  'Explique la note de qualité des noms',
+  'Quels fichiers dois-je modifier en priorité ?',
+  'Compare les statistiques PROD et DEV',
+];
+
 function TransitionAnalysisChat({ analysis }) {
   const [messages, setMessages] = useState([
     { role: 'assistant', content: 'Posez-moi des questions sur l analyse ci-dessus : les ecarts PROD/DEV, les notes, les recommandations de code, ou tout autre point.' },
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [copiedIndex, setCopiedIndex] = useState(null);
   const messagesEndRef = useRef(null);
 
   // Construire le contexte de l analyse pour l envoyer au backend
@@ -769,17 +791,17 @@ function TransitionAnalysisChat({ analysis }) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
-  async function sendMessage() {
-    const text = input.trim();
-    if (!text || loading) return;
+  async function sendMessage(text) {
+    const msg = text || input.trim();
+    if (!msg || loading) return;
     setInput('');
-    const userMsg = { role: 'user', content: text };
+    const userMsg = { role: 'user', content: msg };
     setMessages(prev => [...prev, userMsg]);
     setLoading(true);
     try {
       const history = [...messages, userMsg].slice(-10).map(m => ({ role: m.role, content: m.content }));
       const { data } = await api.post('/transition/chat', {
-        message: text,
+        message: msg,
         history,
         analysisContext,
       });
@@ -798,25 +820,63 @@ function TransitionAnalysisChat({ analysis }) {
     }
   }
 
+  async function copyMessage(content, index) {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedIndex(index);
+      setTimeout(() => setCopiedIndex(null), 2000);
+    } catch {}
+  }
+
+  function clearChat() {
+    setMessages([
+      { role: 'assistant', content: 'Posez-moi des questions sur l analyse ci-dessus : les ecarts PROD/DEV, les notes, les recommandations de code, ou tout autre point.' },
+    ]);
+  }
+
+  const showSuggestions = messages.length <= 1;
+
   return (
     <div className="mt-4 pt-4 border-t" style={{ borderColor: 'var(--color-outline-variant)' }}>
-      <h4 className="text-[12px] font-bold flex items-center gap-1.5 mb-3" style={{ color: 'var(--color-on-surface)' }}>
-        <span className="material-symbols-outlined text-sm" style={{ color: '#8b5cf6' }}>chat</span>
-        Discuter de l'analyse
-      </h4>
+      <div className="flex items-center justify-between mb-3">
+        <h4 className="text-[12px] font-bold flex items-center gap-1.5" style={{ color: 'var(--color-on-surface)' }}>
+          <span className="material-symbols-outlined text-sm" style={{ color: '#8b5cf6' }}>chat</span>
+          Discuter de l'analyse
+        </h4>
+        {messages.length > 1 && (
+          <button onClick={clearChat}
+            className="text-[10px] flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-surface-container-low transition-colors"
+            style={{ color: 'var(--color-on-surface-variant)' }}>
+            <span className="material-symbols-outlined text-[12px]">delete</span>
+            Effacer
+          </button>
+        )}
+      </div>
 
       {/* Messages */}
-      <div className="max-h-[300px] overflow-y-auto space-y-2 mb-3 pr-1">
+      <div className="max-h-[350px] overflow-y-auto space-y-2 mb-3 pr-1">
         {messages.map((msg, i) => (
           <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div
-              className={`max-w-[85%] rounded-xl px-3 py-2 text-[12px] leading-relaxed ${
-                msg.role === 'user'
-                  ? 'bg-primary text-white rounded-br-sm'
-                  : 'bg-surface-container-low border border-outline-variant/40 text-on-surface rounded-bl-sm'
-              }`}
-            >
-              {msg.content}
+            <div className="group relative max-w-[85%]">
+              <div
+                className={`rounded-xl px-3 py-2 text-[12px] leading-relaxed ${
+                  msg.role === 'user'
+                    ? 'bg-primary text-white rounded-br-sm'
+                    : 'bg-surface-container-low border border-outline-variant/40 text-on-surface rounded-bl-sm'
+                }`}
+              >
+                <div className="whitespace-pre-wrap">{msg.content}</div>
+              </div>
+              {msg.role === 'assistant' && msg.content.length > 20 && (
+                <button
+                  onClick={() => copyMessage(msg.content, i)}
+                  className="absolute -bottom-4 right-0 opacity-0 group-hover:opacity-100 transition-opacity text-[9px] px-1.5 py-0.5 rounded-lg bg-surface-container-high border border-outline-variant/40 hover:bg-surface-container transition-colors"
+                  style={{ color: 'var(--color-on-surface-variant)' }}
+                  title="Copier la réponse"
+                >
+                  <span className="material-symbols-outlined text-[10px]">{copiedIndex === i ? 'check' : 'content_copy'}</span>
+                </button>
+              )}
             </div>
           </div>
         ))}
@@ -832,6 +892,28 @@ function TransitionAnalysisChat({ analysis }) {
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Questions suggérées */}
+      {showSuggestions && (
+        <div className="mb-3">
+          <p className="text-[10px] font-medium mb-1.5" style={{ color: 'var(--color-on-surface-variant)' }}>
+            Suggestions de questions :
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {SUGGESTED_QUESTIONS.map((q, i) => (
+              <button
+                key={i}
+                onClick={() => sendMessage(q)}
+                disabled={loading}
+                className="text-[10px] px-2 py-1 rounded-lg border transition-colors hover:bg-surface-container-low disabled:opacity-40"
+                style={{ borderColor: 'var(--color-outline-variant)', color: 'var(--color-on-surface-variant)' }}
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Input */}
       <div className="flex items-center gap-2">
         <input
@@ -844,7 +926,7 @@ function TransitionAnalysisChat({ analysis }) {
           className="flex-1 bg-surface border border-outline-variant/60 rounded-xl px-3 py-2 text-[12px] text-on-surface placeholder-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all disabled:opacity-50"
         />
         <button
-          onClick={sendMessage}
+          onClick={() => sendMessage()}
           disabled={!input.trim() || loading}
           className="w-8 h-8 rounded-lg bg-primary text-white flex items-center justify-center disabled:opacity-40 hover:bg-primary/90 transition-colors shrink-0"
         >
@@ -881,15 +963,31 @@ function AiAnalysisSection() {
     }
   }
 
-  function NoteBadge({ note }) {
+  function ScoreGauge({ note, size = 'sm' }) {
     const color = note >= 8 ? '#16a34a' : note >= 5 ? '#f59e0b' : '#ef4444';
+    const pct = Math.min(100, Math.max(0, note * 10));
+    const isLarge = size === 'lg';
+    const dim = isLarge ? 64 : 36;
+    const stroke = isLarge ? 5 : 3;
+    const r = (dim - stroke) / 2;
+    const circ = 2 * Math.PI * r;
+
     return (
-      <span
-        className="inline-flex items-center justify-center w-7 h-7 rounded-full text-[11px] font-bold"
-        style={{ backgroundColor: `${color}15`, color }}
-      >
-        {note}/10
-      </span>
+      <div className={`relative inline-flex items-center justify-center ${isLarge ? 'flex-col' : ''}`}>
+        <svg width={dim} height={dim} className="-rotate-90">
+          <circle cx={dim / 2} cy={dim / 2} r={r} fill="none"
+            stroke="var(--color-outline-variant)" strokeWidth={stroke} />
+          <motion.circle cx={dim / 2} cy={dim / 2} r={r} fill="none"
+            stroke={color} strokeWidth={stroke} strokeLinecap="round"
+            strokeDasharray={circ}
+            initial={{ strokeDashoffset: circ }}
+            animate={{ strokeDashoffset: circ * (1 - pct / 100) }}
+            transition={{ duration: 1, ease: 'easeOut' }} />
+        </svg>
+        <span className={`absolute font-bold ${isLarge ? 'text-lg' : 'text-[10px]'}`} style={{ color }}>
+          {isLarge ? `${note}/10` : note}
+        </span>
+      </div>
     );
   }
 
@@ -958,6 +1056,34 @@ function AiAnalysisSection() {
 
       {analysis?.success && analysis?.analysis && (
         <div className="space-y-4">
+          {/* Score de santé global */}
+          {(() => {
+            const notes = ['qualiteNoms', 'assignations', 'categoriesPriorites', 'ecartsProdDev'];
+            const vals = notes.map(k => analysis.analysis[k]?.note).filter(v => v != null);
+            const avg = vals.length > 0 ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10 : 0;
+            const healthColor = avg >= 8 ? '#16a34a' : avg >= 6 ? '#f59e0b' : avg >= 4 ? '#f97316' : '#ef4444';
+            const healthLabel = avg >= 8 ? 'Excellent' : avg >= 6 ? 'Bon' : avg >= 4 ? 'Moyen' : 'Critique';
+            return (
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+                className="p-4 rounded-xl border flex items-center gap-4"
+                style={{ borderColor: `${healthColor}25`, backgroundColor: `${healthColor}05` }}>
+                <ScoreGauge note={avg} size="lg" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold" style={{ color: 'var(--color-on-surface)' }}>Santé globale</span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase"
+                      style={{ backgroundColor: `${healthColor}15`, color: healthColor }}>
+                      {healthLabel}
+                    </span>
+                  </div>
+                  <p className="text-[11px] mt-1" style={{ color: 'var(--color-on-surface-variant)' }}>
+                    Moyenne sur {vals.length} critères · {avg}/10
+                  </p>
+                </div>
+              </motion.div>
+            );
+          })()}
+
           {/* Cartes de notes */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {[
@@ -967,6 +1093,7 @@ function AiAnalysisSection() {
               { key: 'ecartsProdDev', label: 'Écarts PROD/DEV', icon: 'compare_arrows' },
             ].map(item => {
               const data = analysis.analysis[item.key];
+              const note = data?.note ?? 5;
               return (
                 <div key={item.key} className="p-3 rounded-xl border" style={{ borderColor: 'var(--color-outline-variant)' }}>
                   <div className="flex items-center gap-2 mb-2">
@@ -974,17 +1101,28 @@ function AiAnalysisSection() {
                     <span className="text-[11px] font-semibold" style={{ color: 'var(--color-on-surface)' }}>{item.label}</span>
                   </div>
                   <div className="flex items-center gap-2 mb-1.5">
-                    <NoteBadge note={data?.note ?? 5} />
+                    <ScoreGauge note={note} />
                     <span className="text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>{data?.analyse?.substring(0, 80) || ''}</span>
                   </div>
                   {data?.problemes?.length > 0 && (
-                    <div className="mt-1.5 space-y-0.5">
-                      {data.problemes.slice(0, 2).map((p, i) => (
-                        <p key={i} className="text-[10px] flex items-start gap-1" style={{ color: '#ef4444' }}>
-                          <span className="material-symbols-outlined text-[10px] shrink-0 mt-px">circle</span>
-                          {p}
+                    <div className="mt-1.5 space-y-1">
+                      {data.problemes.slice(0, 3).map((p, i) => {
+                        const sev = typeof p === 'string' ? (p.toLowerCase().includes('critique') || p.toLowerCase().includes('bloqu') ? 'HAUT' : p.toLowerCase().includes('manquant') || p.toLowerCase().includes('manque') ? 'MOYEN' : 'INFO') : 'INFO';
+                        const sevColor = sev === 'HAUT' ? '#ef4444' : sev === 'MOYEN' ? '#f59e0b' : '#3b82f6';
+                        const sevBg = sev === 'HAUT' ? 'rgba(239,68,68,0.1)' : sev === 'MOYEN' ? 'rgba(245,158,11,0.1)' : 'rgba(59,130,246,0.1)';
+                        const displayText = typeof p === 'string' ? p : p.message || p.text || String(p);
+                        return (
+                          <p key={i} className="text-[10px] flex items-start gap-1.5">
+                            <span className="text-[8px] font-bold px-1 rounded shrink-0 mt-0.5" style={{ backgroundColor: sevBg, color: sevColor }}>{sev}</span>
+                            <span style={{ color: 'var(--color-on-surface-variant)' }}>{displayText}</span>
+                          </p>
+                        );
+                      })}
+                      {data.problemes.length > 3 && (
+                        <p className="text-[9px] font-medium" style={{ color: 'var(--color-on-surface-variant)' }}>
+                          +{data.problemes.length - 3} autres problèmes
                         </p>
-                      ))}
+                      )}
                     </div>
                   )}
                 </div>
@@ -1210,15 +1348,17 @@ function TimelineItem({ event }) {
 /* PAGE PRINCIPALE                                                         */
 /* ═══════════════════════════════════════════════════════════════════════ */
 export default function TransitionDashboard() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [activeSettings, setActiveSettings] = useState(null);
-  const [selectedPeriod, setSelectedPeriod] = useState(7);
+  const [selectedPeriod, setSelectedPeriod] = useState(() => Number(searchParams.get('days')) || 7);
   const [compareData, setCompareData] = useState(null);
   const [compareLoading, setCompareLoading] = useState(false);
   const [compareError, setCompareError] = useState('');
+  const [confirmMode, setConfirmMode] = useState(null);
 
   const scrollToAnalysis = useCallback(() => {
     // Déclencher l'analyse IA en cliquant sur le bouton
@@ -1369,7 +1509,7 @@ export default function TransitionDashboard() {
             {[7, 14, 30].map(d => (
               <button
                 key={d}
-                onClick={() => setSelectedPeriod(d)}
+                onClick={() => { setSelectedPeriod(d); setSearchParams({ days: d }, { replace: true }); }}
                 className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all ${
                   selectedPeriod === d
                     ? 'bg-primary text-white shadow-sm'
@@ -1538,9 +1678,7 @@ export default function TransitionDashboard() {
               onClick={() => {
                 if (currentMode.id !== mode.id && !saving) {
                   if (mode.id === 'PRODUCTION') {
-                    if (window.confirm(
-                      '⚠️ Passer en mode Production va activer l\'écriture dans GLPI production. Les emails seront transformés en tickets réels. Confirmer ?'
-                    )) applyMode(mode);
+                    setConfirmMode(mode);
                   } else {
                     applyMode(mode);
                   }
@@ -2051,6 +2189,81 @@ export default function TransitionDashboard() {
       </motion.div>
 
       {/* ══════════════════════════════════════════════════════════════════ */}
+      {/* DONNÉES HISTORIQUES IMPORTÉES */}
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      {data.importData && (
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15 }}
+          className="bento-card p-4"
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--color-on-surface)' }}>
+              <span className="material-symbols-outlined text-lg" style={{ color: '#8b5cf6' }}>database</span>
+              Données historiques importées
+            </h3>
+            <span className="text-[10px] px-2 py-1 rounded-full font-semibold"
+              style={{ backgroundColor: 'rgba(139,92,246,0.1)', color: '#8b5cf6' }}>
+              {data.importData.ticketsTotal} tickets · {data.importData.locationsImported} lieux
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="p-3 rounded-xl" style={{ backgroundColor: 'var(--color-surface-container-low)' }}>
+              <div className="text-[22px] font-bold" style={{ color: 'var(--color-on-surface)' }}>
+                {data.importData.ticketsImported.toLocaleString()}
+              </div>
+              <div className="text-[10px] mt-1" style={{ color: 'var(--color-on-surface-variant)' }}>
+                Tickets importés (CSV)
+              </div>
+            </div>
+            <div className="p-3 rounded-xl" style={{ backgroundColor: 'var(--color-surface-container-low)' }}>
+              <div className="text-[22px] font-bold" style={{ color: 'var(--color-on-surface)' }}>
+                {data.importData.ticketsWithLocation.toLocaleString()}
+              </div>
+              <div className="text-[10px] mt-1" style={{ color: 'var(--color-on-surface-variant)' }}>
+                Avec lieu renseigné
+              </div>
+              <div className="text-[9px] mt-0.5" style={{ color: 'var(--color-on-surface-variant)' }}>
+                {Math.round((data.importData.ticketsWithLocation / data.importData.ticketsTotal) * 100)}% de couverture
+              </div>
+            </div>
+            <div className="p-3 rounded-xl" style={{ backgroundColor: 'var(--color-surface-container-low)' }}>
+              <div className="text-[22px] font-bold" style={{ color: 'var(--color-on-surface)' }}>
+                {data.importData.locationsImported}
+              </div>
+              <div className="text-[10px] mt-1" style={{ color: 'var(--color-on-surface-variant)' }}>
+                Lieux de référence
+              </div>
+              <div className="text-[9px] mt-0.5" style={{ color: 'var(--color-on-surface-variant)' }}>
+                Pour la détection IA
+              </div>
+            </div>
+            <div className="p-3 rounded-xl" style={{ backgroundColor: 'var(--color-surface-container-low)' }}>
+              <div className="text-[10px] font-medium mb-1" style={{ color: 'var(--color-on-surface-variant)' }}>
+                Utilité
+              </div>
+              <ul className="text-[10px] space-y-1" style={{ color: 'var(--color-on-surface-variant)' }}>
+                <li className="flex items-center gap-1">
+                  <span className="material-symbols-outlined text-[10px]" style={{ color: '#8b5cf6' }}>check_circle</span>
+                  Few-shot learning (titres + lieux)
+                </li>
+                <li className="flex items-center gap-1">
+                  <span className="material-symbols-outlined text-[10px]" style={{ color: '#8b5cf6' }}>check_circle</span>
+                  Détection du lieu par l'IA
+                </li>
+                <li className="flex items-center gap-1">
+                  <span className="material-symbols-outlined text-[10px]" style={{ color: '#8b5cf6' }}>check_circle</span>
+                  Format de titre standardisé
+                </li>
+              </ul>
+            </div>
+          </div>
+        </motion.div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════ */}
       {/* ANALYSE IA DES TICKETS */}
       {/* ══════════════════════════════════════════════════════════════════ */}
       <AiAnalysisSection />
@@ -2086,6 +2299,17 @@ export default function TransitionDashboard() {
           )}
         </div>
       </motion.div>
+
+      <ConfirmDialog
+        open={!!confirmMode}
+        title="Passer en mode Production"
+        message="Passer en mode Production va activer l'écriture dans GLPI production. Les emails seront transformés en tickets réels. Confirmer ?"
+        confirmLabel="Activer"
+        danger
+        loading={saving}
+        onConfirm={() => { if (confirmMode) applyMode(confirmMode); setConfirmMode(null); }}
+        onCancel={() => setConfirmMode(null)}
+      />
 
     </div>
   );

@@ -375,10 +375,20 @@ async function processMessage(message, account) {
       return updated;
     }
 
+    // Résoudre le lieu détecté par l'IA en un ID de lieu GLPI
+    let locationId = null;
+    if (analysis.location) {
+      const loc = await prisma.glpiLocation.findFirst({
+        where: { completename: analysis.location },
+        select: { glpiLocationId: true },
+      });
+      if (loc) locationId = loc.glpiLocationId;
+    }
+
     // Étape 3 : créer ticket GLPI + ERP dans une transaction pour éviter l'incohérence
     const { glpiTicketId, erpTicketId } = await prisma.$transaction(async (tx) => {
       const created = await createTicketFromEmail({
-        subject, body: bodyPreview, from: fromEmail, fromName, analysis, emailAccountId: account.id, tx
+        subject, body: bodyPreview, from: fromEmail, fromName, analysis, emailAccountId: account.id, locationId, tx
       });
 
       // Étape 4 : stocker conversationId + aiSummary sur le ticket ERP

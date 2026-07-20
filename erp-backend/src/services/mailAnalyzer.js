@@ -116,14 +116,14 @@ async function getFewShotExamples(subject, body) {
 
   try {
     const similarTickets = await prisma.$queryRawUnsafe(`
-      SELECT t.title, t.content, t.category, t.priority, tm.name as team_name
+      SELECT t.title, t.content, t.category, t.priority, t."glpiLocationName", tm.name as team_name
       FROM "Ticket" t
       LEFT JOIN "Team" tm ON tm.id = t."teamId"
       WHERE t.status IN ('SOLVED', 'CLOSED') 
         AND t.category IS NOT NULL 
         AND t.priority IS NOT NULL
       ORDER BY ts_rank(to_tsvector('french', COALESCE(t.title, '') || ' ' || COALESCE(t.content, '')), plainto_tsquery('french', $1)) DESC
-      LIMIT 3
+      LIMIT 5
     `, textQuery);
 
     if (similarTickets.length === 0) return '';
@@ -141,7 +141,9 @@ Classification attendue :
   "summary": "${(ticket.title || '').replace(/"/g, '\\"')}",
   "category": "${ticket.category}",
   "priority": "${ticket.priority}",
-  "team": "${(ticket.team_name || '').replace(/"/g, '\\"')}"
+  "team": "${(ticket.team_name || '').replace(/"/g, '\\"')}",
+  "suggestedTitle": "${(ticket.title || '').replace(/"/g, '\\"')}",
+  "location": "${(ticket.glpiLocationName || '').replace(/"/g, '\\"')}"
 }
 `;
     }
@@ -163,10 +165,26 @@ async function getAllSkills() {
   }
 }
 
+// Récupère tous les lieux disponibles
+async function getAllLocations() {
+  try {
+    return await prisma.glpiLocation.findMany({ select: { completename: true }, orderBy: { completename: 'asc' } });
+  } catch (err) {
+    console.error('[mailAnalyzer] Échec récupération lieux:', err.message);
+    return [];
+  }
+}
+
 // Construit la chaîne de compétences pour le prompt
 function formatSkillsForPrompt(skills) {
   if (skills.length === 0) return 'Aucune compétence configurée.';
   return skills.map((s) => `- ${s.name}`).join('\n');
+}
+
+// Construit la chaîne des lieux pour le prompt
+function formatLocationsForPrompt(locations) {
+  if (locations.length === 0) return 'Aucun lieu configuré.';
+  return locations.map((l) => `- ${l.completename}`).join('\n');
 }
 
 // Fallback : si le LLM n'a pas retourné suggestedSkill, tente une correspondance
@@ -208,9 +226,11 @@ async function analyzeEmail({ subject, body, from, fromName }) {
     fewShotExamples = await getFewShotExamples(subject, body);
   }
 
-  // Injecter la liste des compétences disponibles pour guider l'IA dans l'assignation
   const skills = await getAllSkills();
   const availableSkills = formatSkillsForPrompt(skills);
+
+  const locations = await getAllLocations();
+  const availableLocations = formatLocationsForPrompt(locations);
 
   const { getPrompt } = require('./promptTemplates');
   const prompt = await getPrompt('analyzeEmail', {
@@ -220,6 +240,7 @@ async function analyzeEmail({ subject, body, from, fromName }) {
     body: body?.substring(0, 2000) || '',
     fewShotExamples,
     availableSkills,
+    availableLocations,
   });
 
   const raw = await callProvider(provider, prompt);

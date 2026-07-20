@@ -1,4 +1,5 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
+import { toast } from 'sonner';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -89,6 +90,8 @@ export default function TicketDetail() {
   const [error, setError] = useState('');
   const [teams, setTeams] = useState([]);
   const [users, setUsers] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [glpiUsers, setGlpiUsers] = useState([]);
   const [syncFailures, setSyncFailures] = useState([]);
   const [savingField, setSavingField] = useState(null);
 
@@ -103,26 +106,23 @@ export default function TicketDetail() {
   // requêtes images soient résolues.
   const followupBlobUrlsRef = useRef([]);
 
-  function load() {
+  const load = useCallback(() => {
     api
       .get(`/tickets/${id}`)
       .then(({ data }) => setTicket(data))
       .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
-    // Échecs de synchro GLPI (création, mise à jour, suivi, pièce jointe) — invisibles autrement,
-    // voir GLPI_SYNC_FAILED dans erp-backend/src/routes/ticket.routes.js.
     api
       .get(`/tickets/${id}/events`)
       .then(({ data }) => setSyncFailures(data.filter((e) => e.type === 'GLPI_SYNC_FAILED')))
       .catch(() => {});
-  }
+  }, [id]);
 
-  useEffect(load, [id]);
+  useEffect(() => { load(); }, [load]);
 
-  // Rafraîchit le ticket en arrière-plan pour voir arriver les nouveaux suivis/pièces jointes sans recharger la page
   useEffect(() => {
     const intervalId = setInterval(load, 15000);
     return () => clearInterval(intervalId);
-  }, [id]);
+  }, [load]);
 
   // Post-traite les images des suivis GLPI : les balises <img src="/glpi/document/X/file"> sont
   // chargées via axios (qui envoie le JWT dans Authorization header) et converties en blob URLs.
@@ -185,6 +185,8 @@ export default function TicketDetail() {
   }
 
   useEffect(() => {
+    api.get('/glpi/categories').then(({ data }) => setCategories(data)).catch(() => {});
+    api.get('/glpi/users').then(({ data }) => setGlpiUsers(data)).catch(() => {});
     if (!canAssign) return;
     api.get('/teams').then(({ data }) => setTeams(data)).catch(() => {});
     api.get('/users').then(({ data }) => setUsers(data)).catch(() => {});
@@ -194,6 +196,7 @@ export default function TicketDetail() {
     try {
       setSavingField(field);
       await api.patch(`/tickets/${id}`, { [field]: value });
+      toast.success(`${field} mis à jour`);
       load();
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la mise à jour');
@@ -207,6 +210,7 @@ export default function TicketDetail() {
     if (!followup.trim()) return;
     try {
       await api.post(`/tickets/${id}/followups`, { content: followup });
+      toast.success('Commentaire ajouté');
       setFollowup('');
       load();
     } catch (err) {
@@ -638,6 +642,26 @@ export default function TicketDetail() {
                 </select>
               </div>
               <div>
+                <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Catégorie</label>
+                {canAssign ? (
+                  <select
+                    className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
+                    value={ticket.category || ''}
+                    disabled={savingField === 'category'}
+                    onChange={(e) => updateField('category', e.target.value)}
+                  >
+                    <option value="">-----</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.name}>{c.name}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="w-full bg-surface-container-low/60 border border-outline-variant/60 rounded-xl py-2.5 px-3.5 font-body-sm text-body-sm text-on-surface-variant">
+                    {ticket.category || '-'}
+                  </div>
+                )}
+              </div>
+              <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Statut</label>
                 <select
                   className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
@@ -742,9 +766,10 @@ export default function TicketDetail() {
                     onChange={(e) => updateField('assignedToId', e.target.value ? Number(e.target.value) : null)}
                   >
                     <option value="">Non assigné</option>
-                    {users.map((u) => (
-                      <option key={u.id} value={u.id}>{u.fullName}</option>
-                    ))}
+                    {users.map((u) => {
+                      const isGlpi = glpiUsers.some((gu) => gu.id === u.id);
+                      return <option key={u.id} value={u.id}>{u.fullName}{isGlpi ? ' 🔗' : ''}</option>;
+                    })}
                   </select>
                 ) : (
                   <div className="w-full flex items-center gap-2 bg-surface-container-low/60 border border-outline-variant/60 rounded-xl py-2.5 px-3.5 font-body-sm text-body-sm text-on-surface">

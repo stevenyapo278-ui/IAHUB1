@@ -50,6 +50,7 @@ const userSelect = {
   teamId: true,
   isActive: true,
   receiveDraftAlerts: true,
+  glpiId: true,
   team: { select: { id: true, name: true } },
   createdAt: true,
 };

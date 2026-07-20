@@ -1,9 +1,7 @@
-import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
 import { hasPermission } from '../../utils/permissions';
-import Skeleton from '../../components/Skeleton';
 import AiProvidersTab from './AiProvidersTab';
 import EmailAccountsTab from './EmailAccountsTab';
 import OtherApisTab from './OtherApisTab';
@@ -22,13 +20,6 @@ const BASE_TABS = [
 
 export default function Settings() {
   const { user } = useAuth();
-  const [loading, setLoading] = useState(true);
-
-  // Petit délai pour afficher le skeleton le temps que les tabs chargent leurs données
-  useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 300);
-    return () => clearTimeout(timer);
-  }, []);
 
   const visibleBaseTabs = BASE_TABS.filter((tab) => hasPermission(user, tab.permission, ['ADMIN']));
   // Onglet "Avancé" réservé au SUPERADMIN — masqué pour ADMIN, pas seulement désactivé, car ces
@@ -72,10 +63,7 @@ export default function Settings() {
 
       {/* Horizontal Tabs Container */}
       <div className="w-full">
-        {loading ? (
-          <Skeleton variant="button" className="h-16 w-full" />
-        ) : (
-          <div className="flex flex-row overflow-x-auto md:overflow-visible bg-surface-container-lowest p-sm rounded-2xl border border-outline-variant/60 card-shadow gap-sm no-scrollbar mb-lg">
+        <div className="flex flex-row overflow-x-auto md:overflow-visible bg-surface-container-lowest p-sm rounded-2xl border border-outline-variant/60 card-shadow gap-sm no-scrollbar mb-lg">
             {TABS.map((tab) => {
               const isActive = activeTab === tab.id;
               return (
@@ -108,15 +96,11 @@ export default function Settings() {
               );
             })}
           </div>
-        )}
       </div>
 
       {/* Full Width Active Tab Content */}
       <div className="w-full">
-        {loading ? (
-          <Skeleton variant="card" className="h-[400px]" />
-        ) : (
-          <AnimatePresence mode="wait">
+        <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
               variants={tabVariants}
@@ -154,7 +138,6 @@ export default function Settings() {
               </div>
             </motion.div>
           </AnimatePresence>
-        )}
       </div>
     </motion.div>
   );

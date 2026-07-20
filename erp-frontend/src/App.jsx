@@ -2,7 +2,6 @@ import { Routes, Route } from 'react-router-dom';
 import MainLayout from './layouts/MainLayout';
 import ProtectedRoute from './components/ProtectedRoute';
 import ErrorBoundary from './components/ErrorBoundary';
-import PageTransition from './components/PageTransition';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Tickets from './pages/Tickets';
@@ -29,10 +28,10 @@ export default function App() {
   return (
     <ErrorBoundary>
     <Routes>
-        <Route path="/login" element={<PageTransition><Login /></PageTransition>} />
-        <Route path="/approve/:token" element={<PageTransition><ApprovalPage /></PageTransition>} />
-        <Route path="/forgot-password" element={<PageTransition><ForgotPassword /></PageTransition>} />
-        <Route path="/reset-password/:token" element={<PageTransition><ResetPassword /></PageTransition>} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/approve/:token" element={<ApprovalPage />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password/:token" element={<ResetPassword />} />
         <Route
           path="/"
           element={

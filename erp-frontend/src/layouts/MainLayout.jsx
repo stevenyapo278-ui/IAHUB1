@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -8,10 +8,10 @@ import ForcePasswordChange from '../components/ForcePasswordChange';
 import { useVoiceAlerts } from '../hooks/useVoiceAlerts';
 import ConfirmDialog from '../components/ConfirmDialog';
 import GlobalSearch from '../components/GlobalSearch';
-import PageTransition from '../components/PageTransition';
 import NotificationPanel from '../components/NotificationPanel';
 import ChatWidget from '../components/ChatWidget';
 import { useNotifications } from '../context/NotificationContext';
+import { saveSessionLocation } from '../utils/sessionLocation';
 
 const platformItems = [
   { to: '/', label: 'Dashboard', icon: 'house', end: true, permission: null },
@@ -33,6 +33,49 @@ const systemItems = [
   { to: '/transition', label: 'Transition SOS', icon: 'swap_horiz', permission: 'glpi.manage', fallbackRoles: ['ADMIN'] },
 ];
 
+const ROUTE_SEMANTICS = {
+  '/': { zone: 'main', idx: 0 },
+  '/tickets': { zone: 'main', idx: 1 },
+  '/teams': { zone: 'main', idx: 2 },
+  '/inbox': { zone: 'main', idx: 3 },
+  '/knowledge-base': { zone: 'main', idx: 4 },
+  '/supervision': { zone: 'admin', idx: 0 },
+  '/email-drafts': { zone: 'admin', idx: 1 },
+  '/skills': { zone: 'admin', idx: 2 },
+  '/documentation': { zone: 'admin', idx: 3 },
+  '/users': { zone: 'admin', idx: 4 },
+  '/permission-groups': { zone: 'admin', idx: 5 },
+  '/prompts': { zone: 'admin', idx: 6 },
+  '/settings': { zone: 'admin', idx: 7 },
+  '/transition': { zone: 'admin', idx: 8 },
+};
+
+function resolveSemantics(pathname) {
+  if (ROUTE_SEMANTICS[pathname]) return ROUTE_SEMANTICS[pathname];
+  const match = Object.entries(ROUTE_SEMANTICS)
+    .filter(([key]) => key !== '/')
+    .sort(([a], [b]) => b.length - a.length)
+    .find(([key]) => pathname.startsWith(key));
+  return match ? match[1] : null;
+}
+
+const pageVariants = {
+  enter: ({ dir, axis }) => ({
+    [axis]: dir > 0 ? '40%' : dir < 0 ? '-40%' : 0,
+    opacity: 0,
+  }),
+  center: {
+    x: 0, y: 0,
+    opacity: 1,
+    transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] },
+  },
+  exit: ({ dir, axis }) => ({
+    [axis]: dir > 0 ? '-20%' : dir < 0 ? '20%' : 0,
+    opacity: 0,
+    transition: { duration: 0.25, ease: [0.16, 1, 0.3, 1] },
+  }),
+};
+
 export default function MainLayout() {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
@@ -45,6 +88,9 @@ export default function MainLayout() {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [sidebarHovered, setSidebarHovered] = useState(false);
+  const [sidebarPinned, setSidebarPinned] = useState(() => {
+    return localStorage.getItem('sidebarPinned') === 'true';
+  });
   const [tooltipData, setTooltipData] = useState(null);
   const sidebarRef = useRef(null);
   const userMenuRef = useRef(null);
@@ -90,8 +136,44 @@ export default function MainLayout() {
     (item) => location.pathname === item.to || location.pathname.startsWith(item.to + '/')
   );
 
-  const isSidebarExpanded = sidebarHovered;
+  const navigationType = useNavigationType();
+  const [direction, setDirection] = useState({ dir: 0, axis: 'y' });
+  const prevPathRef = useRef(location.pathname);
+
+  useEffect(() => {
+    if (user) {
+      saveSessionLocation(user.id, location.pathname, location.search);
+    }
+  }, [user, location.pathname, location.search]);
+
+  useEffect(() => {
+    const prev = resolveSemantics(prevPathRef.current);
+    const curr = resolveSemantics(location.pathname);
+    let dir = 0;
+    let axis = 'y';
+    if (prev && curr) {
+      if (prev.zone === curr.zone) {
+        axis = 'y';
+        dir = navigationType === 'POP' ? (curr.idx < prev.idx ? -1 : 1) : (curr.idx > prev.idx ? 1 : -1);
+      } else {
+        axis = 'x';
+        dir = navigationType === 'POP' ? -1 : 1;
+      }
+    }
+    setDirection({ dir, axis });
+    prevPathRef.current = location.pathname;
+  }, [location.pathname, navigationType]);
+
+  const isSidebarExpanded = sidebarPinned || sidebarHovered;
   const sidebarW = isSidebarExpanded ? 240 : 64;
+
+  function toggleSidebarPin() {
+    setSidebarPinned(prev => {
+      const next = !prev;
+      localStorage.setItem('sidebarPinned', next);
+      return next;
+    });
+  }
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--color-background)' }}>
@@ -186,6 +268,18 @@ export default function MainLayout() {
             </>
           )}
         </nav>
+
+        {/* Pin toggle */}
+        <button
+          onClick={toggleSidebarPin}
+          className="sidebar-pin-btn"
+          title={sidebarPinned ? 'Détacher la sidebar' : 'Épingler la sidebar'}
+          aria-label={sidebarPinned ? 'Détacher la sidebar' : 'Épingler la sidebar'}
+        >
+          <span className="material-symbols-outlined" style={{ fontSize: '18px', fontVariationSettings: `'FILL' ${sidebarPinned ? 1 : 0}` }}>
+            keep
+          </span>
+        </button>
 
         {/* User profile at bottom */}
         <div
@@ -292,16 +386,24 @@ export default function MainLayout() {
         </header>
 
         {/* Page content */}
-        <motion.main
+        <main
           className="flex-1 overflow-y-auto"
           style={{ backgroundColor: 'var(--color-background)' }}
         >
-          <AnimatePresence initial={false} mode="wait">
-            <PageTransition key={location.pathname}>
+          <AnimatePresence initial={false} mode="popLayout">
+            <motion.div
+              key={location.pathname}
+              custom={direction}
+              variants={pageVariants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              style={{ willChange: 'transform, opacity', minHeight: '100%' }}
+            >
               <Outlet />
-            </PageTransition>
+            </motion.div>
           </AnimatePresence>
-        </motion.main>
+        </main>
       </div>
 
       {user?.mustChangePassword && <ForcePasswordChange />}

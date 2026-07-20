@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import api from '../api/client';
+import { saveSessionLocation, getSessionLocation, clearSessionLocation } from '../utils/sessionLocation';
 
 const AuthContext = createContext(null);
 
@@ -18,9 +19,21 @@ export function AuthProvider({ children }) {
   }
 
   function logout() {
+    // Sauvegarder la position actuelle avant de déconnecter
+    if (user) {
+      const path = window.location.pathname + window.location.search;
+      saveSessionLocation(user.id, window.location.pathname, window.location.search);
+    }
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     setUser(null);
+  }
+
+  function getLastLocation() {
+    if (!user) return null;
+    const saved = getSessionLocation(user.id);
+    if (saved) clearSessionLocation(user.id);
+    return saved;
   }
 
   // Appelé après un changement de mot de passe réussi (écran ForcePasswordChange), pour faire
@@ -57,7 +70,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, clearMustChangePassword }}>
+    <AuthContext.Provider value={{ user, login, logout, clearMustChangePassword, getLastLocation }}>
       {children}
     </AuthContext.Provider>
   );

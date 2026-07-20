@@ -16,6 +16,21 @@ const GLPI_STATUS_MAP = {
   6: 'CLOSED',
 };
 
+function stripHtml(str) {
+  if (!str || typeof str !== 'string') return str;
+  return str
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function glpiPriorityToErp(priority) {
   if (priority >= 5) return 'P1';
   if (priority === 4) return 'P2';
@@ -158,7 +173,7 @@ async function syncGlpiTickets() {
 
       const data = {
         title: t.name,
-        content: t.content || '',
+        content: stripHtml(t.content) || '',
         status,
         priority: glpiPriorityToErp(t.priority),
         category: await glpiIdToCategory(t.itilcategories_id),
@@ -236,7 +251,7 @@ async function fullReimportFromGlpi({ dateFrom, dateTo } = {}) {
 
       const data = {
         title: t.name,
-        content: t.content || '',
+        content: stripHtml(t.content) || '',
         status: GLPI_STATUS_MAP[t.status] || 'NEW',
         priority: glpiPriorityToErp(t.priority),
         category: await glpiIdToCategory(t.itilcategories_id),

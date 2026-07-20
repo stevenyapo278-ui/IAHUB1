@@ -14,10 +14,14 @@ const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); // 20 Mo max
 const router = express.Router();
 router.use(authenticate);
 
-// List tickets (with optional filters)
+// List tickets (with optional filters + pagination)
 router.get('/', async (req, res) => {
-  const { status, priority, teamId, assignedToId, mine, title, search, limit } = req.query;
+  const { status, priority, teamId, assignedToId, mine, title, search, limit, page } = req.query;
   const searchQuery = title || search || req.query.query;
+
+  const pageNum = Math.max(1, parseInt(page) || 1);
+  const pageSize = Math.min(500, Math.max(1, parseInt(limit) || 100));
+  const skip = (pageNum - 1) * pageSize;
 
   const where = {};
   if (status) {
@@ -61,20 +65,24 @@ router.get('/', async (req, res) => {
     where.OR = orConditions;
   }
 
-  const tickets = await prisma.ticket.findMany({
-    where,
-    take: limit ? Number(limit) : undefined,
-    include: {
-      requester: { select: { id: true, fullName: true, email: true } },
-      assignedTo: { select: { id: true, fullName: true, email: true } },
-      observers: { select: { id: true, fullName: true, email: true } },
-      team: { select: { id: true, name: true } },
-      approvedBy: { select: { id: true, fullName: true, email: true } },
-    },
-    orderBy: { createdAt: 'desc' },
-  });
+  const [tickets, total] = await Promise.all([
+    prisma.ticket.findMany({
+      where,
+      skip,
+      take: pageSize,
+      include: {
+        requester: { select: { id: true, fullName: true, email: true } },
+        assignedTo: { select: { id: true, fullName: true, email: true } },
+        observers: { select: { id: true, fullName: true, email: true } },
+        team: { select: { id: true, name: true } },
+        approvedBy: { select: { id: true, fullName: true, email: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    }),
+    prisma.ticket.count({ where }),
+  ]);
 
-  return res.json(tickets);
+  return res.json({ items: tickets, total, page: pageNum, pages: Math.ceil(total / pageSize) });
 });
 
 // Get single ticket with followups

@@ -18,7 +18,7 @@ router.get('/', async (req, res) => {
   since.setHours(0, 0, 0, 0);
 
   try {
-    const [settings, emailStats, ticketStats, followupStats, recentEvents, glpiInstances] = await Promise.all([
+    const [settings, emailStats, ticketStats, followupStats, recentEvents, glpiInstances, importStats, locationStats] = await Promise.all([
       // 1. Réglages système
       prisma.systemSettings.findUnique({ where: { id: 1 } }),
 
@@ -62,6 +62,14 @@ router.get('/', async (req, res) => {
         where: { serviceName: { in: ['glpi', 'glpi_dev'] } },
         select: { serviceName: true, baseUrl: true, isActive: true },
       }),
+
+      // 7. Stats d'import des données historiques
+      prisma.ticket.count({
+        where: { aiProcessed: false, glpiTicketId: { not: null } },
+      }),
+
+      // 8. Stats des lieux
+      prisma.glpiLocation.count(),
     ]);
 
     // Déterminer le mode actif
@@ -193,6 +201,13 @@ router.get('/', async (req, res) => {
         payload: e.payload,
         createdAt: e.createdAt,
       })),
+      // Données historiques importées
+      importData: {
+        ticketsImported: importStats,
+        locationsImported: locationStats,
+        ticketsTotal: await prisma.ticket.count(),
+        ticketsWithLocation: await prisma.ticket.count({ where: { glpiLocationName: { not: null } } }),
+      },
     });
   } catch (err) {
     return res.status(500).json({ error: err.message });
