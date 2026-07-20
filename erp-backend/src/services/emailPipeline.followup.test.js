@@ -4,7 +4,9 @@ const mockIncomingEmailUpdate = jest.fn();
 const mockTicketFindUnique = jest.fn();
 const mockTicketUpdate = jest.fn();
 const mockTicketMessageCreate = jest.fn();
+const mockTicketMessageUpdate = jest.fn();
 const mockTicketMessageFindMany = jest.fn();
+const mockTicketMessageFindUnique = jest.fn();
 const mockAiEmailDraftCreate = jest.fn();
 
 jest.mock('../prismaClient', () => ({
@@ -19,7 +21,9 @@ jest.mock('../prismaClient', () => ({
   },
   ticketMessage: {
     create: (...args) => mockTicketMessageCreate(...args),
+    update: (...args) => mockTicketMessageUpdate(...args),
     findMany: (...args) => mockTicketMessageFindMany(...args),
+    findUnique: (...args) => mockTicketMessageFindUnique(...args),
   },
   aiEmailDraft: { create: (...args) => mockAiEmailDraftCreate(...args) },
 }));
@@ -56,7 +60,7 @@ jest.mock('./emailSender', () => ({
   sendEmail: jest.fn(),
   getEmailSignature: jest.fn().mockResolvedValue('<div>Signature</div>'),
 }));
-jest.mock('./emailAttachmentProcessor', () => ({ processIncomingAttachments: jest.fn() }));
+jest.mock('./emailAttachmentProcessor', () => ({ processIncomingAttachments: jest.fn().mockResolvedValue({ saved: [], cidMap: {} }) }));
 jest.mock('./signatureStripper', () => ({ stripSignature: jest.fn((body) => Promise.resolve(body)) }));
 jest.mock('./ticketEvent', () => ({ logEvent: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('./systemSettings', () => ({ getSystemSettings: jest.fn().mockResolvedValue({ autoSendAiEmails: true }) }));
@@ -93,6 +97,7 @@ describe('emailPipeline — conversation IA multi-tours sur les emails de suivi'
     mockIncomingEmailUpdate.mockResolvedValue({ id: 1 });
     mockIncomingEmailFindUnique.mockResolvedValue({ id: 1, status: 'DONE' });
     mockAnalyzeIntent.mockResolvedValue({ intent: 'QUESTION', confidence: 0.9, isAutoReply: false, newIssueSummary: null });
+    mockTicketMessageCreate.mockResolvedValue({ id: 999, bodyHtml: '<p>Toujours en panne</p>' });
   });
 
   it('crée un AiEmailDraft CONVERSATION_FOLLOWUP quand l\'IA peut répondre, jamais d\'envoi direct même avec autoSendAiEmails: true', async () => {

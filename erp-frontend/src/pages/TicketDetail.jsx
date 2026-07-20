@@ -176,7 +176,7 @@ export default function TicketDetail() {
       followupBlobUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
       followupBlobUrlsRef.current = [];
     };
-  }, [ticket?.followups]);
+    }, [ticket?.followups, ticket?.messages]);
 
   async function downloadAttachment(attachment) {
     try {
@@ -477,7 +477,14 @@ export default function TicketDetail() {
                           </time>
                         </div>
                         <div className="text-xs text-outline mb-1 font-medium italic">{item.data.subject}</div>
-                        <div className="font-body-sm text-body-sm text-on-surface-variant whitespace-pre-wrap leading-relaxed">{item.data.body}</div>
+                        {(item.data.bodyHtml) ? (
+                          <div
+                            className="leading-relaxed text-body-sm text-on-surface-variant [&_img]:max-w-full [&_img]:rounded-lg [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-2 [&_a]:text-primary [&_a]:underline [&_a]:hover:text-primary/80 [&_p]:mb-2 [&_p]:last:mb-0 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:mb-1 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-outline-variant/40 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-outline-variant/40 [&_th]:px-2 [&_th]:py-1 [&_th]:bg-surface-container-high/40 [&_pre]:bg-surface-container-high [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:overflow-x-auto [&_code]:bg-surface-container-high [&_code]:rounded [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-sm"
+                            dangerouslySetInnerHTML={{ __html: sanitizeFollowupHtml(item.data.bodyHtml) }}
+                          />
+                        ) : (
+                          <div className="font-body-sm text-body-sm text-on-surface-variant whitespace-pre-wrap leading-relaxed">{item.data.body}</div>
+                        )}
                       </div>
                     </div>
                   )

@@ -92,7 +92,7 @@ async function processMessage(message, account) {
       const ticket = await prisma.ticket.findUnique({ where: { id: match.ticketId } });
 
       // Enregistrer le message dans l'historique
-      await prisma.ticketMessage.create({
+      const ticketMsg = await prisma.ticketMessage.create({
         data: {
           ticketId: match.ticketId,
           direction: 'INBOUND',
@@ -110,12 +110,21 @@ async function processMessage(message, account) {
         },
       });
 
-      await processIncomingAttachments({
+      const { cidMap } = await processIncomingAttachments({
         account, graphMessageId, incomingEmailId: incoming.id,
         ticketId: match.ticketId, glpiTicketId: ticket?.glpiTicketId,
         simulatedAttachments: message.simulatedAttachments,
         bodyText: cleanBody,
       });
+
+      // Réécrit les références cid: dans le bodyHtml pour pointer vers le proxy GLPI
+      const rewrittenHtml = rewriteCidRefs(ticketMsg.bodyHtml, cidMap);
+      if (rewrittenHtml !== ticketMsg.bodyHtml) {
+        await prisma.ticketMessage.update({
+          where: { id: ticketMsg.id },
+          data: { bodyHtml: rewrittenHtml },
+        });
+      }
 
       // Répercute la réponse de l'utilisateur dans GLPI (pas seulement le mail initial à la création) :
       // sans ça, les échanges ultérieurs n'apparaissent jamais dans l'interface GLPI.
@@ -281,7 +290,7 @@ async function processMessage(message, account) {
 
     if (similarMatch) {
       // Rattacher cet email au ticket similaire existant
-      await prisma.ticketMessage.create({
+      const ticketMsg = await prisma.ticketMessage.create({
         data: {
           ticketId: similarMatch.ticketId,
           direction: 'INBOUND',
@@ -318,12 +327,21 @@ async function processMessage(message, account) {
         select: { glpiTicketId: true, impactedSites: true, isMajorIncident: true },
       });
 
-      await processIncomingAttachments({
+      const { cidMap } = await processIncomingAttachments({
         account, graphMessageId, incomingEmailId: incoming.id,
         ticketId: similarMatch.ticketId, glpiTicketId: updatedTicket.glpiTicketId,
         simulatedAttachments: message.simulatedAttachments,
         bodyText: cleanBody,
       });
+
+      // Réécrit les références cid: dans le bodyHtml pour pointer vers le proxy GLPI
+      const rewrittenHtml = rewriteCidRefs(ticketMsg.bodyHtml, cidMap);
+      if (rewrittenHtml !== ticketMsg.bodyHtml) {
+        await prisma.ticketMessage.update({
+          where: { id: ticketMsg.id },
+          data: { bodyHtml: rewrittenHtml },
+        });
+      }
 
       if (updatedTicket.glpiTicketId) {
         try {
@@ -386,7 +404,7 @@ async function processMessage(message, account) {
     }
 
     // Étape 3 : créer ticket GLPI + ERP dans une transaction pour éviter l'incohérence
-    const { glpiTicketId, erpTicketId } = await prisma.$transaction(async (tx) => {
+    const { glpiTicketId, erpTicketId, ticketMessageId } = await prisma.$transaction(async (tx) => {
       const created = await createTicketFromEmail({
         subject, body: bodyPreview, from: fromEmail, fromName, analysis, emailAccountId: account.id, locationId, tx
       });
@@ -401,7 +419,7 @@ async function processMessage(message, account) {
       });
 
       // Étape 5 : enregistrer le message entrant
-      await tx.ticketMessage.create({
+      const ticketMsg = await tx.ticketMessage.create({
         data: {
           ticketId: created.erpTicketId,
           direction: 'INBOUND',
@@ -418,15 +436,32 @@ async function processMessage(message, account) {
       await logEvent(created.erpTicketId, 'CREATED', fromEmail, { glpiTicketId: created.glpiTicketId, source: 'EMAIL' }, tx);
       await logEvent(created.erpTicketId, 'AI_ANALYZED', 'AI', { analysis }, tx);
 
-      return created;
+      return { ...created, ticketMessageId: ticketMsg.id };
     });
 
-    await processIncomingAttachments({
+    const { cidMap } = await processIncomingAttachments({
       account, graphMessageId, incomingEmailId: incoming.id,
       ticketId: erpTicketId, glpiTicketId,
       simulatedAttachments: message.simulatedAttachments,
       bodyText: cleanBody,
     });
+
+    // Réécrit les références cid: dans le bodyHtml pour pointer vers le proxy GLPI
+    if (ticketMessageId && cidMap && Object.keys(cidMap).length > 0) {
+      const ticketMsg = await prisma.ticketMessage.findUnique({
+        where: { id: ticketMessageId },
+        select: { bodyHtml: true },
+      });
+      if (ticketMsg) {
+        const rewrittenHtml = rewriteCidRefs(ticketMsg.bodyHtml, cidMap);
+        if (rewrittenHtml !== ticketMsg.bodyHtml) {
+          await prisma.ticketMessage.update({
+            where: { id: ticketMessageId },
+            data: { bodyHtml: rewrittenHtml },
+          });
+        }
+      }
+    }
 
     // Émettre l'événement temps réel pour les notifications
     try {
@@ -522,6 +557,14 @@ async function runEmailPipeline() {
     }
   }
   return results;
+}
+
+function rewriteCidRefs(html, cidMap) {
+  if (!html || !cidMap || Object.keys(cidMap).length === 0) return html;
+  return html.replace(/cid:([^"'>\s]+)/gi, (match, cid) => {
+    const docId = cidMap[cid];
+    return docId ? `/glpi/document/${docId}/file` : match;
+  });
 }
 
 module.exports = { runEmailPipeline, processMessage };

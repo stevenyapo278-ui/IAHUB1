@@ -62,8 +62,10 @@ function hashContent(base64) {
 
 // Récupère, uploade vers GLPI et enregistre les pièces jointes d'un email entrant.
 // simulatedAttachments permet de contourner Graph pour les tests (/inbox/simulate).
+// Retourne { saved, cidMap } où cidMap = { "contentId1": glpiDocumentId1, ... }
+// pour réécrire les références cid: dans le bodyHtml du ticketMessage.
 async function processIncomingAttachments({ account, graphMessageId, incomingEmailId, ticketId, glpiTicketId, simulatedAttachments, bodyText }) {
-  if (!glpiTicketId) return [];
+  if (!glpiTicketId) return { saved: [], cidMap: {} };
 
   // graphMessageId factice (préfixe SIM-) = message simulé via /inbox/simulate sans Graph réel :
   // on n'interroge jamais Graph dans ce cas, simulatedAttachments (même vide) fait foi.
@@ -77,7 +79,7 @@ async function processIncomingAttachments({ account, graphMessageId, incomingEma
   } else {
     const rawAttachments = await fetchMessageAttachments(account, graphMessageId);
     const filtered = await filterOutSignatureImages(rawAttachments, bodyText);
-    attachments = filtered.map((a) => ({ name: a.name, contentType: a.contentType, contentBytes: a.contentBytes }));
+    attachments = filtered.map((a) => ({ name: a.name, contentType: a.contentType, contentBytes: a.contentBytes, contentId: a.contentId }));
   }
 
   // Filet de sécurité indépendant du jugement IA : si le contenu binaire exact (hash) d'une image
@@ -90,6 +92,7 @@ async function processIncomingAttachments({ account, graphMessageId, incomingEma
   );
 
   const saved = [];
+  const cidMap = {};
   for (const att of attachments) {
     try {
       const contentHash = hashContent(att.contentBytes);
@@ -113,12 +116,15 @@ async function processIncomingAttachments({ account, graphMessageId, incomingEma
         });
         existingHashes.add(contentHash);
         saved.push(created);
+        if (att.contentId) {
+          cidMap[att.contentId] = documentId;
+        }
       }
     } catch (err) {
       console.error('[emailAttachmentProcessor] Échec attachment', att.name, err.message);
     }
   }
-  return saved;
+  return { saved, cidMap };
 }
 
 module.exports = { processIncomingAttachments };
