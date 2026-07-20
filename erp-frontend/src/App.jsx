@@ -21,6 +21,7 @@ import Supervision from './pages/Supervision';
 import Documentation from './pages/Documentation';
 import SkillsManagement from './pages/SkillsManagement';
 import TransitionDashboard from './pages/TransitionDashboard';
+import ActivityLogs from './pages/ActivityLogs';
 
 export default function App() {
   // Les transitions de pages sont gérées dans MainLayout (Outlet uniquement).
@@ -104,6 +105,14 @@ export default function App() {
             element={
               <ProtectedRoute roles={['ADMIN']}>
                 <TransitionDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="logs"
+            element={
+              <ProtectedRoute roles={['ADMIN', 'TECHNICIAN']}>
+                <ActivityLogs />
               </ProtectedRoute>
             }
           />

@@ -31,6 +31,7 @@ const systemItems = [
   { to: '/prompts', label: 'Prompts IA', icon: 'terminal', permission: 'prompts.manage', fallbackRoles: ['ADMIN'] },
   { to: '/settings', label: 'Parametres', icon: 'settings', permission: ['settings.ai', 'settings.email', 'settings.integrations', 'automation.manage'], fallbackRoles: ['ADMIN'] },
   { to: '/transition', label: 'Transition SOS', icon: 'swap_horiz', permission: 'glpi.manage', fallbackRoles: ['ADMIN'] },
+  { to: '/logs', label: 'Journal activité', icon: 'summarize', permission: null },
 ];
 
 const ROUTE_SEMANTICS = {
@@ -48,6 +49,7 @@ const ROUTE_SEMANTICS = {
   '/prompts': { zone: 'admin', idx: 6 },
   '/settings': { zone: 'admin', idx: 7 },
   '/transition': { zone: 'admin', idx: 8 },
+  '/logs': { zone: 'admin', idx: 9 },
 };
 
 function resolveSemantics(pathname) {
