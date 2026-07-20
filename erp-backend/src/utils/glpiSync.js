@@ -372,15 +372,20 @@ function rewriteGlpiDocumentUrls(html, config, ticketId) {
 }
 
 function sanitizeGlpiHtml(html) {
-  // Nettoie le HTML GLPI : supprime les balises <script> et les attributs on* (event handlers)
-  // pour éviter toute injection XSS — GLPI est un système de confiance, mais on ne prend pas de risque.
+  // Nettoie le HTML GLPI : supprime les balises <script>, les attributs on* (event handlers),
+  // et les <a> qui embarquent directement une image GLPI (le lien est inutile et déclenche une
+  // navigation vers une URL que seul le blob processing côté frontend sait résoudre).
   return html
     .replace(/<script\b[^<]*(?:<\/script>|<\/script\s*>)/gi, '')
     .replace(/<script(\s[^>]*)?>/gi, '')
     .replace(/<\/script>/gi, '')
     .replace(/\son\w+="[^"]*"/gi, '')
     .replace(/\son\w+='[^']*'/gi, '')
-    .replace(/\son\w+=\S+/gi, '');
+    .replace(/\son\w+=\S+/gi, '')
+    // Supprime les <a href="/glpi/document/..."><img ...></a> — garde l'image, enlève le lien
+    .replace(/<a\s[^>]*href=["']\/glpi\/document\/\d+\/file["'][^>]*>\s*(<img[^>]*\/?>)\s*<\/a>/gi, '$1')
+    // Supprime aussi les <a target="_blank"> seuls s'ils pointent vers un document GLPI
+    .replace(/<a\s[^>]*href=["']\/glpi\/document\/\d+\/file["'][^>]*>\s*<\/a>/gi, '');
 }
 
 async function syncGlpiFollowups(config, sessionToken, glpiTicketId, ticketId) {

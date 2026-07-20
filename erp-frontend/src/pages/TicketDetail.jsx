@@ -61,7 +61,10 @@ function sanitizeFollowupHtml(html) {
     .replace(/href\s*=\s*"\s*javascript:/gi, 'href="#')
     .replace(/href\s*=\s*'\s*javascript:/gi, "href='#")
     .replace(/src\s*=\s*"\s*javascript:/gi, 'src="#')
-    .replace(/src\s*=\s*'\s*javascript:/gi, "src='#");
+    .replace(/src\s*=\s*'\s*javascript:/gi, "src='#")
+    // Supprime les <a href="/glpi/document/X/file"><img ...></a> — garde l'img, enlève le lien cassé
+    .replace(/<a\s[^>]*href=["']\/glpi\/document\/\d+\/file["'][^>]*>\s*(<img[^>]*\/?>)\s*<\/a>/gi, '$1')
+    .replace(/<a\s[^>]*href=["']\/glpi\/document\/\d+\/file["'][^>]*>\s*<\/a>/gi, '');
 }
 
 // Note : containsHtmlTags a été supprimée car les suivis GLPI utilisent des entités HTML
