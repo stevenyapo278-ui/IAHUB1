@@ -42,9 +42,19 @@ function initials(name) {
 // Sanitisation minimale du HTML provenant des suivis GLPI : supprime les event handlers
 // (onclick, onerror...) et les protocoles javascript: dans les URLs, en complément de la
 // sanitisation déjà faite côté serveur (suppression des balises <script>).
+function decodeHtmlEntities(str) {
+  if (!str) return '';
+  const textarea = document.createElement('textarea');
+  textarea.innerHTML = str;
+  return textarea.value;
+}
+
 function sanitizeFollowupHtml(html) {
   if (!html) return '';
-  return html
+  // D'abord : décoder les entités HTML (&#60; → <, &#62; → >, &amp; → &, etc.)
+  // pour que le HTML soit propre avant l'injection via dangerouslySetInnerHTML
+  const decoded = decodeHtmlEntities(html);
+  return decoded
     .replace(/<script\b[^<]*(?:<\/script>|<\/script\s*>)/gi, '')
     .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*')/gi, '')
     .replace(/\s+on\w+\s*=\s*\S+/gi, '')
