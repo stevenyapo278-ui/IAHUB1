@@ -81,7 +81,7 @@
   --color-on-error:                    #ffffff;
   --color-error-container:             #ffdad6;
   --color-outline:                     #636e84;
-  --color-outline-variant:             rgba(0, 0, 0, 0.08);
+  --color-outline-variant:             #d4d8e2;
   --color-tertiary-fixed-dim:          #ffb695;
   --color-surface-dim:                 #dce5f5;
   --color-on-tertiary:                 #ffffff;
@@ -149,7 +149,7 @@
   --color-on-error-container:          #fca5a5;
 
   --color-outline:                     #63636e;
-  --color-outline-variant:             rgba(255, 255, 255, 0.06);
+  --color-outline-variant:             #2a2e3a;
 
   color-scheme: dark;
 }
