@@ -134,12 +134,12 @@ export default function TicketDetail() {
     return () => clearInterval(intervalId);
   }, [load]);
 
-  // Post-traite les images des suivis GLPI : les balises <img src="/glpi/document/X/file"> sont
-  // chargées via axios (qui envoie le JWT dans Authorization header) et converties en blob URLs.
+    // Post-traite les images des suivis GLPI et emails : les balises <img src="/glpi/document/X/file">
+  // sont chargées via axios (qui envoie le JWT dans Authorization header) et converties en blob URLs.
   // Sans ce contournement, le navigateur tente de les charger directement mais reçoit une 401
   // car une balise <img> est incapable d'envoyer des en-têtes d'authentification personnalisés.
-  // Note : le chemin est /glpi/... (sans /api) car l'instance axios a baseURL = .../api, donc
-  // axios résout /glpi/document/X/file en {baseURL}/glpi/document/X/file.
+  // Les balises <a href="/glpi/document/X/file"> sont aussi réécrites pour pointer vers le blob URL
+  // une fois l'image chargée, afin que le clic fonctionne aussi.
   useEffect(() => {
     const container = followupContainerRef.current;
     if (!container) return;
@@ -149,12 +149,15 @@ export default function TicketDetail() {
     // anciennes images référencent encore leurs blob URLs. Les révoquer les briserait.
     // Les blob URLs accumulées sont nettoyées UNIQUEMENT au démontage du composant (return).
 
+    // Traite les images
     container.querySelectorAll('img[src^="/glpi/document/"]').forEach((img) => {
       if (img.getAttribute('data-blob-processed')) return;
       img.setAttribute('data-blob-processed', 'true');
 
       const src = img.getAttribute('src');
       if (!src) return;
+
+      const parentLink = img.closest('a[href="' + CSS.escape(src) + '"]');
 
       api
         .get(src, { responseType: 'blob' })
@@ -163,11 +166,30 @@ export default function TicketDetail() {
           followupBlobUrlsRef.current.push(url);
           img.setAttribute('data-blob-url', url);
           img.src = url;
+          if (parentLink) {
+            parentLink.href = url;
+          }
         })
-        .catch(() => {
-          // Silencieux : si le proxy échoue, l'image reste cassée mais n'empêche pas
-          // l'affichage du reste du suivi.
-        });
+        .catch(() => {});
+    });
+
+    // Traite les liens seuls (sans image) vers les documents GLPI
+    container.querySelectorAll('a[href^="/glpi/document/"]').forEach((link) => {
+      if (link.getAttribute('data-blob-processed')) return;
+      if (link.querySelector('img[src^="/glpi/document/"]')) return; // déjà traité via l'image
+      link.setAttribute('data-blob-processed', 'true');
+
+      const href = link.getAttribute('href');
+      if (!href) return;
+
+      api
+        .get(href, { responseType: 'blob' })
+        .then(({ data }) => {
+          const url = URL.createObjectURL(data);
+          followupBlobUrlsRef.current.push(url);
+          link.href = url;
+        })
+        .catch(() => {});
     });
 
     // Nettoyage UNIQUEMENT au démontage du composant — ne JAMAIS révoquer entre les cycles
@@ -176,7 +198,7 @@ export default function TicketDetail() {
       followupBlobUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
       followupBlobUrlsRef.current = [];
     };
-    }, [ticket?.followups, ticket?.messages]);
+  }, [ticket?.followups, ticket?.messages]);
 
   async function downloadAttachment(attachment) {
     try {
