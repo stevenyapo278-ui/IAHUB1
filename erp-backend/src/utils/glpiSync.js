@@ -76,6 +76,27 @@ async function glpiKillSession(config, sessionToken) {
   });
 }
 
+// Résout un objet Ticket GLPI complet depuis un objet brut (ex. retour de /search/Ticket)
+async function resolveGlpiTicketDetails(config, sessionToken, t) {
+  if (t && t.id && t.name) {
+    return t; // C'est déjà un objet Ticket complet (ex. issu de GET /Ticket)
+  }
+  // GLPI /search/Ticket retourne les colonnes sous forme de clés numériques (champ 2 = id)
+  const glpiId = t ? (t[2] || t['2'] || t.id) : null;
+  if (!glpiId) return null;
+
+  try {
+    const res = await fetch(`${config.baseUrl}/Ticket/${glpiId}`, {
+      headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.error(`[glpiSync] Échec résolution détails ticket GLPI ${glpiId}:`, err.message);
+    return null;
+  }
+}
+
 // Récupère les tickets GLPI avec pagination et filtre optionnel par date.
 // Si dateFrom/dateTo sont fournis, utilise les filtres GLPI criteria pour ne récupérer
 // que les tickets créés/modifiés dans cet intervalle.
@@ -86,10 +107,6 @@ async function fetchAllGlpiTickets(config, sessionToken, { dateFrom, dateTo } = 
 
   while (true) {
     let url = `${config.baseUrl}/Ticket?range=${offset}-${offset + PAGE_SIZE - 1}`;
-
-    const fetchOptions = {
-      headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
-    };
 
     // Si des dates sont fournies, utiliser la requête POST avec criteria (API GLPI avancée)
     if (dateFrom || dateTo) {
@@ -118,12 +135,18 @@ async function fetchAllGlpiTickets(config, sessionToken, { dateFrom, dateTo } = 
 
       if (!postRes.ok) break;
       const data = await postRes.json();
-      // data.data contient les résultats dans la réponse search/Ticket de GLPI.
-      // Si GLPI renvoie une erreur ou un objet inattendu, on s'arrête proprement.
-      const tickets = Array.isArray(data.data) ? data.data : Array.isArray(data) ? data : [];
-      if (tickets.length === 0) break;
-      allTickets.push(...tickets);
-      if (tickets.length < PAGE_SIZE) break;
+      const rawTickets = Array.isArray(data.data) ? data.data : Array.isArray(data) ? data : [];
+      if (rawTickets.length === 0) break;
+
+      // GLPI /search/Ticket renvoie des lignes avec clés numériques (ex: "2" pour ID).
+      // On résout chaque ticket via GET /Ticket/:id pour obtenir l'objet standard complet.
+      const resolved = await Promise.all(
+        rawTickets.map((rt) => resolveGlpiTicketDetails(config, sessionToken, rt))
+      );
+      const validTickets = resolved.filter(Boolean);
+      allTickets.push(...validTickets);
+
+      if (rawTickets.length < PAGE_SIZE) break;
       offset += PAGE_SIZE;
     } else {
       const res = await fetch(url, {
