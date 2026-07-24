@@ -810,11 +810,31 @@ export default function Tickets() {
                     <td className="px-md py-3.5">
                       <PriorityBadge priority={t.priority} />
                     </td>
-                    <td className="px-md py-3.5 text-on-surface-variant text-body-sm">{t.team?.name || '-'}</td>
+                    <td className="px-md py-3.5 text-on-surface-variant text-body-sm font-medium">{t.team?.name || '-'}</td>
                     <td className="px-md py-3.5 text-on-surface text-body-sm">
-                      {t.assignedTo?.fullName || <span className="text-outline/65 italic">Non assigné</span>}
+                      {t.assignedTo ? (
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[10px] font-bold shrink-0 border border-primary/20">
+                            {t.assignedTo.fullName?.charAt(0)?.toUpperCase()}
+                          </div>
+                          <span className="font-medium truncate max-w-[120px]">{t.assignedTo.fullName}</span>
+                        </div>
+                      ) : (
+                        <span className="text-outline/65 italic text-xs font-medium">Non assigné</span>
+                      )}
                     </td>
-                    <td className="px-md py-3.5 text-on-surface-variant text-body-sm">{t.requester?.fullName || '-'}</td>
+                    <td className="px-md py-3.5 text-on-surface-variant text-body-sm">
+                      {t.requester ? (
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full bg-surface-container-high text-on-surface flex items-center justify-center text-[10px] font-bold shrink-0 border border-outline-variant/60">
+                            {t.requester.fullName?.charAt(0)?.toUpperCase()}
+                          </div>
+                          <span className="font-medium truncate max-w-[120px]">{t.requester.fullName}</span>
+                        </div>
+                      ) : (
+                        <span className="text-outline/65 italic text-xs font-medium">-</span>
+                      )}
+                    </td>
                     {canDelete && (
                       <td className="px-md py-3.5">
                         <motion.button
@@ -1050,51 +1070,73 @@ function FilterSelect({ value, onChange, label, options }) {
   );
 }
 
-const BADGE_COLORS = {
-  NEW: 'badge-status-new',
-  OPEN: 'badge-status-open',
-  PENDING: 'badge-status-pending',
-  SOLVED: 'badge-status-solved',
-  CLOSED: 'badge-status-closed',
-  P1: 'badge-priority-p1',
-  P2: 'badge-priority-p2',
-  P3: 'badge-priority-p3',
-  P4: 'badge-priority-p4',
+const STATUS_CONFIG = {
+  NEW: {
+    label: 'Nouveau',
+    bg: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20',
+    icon: 'star',
+  },
+  OPEN: {
+    label: 'Ouvert',
+    bg: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20',
+    icon: 'radio_button_checked',
+  },
+  PENDING: {
+    label: 'En attente',
+    bg: 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border border-yellow-500/20',
+    icon: 'hourglass_empty',
+  },
+  SOLVED: {
+    label: 'Résolu',
+    bg: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20',
+    icon: 'check_circle',
+  },
+  CLOSED: {
+    label: 'Fermé',
+    bg: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20',
+    icon: 'lock',
+  },
 };
 
-const DOT_COLORS = {
-  NEW: 'bg-primary',
-  OPEN: 'bg-secondary',
-  PENDING: 'bg-tertiary',
-  SOLVED: 'bg-emerald-500',
-  CLOSED: 'bg-slate-500',
-  P1: 'bg-error',
-  P2: 'bg-tertiary',
-  P3: 'bg-secondary',
-  P4: 'bg-emerald-500',
+const PRIORITY_CONFIG = {
+  P1: {
+    label: 'P1 - Critique',
+    bg: 'bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30',
+    icon: 'emergency',
+  },
+  P2: {
+    label: 'P2 - Haute',
+    bg: 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20',
+    icon: 'report',
+  },
+  P3: {
+    label: 'P3 - Moyenne',
+    bg: 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20',
+    icon: 'info',
+  },
+  P4: {
+    label: 'P4 - Basse',
+    bg: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20',
+    icon: 'arrow_downward',
+  },
 };
 
 function StatusBadge({ status }) {
-  const STATUS_LABEL = {
-    NEW: 'Nouveau',
-    OPEN: 'Ouvert',
-    PENDING: 'En attente',
-    RESOLVED: 'Résolu',
-    CLOSED: 'Fermé',
-  };
+  const conf = STATUS_CONFIG[status] || STATUS_CONFIG.NEW;
   return (
-    <span className={`badge ${BADGE_COLORS[status] || ''}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${DOT_COLORS[status] || ''} animate-pulse-soft shrink-0`} />
-      {STATUS_LABEL[status] || status}
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${conf.bg}`}>
+      <span className="material-symbols-outlined text-[13px]">{conf.icon}</span>
+      {conf.label}
     </span>
   );
 }
 
 function PriorityBadge({ priority }) {
+  const conf = PRIORITY_CONFIG[priority] || PRIORITY_CONFIG.P3;
   return (
-    <span className={`badge ${BADGE_COLORS[priority] || 'badge-priority-p3'}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${DOT_COLORS[priority] || 'bg-secondary'} animate-pulse-soft shrink-0`} />
-      {PRIORITY_LABEL[priority] || 'Moyenne'}
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${conf.bg}`}>
+      <span className="material-symbols-outlined text-[13px]">{conf.icon}</span>
+      {conf.label}
     </span>
   );
 }

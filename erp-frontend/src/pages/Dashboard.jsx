@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   AreaChart,
@@ -61,14 +61,15 @@ function EfferdTooltip({ active, payload, label }) {
   );
 }
 
-/* ── KPI Card style M3 ──────────────────────────────────────────────────────── */
-function KpiCard({ label, value, icon, trendUp, trendValue, critical }) {
+/* ── KPI Card style M3 (Cliquable) ─────────────────────────────────────────── */
+function KpiCard({ label, value, icon, trendUp, trendValue, critical, onClick }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-      className="bento-card"
+      onClick={onClick}
+      className={`bento-card ${onClick ? 'cursor-pointer hover:border-primary/40 hover:shadow-md transition-all group' : ''}`}
       style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}
     >
       <div className="flex items-center justify-between">
@@ -91,20 +92,25 @@ function KpiCard({ label, value, icon, trendUp, trendValue, critical }) {
         initial={{ opacity: 0, scale: 0.92 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.4, delay: 0.08 }}
-        className="font-bold"
+        className="font-bold flex items-center justify-between"
         style={{
           fontSize: '2rem',
           lineHeight: 1.1,
           color: critical ? 'var(--color-error)' : 'var(--color-on-surface)',
         }}
       >
-        {value}
+        <span>{value}</span>
+        {onClick && (
+          <span className="material-symbols-outlined text-[18px] text-on-surface-variant/40 group-hover:text-primary group-hover:translate-x-1 transition-all">
+            arrow_forward
+          </span>
+        )}
       </motion.div>
 
       {critical && (
         <div className="flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ flexShrink: 0, backgroundColor: 'var(--color-error)' }} />
-          <span className="text-[11px]" style={{ color: 'var(--color-error)' }}>Necessite une attention immediate</span>
+          <span className="text-[11px]" style={{ color: 'var(--color-error)' }}>Nécessite une attention immédiate</span>
         </div>
       )}
     </motion.div>
@@ -238,6 +244,7 @@ function IntegrationGroup({ label, items, getConnected, suffix }) {
 /* DASHBOARD PRINCIPAL                                                           */
 /* ══════════════════════════════════════════════════════════════════════════════ */
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [pendingApprovals, setPendingApprovals] = useState([]);
   const [recentActivity, setRecentActivity] = useState([]);
@@ -554,6 +561,7 @@ export default function Dashboard() {
           icon="confirmation_number"
           trendUp={globalTrendUp}
           trendValue={`${trendTicketsSum} sur ${activePeriod.toLowerCase()}`}
+          onClick={() => navigate('/tickets')}
         />
         <KpiCard
           label="Tickets ouverts"
@@ -561,6 +569,7 @@ export default function Dashboard() {
           icon="pending_actions"
           trendUp={stats.open < stats.total / 2}
           trendValue={stats.total > 0 ? `${Math.round((stats.open / stats.total) * 100)}% du total` : '0%'}
+          onClick={() => navigate('/tickets?status=OPEN')}
         />
         <KpiCard
           label="Taux résolution"
@@ -568,6 +577,7 @@ export default function Dashboard() {
           icon="check_circle"
           trendUp={resolutionRate >= 50}
           trendValue={`${resolvedTotal} résolus`}
+          onClick={() => navigate('/tickets?status=SOLVED')}
         />
         <KpiCard
           label="Priorités P1"
@@ -576,6 +586,7 @@ export default function Dashboard() {
           critical={p1Count > 0}
           trendUp={false}
           trendValue={p1Count > 0 ? `${p1Count} urgent${p1Count > 1 ? 's' : ''}` : undefined}
+          onClick={() => navigate('/tickets?priority=P1')}
         />
       </div>
 

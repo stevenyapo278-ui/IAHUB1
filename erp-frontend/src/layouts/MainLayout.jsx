@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
+import api from '../api/client';
 import { useTheme } from '../context/ThemeContext';
 import { hasPermission } from '../utils/permissions';
 import ForcePasswordChange from '../components/ForcePasswordChange';
@@ -94,9 +95,28 @@ export default function MainLayout() {
     return localStorage.getItem('sidebarPinned') === 'true';
   });
   const [tooltipData, setTooltipData] = useState(null);
+  const [badgeCounts, setBadgeCounts] = useState({ tickets: 0, drafts: 0 });
   const sidebarRef = useRef(null);
   const userMenuRef = useRef(null);
   const notifBtnRef = useRef(null);
+
+  useEffect(() => {
+    if (!user) return;
+    function fetchSidebarBadges() {
+      Promise.all([
+        api.get('/tickets?status=OPEN&limit=1').catch(() => null),
+        api.get('/dashboard/pending-ai-drafts').catch(() => null),
+      ]).then(([ticketsRes, draftsRes]) => {
+        setBadgeCounts({
+          tickets: ticketsRes?.data?.total || 0,
+          drafts: Array.isArray(draftsRes?.data) ? draftsRes.data.length : 0,
+        });
+      });
+    }
+    fetchSidebarBadges();
+    const interval = setInterval(fetchSidebarBadges, 30000);
+    return () => clearInterval(interval);
+  }, [user]);
 
   const toggleNotifications = useCallback(() => {
     setShowNotifications((prev) => !prev);
@@ -205,14 +225,18 @@ export default function MainLayout() {
         <nav className="sidebar-nav">
           {/* Platform section */}
           <div className="sidebar-group-label">Plateforme</div>
-          {platformItems.map((item) => (
-            <SidebarItem
-              key={item.to}
-              item={item}
-              user={user}
-              isSidebarExpanded={isSidebarExpanded}
-            />
-          ))}
+          {platformItems.map((item) => {
+            const count = item.to === '/tickets' ? badgeCounts.tickets : 0;
+            return (
+              <SidebarItem
+                key={item.to}
+                item={item}
+                user={user}
+                isSidebarExpanded={isSidebarExpanded}
+                count={count}
+              />
+            );
+          })}
 
           <div className="sidebar-separator" />
 
@@ -221,14 +245,18 @@ export default function MainLayout() {
             <>
               <div className="sidebar-group-label">Administration</div>
               {isSidebarExpanded ? (
-                visibleSystemItems.map((item) => (
-                  <SidebarItem
-                    key={item.to}
-                    item={item}
-                    user={user}
-                    isSidebarExpanded={isSidebarExpanded}
-                  />
-                ))
+                visibleSystemItems.map((item) => {
+                  const count = item.to === '/email-drafts' ? badgeCounts.drafts : 0;
+                  return (
+                    <SidebarItem
+                      key={item.to}
+                      item={item}
+                      user={user}
+                      isSidebarExpanded={isSidebarExpanded}
+                      count={count}
+                    />
+                  );
+                })
               ) : (
                 <div className="relative">
                   <button
@@ -427,7 +455,7 @@ export default function MainLayout() {
 }
 
 /* ── Sidebar Item ──────────────────────────────────────────────────────────── */
-function SidebarItem({ item, user, isSidebarExpanded }) {
+function SidebarItem({ item, user, isSidebarExpanded, count }) {
   if (item.permission !== null) {
     const keys = Array.isArray(item.permission) ? item.permission : [item.permission];
     if (!keys.some((key) => hasPermission(user, key, item.fallbackRoles))) return null;
@@ -441,12 +469,20 @@ function SidebarItem({ item, user, isSidebarExpanded }) {
         `sidebar-item ${isActive ? 'active' : ''}`
       }
     >
-      <span className="sidebar-item-icon">
+      <span className="sidebar-item-icon relative">
         <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>
           {item.icon}
         </span>
+        {!isSidebarExpanded && count > 0 && (
+          <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-primary animate-pulse" />
+        )}
       </span>
-      <span className="sidebar-item-label">{item.label}</span>
+      <span className="sidebar-item-label flex-1 truncate">{item.label}</span>
+      {isSidebarExpanded && count > 0 && (
+        <span className="ml-auto px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary/20 text-primary border border-primary/30 shrink-0">
+          {count > 99 ? '99+' : count}
+        </span>
+      )}
     </NavLink>
   );
 }
