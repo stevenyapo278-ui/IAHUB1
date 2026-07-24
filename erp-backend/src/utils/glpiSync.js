@@ -141,7 +141,7 @@ async function fetchAllGlpiTickets(config, sessionToken, { dateFrom, dateTo } = 
         criteria.push({
           ...(criteria.length > 0 ? { link: 'AND' } : {}),
           field: 15,
-          searchtype: 2, // 2 = superieur ou egal (morethan)
+          searchtype: 'morethan',
           value: `${dateFrom} 00:00:00`,
         });
       }
@@ -149,7 +149,7 @@ async function fetchAllGlpiTickets(config, sessionToken, { dateFrom, dateTo } = 
         criteria.push({
           ...(criteria.length > 0 ? { link: 'AND' } : {}),
           field: 15,
-          searchtype: 3, // 3 = inferieur ou egal (lessthan)
+          searchtype: 'lessthan',
           value: `${dateTo} 23:59:59`,
         });
       }
