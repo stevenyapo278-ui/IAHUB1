@@ -46,7 +46,13 @@ async function getGlpiConfig(serviceName) {
   if (!config || !config.isActive || !config.baseUrl || !config.apiKey) return null;
   const appToken = config.extra?.appToken;
   if (!appToken) return null;
-  return { baseUrl: config.baseUrl, userToken: config.apiKey, appToken };
+  return {
+    baseUrl: config.baseUrl,
+    userToken: config.apiKey,
+    appToken,
+    dateFrom: config.extra?.dateFrom || null,
+    dateTo: config.extra?.dateTo || null,
+  };
 }
 
 // Récupère la config GLPI Production active
@@ -197,7 +203,10 @@ async function syncGlpiTickets() {
 
   const sessionToken = await glpiInitSession(config);
   try {
-    const tickets = await fetchAllGlpiTickets(config, sessionToken);
+    const tickets = await fetchAllGlpiTickets(config, sessionToken, {
+      dateFrom: config.dateFrom,
+      dateTo: config.dateTo,
+    });
     let imported = 0;
     let updated = 0;
 
@@ -282,6 +291,25 @@ async function syncGlpiTickets() {
 async function fullReimportFromGlpi({ dateFrom, dateTo } = {}) {
   const config = await getGlpiConfig();
   if (!config) return null;
+
+  // Persister les filtres de dates dans ApiConfig pour que les synchros automatiques (arrière-plan) les respectent aussi
+  try {
+    const currentApi = await prisma.apiConfig.findUnique({ where: { serviceName: 'glpi' } });
+    if (currentApi) {
+      await prisma.apiConfig.update({
+        where: { serviceName: 'glpi' },
+        data: {
+          extra: {
+            ...(currentApi.extra || {}),
+            dateFrom: dateFrom || null,
+            dateTo: dateTo || null,
+          },
+        },
+      });
+    }
+  } catch (err) {
+    console.error('[glpiSync] Échec mise à jour ApiConfig.extra avec filtres de dates:', err.message);
+  }
 
   // 1. Supprimer les tickets GLPI-syncés de l'ERP
   const deleted = await prisma.ticket.deleteMany({ where: { glpiTicketId: { not: null } } });
