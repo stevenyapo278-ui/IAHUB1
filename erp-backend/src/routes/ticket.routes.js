@@ -14,9 +14,12 @@ const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); // 20 Mo max
 const router = express.Router();
 router.use(authenticate);
 
-// List tickets (with optional filters + pagination)
+// List tickets (with optional filters + pagination + sorting)
 router.get('/', async (req, res) => {
-  const { status, priority, teamId, assignedToId, mine, title, search, limit, page } = req.query;
+  const {
+    status, priority, teamId, assignedToId, mine, title, search, limit, page,
+    sortBy, sortOrder, category, locationId, aiProcessed
+  } = req.query;
   const searchQuery = title || search || req.query.query;
 
   const pageNum = Math.max(1, parseInt(page) || 1);
@@ -36,6 +39,9 @@ router.get('/', async (req, res) => {
   if (priority) where.priority = priority;
   if (teamId) where.teamId = Number(teamId);
   if (assignedToId) where.assignedToId = Number(assignedToId);
+  if (category) where.category = category;
+  if (locationId) where.glpiLocationId = Number(locationId);
+  if (aiProcessed === 'true') where.aiProcessed = true;
 
   if (mine === 'true') {
     if (req.user.role === 'REQUESTER') {
@@ -56,13 +62,28 @@ router.get('/', async (req, res) => {
     const numericId = parseInt(searchQuery, 10);
     const orConditions = [
       { title: { contains: searchQuery, mode: 'insensitive' } },
-      { content: { contains: searchQuery, mode: 'insensitive' } }
+      { content: { contains: searchQuery, mode: 'insensitive' } },
+      { category: { contains: searchQuery, mode: 'insensitive' } },
+      { glpiLocationName: { contains: searchQuery, mode: 'insensitive' } },
     ];
     if (!isNaN(numericId)) {
       orConditions.push({ id: numericId });
       orConditions.push({ glpiTicketId: numericId });
     }
     where.OR = orConditions;
+  }
+
+  // Tri dynamique
+  let orderBy = { createdAt: 'desc' };
+  if (sortBy) {
+    const order = sortOrder === 'asc' ? 'asc' : 'desc';
+    if (sortBy === 'id') orderBy = { id: order };
+    else if (sortBy === 'createdAt') orderBy = { createdAt: order };
+    else if (sortBy === 'title') orderBy = { title: order };
+    else if (sortBy === 'priority') orderBy = { priority: order };
+    else if (sortBy === 'status') orderBy = { status: order };
+    else if (sortBy === 'assignedTo') orderBy = { assignedTo: { fullName: order } };
+    else if (sortBy === 'requester') orderBy = { requester: { fullName: order } };
   }
 
   const [tickets, total] = await Promise.all([
@@ -76,8 +97,9 @@ router.get('/', async (req, res) => {
         observers: { select: { id: true, fullName: true, email: true } },
         team: { select: { id: true, name: true } },
         approvedBy: { select: { id: true, fullName: true, email: true } },
+        _count: { select: { followups: true, attachments: true } },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy,
     }),
     prisma.ticket.count({ where }),
   ]);
