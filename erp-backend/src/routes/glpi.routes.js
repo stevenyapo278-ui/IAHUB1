@@ -58,9 +58,6 @@ router.post(
     try {
       const { dateFrom, dateTo } = req.body;
       const result = await fullReimportFromGlpi({ dateFrom, dateTo });
-      if (!result) {
-        return res.status(422).json({ error: 'GLPI non configuré ou inactif' });
-      }
       return res.json(result);
     } catch (err) {
       return res.status(502).json({ error: err.message || 'Erreur de réimport GLPI' });

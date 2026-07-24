@@ -305,14 +305,19 @@ async function syncGlpiTickets() {
 // depuis GLPI avec filtre optionnel par date.
 // NE TOUCHE PAS à GLPI — c'est une lecture seule.
 async function fullReimportFromGlpi({ dateFrom, dateTo } = {}) {
-  if (isGlpiSyncRunning) return null;
-  isGlpiSyncRunning = true;
+  // Si une synchro automatique d'arrière-plan s'exécute, attendre jusqu'à 5s qu'elle se termine
+  let wait = 0;
+  while (isGlpiSyncRunning && wait < 25) {
+    await new Promise((r) => setTimeout(r, 200));
+    wait++;
+  }
 
   const config = await getGlpiConfig();
   if (!config) {
-    isGlpiSyncRunning = false;
-    return null;
+    throw new Error('GLPI non configuré ou inactif');
   }
+
+  isGlpiSyncRunning = true;
 
   // Persister les filtres de dates dans ApiConfig pour que les synchros automatiques (arrière-plan) les respectent aussi
   try {
