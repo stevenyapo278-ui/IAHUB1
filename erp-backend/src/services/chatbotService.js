@@ -2,30 +2,29 @@ const prisma = require('../prismaClient');
 const { getActiveProvider, callProvider } = require('./mailAnalyzer');
 const { emitTicketCreated } = require('../utils/socket');
 
-const SYSTEM_PROMPT = `Tu es l'assistant IA du helpdesk IT de Prosuma. Tu réponds en français, concise et professionnelle.
+const SYSTEM_PROMPT = `Tu es l'assistant IA intelligent du helpdesk IT de Prosuma (IA Hub). Tu réponds en français, de manière claire, concise, précise et professionnelle.
 
-Tu peux aider les utilisateurs à :
-1. Trouver des informations dans la base de connaissances IT
-2. Créer des tickets d'incident ou de demande
-3. Consulter l'état de leurs tickets (par numéro)
-4. Escalader vers un technicien si tu ne peux pas résoudre
-5. Générer un rapport des tickets ouverts
+Tu peux répondre aux questions sur :
+1. Les TICKETS du système ERP (/tickets) : recherche par sujet, numéro, statut (Nouveau, Ouvert, En attente, Résolu, Fermé), catégorie, priorités, demandeur, technicien ou lieu.
+2. Les procédures et informations de la Base de Connaissances IT.
+3. La création de nouveaux tickets d'incident ou de demande.
+4. L'état détaillé d'un ticket par son numéro (ex: #123).
+5. L'escalade immédiate d'un incident vers un technicien (création automatique de ticket P2).
+6. La génération d'un rapport ou d'une synthèse des tickets ouverts.
 
 RÈGLES IMPORTANTES :
-- Si tu trouves une réponse dans la base de connaissances, cite-la et indique la source (titre du document).
-- Pour créer un ticket, propose de créer un ticket et attends la confirmation de l'utilisateur.
-- Pour consulter un ticket, demande le numéro.
-- Si l'utilisateur veut escalader, confirme et crée un ticket P2 automatiquement.
-- Pour un rapport, résume les tickets ouverts par statut/priorité.
-- Sois toujours poli et utile. Si tu ne sais pas, dis-le franchement.
-- Réponds toujours en markdown simple (gras, listes, italique).`;
+- Quand des tickets pertinents de la base de données sont fournis dans le contexte, utilise-les pour répondre précisément à la question de l'utilisateur avec leur numéro #ID, leur statut et leurs détails.
+- Si tu trouves une solution dans la base de connaissances, cite la source.
+- Pour créer un ticket, demande la confirmation de l'utilisateur avec le titre et le problème.
+- Réponds toujours avec un format Markdown soigné (listes à puces, gras, italique).`;
 
 const INTENT_PROMPT = `Tu es un classificateur d'intentions. Analyse le message utilisateur et réponds UNIQUEMENT avec un JSON valide (pas de texte avant ou après).
 
 Intents possibles :
 - "general" : question générale, salutation, conversation
+- "search_tickets" : l'utilisateur pose une question sur les tickets existants (ex: "quelles sont les pannes vpn", "tickets imprimantes", "tickets de Paul")
 - "create_ticket" : l'utilisateur veut créer/ouvrir un ticket, signale un problème
-- "check_ticket" : l'utilisateur veut connaître le statut d'un ticket
+- "check_ticket" : l'utilisateur veut connaître le statut d'un ticket spécifique
 - "report" : l'utilisateur veut un rapport/statistique des tickets
 - "escalate" : l'utilisateur veut parler à un humain/technicien
 - "help" : l'utilisateur demande de l'aide sur les fonctionnalités
@@ -35,17 +34,9 @@ Réponds avec :
 
 Si l'utilisateur mentionne un numéro de ticket (#123 ou "ticket 123"), ajoute "params": {"ticketId": 123}.
 Si l'utilisateur veut créer un ticket et mentionne déjà un titre ou un problème, ajoute "params": {"title": "...", "description": "..."}.
-Si l'utilisateur mentionne une priorité (urgent, critique, important, etc.), ajoute "params": {"priorityHint": "P1|P2|P3|P4"}.
+Si l'utilisateur mentionne une priorité (urgent, critique, important, etc.), ajoute "params": {"priorityHint": "P1|P2|P3|P4"}.`;
 
-Exemples :
-User: "Bonjour" → {"intent": "general", "params": {}}
-User: "J'ai un problème VPN" → {"intent": "create_ticket", "params": {"title": "Problème VPN", "description": "J'ai un problème VPN"}}
-User: "Quel est le statut du ticket 45?" → {"intent": "check_ticket", "params": {"ticketId": 45}}
-User: "Donne-moi un rapport" → {"intent": "report", "params": {}}
-User: "Je veux parler à quelqu'un" → {"intent": "escalate", "params": {}}
-User: "Aide" → {"intent": "help", "params": {}}`;
-
-// ── Recherche RAG ──────────────────────────────────────────────────────
+// ── Recherche RAG (Base de connaissances) ─────────────────────────────
 
 async function searchKnowledge(query, limit = 5) {
   try {
@@ -57,6 +48,103 @@ async function searchKnowledge(query, limit = 5) {
     if (!response.ok) return [];
     return await response.json();
   } catch {
+    return [];
+  }
+}
+
+// ── Recherche de tickets ERP en base ───────────────────────────────────
+
+async function searchTickets(query, limit = 5) {
+  if (!query || !query.trim()) return [];
+  const clean = query.trim();
+  const lower = clean.toLowerCase();
+
+  const idMatch = clean.match(/#?(\d+)/);
+  const statusMatch = lower.match(/\b(nouveau|ouvert|attente|résolu|resolu|fermé|ferme)\b/);
+  const priorityMatch = lower.match(/\b(p1|p2|p3|p4|critique|haute|moyenne|basse)\b/);
+
+  const STATUS_MAP = {
+    nouveau: 'NEW',
+    ouvert: 'OPEN',
+    attente: 'PENDING',
+    résolu: 'SOLVED',
+    resolu: 'SOLVED',
+    fermé: 'CLOSED',
+    ferme: 'CLOSED',
+  };
+
+  const PRIORITY_MAP = {
+    p1: 'P1',
+    critique: 'P1',
+    p2: 'P2',
+    haute: 'P2',
+    p3: 'P3',
+    moyenne: 'P3',
+    p4: 'P4',
+    basse: 'P4',
+  };
+
+  try {
+    const where = {};
+
+    if (statusMatch) {
+      where.status = STATUS_MAP[statusMatch[1]];
+    }
+    if (priorityMatch) {
+      where.priority = PRIORITY_MAP[priorityMatch[1]];
+    }
+
+    const words = clean.split(/\s+/).filter(
+      (w) =>
+        w.length > 2 &&
+        ![
+          'les', 'des', 'que', 'sur', 'pour', 'avec', 'par', 'dans', 'un', 'une', 'qui', 'est',
+          'ticket', 'tickets', 'montre', 'cherche', 'donne', 'combien', 'quels', 'quelle', 'quelles',
+          'est-ce', 'base', 'propos', 'avez-vous', 'avez', 'nous', 'vous'
+        ].includes(w.toLowerCase())
+    );
+
+    if (words.length > 0) {
+      where.OR = words.flatMap((w) => [
+        { title: { contains: w, mode: 'insensitive' } },
+        { content: { contains: w, mode: 'insensitive' } },
+        { category: { contains: w, mode: 'insensitive' } },
+        { glpiLocationName: { contains: w, mode: 'insensitive' } },
+      ]);
+    }
+
+    if (idMatch) {
+      const numId = parseInt(idMatch[1], 10);
+      if (!where.OR) where.OR = [];
+      where.OR.push({ id: numId }, { glpiTicketId: numId });
+    }
+
+    let tickets = await prisma.ticket.findMany({
+      where,
+      take: limit,
+      include: {
+        requester: { select: { fullName: true, email: true } },
+        assignedTo: { select: { fullName: true } },
+        team: { select: { name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (tickets.length === 0 && (lower.includes('ticket') || lower.includes('récent') || lower.includes('problème') || lower.includes('incident'))) {
+      tickets = await prisma.ticket.findMany({
+        take: limit,
+        include: {
+          requester: { select: { fullName: true, email: true } },
+          assignedTo: { select: { fullName: true } },
+          team: { select: { name: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+    }
+
+    return tickets;
+  } catch (err) {
+    console.error('[chatbot] Erreur recherche tickets:', err.message);
     return [];
   }
 }
@@ -194,15 +282,34 @@ async function escalateToTechnician(message, userId) {
 async function handleMessage(message, conversationHistory = [], userId = null) {
   const { intent, params } = await detectIntent(message);
 
-  // Recherche RAG
-  const knowledgeChunks = await searchKnowledge(message, 3);
+  // Recherche simultanée : RAG (Base de connaissances) + Tickets ERP
+  const [knowledgeChunks, matchingTickets] = await Promise.all([
+    searchKnowledge(message, 3),
+    searchTickets(message, 5),
+  ]);
+
   const knowledgeContext = knowledgeChunks.length > 0
     ? knowledgeChunks.map((c) => `[${c.title}] : ${c.content.substring(0, 500)}`).join('\n\n')
     : '';
 
   const contextParts = [];
+
   if (knowledgeContext) {
     contextParts.push(`**Informations de la base de connaissances :**\n${knowledgeContext}`);
+  }
+
+  if (matchingTickets.length > 0) {
+    let ticketContext = "**Tickets pertinents trouvés dans la base de données (/tickets) :**\n";
+    for (const t of matchingTickets) {
+      ticketContext += `• **Ticket #${t.id}** : "${t.title}"\n  - Statut : ${STATUS_LABEL[t.status] || t.status} | Priorité : ${PRIORITY_LABEL[t.priority] || t.priority}`;
+      if (t.category) ticketContext += ` | Catégorie : ${t.category}`;
+      if (t.requester) ticketContext += ` | Demandeur : ${t.requester.fullName}`;
+      if (t.assignedTo) ticketContext += ` | Assigné à : ${t.assignedTo.fullName}`;
+      if (t.glpiLocationName) ticketContext += ` | Lieu : ${t.glpiLocationName}`;
+      if (t.glpiTicketId) ticketContext += ` | GLPI #${t.glpiTicketId}`;
+      ticketContext += `\n  - *Description :* ${(t.content || '').substring(0, 200)}...\n\n`;
+    }
+    contextParts.push(ticketContext);
   }
 
   let action = null;
@@ -248,7 +355,7 @@ async function handleMessage(message, conversationHistory = [], userId = null) {
       break;
     }
     case 'help': {
-      contextParts.push(`**Fonctionnalités disponibles :**\n• **Créer un ticket** : "Je veux signaler un problème"\n• **Consulter un ticket** : "Quel est le statut du ticket #123"\n• **Rapport** : "Donne-moi un rapport des tickets ouverts"\n• **Escalade** : "Je veux parler à un technicien"\n• **Base de connaissances** : pose une question sur l'IT`);
+      contextParts.push(`**Fonctionnalités disponibles :**\n• **Recherche de tickets** : "Pose des questions sur les pannes, les catégories, les demandeurs..."\n• **Créer un ticket** : "Je veux signaler un problème"\n• **Consulter un ticket** : "Quel est le statut du ticket #123"\n• **Rapport** : "Donne-moi un rapport des tickets ouverts"\n• **Escalade** : "Je veux parler à un technicien"\n• **Base de connaissances** : pose une question sur l'IT`);
       break;
     }
   }
