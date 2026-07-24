@@ -27,6 +27,51 @@ function initials(name) {
   return name.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase();
 }
 
+const ROLE_CONFIG = {
+  SUPERADMIN: {
+    label: 'Superadmin',
+    bg: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20',
+    icon: 'military_tech',
+  },
+  ADMIN: {
+    label: 'Admin',
+    bg: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20',
+    icon: 'admin_panel_settings',
+  },
+  TECHNICIAN: {
+    label: 'Technicien',
+    bg: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20',
+    icon: 'build',
+  },
+  REQUESTER: {
+    label: 'Demandeur',
+    bg: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20',
+    icon: 'person',
+  },
+};
+
+function ToggleSwitch({ checked, onChange, disabled, title }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      title={title}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-40 ${
+        checked ? 'bg-primary' : 'bg-outline-variant/60 dark:bg-surface-container-high'
+      }`}
+    >
+      <span
+        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+          checked ? 'translate-x-4' : 'translate-x-0'
+        }`}
+      />
+    </button>
+  );
+}
+
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.05 } },
@@ -513,135 +558,216 @@ export default function Users() {
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       {/* TABLEAU DES UTILISATEURS */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
-      <motion.div variants={itemVariants} className="bento-card">
-        <div className="bento-card-header">
+      <motion.div variants={itemVariants} className="bento-card overflow-hidden">
+        <div className="bento-card-header flex items-center justify-between border-b border-outline-variant/40 bg-surface-container-low/30 px-lg py-md">
           <span className="font-headline-sm text-headline-sm text-on-surface flex items-center gap-2">
             <span className="material-symbols-outlined text-[18px] text-primary" aria-hidden="true">badge</span>
-            Annuaire
+            Annuaire des comptes
           </span>
-          <span className="text-on-surface-variant text-xs font-mono-sm bg-surface-container border border-outline-variant/50 px-2.5 py-0.5 rounded-full font-medium">
-            {users.length} utilisateur{users.length !== 1 ? 's' : ''}
+          <span className="text-on-surface-variant text-xs font-mono-sm bg-surface-container border border-outline-variant/50 px-3 py-1 rounded-full font-medium">
+            {total} utilisateur{total !== 1 ? 's' : ''} au total
           </span>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[900px]">
+          <table className="w-full text-left border-collapse min-w-[950px]">
             <thead>
-              <tr              className="bg-surface-bright/50 dark:bg-[rgba(255,255,255,0.03)] border-b border-outline-variant/60">
+              <tr className="bg-surface-container-low/60 border-b border-outline-variant/60 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">
                 <TH checkbox>
                   <input type="checkbox" checked={users.length > 0 && selectedIds.length === users.length}
-                    onChange={toggleSelectAll} className="cursor-pointer accent-primary w-4 h-4" />
+                    onChange={toggleSelectAll} className="cursor-pointer accent-primary w-4 h-4 rounded" />
                 </TH>
-                <TH>Utilisateur</TH>
-                <TH>Rôle</TH>
-                <TH>Équipe</TH>
-                <TH className="text-center">GLPI</TH>
-                <TH className="text-center">Actif</TH>
-                <TH className="text-center">Alertes</TH>
-                <TH className="text-right">Actions</TH>
+                <TH className="min-w-[240px]">Utilisateur</TH>
+                <TH className="w-44">Rôle</TH>
+                <TH className="w-48">Équipe</TH>
+                <TH className="w-28 text-center">Lien GLPI</TH>
+                <TH className="w-24 text-center">Statut</TH>
+                <TH className="w-24 text-center">Alertes IA</TH>
+                <TH className="w-28 text-right">Actions</TH>
               </tr>
             </thead>
-            <tbody className="divide-y divide-outline-variant/30">
+            <tbody className="divide-y divide-outline-variant/20 font-body-sm text-body-sm text-on-surface">
               <AnimatePresence mode="popLayout">
-                {users.map((u, idx) => (
-                  <motion.tr key={u.id} layout
-                    initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.25, delay: idx * 0.015, ease: [0.16, 1, 0.3, 1] }}
-                    className="hover:bg-surface-container-low/60 transition-colors group"
-                  >
-                    <td className="p-md"><input type="checkbox" checked={selectedIds.includes(u.id)}
-                      onChange={() => toggleSelect(u.id)} className="cursor-pointer accent-primary w-4 h-4" /></td>
-                    <td className="p-md">
-                      {editingId === u.id ? (
-                        <div className="flex flex-col gap-2 max-w-xs">
-                          <input value={editForm.fullName} onChange={(e) => setEditForm({ ...editForm, fullName: e.target.value })}
-                            placeholder="Nom" className="border border-outline-variant/60 rounded-xl px-3 py-1.5 text-body-sm text-on-surface bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all" />
-                          <input type="email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
-                            placeholder="Email" className="border border-outline-variant/60 rounded-xl px-3 py-1.5 text-body-sm text-on-surface bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all" />
-                          <div className="flex gap-2 mt-1">
-                            <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-                              onClick={() => saveEdit(u.id)} disabled={savingEdit}
-                              className="text-xs px-2.5 py-1.5 rounded-lg btn-gradient font-semibold shadow-sm hover:shadow transition-all disabled:opacity-50"
-                            >{savingEdit ? '...' : 'Enregistrer'}</motion.button>
-                            <button onClick={() => setEditingId(null)} disabled={savingEdit}
-                              className="text-xs px-2.5 py-1.5 rounded-lg border border-outline-variant/60 text-on-surface hover:bg-surface-container-high transition-all"
-                            >Annuler</button>
+                {users.map((u, idx) => {
+                  const roleConf = ROLE_CONFIG[u.role] || ROLE_CONFIG.REQUESTER;
+                  return (
+                    <motion.tr key={u.id} layout
+                      initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, x: -16 }} transition={{ duration: 0.2, delay: idx * 0.015, ease: [0.16, 1, 0.3, 1] }}
+                      className="hover:bg-surface-container-high/40 transition-colors group"
+                    >
+                      {/* Checkbox */}
+                      <td className="p-md text-center">
+                        <input type="checkbox" checked={selectedIds.includes(u.id)}
+                          onChange={() => toggleSelect(u.id)} className="cursor-pointer accent-primary w-4 h-4 rounded" />
+                      </td>
+
+                      {/* Utilisateur (Avatar + Nom + Email) */}
+                      <td className="p-md">
+                        {editingId === u.id ? (
+                          <div className="flex flex-col gap-2 max-w-xs">
+                            <input value={editForm.fullName} onChange={(e) => setEditForm({ ...editForm, fullName: e.target.value })}
+                              placeholder="Nom complet" className="border border-outline-variant/60 rounded-xl px-3 py-1.5 text-body-sm text-on-surface bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all" />
+                            <input type="email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                              placeholder="Email" className="border border-outline-variant/60 rounded-xl px-3 py-1.5 text-body-sm text-on-surface bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all" />
+                            <div className="flex gap-2 mt-1">
+                              <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                                onClick={() => saveEdit(u.id)} disabled={savingEdit}
+                                className="text-xs px-3 py-1.5 rounded-lg btn-gradient font-semibold shadow-sm hover:shadow transition-all disabled:opacity-50"
+                              >{savingEdit ? '...' : 'Enregistrer'}</motion.button>
+                              <button onClick={() => setEditingId(null)} disabled={savingEdit}
+                                className="text-xs px-3 py-1.5 rounded-lg border border-outline-variant/60 text-on-surface hover:bg-surface-container-high transition-all font-medium"
+                              >Annuler</button>
+                            </div>
                           </div>
+                        ) : (
+                          <button onClick={() => startEdit(u)}
+                            className="flex items-center gap-3 text-left group-hover:translate-x-0.5 transition-transform"
+                            title="Cliquer pour éditer le nom ou l'email"
+                          >
+                            <div className="relative">
+                              <div className="w-9 h-9 rounded-full border border-outline-variant/60 bg-gradient-to-br from-primary/10 to-primary/5 text-primary flex items-center justify-center font-bold text-xs shrink-0 shadow-sm">
+                                {initials(u.fullName)}
+                              </div>
+                              <span
+                                className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-surface ${
+                                  u.isActive ? 'bg-emerald-500' : 'bg-slate-400'
+                                }`}
+                                title={u.isActive ? 'Compte actif' : 'Compte inactif'}
+                              />
+                            </div>
+                            <div>
+                              <div className="font-headline-sm text-body-md text-on-surface font-semibold flex items-center gap-1.5">
+                                {u.fullName}
+                                <span className="material-symbols-outlined text-[14px] text-on-surface-variant opacity-0 group-hover:opacity-100 transition-opacity">edit</span>
+                              </div>
+                              <div className="text-on-surface-variant text-xs font-mono-sm">{u.email}</div>
+                            </div>
+                          </button>
+                        )}
+                      </td>
+
+                      {/* Rôle */}
+                      <td className="p-md">
+                        {(currentUser?.role === 'SUPERADMIN' || !ADMIN_LIKE_ROLES.includes(u.role)) ? (
+                          <div className="relative inline-block">
+                            <select value={u.role} onChange={(e) => updateField(u.id, 'role', e.target.value)}
+                              className={`appearance-none rounded-xl pl-8 pr-7 py-1.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer ${roleConf.bg}`}
+                            >
+                              {Array.from(new Set([...ROLES, u.role])).map((r) => (
+                                <option key={r} value={r} className="bg-surface text-on-surface font-medium">
+                                  {ROLE_LABELS[r] || r}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="material-symbols-outlined absolute left-2.5 top-2 text-[14px] pointer-events-none">
+                              {roleConf.icon}
+                            </span>
+                            <span className="material-symbols-outlined absolute right-1.5 top-2 text-[14px] pointer-events-none opacity-70">
+                              expand_more
+                            </span>
+                          </div>
+                        ) : (
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${roleConf.bg}`} title="Modification réservée aux Superadmins">
+                            <span className="material-symbols-outlined text-[14px]">{roleConf.icon}</span>
+                            {ROLE_LABELS[u.role] || u.role}
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Équipe */}
+                      <td className="p-md">
+                        <div className="relative inline-block">
+                          <select value={u.teamId || ''} onChange={(e) => updateField(u.id, 'teamId', e.target.value ? Number(e.target.value) : null)}
+                            className="appearance-none bg-surface-container-low border border-outline-variant/60 rounded-xl pl-8 pr-7 py-1.5 text-xs font-medium text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer"
+                          >
+                            <option value="">Aucune équipe</option>
+                            {teams.map((t) => (
+                              <option key={t.id} value={t.id}>{t.name}</option>
+                            ))}
+                          </select>
+                          <span className="material-symbols-outlined absolute left-2.5 top-2 text-[15px] text-on-surface-variant pointer-events-none">
+                            groups
+                          </span>
+                          <span className="material-symbols-outlined absolute right-1.5 top-2 text-[14px] text-on-surface-variant pointer-events-none opacity-70">
+                            expand_more
+                          </span>
                         </div>
-                      ) : (
-                        <motion.button whileHover={{ x: 2 }} onClick={() => startEdit(u)}
-                          className="flex items-center gap-3 text-left"
-                        >
-                          <div className="w-8 h-8 rounded-full border border-outline-variant/60 bg-surface-container-low text-on-surface flex items-center justify-center font-semibold shrink-0 shadow-sm text-[12px]">
-                            {initials(u.fullName)}
+                      </td>
+
+                      {/* GLPI */}
+                      <td className="p-md text-center">
+                        {u.glpiId ? (
+                          <span title={`Synchronisé depuis GLPI (ID: ${u.glpiId})`}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-sky-500/20 bg-sky-500/10 text-sky-600 dark:text-sky-400 font-semibold text-[11px]"
+                          >
+                            <span className="material-symbols-outlined text-[13px]">sync</span>
+                            #{u.glpiId}
+                          </span>
+                        ) : (
+                          <span className="text-outline/40 italic text-[11px] font-medium">—</span>
+                        )}
+                      </td>
+
+                      {/* Actif (Toggle Switch) */}
+                      <td className="p-md text-center">
+                        <ToggleSwitch
+                          checked={u.isActive}
+                          onChange={(val) => updateField(u.id, 'isActive', val)}
+                          title={u.isActive ? 'Désactiver ce compte' : 'Activer ce compte'}
+                        />
+                      </td>
+
+                      {/* Alertes IA (Toggle Switch) */}
+                      <td className="p-md text-center">
+                        {u.role !== 'REQUESTER' ? (
+                          <ToggleSwitch
+                            checked={u.receiveDraftAlerts}
+                            onChange={(val) => updateField(u.id, 'receiveDraftAlerts', val)}
+                            title={u.receiveDraftAlerts ? 'Désactiver les alertes de brouillons' : 'Activer les alertes de brouillons'}
+                          />
+                        ) : (
+                          <span className="text-outline/30 text-xs">—</span>
+                        )}
+                      </td>
+
+                      {/* Actions */}
+                      <td className="p-md text-right">
+                        {(currentUser?.role === 'SUPERADMIN' || !ADMIN_LIKE_ROLES.includes(u.role)) && (
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => askResetPassword(u.id)}
+                              title="Réinitialiser le mot de passe"
+                              className="p-1.5 rounded-lg text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-colors"
+                            >
+                              <span className="material-symbols-outlined text-[18px]">lock_reset</span>
+                            </button>
+                            <button
+                              onClick={() => startEdit(u)}
+                              title="Éditer le nom ou l'email"
+                              className="p-1.5 rounded-lg text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-colors"
+                            >
+                              <span className="material-symbols-outlined text-[18px]">edit</span>
+                            </button>
+                            <button
+                              onClick={() => askDelete(u.id)}
+                              title="Supprimer l'utilisateur"
+                              className="p-1.5 rounded-lg text-on-surface-variant hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                            >
+                              <span className="material-symbols-outlined text-[18px]">delete</span>
+                            </button>
                           </div>
-                          <div>
-                            <div className="font-headline-sm text-headline-sm text-on-surface font-medium">{u.fullName}</div>
-                            <div className="text-on-surface-variant text-xs">{u.email}</div>
-                          </div>
-                        </motion.button>
-                      )}
-                    </td>
-                    <td className="p-md">
-                      {(currentUser?.role === 'SUPERADMIN' || !ADMIN_LIKE_ROLES.includes(u.role)) ? (
-                        <select value={u.role} onChange={(e) => updateField(u.id, 'role', e.target.value)}
-                          className="bg-surface border border-outline-variant/60 rounded-xl px-2.5 py-1.5 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
-                        >{Array.from(new Set([...ROLES, u.role])).map((r) => (<option key={r} value={r}>{r}</option>))}</select>
-                      ) : (
-                        <span className="text-on-surface-variant font-medium" title="Seul un super-administrateur peut modifier">{u.role}</span>
-                      )}
-                    </td>
-                    <td className="p-md">
-                      <select value={u.teamId || ''} onChange={(e) => updateField(u.id, 'teamId', e.target.value ? Number(e.target.value) : null)}
-                        className="bg-surface border border-outline-variant/60 rounded-xl px-2.5 py-1.5 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
-                      ><option value="">Aucune</option>
-                        {teams.map((t) => (<option key={t.id} value={t.id}>{t.name}</option>))}
-                      </select>
-                    </td>
-                    <td className="p-md text-center">
-                      {u.glpiId ? (
-                        <span title={`ID GLPI: ${u.glpiId}`}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-outline-variant bg-surface-container-low text-on-surface-variant font-medium text-[10px]"
-                        >
-                          <span className="material-symbols-outlined text-[12px]">sync</span>
-                          #{u.glpiId}
-                        </span>
-                      ) : (
-                        <span className="text-outline/60 italic text-[11px]">Non lié</span>
-                      )}
-                    </td>
-                    <td className="p-md text-center">
-                      <input type="checkbox" checked={u.isActive} onChange={(e) => updateField(u.id, 'isActive', e.target.checked)}
-                        className="w-4 h-4 accent-primary cursor-pointer" />
-                    </td>
-                    <td className="p-md text-center">
-                      {u.role !== 'REQUESTER' && (
-                        <input type="checkbox" checked={u.receiveDraftAlerts} onChange={(e) => updateField(u.id, 'receiveDraftAlerts', e.target.checked)}
-                          className="w-4 h-4 accent-primary cursor-pointer" />
-                      )}
-                    </td>
-                    <td className="p-md text-right">
-                      {(currentUser?.role === 'SUPERADMIN' || !ADMIN_LIKE_ROLES.includes(u.role)) && (
-                        <div className="flex items-center justify-end gap-1">
-                          <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-                            onClick={() => askResetPassword(u.id)} title="Réinitialiser le mot de passe"
-                            className="text-on-surface-variant hover:text-primary transition-colors p-1"
-                          ><span className="material-symbols-outlined text-[18px]" aria-hidden="true">lock_reset</span></motion.button>
-                          <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-                            onClick={() => askDelete(u.id)} title="Supprimer"
-                            className="text-on-surface-variant hover:text-error transition-colors p-1 opacity-60 lg:opacity-0 lg:group-hover:opacity-100 focus-visible:opacity-100"
-                          ><span className="material-symbols-outlined text-[18px]" aria-hidden="true">delete</span></motion.button>
-                        </div>
-                      )}
-                    </td>
-                  </motion.tr>
-                ))}
+                        )}
+                      </td>
+                    </motion.tr>
+                  );
+                })}
               </AnimatePresence>
               {users.length === 0 && (
                 <motion.tr initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
                   <td colSpan={8} className="p-md py-12 text-center">
                     <div className="flex flex-col items-center gap-2 text-on-surface-variant">
                       <span className="material-symbols-outlined text-[40px] text-outline/40" aria-hidden="true">people</span>
-                      <p className="font-body-md text-body-md italic">Aucun utilisateur trouvé.</p>
+                      <p className="font-body-md text-body-md italic">Aucun utilisateur correspondant à votre recherche.</p>
                     </div>
                   </td>
                 </motion.tr>
