@@ -72,7 +72,7 @@ router.get('/', async (req, res) => {
   if (role) where.role = role;
   if (teamId) where.teamId = teamId === 'null' ? null : Number(teamId);
 
-  if (all === 'true') {
+  if (!page || all === 'true') {
     const users = await prisma.user.findMany({
       where,
       take: limit ? Number(limit) : undefined,

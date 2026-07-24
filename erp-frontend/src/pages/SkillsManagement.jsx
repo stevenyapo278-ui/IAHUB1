@@ -32,7 +32,8 @@ export default function SkillsManagement() {
     ])
       .then(([skillsRes, usersRes]) => {
         setSkills(skillsRes.data);
-        setUsers(usersRes.data.filter((u) => u.role !== 'REQUESTER'));
+        const uList = Array.isArray(usersRes.data) ? usersRes.data : (usersRes.data.users || []);
+        setUsers(uList.filter((u) => u.role !== 'REQUESTER'));
       })
       .catch((err) => toast.error(err.response?.data?.error || 'Erreur de chargement'))
       .finally(() => setLoading(false));

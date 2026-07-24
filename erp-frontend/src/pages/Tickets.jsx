@@ -260,7 +260,7 @@ export default function Tickets() {
   useEffect(() => {
     if (!canAssign) return;
     api.get('/teams').then(({ data }) => setTeams(data)).catch(() => {});
-    api.get('/users').then(({ data }) => setUsers(data)).catch(() => {});
+    api.get('/users').then(({ data }) => setUsers(Array.isArray(data) ? data : (data.users || []))).catch(() => {});
   }, [canAssign]);
 
   async function handleCreate(e) {

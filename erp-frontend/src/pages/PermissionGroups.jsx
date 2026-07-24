@@ -30,7 +30,7 @@ export default function PermissionGroups() {
     Promise.all([api.get('/permission-groups'), api.get('/users')])
       .then(([groupsRes, usersRes]) => {
         setGroups(groupsRes.data);
-        setUsers(usersRes.data);
+        setUsers(Array.isArray(usersRes.data) ? usersRes.data : (usersRes.data.users || []));
       })
       .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
   }

@@ -224,7 +224,7 @@ export default function TicketDetail() {
     api.get('/glpi/users').then(({ data }) => setGlpiUsers(data)).catch(() => {});
     if (!canAssign) return;
     api.get('/teams').then(({ data }) => setTeams(data)).catch(() => {});
-    api.get('/users').then(({ data }) => setUsers(data)).catch(() => {});
+    api.get('/users').then(({ data }) => setUsers(Array.isArray(data) ? data : (data.users || []))).catch(() => {});
   }, [canAssign]);
 
   async function updateField(field, value) {
@@ -815,7 +815,7 @@ export default function TicketDetail() {
                     onChange={(e) => updateField('assignedToId', e.target.value ? Number(e.target.value) : null)}
                   >
                     <option value="">Non assigné</option>
-                    {users.map((u) => {
+                    {(Array.isArray(users) ? users : []).map((u) => {
                       const isGlpi = glpiUsers.some((gu) => gu.id === u.id);
                       return <option key={u.id} value={u.id}>{u.fullName}{isGlpi ? ' 🔗' : ''}</option>;
                     })}
