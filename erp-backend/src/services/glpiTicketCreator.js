@@ -357,6 +357,77 @@ async function uploadGlpiAttachment({ glpiTicketId, buffer, filename, mimeType }
   });
 }
 
+// Helper de pagination générique pour récupérer tous les éléments d'un endpoint GLPI
+async function fetchAllGlpiItems(config, sessionToken, endpoint) {
+  const PAGE_SIZE = 100;
+  let offset = 0;
+  const allItems = [];
+
+  while (true) {
+    const url = `${config.baseUrl}/${endpoint}?range=${offset}-${offset + PAGE_SIZE - 1}`;
+    const res = await fetch(url, {
+      headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
+    }).catch(() => null);
+
+    if (!res || !res.ok) break;
+    const data = await res.json().catch(() => []);
+    const items = Array.isArray(data) ? data : (data.data || []);
+    if (items.length === 0) break;
+
+    allItems.push(...items);
+    if (items.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
+  }
+
+  return allItems;
+}
+
+// Récupère la carte { users_id: email } depuis GLPI (table UserEmail)
+async function fetchGlpiUserEmails(config, sessionToken) {
+  const PAGE_SIZE = 100;
+  let offset = 0;
+  const emailMap = {};
+
+  while (true) {
+    const res = await fetch(`${config.baseUrl}/UserEmail?range=${offset}-${offset + PAGE_SIZE - 1}`, {
+      headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
+    }).catch(() => null);
+    if (!res || !res.ok) break;
+    const data = await res.json().catch(() => []);
+    const items = Array.isArray(data) ? data : (data.data || []);
+    if (items.length === 0) break;
+
+    for (const item of items) {
+      if (item.users_id && item.email) {
+        if (!emailMap[item.users_id] || item.is_default) {
+          emailMap[item.users_id] = item.email;
+        }
+      }
+    }
+    if (items.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
+  }
+  return emailMap;
+}
+
+// Résout l'adresse email d'un utilisateur GLPI / Active Directory
+function resolveGlpiUserEmail(u, emailMap = {}) {
+  // 1. Email direct sur l'objet
+  let email = u._useremails?.[0]?.email || u.email || u.user_email || emailMap[u.id] || null;
+  if (email && typeof email === 'string' && email.trim() !== '') {
+    return email.trim().toLowerCase();
+  }
+
+  // 2. Si le nom GLPI (u.name) est un UPN Active Directory (ex: prenom.nom@prosuma.ci)
+  if (u.name && typeof u.name === 'string' && u.name.includes('@') && u.name.includes('.')) {
+    return u.name.trim().toLowerCase();
+  }
+
+  // 3. Email fallback pour les comptes AD / locaux sans adresse dans GLPI
+  const cleanName = (u.name || `user_${u.id}`).toLowerCase().replace(/[^a-z0-9_.-]/g, '');
+  return `${cleanName}@prosuma.ci`;
+}
+
 // Récupère les groupes (Group) depuis GLPI et crée/met à jour les Team correspondantes
 // dans l'ERP, en les liant via glpiGroupId. Retourne le nombre de groupes synchronisés,
 // ou null si GLPI n'est pas configuré/accessible.
@@ -365,11 +436,7 @@ async function syncTeamsFromGlpi() {
   if (!config) return null;
 
   return withGlpiSession(config, async (sessionToken) => {
-    const headers = { 'App-Token': config.appToken, 'Session-Token': sessionToken };
-
-    const res = await fetch(`${config.baseUrl}/Group?range=0-200`, { headers });
-    if (!res.ok) throw new Error(`GLPI récupération des groupes échouée (${res.status})`);
-    const groups = await res.json();
+    const groups = await fetchAllGlpiItems(config, sessionToken, 'Group');
 
     let synced = 0;
     for (const group of groups) {
@@ -397,19 +464,13 @@ async function syncTeamsFromGlpi() {
 }
 
 // Récupère les catégories (ITILCategory) depuis GLPI et crée/met à jour les TicketCategory
-// correspondantes dans l'ERP, en les liant via glpiCategoryId. Remplace le mapping statique
-// GLPI_CATEGORIES (glpiMapping.js) qui se désynchronisait silencieusement si la liste changeait
-// côté GLPI. Retourne le nombre de catégories synchronisées, ou null si GLPI n'est pas configuré.
+// correspondantes dans l'ERP, en les liant via glpiCategoryId.
 async function syncCategoriesFromGlpi() {
   const config = await getActiveGlpiConfig();
   if (!config) return null;
 
   return withGlpiSession(config, async (sessionToken) => {
-    const headers = { 'App-Token': config.appToken, 'Session-Token': sessionToken };
-
-    const res = await fetch(`${config.baseUrl}/ITILCategory?range=0-200`, { headers });
-    if (!res.ok) throw new Error(`GLPI récupération des catégories échouée (${res.status})`);
-    const categories = await res.json();
+    const categories = await fetchAllGlpiItems(config, sessionToken, 'ITILCategory');
 
     let synced = 0;
     for (const cat of categories) {
@@ -436,29 +497,23 @@ async function syncCategoriesFromGlpi() {
   });
 }
 
-// Synchronise les "Lieux" (Location) depuis GLPI vers la table GlpiLocation de l'ERP,
-// exactement comme syncCategoriesFromGlpi pour les catégories. Les lieux sont ensuite
-// accessibles via glpiLocationId sur le Ticket, résolus en nom complet au moment de la synchro.
-// Retourne le nombre de lieux synchronisés, ou null si GLPI n'est pas configuré.
+// Synchronise les "Lieux" (Location) depuis GLPI vers la table GlpiLocation de l'ERP.
+// Effectue la pagination complète et met à jour automatiquement glpiLocationName sur les tickets.
 async function syncLocationsFromGlpi() {
   const config = await getActiveGlpiConfig();
   if (!config) return null;
 
   return withGlpiSession(config, async (sessionToken) => {
-    const headers = { 'App-Token': config.appToken, 'Session-Token': sessionToken };
-
-    const res = await fetch(`${config.baseUrl}/Location?range=0-500`, { headers });
-    if (!res.ok) throw new Error(`GLPI récupération des lieux échouée (${res.status})`);
-    const locations = await res.json();
+    const locations = await fetchAllGlpiItems(config, sessionToken, 'Location');
 
     let synced = 0;
     for (const loc of locations) {
-      if (!loc.name) continue;
+      if (!loc.name && !loc.completename) continue;
 
       await prisma.glpiLocation.upsert({
         where: { glpiLocationId: loc.id },
         update: {
-          name: loc.name,
+          name: loc.name || loc.completename,
           completename: loc.completename || loc.name,
           address: loc.address || null,
           postcode: loc.postcode || null,
@@ -469,7 +524,7 @@ async function syncLocationsFromGlpi() {
         },
         create: {
           glpiLocationId: loc.id,
-          name: loc.name,
+          name: loc.name || loc.completename,
           completename: loc.completename || loc.name,
           address: loc.address || null,
           postcode: loc.postcode || null,
@@ -481,41 +536,42 @@ async function syncLocationsFromGlpi() {
       });
       synced++;
     }
+
+    // Raccordement automatique des noms de lieux sur tous les tickets historiques qui ont glpiLocationId
+    try {
+      await prisma.$executeRawUnsafe(`
+        UPDATE "Ticket" t
+        SET "glpiLocationName" = l."completename"
+        FROM "GlpiLocation" l
+        WHERE t."glpiLocationId" = l."glpiLocationId"
+          AND t."glpiLocationName" IS NULL
+      `);
+    } catch (err) {
+      // Ignoré silencieusement si la table/colonne n'existe pas encore
+    }
+
     return synced;
   });
 }
 
-// Synchronise les utilisateurs (User) depuis GLPI vers la table User de l'ERP.
-// Les correspondances se font par glpiId (prioritaire) puis par email.
-// Les utilisateurs GLPI sans email ou sans nom sont ignorés.
-// Si createMissing est true, crée automatiquement les comptes ERP manquants avec :
-//   - mot de passe aléatoire (mustChangePassword: true)
-//   - rôle TECHNICIAN
-//   - équipe déduite du groupe GLPI principal (si trouvé via Group_User)
-// Retourne le nombre d'utilisateurs synchronisés, ou null si GLPI n'est pas configuré.
+// Synchronise les utilisateurs (User) depuis GLPI / Active Directory vers la table User de l'ERP.
 async function syncUsersFromGlpi({ createMissing } = {}) {
   const config = await getActiveGlpiConfig();
   if (!config) return null;
 
   return withGlpiSession(config, async (sessionToken) => {
-    const headers = { 'App-Token': config.appToken, 'Session-Token': sessionToken };
-
-    const res = await fetch(`${config.baseUrl}/User?range=0-500`, { headers });
-    if (!res.ok) throw new Error(`GLPI récupération des utilisateurs échouée (${res.status})`);
-    const users = await res.json();
+    const emailMap = await fetchGlpiUserEmails(config, sessionToken);
+    const users = await fetchAllGlpiItems(config, sessionToken, 'User');
 
     // Fetch Group_User si createMissing pour assigner l'équipe
     let userGroupMap = {};
     if (createMissing) {
       try {
-        const guRes = await fetch(`${config.baseUrl}/Group_User?range=0-500`, { headers });
-        if (guRes.ok) {
-          const groupUsers = await guRes.json();
-          for (const gu of groupUsers) {
-            const uid = gu.users_id;
-            if (!userGroupMap[uid]) userGroupMap[uid] = [];
-            userGroupMap[uid].push(gu.groups_id);
-          }
+        const groupUsers = await fetchAllGlpiItems(config, sessionToken, 'Group_User');
+        for (const gu of groupUsers) {
+          const uid = gu.users_id;
+          if (!userGroupMap[uid]) userGroupMap[uid] = [];
+          userGroupMap[uid].push(gu.groups_id);
         }
       } catch (e) { /* ignore group fetch errors */ }
     }
@@ -525,10 +581,9 @@ async function syncUsersFromGlpi({ createMissing } = {}) {
       if (!u.name && !u.realname && !u.firstname) continue;
 
       const glpiId = u.id;
-      const email = u._useremails?.[0]?.email || u.email || null;
+      const email = resolveGlpiUserEmail(u, emailMap);
       const fullName = [u.realname, u.firstname].filter(Boolean).join(' ') || u.name;
 
-      // Skip users without email when createMissing (impossible d'avoir un compte sans email)
       if (!email) continue;
 
       // 1. Chercher par glpiId
@@ -573,18 +628,14 @@ async function syncUsersFromGlpi({ createMissing } = {}) {
   });
 }
 
-// Récupère la liste des utilisateurs GLPI non encore importés dans l'ERP.
-// Retourne un tableau d'objets { glpiId, name, firstName, realName, email }.
+// Récupère la liste des utilisateurs GLPI / Active Directory non encore importés dans l'ERP.
 async function getImportableGlpiUsers() {
   const config = await getActiveGlpiConfig();
   if (!config) throw new Error('GLPI non configuré');
 
   return withGlpiSession(config, async (sessionToken) => {
-    const headers = { 'App-Token': config.appToken, 'Session-Token': sessionToken };
-
-    const res = await fetch(`${config.baseUrl}/User?range=0-500`, { headers });
-    if (!res.ok) throw new Error(`GLPI récupération des utilisateurs échouée (${res.status})`);
-    const users = await res.json();
+    const emailMap = await fetchGlpiUserEmails(config, sessionToken);
+    const users = await fetchAllGlpiItems(config, sessionToken, 'User');
 
     // Récupérer les glpiId déjà présents dans l'ERP
     const existingIds = new Set(
@@ -599,7 +650,7 @@ async function getImportableGlpiUsers() {
     const importable = [];
     for (const u of users) {
       if (!u.name && !u.realname && !u.firstname) continue;
-      const email = u._useremails?.[0]?.email || u.email || null;
+      const email = resolveGlpiUserEmail(u, emailMap);
       if (!email) continue;
       if (existingIds.has(u.id)) continue;
       if (existingEmails.has(email)) continue;
@@ -618,20 +669,13 @@ async function getImportableGlpiUsers() {
 }
 
 // Importe sélectivement des utilisateurs GLPI dans l'ERP.
-// glpiUserIds : tableau des glpiId à importer.
-// Retourne { imported: nombre, errors: [...] }.
 async function importGlpiUsers(glpiUserIds) {
   const config = await getActiveGlpiConfig();
   if (!config) throw new Error('GLPI non configuré');
 
   return withGlpiSession(config, async (sessionToken) => {
-    const headers = { 'App-Token': config.appToken, 'Session-Token': sessionToken };
-
-    // Récupérer les utilisateurs GLPI demandés
-    const ids = glpiUserIds.join(',');
-    const res = await fetch(`${config.baseUrl}/User?range=0-500`, { headers });
-    if (!res.ok) throw new Error(`GLPI récupération des utilisateurs échouée (${res.status})`);
-    const allUsers = await res.json();
+    const emailMap = await fetchGlpiUserEmails(config, sessionToken);
+    const allUsers = await fetchAllGlpiItems(config, sessionToken, 'User');
 
     // Filtrer ceux dont l'ID est dans la liste demandée
     const users = allUsers.filter((u) => glpiUserIds.includes(u.id));
@@ -640,7 +684,7 @@ async function importGlpiUsers(glpiUserIds) {
     const errors = [];
 
     for (const u of users) {
-      const email = u._useremails?.[0]?.email || u.email || null;
+      const email = resolveGlpiUserEmail(u, emailMap);
       if (!email) {
         errors.push({ glpiId: u.id, reason: 'Email manquant' });
         continue;
@@ -678,3 +722,4 @@ async function importGlpiUsers(glpiUserIds) {
 }
 
 module.exports = { createTicketFromEmail, createGlpiTicket, updateGlpiTicket, deleteGlpiTicket, uploadGlpiAttachment, syncTeamsFromGlpi, syncCategoriesFromGlpi, syncLocationsFromGlpi, syncUsersFromGlpi, addGlpiFollowup, getImportableGlpiUsers, importGlpiUsers };
+
