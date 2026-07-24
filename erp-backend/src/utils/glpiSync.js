@@ -566,7 +566,7 @@ async function syncGlpiTicketActors(config, sessionToken, glpiTicketId, ticketId
             });
           } catch (e) { /* email unique en conflit — l'utilisateur existe déjà sous un autre glpiId */ }
         }
-        if (assignee) updates.assigneeId = assignee.id;
+        if (assignee) updates.assignedToId = assignee.id;
       }
     }
 
