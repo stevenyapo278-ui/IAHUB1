@@ -118,7 +118,9 @@ async function fetchAllGlpiTickets(config, sessionToken, { dateFrom, dateTo } = 
 
       if (!postRes.ok) break;
       const data = await postRes.json();
-      const tickets = data.data || data || [];
+      // data.data contient les résultats dans la réponse search/Ticket de GLPI.
+      // Si GLPI renvoie une erreur ou un objet inattendu, on s'arrête proprement.
+      const tickets = Array.isArray(data.data) ? data.data : Array.isArray(data) ? data : [];
       if (tickets.length === 0) break;
       allTickets.push(...tickets);
       if (tickets.length < PAGE_SIZE) break;
