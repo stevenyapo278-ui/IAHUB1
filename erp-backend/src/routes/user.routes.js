@@ -56,21 +56,113 @@ const userSelect = {
 };
 
 router.get('/', async (req, res) => {
-  const { search, limit } = req.query;
+  const { search, limit, page, role, teamId, all } = req.query;
   const where = {};
   if (search) {
-    where.OR = [
+    const searchInt = parseInt(search, 10);
+    const searchConditions = [
       { fullName: { contains: search, mode: 'insensitive' } },
-      { email: { contains: search, mode: 'insensitive' } }
+      { email: { contains: search, mode: 'insensitive' } },
     ];
+    if (!isNaN(searchInt)) {
+      searchConditions.push({ glpiId: searchInt });
+    }
+    where.OR = searchConditions;
   }
-  const users = await prisma.user.findMany({
-    where,
-    take: limit ? Number(limit) : undefined,
-    select: userSelect,
-    orderBy: { fullName: 'asc' },
+  if (role) where.role = role;
+  if (teamId) where.teamId = teamId === 'null' ? null : Number(teamId);
+
+  if (all === 'true') {
+    const users = await prisma.user.findMany({
+      where,
+      take: limit ? Number(limit) : undefined,
+      select: userSelect,
+      orderBy: { fullName: 'asc' },
+    });
+    return res.json(users);
+  }
+
+  const pageNum = Math.max(1, Number(page) || 1);
+  const limitNum = Math.max(1, Math.min(100, Number(limit) || 25));
+  const skip = (pageNum - 1) * limitNum;
+
+  const [total, users] = await Promise.all([
+    prisma.user.count({ where }),
+    prisma.user.findMany({
+      where,
+      skip,
+      take: limitNum,
+      select: userSelect,
+      orderBy: { fullName: 'asc' },
+    }),
+  ]);
+
+  return res.json({
+    users,
+    total,
+    page: pageNum,
+    limit: limitNum,
+    totalPages: Math.ceil(total / limitNum) || 1,
   });
-  return res.json(users);
+});
+
+// Suppression par lot d'utilisateurs sélectionnés
+router.post('/bulk-delete', async (req, res) => {
+  const { userIds } = req.body;
+  if (!Array.isArray(userIds) || userIds.length === 0) {
+    return res.status(400).json({ error: 'Aucun ID d\'utilisateur fourni' });
+  }
+
+  const targets = await prisma.user.findMany({
+    where: { id: { in: userIds.map(Number) } },
+    select: { id: true, role: true },
+  });
+
+  const validIdsToDelete = targets
+    .filter((u) => canActOnTarget(req.user.role, u.role))
+    .map((u) => u.id);
+
+  if (validIdsToDelete.length === 0) {
+    return res.status(403).json({ error: 'Aucun utilisateur sélectionné ne peut être supprimé' });
+  }
+
+  const deleted = await prisma.user.deleteMany({
+    where: { id: { in: validIdsToDelete } },
+  });
+
+  return res.json({ deletedCount: deleted.count });
+});
+
+// Purge de tous les utilisateurs importés (hors Admin / SuperAdmin)
+router.delete('/purge-imported', async (req, res) => {
+  try {
+    const deleted = await prisma.user.deleteMany({
+      where: {
+        glpiId: { not: null },
+        role: { notIn: ADMIN_LIKE_ROLES },
+      },
+    });
+    return res.json({ purgedCount: deleted.count });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || 'Erreur lors de la purge' });
+  }
+});
+
+// Assignation d'équipe par lot
+router.post('/bulk-assign-team', async (req, res) => {
+  const { userIds, teamId } = req.body;
+  if (!Array.isArray(userIds) || userIds.length === 0) {
+    return res.status(400).json({ error: 'Aucun ID d\'utilisateur fourni' });
+  }
+
+  const teamIdValue = teamId ? Number(teamId) : null;
+
+  const updated = await prisma.user.updateMany({
+    where: { id: { in: userIds.map(Number) } },
+    data: { teamId: teamIdValue },
+  });
+
+  return res.json({ updatedCount: updated.count });
 });
 
 router.post(
@@ -357,7 +449,7 @@ router.post('/import-csv', upload.single('file'), async (req, res) => {
               email: r.email,
               passwordHash,
               fullName: r.fullName,
-              role: 'TECHNICIAN',
+              role: 'REQUESTER',
               glpiId: r.glpiId || null,
               isActive: r.isActive !== undefined ? r.isActive : true,
               mustChangePassword: true,

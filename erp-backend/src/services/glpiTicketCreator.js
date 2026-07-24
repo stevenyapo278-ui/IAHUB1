@@ -615,7 +615,7 @@ async function syncUsersFromGlpi({ createMissing = true } = {}) {
             email,
             passwordHash,
             fullName,
-            role: 'TECHNICIAN',
+            role: 'REQUESTER',
             glpiId,
             teamId,
             mustChangePassword: true,

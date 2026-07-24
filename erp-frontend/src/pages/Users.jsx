@@ -182,15 +182,98 @@ export default function Users() {
     }
   }
 
+  const [searchQuery, setSearchQuery] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
+  const [teamFilter, setTeamFilter] = useState('');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [assignTeamId, setAssignTeamId] = useState('');
+  const [showPurgeModal, setShowPurgeModal] = useState(false);
+  const [purging, setPurging] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  function load() {
+    const params = new URLSearchParams();
+    params.set('page', page);
+    params.set('limit', limit);
+    if (searchQuery) params.set('search', searchQuery);
+    if (roleFilter) params.set('role', roleFilter);
+    if (teamFilter) params.set('teamId', teamFilter);
+
+    Promise.all([
+      api.get(`/users?${params.toString()}`),
+      api.get('/teams'),
+      api.get('/permission-groups'),
+    ])
+      .then(([usersRes, teamsRes, groupsRes]) => {
+        if (usersRes.data.users) {
+          setUsers(usersRes.data.users);
+          setTotal(usersRes.data.total);
+          setTotalPages(usersRes.data.totalPages);
+        } else {
+          setUsers(usersRes.data);
+          setTotal(usersRes.data.length);
+          setTotalPages(1);
+        }
+        setTeams(teamsRes.data);
+        setGroups(groupsRes.data);
+        setSelectedIds([]);
+      })
+      .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
+  }
+  useEffect(load, [page, limit, searchQuery, roleFilter, teamFilter]);
+
+  async function handleAssignToTeam() {
+    if (!assignTeamId || selectedIds.length === 0) return;
+    setAssigning(true); setError('');
+    try {
+      await api.post('/users/bulk-assign-team', { userIds: selectedIds, teamId: assignTeamId === 'none' ? null : assignTeamId });
+      toast.success(`${selectedIds.length} utilisateur(s) assigné(s) à l'équipe`);
+      setAssignTeamId(''); setSelectedIds([]); load();
+    } catch (err) { setError(err.response?.data?.error || "Erreur lors de l'assignation"); }
+    finally { setAssigning(false); }
+  }
+
+  async function handleBulkDelete() {
+    if (selectedIds.length === 0) return;
+    setBulkDeleting(true); setError('');
+    try {
+      const { data } = await api.post('/users/bulk-delete', { userIds: selectedIds });
+      toast.success(`${data.deletedCount} utilisateur(s) supprimé(s)`);
+      setSelectedIds([]); load();
+    } catch (err) { setError(err.response?.data?.error || 'Erreur lors de la suppression par lot'); }
+    finally { setBulkDeleting(false); }
+  }
+
+  async function handlePurgeImported() {
+    setPurging(true); setError('');
+    try {
+      const { data } = await api.delete('/users/purge-imported');
+      toast.success(`${data.purgedCount} utilisateur(s) importé(s) purgés avec succès`);
+      setShowPurgeModal(false); load();
+    } catch (err) { setError(err.response?.data?.error || 'Erreur lors de la purge'); }
+    finally { setPurging(false); }
+  }
+
   return (
     <motion.div className="p-lg space-y-lg" variants={containerVariants} initial="hidden" animate="visible">
       {/* ── En-tête ─────────────────────────────────────────────────────────── */}
       <motion.header variants={itemVariants} className="flex justify-between items-end gap-md">
         <div>
           <h2 className="font-display-lg text-display-lg text-on-background tracking-tight">Utilisateurs</h2>
-          <p className="font-body-lg text-body-lg text-on-surface-variant">Gestion des comptes et des rôles.</p>
+          <p className="font-body-lg text-body-lg text-on-surface-variant">Gestion des comptes et des rôles ({total} total).</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+            onClick={() => setShowPurgeModal(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-red-500/30 text-red-500 hover:bg-red-500/10 font-semibold text-body-sm transition-all duration-300 whitespace-nowrap"
+            title="Supprimer tous les utilisateurs importés de GLPI / CSV"
+          >
+            <span className="material-symbols-outlined text-[18px]" aria-hidden="true">delete_sweep</span>
+            Purger les importés
+          </motion.button>
           <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
             onClick={() => {
               setError('');
@@ -311,26 +394,120 @@ export default function Users() {
       </motion.div>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* BARRE D'ASSIGNATION DE GROUPE */}
+      {/* BARRE DE RECHERCHE, FILTRES ET ACTIONS DE MASSE */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
-      <motion.div variants={itemVariants} className="bento-card">
-        <div className="flex flex-wrap items-center gap-3 p-lg">
-          <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider shrink-0">Assignation groupe</span>
-          <select
-            className="bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-            value={assignGroupId} onChange={(e) => setAssignGroupId(e.target.value)} disabled={selectedIds.length === 0}
-          >
-            <option value="">Groupe de droits...</option>
-            {groups.map((g) => (<option key={g.id} value={g.id}>{g.name}</option>))}
-          </select>
-          <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-            onClick={handleAssignToGroup} disabled={!assignGroupId || selectedIds.length === 0 || assigning}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-outline-variant/60 bg-surface hover:bg-surface-container-high transition-colors font-semibold text-body-sm disabled:opacity-40"
-          >
-            <span className="material-symbols-outlined text-[18px]" aria-hidden="true">group_add</span>
-            Assigner ({selectedIds.length})
-          </motion.button>
+      <motion.div variants={itemVariants} className="bento-card p-md space-y-md">
+        <div className="flex flex-wrap items-center justify-between gap-md">
+          {/* Recherche & Filtres */}
+          <div className="flex items-center gap-2 flex-1 min-w-[280px]">
+            <div className="relative flex-1">
+              <span className="material-symbols-outlined absolute left-3 top-2.5 text-on-surface-variant text-[18px]">search</span>
+              <input
+                type="text"
+                placeholder="Rechercher par nom, email, ID GLPI..."
+                value={searchQuery}
+                onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
+                className="w-full pl-9 pr-8 py-2 bg-surface border border-outline-variant/60 rounded-xl text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+              />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery('')} className="absolute right-2.5 top-2.5 text-on-surface-variant hover:text-on-surface">
+                  <span className="material-symbols-outlined text-[16px]">close</span>
+                </button>
+              )}
+            </div>
+
+            <select
+              value={roleFilter}
+              onChange={(e) => { setRoleFilter(e.target.value); setPage(1); }}
+              className="bg-surface border border-outline-variant/60 rounded-xl px-3 py-2 text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer"
+            >
+              <option value="">Tous les rôles</option>
+              <option value="SUPERADMIN">Superadmin</option>
+              <option value="ADMIN">Admin</option>
+              <option value="TECHNICIAN">Technicien</option>
+              <option value="REQUESTER">Demandeur</option>
+            </select>
+
+            <select
+              value={teamFilter}
+              onChange={(e) => { setTeamFilter(e.target.value); setPage(1); }}
+              className="bg-surface border border-outline-variant/60 rounded-xl px-3 py-2 text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer"
+            >
+              <option value="">Toutes les équipes</option>
+              <option value="null">Sans équipe</option>
+              {teams.map((t) => (<option key={t.id} value={t.id}>{t.name}</option>))}
+            </select>
+          </div>
+
+          {/* Affichage par page */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-on-surface-variant font-medium">Afficher :</span>
+            <select
+              value={limit}
+              onChange={(e) => { setLimit(Number(e.target.value)); setPage(1); }}
+              className="bg-surface border border-outline-variant/60 rounded-xl px-2.5 py-1.5 text-xs text-on-surface focus:outline-none transition-all cursor-pointer font-medium"
+            >
+              <option value={25}>25 par page</option>
+              <option value={50}>50 par page</option>
+              <option value={100}>100 par page</option>
+            </select>
+          </div>
         </div>
+
+        {/* Barre d'actions par lot (quand des utilisateurs sont sélectionnés) */}
+        {selectedIds.length > 0 && (
+          <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
+            className="flex flex-wrap items-center justify-between gap-3 p-md bg-surface-container-low border border-primary/20 rounded-xl"
+          >
+            <span className="font-body-sm text-body-sm text-primary font-semibold flex items-center gap-1.5">
+              <span className="material-symbols-outlined text-[18px]">check_box</span>
+              {selectedIds.length} utilisateur(s) sélectionné(s)
+            </span>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Assigner Groupe */}
+              <div className="flex items-center gap-1.5">
+                <select
+                  className="bg-surface border border-outline-variant/60 rounded-xl px-3 py-1.5 text-xs text-on-surface focus:outline-none"
+                  value={assignGroupId} onChange={(e) => setAssignGroupId(e.target.value)}
+                >
+                  <option value="">Assigner groupe...</option>
+                  {groups.map((g) => (<option key={g.id} value={g.id}>{g.name}</option>))}
+                </select>
+                <button onClick={handleAssignToGroup} disabled={!assignGroupId || assigning}
+                  className="px-3 py-1.5 rounded-xl border border-outline-variant text-xs font-semibold hover:bg-surface-container-high transition-colors disabled:opacity-40"
+                >
+                  Groupe
+                </button>
+              </div>
+
+              {/* Assigner Équipe */}
+              <div className="flex items-center gap-1.5">
+                <select
+                  className="bg-surface border border-outline-variant/60 rounded-xl px-3 py-1.5 text-xs text-on-surface focus:outline-none"
+                  value={assignTeamId} onChange={(e) => setAssignTeamId(e.target.value)}
+                >
+                  <option value="">Assigner équipe...</option>
+                  <option value="none">Retirer l'équipe</option>
+                  {teams.map((t) => (<option key={t.id} value={t.id}>{t.name}</option>))}
+                </select>
+                <button onClick={handleAssignToTeam} disabled={!assignTeamId || assigning}
+                  className="px-3 py-1.5 rounded-xl border border-outline-variant text-xs font-semibold hover:bg-surface-container-high transition-colors disabled:opacity-40"
+                >
+                  Équipe
+                </button>
+              </div>
+
+              {/* Supprimer la sélection */}
+              <button onClick={handleBulkDelete} disabled={bulkDeleting}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/30 text-xs font-semibold transition-colors disabled:opacity-40"
+              >
+                <span className="material-symbols-outlined text-[16px]">delete</span>
+                Supprimer ({selectedIds.length})
+              </button>
+            </div>
+          </motion.div>
+        )}
       </motion.div>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
@@ -471,6 +648,32 @@ export default function Users() {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Pagination à deux contrôles (Précédent / Suivant) */}
+        <div className="flex items-center justify-between p-md border-t border-outline-variant/40">
+          <div className="text-xs text-on-surface-variant font-medium">
+            Affichage page <strong>{page}</strong> sur <strong>{totalPages}</strong> ({total} utilisateurs)
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="flex items-center gap-1 px-3.5 py-1.5 rounded-xl border border-outline-variant/60 text-xs font-semibold text-on-surface hover:bg-surface-container-high transition-all disabled:opacity-40"
+            >
+              <span className="material-symbols-outlined text-[16px]">chevron_left</span>
+              Précédent
+            </button>
+            <span className="text-xs font-mono px-2">{page} / {totalPages}</span>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className="flex items-center gap-1 px-3.5 py-1.5 rounded-xl border border-outline-variant/60 text-xs font-semibold text-on-surface hover:bg-surface-container-high transition-all disabled:opacity-40"
+            >
+              Suivant
+              <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+            </button>
+          </div>
         </div>
       </motion.div>
 
@@ -764,6 +967,9 @@ export default function Users() {
       <ConfirmDialog open={!!confirmResetId} title="Réinitialiser le mot de passe"
         message="Un nouveau mot de passe temporaire sera généré et envoyé par email."
         confirmLabel="Réinitialiser" loading={resetting} onConfirm={handleResetPassword} onCancel={() => setConfirmResetId(null)} />
+      <ConfirmDialog open={showPurgeModal} title="Purger tous les utilisateurs importés"
+        message="Supprimer tous les comptes importés depuis GLPI / CSV ? Vos comptes Administrateurs et SuperAdministrateurs seront impérativement conservés. Cette action est irréversible."
+        confirmLabel="Purger les importés" danger loading={purging} onConfirm={handlePurgeImported} onCancel={() => setShowPurgeModal(false)} />
     </motion.div>
   );
 }

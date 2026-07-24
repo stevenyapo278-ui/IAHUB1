@@ -1,3 +1,5 @@
+const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
 const prisma = require('../prismaClient');
 const { GLPI_AI_REQUESTER_ID, glpiIdToCategory } = require('./glpiMapping');
 const { getSystemSettings } = require('../services/systemSettings');
@@ -195,6 +197,7 @@ async function syncGlpiTickets() {
 
       await syncTicketAttachments(config, sessionToken, t.id, ticketId);
       await syncGlpiFollowups(config, sessionToken, t.id, ticketId);
+      await syncGlpiTicketActors(config, sessionToken, t.id, ticketId);
       await maybeAutoApproveValidation(config, sessionToken, t.id);
       await maybeAutoApproveSolution(config, sessionToken, t);
     }
@@ -432,4 +435,97 @@ async function syncGlpiFollowups(config, sessionToken, glpiTicketId, ticketId) {
   }
 }
 
-module.exports = { syncGlpiTickets, fullReimportFromGlpi, syncGlpiFollowups, getGlpiConfig, getActiveGlpiConfig, glpiInitSession, glpiKillSession };
+// Récupère les acteurs (Demandeurs, Techniciens, Observateurs) associés au ticket GLPI
+// depuis GET /Ticket/:id/Ticket_User et met à jour requesterId / assigneeId sur le ticket ERP.
+async function syncGlpiTicketActors(config, sessionToken, glpiTicketId, ticketId) {
+  try {
+    const res = await fetch(`${config.baseUrl}/Ticket/${glpiTicketId}/Ticket_User`, {
+      headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
+    });
+    if (!res.ok) return;
+
+    const actors = await res.json();
+    if (!Array.isArray(actors) || actors.length === 0) return;
+
+    let requesterGlpiId = null;
+    let assigneeGlpiId = null;
+
+    for (const a of actors) {
+      if (a.type === 1 && !requesterGlpiId) requesterGlpiId = a.users_id;
+      if (a.type === 2 && !assigneeGlpiId) assigneeGlpiId = a.users_id;
+    }
+
+    const updates = {};
+
+    if (requesterGlpiId) {
+      let requester = await prisma.user.findUnique({ where: { glpiId: requesterGlpiId } });
+      if (!requester) {
+        try {
+          const uRes = await fetch(`${config.baseUrl}/User/${requesterGlpiId}`, {
+            headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
+          });
+          if (uRes.ok) {
+            const uData = await uRes.json();
+            const fullName = [uData.realname, uData.firstname].filter(Boolean).join(' ') || uData.name || `Utilisateur ${requesterGlpiId}`;
+            const email = (uData.name && uData.name.includes('@')) ? uData.name : `${uData.name || requesterGlpiId}@prosuma.ci`;
+            const passwordHash = await bcrypt.hash(crypto.randomBytes(20).toString('hex'), 10);
+            requester = await prisma.user.create({
+              data: {
+                glpiId: requesterGlpiId,
+                fullName,
+                email,
+                passwordHash,
+                role: 'REQUESTER',
+                mustChangePassword: true,
+              },
+            });
+          }
+        } catch (e) {
+          // Ignoré si la création échoue
+        }
+      }
+      if (requester) updates.requesterId = requester.id;
+    }
+
+    if (assigneeGlpiId) {
+      let assignee = await prisma.user.findUnique({ where: { glpiId: assigneeGlpiId } });
+      if (!assignee) {
+        try {
+          const uRes = await fetch(`${config.baseUrl}/User/${assigneeGlpiId}`, {
+            headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
+          });
+          if (uRes.ok) {
+            const uData = await uRes.json();
+            const fullName = [uData.realname, uData.firstname].filter(Boolean).join(' ') || uData.name || `Technicien ${assigneeGlpiId}`;
+            const email = (uData.name && uData.name.includes('@')) ? uData.name : `${uData.name || assigneeGlpiId}@prosuma.ci`;
+            const passwordHash = await bcrypt.hash(crypto.randomBytes(20).toString('hex'), 10);
+            assignee = await prisma.user.create({
+              data: {
+                glpiId: assigneeGlpiId,
+                fullName,
+                email,
+                passwordHash,
+                role: 'REQUESTER',
+                mustChangePassword: true,
+              },
+            });
+          }
+        } catch (e) {
+          // Ignoré
+        }
+      }
+      if (assignee) updates.assigneeId = assignee.id;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await prisma.ticket.update({
+        where: { id: ticketId },
+        data: updates,
+      });
+    }
+  } catch (err) {
+    // Ignoré silencieusement
+  }
+}
+
+module.exports = { syncGlpiTickets, fullReimportFromGlpi, syncGlpiFollowups, syncGlpiTicketActors, getGlpiConfig, getActiveGlpiConfig, glpiInitSession, glpiKillSession };

@@ -114,7 +114,7 @@ describe('GLPI Sync & Active Directory Resolution Tests', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             email: 'tech1@prosuma.ci',
-            role: 'TECHNICIAN',
+            role: 'REQUESTER',
             glpiId: 1,
           }),
         })
@@ -123,7 +123,7 @@ describe('GLPI Sync & Active Directory Resolution Tests', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             email: 'p.martin@prosuma.ci',
-            role: 'TECHNICIAN',
+            role: 'REQUESTER',
             glpiId: 2,
           }),
         })
