@@ -18,6 +18,9 @@ const GLPI_STATUS_MAP = {
   6: 'CLOSED',
 };
 
+// Verrou global pour empêcher la concurrence entre le réimport et la synchro d'arrière-plan
+let isGlpiSyncRunning = false;
+
 function stripHtml(str) {
   if (!str || typeof str !== 'string') return str;
   return str
@@ -193,13 +196,25 @@ async function fetchAllGlpiTickets(config, sessionToken, { dateFrom, dateTo } = 
     }
   }
 
-  return allTickets;
+  // Dédupliquer les tickets par ID GLPI pour éviter toute insertion en double
+  const uniqueTicketsMap = new Map();
+  for (const t of allTickets) {
+    if (t && t.id) {
+      uniqueTicketsMap.set(t.id, t);
+    }
+  }
+  return Array.from(uniqueTicketsMap.values());
 }
 
 // Sync standard : import incrémental (upsert par glpiTicketId), sans dates = tout récupérer
 async function syncGlpiTickets() {
+  if (isGlpiSyncRunning) return null;
+  isGlpiSyncRunning = true;
   const config = await getGlpiConfig();
-  if (!config) return null;
+  if (!config) {
+    isGlpiSyncRunning = false;
+    return null;
+  }
 
   const sessionToken = await glpiInitSession(config);
   try {
@@ -281,6 +296,7 @@ async function syncGlpiTickets() {
 
     return { imported, updated };
   } finally {
+    isGlpiSyncRunning = false;
     await glpiKillSession(config, sessionToken);
   }
 }
@@ -289,8 +305,14 @@ async function syncGlpiTickets() {
 // depuis GLPI avec filtre optionnel par date.
 // NE TOUCHE PAS à GLPI — c'est une lecture seule.
 async function fullReimportFromGlpi({ dateFrom, dateTo } = {}) {
+  if (isGlpiSyncRunning) return null;
+  isGlpiSyncRunning = true;
+
   const config = await getGlpiConfig();
-  if (!config) return null;
+  if (!config) {
+    isGlpiSyncRunning = false;
+    return null;
+  }
 
   // Persister les filtres de dates dans ApiConfig pour que les synchros automatiques (arrière-plan) les respectent aussi
   try {
@@ -346,15 +368,40 @@ async function fullReimportFromGlpi({ dateFrom, dateTo } = {}) {
         ...(createdAt ? { createdAt } : {}),
       };
 
-      const created = await prisma.ticket.create({ data: { ...data, glpiTicketId: t.id } });
-      await syncTicketAttachments(config, sessionToken, t.id, created.id);
-      await syncGlpiFollowups(config, sessionToken, t.id, created.id);
-      await syncGlpiTicketActors(config, sessionToken, t.id, created.id);
+      let ticketId;
+      const existing = await prisma.ticket.findUnique({ where: { glpiTicketId: t.id } });
+
+      if (existing) {
+        await prisma.ticket.update({ where: { id: existing.id }, data });
+        ticketId = existing.id;
+      } else {
+        try {
+          const created = await prisma.ticket.create({ data: { ...data, glpiTicketId: t.id } });
+          ticketId = created.id;
+        } catch (e) {
+          if (e.code === 'P2002') {
+            const fallback = await prisma.ticket.findUnique({ where: { glpiTicketId: t.id } });
+            if (fallback) {
+              await prisma.ticket.update({ where: { id: fallback.id }, data });
+              ticketId = fallback.id;
+            } else {
+              continue;
+            }
+          } else {
+            throw e;
+          }
+        }
+      }
+
+      await syncTicketAttachments(config, sessionToken, t.id, ticketId);
+      await syncGlpiFollowups(config, sessionToken, t.id, ticketId);
+      await syncGlpiTicketActors(config, sessionToken, t.id, ticketId);
       imported += 1;
     }
 
     return { deleted: deleted.count, imported };
   } finally {
+    isGlpiSyncRunning = false;
     await glpiKillSession(config, sessionToken);
   }
 }
