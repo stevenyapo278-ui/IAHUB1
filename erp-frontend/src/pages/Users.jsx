@@ -109,17 +109,7 @@ export default function Users() {
   const [importResult, setImportResult] = useState(null);
   const inputClass = 'bg-surface border border-outline-variant/60 rounded-xl py-2 px-3.5 text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300';
 
-  function load() {
-    Promise.all([api.get('/users'), api.get('/teams'), api.get('/permission-groups')])
-      .then(([usersRes, teamsRes, groupsRes]) => {
-        setUsers(usersRes.data);
-        setTeams(teamsRes.data);
-        setGroups(groupsRes.data);
-        setSelectedIds([]);
-      })
-      .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
-  }
-  useEffect(load, []);
+
 
   function toggleSelect(id) {
     setSelectedIds((ids) => (ids.includes(id) ? ids.filter((i) => i !== id) : [...ids, id]));
@@ -183,9 +173,7 @@ export default function Users() {
     finally { setSubmitting(false); }
   }
 
-  const activeCount = users.filter((u) => u.isActive).length;
-  const inactiveCount = users.length - activeCount;
-  const staffCount = users.filter((u) => u.role !== 'REQUESTER').length;
+
 
   const [showCsvImport, setShowCsvImport] = useState(false);
   const [csvFile, setCsvFile] = useState(null);
@@ -233,17 +221,21 @@ export default function Users() {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(25);
   const [total, setTotal] = useState(0);
+  const [staffCount, setStaffCount] = useState(0);
+  const [inactiveCount, setInactiveCount] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [assignTeamId, setAssignTeamId] = useState('');
   const [showPurgeModal, setShowPurgeModal] = useState(false);
   const [purging, setPurging] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const loadReqIdRef = useRef(0);
 
   function load() {
+    const reqId = ++loadReqIdRef.current;
     const params = new URLSearchParams();
     params.set('page', page);
     params.set('limit', limit);
-    if (searchQuery) params.set('search', searchQuery);
+    if (searchQuery && searchQuery.trim()) params.set('search', searchQuery.trim());
     if (roleFilter) params.set('role', roleFilter);
     if (teamFilter) params.set('teamId', teamFilter);
 
@@ -253,22 +245,34 @@ export default function Users() {
       api.get('/permission-groups'),
     ])
       .then(([usersRes, teamsRes, groupsRes]) => {
+        if (reqId !== loadReqIdRef.current) return;
         if (usersRes.data.users) {
           setUsers(usersRes.data.users);
-          setTotal(usersRes.data.total);
-          setTotalPages(usersRes.data.totalPages);
+          setTotal(usersRes.data.total || 0);
+          setStaffCount(usersRes.data.staffCount ?? 0);
+          setInactiveCount(usersRes.data.inactiveCount ?? 0);
+          setTotalPages(usersRes.data.totalPages || 1);
         } else {
-          setUsers(usersRes.data);
-          setTotal(usersRes.data.length);
+          const list = Array.isArray(usersRes.data) ? usersRes.data : [];
+          setUsers(list);
+          setTotal(list.length);
+          setStaffCount(list.filter((u) => u.role !== 'REQUESTER').length);
+          setInactiveCount(list.filter((u) => !u.isActive).length);
           setTotalPages(1);
         }
         setTeams(teamsRes.data);
         setGroups(groupsRes.data);
         setSelectedIds([]);
       })
-      .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
+      .catch((err) => {
+        if (reqId !== loadReqIdRef.current) return;
+        setError(err.response?.data?.error || 'Erreur de chargement');
+      });
   }
-  useEffect(load, [page, limit, searchQuery, roleFilter, teamFilter]);
+
+  useEffect(() => {
+    load();
+  }, [page, limit, searchQuery, roleFilter, teamFilter]);
 
   async function handleAssignToTeam() {
     if (!assignTeamId || selectedIds.length === 0) return;
@@ -433,7 +437,7 @@ export default function Users() {
       {/* STATISTIQUES — Bento grid */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-3 gap-gutter">
-        <StatCard label="Total utilisateurs" value={users.length} icon="people" />
+        <StatCard label="Total utilisateurs" value={total} icon="people" />
         <StatCard label="Admins & Techniciens" value={staffCount} icon="admin_panel_settings" />
         <StatCard label="Comptes inactifs" value={inactiveCount} icon="person_off" critical={inactiveCount > 0} />
       </motion.div>

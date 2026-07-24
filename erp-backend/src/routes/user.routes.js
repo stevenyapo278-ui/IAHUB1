@@ -58,14 +58,15 @@ const userSelect = {
 router.get('/', async (req, res) => {
   const { search, limit, page, role, teamId, all } = req.query;
   const where = {};
-  if (search) {
-    const searchInt = parseInt(search, 10);
+  if (search && search.trim()) {
+    const trimmed = search.trim();
     const searchConditions = [
-      { fullName: { contains: search, mode: 'insensitive' } },
-      { email: { contains: search, mode: 'insensitive' } },
+      { fullName: { contains: trimmed, mode: 'insensitive' } },
+      { email: { contains: trimmed, mode: 'insensitive' } },
     ];
-    if (!isNaN(searchInt)) {
-      searchConditions.push({ glpiId: searchInt });
+    const matchGlpi = trimmed.match(/#?(\d+)/);
+    if (matchGlpi) {
+      searchConditions.push({ glpiId: parseInt(matchGlpi[1], 10) });
     }
     where.OR = searchConditions;
   }
@@ -86,8 +87,10 @@ router.get('/', async (req, res) => {
   const limitNum = Math.max(1, Math.min(100, Number(limit) || 25));
   const skip = (pageNum - 1) * limitNum;
 
-  const [total, users] = await Promise.all([
+  const [total, staffCount, inactiveCount, users] = await Promise.all([
     prisma.user.count({ where }),
+    prisma.user.count({ where: { ...where, role: { in: ['SUPERADMIN', 'ADMIN', 'TECHNICIAN'] } } }),
+    prisma.user.count({ where: { ...where, isActive: false } }),
     prisma.user.findMany({
       where,
       skip,
@@ -100,6 +103,8 @@ router.get('/', async (req, res) => {
   return res.json({
     users,
     total,
+    staffCount,
+    inactiveCount,
     page: pageNum,
     limit: limitNum,
     totalPages: Math.ceil(total / limitNum) || 1,
