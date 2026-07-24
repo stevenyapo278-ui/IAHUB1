@@ -321,7 +321,7 @@ export default function OtherApisTab() {
                     className={inputClass}
                     value={form.serviceName}
                     onChange={(e) => setForm({ ...form, serviceName: e.target.value })}
-                    placeholder="glpi, glpi_dev, supabase…"
+                    placeholder="glpi, supabase…"
                     required
                   />
                   {form.serviceName === 'glpi' && (

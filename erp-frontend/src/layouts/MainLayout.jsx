@@ -31,7 +31,6 @@ const systemItems = [
   { to: '/permission-groups', label: 'Groupes de droits', icon: 'shield', permission: 'users.manage', fallbackRoles: ['ADMIN'] },
   { to: '/prompts', label: 'Prompts IA', icon: 'terminal', permission: 'prompts.manage', fallbackRoles: ['ADMIN'] },
   { to: '/settings', label: 'Parametres', icon: 'settings', permission: ['settings.ai', 'settings.email', 'settings.integrations', 'automation.manage'], fallbackRoles: ['ADMIN'] },
-  { to: '/transition', label: 'Transition SOS', icon: 'swap_horiz', permission: 'glpi.manage', fallbackRoles: ['ADMIN'] },
   { to: '/logs', label: 'Journal activité', icon: 'summarize', permission: null },
 ];
 
@@ -49,8 +48,7 @@ const ROUTE_SEMANTICS = {
   '/permission-groups': { zone: 'admin', idx: 5 },
   '/prompts': { zone: 'admin', idx: 6 },
   '/settings': { zone: 'admin', idx: 7 },
-  '/transition': { zone: 'admin', idx: 8 },
-  '/logs': { zone: 'admin', idx: 9 },
+  '/logs': { zone: 'admin', idx: 8 },
 };
 
 function resolveSemantics(pathname) {

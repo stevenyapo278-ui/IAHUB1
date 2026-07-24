@@ -5,7 +5,7 @@ export function saveSessionLocation(userId, pathname, search = '') {
   try {
     const map = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
     const fullPath = pathname + (search || '');
-    const allowed = ['/tickets', '/inbox', '/teams', '/supervision', '/email-drafts', '/skills', '/documentation', '/knowledge-base', '/users', '/permission-groups', '/prompts', '/settings', '/transition'];
+    const allowed = ['/tickets', '/inbox', '/teams', '/supervision', '/email-drafts', '/skills', '/documentation', '/knowledge-base', '/users', '/permission-groups', '/prompts', '/settings', '/logs'];
     const isAllowed = allowed.some((p) => pathname === p || pathname.startsWith(p + '/'));
     if (isAllowed) {
       map[String(userId)] = fullPath;

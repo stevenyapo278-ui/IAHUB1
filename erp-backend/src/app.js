@@ -30,7 +30,6 @@ const notificationRoutes = require('./routes/notification.routes');
 const draftApprovalRoutes = require('./routes/draftapproval.routes');
 const triageRuleRoutes = require('./routes/triageRule.routes');
 const chatbotRoutes = require('./routes/chatbot.routes');
-const transitionRoutes = require('./routes/transition.routes');
 const logsRoutes = require('./routes/logs.routes');
 
 const { requestId } = require('./middleware/requestId');
@@ -93,7 +92,6 @@ app.use('/api/reassignments', reassignmentRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/triage-rules', triageRuleRoutes);
 app.use('/api/chat', chatbotRoutes);
-app.use('/api/transition', transitionRoutes);
 app.use('/api/logs', logsRoutes);
 
 // Serve frontend static files in production
