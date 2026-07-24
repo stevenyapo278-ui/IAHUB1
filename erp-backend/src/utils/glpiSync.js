@@ -76,6 +76,21 @@ async function glpiKillSession(config, sessionToken) {
   });
 }
 
+function parseGlpiDate(rawDate) {
+  if (!rawDate || typeof rawDate !== 'string') return null;
+  const normalized = rawDate.trim().includes('T') ? rawDate.trim() : rawDate.trim().replace(' ', 'T');
+  const d = new Date(normalized);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function isTicketInDateRange(t, dateFrom, dateTo) {
+  const d = parseGlpiDate(t.date || t.date_creation || t.date_mod);
+  if (!d) return true;
+  if (dateFrom && d < new Date(`${dateFrom}T00:00:00`)) return false;
+  if (dateTo && d > new Date(`${dateTo}T23:59:59`)) return false;
+  return true;
+}
+
 // Résout un objet Ticket GLPI complet depuis un objet brut (ex. retour de /search/Ticket)
 async function resolveGlpiTicketDetails(config, sessionToken, t) {
   if (t && t.id && t.name) {
@@ -110,14 +125,24 @@ async function fetchAllGlpiTickets(config, sessionToken, { dateFrom, dateTo } = 
 
     // Si des dates sont fournies, utiliser la requête POST avec criteria (API GLPI avancée)
     if (dateFrom || dateTo) {
-      const criteria = [
-        { field: 1, searchtype: 2, value: '%' },
-      ];
+      // Champ 15 dans GLPI = Date d'ouverture (date).
+      // link: 'AND' est requis pour que GLPI ne combine pas avec un OR par défaut.
+      const criteria = [];
       if (dateFrom) {
-        criteria.push({ field: 19, searchtype: 2, value: dateFrom });
+        criteria.push({
+          ...(criteria.length > 0 ? { link: 'AND' } : {}),
+          field: 15,
+          searchtype: 2, // 2 = superieur ou egal (morethan)
+          value: `${dateFrom} 00:00:00`,
+        });
       }
       if (dateTo) {
-        criteria.push({ field: 19, searchtype: 3, value: dateTo });
+        criteria.push({
+          ...(criteria.length > 0 ? { link: 'AND' } : {}),
+          field: 15,
+          searchtype: 3, // 3 = inferieur ou egal (lessthan)
+          value: `${dateTo} 23:59:59`,
+        });
       }
 
       const postRes = await fetch(`${config.baseUrl}/search/Ticket`, {
@@ -143,7 +168,8 @@ async function fetchAllGlpiTickets(config, sessionToken, { dateFrom, dateTo } = 
       const resolved = await Promise.all(
         rawTickets.map((rt) => resolveGlpiTicketDetails(config, sessionToken, rt))
       );
-      const validTickets = resolved.filter(Boolean);
+      // Double vérification client des dates
+      const validTickets = resolved.filter(Boolean).filter((t) => isTicketInDateRange(t, dateFrom, dateTo));
       allTickets.push(...validTickets);
 
       if (rawTickets.length < PAGE_SIZE) break;
@@ -196,6 +222,8 @@ async function syncGlpiTickets() {
         }
       }
 
+      const createdAt = parseGlpiDate(t.date || t.date_creation || t.date_mod);
+
       const data = {
         title: t.name,
         content: stripHtml(t.content) || '',
@@ -205,6 +233,7 @@ async function syncGlpiTickets() {
         aiProcessed: t.users_id_recipient === GLPI_AI_REQUESTER_ID,
         glpiLocationId: t.locations_id || null,
         glpiLocationName,
+        ...(createdAt ? { createdAt } : {}),
       };
 
       let ticketId;
@@ -275,6 +304,8 @@ async function fullReimportFromGlpi({ dateFrom, dateTo } = {}) {
         }
       }
 
+      const createdAt = parseGlpiDate(t.date || t.date_creation || t.date_mod);
+
       const data = {
         title: t.name,
         content: stripHtml(t.content) || '',
@@ -284,6 +315,7 @@ async function fullReimportFromGlpi({ dateFrom, dateTo } = {}) {
         aiProcessed: t.users_id_recipient === GLPI_AI_REQUESTER_ID,
         glpiLocationId: t.locations_id || null,
         glpiLocationName,
+        ...(createdAt ? { createdAt } : {}),
       };
 
       const created = await prisma.ticket.create({ data: { ...data, glpiTicketId: t.id } });
