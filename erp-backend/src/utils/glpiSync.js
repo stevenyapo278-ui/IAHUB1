@@ -264,6 +264,7 @@ async function fullReimportFromGlpi({ dateFrom, dateTo } = {}) {
       const created = await prisma.ticket.create({ data: { ...data, glpiTicketId: t.id } });
       await syncTicketAttachments(config, sessionToken, t.id, created.id);
       await syncGlpiFollowups(config, sessionToken, t.id, created.id);
+      await syncGlpiTicketActors(config, sessionToken, t.id, created.id);
       imported += 1;
     }
 
@@ -434,96 +435,123 @@ async function syncGlpiFollowups(config, sessionToken, glpiTicketId, ticketId) {
 }
 
 // Récupère les acteurs (Demandeurs, Techniciens, Observateurs) associés au ticket GLPI
-// depuis GET /Ticket/:id/Ticket_User et met à jour requesterId / assigneeId sur le ticket ERP.
+// depuis GET /Ticket/:id/Ticket_User?expand_dropdowns=true et met à jour requesterId / assigneeId sur le ticket ERP.
 async function syncGlpiTicketActors(config, sessionToken, glpiTicketId, ticketId) {
   try {
-    const res = await fetch(`${config.baseUrl}/Ticket/${glpiTicketId}/Ticket_User`, {
-      headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
-    });
+    // expand_dropdowns=true : GLPI résout users_id en objet { id, name, realname, firstname }
+    // directement dans la réponse — évite un second appel /User/:id par acteur.
+    const res = await fetch(
+      `${config.baseUrl}/Ticket/${glpiTicketId}/Ticket_User?expand_dropdowns=true`,
+      { headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken } }
+    );
     if (!res.ok) return;
 
     const actors = await res.json();
     if (!Array.isArray(actors) || actors.length === 0) return;
 
-    let requesterGlpiId = null;
-    let assigneeGlpiId = null;
-
-    for (const a of actors) {
-      if (a.type === 1 && !requesterGlpiId) requesterGlpiId = a.users_id;
-      if (a.type === 2 && !assigneeGlpiId) assigneeGlpiId = a.users_id;
+    // Helpers pour extraire l'id numérique et le nom depuis un acteur, que users_id soit
+    // un entier (expand_dropdowns désactivé) ou un objet (expand_dropdowns activé).
+    function getGlpiId(actor) {
+      if (!actor.users_id) return null;
+      if (typeof actor.users_id === 'object') return actor.users_id.id || null;
+      return actor.users_id;
     }
+
+    function getFullName(actor) {
+      if (typeof actor.users_id === 'object') {
+        const { realname, firstname, name } = actor.users_id;
+        const full = [firstname, realname].filter(Boolean).join(' ').trim();
+        return full || name || null;
+      }
+      return null;
+    }
+
+    function buildEmail(actor, glpiId) {
+      if (typeof actor.users_id === 'object') {
+        const { name } = actor.users_id;
+        if (name && name.includes('@')) return name;
+        if (name) return `${name}@prosuma.ci`;
+      }
+      return `glpi_user_${glpiId}@prosuma.ci`;
+    }
+
+    // type 1 = Demandeur, type 2 = Assigné, type 3 = Observateur
+    const requesterActor = actors.find((a) => a.type === 1);
+    const assigneeActor  = actors.find((a) => a.type === 2);
 
     const updates = {};
 
-    if (requesterGlpiId) {
-      let requester = await prisma.user.findUnique({ where: { glpiId: requesterGlpiId } });
-      if (!requester) {
-        try {
-          const uRes = await fetch(`${config.baseUrl}/User/${requesterGlpiId}`, {
-            headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
-          });
-          if (uRes.ok) {
-            const uData = await uRes.json();
-            const fullName = [uData.realname, uData.firstname].filter(Boolean).join(' ') || uData.name || `Utilisateur ${requesterGlpiId}`;
-            const email = (uData.name && uData.name.includes('@')) ? uData.name : `${uData.name || requesterGlpiId}@prosuma.ci`;
+    // ─── Demandeur ─────────────────────────────────────────────────────────────
+    if (requesterActor) {
+      const glpiId = getGlpiId(requesterActor);
+      if (glpiId) {
+        let requester = await prisma.user.findUnique({ where: { glpiId } });
+        if (!requester) {
+          try {
+            let fullName = getFullName(requesterActor);
+            let email    = buildEmail(requesterActor, glpiId);
+            // Fallback si expand_dropdowns n'a pas résolu l'objet
+            if (!fullName) {
+              const uRes = await fetch(`${config.baseUrl}/User/${glpiId}`, {
+                headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
+              });
+              if (uRes.ok) {
+                const uData = await uRes.json();
+                fullName = [uData.realname, uData.firstname].filter(Boolean).join(' ') || uData.name || `Utilisateur ${glpiId}`;
+                email    = (uData.name && uData.name.includes('@')) ? uData.name : `${uData.name || glpiId}@prosuma.ci`;
+              } else {
+                fullName = `Utilisateur ${glpiId}`;
+              }
+            }
             const passwordHash = await bcrypt.hash(crypto.randomBytes(20).toString('hex'), 10);
             requester = await prisma.user.create({
-              data: {
-                glpiId: requesterGlpiId,
-                fullName,
-                email,
-                passwordHash,
-                role: 'REQUESTER',
-                mustChangePassword: true,
-              },
+              data: { glpiId, fullName, email, passwordHash, role: 'REQUESTER', mustChangePassword: true },
             });
-          }
-        } catch (e) {
-          // Ignoré si la création échoue
+          } catch (e) { /* email unique en conflit — l'utilisateur existe déjà sous un autre glpiId */ }
         }
+        if (requester) updates.requesterId = requester.id;
       }
-      if (requester) updates.requesterId = requester.id;
     }
 
-    if (assigneeGlpiId) {
-      let assignee = await prisma.user.findUnique({ where: { glpiId: assigneeGlpiId } });
-      if (!assignee) {
-        try {
-          const uRes = await fetch(`${config.baseUrl}/User/${assigneeGlpiId}`, {
-            headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
-          });
-          if (uRes.ok) {
-            const uData = await uRes.json();
-            const fullName = [uData.realname, uData.firstname].filter(Boolean).join(' ') || uData.name || `Technicien ${assigneeGlpiId}`;
-            const email = (uData.name && uData.name.includes('@')) ? uData.name : `${uData.name || assigneeGlpiId}@prosuma.ci`;
+    // ─── Technicien assigné ─────────────────────────────────────────────────────
+    if (assigneeActor) {
+      const glpiId = getGlpiId(assigneeActor);
+      if (glpiId) {
+        let assignee = await prisma.user.findUnique({ where: { glpiId } });
+        if (!assignee) {
+          try {
+            let fullName = getFullName(assigneeActor);
+            let email    = buildEmail(assigneeActor, glpiId);
+            // Fallback si expand_dropdowns n'a pas résolu l'objet
+            if (!fullName) {
+              const uRes = await fetch(`${config.baseUrl}/User/${glpiId}`, {
+                headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
+              });
+              if (uRes.ok) {
+                const uData = await uRes.json();
+                fullName = [uData.realname, uData.firstname].filter(Boolean).join(' ') || uData.name || `Technicien ${glpiId}`;
+                email    = (uData.name && uData.name.includes('@')) ? uData.name : `${uData.name || glpiId}@prosuma.ci`;
+              } else {
+                fullName = `Technicien ${glpiId}`;
+              }
+            }
             const passwordHash = await bcrypt.hash(crypto.randomBytes(20).toString('hex'), 10);
             assignee = await prisma.user.create({
-              data: {
-                glpiId: assigneeGlpiId,
-                fullName,
-                email,
-                passwordHash,
-                role: 'REQUESTER',
-                mustChangePassword: true,
-              },
+              data: { glpiId, fullName, email, passwordHash, role: 'TECHNICIAN', mustChangePassword: true },
             });
-          }
-        } catch (e) {
-          // Ignoré
+          } catch (e) { /* email unique en conflit — l'utilisateur existe déjà sous un autre glpiId */ }
         }
+        if (assignee) updates.assigneeId = assignee.id;
       }
-      if (assignee) updates.assigneeId = assignee.id;
     }
 
     if (Object.keys(updates).length > 0) {
-      await prisma.ticket.update({
-        where: { id: ticketId },
-        data: updates,
-      });
+      await prisma.ticket.update({ where: { id: ticketId }, data: updates });
     }
   } catch (err) {
-    // Ignoré silencieusement
+    console.error(`[glpiSync] syncGlpiTicketActors ticket GLPI ${glpiTicketId}:`, err.message);
   }
 }
+
 
 module.exports = { syncGlpiTickets, fullReimportFromGlpi, syncGlpiFollowups, syncGlpiTicketActors, getGlpiConfig, getActiveGlpiConfig, glpiInitSession, glpiKillSession };
