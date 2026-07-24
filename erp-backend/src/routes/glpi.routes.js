@@ -85,12 +85,11 @@ router.post('/sync-locations', requirePermission('glpi.manage', ['ADMIN', 'TECHN
   }
 });
 
-// Synchronisation des "Utilisateurs" depuis GLPI — met à jour le glpiId sur les comptes ERP
-// existants en les rapprochant par email ou par nom. Appelée manuellement depuis les réglages.
-// Body optionnel { createMissing: true } pour créer automatiquement les comptes manquants.
+// Synchronisation des "Utilisateurs" depuis GLPI — crée ou met à jour les comptes ERP
+// depuis GLPI / Active Directory. Par défaut createMissing est true.
 router.post('/sync-users', requirePermission('glpi.manage', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   try {
-    const createMissing = req.body?.createMissing === true;
+    const createMissing = req.body?.createMissing !== false;
     const result = await syncUsersFromGlpi({ createMissing });
     if (result === null) {
       return res.status(422).json({ error: 'GLPI non configuré' });

@@ -555,7 +555,7 @@ async function syncLocationsFromGlpi() {
 }
 
 // Synchronise les utilisateurs (User) depuis GLPI / Active Directory vers la table User de l'ERP.
-async function syncUsersFromGlpi({ createMissing } = {}) {
+async function syncUsersFromGlpi({ createMissing = true } = {}) {
   const config = await getActiveGlpiConfig();
   if (!config) return null;
 

@@ -157,7 +157,8 @@ export default function OtherApisTab() {
     const labels = { tickets: 'tickets', locations: 'lieux', users: 'utilisateurs' };
     const endpoints = { tickets: '/glpi/sync', locations: '/glpi/sync-locations', users: '/glpi/sync-users' };
     try {
-      const { data } = await api.post(endpoints[type]);
+      const payload = type === 'users' ? { createMissing: true } : {};
+      const { data } = await api.post(endpoints[type], payload);
       if (type === 'tickets') {
         setInfo(`Synchronisation GLPI : ${data.imported} ticket(s) importé(s), ${data.updated} mis à jour.`);
       } else {
