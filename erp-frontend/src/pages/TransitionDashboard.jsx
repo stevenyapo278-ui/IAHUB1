@@ -17,8 +17,6 @@ function decodeHtmlEntities(str) {
 /* ── Phases de la transition ──────────────────────────────────────────── */
 const TRANSITION_PHASES = [
   { id: 'AUDIT', label: 'Audit', icon: 'visibility', color: '#f59e0b', targetDays: 7, description: 'Analyse lecture seule' },
-  { id: 'SIMULATION', label: 'Simulation', icon: 'science', color: '#3b82f6', targetDays: 7, description: 'Tests en DEV' },
-  { id: 'HYBRID', label: 'Hybride', icon: 'account_tree', color: '#8b5cf6', targetDays: 7, description: 'Shadow deployment' },
   { id: 'PRODUCTION', label: 'Production', icon: 'rocket_launch', color: '#16a34a', targetDays: 0, description: 'Go Live' },
 ];
 
@@ -40,27 +38,7 @@ const MODES = [
     bgLight: 'rgba(245,158,11,0.08)',
     borderLight: 'rgba(245,158,11,0.2)',
     description: 'Analyse des emails en lecture seule. Aucune écriture dans GLPI.',
-    config: { dryRunMode: true, activeGlpiInstance: 'glpi', enableGlpiTicketCreation: true },
-  },
-  {
-    id: 'SIMULATION',
-    label: 'Simulation',
-    icon: 'science',
-    color: '#3b82f6',
-    bgLight: 'rgba(59,130,246,0.08)',
-    borderLight: 'rgba(59,130,246,0.2)',
-    description: 'Tests en conditions réelles dans GLPI DEV. Aucun impact sur la production.',
-    config: { dryRunMode: false, activeGlpiInstance: 'glpi_dev', enableGlpiTicketCreation: true },
-  },
-  {
-    id: 'HYBRID',
-    label: 'Hybride',
-    icon: 'account_tree',
-    color: '#8b5cf6',
-    bgLight: 'rgba(139,92,246,0.08)',
-    borderLight: 'rgba(139,92,246,0.2)',
-    description: 'Surveillance de la production + écriture dans GLPI DEV. Shadow deployment.',
-    config: { dryRunMode: true, activeGlpiInstance: 'glpi_dev', enableGlpiTicketCreation: false },
+    config: { dryRunMode: true, enableGlpiTicketCreation: true },
   },
   {
     id: 'PRODUCTION',
@@ -70,7 +48,7 @@ const MODES = [
     bgLight: 'rgba(22,163,74,0.08)',
     borderLight: 'rgba(22,163,74,0.2)',
     description: 'La plateforme écrit directement dans GLPI production.',
-    config: { dryRunMode: false, activeGlpiInstance: 'glpi', enableGlpiTicketCreation: true },
+    config: { dryRunMode: false, enableGlpiTicketCreation: true },
   },
 ];
 
@@ -460,18 +438,6 @@ function TransitionActions({ currentModeId, onRunAnalysis, analyzing }) {
       { icon: 'compare', text: 'Comparez avec le travail réel des techniciens', done: false },
       { icon: 'psychology', text: 'Lancez une analyse IA pour valider la qualité des données', done: true, action: 'Lancer', onClick: onRunAnalysis },
       { icon: 'checklist', text: 'Validez le mapping des conversations', done: false },
-    ],
-    SIMULATION: [
-      { icon: 'science', text: 'Testez toute la chaîne de création dans GLPI DEV', done: false },
-      { icon: 'bug_report', text: 'Corrigez les anomalies détectées', done: false },
-      { icon: 'compare_arrows', text: 'Comparez PROD vs DEV via l\'analyse IA', done: true, action: 'Analyser', onClick: onRunAnalysis },
-      { icon: 'check_circle', text: 'Validez les règles métier et le mapping', done: false },
-    ],
-    HYBRID: [
-      { icon: 'account_tree', text: 'Mode shadow actif : la plateforme observe mais écrit en DEV', done: false },
-      { icon: 'compare_arrows', text: 'Comparez ticket par ticket les décisions PROD vs DEV', done: true, action: 'Analyser', onClick: onRunAnalysis },
-      { icon: 'speed', text: 'Mesurez le taux de précision', done: false },
-      { icon: 'rocket_launch', text: 'Préparez le passage en production', done: false },
     ],
     PRODUCTION: [
       { icon: 'rocket_launch', text: 'La plateforme écrit en production', done: true },
@@ -1441,14 +1407,9 @@ export default function TransitionDashboard() {
   // Calculer le mode actif à partir des réglages
   function getCurrentMode(settings) {
     if (!settings) return MODES[0];
-    const { dryRunMode, activeGlpiInstance, enableGlpiTicketCreation } = settings;
-
-    if (dryRunMode && activeGlpiInstance === 'glpi') return MODES[0]; // AUDIT
-    if (!dryRunMode && activeGlpiInstance === 'glpi_dev') return MODES[1]; // SIMULATION
-    if (dryRunMode && activeGlpiInstance === 'glpi_dev') return MODES[2]; // HYBRID
-    // PROD + création OFF = Audit partiel (même visuel que Audit)
-    if (!dryRunMode && activeGlpiInstance === 'glpi' && !enableGlpiTicketCreation) return MODES[0]; // Audit
-    return MODES[3]; // PRODUCTION
+    const { dryRunMode } = settings;
+    if (dryRunMode) return MODES[0]; // AUDIT
+    return MODES[1]; // PRODUCTION
   }
 
   if (loading && !data) {
@@ -1611,17 +1572,6 @@ export default function TransitionDashboard() {
                 <span
                   className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full"
                   style={{
-                    backgroundColor: activeSettings?.activeGlpiInstance === 'glpi_dev'
-                      ? 'rgba(59,130,246,0.1)' : 'rgba(22,163,74,0.1)',
-                    color: activeSettings?.activeGlpiInstance === 'glpi_dev' ? '#3b82f6' : '#16a34a',
-                  }}
-                >
-                  <span className="material-symbols-outlined text-[12px]">dns</span>
-                  {activeSettings?.activeGlpiInstance === 'glpi_dev' ? 'GLPI DEV' : 'GLPI PROD'}
-                </span>
-                <span
-                  className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                  style={{
                     backgroundColor: activeSettings?.enableGlpiTicketCreation
                       ? 'rgba(22,163,74,0.1)' : 'rgba(239,68,68,0.1)',
                     color: activeSettings?.enableGlpiTicketCreation ? '#16a34a' : '#ef4444',
@@ -1764,38 +1714,7 @@ export default function TransitionDashboard() {
 
             <div className="h-px" style={{ backgroundColor: 'var(--color-outline-variant)' }} />
 
-            {/* Instance GLPI */}
-            <div className="flex flex-col gap-1.5 py-1.5">
-              <div className="flex items-center justify-between">
-                <div className="text-[13px] font-semibold" style={{ color: 'var(--color-on-surface)' }}>Instance GLPI cible</div>
-                <span
-                  className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full ${
-                    (activeSettings?.activeGlpiInstance || 'glpi') === 'glpi'
-                      ? 'bg-emerald-500/10 text-emerald-600'
-                      : 'bg-amber-500/10 text-amber-600'
-                  }`}
-                >
-                  {(activeSettings?.activeGlpiInstance || 'glpi') === 'glpi' ? 'PROD' : 'DEV'}
-                </span>
-              </div>
-              <select
-                value={activeSettings?.activeGlpiInstance || 'glpi'}
-                onChange={(e) => toggleSetting('activeGlpiInstance', e.target.value)}
-                disabled={saving}
-                className="bg-surface border border-outline-variant/60 rounded-xl px-3 py-2 text-[12px] focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
-                style={{ color: 'var(--color-on-surface)' }}
-              >
-                <option value="glpi">GLPI Production</option>
-                <option value="glpi_dev">GLPI Développement</option>
-              </select>
-              <p className="text-[10px] leading-relaxed" style={{ color: 'var(--color-on-surface-variant)' }}>
-                {(activeSettings?.activeGlpiInstance || 'glpi') === 'glpi'
-                  ? 'Les tickets sont envoyés vers la base réelle des techniciens.'
-                  : 'Les tickets sont envoyés vers l\'instance de test isolée. Aucun impact sur la production.'}
-              </p>
-            </div>
 
-            <div className="h-px" style={{ backgroundColor: 'var(--color-outline-variant)' }} />
 
             {/* Comportement ticket fermé */}
             <div className="flex flex-col gap-1.5 py-1.5">
@@ -2011,7 +1930,7 @@ export default function TransitionDashboard() {
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════ */}
-      {/* COMPARAISON PROD vs DEV */}
+      {/* SANTÉ & SYNCHRONISATION GLPI PRODUCTION */}
       {/* ══════════════════════════════════════════════════════════════════ */}
       <motion.div
         initial={{ opacity: 0, y: 12 }}
@@ -2021,8 +1940,8 @@ export default function TransitionDashboard() {
       >
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--color-on-surface)' }}>
-            <span className="material-symbols-outlined text-lg">compare_arrows</span>
-            Comparaison PROD vs DEV
+            <span className="material-symbols-outlined text-lg">dns</span>
+            Instance GLPI Production
           </h3>
           <button
             onClick={loadCompare}
@@ -2043,74 +1962,59 @@ export default function TransitionDashboard() {
         )}
 
         {compareLoading && !compareData && (
-          <div className="grid grid-cols-2 gap-4">
-            <div className="h-32 rounded-xl animate-pulse" style={{ backgroundColor: 'var(--color-surface-container-high)' }} />
-            <div className="h-32 rounded-xl animate-pulse" style={{ backgroundColor: 'var(--color-surface-container-high)' }} />
-          </div>
+          <div className="h-32 rounded-xl animate-pulse" style={{ backgroundColor: 'var(--color-surface-container-high)' }} />
         )}
 
         {compareData && (
           <div className="space-y-4">
-            {/* Cartes côte à côte */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Carte GLPI Production */}
+            <div className="grid grid-cols-1 gap-4">
               {Object.entries(compareData.instances).map(([key, inst]) => {
-                const isProd = key === 'glpi';
-                const isActive = compareData.instanceActive === key;
                 return (
                   <div
                     key={key}
                     className="rounded-xl border p-4 relative overflow-hidden"
                     style={{
-                      borderColor: inst.configured
-                        ? (isActive ? 'rgba(22,163,74,0.2)' : 'var(--color-outline-variant)')
-                        : 'rgba(239,68,68,0.2)',
-                      backgroundColor: inst.configured
-                        ? 'var(--color-surface)'
-                        : 'rgba(239,68,68,0.03)',
+                      borderColor: inst.configured ? 'rgba(22,163,74,0.2)' : 'rgba(239,68,68,0.2)',
+                      backgroundColor: inst.configured ? 'var(--color-surface)' : 'rgba(239,68,68,0.03)',
                     }}
                   >
-                    {/* Badge actif */}
-                    {isActive && (
-                      <span
-                        className="absolute top-2 right-2 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full"
-                        style={{ backgroundColor: 'rgba(22,163,74,0.1)', color: '#16a34a' }}
-                      >
-                        Actif
-                      </span>
-                    )}
+                    <span
+                      className="absolute top-2 right-2 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full"
+                      style={{ backgroundColor: 'rgba(22,163,74,0.1)', color: '#16a34a' }}
+                    >
+                      Production Actives
+                    </span>
 
                     <div className="flex items-center gap-2 mb-3">
-                      <span
-                        className={`w-2.5 h-2.5 rounded-full ${
-                          inst.configured ? (isActive ? 'bg-emerald-500' : 'bg-amber-500') : 'bg-red-500'
-                        }`}
-                      />
+                      <span className={`w-2.5 h-2.5 rounded-full ${inst.configured ? 'bg-emerald-500' : 'bg-red-500'}`} />
                       <span className="text-[13px] font-bold" style={{ color: 'var(--color-on-surface)' }}>
                         {inst.label}
                       </span>
-                      {isProd && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 font-semibold">
-                          PROD
-                        </span>
-                      )}
                     </div>
 
                     {inst.error ? (
                       <p className="text-[12px] text-red-500">{inst.error}</p>
                     ) : (
                       <>
-                        <div className="grid grid-cols-2 gap-2 mb-3">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-3">
                           <div className="p-2 rounded-lg" style={{ backgroundColor: 'var(--color-surface-container-low)' }}>
                             <div className="text-[18px] font-bold" style={{ color: 'var(--color-on-surface)' }}>
                               {inst.ticketCount.toLocaleString()}
                             </div>
-                            <div className="text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>Total tickets</div>
+                            <div className="text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>Total tickets GLPI</div>
                           </div>
                           <div className="p-2 rounded-lg" style={{ backgroundColor: 'var(--color-surface-container-low)' }}>
-                            <div className="text-[18px] font-bold" style={{ color: 'var(--color-on-surface)' }}>
-                              {inst.recentTickets?.length || 0}
+                            <div className="text-[18px] font-bold" style={{ color: '#16a34a' }}>
+                              {compareData.erp.glpiSynced}
                             </div>
-                            <div className="text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>Récents (10)</div>
+                            <div className="text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>Synchro ERP (30j)</div>
+                          </div>
+                          <div className="p-2 rounded-lg" style={{ backgroundColor: 'var(--color-surface-container-low)' }}>
+                            <div className="text-[18px] font-bold" style={{ color: '#f59e0b' }}>
+                              {compareData.erp.erpOnly}
+                            </div>
+                            <div className="text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>ERP uniquement</div>
                           </div>
                         </div>
 
@@ -2119,7 +2023,7 @@ export default function TransitionDashboard() {
                           <div>
                             <div className="text-[10px] font-semibold uppercase tracking-wider mb-1.5"
                               style={{ color: 'var(--color-on-surface-variant)' }}>
-                              Derniers tickets
+                              Derniers tickets GLPI
                             </div>
                             <div className="max-h-[180px] overflow-y-auto space-y-1 pr-1">
                               {inst.recentTickets.map(t => (

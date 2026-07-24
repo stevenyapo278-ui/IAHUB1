@@ -299,14 +299,11 @@ async function makeAIRequest(providerName, baseUrl, apiKey, model, prompt, maxTo
 /* ── Analyse principale ────────────────────────────────────────────────── */
 
 async function analyzeTicketDifferences({ limit = 20 } = {}) {
-  // 1. Récupérer les tickets des deux instances (indépendamment)
+  // 1. Récupérer les tickets de l'instance GLPI Production unique
   let prodResult = { instance: 'glpi', tickets: [], error: null };
-  let devResult = { instance: 'glpi_dev', tickets: [], error: null };
   try { prodResult = await fetchTicketsFromInstance('glpi', limit); } catch (e) { prodResult.error = e.message; }
-  try { devResult = await fetchTicketsFromInstance('glpi_dev', limit); } catch (e) { devResult.error = e.message; }
 
   // 2. Récupérer les stats ERP pour contexte
-  const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
   const erpTickets = await prisma.ticket.count({
     where: {
       OR: [
@@ -327,33 +324,24 @@ async function analyzeTicketDifferences({ limit = 20 } = {}) {
 
   // 3. Construire le prompt pour l'IA
   const prodTickets = prodResult.tickets;
-  const devTickets = devResult.tickets;
-  const activeInstance = settings?.activeGlpiInstance || 'glpi';
 
   const prodTicketsText = prodTickets.map((t) =>
     `  #${t.id} "${t.name}" | Demandeur: ${t.requester || 'N/A'} | Assigné: ${t.assignedTo || 'N/A'} | Observateur: ${t.observer || 'N/A'} | Priorité: ${t.priority} | Statut: ${t.status} | Lieu: ${t.location || 'N/A'} | Suivis: ${t.followupCount}`
   ).join('\n');
 
-  const devTicketsText = devTickets.map((t) =>
-    `  #${t.id} "${t.name}" | Demandeur: ${t.requester || 'N/A'} | Assigné: ${t.assignedTo || 'N/A'} | Observateur: ${t.observer || 'N/A'} | Priorité: ${t.priority} | Statut: ${t.status} | Lieu: ${t.location || 'N/A'} | Suivis: ${t.followupCount}`
-  ).join('\n');
-
-  const prompt = `Tu es un consultant expert en ITIL et en qualité de données ITSM. Tu analyses les tickets de deux instances GLPI d'une même entreprise pour détecter des problèmes et proposer des améliorations.
+  const prompt = `Tu es un consultant expert en ITIL et en qualité de données ITSM. Tu analyses les tickets de l'instance GLPI Production d'une entreprise pour détecter des anomalies, évaluer la qualité des données et proposer des améliorations.
 
 ## Contexte
-- Instance active actuelle : ${activeInstance === 'glpi' ? 'PRODUCTION' : 'DÉVELOPPEMENT'}
+- Instance active : GLPI Production
 - Tickets ERP totaux : ${erpTickets} (dont ${erpTicketsLast30} dans les 30 derniers jours)
-- La plateforme écoute les emails SOS et crée des tickets automatiquement via l'IA
+- La plateforme écoute les emails SOS et crée/synchronise les tickets automatiquement via l'IA
 
 ## Tickets GLPI PRODUCTION (${prodTickets.length} tickets)
 ${prodTicketsText || '  (Aucun ticket ou instance non configurée)'}
 
-## Tickets GLPI DÉVELOPPEMENT (${devTickets.length} tickets)
-${devTicketsText || '  (Aucun ticket ou instance non configurée)'}
-
 ## Analyse à réaliser
 
-Analyse les différences entre les deux instances et retourne UNIQUEMENT un objet JSON valide (sans markdown, sans texte autour) avec cette structure exacte :
+Analyse la qualité des données des tickets de Production et retourne UNIQUEMENT un objet JSON valide (sans markdown, sans texte autour) avec cette structure exacte :
 
 \`\`\`json
 {
@@ -375,9 +363,9 @@ Analyse les différences entre les deux instances et retourne UNIQUEMENT un obje
     "problemes": ["Problème 1"],
     "recommandations": ["Recommandation 1"]
   },
-  "ecartsProdDev": {
+  "conformiteQualite": {
     "note": 0-10,
-    "analyse": "Analyse des écarts entre PROD et DEV (volume, contenu, maturité)",
+    "analyse": "Analyse globale de conformité et de qualité des données GLPI Production",
     "problemes": ["Problème 1"],
     "recommandations": ["Recommandation 1"]
   },
@@ -406,7 +394,6 @@ Sois très concret et précis dans tes recommandations d'amélioration du code. 
       success: false,
       error: err.message,
       prodTickets,
-      devTickets,
       erp: { total: erpTickets, last30: erpTicketsLast30 },
     };
   }
@@ -418,7 +405,6 @@ Sois très concret et précis dans tes recommandations d'amélioration du code. 
       success: false,
       error: `L'IA n'a pas retourné de JSON valide. Réponse brute: ${raw.substring(0, 500)}`,
       prodTickets,
-      devTickets,
       erp: { total: erpTickets, last30: erpTicketsLast30 },
     };
   }
@@ -432,7 +418,6 @@ Sois très concret et précis dans tes recommandations d'amélioration du code. 
       error: `Erreur de parsing JSON: ${err.message}`,
       raw: raw.substring(0, 1000),
       prodTickets,
-      devTickets,
       erp: { total: erpTickets, last30: erpTicketsLast30 },
     };
   }
@@ -441,7 +426,6 @@ Sois très concret et précis dans tes recommandations d'amélioration du code. 
     success: true,
     analysis,
     prodTickets,
-    devTickets,
     erp: { total: erpTickets, last30: erpTicketsLast30 },
   };
 }

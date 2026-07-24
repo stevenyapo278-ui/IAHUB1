@@ -49,11 +49,9 @@ async function getGlpiConfig(serviceName) {
   return { baseUrl: config.baseUrl, userToken: config.apiKey, appToken };
 }
 
-// Récupère la config GLPI active pour la création de tickets (selon SystemSettings.activeGlpiInstance)
+// Récupère la config GLPI Production active
 async function getActiveGlpiConfig() {
-  const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
-  const activeInstance = settings?.activeGlpiInstance || 'glpi';
-  return getGlpiConfig(activeInstance);
+  return getGlpiConfig('glpi');
 }
 
 async function glpiInitSession(config) {

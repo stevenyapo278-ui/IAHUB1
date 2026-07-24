@@ -44,7 +44,7 @@ router.patch(
     body('autoApproveGlpiSolutions').optional().isBoolean(),
     body('autoSendAiEmails').optional().isBoolean(),
     body('enableGlpiTicketCreation').optional().isBoolean(),
-    body('activeGlpiInstance').optional().isString().isIn(['glpi', 'glpi_dev']).withMessage('Instance GLPI invalide'),
+    body('activeGlpiInstance').optional().isString().isIn(['glpi']).withMessage('Instance GLPI invalide'),
     body('glpiTicketsSyncIntervalSeconds').optional().isInt({ min: 0, max: 3600 }),
     body('emailSyncIntervalSeconds').optional().isInt({ min: 0, max: 3600 }),
     body('glpiTeamsCategoriesSyncIntervalMinutes').optional().isInt({ min: 0, max: 1440 }),

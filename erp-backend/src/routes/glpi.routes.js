@@ -9,24 +9,22 @@ const { syncLocationsFromGlpi, syncUsersFromGlpi, getImportableGlpiUsers, import
 const router = express.Router();
 router.use(authenticate);
 
-// Liste les instances GLPI configurées
+// Liste l'instance GLPI configurée
 router.get('/instances', requirePermission('glpi.manage', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const configs = await prisma.apiConfig.findMany({
-    where: { serviceName: { in: ['glpi', 'glpi_dev'] } },
+    where: { serviceName: 'glpi' },
     select: { serviceName: true, baseUrl: true, isActive: true, extra: true },
   });
-
-  const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
 
   res.json({
     instances: configs.map((c) => ({
       id: c.serviceName,
-      label: c.serviceName === 'glpi' ? 'GLPI Production' : 'GLPI Développement',
+      label: 'GLPI Production',
       baseUrl: c.baseUrl,
       isActive: c.isActive,
       isConfigured: !!(c.baseUrl && c.extra?.appToken),
     })),
-    activeInstance: settings?.activeGlpiInstance || 'glpi',
+    activeInstance: 'glpi',
   });
 });
 

@@ -45,9 +45,8 @@ export default function OtherApisTab() {
   ];
   const REQUIRED_FIELDS = {
     glpi: GLPI_FIELDS,
-    glpi_dev: GLPI_FIELDS,
   };
-  const isGlpi = (name) => name === 'glpi' || name === 'glpi_dev';
+  const isGlpi = (name) => name === 'glpi';
 
   function getMissingFields(config) {
     const required = REQUIRED_FIELDS[config.serviceName];
@@ -329,19 +328,7 @@ export default function OtherApisTab() {
                     <div className="flex items-start gap-1.5 mt-1.5 p-2 rounded-lg" style={{ backgroundColor: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.15)' }}>
                       <span className="material-symbols-outlined text-[14px] shrink-0 mt-px" style={{ color: '#3b82f6' }}>info</span>
                       <div className="text-[10px] leading-relaxed" style={{ color: 'var(--color-on-surface-variant)' }}>
-                        <strong style={{ color: '#3b82f6' }}>GLPI Production</strong> — utilisez <code className="bg-surface-container-high px-1 rounded font-mono">glpi</code> pour l'instance de production réelle des techniciens.
-                        <br />
-                        Pour une instance de <strong style={{ color: '#f59e0b' }}>Développement / Test</strong>, créez une seconde entrée avec le nom <code className="bg-surface-container-high px-1 rounded font-mono">glpi_dev</code>.
-                      </div>
-                    </div>
-                  )}
-                  {form.serviceName === 'glpi_dev' && (
-                    <div className="flex items-start gap-1.5 mt-1.5 p-2 rounded-lg" style={{ backgroundColor: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.15)' }}>
-                      <span className="material-symbols-outlined text-[14px] shrink-0 mt-px" style={{ color: '#f59e0b' }}>info</span>
-                      <div className="text-[10px] leading-relaxed" style={{ color: 'var(--color-on-surface-variant)' }}>
-                        <strong style={{ color: '#f59e0b' }}>GLPI Développement</strong> — instance de test isolée. Aucun impact sur la production.
-                        <br />
-                        Pour l'instance de <strong style={{ color: '#16a34a' }}>Production</strong>, créez une autre entrée avec le nom <code className="bg-surface-container-high px-1 rounded font-mono">glpi</code>.
+                        <strong style={{ color: '#3b82f6' }}>GLPI Production</strong> — utilisez <code className="bg-surface-container-high px-1 rounded font-mono">glpi</code> pour l'instance de production de l'entreprise.
                       </div>
                     </div>
                   )}
@@ -439,15 +426,9 @@ export default function OtherApisTab() {
                         {c.serviceName === 'glpi' && (
                           <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full" style={{ backgroundColor: 'rgba(22,163,74,0.1)', color: '#16a34a' }}>PROD</span>
                         )}
-                        {c.serviceName === 'glpi_dev' && (
-                          <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full" style={{ backgroundColor: 'rgba(245,158,11,0.1)', color: '#f59e0b' }}>DEV</span>
-                        )}
                       </div>
                       {c.serviceName === 'glpi' && (
                         <div className="text-[9px] mt-0.5" style={{ color: 'var(--color-on-surface-variant)' }}>Instance de production</div>
-                      )}
-                      {c.serviceName === 'glpi_dev' && (
-                        <div className="text-[9px] mt-0.5" style={{ color: 'var(--color-on-surface-variant)' }}>Instance de développement / test</div>
                       )}
                     </td>
                     <td className="p-3">

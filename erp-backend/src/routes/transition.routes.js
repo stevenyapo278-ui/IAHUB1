@@ -57,9 +57,9 @@ router.get('/', async (req, res) => {
         },
       }),
 
-      // 6. Instances GLPI configurées
+      // 6. Instance GLPI configurée
       prisma.apiConfig.findMany({
-        where: { serviceName: { in: ['glpi', 'glpi_dev'] } },
+        where: { serviceName: 'glpi' },
         select: { serviceName: true, baseUrl: true, isActive: true },
       }),
 
@@ -73,37 +73,20 @@ router.get('/', async (req, res) => {
     ]);
 
     // Déterminer le mode actif
-    const activeInstance = settings?.activeGlpiInstance || 'glpi';
     const dryRun = settings?.dryRunMode || false;
     const creationEnabled = settings?.enableGlpiTicketCreation !== false;
 
     let mode = 'PRODUCTION';
     let modeLabel = 'Production';
-    let modeDescription = 'La plateforme écrit dans GLPI production.';
+    let modeDescription = 'La plateforme écrit directement dans GLPI production.';
     let modeColor = '#16a34a';
 
-    if (dryRun && activeInstance === 'glpi') {
+    if (dryRun) {
       mode = 'AUDIT';
       modeLabel = 'Audit';
       modeDescription = 'Analyse des emails en lecture seule. Aucune écriture dans GLPI.';
       modeColor = '#f59e0b';
-    } else if (dryRun && activeInstance === 'glpi_dev') {
-      mode = 'HYBRID';
-      modeLabel = 'Hybride';
-      modeDescription = 'Surveillance de la production + écriture dans GLPI DEV.';
-      modeColor = '#8b5cf6';
-    } else if (!dryRun && activeInstance === 'glpi_dev') {
-      mode = 'SIMULATION';
-      modeLabel = 'Simulation';
-      modeDescription = 'Tests en conditions réelles dans GLPI DEV. Aucun impact sur la production.';
-      modeColor = '#3b82f6';
-    } else if (!dryRun && activeInstance === 'glpi' && creationEnabled) {
-      mode = 'PRODUCTION';
-      modeLabel = 'Production';
-      modeDescription = 'La plateforme écrit directement dans GLPI production.';
-      modeColor = '#16a34a';
-    } else {
-      // PROD + création OFF = similaire à Audit mais avec écriture possible (suivis, fermetures)
+    } else if (!creationEnabled) {
       mode = 'AUDIT';
       modeLabel = 'Audit partiel';
       modeDescription = 'Production surveillée — création de tickets désactivée. Les suivis et fermetures peuvent encore être actifs.';
@@ -151,7 +134,7 @@ router.get('/', async (req, res) => {
       },
       // Réglages actuels
       settings: {
-        activeGlpiInstance: activeInstance,
+        activeGlpiInstance: 'glpi',
         dryRunMode: dryRun,
         enableGlpiTicketCreation: creationEnabled,
         enableGlpiFollowupCreation: settings?.enableGlpiFollowupCreation !== false,
@@ -182,10 +165,10 @@ router.get('/', async (req, res) => {
           aiDrafts: eventCounts['AI_DRAFT_GENERATED'] || eventCounts['AI_FOLLOWUP_DRAFT_GENERATED'] || 0,
         },
       },
-      // Instances GLPI configurées
+      // Instance GLPI configurée
       instances: glpiInstances.map(i => ({
         id: i.serviceName,
-        label: i.serviceName === 'glpi' ? 'GLPI Production' : 'GLPI Développement',
+        label: 'GLPI Production',
         baseUrl: i.baseUrl,
         isActive: i.isActive,
         isConfigured: !!i.baseUrl,
@@ -214,37 +197,25 @@ router.get('/', async (req, res) => {
   }
 });
 
-// ── Comparaison PROD vs DEV ──────────────────────────────────────────────
-// Interroge les deux instances GLPI (glpi + glpi_dev) et retourne les stats
-// côte à côte : nombre de tickets, derniers tickets créés, divergence de contenu.
+// ── Statistiques GLPI Production ──────────────────────────────────────────
+// Interroge l'instance GLPI Production et retourne les statistiques et les derniers tickets
 router.get('/compare', async (req, res) => {
   try {
-    const [prodConfig, devConfig] = await Promise.all([
-      getGlpiConfig('glpi'),
-      getGlpiConfig('glpi_dev'),
-    ]);
-
+    const config = await getGlpiConfig('glpi');
     const results = {};
 
-    for (const [instanceName, config, label] of [
-      ['glpi', prodConfig, 'GLPI Production'],
-      ['glpi_dev', devConfig, 'GLPI Développement'],
-    ]) {
-      if (!config) {
-        results[instanceName] = {
-          label,
-          configured: false,
-          ticketCount: 0,
-          recentTickets: [],
-          error: 'Instance non configurée',
-        };
-        continue;
-      }
-
+    if (!config) {
+      results['glpi'] = {
+        label: 'GLPI Production',
+        configured: false,
+        ticketCount: 0,
+        recentTickets: [],
+        error: 'Instance non configurée',
+      };
+    } else {
       try {
         const sessionToken = await glpiInitSession(config);
         try {
-          // Récupère le nombre total de tickets
           const countRes = await fetch(`${config.baseUrl}/Ticket?range=0-0`, {
             headers: {
               'App-Token': config.appToken,
@@ -255,7 +226,6 @@ router.get('/compare', async (req, res) => {
           const contentRange = countRes.headers.get('content-range');
           const totalCount = contentRange ? parseInt(contentRange.split('/')[1], 10) : 0;
 
-          // Récupère les 20 derniers tickets
           const range = totalCount > 20 ? `${totalCount - 20}-${totalCount - 1}` : '0-19';
           const ticketsRes = await fetch(`${config.baseUrl}/Ticket?range=${range}`, {
             headers: {
@@ -267,8 +237,8 @@ router.get('/compare', async (req, res) => {
           const recentTickets = ticketsRes.ok ? await ticketsRes.json() : [];
           const tickets = Array.isArray(recentTickets) ? recentTickets : [];
 
-          results[instanceName] = {
-            label,
+          results['glpi'] = {
+            label: 'GLPI Production',
             configured: true,
             ticketCount: totalCount,
             recentTickets: tickets.slice(-10).reverse().map(t => ({
@@ -284,8 +254,8 @@ router.get('/compare', async (req, res) => {
           await glpiKillSession(config, sessionToken);
         }
       } catch (err) {
-        results[instanceName] = {
-          label,
+        results['glpi'] = {
+          label: 'GLPI Production',
           configured: true,
           ticketCount: 0,
           recentTickets: [],
@@ -294,11 +264,6 @@ router.get('/compare', async (req, res) => {
       }
     }
 
-    // Compter dans l'ERP les tickets créés par email, par instance GLPI cible
-    const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
-    const activeInstance = settings?.activeGlpiInstance || 'glpi';
-
-    // Tickets ERP avec glpiTicketId > 0 (tickets réellement créés dans GLPI)
     const erpGlpiTickets = await prisma.ticket.count({
       where: {
         glpiTicketId: { not: null, gt: 0 },
@@ -306,7 +271,6 @@ router.get('/compare', async (req, res) => {
       },
     });
 
-    // Tickets ERP sans glpiTicketId (ERP uniquement, dry-run ou en attente)
     const erpOnlyTickets = await prisma.ticket.count({
       where: {
         glpiTicketId: null,
@@ -317,7 +281,7 @@ router.get('/compare', async (req, res) => {
 
     return res.json({
       instances: results,
-      instanceActive: activeInstance,
+      instanceActive: 'glpi',
       erp: {
         glpiSynced: erpGlpiTickets,
         erpOnly: erpOnlyTickets,
@@ -328,9 +292,7 @@ router.get('/compare', async (req, res) => {
   }
 });
 
-// ── Analyse IA des tickets PROD vs DEV ───────────────────────────────────
-// Utilise le provider IA configuré pour analyser les différences entre les
-// tickets des instances GLPI (glpi + glpi_dev) et proposer des améliorations.
+// ── Analyse IA des tickets Production ────────────────────────────────────
 const { analyzeTicketDifferences, makeAIRequest } = require('../services/aiTicketComparison');
 
 router.post('/analyze', async (req, res) => {
@@ -344,11 +306,7 @@ router.post('/analyze', async (req, res) => {
   }
 });
 
-// ── Chat sur l analyse IA ────────────────────────────────────────────────
-// Permet de discuter de l analyse effectuee (notes, recommandations, donnees
-// recuperees). Le contexte de l analyse (tickets PROD/DEV, synthese IA) est
-// envoye comme contexte systeme pour que l IA puisse repondre precisement.
-
+// ── Chat sur l'analyse IA ────────────────────────────────────────────────
 router.post('/chat', async (req, res) => {
   try {
     const { message, history = [], analysisContext } = req.body;
@@ -356,13 +314,12 @@ router.post('/chat', async (req, res) => {
       return res.status(400).json({ error: 'Message vide' });
     }
 
-    // Construire le prompt systeme avec le contexte de l analyse
     let systemPrompt = [
-      'Tu es un consultant expert ITIL specialise dans la qualite des donnees ITSM.',
-      'Tu analyses les tickets de deux instances GLPI (Production et Developpement)',
-      'et tu aides a comprendre les ecarts, les anomalies et les recommandations.',
-      'Reponds en francais, de maniere concise et technique.',
-      'Utilise le contexte ci-dessous pour etayer tes reponses.',
+      'Tu es un consultant expert ITIL spécialisé dans la qualité des données ITSM.',
+      'Tu analyses les tickets de l\'instance GLPI Production d\'une entreprise',
+      'et tu aides à comprendre la qualité des données, les anomalies et les recommandations d\'amélioration.',
+      'Réponds en français, de manière concise et technique.',
+      'Utilise le contexte ci-dessous pour étayer tes réponses.',
       '',
     ];
 

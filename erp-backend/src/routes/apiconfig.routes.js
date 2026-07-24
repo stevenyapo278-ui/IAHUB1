@@ -33,9 +33,8 @@ const GLPI_REQUIRED = [
 ];
 const REQUIRED_FIELDS = {
   glpi: GLPI_REQUIRED,
-  glpi_dev: GLPI_REQUIRED,
 };
-const isGlpi = (name) => name === 'glpi' || name === 'glpi_dev';
+const isGlpi = (name) => name === 'glpi';
 
 function getMissingFields(serviceName, { baseUrl, apiKey, extra }) {
   const required = REQUIRED_FIELDS[serviceName];
@@ -111,7 +110,7 @@ router.patch('/:id', async (req, res) => {
   }
 });
 
-// Teste la connexion au service configuré (actuellement supporté : glpi et glpi_dev)
+// Teste la connexion au service configuré (actuellement supporté : glpi)
 router.post('/:id/test-connection', async (req, res) => {
   const config = await prisma.apiConfig.findUnique({ where: { id: Number(req.params.id) } });
   if (!config) return res.status(404).json({ error: 'Configuration introuvable' });
