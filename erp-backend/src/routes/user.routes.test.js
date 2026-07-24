@@ -1,7 +1,53 @@
 jest.mock('../prismaClient', () => ({}));
 jest.mock('../services/emailSender', () => ({ sendTemporaryPasswordEmail: jest.fn() }));
 
-const { canAssignRole, canActOnTarget } = require('./user.routes');
+const { canAssignRole, canActOnTarget, parseUsersCsv } = require('./user.routes');
+
+describe('parseUsersCsv', () => {
+  it('extrait correctement les colonnes et identifiants GLPI du format Prosuma', () => {
+    const csvContent =
+      'Identifiant;Nom de famille;Courriels;Téléphone;Lieu;Actif\n' +
+      'aabledou (1778);BLEDOU;Ange.BLEDOU@prosuma.ci;;;Oui\n' +
+      'aadepo (986);Adepo;&nbsp;;;;Oui\n' +
+      "aanoma (978);Anoma;Arnaud.Anoma@prosuma.ci;345;CENTRALE D'ACHATS > DAFCI;Non\n";
+
+    const parsed = parseUsersCsv(csvContent);
+    expect(parsed).toHaveLength(3);
+
+    expect(parsed[0]).toEqual({
+      username: 'aabledou',
+      glpiId: 1778,
+      fullName: 'BLEDOU',
+      email: 'ange.bledou@prosuma.ci',
+      location: null,
+      isActive: true,
+    });
+
+    // Remplace &nbsp; par l'adresse fallback
+    expect(parsed[1]).toEqual({
+      username: 'aadepo',
+      glpiId: 986,
+      fullName: 'Adepo',
+      email: 'aadepo@prosuma.ci',
+      location: null,
+      isActive: true,
+    });
+
+    expect(parsed[2]).toEqual({
+      username: 'aanoma',
+      glpiId: 978,
+      fullName: 'Anoma',
+      email: 'arnaud.anoma@prosuma.ci',
+      location: "CENTRALE D'ACHATS > DAFCI",
+      isActive: false,
+    });
+  });
+
+  it('gère les fichiers CSV vides ou invalides', () => {
+    expect(parseUsersCsv('')).toEqual([]);
+    expect(parseUsersCsv(null)).toEqual([]);
+  });
+});
 
 describe('canAssignRole', () => {
   it('SUPERADMIN peut assigner SUPERADMIN, ADMIN, TECHNICIAN, REQUESTER', () => {

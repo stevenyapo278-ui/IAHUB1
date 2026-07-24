@@ -204,6 +204,183 @@ router.post('/:id/reset-password', async (req, res) => {
   return res.json({ ok: true, message: `Nouveau mot de passe envoyé à ${user.email}` });
 });
 
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+function parseUsersCsv(csvText) {
+  if (!csvText || typeof csvText !== 'string') return [];
+
+  let cleanText = csvText.replace(/^\uFEFF/, '').replace(/&nbsp;?/gi, ' ').trim();
+  if (!cleanText) return [];
+
+  const lines = cleanText.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length < 2) return [];
+
+  const headerLine = lines[0];
+  let delimiter = ';';
+  if (headerLine.includes(';') && !headerLine.includes('\t')) delimiter = ';';
+  else if (headerLine.includes('\t')) delimiter = '\t';
+  else if (headerLine.includes(',')) delimiter = ',';
+
+  function splitRow(row) {
+    const values = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < row.length; i++) {
+      const char = row[i];
+      if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === delimiter && !inQuotes) {
+        values.push(current.trim().replace(/^"|"$/g, ''));
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    values.push(current.trim().replace(/^"|"$/g, ''));
+    return values;
+  }
+
+  const headers = splitRow(headerLine).map((h) => h.toLowerCase().trim());
+
+  let colIdentifiant = headers.findIndex((h) => h.includes('identifiant') || h.includes('login') || h.includes('glpi'));
+  let colNom = headers.findIndex((h) => h.includes('nom') || h.includes('fullname') || h.includes('name'));
+  let colEmail = headers.findIndex((h) => h.includes('courriel') || h.includes('email') || h.includes('mail'));
+  let colLieu = headers.findIndex((h) => h.includes('lieu') || h.includes('location'));
+  let colActif = headers.findIndex((h) => h.includes('actif') || h.includes('active') || h.includes('statut'));
+
+  if (colIdentifiant === -1) colIdentifiant = 0;
+  if (colNom === -1) colNom = 1;
+  if (colEmail === -1) colEmail = 2;
+
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = splitRow(lines[i]);
+    if (cols.length === 0 || cols.every((c) => !c)) continue;
+
+    const rawIdentifiant = cols[colIdentifiant] || '';
+    const rawNom = cols[colNom] || '';
+    const rawEmail = (cols[colEmail] || '').replace(/&nbsp;/g, '').trim();
+    const rawLieu = (colLieu !== -1 && cols[colLieu] && cols[colLieu].trim()) ? cols[colLieu].trim() : null;
+    const rawActif = colActif !== -1 ? cols[colActif] : 'Oui';
+
+    let glpiId = null;
+    let username = rawIdentifiant.trim();
+    const idMatch = rawIdentifiant.match(/\((\d+)\)/);
+    if (idMatch) {
+      glpiId = Number(idMatch[1]);
+      username = rawIdentifiant.replace(/\(\d+\)/, '').trim();
+    } else if (/^\d+$/.test(rawIdentifiant.trim())) {
+      glpiId = Number(rawIdentifiant.trim());
+    }
+
+    let email = rawEmail;
+    if (!email || email === '' || email.toLowerCase() === '&nbsp;') {
+      if (username.includes('@')) {
+        email = username.toLowerCase();
+      } else if (username) {
+        const cleanName = username.toLowerCase().replace(/[^a-z0-9_.-]/g, '');
+        email = `${cleanName}@prosuma.ci`;
+      }
+    }
+    if (email) email = email.toLowerCase().trim();
+
+    let fullName = rawNom.trim();
+    if (!fullName && email && email.includes('@')) {
+      const parts = email.split('@')[0].split('.');
+      fullName = parts.map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+    }
+    if (!fullName) fullName = username || 'Utilisateur Prosuma';
+
+    const isActive = rawActif ? !['non', 'false', '0', 'inactif'].includes(rawActif.toLowerCase().trim()) : true;
+
+    if (!email && !glpiId) continue;
+
+    rows.push({
+      username,
+      glpiId,
+      fullName,
+      email,
+      location: rawLieu,
+      isActive,
+    });
+  }
+
+  return rows;
+}
+
+// Endpoint d'importation CSV d'utilisateurs
+router.post('/import-csv', upload.single('file'), async (req, res) => {
+  try {
+    let csvText = '';
+    if (req.file) {
+      csvText = req.file.buffer.toString('utf-8');
+    } else if (req.body?.csvText) {
+      csvText = req.body.csvText;
+    } else {
+      return res.status(400).json({ error: 'Aucun fichier ou texte CSV fourni' });
+    }
+
+    const rows = parseUsersCsv(csvText);
+    if (rows.length === 0) {
+      return res.status(400).json({ error: 'Fichier CSV vide ou format de colonnes non reconnu' });
+    }
+
+    let imported = 0;
+    let updated = 0;
+    const errors = [];
+
+    for (const r of rows) {
+      try {
+        let existing = null;
+        if (r.glpiId) {
+          existing = await prisma.user.findUnique({ where: { glpiId: r.glpiId } });
+        }
+        if (!existing && r.email) {
+          existing = await prisma.user.findUnique({ where: { email: r.email } });
+        }
+
+        if (existing) {
+          await prisma.user.update({
+            where: { id: existing.id },
+            data: {
+              fullName: r.fullName || existing.fullName,
+              glpiId: r.glpiId || existing.glpiId,
+              isActive: r.isActive !== undefined ? r.isActive : existing.isActive,
+            },
+          });
+          updated++;
+        } else {
+          const passwordHash = await bcrypt.hash(crypto.randomBytes(20).toString('hex'), 10);
+          await prisma.user.create({
+            data: {
+              email: r.email,
+              passwordHash,
+              fullName: r.fullName,
+              role: 'TECHNICIAN',
+              glpiId: r.glpiId || null,
+              isActive: r.isActive !== undefined ? r.isActive : true,
+              mustChangePassword: true,
+            },
+          });
+          imported++;
+        }
+      } catch (err) {
+        errors.push({ email: r.email, glpiId: r.glpiId, reason: err.message });
+      }
+    }
+
+    return res.json({
+      imported,
+      updated,
+      totalProcessed: rows.length,
+      errors,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "Erreur d'importation CSV" });
+  }
+});
+
 router.delete('/:id', async (req, res) => {
   const target = await prisma.user.findUnique({ where: { id: Number(req.params.id) }, select: { role: true } });
   if (!target) return res.status(404).json({ error: 'Utilisateur introuvable' });
@@ -222,3 +399,5 @@ router.delete('/:id', async (req, res) => {
 module.exports = router;
 module.exports.canAssignRole = canAssignRole;
 module.exports.canActOnTarget = canActOnTarget;
+module.exports.parseUsersCsv = parseUsersCsv;
+

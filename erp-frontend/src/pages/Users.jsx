@@ -142,6 +142,46 @@ export default function Users() {
   const inactiveCount = users.length - activeCount;
   const staffCount = users.filter((u) => u.role !== 'REQUESTER').length;
 
+  const [showCsvImport, setShowCsvImport] = useState(false);
+  const [csvFile, setCsvFile] = useState(null);
+  const [csvImporting, setCsvImporting] = useState(false);
+  const [csvResult, setCsvResult] = useState(null);
+
+  function downloadSampleCsv() {
+    const sample = "Identifiant;Nom de famille;Courriels;Téléphone;Lieu;Actif\n" +
+                   "aabledou (1778);BLEDOU;Ange.BLEDOU@prosuma.ci;;;Oui\n" +
+                   "aadepo (986);Adepo;&nbsp;;;;Oui\n" +
+                   "aanoma (978);Anoma;Arnaud.Anoma@prosuma.ci;345;CENTRALE D'ACHATS > DAFCI;Oui\n";
+    const blob = new Blob(['\uFEFF' + sample], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', 'modele_import_utilisateurs.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
+  async function handleCsvUpload() {
+    if (!csvFile) return;
+    setCsvImporting(true);
+    setError('');
+    const formData = new FormData();
+    formData.append('file', csvFile);
+    try {
+      const { data } = await api.post('/users/import-csv', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setCsvResult(data);
+      toast.success(`Import terminé : ${data.imported} créé(s), ${data.updated} mis à jour`);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || "Erreur lors de l'importation CSV");
+    } finally {
+      setCsvImporting(false);
+    }
+  }
+
   return (
     <motion.div className="p-lg space-y-lg" variants={containerVariants} initial="hidden" animate="visible">
       {/* ── En-tête ─────────────────────────────────────────────────────────── */}
@@ -151,6 +191,18 @@ export default function Users() {
           <p className="font-body-lg text-body-lg text-on-surface-variant">Gestion des comptes et des rôles.</p>
         </div>
         <div className="flex items-center gap-2">
+          <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+            onClick={() => {
+              setError('');
+              setCsvFile(null);
+              setCsvResult(null);
+              setShowCsvImport(true);
+            }}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-outline-variant text-on-surface hover:bg-surface-container-low font-semibold text-body-sm transition-all duration-300 whitespace-nowrap"
+          >
+            <span className="material-symbols-outlined text-[18px]" aria-hidden="true">upload_file</span>
+            Importer CSV
+          </motion.button>
           <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
             onClick={async () => {
               setError(''); setImportResult(null);
@@ -556,6 +608,144 @@ export default function Users() {
                       >
                         {importing && <span className="material-symbols-outlined animate-spin text-[16px]">progress_activity</span>}
                         {importing ? 'Import...' : `Importer (${selectedImportIds.length})`}
+                      </motion.button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </motion.div>
+          </div>
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* MODAL D'IMPORT CSV */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      <AnimatePresence>
+        {showCsvImport && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => { if (!csvImporting) setShowCsvImport(false); }}
+              className="absolute inset-0 bg-black/60 backdrop-blur-[2px] cursor-pointer"
+            />
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ type: 'spring', duration: 0.35, bounce: 0.12 }}
+              className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col"
+            >
+              <div className="sticky top-0 z-10 bg-surface-container-lowest rounded-t-2xl border-b border-outline-variant/40">
+                <div className="bento-card-header flex justify-between items-center">
+                  <h3 className="font-headline-md text-headline-md text-on-background flex items-center gap-2">
+                    <span className="material-symbols-outlined text-primary text-[20px]">upload_file</span>
+                    Importer des utilisateurs via CSV
+                  </h3>
+                  <button onClick={() => { if (!csvImporting) setShowCsvImport(false); }}
+                    className="text-on-surface-variant hover:text-on-surface transition-colors" aria-label="Fermer"
+                  >
+                    <span className="material-symbols-outlined">close</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-lg overflow-y-auto flex-1 space-y-4">
+                {csvResult ? (
+                  <div className="space-y-4">
+                    <div className="p-md rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-body-sm">
+                      <p className="font-bold text-base mb-1">Importation CSV terminée avec succès !</p>
+                      <ul className="list-disc pl-md space-y-1">
+                        <li><strong>{csvResult.imported}</strong> utilisateur(s) créé(s)</li>
+                        <li><strong>{csvResult.updated}</strong> utilisateur(s) mis à jour</li>
+                        <li><strong>{csvResult.totalProcessed}</strong> ligne(s) traitée(s) au total</li>
+                      </ul>
+                    </div>
+                    {csvResult.errors?.length > 0 && (
+                      <div className="bg-red-500/5 text-red-500 border border-red-500/20 rounded-xl p-md font-body-sm">
+                        <p className="font-semibold mb-2">Erreurs rencontrées ({csvResult.errors.length}) :</p>
+                        <ul className="list-disc pl-md space-y-1 max-h-32 overflow-y-auto">
+                          {csvResult.errors.map((e, i) => (
+                            <li key={i}>{e.email || e.glpiId || `Ligne ${i+1}`} : {e.reason}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    <div className="flex justify-end">
+                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                        onClick={() => { setShowCsvImport(false); load(); }}
+                        className="px-5 py-2.5 rounded-xl btn-gradient font-semibold text-body-sm"
+                      >
+                        Terminé
+                      </motion.button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between bg-surface-container-low border border-outline-variant/40 rounded-xl p-3">
+                      <div className="flex items-center gap-2">
+                        <span className="material-symbols-outlined text-primary text-[18px]">info</span>
+                        <span className="text-xs text-on-surface-variant font-medium">Format Prosuma / GLPI reconnu (`Identifiant`, `Nom`, `Courriels`, `Lieu`, `Actif`)</span>
+                      </div>
+                      <button
+                        onClick={downloadSampleCsv}
+                        className="text-xs text-primary font-semibold hover:underline flex items-center gap-1 shrink-0"
+                      >
+                        <span className="material-symbols-outlined text-[14px]">download</span>
+                        Télécharger le modèle
+                      </button>
+                    </div>
+
+                    <div className="border-2 border-dashed border-outline-variant/60 hover:border-primary/60 rounded-2xl p-6 flex flex-col items-center justify-center gap-3 transition-colors bg-surface-container-low/30">
+                      <span className="material-symbols-outlined text-[40px] text-primary/60">cloud_upload</span>
+                      <div className="text-center">
+                        <p className="text-body-sm font-semibold text-on-surface">Glissez-déposez votre fichier CSV ici</p>
+                        <p className="text-xs text-on-surface-variant mt-0.5">ou cliquez pour choisir un fichier (.csv)</p>
+                      </div>
+                      <input
+                        type="file"
+                        accept=".csv,text/csv"
+                        onChange={(e) => {
+                          if (e.target.files?.[0]) {
+                            setCsvFile(e.target.files[0]);
+                          }
+                        }}
+                        className="hidden"
+                        id="csv-file-input"
+                      />
+                      <label
+                        htmlFor="csv-file-input"
+                        className="cursor-pointer px-4 py-2 rounded-xl border border-outline-variant text-on-surface hover:bg-surface-container font-semibold text-xs transition-colors"
+                      >
+                        Parcourir les fichiers
+                      </label>
+                    </div>
+
+                    {csvFile && (
+                      <div className="flex items-center justify-between bg-surface border border-outline-variant/60 rounded-xl p-3">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="material-symbols-outlined text-emerald-500 text-[20px]">description</span>
+                          <div className="min-w-0">
+                            <p className="text-body-sm font-semibold text-on-surface truncate">{csvFile.name}</p>
+                            <p className="text-xs text-on-surface-variant">{(csvFile.size / 1024).toFixed(1)} KB</p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setCsvFile(null)}
+                          className="text-on-surface-variant hover:text-error transition-colors p-1"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">close</span>
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="flex justify-end gap-sm mt-lg pt-4 border-t border-outline-variant/50">
+                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                        onClick={() => setShowCsvImport(false)} disabled={csvImporting}
+                        className="px-5 py-2.5 rounded-xl border border-outline-variant text-on-surface font-semibold text-body-sm hover:bg-surface-container-low transition-colors"
+                      >
+                        Annuler
+                      </motion.button>
+                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                        onClick={handleCsvUpload}
+                        disabled={!csvFile || csvImporting}
+                        className="px-5 py-2.5 rounded-xl btn-gradient font-semibold text-body-sm shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                      >
+                        {csvImporting && <span className="material-symbols-outlined animate-spin text-[16px]">progress_activity</span>}
+                        {csvImporting ? 'Importation...' : "Lancer l'importation"}
                       </motion.button>
                     </div>
                   </>
