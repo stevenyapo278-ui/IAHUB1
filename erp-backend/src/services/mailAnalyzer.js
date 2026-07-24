@@ -41,17 +41,18 @@ async function callOpenAICompat(provider, apiKey, model, prompt) {
 }
 
 // Appelle l'API Gemini
-async function callGemini(provider, apiKey, prompt) {
+async function callGemini(provider, apiKey, prompt, modelName) {
   const base = provider.baseUrl || 'https://generativelanguage.googleapis.com/v1beta';
+  const model = modelName || 'gemini-1.5-flash';
   const res = await fetch(
-    `${base}/models/gemini-flash-lite-latest:generateContent`,
+    `${base}/models/${model}:generateContent`,
     {
       method: 'POST',
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(20000),
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 2048, thinkingConfig: { thinkingBudget: 0 } },
+        generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
       }),
     }
   );
@@ -92,7 +93,7 @@ async function callProvider(provider, prompt) {
       let raw;
       switch (provider.name) {
         case 'gemini':
-          raw = await callGemini(provider, key.apiKey, prompt);
+          raw = await callGemini(provider, key.apiKey, prompt, defaultModel);
           break;
         case 'anthropic':
           raw = await callAnthropic(provider, key.apiKey, prompt);

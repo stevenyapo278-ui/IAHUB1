@@ -259,7 +259,7 @@ async function makeAIRequest(providerName, baseUrl, apiKey, model, prompt, maxTo
           headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.1, maxOutputTokens: maxTokens, thinkingConfig: { thinkingBudget: 0 } },
+            generationConfig: { temperature: 0.1, maxOutputTokens: maxTokens },
           }),
         });
         if (!res.ok) {
