@@ -384,40 +384,88 @@ function GlpiReimportSection() {
   const [dateTo, setDateTo] = useState('');
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [progress, setProgress] = useState(0);
+  const [currentStep, setCurrentStep] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
+
+  const GLPI_STEPS = [
+    { icon: 'delete_sweep',   label: 'Suppression des tickets existants',    color: '#ef4444', pct: 15 },
+    { icon: 'cloud_download', label: 'Récupération depuis GLPI',              color: '#f59e0b', pct: 40 },
+    { icon: 'sync_alt',       label: 'Import & synchronisation des tickets',  color: '#3b82f6', pct: 75 },
+    { icon: 'people',         label: 'Résolution des assignations',           color: '#8b5cf6', pct: 90 },
+    { icon: 'check_circle',   label: 'Finalisation',                          color: '#10b981', pct: 100 },
+  ];
+
+  const EMAIL_STEPS = [
+    { icon: 'mail_lock',       label: 'Connexion Outlook',           color: '#3b82f6', pct: 20 },
+    { icon: 'mark_email_read', label: 'Récupération des emails',     color: '#f59e0b', pct: 55 },
+    { icon: 'psychology',      label: 'Traitement IA',               color: '#8b5cf6', pct: 85 },
+    { icon: 'check_circle',    label: 'Finalisation',                color: '#10b981', pct: 100 },
+  ];
+
+  const STEPS = activeTab === 'glpi' ? GLPI_STEPS : EMAIL_STEPS;
+
+  useEffect(() => {
+    if (!reimporting) return;
+    setElapsed(0);
+    const t = setInterval(() => setElapsed((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [reimporting]);
+
+  useEffect(() => {
+    if (!reimporting) return;
+    setProgress(0); setCurrentStep(0);
+    let pct = 0;
+    const interval = setInterval(() => {
+      pct += Math.random() * 1.2 + 0.4;
+      if (pct >= 92) { pct = 92; clearInterval(interval); }
+      setProgress(pct);
+      const idx = STEPS.findIndex((s) => pct < s.pct);
+      setCurrentStep(idx === -1 ? STEPS.length - 1 : Math.max(0, idx - 1));
+    }, 180);
+    return () => clearInterval(interval);
+  }, [reimporting]); // eslint-disable-line
+
+  function finishAnimation(finalResult, finalError) {
+    setProgress(100);
+    setCurrentStep(STEPS.length - 1);
+    setTimeout(() => {
+      setReimporting(false);
+      if (finalResult) setResult(finalResult);
+      if (finalError) setError(finalError);
+    }, 800);
+  }
 
   async function handleGlpiReimport() {
-    if (!confirm('Supprimer les tickets GLPI existants dans l\'ERP et tout réimporter depuis GLPI ? Cette action est réversible.')) return;
+    if (!confirm("Supprimer les tickets GLPI existants dans l'ERP et tout réimporter depuis GLPI ? Cette action est réversible.")) return;
     setReimporting(true); setResult(null); setError(null);
     try {
       const payload = {};
       if (dateFrom) payload.dateFrom = dateFrom;
       if (dateTo) payload.dateTo = dateTo;
       const { data } = await api.post('/glpi/reimport', payload);
-      setResult(data);
+      finishAnimation(data, null);
     } catch (err) {
-      setError(err.response?.data?.error || err.message);
-    } finally {
-      setReimporting(false);
+      finishAnimation(null, err.response?.data?.error || err.message);
     }
   }
 
   async function handleEmailReimport() {
-    if (!confirm('Réimporter les emails de la plage de dates sélectionnée ? Les emails déjà traités seront ignorés (pas de doublons).')) return;
+    if (!confirm("Réimporter les emails de la plage de dates sélectionnée ? Les emails déjà traités seront ignorés (pas de doublons).")) return;
     setReimporting(true); setResult(null); setError(null);
     try {
       const payload = {};
       if (dateFrom) payload.dateFrom = dateFrom;
       if (dateTo) payload.dateTo = dateTo;
       const { data } = await api.post('/inbox/reimport', payload);
-      setResult(data);
+      finishAnimation(data, null);
     } catch (err) {
-      setError(err.response?.data?.error || err.message);
-    } finally {
-      setReimporting(false);
+      finishAnimation(null, err.response?.data?.error || err.message);
     }
   }
 
   const isGlpi = activeTab === 'glpi';
+  const fmtElapsed = `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`;
 
   return (
     <div className="space-y-md">
@@ -426,76 +474,235 @@ function GlpiReimportSection() {
         <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Réimport de données</h4>
       </div>
 
-      {/* Tab selector */}
       <div className="flex gap-1 p-1 rounded-xl bg-surface-container-high/50 w-fit">
         <button
           onClick={() => { setActiveTab('glpi'); setResult(null); setError(null); }}
-          className={`px-4 py-2 rounded-lg text-[13px] font-semibold transition-all ${isGlpi ? 'bg-primary text-white shadow-sm' : 'text-on-surface-variant hover:text-on-surface'}`}
+          disabled={reimporting}
+          className={`px-4 py-2 rounded-lg text-[13px] font-semibold transition-all disabled:opacity-40 ${isGlpi ? 'bg-primary text-white shadow-sm' : 'text-on-surface-variant hover:text-on-surface'}`}
         >
           <span className="material-symbols-outlined text-[16px] mr-1.5 align-middle">link</span>
           GLPI
         </button>
         <button
           onClick={() => { setActiveTab('email'); setResult(null); setError(null); }}
-          className={`px-4 py-2 rounded-lg text-[13px] font-semibold transition-all ${!isGlpi ? 'bg-primary text-white shadow-sm' : 'text-on-surface-variant hover:text-on-surface'}`}
+          disabled={reimporting}
+          className={`px-4 py-2 rounded-lg text-[13px] font-semibold transition-all disabled:opacity-40 ${!isGlpi ? 'bg-primary text-white shadow-sm' : 'text-on-surface-variant hover:text-on-surface'}`}
         >
           <span className="material-symbols-outlined text-[16px] mr-1.5 align-middle">mail</span>
           Emails
         </button>
       </div>
 
-      <motion.div variants={itemVariants} className="bento-card p-lg space-y-md">
-        <p className="font-body-sm text-body-sm text-on-surface-variant">
-          {isGlpi
-            ? 'Supprime les tickets synchronisés depuis GLPI dans l\'ERP et les réimporte depuis la source. Le GLPI source n\'est <strong>jamais modifié</strong>.'
-            : 'Récupère les emails Outlook de la plage de dates et les traite via le pipeline IA. Les emails déjà traités sont ignorés (pas de doublons). Outlook n\'est <strong>jamais modifié</strong>.'}
-        </p>
+      <motion.div variants={itemVariants} className="bento-card p-lg space-y-md overflow-hidden">
+        <p className="font-body-sm text-body-sm text-on-surface-variant"
+          dangerouslySetInnerHTML={{
+            __html: isGlpi
+              ? "Supprime les tickets synchronisés depuis GLPI dans l'ERP et les réimporte depuis la source. Le GLPI source n'est <strong>jamais modifié</strong>."
+              : "Récupère les emails Outlook de la plage de dates et les traite via le pipeline IA. Les emails déjà traités sont ignorés (pas de doublons). Outlook n'est <strong>jamais modifié</strong>."
+          }}
+        />
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-md">
           <label className="flex flex-col gap-xs">
             <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Date de début (optionnel)</span>
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={inputClass} />
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} disabled={reimporting} className={inputClass} />
             <span className="text-[11px] text-on-surface-variant">Laisser vide = tout récupérer</span>
           </label>
           <label className="flex flex-col gap-xs">
             <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Date de fin (optionnel)</span>
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={inputClass} />
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} disabled={reimporting} className={inputClass} />
             <span className="text-[11px] text-on-surface-variant">Laisser vide = jusqu'à aujourd'hui</span>
           </label>
         </div>
 
-        <div className="flex items-center gap-sm">
-          <motion.button
-            onClick={isGlpi ? handleGlpiReimport : handleEmailReimport}
-            disabled={reimporting}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.97 }}
-            className="px-5 py-2.5 bg-red-500/10 text-red-500 border border-red-500/30 hover:bg-red-500/20 rounded-xl font-semibold text-body-sm transition-all disabled:opacity-50 flex items-center gap-2"
-          >
-            <span className="material-symbols-outlined text-[18px]">{reimporting ? 'sync' : 'restart_alt'}</span>
-            {reimporting ? 'Réimport en cours...' : isGlpi ? 'Réinitialiser et réimporter GLPI' : 'Réimporter les emails'}
-          </motion.button>
-        </div>
+        <AnimatePresence mode="wait">
+          {!reimporting && (
+            <motion.div key="launch" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}>
+              <motion.button
+                onClick={isGlpi ? handleGlpiReimport : handleEmailReimport}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.97 }}
+                className="px-5 py-2.5 bg-red-500/10 text-red-500 border border-red-500/30 hover:bg-red-500/20 rounded-xl font-semibold text-body-sm transition-all flex items-center gap-2"
+              >
+                <span className="material-symbols-outlined text-[18px]">restart_alt</span>
+                {isGlpi ? 'Réinitialiser et réimporter GLPI' : 'Réimporter les emails'}
+              </motion.button>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-        {result && (
-          <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[13px] text-emerald-600 flex items-center gap-2">
-            <span className="material-symbols-outlined" style={{ fontSize: '18px', fontVariationSettings: "'FILL' 1" }}>check_circle</span>
-            {isGlpi
-              ? `${result.deleted} tickets supprimés, ${result.imported} tickets réimportés depuis GLPI.`
-              : `${result.totalFetched} emails récupérés, ${result.totalProcessed} traités, ${result.totalSkipped} déjà existants.`}
-          </div>
-        )}
+        <AnimatePresence>
+          {reimporting && (
+            <motion.div
+              key="progress-panel"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.35, ease: 'easeInOut' }}
+              style={{ overflow: 'hidden' }}
+            >
+              <div style={{
+                background: 'linear-gradient(135deg, rgba(59,130,246,0.06) 0%, rgba(139,92,246,0.06) 100%)',
+                border: '1px solid rgba(99,102,241,0.2)',
+                borderRadius: '16px',
+                padding: '20px',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <motion.span
+                      className="material-symbols-outlined"
+                      style={{ fontSize: '20px', color: '#6366f1' }}
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
+                    >autorenew</motion.span>
+                    <span style={{ fontWeight: 700, fontSize: '14px', color: 'var(--on-surface)' }}>Import en cours…</span>
+                  </div>
+                  <span style={{
+                    fontFamily: 'monospace', fontSize: '13px', color: 'var(--on-surface-variant)',
+                    background: 'rgba(99,102,241,0.1)', padding: '2px 10px', borderRadius: '20px', letterSpacing: '0.05em',
+                  }}>⏱ {fmtElapsed}</span>
+                </div>
 
-        {error && (
-          <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-[13px] text-red-500 flex items-center gap-2">
-            <span className="material-symbols-outlined" style={{ fontSize: '18px', fontVariationSettings: "'FILL' 1" }}>error</span>
-            {error}
-          </div>
-        )}
+                <div style={{ height: '8px', background: 'rgba(99,102,241,0.12)', borderRadius: '99px', overflow: 'hidden', marginBottom: '20px' }}>
+                  <motion.div
+                    style={{
+                      height: '100%', borderRadius: '99px',
+                      background: 'linear-gradient(90deg, #6366f1, #8b5cf6, #3b82f6)',
+                      backgroundSize: '200% 100%',
+                    }}
+                    animate={{ width: `${progress}%`, backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'] }}
+                    transition={{ width: { duration: 0.4, ease: 'easeOut' }, backgroundPosition: { duration: 2, repeat: Infinity, ease: 'linear' } }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {STEPS.map((step, idx) => {
+                    const isCompleted = idx < currentStep;
+                    const isActive    = idx === currentStep;
+                    const isPending   = idx > currentStep;
+                    return (
+                      <motion.div
+                        key={idx}
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: idx * 0.07 }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '12px',
+                          padding: '8px 12px', borderRadius: '10px',
+                          background: isActive ? `${step.color}15` : isCompleted ? 'rgba(16,185,129,0.06)' : 'transparent',
+                          border: isActive ? `1px solid ${step.color}40` : '1px solid transparent',
+                          transition: 'all 0.3s ease',
+                        }}
+                      >
+                        <div style={{
+                          width: '32px', height: '32px', borderRadius: '50%', flexShrink: 0,
+                          background: isCompleted ? 'rgba(16,185,129,0.15)' : isActive ? `${step.color}20` : 'rgba(148,163,184,0.1)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          {isCompleted ? (
+                            <motion.span className="material-symbols-outlined" style={{ fontSize: '18px', color: '#10b981' }}
+                              initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 400 }}>
+                              check_circle
+                            </motion.span>
+                          ) : isActive ? (
+                            <motion.span className="material-symbols-outlined" style={{ fontSize: '18px', color: step.color }}
+                              animate={{ scale: [1, 1.2, 1] }} transition={{ duration: 1, repeat: Infinity }}>
+                              {step.icon}
+                            </motion.span>
+                          ) : (
+                            <span className="material-symbols-outlined" style={{ fontSize: '18px', color: 'var(--on-surface-variant)', opacity: 0.4 }}>
+                              {step.icon}
+                            </span>
+                          )}
+                        </div>
+                        <span style={{
+                          fontSize: '13px',
+                          fontWeight: isActive ? 600 : isCompleted ? 500 : 400,
+                          color: isCompleted ? '#10b981' : isActive ? step.color : 'var(--on-surface-variant)',
+                          opacity: isPending ? 0.5 : 1,
+                          transition: 'all 0.3s ease',
+                        }}>{step.label}</span>
+                        {isActive && (
+                          <motion.div style={{ display: 'flex', gap: '3px', marginLeft: 'auto' }}>
+                            {[0, 1, 2].map((i) => (
+                              <motion.div key={i}
+                                style={{ width: '5px', height: '5px', borderRadius: '50%', background: step.color }}
+                                animate={{ opacity: [0.3, 1, 0.3], scale: [0.8, 1.2, 0.8] }}
+                                transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
+                              />
+                            ))}
+                          </motion.div>
+                        )}
+                        {isCompleted && (
+                          <motion.span initial={{ opacity: 0, scale: 0 }} animate={{ opacity: 1, scale: 1 }}
+                            style={{ marginLeft: 'auto', fontSize: '11px', fontWeight: 700, color: '#10b981', background: 'rgba(16,185,129,0.1)', padding: '1px 8px', borderRadius: '99px' }}>
+                            OK
+                          </motion.span>
+                        )}
+                      </motion.div>
+                    );
+                  })}
+                </div>
+
+                <div style={{ textAlign: 'right', marginTop: '12px' }}>
+                  <span style={{ fontSize: '24px', fontWeight: 800, color: '#6366f1', fontVariantNumeric: 'tabular-nums' }}>
+                    {Math.floor(progress)}%
+                  </span>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {result && !reimporting && (
+            <motion.div key="success"
+              initial={{ opacity: 0, scale: 0.95, y: 6 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 300 }}
+              style={{
+                padding: '14px 16px', borderRadius: '14px',
+                background: 'linear-gradient(135deg, rgba(16,185,129,0.08), rgba(16,185,129,0.04))',
+                border: '1px solid rgba(16,185,129,0.25)',
+                display: 'flex', flexDirection: 'column', gap: '8px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <motion.span className="material-symbols-outlined" style={{ fontSize: '20px', color: '#10b981' }}
+                  initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 500, delay: 0.1 }}>
+                  task_alt
+                </motion.span>
+                <span style={{ fontWeight: 700, fontSize: '14px', color: '#10b981' }}>Import terminé avec succès</span>
+                <span style={{ marginLeft: 'auto', fontFamily: 'monospace', fontSize: '12px', color: 'rgba(16,185,129,0.7)' }}>
+                  ⏱ {fmtElapsed}
+                </span>
+              </div>
+              <div style={{ fontSize: '13px', color: 'var(--on-surface-variant)', paddingLeft: '28px' }}>
+                {isGlpi
+                  ? (<><span style={{ color: '#ef4444', fontWeight: 600 }}>{result.deleted}</span> tickets supprimés{' · '}<span style={{ color: '#10b981', fontWeight: 600 }}>{result.imported}</span> tickets importés</>)
+                  : (<><span style={{ color: '#3b82f6', fontWeight: 600 }}>{result.totalFetched}</span> emails récupérés{' · '}<span style={{ color: '#10b981', fontWeight: 600 }}>{result.totalProcessed}</span> traités{' · '}<span style={{ color: '#f59e0b', fontWeight: 600 }}>{result.totalSkipped}</span> déjà existants</>)
+                }
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {error && !reimporting && (
+            <motion.div key="error" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+              className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-[13px] text-red-500 flex items-center gap-2"
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: '18px', fontVariationSettings: "'FILL' 1" }}>error</span>
+              {error}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </motion.div>
     </div>
   );
 }
+
 
 function TriageRulesSection({ saving, setSaving, setError }) {
   const [rules, setRules] = useState([]);
