@@ -258,7 +258,7 @@ export default function AdvancedTab() {
           />
 
           <SettingRow
-            title="🔴 Dry Run Mode (simulation)"
+            title="Dry Run Mode (simulation)"
             description="Mode simulation : aucune action n'est réellement écrite dans GLPI (création, mise à jour, suivi). Les tickets reçoivent un ID fictif négatif. À désactiver en production."
             checked={settings.dryRunMode === true}
             onChange={(v) => updateSetting('dryRunMode', v)}
