@@ -275,7 +275,12 @@ export default function Teams() {
                         {t.name.charAt(0).toUpperCase()}
                       </div>
                       <div className="min-w-0">
-                        <p className="text-xs font-bold text-on-surface group-hover:text-primary transition-colors truncate">{t.name}</p>
+                        <p className="text-xs font-bold text-on-surface group-hover:text-primary transition-colors truncate flex items-center gap-2">
+                          {t.name}
+                          {t.glpiGroupId && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-gradient-to-r from-blue-600 to-indigo-600 text-white leading-none">GLPI</span>
+                          )}
+                        </p>
                         {t.category && (
                           <span className="text-[10px] text-on-surface-variant font-medium uppercase tracking-wider">{t.category}</span>
                         )}
