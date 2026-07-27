@@ -26,6 +26,11 @@ let isGlpiSyncRunning = false;
 
 function stripHtml(str) {
   if (!str || typeof str !== 'string') return str;
+  // 1. Remplace les <br> par des espaces
+  // 2. Supprime toutes les balises HTML
+  // 3. Décode les entités HTML nommées (5 courantes)
+  // 4. Décode les entités HTML numériques (décimales et hexa) comme &#38; &#x26;
+  // 5. Normalise les espaces
   return str
     .replace(/<br\s*\/?>/gi, ' ')
     .replace(/<[^>]*>/g, '')
@@ -35,6 +40,51 @@ function stripHtml(str) {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, ' ')
+    .replace(/&#(?:x([0-9a-fA-F]+)|(\d+));/g, (_, hex, dec) => {
+      const code = hex ? parseInt(hex, 16) : parseInt(dec, 10);
+      return code ? String.fromCodePoint(code) : '';
+    })
+    .replace(/&([a-zA-Z]+);/g, (match, name) => {
+      // Entités HTML nommées courantes (accents européens + symboles)
+      const entities = {
+        // Minuscules accentuées
+        'agrave': 'à', 'aacute': 'á', 'acirc': 'â', 'atilde': 'ã', 'auml': 'ä', 'aring': 'å',
+        'egrave': 'è', 'eacute': 'é', 'ecirc': 'ê', 'euml': 'ë',
+        'igrave': 'ì', 'iacute': 'í', 'icirc': 'î', 'iuml': 'ï',
+        'ograve': 'ò', 'oacute': 'ó', 'ocirc': 'ô', 'otilde': 'õ', 'ouml': 'ö', 'oslash': 'ø',
+        'ugrave': 'ù', 'uacute': 'ú', 'ucirc': 'û', 'uuml': 'ü',
+        'yacute': 'ý', 'yuml': 'ÿ',
+        // Majuscules accentuées
+        'Agrave': 'À', 'Aacute': 'Á', 'Acirc': 'Â', 'Atilde': 'Ã', 'Auml': 'Ä', 'Aring': 'Å',
+        'Egrave': 'È', 'Eacute': 'É', 'Ecirc': 'Ê', 'Euml': 'Ë',
+        'Igrave': 'Ì', 'Iacute': 'Í', 'Icirc': 'Î', 'Iuml': 'Ï',
+        'Ograve': 'Ò', 'Oacute': 'Ó', 'Ocirc': 'Ô', 'Otilde': 'Õ', 'Ouml': 'Ö', 'Oslash': 'Ø',
+        'Ugrave': 'Ù', 'Uacute': 'Ú', 'Ucirc': 'Û', 'Uuml': 'Ü',
+        'Yacute': 'Ý',
+        // Symboles courants
+        'nbsp': ' ', 'iexcl': '¡', 'cent': '¢', 'pound': '£', 'curren': '¤',
+        'yen': '¥', 'brvbar': '¦', 'sect': '§', 'copy': '©', 'ordf': 'ª',
+        'laquo': '«', 'not': '¬', 'reg': '®', 'macr': '¯', 'deg': '°',
+        'plusmn': '±', 'sup2': '²', 'sup3': '³', 'acute': '´', 'micro': 'µ',
+        'para': '¶', 'middot': '·', 'cedil': '¸', 'sup1': '¹', 'ordm': 'º',
+        'raquo': '»', 'frac14': '¼', 'frac12': '½', 'frac34': '¾', 'iquest': '¿',
+        'times': '×', 'divide': '÷',
+        // Guillemets et ponctuation
+        'lsquo': '\'', 'rsquo': '\'', 'sbquo': '‚',
+        'ldquo': '\"', 'rdquo': '\"', 'bdquo': '„',
+        'dagger': '†', 'Dagger': '‡', 'bull': '•', 'hellip': '…',
+        'permil': '‰', 'prime': '′', 'Prime': '″',
+        'lsaquo': '‹', 'rsaquo': '›',
+        'oline': '‾', 'frasl': '⁄',
+        // Symboles monétaires et divers
+        'euro': '€', 'trade': '™',
+        'larr': '←', 'uarr': '↑', 'rarr': '→', 'darr': '↓',
+        'harr': '↔', 'crarr': '↵',
+        'lceil': '⌈', 'rceil': '⌉', 'lfloor': '⌊', 'rfloor': '⌋',
+        'loz': '◊', 'spades': '♠', 'clubs': '♣', 'hearts': '♥', 'diams': '♦',
+      };
+      return entities[name] !== undefined ? entities[name] : match;
+    })
     .replace(/\s+/g, ' ')
     .trim();
 }

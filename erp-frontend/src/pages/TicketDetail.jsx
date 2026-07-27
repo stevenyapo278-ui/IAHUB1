@@ -517,10 +517,16 @@ export default function TicketDetail() {
                             {new Date(item.data.createdAt).toLocaleString('fr-FR')}
                           </time>
                         </div>
-                        <div
-                          className="leading-relaxed text-xs text-on-surface [&_img]:max-w-full [&_img]:rounded-lg [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-2 [&_a]:text-blue-600 [&_a]:underline [&_p]:mb-1.5 [&_p]:last:mb-0"
-                          dangerouslySetInnerHTML={{ __html: sanitizeHtml(item.data.content) }}
-                        />
+                        {item.data.content && (item.data.content.includes('<') || item.data.content.includes('&#') || item.data.content.includes('&lt;')) ? (
+                          <div
+                            className="leading-relaxed text-xs text-on-surface [&_img]:max-w-full [&_img]:rounded-lg [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-2 [&_a]:text-blue-600 [&_a]:underline [&_p]:mb-1.5 [&_p]:last:mb-0"
+                            dangerouslySetInnerHTML={{ __html: sanitizeHtml(item.data.content) }}
+                          />
+                        ) : (
+                          <div className="text-xs text-on-surface leading-relaxed whitespace-pre-wrap font-normal">
+                            {item.data.content}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ) : (
