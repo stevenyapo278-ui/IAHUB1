@@ -46,8 +46,8 @@ export default function TicketDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [ticket, setTicket] = useState(null);
-  const [followup, setFollowup] = useState('');
+  const [ticket, setTicket] = useState(null);    const [followup, setFollowup] = useState('');
+  const [pastedImages, setPastedImages] = useState([]);
   const [error, setError] = useState('');
   const [teams, setTeams] = useState([]);
   const [users, setUsers] = useState([]);
@@ -179,13 +179,56 @@ export default function TicketDetail() {
     }
   }
 
+  function handlePaste(e) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type?.startsWith('image/')) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (!file) continue;
+        const id = `paste-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const dataUrl = URL.createObjectURL(file);
+        setPastedImages((prev) => [...prev, { id, file, dataUrl }]);
+        toast.success('Image collée — elle sera envoyée avec le commentaire');
+      }
+    }
+  }
+
+  function removePastedImage(id) {
+    setPastedImages((prev) => {
+      const img = prev.find((p) => p.id === id);
+      if (img) URL.revokeObjectURL(img.dataUrl);
+      return prev.filter((p) => p.id !== id);
+    });
+  }
+
   async function handleAddFollowup(e) {
     e.preventDefault();
-    if (!followup.trim()) return;
+    if (!followup.trim() && pastedImages.length === 0) return;
     try {
-      await api.post(`/tickets/${id}/followups`, { content: followup });
+      const hasImages = pastedImages.length > 0;
+      let content = followup;
+
+      if (hasImages) {
+        // Envoyer en FormData avec les images
+        const fd = new FormData();
+        fd.append('content', followup);
+        pastedImages.forEach((img, idx) => {
+          fd.append('images', img.file);
+          content += `\n\n<!--IMAGE_${idx}-->`;
+        });
+        // Re-build content with image markers
+        fd.set('content', content);
+        await api.post(`/tickets/${id}/followups`, fd);
+      } else {
+        await api.post(`/tickets/${id}/followups`, { content });
+      }
+
       toast.success('Commentaire ajouté');
       setFollowup('');
+      pastedImages.forEach((img) => URL.revokeObjectURL(img.dataUrl));
+      setPastedImages([]);
       load();
     } catch (err) {
       setError(err.response?.data?.error || "Erreur lors de l'ajout du commentaire");
@@ -568,16 +611,43 @@ export default function TicketDetail() {
                 value={followup}
                 onChange={(e) => setFollowup(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleAddFollowup(e); } }}
+                onPaste={handlePaste}
               />
+
+              {/* Pasted images preview */}
+              {pastedImages.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {pastedImages.map((img) => (
+                    <div key={img.id} className="relative group">
+                      <img
+                        src={img.dataUrl}
+                        alt="image collée"
+                        className="h-16 w-16 object-cover rounded-xl border border-outline-variant/40 shadow-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removePastedImage(img.id)}
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center shadow-md opacity-0 group-hover:opacity-100 transition-all hover:scale-110"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                  <span className="text-[10px] text-on-surface-variant self-end pb-1 font-medium">
+                    {pastedImages.length} image{pastedImages.length > 1 ? 's' : ''} collée{pastedImages.length > 1 ? 's' : ''}
+                  </span>
+                </div>
+              )}
+
               <div className="flex items-center justify-between">
-                <span className="text-[10px] text-on-surface-variant font-medium">Astuce : Appuyez sur <kbd className="px-1.5 py-0.5 bg-surface-container border border-outline-variant/40 rounded text-[9px] font-mono">Ctrl+Entrée</kbd> pour soumettre</span>
+                <span className="text-[10px] text-on-surface-variant font-medium">Astuce : Appuyez sur <kbd className="px-1.5 py-0.5 bg-surface-container border border-outline-variant/40 rounded text-[9px] font-mono">Ctrl+Entrée</kbd> pour soumettre. Vous pouvez <kbd className="px-1.5 py-0.5 bg-surface-container border border-outline-variant/40 rounded text-[9px] font-mono">Coller</kbd> des images directement.</span>
                 <button
                   type="submit"
-                  disabled={!followup.trim()}
+                  disabled={!followup.trim() && pastedImages.length === 0}
                   className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-bold shadow-md shadow-blue-500/20 disabled:opacity-40 hover:brightness-110 transition-all cursor-pointer"
                 >
                   <Send className="w-3.5 h-3.5" />
-                  <span>Envoyer</span>
+                  <span>Envoyer{pastedImages.length > 0 ? ` (${pastedImages.length} img.)` : ''}</span>
                 </button>
               </div>
             </form>

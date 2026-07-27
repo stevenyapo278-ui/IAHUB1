@@ -1,5 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
+const path = require('path');
+const fs = require('fs');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
@@ -582,8 +584,17 @@ router.patch('/:id/reassign', requirePermission('tickets.assign', ['ADMIN', 'TEC
   }
 });
 
-// Add followup / comment
-router.post('/:id/followups', [body('content').notEmpty()], async (req, res) => {
+// ── Upload de suivi avec images collées ─────────────────────────────────
+const FOLLOWUP_IMAGES_DIR = path.join(__dirname, '..', 'uploads', 'followup-images');
+fs.mkdirSync(FOLLOWUP_IMAGES_DIR, { recursive: true });
+
+const followupUpload = multer({
+  dest: FOLLOWUP_IMAGES_DIR,
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
+
+// Add followup / comment (supporte le collage d'images via FormData)
+router.post('/:id/followups', followupUpload.array('images', 10), [body('content').notEmpty()], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     return res.status(400).json({ errors: errors.array() });
@@ -596,11 +607,51 @@ router.post('/:id/followups', [body('content').notEmpty()], async (req, res) => 
     return res.status(404).json({ error: 'Ticket introuvable' });
   }
 
+  // Sauvegarder les images uploadées et créer des TicketAttachment
+  const imageAttachments = [];
+  if (req.files && req.files.length > 0) {
+    for (const file of req.files) {
+      const ext = path.extname(file.originalname) || '.png';
+      const safeFilename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+      const destPath = path.join(FOLLOWUP_IMAGES_DIR, safeFilename);
+      try {
+        fs.renameSync(file.path, destPath);
+      } catch {
+        // Si rename échoue (ex:跨设备), fallback sur copie + suppression
+        fs.copyFileSync(file.path, destPath);
+        fs.unlinkSync(file.path);
+      }
+
+      const attachment = await prisma.ticketAttachment.create({
+        data: {
+          ticketId,
+          filename: file.originalname || safeFilename,
+          mimeType: file.mimetype || 'image/png',
+        },
+      });
+
+      imageAttachments.push({
+        id: attachment.id,
+        filename: safeFilename,
+        url: `/uploads/followup-images/${safeFilename}`,
+      });
+    }
+  }
+
+  // Construire le contenu final : remplacer les marqueurs IMAGE_<n> par des <img> tags
+  let content = req.body.content;
+  imageAttachments.forEach((img, idx) => {
+    content = content.replace(
+      `<!--IMAGE_${idx}-->`,
+      `<img src="${img.url}" alt="image collée" class="pasted-image" style="max-width:100%;border-radius:12px;margin:8px 0;border:1px solid rgba(128,128,128,0.2);" />`
+    );
+  });
+
   const followup = await prisma.followup.create({
     data: {
       ticketId,
       authorId: req.user.sub,
-      content: req.body.content,
+      content,
     },
     include: { author: { select: { id: true, fullName: true } } },
   });
@@ -615,7 +666,7 @@ router.post('/:id/followups', [body('content').notEmpty()], async (req, res) => 
     }
   }
 
-  return res.status(201).json(followup);
+  return res.status(201).json({ followup, imageAttachments });
 });
 
 // Delete ticket
