@@ -112,9 +112,11 @@ async function getGlpiConfig(serviceName) {
   };
 }
 
-// Récupère la config GLPI Production active
+// Récupère la config GLPI active, en fonction du paramètre SystemSettings.activeGlpiInstance
 async function getActiveGlpiConfig() {
-  return getGlpiConfig('glpi');
+  const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+  const instanceName = settings?.activeGlpiInstance || 'glpi';
+  return getGlpiConfig(instanceName);
 }
 
 async function glpiInitSession(config) {

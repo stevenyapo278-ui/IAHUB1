@@ -88,12 +88,17 @@ export default function AdvancedTab() {
   const [effectiveServerUrls, setEffectiveServerUrls] = useState(null);
   const [schedulerHealth, setSchedulerHealth] = useState(null);
 
+  const [glpiInstances, setGlpiInstances] = useState([]);
+
   function load() {
     api.get('/advanced-settings').then(({ data }) => {
       setSettings(data);
     }).catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
     api.get('/advanced-settings/server-urls/effective').then(({ data }) => setEffectiveServerUrls(data)).catch(() => {});
     api.get('/advanced-settings/scheduler-health').then(({ data }) => setSchedulerHealth(data)).catch(() => {});
+    api.get('/api-configs').then(({ data }) => {
+      setGlpiInstances(data.filter((c) => c.serviceName?.startsWith('glpi')));
+    }).catch(() => {});
   }
 
   useEffect(load, []);
@@ -266,7 +271,38 @@ export default function AdvancedTab() {
           />
         </div>
 
-
+        {/* Instance GLPI active */}
+        <motion.div variants={itemVariants} className="bento-card flex items-center justify-between gap-lg p-lg">
+          <div>
+            <div className="font-headline-sm text-headline-sm text-on-surface font-semibold flex items-center gap-2">
+              <span className="material-symbols-outlined text-[20px] text-primary">database</span>
+              Instance GLPI active
+            </div>
+            <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5">
+              Instance GLPI utilisée pour créer les tickets approuvés. 
+              Les instances disponibles se configurent dans <strong>Paramètres → Autre → Services & APIs</strong>.
+            </p>
+          </div>
+          <div className="shrink-0">
+            {glpiInstances.length === 0 ? (
+              <span className="text-xs text-on-surface-variant italic">Aucune instance configurée</span>
+            ) : (
+              <select
+                value={settings.activeGlpiInstance || 'glpi'}
+                onChange={(e) => updateSetting('activeGlpiInstance', e.target.value)}
+                disabled={saving}
+                className={`${inputClass} min-w-[200px] disabled:opacity-50`}
+              >
+                {glpiInstances.map((inst) => (
+                  <option key={inst.id} value={inst.serviceName}>
+                    {inst.serviceName === 'glpi' ? 'GLPI Production' : inst.serviceName}
+                    {inst.baseUrl ? ` (${inst.baseUrl.replace(/^https?:\/\//, '').slice(0, 40)})` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        </motion.div>
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
