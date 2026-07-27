@@ -95,20 +95,60 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
       const parsed = JSON.parse(rawBody);
       glpiId = parsed.id || (Array.isArray(parsed) ? parsed[0]?.id : null);
     } catch (parseErr) {
-      // Si le body est vide mais la réponse est 200, essayer l'en-tête Location
-      const locationHeader = ticketRes.headers.get('Location') || ticketRes.headers.get('Content-Location') || '';
-      const locationMatch = locationHeader.match(/\/Ticket\/(\d+)/);
-      if (locationMatch) {
-        glpiId = parseInt(locationMatch[1], 10);
-        console.log(`[glpiTicketCreator] ID ticket GLPI ${glpiId} extrait depuis l'en-tête Location (body était vide)`);
-      } else {
-        console.error(`[glpiTicketCreator] Réponse GLPI vide (${ticketRes.status}):`, {
-          status: ticketRes.status,
-          statusText: ticketRes.statusText,
-          headers: Object.fromEntries(ticketRes.headers.entries()),
-          bodyLength: rawBody.length,
-        });
-        throw new Error(`Réponse GLPI invalide après création ticket (${ticketRes.status}) : ${rawBody || '(corps vide)'}`);
+      // GLPI 10.0.x retourne 200 OK avec body vide mais le ticket est bien créé.
+      // Stratégie : récupérer le ticket le plus récent via GET /Ticket?range=0-0
+      // et vérifier que son nom correspond au titre qu'on a envoyé.
+      console.warn(`[glpiTicketCreator] POST /Ticket body vide (200). Récupération du dernier ticket GLPI...`);
+
+      // 1) GET /Ticket?range=0-0 — GLPI trie par ID descendant (nouveau en premier)
+      const recentRes = await fetchWithTimeout(`${config.baseUrl}/Ticket?range=0-0`, {
+        headers: { ...headers, 'Accept': 'application/json' },
+      });
+      if (recentRes.ok) {
+        const recentBody = await recentRes.text().catch(() => '');
+        try {
+          const recentParsed = JSON.parse(recentBody);
+          const recentTickets = Array.isArray(recentParsed) ? recentParsed : (recentParsed.data || []);
+          if (recentTickets.length > 0 && recentTickets[0].name === title) {
+            glpiId = recentTickets[0].id;
+            console.log(`[glpiTicketCreator] ID ${glpiId} récupéré via GET /Ticket?range=0-0`);
+          }
+        } catch (e) { /* ignore parse error */ }
+      }
+
+      // 2) Fallback : recherche par nom via POST /search/Ticket (field 1 = name)
+      if (!glpiId) {
+        try {
+          const searchRes = await fetchWithTimeout(`${config.baseUrl}/search/Ticket`, {
+            method: 'POST',
+            headers: { ...headers, 'Accept': 'application/json', 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              criteria: [{ field: 1, searchtype: 'contains', value: title }],
+              range: '0-5',
+            }),
+          });
+          if (searchRes.ok) {
+            const searchBody = await searchRes.text().catch(() => '');
+            const searchParsed = JSON.parse(searchBody);
+            const searchItems = Array.isArray(searchParsed) ? searchParsed : (searchParsed.data || []);
+            for (const item of searchItems) {
+              // /search/Ticket retourne des clés numériques — on cherche le nom dans le champ 1
+              const itemName = item['1'] || item.name || item['name'];
+              const itemId   = item['2'] || item.id || item['id'];
+              if (itemName === title && itemId) {
+                glpiId = Number(itemId);
+                console.log(`[glpiTicketCreator] ID ${glpiId} récupéré via /search/Ticket`);
+                break;
+              }
+            }
+          }
+        } catch (e) { /* ignore search error */ }
+      }
+
+      if (!glpiId) {
+        console.error(`[glpiTicketCreator] Échec récupération ticket GLPI après POST vide. Headers:`, 
+          Object.fromEntries(ticketRes.headers.entries()));
+        throw new Error(`Réponse GLPI invalide après création ticket (${ticketRes.status}) : (corps vide)`);
       }
     }
 
