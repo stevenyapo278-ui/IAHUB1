@@ -29,6 +29,13 @@ export default function OtherApisTab() {
   const [pendingDelete, setPendingDelete] = useState(null); // { type: 'workflow'|'config', id }
   const [deleting, setDeleting] = useState(false);
   
+  // Migration GLPI
+  const [migrationForm, setMigrationForm] = useState({ newBaseUrl: '', newAppToken: '', newUserToken: '' });
+  const [migrationPreview, setMigrationPreview] = useState(null);
+  const [migrationResult, setMigrationResult] = useState(null);
+  const [migrating, setMigrating] = useState(false);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+
   const [showAddIntegration, setShowAddIntegration] = useState(false);
   const [showAddWorkflow, setShowAddWorkflow] = useState(false);
   const [showSecrets, setShowSecrets] = useState({});
@@ -219,6 +226,36 @@ export default function OtherApisTab() {
       load();
     } catch (err) {
       setError(err.response?.data?.error || "Erreur lors de la mise à jour de l'App Token");
+    }
+  }
+
+  async function handleMigrationPreview() {
+    setError('');
+    setLoadingPreview(true);
+    try {
+      const { data } = await api.get('/glpi/migration-preview');
+      setMigrationPreview(data);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur de prévisualisation');
+    } finally {
+      setLoadingPreview(false);
+    }
+  }
+
+  async function handleMigrate() {
+    setError('');
+    setInfo('');
+    setMigrating(true);
+    try {
+      const { data } = await api.post('/glpi/migrate', migrationForm);
+      setMigrationResult(data);
+      setInfo(`Migration terminée : ${data.users} utilisateurs, ${data.categories} catégories, ${data.locations} lieux, ${data.groups} groupes. ${data.detachedTickets || 0} tickets ERP détachés de l'ancien GLPI.`);
+      // Recharger les configs
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur lors de la migration');
+    } finally {
+      setMigrating(false);
     }
   }
 
@@ -761,6 +798,226 @@ export default function OtherApisTab() {
           </div>
         </motion.div>
       </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* SECTION 3 : MIGRATION GLPI */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {canManageGlpi && (
+        <div className="space-y-md">
+          <div className="flex justify-between items-center border-b border-outline-variant/40 pb-sm">
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-primary text-2xl">database_sync</span>
+              <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Migration GLPI</h4>
+            </div>
+          </div>
+
+          <motion.div variants={itemVariants} className="bento-card p-lg overflow-hidden">
+            <p className="text-body-sm text-on-surface-variant mb-lg">
+              Permet de migrer les utilisateurs, catégories, lieux et groupes depuis l'ancien GLPI vers un nouveau GLPI.
+              Une fois la migration terminée, la configuration de l'ERP sera automatiquement mise à jour pour pointer vers le nouveau GLPI.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-md mb-lg">
+              <label className="flex flex-col gap-xs">
+                <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Nouvelle URL GLPI</span>
+                <input
+                  className={inputClass}
+                  value={migrationForm.newBaseUrl}
+                  onChange={(e) => setMigrationForm(f => ({ ...f, newBaseUrl: e.target.value }))}
+                  placeholder="http://10.0.70.65/glpi/apirest.php"
+                />
+              </label>
+              <label className="flex flex-col gap-xs">
+                <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Nouvel App Token</span>
+                <div className="relative flex items-center w-full">
+                  <input
+                    className={`${inputClass} w-full pr-10`}
+                    type={showSecrets['migration-appToken'] ? 'text' : 'password'}
+                    value={migrationForm.newAppToken}
+                    onChange={(e) => setMigrationForm(f => ({ ...f, newAppToken: e.target.value }))}
+                    placeholder="Jeton API du nouveau GLPI"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleSecretVisibility('migration', 'appToken')}
+                    className="absolute right-3 text-on-surface-variant/80 hover:text-on-surface select-none flex items-center"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">
+                      {showSecrets['migration-appToken'] ? 'visibility_off' : 'visibility'}
+                    </span>
+                  </button>
+                </div>
+              </label>
+              <label className="flex flex-col gap-xs">
+                <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Nouveau User Token</span>
+                <div className="relative flex items-center w-full">
+                  <input
+                    className={`${inputClass} w-full pr-10`}
+                    type={showSecrets['migration-userToken'] ? 'text' : 'password'}
+                    value={migrationForm.newUserToken}
+                    onChange={(e) => setMigrationForm(f => ({ ...f, newUserToken: e.target.value }))}
+                    placeholder="Token utilisateur du nouveau GLPI"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleSecretVisibility('migration', 'userToken')}
+                    className="absolute right-3 text-on-surface-variant/80 hover:text-on-surface select-none flex items-center"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">
+                      {showSecrets['migration-userToken'] ? 'visibility_off' : 'visibility'}
+                    </span>
+                  </button>
+                </div>
+              </label>
+            </div>
+
+            {/* Aperçu de la migration */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-4 rounded-2xl bg-surface-container-low/50 border border-outline-variant/30 mb-lg">
+              <div className="flex items-center gap-3 flex-1 flex-wrap">
+                {migrationPreview ? (
+                  <>
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 text-xs font-bold">
+                      <span className="material-symbols-outlined text-[14px]">group</span>
+                      {migrationPreview.users} utilisateurs
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-xs font-bold">
+                      <span className="material-symbols-outlined text-[14px]">category</span>
+                      {migrationPreview.categories} catégories
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-xs font-bold">
+                      <span className="material-symbols-outlined text-[14px]">location_on</span>
+                      {migrationPreview.locations} lieux
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 text-xs font-bold">
+                      <span className="material-symbols-outlined text-[14px]">folder</span>
+                      {migrationPreview.groups} groupes
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 text-xs font-bold">
+                      <span className="material-symbols-outlined text-[14px]">confirmation_number</span>
+                      {migrationPreview.erpTickets} tickets ERP liés
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-xs text-on-surface-variant italic">Cliquez sur "Tester les connexions" pour voir l'aperçu</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <motion.button
+                  onClick={handleMigrationPreview}
+                  disabled={loadingPreview || !migrationForm.newBaseUrl}
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.96 }}
+                  className="px-4 py-2 rounded-xl border border-outline-variant/60 text-xs font-semibold text-on-surface hover:bg-surface-container-high transition-all disabled:opacity-50 shadow-sm flex items-center gap-1.5"
+                >
+                  {loadingPreview ? (
+                    <><span className="material-symbols-outlined text-[14px] animate-spin">sync</span> Chargement...</>
+                  ) : (
+                    <><span className="material-symbols-outlined text-[14px]">visibility</span> Tester les connexions</>
+                  )}
+                </motion.button>
+              </div>
+            </div>
+
+            {/* Boutons d'action */}
+            <div className="flex items-center justify-between pt-2 border-t border-outline-variant/20">
+              <div className="flex items-center gap-2">
+                {migrationResult && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="flex items-center gap-4 flex-wrap"
+                  >
+                    {migrationResult.users > 0 && (
+                      <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                        <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                        {migrationResult.users} utilisateurs
+                      </span>
+                    )}
+                    {migrationResult.categories > 0 && (
+                      <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                        <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                        {migrationResult.categories} catégories
+                      </span>
+                    )}
+                    {migrationResult.locations > 0 && (
+                      <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                        <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                        {migrationResult.locations} lieux
+                      </span>
+                    )}
+                    {migrationResult.groups > 0 && (
+                      <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                        <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                        {migrationResult.groups} groupes
+                      </span>
+                    )}
+                    {migrationResult.errors?.length > 0 && (
+                      <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-600 dark:text-amber-400">
+                        <span className="material-symbols-outlined text-[14px]">warning</span>
+                        {migrationResult.errors.length} erreur(s)
+                      </span>
+                    )}
+                    {migrationResult.detachedTickets > 0 && (
+                      <span className="inline-flex items-center gap-1 text-xs font-bold text-on-surface-variant">
+                        <span className="material-symbols-outlined text-[14px]">link_off</span>
+                        {migrationResult.detachedTickets} tickets détachés
+                      </span>
+                    )}
+                  </motion.div>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {migrationResult && (
+                  <motion.button
+                    onClick={() => {
+                      setMigrationPreview(null);
+                      setMigrationResult(null);
+                      setMigrationForm({ newBaseUrl: '', newAppToken: '', newUserToken: '' });
+                    }}
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.96 }}
+                    className="px-4 py-2 rounded-xl border border-outline-variant/60 text-xs font-semibold text-on-surface hover:bg-surface-container-high transition-all shadow-sm"
+                  >
+                    Réinitialiser
+                  </motion.button>
+                )}
+                <motion.button
+                  onClick={handleMigrate}
+                  disabled={migrating || !migrationForm.newBaseUrl || !migrationForm.newAppToken || !migrationForm.newUserToken}
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.96 }}
+                  className="px-6 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/20 hover:brightness-110 transition-all disabled:opacity-50 flex items-center gap-2"
+                >
+                  {migrating ? (
+                    <><span className="material-symbols-outlined text-[14px] animate-spin">sync</span> Migration en cours...</>
+                  ) : (
+                    <><span className="material-symbols-outlined text-[14px]">database_sync</span> Lancer la migration</>
+                  )}
+                </motion.button>
+              </div>
+            </div>
+
+            {/* Résultats détaillés */}
+            {migrationResult?.errors?.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-md p-3 rounded-xl bg-amber-500/5 border border-amber-500/20"
+              >
+                <p className="text-[11px] font-bold text-amber-600 dark:text-amber-400 mb-2">Erreurs rencontrées :</p>
+                <ul className="space-y-1">
+                  {migrationResult.errors.slice(0, 10).map((err, i) => (
+                    <li key={i} className="text-[10px] text-on-surface-variant font-mono">{err}</li>
+                  ))}
+                  {migrationResult.errors.length > 10 && (
+                    <li className="text-[10px] text-on-surface-variant italic">...et {migrationResult.errors.length - 10} autre(s) erreur(s)</li>
+                  )}
+                </ul>
+              </motion.div>
+            )}
+          </motion.div>
+        </div>
+      )}
 
       <ConfirmDialog
         open={!!pendingDelete}
