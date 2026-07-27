@@ -645,8 +645,17 @@ async function syncGlpiTicketActors(config, sessionToken, glpiTicketId, ticketId
     // un entier (expand_dropdowns désactivé) ou un objet (expand_dropdowns activé).
     function getGlpiId(actor) {
       if (!actor.users_id) return null;
-      if (typeof actor.users_id === 'object') return actor.users_id.id || null;
-      return actor.users_id;
+      let raw;
+      if (typeof actor.users_id === 'object') {
+        raw = actor.users_id.id;
+      } else {
+        raw = actor.users_id;
+      }
+      // Ignorer les IDs non numériques (contacts externes, groupes, etc.)
+      if (raw === null || raw === undefined) return null;
+      const num = Number(raw);
+      if (!Number.isInteger(num) || num <= 0) return null;
+      return num;
     }
 
     function getFullName(actor) {
