@@ -320,4 +320,141 @@ router.get('/documents/:id/feedbacks', async (req, res) => {
   }
 });
 
+// ── Brouillons de connaissances (KnowledgeDraft) ───────────────────────────
+
+// Liste des brouillons en attente (PENDING)
+router.get('/drafts', async (req, res) => {
+  const { status } = req.query;
+  const where = status ? { status } : { status: 'PENDING' };
+  const drafts = await prisma.knowledgeDraft.findMany({
+    where,
+    include: {
+      ticket: {
+        select: {
+          id: true,
+          title: true,
+          requester: { select: { fullName: true, email: true } },
+        },
+      },
+      reviewedBy: { select: { fullName: true, email: true } },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+  return res.json(drafts);
+});
+
+// Mettre à jour un brouillon (titre, problème, cause, solution, keywords, catégorie, tags)
+router.patch('/drafts/:id', requirePermission('knowledge.manage', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+  const draft = await prisma.knowledgeDraft.findUnique({ where: { id: Number(req.params.id) } });
+  if (!draft) return res.status(404).json({ error: 'Brouillon introuvable' });
+  if (draft.status !== 'PENDING') return res.status(400).json({ error: 'Seuls les brouillons en attente peuvent être modifiés' });
+
+  const { title, problem, cause, solution, keywords, category, tags } = req.body;
+  const data = {};
+  if (title !== undefined) data.title = title;
+  if (problem !== undefined) data.problem = problem;
+  if (cause !== undefined) data.cause = cause;
+  if (solution !== undefined) data.solution = solution;
+  if (keywords !== undefined) data.keywords = keywords;
+  if (category !== undefined) data.category = category;
+  if (tags !== undefined) data.tags = tags;
+
+  const updated = await prisma.knowledgeDraft.update({
+    where: { id: draft.id },
+    data,
+  });
+  return res.json(updated);
+});
+
+// Approuver un brouillon : crée un KnowledgeDocument + chunks à partir du draft
+router.post('/drafts/:id/approve', requirePermission('knowledge.manage', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+  const draft = await prisma.knowledgeDraft.findUnique({ where: { id: Number(req.params.id) } });
+  if (!draft) return res.status(404).json({ error: 'Brouillon introuvable' });
+  if (draft.status !== 'PENDING') return res.status(400).json({ error: 'Ce brouillon a déjà été traité' });
+
+  // Créer le document de connaissance (sourceType = 'article')
+  const articleContent = `Problème :
+${draft.problem}
+
+Cause :
+${draft.cause}
+
+Solution :
+${draft.solution}
+
+Mots-clés : ${draft.keywords.join(', ')}`;
+
+  const document = await prisma.knowledgeDocument.create({
+    data: {
+      title: draft.title,
+      sourceType: 'article',
+      status: 'READY',
+      category: draft.category,
+      tags: draft.tags,
+      author: req.user?.fullName || 'Validation Centre',
+    },
+  });
+
+  // Créer un chunk unique avec le contenu complet
+  const { generateEmbedding, toVectorLiteral } = require('../utils/embeddings');
+  try {
+    const embedding = await generateEmbedding(articleContent);
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO "KnowledgeChunk" (id, "documentId", "chunkIndex", content, embedding, "createdAt")
+       VALUES (DEFAULT, $1, $2, $3, $4::vector, now())`,
+      document.id,
+      0,
+      articleContent,
+      toVectorLiteral(embedding)
+    );
+  } catch {
+    // Si l'embedding échoue, on crée le document sans chunk (recherche textuelle uniquement)
+  }
+
+  // Marquer le draft comme approuvé
+  const updated = await prisma.knowledgeDraft.update({
+    where: { id: draft.id },
+    data: {
+      status: 'APPROVED',
+      reviewedById: req.user?.id,
+      reviewedAt: new Date(),
+      documentId: document.id,
+    },
+  });
+
+  // Log l'événement
+  try {
+    const { logEvent } = require('../services/ticketEvent');
+    if (draft.ticketId) {
+      await logEvent(draft.ticketId, 'KNOWLEDGE_CREATED', req.user?.email || 'SYSTEM', { draftId: draft.id, documentId: document.id });
+    }
+  } catch {}
+
+  auditLog('KNOWLEDGE_DRAFT_APPROVED', { actor: req.user, targetType: 'KnowledgeDraft', targetId: draft.id, targetLabel: draft.title, metadata: { documentId: document.id } }).catch(() => {});
+
+  return res.json({ draft: updated, document });
+});
+
+// Rejeter un brouillon
+router.post('/drafts/:id/reject', requirePermission('knowledge.manage', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+  const { reason } = req.body;
+  const draft = await prisma.knowledgeDraft.findUnique({ where: { id: Number(req.params.id) } });
+  if (!draft) return res.status(404).json({ error: 'Brouillon introuvable' });
+  if (draft.status !== 'PENDING') return res.status(400).json({ error: 'Ce brouillon a déjà été traité' });
+
+  const updated = await prisma.knowledgeDraft.update({
+    where: { id: draft.id },
+    data: {
+      status: 'REJECTED',
+      reviewedById: req.user?.id,
+      reviewedAt: new Date(),
+      reviewNote: reason || null,
+    },
+  });
+
+  auditLog('KNOWLEDGE_DRAFT_REJECTED', { actor: req.user, targetType: 'KnowledgeDraft', targetId: draft.id, targetLabel: draft.title, metadata: { reason } }).catch(() => {});
+
+  return res.json(updated);
+});
+
 module.exports = router;

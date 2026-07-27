@@ -5,7 +5,7 @@ import {
   ShieldCheck, Ticket, MailCheck, Clock, CheckCircle2,
   XCircle, AlertTriangle, RefreshCw, ChevronRight, User,
   Sparkles, ExternalLink, Send, ArrowRight, Shield, Check, X,
-  Bell,
+  Bell, BookOpen, Edit3, Tags, HelpCircle,
 } from 'lucide-react';
 import { sanitizeHtml } from '../utils/sanitize';
 import api from '../api/client';
@@ -18,6 +18,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   const [pendingTickets, setPendingTickets] = useState([]);
   const [pendingDrafts, setPendingDrafts] = useState([]);
   const [reminderDrafts, setReminderDrafts] = useState([]);
+  const [pendingKnowledgeDrafts, setPendingKnowledgeDrafts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -37,6 +38,22 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   const [editBody, setEditBody] = useState('');
   const [savingDraft, setSavingDraft] = useState(false);
 
+  // Modale d'approbation connaissance
+  const [showKbApproveModal, setShowKbApproveModal] = useState(false);
+  const [kbDraftToApprove, setKbDraftToApprove] = useState(null);
+  const [approvingKb, setApprovingKb] = useState(false);
+
+  // Modale de rejet connaissance
+  const [showKbRejectModal, setShowKbRejectModal] = useState(false);
+  const [kbDraftToReject, setKbDraftToReject] = useState(null);
+  const [kbRejectReason, setKbRejectReason] = useState('');
+  const [rejectingKb, setRejectingKb] = useState(false);
+
+  // Édition de brouillon connaissance
+  const [editingKbDraftId, setEditingKbDraftId] = useState(null);
+  const [editingKbFields, setEditingKbFields] = useState({ title: '', problem: '', cause: '', solution: '' });
+  const [savingKbDraft, setSavingKbDraft] = useState(false);
+
   function loadAllData(silent = false) {
     if (!silent) setLoading(true);
     else setRefreshing(true);
@@ -44,8 +61,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     Promise.all([
       api.get('/tickets?approvalStatus=PENDING&limit=100').catch(() => ({ data: { tickets: [] } })),
       api.get('/dashboard/pending-ai-drafts').catch(() => ({ data: [] })),
+      api.get('/knowledge/drafts').catch(() => ({ data: [] })),
     ])
-      .then(([ticketsRes, draftsRes]) => {
+      .then(([ticketsRes, draftsRes, knowledgeRes]) => {
         const ticketList = Array.isArray(ticketsRes.data)
           ? ticketsRes.data
           : ticketsRes.data?.items || [];
@@ -54,6 +72,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
         const draftList = Array.isArray(draftsRes.data) ? draftsRes.data : [];
         setPendingDrafts(draftList.filter((d) => d.draftKind !== 'REMINDER'));
         setReminderDrafts(draftList.filter((d) => d.draftKind === 'REMINDER'));
+
+        const knowledgeList = Array.isArray(knowledgeRes.data) ? knowledgeRes.data : [];
+        setPendingKnowledgeDrafts(knowledgeList);
       })
       .catch((err) => toast.error(err.response?.data?.error || 'Erreur lors du chargement des validations'))
       .finally(() => {
@@ -176,6 +197,79 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     }
   }
 
+  // --- ACTIONS BROUILLON CONNAISSANCE ---
+  function openKbApproveModal(draft) {
+    setKbDraftToApprove(draft);
+    setShowKbApproveModal(true);
+  }
+
+  async function handleKbApproveConfirm() {
+    if (!kbDraftToApprove) return;
+    setApprovingKb(true);
+    try {
+      await api.post(`/knowledge/drafts/${kbDraftToApprove.id}/approve`);
+      toast.success('Article de connaissance publié dans la KB !');
+      setShowKbApproveModal(false);
+      setKbDraftToApprove(null);
+      loadAllData(true);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de l\'approbation du brouillon');
+    } finally {
+      setApprovingKb(false);
+    }
+  }
+
+  function openKbRejectModal(draft) {
+    setKbDraftToReject(draft);
+    setKbRejectReason('');
+    setShowKbRejectModal(true);
+  }
+
+  async function handleKbRejectConfirm() {
+    if (!kbDraftToReject) return;
+    if (!kbRejectReason.trim()) {
+      toast.error('Veuillez indiquer une raison de rejet');
+      return;
+    }
+    setRejectingKb(true);
+    try {
+      await api.post(`/knowledge/drafts/${kbDraftToReject.id}/reject`, { reason: kbRejectReason.trim() });
+      toast.success('Brouillon de connaissance rejeté');
+      setShowKbRejectModal(false);
+      setKbDraftToReject(null);
+      loadAllData(true);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors du rejet');
+    } finally {
+      setRejectingKb(false);
+    }
+  }
+
+  function startKbEdit(draft) {
+    setEditingKbDraftId(draft.id);
+    setEditingKbFields({
+      title: draft.title,
+      problem: draft.problem,
+      cause: draft.cause,
+      solution: draft.solution,
+    });
+  }
+
+  async function handleKbSaveEdit() {
+    if (!editingKbDraftId) return;
+    setSavingKbDraft(true);
+    try {
+      await api.patch(`/knowledge/drafts/${editingKbDraftId}`, editingKbFields);
+      toast.success('Brouillon mis à jour');
+      setEditingKbDraftId(null);
+      loadAllData(true);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de la modification');
+    } finally {
+      setSavingKbDraft(false);
+    }
+  }
+
   return (
     <div className="p-6 sm:p-8 max-w-7xl mx-auto space-y-8 animate-fadeIn">
       {/* En-tête de la page */}
@@ -255,6 +349,23 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             activeTab === 'reminders' ? 'bg-white/20 text-white' : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
           }`}>
             {reminderDrafts.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => handleTabChange('knowledge')}
+          className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+            activeTab === 'knowledge'
+              ? 'bg-emerald-600 text-white shadow-md font-extrabold'
+              : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
+          }`}
+        >
+          <BookOpen className="w-4 h-4" />
+          <span className="whitespace-nowrap">Connaissances</span>
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black whitespace-nowrap ${
+            activeTab === 'knowledge' ? 'bg-white/20 text-white' : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+          }`}>
+            {pendingKnowledgeDrafts.length}
           </span>
         </button>
       </div>
@@ -562,6 +673,285 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* CONTENU DE L'ONGLET 4 : CONNAISSANCES (KnowledgeDraft) */}
+      {activeTab === 'knowledge' && (
+        <div className="space-y-4">
+          {loading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-36 rounded-3xl bg-surface-container-low animate-pulse border border-outline-variant/20" />
+              ))}
+            </div>
+          ) : pendingKnowledgeDrafts.length === 0 ? (
+            <div className="p-12 text-center rounded-3xl border border-dashed border-outline-variant/40 bg-surface-container-lowest space-y-3">
+              <BookOpen className="w-12 h-12 text-emerald-500 mx-auto" />
+              <h3 className="text-base font-bold text-on-surface">Aucun brouillon de connaissance en attente</h3>
+              <p className="text-xs text-on-surface-variant max-w-md mx-auto">
+                Utilisez le bouton "Capturer dans la KB" depuis un ticket résolu pour générer un article de base de connaissances.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {pendingKnowledgeDrafts.map((draft) => {
+                const isEditing = editingKbDraftId === draft.id;
+                return (
+                  <div
+                    key={draft.id}
+                    className="rounded-3xl border border-emerald-200 dark:border-emerald-500/20 bg-surface-container-lowest p-6 shadow-sm space-y-4 hover:border-emerald-300 dark:hover:border-emerald-500/30 transition-all"
+                  >
+                    {/* Header */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-outline-variant/20 pb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                          <Sparkles className="w-4 h-4" />
+                        </div>
+                        <div>
+                          {isEditing ? (
+                            <input
+                              value={editingKbFields.title}
+                              onChange={(e) => setEditingKbFields(p => ({ ...p, title: e.target.value }))}
+                              className="w-full bg-surface border border-outline-variant/60 rounded-lg px-3 py-1.5 text-xs font-bold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20"
+                            />
+                          ) : (
+                            <h3 className="text-sm font-bold text-on-surface">{draft.title}</h3>
+                          )}
+                          <p className="text-[11px] text-on-surface-variant mt-0.5">
+                            {draft.ticket ? (
+                              <>Ticket associé : <strong className="text-on-surface">#{draft.ticket.id} — {draft.ticket.title}</strong></>
+                            ) : (
+                              <span className="italic">Aucun ticket associé</span>
+                            )}
+                          </p>
+                          <p className="text-[11px] text-on-surface-variant">
+                            Créé le <strong className="text-on-surface font-semibold">{new Date(draft.createdAt).toLocaleString('fr-FR')}</strong>
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Badge catégorie + tags */}
+                      <div className="flex items-center gap-2 flex-wrap shrink-0">
+                        {draft.category && (
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-500/30">
+                            {draft.category}
+                          </span>
+                        )}
+                        {draft.keywords?.length > 0 && (
+                          <span className="text-[10px] text-on-surface-variant font-mono">
+                            {draft.keywords.slice(0, 3).join(', ')}{draft.keywords.length > 3 ? '...' : ''}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Content fields */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="p-3 rounded-2xl bg-surface-container-low/40 border border-outline-variant/20">
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-red-600 dark:text-red-400 flex items-center gap-1 mb-1.5">
+                          <AlertTriangle className="w-3 h-3" />
+                          Problème
+                        </span>
+                        {isEditing ? (
+                          <textarea
+                            value={editingKbFields.problem}
+                            onChange={(e) => setEditingKbFields(p => ({ ...p, problem: e.target.value }))}
+                            rows={3}
+                            className="w-full p-1.5 rounded-lg bg-surface border border-outline-variant/60 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20"
+                          />
+                        ) : (
+                          <p className="text-xs text-on-surface leading-relaxed whitespace-pre-wrap">{draft.problem}</p>
+                        )}
+                      </div>
+                      <div className="p-3 rounded-2xl bg-surface-container-low/40 border border-outline-variant/20">
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1 mb-1.5">
+                          <HelpCircle className="w-3 h-3" />
+                          Cause
+                        </span>
+                        {isEditing ? (
+                          <textarea
+                            value={editingKbFields.cause}
+                            onChange={(e) => setEditingKbFields(p => ({ ...p, cause: e.target.value }))}
+                            rows={3}
+                            className="w-full p-1.5 rounded-lg bg-surface border border-outline-variant/60 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20"
+                          />
+                        ) : (
+                          <p className="text-xs text-on-surface leading-relaxed whitespace-pre-wrap">{draft.cause}</p>
+                        )}
+                      </div>
+                      <div className="p-3 rounded-2xl bg-surface-container-low/40 border border-outline-variant/20 md:col-span-1">
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 flex items-center gap-1 mb-1.5">
+                          <CheckCircle2 className="w-3 h-3" />
+                          Solution
+                        </span>
+                        {isEditing ? (
+                          <textarea
+                            value={editingKbFields.solution}
+                            onChange={(e) => setEditingKbFields(p => ({ ...p, solution: e.target.value }))}
+                            rows={3}
+                            className="w-full p-1.5 rounded-lg bg-surface border border-outline-variant/60 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20"
+                          />
+                        ) : (
+                          <p className="text-xs text-on-surface leading-relaxed whitespace-pre-wrap">{draft.solution}</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Tags */}
+                    {draft.tags?.length > 0 && (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Tags className="w-3 h-3 text-on-surface-variant" />
+                        {draft.tags.map(t => (
+                          <span key={t} className="px-2 py-0.5 rounded-full bg-surface-container text-on-surface-variant border border-outline-variant/30 text-[10px] font-medium">
+                            #{t}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Actions */}
+                    <div className="flex items-center justify-between gap-4 pt-2 border-t border-outline-variant/20">
+                      <button
+                        onClick={() => isEditing ? null : startKbEdit(draft)}
+                        className="text-xs text-emerald-600 dark:text-emerald-400 font-bold hover:underline flex items-center gap-1"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                        {isEditing ? 'Modification en cours...' : 'Modifier le brouillon'}
+                      </button>
+
+                      {isEditing ? (
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setEditingKbDraftId(null)}
+                            className="px-3.5 py-2 rounded-xl text-xs font-semibold border border-outline-variant/40 hover:bg-surface-container text-on-surface transition-all"
+                          >
+                            Annuler
+                          </button>
+                          <button
+                            onClick={handleKbSaveEdit}
+                            disabled={savingKbDraft}
+                            className="px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-600 text-white disabled:opacity-50 hover:brightness-110 transition-all"
+                          >
+                            {savingKbDraft ? 'Enregistrement...' : 'Enregistrer'}
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => openKbRejectModal(draft)}
+                            className="px-3.5 py-2 rounded-xl text-xs font-bold border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-all"
+                          >
+                            <X className="w-3.5 h-3.5 inline mr-1" />
+                            Rejeter
+                          </button>
+                          <button
+                            onClick={() => openKbApproveModal(draft)}
+                            className="px-4 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-md shadow-emerald-500/20 transition-all flex items-center gap-1.5"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Publier dans la KB</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* MODALE APPROBATION CONNAISSANCE */}
+      {showKbApproveModal && kbDraftToApprove && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fadeIn">
+          <div className="bg-surface border border-outline-variant/40 rounded-3xl p-6 max-w-lg w-full shadow-2xl space-y-5">
+            <div className="flex items-center gap-3 text-emerald-600 dark:text-emerald-400">
+              <BookOpen className="w-6 h-6" />
+              <div>
+                <h3 className="text-base font-bold">Publier dans la Base de Connaissances</h3>
+                <p className="text-xs text-on-surface-variant">
+                  Le brouillon sera approuvé et publié comme article de connaissance.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-surface-container-low/50 border border-outline-variant/20 space-y-2 text-xs">
+              <p className="font-bold text-on-surface">{kbDraftToApprove.title}</p>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-on-surface-variant">
+                <span>Problème : <strong className="text-on-surface">{kbDraftToApprove.problem}</strong></span>
+                <span>Cause : <strong className="text-on-surface">{kbDraftToApprove.cause}</strong></span>
+                <span className="col-span-2">Solution : <strong className="text-on-surface">{kbDraftToApprove.solution}</strong></span>
+              </div>
+              {kbDraftToApprove.keywords?.length > 0 && (
+                <div className="flex items-center gap-1.5 pt-1">
+                  <Tags className="w-3 h-3" />
+                  {kbDraftToApprove.keywords.map(k => (
+                    <span key={k} className="px-2 py-0.5 rounded-full bg-surface-container border border-outline-variant/30 text-[10px]">#{k}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-outline-variant/20">
+              <button
+                type="button"
+                onClick={() => { setShowKbApproveModal(false); setKbDraftToApprove(null); }}
+                className="px-4 py-2.5 rounded-xl text-xs font-semibold border border-outline-variant/40 hover:bg-surface-container text-on-surface transition-all"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                disabled={approvingKb}
+                onClick={handleKbApproveConfirm}
+                className="px-5 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-lg shadow-emerald-500/20 transition-all flex items-center gap-2"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>{approvingKb ? 'Publication en cours...' : 'Confirmer la publication'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODALE REJET CONNAISSANCE */}
+      {showKbRejectModal && kbDraftToReject && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fadeIn">
+          <div className="bg-surface border border-outline-variant/40 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-red-600 dark:text-red-400">
+              <AlertTriangle className="w-6 h-6" />
+              <h3 className="text-base font-bold">Rejeter le brouillon de connaissance</h3>
+            </div>
+            <p className="text-xs text-on-surface-variant">
+              Veuillez indiquer la raison du rejet pour : <strong className="text-on-surface">{kbDraftToReject.title}</strong>
+            </p>
+            <textarea
+              className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-none"
+              rows={3}
+              placeholder="Ex: Contenu incomplet, doublon, hors périmètre..."
+              value={kbRejectReason}
+              onChange={(e) => setKbRejectReason(e.target.value)}
+            />
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => { setShowKbRejectModal(false); setKbDraftToReject(null); }}
+                className="px-4 py-2 rounded-xl text-xs font-semibold border border-outline-variant/40 hover:bg-surface-container text-on-surface transition-all"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                disabled={!kbRejectReason.trim() || rejectingKb}
+                onClick={handleKbRejectConfirm}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 text-white shadow-md shadow-red-500/20 hover:brightness-110 disabled:opacity-50 transition-all"
+              >
+                {rejectingKb ? 'Rejet en cours...' : 'Confirmer le rejet'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
