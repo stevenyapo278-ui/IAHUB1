@@ -31,6 +31,22 @@ function canActOnTarget(actorRole, targetRole) {
   return !ADMIN_LIKE_ROLES.includes(targetRole);
 }
 
+async function syncHotlinePermissionGroup(userId, isHotline) {
+  const group = await prisma.permissionGroup.findFirst({ where: { name: 'Équipe Hotline' } });
+  if (!group) return;
+  if (isHotline) {
+    await prisma.permissionGroup.update({
+      where: { id: group.id },
+      data: { members: { connect: { id: userId } } },
+    }).catch(() => {});
+  } else {
+    await prisma.permissionGroup.update({
+      where: { id: group.id },
+      data: { members: { disconnect: { id: userId } } },
+    }).catch(() => {});
+  }
+}
+
 const router = express.Router();
 router.use(authenticate);
 router.use(authorizeAdmin);
@@ -331,6 +347,10 @@ router.post(
       select: userSelect,
     });
 
+    if (targetRole === 'HOTLINE') {
+      syncHotlinePermissionGroup(user.id, true);
+    }
+
     return res.status(201).json(user);
     auditLog('USER_CREATED', { actor: req.user, targetType: 'User', targetId: user.id, targetLabel: user.fullName || user.email, metadata: { email: user.email, role: user.role } }).catch(() => {});
   }
@@ -393,6 +413,9 @@ router.patch(
         data,
         select: userSelect,
       });
+      if (role !== undefined && role !== target.role) {
+        syncHotlinePermissionGroup(user.id, role === 'HOTLINE');
+      }
       return res.json(user);
       auditLog('USER_UPDATED', { actor: req.user, targetType: 'User', targetId: user.id, targetLabel: user.fullName || user.email, metadata: { changedFields: Object.keys(data) } }).catch(() => {});
     } catch (err) {
