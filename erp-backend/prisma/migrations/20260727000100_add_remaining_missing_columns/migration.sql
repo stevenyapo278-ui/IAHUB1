@@ -23,10 +23,18 @@ CREATE INDEX IF NOT EXISTS "TicketFieldCorrection_ticketId_idx" ON "TicketFieldC
 CREATE INDEX IF NOT EXISTS "TicketFieldCorrection_fieldName_idx" ON "TicketFieldCorrection"("fieldName");
 CREATE INDEX IF NOT EXISTS "TicketFieldCorrection_correctedById_idx" ON "TicketFieldCorrection"("correctedById");
 CREATE INDEX IF NOT EXISTS "TicketFieldCorrection_createdAt_idx" ON "TicketFieldCorrection"("createdAt");
-ALTER TABLE "TicketFieldCorrection" ADD CONSTRAINT IF NOT EXISTS "TicketFieldCorrection_ticketId_fkey"
-    FOREIGN KEY ("ticketId") REFERENCES "Ticket"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "TicketFieldCorrection" ADD CONSTRAINT IF NOT EXISTS "TicketFieldCorrection_correctedById_fkey"
-    FOREIGN KEY ("correctedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'TicketFieldCorrection_ticketId_fkey') THEN
+        ALTER TABLE "TicketFieldCorrection" ADD CONSTRAINT "TicketFieldCorrection_ticketId_fkey"
+            FOREIGN KEY ("ticketId") REFERENCES "Ticket"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+    END IF;
+END $$;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'TicketFieldCorrection_correctedById_fkey') THEN
+        ALTER TABLE "TicketFieldCorrection" ADD CONSTRAINT "TicketFieldCorrection_correctedById_fkey"
+            FOREIGN KEY ("correctedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS "AiWeeklyPatternReport" (
     "id"               SERIAL,
@@ -45,8 +53,12 @@ CREATE TABLE IF NOT EXISTS "AiWeeklyPatternReport" (
 );
 CREATE INDEX IF NOT EXISTS "AiWeeklyPatternReport_startDate_endDate_idx" ON "AiWeeklyPatternReport"("startDate", "endDate");
 CREATE INDEX IF NOT EXISTS "AiWeeklyPatternReport_reviewedById_idx" ON "AiWeeklyPatternReport"("reviewedById");
-ALTER TABLE "AiWeeklyPatternReport" ADD CONSTRAINT IF NOT EXISTS "AiWeeklyPatternReport_reviewedById_fkey"
-    FOREIGN KEY ("reviewedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'AiWeeklyPatternReport_reviewedById_fkey') THEN
+        ALTER TABLE "AiWeeklyPatternReport" ADD CONSTRAINT "AiWeeklyPatternReport_reviewedById_fkey"
+            FOREIGN KEY ("reviewedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS "RequesterLocation" (
     "id"              SERIAL,
@@ -61,10 +73,18 @@ CREATE TABLE IF NOT EXISTS "RequesterLocation" (
     CONSTRAINT "RequesterLocation_email_glpiLocationId_key" UNIQUE ("email", "glpiLocationId")
 );
 CREATE INDEX IF NOT EXISTS "RequesterLocation_email_idx" ON "RequesterLocation"("email");
-ALTER TABLE "RequesterLocation" ADD CONSTRAINT IF NOT EXISTS "RequesterLocation_glpiLocationId_fkey"
-    FOREIGN KEY ("glpiLocationId") REFERENCES "GlpiLocation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "RequesterLocation" ADD CONSTRAINT IF NOT EXISTS "RequesterLocation_assignedById_fkey"
-    FOREIGN KEY ("assignedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'RequesterLocation_glpiLocationId_fkey') THEN
+        ALTER TABLE "RequesterLocation" ADD CONSTRAINT "RequesterLocation_glpiLocationId_fkey"
+            FOREIGN KEY ("glpiLocationId") REFERENCES "GlpiLocation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+    END IF;
+END $$;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'RequesterLocation_assignedById_fkey') THEN
+        ALTER TABLE "RequesterLocation" ADD CONSTRAINT "RequesterLocation_assignedById_fkey"
+            FOREIGN KEY ("assignedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS "AuditLog" (
     "id"          SERIAL,
@@ -83,8 +103,12 @@ CREATE INDEX IF NOT EXISTS "AuditLog_action_idx" ON "AuditLog"("action");
 CREATE INDEX IF NOT EXISTS "AuditLog_actorId_idx" ON "AuditLog"("actorId");
 CREATE INDEX IF NOT EXISTS "AuditLog_targetType_targetId_idx" ON "AuditLog"("targetType", "targetId");
 CREATE INDEX IF NOT EXISTS "AuditLog_createdAt_idx" ON "AuditLog"("createdAt");
-ALTER TABLE "AuditLog" ADD CONSTRAINT IF NOT EXISTS "AuditLog_actorId_fkey"
-    FOREIGN KEY ("actorId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'AuditLog_actorId_fkey') THEN
+        ALTER TABLE "AuditLog" ADD CONSTRAINT "AuditLog_actorId_fkey"
+            FOREIGN KEY ("actorId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+    END IF;
+END $$;
 
 -- =============================================================================
 -- Colonnes manquantes sur GlpiLocation
@@ -129,7 +153,15 @@ CREATE TABLE IF NOT EXISTS "_TeamDefaultObservers" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "_TeamDefaultObservers_AB_unique" ON "_TeamDefaultObservers"("A", "B");
 CREATE INDEX IF NOT EXISTS "_TeamDefaultObservers_B_index" ON "_TeamDefaultObservers"("B");
-ALTER TABLE "_TeamDefaultObservers" ADD CONSTRAINT IF NOT EXISTS "_TeamDefaultObservers_A_fkey"
-    FOREIGN KEY ("A") REFERENCES "Team"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "_TeamDefaultObservers" ADD CONSTRAINT IF NOT EXISTS "_TeamDefaultObservers_B_fkey"
-    FOREIGN KEY ("B") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '_TeamDefaultObservers_A_fkey') THEN
+        ALTER TABLE "_TeamDefaultObservers" ADD CONSTRAINT "_TeamDefaultObservers_A_fkey"
+            FOREIGN KEY ("A") REFERENCES "Team"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+    END IF;
+END $$;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '_TeamDefaultObservers_B_fkey') THEN
+        ALTER TABLE "_TeamDefaultObservers" ADD CONSTRAINT "_TeamDefaultObservers_B_fkey"
+            FOREIGN KEY ("B") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+    END IF;
+END $$;
