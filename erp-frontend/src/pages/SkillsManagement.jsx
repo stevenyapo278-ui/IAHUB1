@@ -1,12 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Fragment } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import api from '../api/client';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { useTheme } from '../context/ThemeContext';
 import {
-  Award, Zap, Users, Plus, Trash2, X,
-  Search, Star, Table2, LayoutGrid
+  Award, Zap, Users, Plus, Trash2, X, Check,
+  Search, Star, Table2, LayoutGrid, UserPlus
 } from 'lucide-react';
 
 const LEVEL_CONFIG = {
@@ -16,6 +16,8 @@ const LEVEL_CONFIG = {
   4: { label: 'Avancé',         color: 'bg-orange-500/15 text-orange-700 dark:text-orange-400 border-orange-500/25',dot: 'bg-orange-400' },
   5: { label: 'Expert',         color: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/25', dot: 'bg-emerald-400' },
 };
+
+const LEVEL_HEAT = ['', 'bg-zinc-500/[0.03]', 'bg-blue-500/[0.05]', 'bg-amber-500/[0.07]', 'bg-orange-500/[0.10]', 'bg-emerald-500/[0.13]'];
 
 export default function SkillsManagement() {
   const { theme } = useTheme();
@@ -33,6 +35,7 @@ export default function SkillsManagement() {
   const [viewMode, setViewMode] = useState('matrix'); // 'matrix' | 'list'
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [catFilter, setCatFilter] = useState('');
+  const [assignModal, setAssignModal] = useState({ open: false, skill: null, tech: null });
 
   function load() {
     setLoading(true);
@@ -91,6 +94,23 @@ export default function SkillsManagement() {
     const matchCat = !catFilter || s.category === catFilter;
     return matchQ && matchCat;
   });
+
+  // Build category groups for matrix
+  const skillGroups = (() => {
+    const groups = [];
+    const cats = [...new Set(filteredSkills.map(s => s.category).filter(Boolean))];
+    cats.forEach(cat => {
+      const catSkills = filteredSkills.filter(s => s.category === cat);
+      if (catSkills.length > 0) groups.push({ category: cat, skills: catSkills });
+    });
+    const uncat = filteredSkills.filter(s => !s.category);
+    if (uncat.length > 0) groups.push({ category: null, skills: uncat });
+    return groups;
+  })();
+
+  function getSkillAssignCount(skillId) {
+    return techs.filter(t => getUserLevel(t.id, skillId) !== null).length;
+  }
 
   function getUserLevel(userId, skillId) {
     const sk = skills.find(s => s.id === skillId);
@@ -232,136 +252,123 @@ export default function SkillsManagement() {
           </div>
         ) : viewMode === 'matrix' ? (
           /* ── Matrix View ─────────────────────────────────────────────── */
-          <div className="overflow-auto rounded-2xl border border-outline-variant/30 bg-surface-container-lowest">
-            <table className="w-full border-collapse" style={{ minWidth: `${200 + techs.length * 100}px` }}>
+          <div className="overflow-auto rounded-2xl border border-outline-variant/30 bg-surface-container-lowest shadow-sm">
+            <table className="w-full border-collapse" style={{ minWidth: `${180 + techs.length * 85}px` }}>
               <thead>
                 <tr className="border-b border-outline-variant/20 bg-surface-container-low/60">
-                  <th className="text-left px-4 py-3 text-[10px] font-black uppercase tracking-widest text-on-surface-variant w-48 sticky left-0 z-10 bg-surface-container-lowest">
+                  <th className="text-left px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-on-surface-variant w-48 sticky left-0 z-20 bg-surface-container-low">
                     Compétence
                   </th>
                   {techs.map(tech => (
-                    <th key={tech.id} className="px-2 py-3 text-center min-w-[90px]">
+                    <th key={tech.id} className="px-1 py-2.5 text-center min-w-[75px]">
                       <div className="flex flex-col items-center gap-1">
-                        <div className="w-8 h-8 rounded-full bg-primary/10 border border-primary/20 text-primary text-[11px] font-bold flex items-center justify-center">
+                        <div className="w-7 h-7 rounded-full bg-primary/10 border border-primary/20 text-primary text-[10px] font-bold flex items-center justify-center">
                           {tech.fullName?.charAt(0)?.toUpperCase()}
+                          {tech.fullName?.split(' ')[1]?.charAt(0)?.toUpperCase()}
                         </div>
-                        <span className="text-[10px] font-semibold text-on-surface-variant truncate max-w-[80px] block">
-                          {tech.fullName?.split(' ')[0]}
+                        <span className="text-[9px] font-semibold text-on-surface-variant truncate max-w-[68px] block leading-tight">
+                          {tech.fullName?.split(' ').length > 2
+                            ? tech.fullName?.split(' ').slice(0, 2).map(w => w.charAt(0)).join('').toUpperCase()
+                            : tech.fullName}
                         </span>
                       </div>
                     </th>
                   ))}
-                  <th className="w-10 px-2" />
+                  <th className="w-8 px-1" />
                 </tr>
               </thead>
               <tbody>
-                <AnimatePresence initial={false}>
-                  {filteredSkills.map((skill, idx) => (
-                    <>
-                      <motion.tr
-                        key={skill.id}
-                        layout
-                        initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 0.15, delay: idx * 0.015 }}
-                        className="border-b border-outline-variant/10 group hover:bg-surface-container-low/40 transition-colors"
-                      >
-                        <td className="px-4 py-3.5 sticky left-0 z-10 bg-surface-container-lowest group-hover:bg-surface-container-low/40 transition-colors">
+                {skillGroups.map((group, gi) => (
+                  <Fragment key={gi}>
+                    {/* Category header row */}
+                    {group.category && (
+                      <tr className="sticky top-0 z-10">
+                        <td colSpan={techs.length + 2} className="px-4 py-1.5 bg-amber-500/[0.04] border-b border-amber-500/10">
                           <div className="flex items-center gap-2">
-                            <div>
-                              <p className="text-sm font-semibold text-on-surface">{skill.name}</p>
-                              {skill.category && (
-                                <span className="text-[9px] text-on-surface-variant font-medium uppercase tracking-wider">{skill.category}</span>
-                              )}
-                            </div>
+                            <div className="w-1 h-3.5 rounded-full bg-amber-500" />
+                            <span className="text-[10px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-400">
+                              {group.category}
+                            </span>
+                            <span className="text-[9px] text-on-surface-variant/50 font-medium ml-1">
+                              {group.skills.reduce((s, sk) => s + getSkillAssignCount(sk.id), 0)} assign. · {group.skills.length} comp.
+                            </span>
                           </div>
                         </td>
+                      </tr>
+                    )}
+                    <AnimatePresence initial={false}>
+                      {group.skills.map((skill, idx) => (
+                        <motion.tr
+                          key={skill.id}
+                          initial={{ opacity: 0, y: -3 }} animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.12, delay: idx * 0.008 }}
+                          exit={{ opacity: 0 }}
+                          className="border-b border-outline-variant/8 group hover:bg-surface-container-low/40 transition-colors"
+                        >
+                          {/* Skill name column */}
+                          <td className="px-4 py-2.5 sticky left-0 z-10 bg-surface-container-lowest group-hover:bg-surface-container-low/40 transition-colors">
+                            <div className="flex items-center gap-2.5">
+                              <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${getSkillAssignCount(skill.id) > 0 ? 'bg-emerald-500' : 'bg-outline/30'}`} />
+                              <div className="min-w-0">
+                                <p className="text-sm font-semibold text-on-surface leading-tight truncate">{skill.name}</p>
+                                <span className="text-[10px] text-on-surface-variant/60">
+                                  {getSkillAssignCount(skill.id)}/{techs.length} assigné{getSkillAssignCount(skill.id) > 1 ? 's' : ''}
+                                </span>
+                              </div>
+                            </div>
+                          </td>
 
-                        {techs.map(tech => {
-                          const level = getUserLevel(tech.id, skill.id);
-                          const cfg = level ? LEVEL_CONFIG[level] : null;
-                          return (
-                            <td key={tech.id} className="px-2 py-3 text-center">
-                              {cfg ? (
-                                <div className="flex flex-col items-center gap-1 group/cell">
-                                  <div className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[9px] font-bold border ${cfg.color}`}>
-                                    {[...Array(level)].map((_, i) => <Star key={i} className="w-2 h-2 fill-current" />)}
-                                  </div>
-                                  <button
-                                    onClick={() => handleRemoveSkill(skill.id, tech.id)}
-                                    className="text-[9px] text-red-500/0 group-hover/cell:text-red-500 hover:!text-red-600 transition-all font-medium"
-                                  >retirer</button>
-                                </div>
-                              ) : (
+                          {/* Technician cells */}
+                          {techs.map(tech => {
+                            const level = getUserLevel(tech.id, skill.id);
+                            const cfg = level ? LEVEL_CONFIG[level] : null;
+                            return (
+                              <td key={tech.id} className="px-1 py-1.5 text-center">
                                 <button
                                   onClick={() => {
-                                    setSelectedSkill(selectedSkill?.id === skill.id ? null : skill);
                                     setAssigningUserId(String(tech.id));
+                                    setAssigningLevel(getUserLevel(tech.id, skill.id) || 3);
+                                    setAssignModal({ open: true, skill, tech });
                                   }}
-                                  className="w-6 h-6 rounded-full border-2 border-dashed border-outline-variant/30 flex items-center justify-center hover:border-amber-500/50 hover:bg-amber-500/5 transition-all group/add mx-auto"
-                                  title={`Assigner ${skill.name} à ${tech.fullName}`}
+                                  className={`w-full min-h-[40px] rounded-xl border transition-all flex flex-col items-center justify-center gap-0.5 ${
+                                    level
+                                      ? `${LEVEL_HEAT[level]} border-transparent hover:brightness-110 cursor-pointer`
+                                      : 'border-dashed border-outline-variant/20 hover:border-amber-500/30 hover:bg-amber-500/[0.02] cursor-pointer'
+                                  }`}
+                                  title={level ? `${tech.fullName} : ${cfg.label}` : `Cliquer pour assigner ${skill.name}`}
                                 >
-                                  <Plus className="w-2.5 h-2.5 text-outline/30 group-hover/add:text-amber-500 transition-colors" />
+                                  {level ? (
+                                    <>
+                                      <div className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[8px] font-bold border ${cfg.color}`}>
+                                        {[...Array(level)].map((_, i) => <Star key={i} className="w-1.5 h-1.5 fill-current" />)}
+                                      </div>
+                                      <span className="text-[7px] text-on-surface-variant/50 leading-tight">{cfg.label}</span>
+                                    </>
+                                  ) : (
+                                    <div className="flex items-center justify-center w-7 h-7 rounded-full bg-surface-container/60 border border-dashed border-outline-variant/25 group-hover:bg-amber-500/10 group-hover:border-amber-500/40 transition-all">
+                                      <Plus className="w-3 h-3 text-outline/30 group-hover:text-amber-500 transition-colors" />
+                                    </div>
+                                  )}
                                 </button>
-                              )}
-                            </td>
-                          );
-                        })}
+                              </td>
+                            );
+                          })}
 
-                        <td className="px-2 py-3">
-                          <button
-                            onClick={() => setDeleteConfirm(skill.id)}
-                            className="p-1 rounded-lg text-on-surface-variant/30 hover:text-red-500 hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
-                      </motion.tr>
-
-                      {selectedSkill?.id === skill.id && (
-                        <tr key={`${skill.id}-assign`}>
-                          <td colSpan={techs.length + 2} className="p-0">
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.2 }}
-                              className="border-b border-outline-variant/20 px-4 py-3 flex flex-wrap items-center gap-3 bg-amber-500/5"
+                          {/* Delete button */}
+                          <td className="px-1 py-1.5 align-middle">
+                            <button
+                              onClick={() => setDeleteConfirm(skill.id)}
+                              className="p-1.5 rounded-lg text-on-surface-variant/20 hover:text-red-500 hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100"
+                              title="Supprimer cette compétence"
                             >
-                              <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider">Assigner {skill.name} à :</span>
-                              <select
-                                value={assigningUserId}
-                                onChange={e => setAssigningUserId(e.target.value)}
-                                className="bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary cursor-pointer transition-all"
-                              >
-                                <option value="">Choisir un technicien...</option>
-                                {techs
-                                  .filter(u => !skill.userSkills?.some(s => s.user.id === u.id))
-                                  .map(u => <option key={u.id} value={u.id}>{u.fullName} ({u.role})</option>)
-                                }
-                              </select>
-                              <select
-                                value={assigningLevel}
-                                onChange={e => setAssigningLevel(Number(e.target.value))}
-                                className="bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary cursor-pointer transition-all"
-                              >
-                                {[1, 2, 3, 4, 5].map(l => (
-                                  <option key={l} value={l}>Niveau {l} — {LEVEL_CONFIG[l].label}</option>
-                                ))}
-                              </select>
-                              <button
-                                onClick={() => handleAssignSkill(skill.id)}
-                                disabled={!assigningUserId}
-                                className="px-4 py-2 rounded-xl bg-amber-500 text-slate-950 text-sm font-bold disabled:opacity-40 hover:brightness-110 transition-all"
-                              >Assigner</button>
-                              <button onClick={() => setSelectedSkill(null)} className="p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all ml-auto">
-                                <X className="w-4 h-4" />
-                              </button>
-                            </motion.div>
+                              <Trash2 className="w-3 h-3" />
+                            </button>
                           </td>
-                        </tr>
-                      )}
-                    </>
-                  ))}
-                </AnimatePresence>
+                        </motion.tr>
+                      ))}
+                    </AnimatePresence>
+                  </Fragment>
+                ))}
               </tbody>
             </table>
           </div>
@@ -475,6 +482,139 @@ export default function SkillsManagement() {
           </div>
         )}
       </div>
+
+      {/* ── Assignment Modal ──────────────────────────────────────────── */}
+      <AnimatePresence>
+        {assignModal.open && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setAssignModal({ open: false, skill: null, tech: null })}
+              className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="relative w-full max-w-lg rounded-3xl border border-outline-variant/30 bg-surface shadow-2xl overflow-hidden"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b border-outline-variant/20">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-xl bg-amber-500/10">
+                    <UserPlus className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-bold text-on-surface">Assigner une compétence</h2>
+                    <p className="text-[11px] text-on-surface-variant">
+                      {assignModal.skill?.name} — {assignModal.tech?.fullName}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setAssignModal({ open: false, skill: null, tech: null })}
+                  className="p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="px-5 py-5 space-y-5">
+                {/* Current level display */}
+                {(() => {
+                  const currentLevel = getUserLevel(assignModal.tech?.id, assignModal.skill?.id);
+                  const curCfg = currentLevel ? LEVEL_CONFIG[currentLevel] : null;
+                  return currentLevel && curCfg ? (
+                    <div className="flex items-center justify-between p-3 rounded-xl bg-surface-container border border-outline-variant/20">
+                      <span className="text-xs text-on-surface-variant font-medium">Niveau actuel</span>
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold border ${curCfg.color}`}>
+                        {[...Array(currentLevel)].map((_, i) => <Star key={i} className="w-2 h-2 fill-current" />)}
+                        <span className="ml-1">{curCfg.label}</span>
+                      </span>
+                    </div>
+                  ) : null;
+                })()}
+
+                {/* Level selector */}
+                <label className="flex flex-col gap-2">
+                  <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">
+                    Nouveau niveau
+                  </span>
+                  <div className="grid grid-cols-5 gap-2">
+                    {[1, 2, 3, 4, 5].map(lvl => (
+                      <button
+                        key={lvl}
+                        onClick={() => setAssigningLevel(lvl)}
+                        className={`py-3 rounded-xl border text-center transition-all ${
+                          assigningLevel === lvl
+                            ? `${LEVEL_CONFIG[lvl].color} scale-105 shadow-sm`
+                            : 'border-outline-variant/30 text-on-surface-variant hover:bg-surface-container hover:border-outline-variant/50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-center gap-0.5 mb-1">
+                          {[...Array(lvl)].map((_, i) => (
+                            <Star key={i} className={`w-2 h-2 ${assigningLevel === lvl ? 'fill-current' : 'text-outline/40'}`} />
+                          ))}
+                        </div>
+                        <span className="text-[9px] font-bold leading-tight">{LEVEL_CONFIG[lvl].label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </label>
+
+                {/* Description of selected level */}
+                <div className={`px-3 py-2 rounded-xl border ${LEVEL_CONFIG[assigningLevel]?.color} border-current/20`}>
+                  <p className="text-[11px] font-medium">
+                    {assigningLevel === 1 && 'Connaissances de base, nécessite une supervision régulière.'}
+                    {assigningLevel === 2 && 'Peut réaliser des tâches simples en autonomie avec des vérifications.'}
+                    {assigningLevel === 3 && 'Autonome sur les tâches courantes, capable de former les débutants.'}
+                    {assigningLevel === 4 && 'Maîtrise avancée, résout des problèmes complexes sans aide.'}
+                    {assigningLevel === 5 && 'Expert reconnu, référence technique, conçoit des solutions.'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="flex items-center justify-between px-5 py-4 border-t border-outline-variant/20 bg-surface-container-low/40">
+                {getUserLevel(assignModal.tech?.id, assignModal.skill?.id) ? (
+                  <button
+                    onClick={() => {
+                      handleRemoveSkill(assignModal.skill?.id, assignModal.tech?.id);
+                      setAssignModal({ open: false, skill: null, tech: null });
+                    }}
+                    className="px-4 py-2 rounded-xl border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-bold hover:bg-red-500/10 transition-all"
+                  >
+                    Retirer la compétence
+                  </button>
+                ) : <div />}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setAssignModal({ open: false, skill: null, tech: null })}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleAssignSkill(assignModal.skill?.id);
+                      setAssignModal({ open: false, skill: null, tech: null });
+                    }}
+                    className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 text-xs font-bold shadow-md hover:brightness-110 transition-all"
+                  >
+                    <Check className="w-3.5 h-3.5 inline-block mr-1.5 -mt-0.5" />
+                    {getUserLevel(assignModal.tech?.id, assignModal.skill?.id) ? 'Mettre à jour' : 'Assigner'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <ConfirmDialog
         open={!!deleteConfirm}
