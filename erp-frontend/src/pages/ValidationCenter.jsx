@@ -379,7 +379,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                         </div>
                         <div>
                           <h3 className="text-sm font-bold text-on-surface">
-                            Réponse pour : {ticketObj?.title || `Ticket #${draft.ticketId}`}
+                            Réponse pour : {ticketObj?.title || (draft.ticketId ? `Ticket #${draft.ticketId}` : 'Ticket sans numéro')}
                           </h3>
                           <p className="text-[11px] text-on-surface-variant">
                             Demandeur : <strong className="text-on-surface">{ticketObj?.requester?.fullName || draft.recipientEmail || 'Inconnu'}</strong>
@@ -411,9 +411,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                     <div className="p-4 rounded-2xl bg-surface-container-low/40 border border-outline-variant/20 space-y-2">
                       <div className="flex items-center justify-between text-[11px] font-bold text-on-surface-variant">
                         <span>Proposition de réponse IA</span>
-                        {draft.confidenceScore && (
+                        {draft.aiConfidence != null && (
                           <span className="text-purple-600 dark:text-purple-400 font-mono">
-                            {Math.round(draft.confidenceScore * 100)}% confiance
+                            {Math.round(draft.aiConfidence * 100)}% confiance
                           </span>
                         )}
                       </div>
@@ -444,7 +444,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                         </div>
                       ) : (
                         <p className="text-xs text-on-surface leading-relaxed whitespace-pre-line font-serif italic">
-                          "{draft.proposedBody}"
+                          "{draft.proposedContent}"
                         </p>
                       )}
                     </div>
@@ -454,7 +454,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                       <button
                         onClick={() => {
                           setEditingDraftId(draft.id);
-                          setEditBody(draft.proposedBody);
+                          setEditBody(draft.proposedContent);
                         }}
                         className="text-xs text-purple-600 dark:text-purple-400 font-bold hover:underline"
                       >
@@ -519,7 +519,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                         </div>
                         <div>
                           <h3 className="text-sm font-bold text-on-surface">
-                            Relance pour : {ticketObj?.title || `Ticket #${draft.ticketId}`}
+                            Relance pour : {ticketObj?.title || (draft.ticketId ? `Ticket #${draft.ticketId}` : 'Ticket sans numéro')}
                           </h3>
                           <p className="text-[11px] text-on-surface-variant">
                             Destinataire : <strong className="text-on-surface">{draft.recipientName || draft.recipientEmail}</strong>
