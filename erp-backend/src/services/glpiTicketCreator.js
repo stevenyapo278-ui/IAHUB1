@@ -80,8 +80,19 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
       headers,
       body: JSON.stringify(ticketPayload),
     });
-    if (!ticketRes.ok) throw new Error(`GLPI création ticket échoué (${ticketRes.status})`);
-    const { id: glpiId } = await ticketRes.json();
+    // Lire le body une seule fois (le stream ne peut être consommé qu'une fois)
+    const rawBody = await ticketRes.text().catch(() => '(corps vide)');
+
+    if (!ticketRes.ok) {
+      throw new Error(`GLPI création ticket échoué (${ticketRes.status}) : ${rawBody}`);
+    }
+
+    let glpiId;
+    try {
+      glpiId = JSON.parse(rawBody).id;
+    } catch (parseErr) {
+      throw new Error(`Réponse GLPI invalide après création ticket (${ticketRes.status}) : ${rawBody}`);
+    }
 
     // Notes privées à ajouter au ticket GLPI
     const followupParts = [];
