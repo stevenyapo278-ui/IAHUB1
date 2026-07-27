@@ -13,6 +13,7 @@ done
 echo "PostgreSQL prêt."
 
 echo "Résolution des éventuelles migrations en échec..."
+npx prisma migrate resolve --rolled-back 20260727000000_add_missing_columns 2>/dev/null || true
 npx prisma migrate resolve --rolled-back 20260727000100_add_remaining_missing_columns 2>/dev/null || true
 
 echo "Migration de la base de données..."
