@@ -103,7 +103,8 @@ async function getGlpiConfig(serviceName) {
   const appToken = config.extra?.appToken;
   if (!appToken) return null;
   return {
-    baseUrl: config.baseUrl,
+    // Enlève le(s) slash(es) final(s) de l'URL pour éviter les doubles slashes (ex: apirest.php//Ticket)
+    baseUrl: config.baseUrl.replace(/\/+$/, ''),
     userToken: config.apiKey,
     appToken,
     dateFrom: config.extra?.dateFrom || null,
