@@ -4,6 +4,7 @@ const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requireSuperAdmin } = require('../middleware/permissions');
 const { normalizeHost, resolveBackendUrl, resolveFrontendUrl } = require('../services/systemSettings');
+const { auditLog } = require('../services/auditLogService');
 
 // Réglages réservés au SUPERADMIN — déplacés hors de Paramètres > Automatisation (accessible à
 // tout ADMIN) car une mauvaise valeur ici peut casser la synchro GLPI/email, envoyer des emails
@@ -87,6 +88,7 @@ router.patch(
 
     const updated = await prisma.systemSettings.update({ where: { id: 1 }, data });
     return res.json(updated);
+    auditLog('ADVANCED_SETTINGS_UPDATED', { actor: req.user, targetType: 'SystemSettings', targetId: 1, targetLabel: 'Réglages avancés', metadata: { changedFields: Object.keys(data) } }).catch(() => {});
   }
 );
 

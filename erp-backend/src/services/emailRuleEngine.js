@@ -51,7 +51,25 @@ function testMatch(textToTest, matchType, matchValue) {
  * @param {string} fromEmail - Adresse email de l'expéditeur
  * @returns {Promise<Object|null>} La règle qui correspond, ou null
  */
-async function evaluateRules(subject = '', body = '', fromEmail = '') {
+/**
+ * Évalue si le moment présent est pendant les heures ouvrées (Lun-Ven 8h-18h).
+ */
+function isWorkHours() {
+  const now = new Date();
+  const day = now.getDay();
+  const hour = now.getHours();
+  return day >= 1 && day <= 5 && hour >= 8 && hour < 18;
+}
+
+/**
+ * Évalue un email entrant par rapport aux règles de triage configurées en base de données.
+ * @param {string} subject - Sujet de l'email
+ * @param {string} body - Corps textuel de l'email
+ * @param {string} fromEmail - Adresse email de l'expéditeur
+ * @param {Object} [extraContext] - Contexte additionnel (sentiment, etc.)
+ * @returns {Promise<Object|null>} La règle qui correspond, ou null
+ */
+async function evaluateRules(subject = '', body = '', fromEmail = '', extraContext = {}) {
   try {
     // Charger toutes les règles actives triées par priorité décroissante
     const rules = await prisma.triageRule.findMany({
@@ -82,7 +100,24 @@ async function evaluateRules(subject = '', body = '', fromEmail = '') {
           break;
 
         case 'from':
+        case 'domain':
           isMatch = testMatch(fromEmail, rule.matchType, rule.matchValue);
+          break;
+
+        case 'sentiment':
+          if (rule.sentiment) {
+            isMatch = (extraContext.sentiment || '').toUpperCase() === rule.sentiment.toUpperCase();
+          } else {
+            isMatch = testMatch(extraContext.sentiment || '', rule.matchType, rule.matchValue);
+          }
+          break;
+
+        case 'time_window':
+          if (rule.timeWindow === 'WORK_HOURS') {
+            isMatch = isWorkHours();
+          } else if (rule.timeWindow === 'OFF_HOURS') {
+            isMatch = !isWorkHours();
+          }
           break;
 
         default:
@@ -98,7 +133,12 @@ async function evaluateRules(subject = '', body = '', fromEmail = '') {
           skillName: rule.skillName,
           teamName: rule.teamName,
           ticketPriority: rule.ticketPriority || 'P3',
-          isSpam: rule.isSpam
+          isSpam: rule.isSpam,
+          autoApproveGlpi: rule.autoApproveGlpi || false,
+          assignMode: rule.assignMode || 'SPECIFIC',
+          tags: rule.tags || [],
+          autoEscalateMinutes: rule.autoEscalateMinutes || null,
+          notificationWebhook: rule.notificationWebhook || null,
         };
       }
     }

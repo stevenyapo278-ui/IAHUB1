@@ -1,22 +1,31 @@
 import { useEffect, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import api from '../api/client';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { useAuth } from '../context/AuthContext';
+import { useFilterParam } from '../hooks/useFilterParam';
+import {
+  Users as UsersIcon, UserPlus, ShieldCheck, UserX,
+  Trash2, Upload, Download, X, Search, CheckCircle2,
+  RotateCcw, KeyRound, Edit2, AlertTriangle, Zap
+} from 'lucide-react';
 
 const ROLE_LABELS = {
-  SUPERADMIN: 'Super-administrateur — accès total, y compris la configuration serveur',
-  ADMIN: 'Administrateur — accès complet',
-  TECHNICIAN: 'Technicien — gère et traite les tickets',
-  REQUESTER: 'Demandeur — peut créer des tickets',
+  SUPERADMIN: 'Superadmin',
+  ADMIN: 'Admin',
+  HOTLINE: 'Hotline',
+  TECHNICIAN: 'Technicien',
+  REQUESTER: 'Demandeur',
 };
-
 const ADMIN_LIKE_ROLES = ['SUPERADMIN', 'ADMIN'];
 
 function assignableRoles(actorRole) {
-  if (actorRole === 'SUPERADMIN') return ['SUPERADMIN', 'ADMIN', 'TECHNICIAN', 'REQUESTER'];
-  if (actorRole === 'ADMIN') return ['TECHNICIAN', 'REQUESTER'];
+  if (actorRole === 'SUPERADMIN') return ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN', 'REQUESTER'];
+  if (actorRole === 'ADMIN') return ['HOTLINE', 'TECHNICIAN', 'REQUESTER'];
+  if (actorRole === 'HOTLINE') return ['TECHNICIAN', 'REQUESTER'];
   return [];
 }
 
@@ -24,62 +33,41 @@ const emptyForm = { email: '', fullName: '', password: '', role: 'REQUESTER', te
 
 function initials(name) {
   if (!name) return '?';
-  return name.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase();
+  return name.split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase();
 }
 
 const ROLE_CONFIG = {
-  SUPERADMIN: {
-    label: 'Superadmin',
-    bg: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20',
-    icon: 'military_tech',
-  },
-  ADMIN: {
-    label: 'Admin',
-    bg: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20',
-    icon: 'admin_panel_settings',
-  },
-  TECHNICIAN: {
-    label: 'Technicien',
-    bg: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20',
-    icon: 'build',
-  },
-  REQUESTER: {
-    label: 'Demandeur',
-    bg: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20',
-    icon: 'person',
-  },
+  SUPERADMIN: { label: 'Superadmin',  color: 'text-purple-700 dark:text-purple-400', bg: 'bg-purple-500/15', border: 'border-purple-500/25', icon: 'military_tech'         },
+  ADMIN:      { label: 'Admin',        color: 'text-blue-700 dark:text-blue-400',   bg: 'bg-blue-500/15',   border: 'border-blue-500/25',   icon: 'admin_panel_settings'  },
+  HOTLINE:    { label: 'Hotline',      color: 'text-amber-700 dark:text-amber-400', bg: 'bg-amber-500/15',  border: 'border-amber-500/25',  icon: 'support_agent'         },
+  TECHNICIAN: { label: 'Technicien',   color: 'text-emerald-700 dark:text-emerald-400',bg: 'bg-emerald-500/15',border: 'border-emerald-500/25',icon: 'build'                 },
+  REQUESTER:  { label: 'Demandeur',    color: 'text-zinc-700 dark:text-zinc-400',   bg: 'bg-zinc-500/15',   border: 'border-zinc-500/25',   icon: 'person'                },
 };
 
-function ToggleSwitch({ checked, onChange, disabled, title }) {
+function ToggleSwitch({ checked, onChange, disabled = false, title }) {
   return (
-    <button
+    <motion.button
       type="button"
-      role="switch"
-      aria-checked={checked}
+      onClick={() => onChange(!checked)}
       disabled={disabled}
       title={title}
-      onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-40 ${
-        checked ? 'bg-primary' : 'bg-outline-variant/60 dark:bg-surface-container-high'
-      }`}
+      whileTap={{ scale: 0.92 }}
+      className={`relative w-12 h-6 rounded-full border transition-all duration-300 outline-none ${
+        checked
+          ? 'bg-primary border-primary/60 shadow-sm shadow-primary/20'
+          : 'bg-surface-container-high border-outline-variant/60'
+      } disabled:opacity-50 disabled:cursor-not-allowed`}
     >
-      <span
-        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
-          checked ? 'translate-x-4' : 'translate-x-0'
+      <motion.span
+        animate={{ x: checked ? 24 : 0 }}
+        transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+        className={`absolute top-[2px] left-[2px] w-[18px] h-[18px] rounded-full shadow-sm ${
+          checked ? 'bg-white' : 'bg-on-surface-variant/80'
         }`}
       />
-    </button>
+    </motion.button>
   );
 }
-
-const containerVariants = {
-  hidden: { opacity: 0 },
-  visible: { opacity: 1, transition: { staggerChildren: 0.05 } },
-};
-const itemVariants = {
-  hidden: { opacity: 0, y: 12 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: [0.16, 1, 0.3, 1] } },
-};
 
 export default function Users() {
   const { user: currentUser } = useAuth();
@@ -101,58 +89,80 @@ export default function Users() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [confirmResetId, setConfirmResetId] = useState(null);
   const [resetting, setResetting] = useState(false);
-  const [resetMessage, setResetMessage] = useState('');
   const [showGlpiImport, setShowGlpiImport] = useState(false);
   const [importableUsers, setImportableUsers] = useState([]);
   const [selectedImportIds, setSelectedImportIds] = useState([]);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
-  const inputClass = 'bg-surface border border-outline-variant/60 rounded-xl py-2 px-3.5 text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300';
+  const [showCsvImport, setShowCsvImport] = useState(false);
+  const [csvFile, setCsvFile] = useState(null);
+  const [csvImporting, setCsvImporting] = useState(false);
+  const [csvResult, setCsvResult] = useState(null);
+  const [searchQuery, setSearchQuery] = useFilterParam('search');
+  const [roleFilter, setRoleFilter] = useFilterParam('role');
+  const [teamFilter, setTeamFilter] = useFilterParam('teamId');
+  const [page, setPage] = useState(1);
+  const [limit] = useState(25);
+  const [total, setTotal] = useState(0);
+  const [staffCount, setStaffCount] = useState(0);
+  const [inactiveCount, setInactiveCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [assignTeamId, setAssignTeamId] = useState('');
+  const [showPurgeModal, setShowPurgeModal] = useState(false);
+  const [purgePreview, setPurgePreview] = useState(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [purgeMode, setPurgeMode] = useState('smart');
+  const [purging, setPurging] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const loadReqIdRef = useRef(0);
 
-
-
-  function toggleSelect(id) {
-    setSelectedIds((ids) => (ids.includes(id) ? ids.filter((i) => i !== id) : [...ids, id]));
+  function load() {
+    const reqId = ++loadReqIdRef.current;
+    const params = new URLSearchParams();
+    params.set('page', page); params.set('limit', limit);
+    if (searchQuery?.trim()) params.set('search', searchQuery.trim());
+    if (roleFilter) params.set('role', roleFilter);
+    if (teamFilter) params.set('teamId', teamFilter);
+    Promise.all([api.get(`/users?${params}`), api.get('/teams'), api.get('/permission-groups')])
+      .then(([uRes, tRes, gRes]) => {
+        if (reqId !== loadReqIdRef.current) return;
+        if (uRes.data.users) {
+          setUsers(uRes.data.users); setTotal(uRes.data.total || 0);
+          setStaffCount(uRes.data.staffCount ?? 0); setInactiveCount(uRes.data.inactiveCount ?? 0);
+          setTotalPages(uRes.data.totalPages || 1);
+        } else {
+          const list = Array.isArray(uRes.data) ? uRes.data : [];
+          setUsers(list); setTotal(list.length);
+          setStaffCount(list.filter(u => u.role !== 'REQUESTER').length);
+          setInactiveCount(list.filter(u => !u.isActive).length);
+          setTotalPages(1);
+        }
+        setTeams(tRes.data); setGroups(gRes.data); setSelectedIds([]);
+      })
+      .catch(err => { if (reqId === loadReqIdRef.current) setError(err.response?.data?.error || 'Erreur de chargement'); });
   }
-  function toggleSelectAll() {
-    setSelectedIds((ids) => (ids.length === users.length ? [] : users.map((u) => u.id)));
-  }
+  useEffect(() => { load(); }, [page, searchQuery, roleFilter, teamFilter]);
 
-  async function handleAssignToGroup() {
-    if (!assignGroupId || selectedIds.length === 0) return;
-    setAssigning(true); setError('');
-    try {
-      await api.post(`/permission-groups/${assignGroupId}/assign`, { userIds: selectedIds });
-      toast.success(`${selectedIds.length} utilisateur(s) assigné(s) au groupe`);
-      setAssignGroupId(''); setSelectedIds([]); load();
-    } catch (err) { setError(err.response?.data?.error || "Erreur lors de l'assignation"); }
-    finally { setAssigning(false); }
-  }
+  function toggleSelect(id) { setSelectedIds(ids => ids.includes(id) ? ids.filter(i => i !== id) : [...ids, id]); }
+  function toggleSelectAll() { setSelectedIds(ids => ids.length === users.length ? [] : users.map(u => u.id)); }
 
   async function updateField(id, field, value) {
     try { await api.patch(`/users/${id}`, { [field]: value }); load(); }
-    catch (err) { setError(err.response?.data?.error || 'Erreur lors de la mise à jour'); }
+    catch (err) { setError(err.response?.data?.error || 'Erreur'); }
   }
 
-  function startEdit(u) {
-    setEditingId(u.id); setEditForm({ fullName: u.fullName, email: u.email }); setError('');
-  }
+  function startEdit(u) { setEditingId(u.id); setEditForm({ fullName: u.fullName, email: u.email }); }
   async function saveEdit(id) {
-    setSavingEdit(true); setError('');
-    try { await api.patch(`/users/${id}`, editForm); toast.success('Utilisateur mis à jour'); setEditingId(null); load(); }
-    catch (err) { setError(err.response?.data?.error || 'Erreur lors de la mise à jour'); }
+    setSavingEdit(true);
+    try { await api.patch(`/users/${id}`, editForm); toast.success('Mis à jour'); setEditingId(null); load(); }
+    catch (err) { setError(err.response?.data?.error || 'Erreur'); }
     finally { setSavingEdit(false); }
   }
 
-  function askDelete(id) { setConfirmDeleteId(id); }
-  function askResetPassword(id) { setConfirmResetId(id); setResetMessage(''); }
-
   async function handleResetPassword() {
-    if (!confirmResetId) return; setResetting(true); setError('');
-    try {
-      const { data } = await api.post(`/users/${confirmResetId}/reset-password`);
-      setResetMessage(data.message); setConfirmResetId(null);
-    } catch (err) { setError(err.response?.data?.error || 'Erreur'); setConfirmResetId(null); }
+    if (!confirmResetId) return; setResetting(true);
+    try { await api.post(`/users/${confirmResetId}/reset-password`); toast.success('Mot de passe réinitialisé'); setConfirmResetId(null); }
+    catch (err) { setError(err.response?.data?.error || 'Erreur'); setConfirmResetId(null); }
     finally { setResetting(false); }
   }
 
@@ -167,929 +177,622 @@ export default function Users() {
     e.preventDefault(); setError(''); setSubmitting(true);
     try {
       await api.post('/users', { ...form, teamId: form.teamId ? Number(form.teamId) : null });
-      toast.success('Utilisateur créé');
-      setForm(emptyForm); setShowForm(false); load();
+      toast.success('Utilisateur créé'); setForm(emptyForm); setShowForm(false); load();
     } catch (err) { setError(err.response?.data?.error || 'Erreur lors de la création'); }
     finally { setSubmitting(false); }
   }
 
-
-
-  const [showCsvImport, setShowCsvImport] = useState(false);
-  const [csvFile, setCsvFile] = useState(null);
-  const [csvImporting, setCsvImporting] = useState(false);
-  const [csvResult, setCsvResult] = useState(null);
-
-  function downloadSampleCsv() {
-    const sample = "Identifiant;Nom de famille;Courriels;Téléphone;Lieu;Actif\n" +
-                   "aabledou (1778);BLEDOU;Ange.BLEDOU@prosuma.ci;;;Oui\n" +
-                   "aadepo (986);Adepo;&nbsp;;;;Oui\n" +
-                   "aanoma (978);Anoma;Arnaud.Anoma@prosuma.ci;345;CENTRALE D'ACHATS > DAFCI;Oui\n";
-    const blob = new Blob(['\uFEFF' + sample], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', 'modele_import_utilisateurs.csv');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  async function handleAssignToGroup() {
+    if (!assignGroupId || selectedIds.length === 0) return; setAssigning(true);
+    try { await api.post(`/permission-groups/${assignGroupId}/assign`, { userIds: selectedIds }); toast.success(`${selectedIds.length} assigné(s) au groupe`); setAssignGroupId(''); setSelectedIds([]); load(); }
+    catch (err) { setError(err.response?.data?.error || 'Erreur'); } finally { setAssigning(false); }
   }
-
-  async function handleCsvUpload() {
-    if (!csvFile) return;
-    setCsvImporting(true);
-    setError('');
-    const formData = new FormData();
-    formData.append('file', csvFile);
-    try {
-      const { data } = await api.post('/users/import-csv', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      setCsvResult(data);
-      toast.success(`Import terminé : ${data.imported} créé(s), ${data.updated} mis à jour`);
-      load();
-    } catch (err) {
-      setError(err.response?.data?.error || "Erreur lors de l'importation CSV");
-    } finally {
-      setCsvImporting(false);
-    }
-  }
-
-  const [searchQuery, setSearchQuery] = useState('');
-  const [roleFilter, setRoleFilter] = useState('');
-  const [teamFilter, setTeamFilter] = useState('');
-  const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(25);
-  const [total, setTotal] = useState(0);
-  const [staffCount, setStaffCount] = useState(0);
-  const [inactiveCount, setInactiveCount] = useState(0);
-  const [totalPages, setTotalPages] = useState(1);
-  const [assignTeamId, setAssignTeamId] = useState('');
-  const [showPurgeModal, setShowPurgeModal] = useState(false);
-  const [purging, setPurging] = useState(false);
-  const [bulkDeleting, setBulkDeleting] = useState(false);
-  const loadReqIdRef = useRef(0);
-
-  function load() {
-    const reqId = ++loadReqIdRef.current;
-    const params = new URLSearchParams();
-    params.set('page', page);
-    params.set('limit', limit);
-    if (searchQuery && searchQuery.trim()) params.set('search', searchQuery.trim());
-    if (roleFilter) params.set('role', roleFilter);
-    if (teamFilter) params.set('teamId', teamFilter);
-
-    Promise.all([
-      api.get(`/users?${params.toString()}`),
-      api.get('/teams'),
-      api.get('/permission-groups'),
-    ])
-      .then(([usersRes, teamsRes, groupsRes]) => {
-        if (reqId !== loadReqIdRef.current) return;
-        if (usersRes.data.users) {
-          setUsers(usersRes.data.users);
-          setTotal(usersRes.data.total || 0);
-          setStaffCount(usersRes.data.staffCount ?? 0);
-          setInactiveCount(usersRes.data.inactiveCount ?? 0);
-          setTotalPages(usersRes.data.totalPages || 1);
-        } else {
-          const list = Array.isArray(usersRes.data) ? usersRes.data : [];
-          setUsers(list);
-          setTotal(list.length);
-          setStaffCount(list.filter((u) => u.role !== 'REQUESTER').length);
-          setInactiveCount(list.filter((u) => !u.isActive).length);
-          setTotalPages(1);
-        }
-        setTeams(teamsRes.data);
-        setGroups(groupsRes.data);
-        setSelectedIds([]);
-      })
-      .catch((err) => {
-        if (reqId !== loadReqIdRef.current) return;
-        setError(err.response?.data?.error || 'Erreur de chargement');
-      });
-  }
-
-  useEffect(() => {
-    load();
-  }, [page, limit, searchQuery, roleFilter, teamFilter]);
 
   async function handleAssignToTeam() {
-    if (!assignTeamId || selectedIds.length === 0) return;
-    setAssigning(true); setError('');
-    try {
-      await api.post('/users/bulk-assign-team', { userIds: selectedIds, teamId: assignTeamId === 'none' ? null : assignTeamId });
-      toast.success(`${selectedIds.length} utilisateur(s) assigné(s) à l'équipe`);
-      setAssignTeamId(''); setSelectedIds([]); load();
-    } catch (err) { setError(err.response?.data?.error || "Erreur lors de l'assignation"); }
-    finally { setAssigning(false); }
+    if (!assignTeamId || selectedIds.length === 0) return; setAssigning(true);
+    try { await api.post('/users/bulk-assign-team', { userIds: selectedIds, teamId: assignTeamId === 'none' ? null : assignTeamId }); toast.success(`${selectedIds.length} assigné(s)`); setAssignTeamId(''); setSelectedIds([]); load(); }
+    catch (err) { setError(err.response?.data?.error || 'Erreur'); } finally { setAssigning(false); }
   }
 
   async function handleBulkDelete() {
-    if (selectedIds.length === 0) return;
-    setBulkDeleting(true); setError('');
-    try {
-      const { data } = await api.post('/users/bulk-delete', { userIds: selectedIds });
-      toast.success(`${data.deletedCount} utilisateur(s) supprimé(s)`);
-      setSelectedIds([]); load();
-    } catch (err) { setError(err.response?.data?.error || 'Erreur lors de la suppression par lot'); }
-    finally { setBulkDeleting(false); }
+    if (selectedIds.length === 0) return; setBulkDeleting(true);
+    try { const { data } = await api.post('/users/bulk-delete', { userIds: selectedIds }); toast.success(`${data.deletedCount} supprimé(s)`); setSelectedIds([]); load(); }
+    catch (err) { setError(err.response?.data?.error || 'Erreur'); } finally { setBulkDeleting(false); }
   }
 
-  async function handlePurgeImported() {
-    setPurging(true); setError('');
+  async function openPurgeModal() {
+    setShowPurgeModal(true);
+    setLoadingPreview(true);
+    setPurgePreview(null);
     try {
-      const { data } = await api.delete('/users/purge-imported');
-      toast.success(`${data.purgedCount} utilisateur(s) importé(s) purgés avec succès`);
-      setShowPurgeModal(false); load();
-    } catch (err) { setError(err.response?.data?.error || 'Erreur lors de la purge'); }
-    finally { setPurging(false); }
+      const { data } = await api.get('/users/purge-preview');
+      setPurgePreview(data);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur lors du calcul de l\'aperçu');
+    } finally {
+      setLoadingPreview(false);
+    }
+  }
+
+  async function handlePurgeSmart() {
+    setPurging(true);
+    try {
+      const { data } = await api.post('/users/purge-smart', { mode: purgeMode });
+      toast.success(data.message);
+      setShowPurgeModal(false);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur lors de la purge');
+    } finally {
+      setPurging(false);
+    }
+  }
+
+  function downloadSampleCsv() {
+    const sample = "Identifiant;Nom de famille;Courriels;Téléphone;Lieu;Actif\nabledou (1778);BLEDOU;Ange.BLEDOU@prosuma.ci;;;Oui\n";
+    const blob = new Blob(['\uFEFF' + sample], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url; link.setAttribute('download', 'modele_import_utilisateurs.csv');
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+  }
+
+  async function handleCsvUpload() {
+    if (!csvFile) return; setCsvImporting(true);
+    const fd = new FormData(); fd.append('file', csvFile);
+    try { const { data } = await api.post('/users/import-csv', fd, { headers: { 'Content-Type': 'multipart/form-data' } }); setCsvResult(data); toast.success(`Import : ${data.imported} créé(s), ${data.updated} mis à jour`); load(); }
+    catch (err) { setError(err.response?.data?.error || 'Erreur CSV'); } finally { setCsvImporting(false); }
   }
 
   return (
-    <motion.div className="p-lg space-y-lg" variants={containerVariants} initial="hidden" animate="visible">
-      {/* ── En-tête ─────────────────────────────────────────────────────────── */}
-      <motion.header variants={itemVariants} className="flex justify-between items-end gap-md">
-        <div>
-          <h2 className="font-display-lg text-display-lg text-on-background tracking-tight">Utilisateurs</h2>
-          <p className="font-body-lg text-body-lg text-on-surface-variant">Gestion des comptes et des rôles ({total} total).</p>
+    <div className="flex flex-col min-h-screen">
+      {/* ── Top Bar ─────────────────────────────────────────────────────── */}
+      <div className="sticky top-0 z-20 shrink-0 border-b border-outline-variant/30 bg-surface-container-lowest/95 backdrop-blur-sm px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between gap-3 flex-wrap">
+        {/* Title */}
+        <div className="flex items-center gap-3">
+          <div className="p-1.5 bg-blue-500/10 rounded-lg">
+            <UsersIcon className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+          </div>
+          <div>
+            <h1 className="text-base font-bold text-on-surface">Gestion des Utilisateurs</h1>
+            <p className="text-[11px] text-on-surface-variant font-medium">{total} comptes · {staffCount} staff · {inactiveCount} inactifs</p>
+          </div>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-            onClick={() => setShowPurgeModal(true)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-red-500/30 text-red-500 hover:bg-red-500/10 font-semibold text-body-sm transition-all duration-300 whitespace-nowrap"
-            title="Supprimer tous les utilisateurs importés de GLPI / CSV"
+
+        {/* Actions */}
+        <div className="flex items-center gap-2 ml-auto shrink-0">
+          <button onClick={openPurgeModal}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 text-xs font-semibold transition-all cursor-pointer"
+            title="Purger & nettoyer intelligemment les comptes"
           >
-            <span className="material-symbols-outlined text-[18px]" aria-hidden="true">delete_sweep</span>
-            Purger les importés
-          </motion.button>
-          <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-            onClick={() => {
-              setError('');
-              setCsvFile(null);
-              setCsvResult(null);
-              setShowCsvImport(true);
-            }}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-outline-variant text-on-surface hover:bg-surface-container-low font-semibold text-body-sm transition-all duration-300 whitespace-nowrap"
+            <Trash2 className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Purger</span>
+          </button>
+          <button onClick={() => { setError(''); setCsvFile(null); setCsvResult(null); setShowCsvImport(true); }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/40 text-on-surface-variant hover:bg-surface-container text-xs font-semibold transition-all"
           >
-            <span className="material-symbols-outlined text-[18px]" aria-hidden="true">upload_file</span>
-            Importer CSV
-          </motion.button>
-          <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-            onClick={async () => {
-              setError(''); setImportResult(null);
-              try {
-                const { data } = await api.get('/glpi/importable-users');
-                setImportableUsers(data);
-                setSelectedImportIds([]);
-                setShowGlpiImport(true);
-              } catch (err) {
-                setError(err.response?.data?.error || 'Erreur de récupération des utilisateurs GLPI');
-              }
-            }}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-outline-variant text-on-surface hover:bg-surface-container-low font-semibold text-body-sm transition-all duration-300 whitespace-nowrap"
+            <Upload className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">CSV</span>
+          </button>
+          <button onClick={async () => {
+            setError(''); setImportResult(null);
+            try { const { data } = await api.get('/glpi/importable-users'); setImportableUsers(data); setSelectedImportIds([]); setShowGlpiImport(true); }
+            catch (err) { setError(err.response?.data?.error || 'Erreur GLPI'); }
+          }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/40 text-on-surface-variant hover:bg-surface-container text-xs font-semibold transition-all"
           >
-            <span className="material-symbols-outlined text-[18px]" aria-hidden="true">cloud_download</span>
-            Importer de GLPI
-          </motion.button>
-          <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-            onClick={() => { setShowForm((v) => !v); setError(''); }}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl font-semibold text-body-sm transition-all duration-300 whitespace-nowrap ${
-              showForm
-                ? 'border border-outline-variant text-on-surface hover:bg-surface-container-low'
-                : 'btn-gradient shadow-md shadow-primary/10 dark:shadow-white/10 hover:shadow-lg'
-            }`}
+            <Download className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">GLPI</span>
+          </button>
+          <motion.button
+            whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+            onClick={() => { setShowForm(v => !v); setError(''); }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-bold shadow-md shadow-blue-500/20"
           >
-            <span className="material-symbols-outlined text-[18px]" aria-hidden="true">{showForm ? 'close' : 'person_add'}</span>
-            {showForm ? 'Fermer' : 'Nouvel utilisateur'}
+            {showForm ? <X className="w-3.5 h-3.5" /> : <UserPlus className="w-3.5 h-3.5" />}
+            <span className="hidden sm:inline">{showForm ? 'Fermer' : 'Nouveau compte'}</span>
           </motion.button>
         </div>
-      </motion.header>
+      </div>
 
-      {/* ── Messages ────────────────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {error && (
-          <motion.div initial={{ opacity: 0, y: -8, height: 0 }} animate={{ opacity: 1, y: 0, height: 'auto' }} exit={{ opacity: 0, y: -8, height: 0 }}
-            className="border border-red-500/20 bg-red-500/5 text-red-500 p-md rounded-xl font-body-md"
-          >{error}</motion.div>
-        )}
-        {resetMessage && (
-          <motion.div initial={{ opacity: 0, y: -8, height: 0 }} animate={{ opacity: 1, y: 0, height: 'auto' }} exit={{ opacity: 0, y: -8, height: 0 }}
-            className="border border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 p-md rounded-xl font-body-md"
-          >{resetMessage}</motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* FORMULAIRE DE CRÉATION */}
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* ── Create user panel ─────────────────────────────────────────────── */}
       <AnimatePresence>
         {showForm && (
-          <motion.form initial={{ opacity: 0, y: -16, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -16, scale: 0.98 }}
-            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }} onSubmit={handleCreate} className="bento-card flex flex-col"
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.22 }}
+            className="overflow-hidden border-b border-outline-variant/20 bg-surface-container-low/40"
           >
-            <div className="bento-card-header">
-              <h3 className="font-headline-md text-headline-md text-on-background flex items-center gap-2">
-                <span className="material-symbols-outlined text-primary text-[20px]" aria-hidden="true">person_add</span>
-                Créer un utilisateur
-              </h3>
-            </div>
-            <div className="bento-card-body">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-md">
-                <Field label="Nom complet" required>
-                  <input required className={inputClass} value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} />
-                </Field>
-                <Field label="Email" required>
-                  <input required type="email" className={inputClass} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-                </Field>
-                <Field label="Mot de passe" required>
-                  <input required type="password" minLength={8} placeholder="Au moins 8 caractères" className={inputClass} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
-                </Field>
-                <Field label="Équipe">
-                  <select className={inputClass} value={form.teamId} onChange={(e) => setForm({ ...form, teamId: e.target.value })}>
-                    <option value="">Aucune</option>
-                    {teams.map((t) => (<option key={t.id} value={t.id}>{t.name}</option>))}
-                  </select>
-                </Field>
-                <Field label="Rôle / droits" className="md:col-span-2">
-                  <div className="flex flex-col gap-2 bg-surface-container-low/40 border border-outline-variant/60 rounded-xl p-md">
-                    {ROLES.map((r) => (
-                      <label key={r} className="flex items-center gap-2 cursor-pointer">
-                        <input type="radio" name="role" value={r} checked={form.role === r} onChange={() => setForm({ ...form, role: r })} className="accent-primary w-4 h-4" />
-                        <span className="text-body-sm text-on-surface font-medium">{ROLE_LABELS[r]}</span>
-                      </label>
-                    ))}
-                  </div>
-                </Field>
-              </div>
-              <div className="flex justify-end mt-lg pt-4 border-t border-outline-variant/50">
-                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-                  type="submit" disabled={submitting}
-                  className="btn-gradient font-semibold py-2.5 px-6 rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all disabled:opacity-50 text-body-sm"
-                >{submitting ? 'Création…' : 'Créer'}</motion.button>
-              </div>
-            </div>
-          </motion.form>
+            <form onSubmit={handleCreate} className="px-4 sm:px-6 lg:px-8 py-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 items-end">
+              {[
+                { label: 'Nom *', key: 'fullName', type: 'text',     placeholder: 'Nom complet', required: true },
+                { label: 'Email *', key: 'email',  type: 'email',    placeholder: 'email@exemple.ci', required: true },
+                { label: 'Mot de passe *', key: 'password', type: 'password', placeholder: '••••••••', required: true },
+              ].map(f => (
+                <label key={f.key} className="flex flex-col gap-1">
+                  <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">{f.label}</span>
+                  <input type={f.type} required={f.required} placeholder={f.placeholder}
+                    value={form[f.key]} onChange={e => setForm({ ...form, [f.key]: e.target.value })}
+                    className="w-full bg-surface border border-outline-variant/40 rounded-xl px-3.5 py-2 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                  />
+                </label>
+              ))}
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Rôle</span>
+                <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}
+                  className="bg-surface border border-outline-variant/40 rounded-xl px-3.5 py-2 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer">
+                  {ROLES.map(r => <option key={r} value={r}>{ROLE_CONFIG[r]?.label || r}</option>)}
+                </select>
+              </label>
+              <button type="submit" disabled={submitting}
+                className="py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-bold disabled:opacity-50 shadow-sm hover:brightness-110 transition-all"
+              >{submitting ? 'Création...' : 'Créer'}</button>
+            </form>
+          </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* STATISTIQUES — Bento grid */}
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-3 gap-gutter">
-        <StatCard label="Total utilisateurs" value={total} icon="people" />
-        <StatCard label="Admins & Techniciens" value={staffCount} icon="admin_panel_settings" />
-        <StatCard label="Comptes inactifs" value={inactiveCount} icon="person_off" critical={inactiveCount > 0} />
-      </motion.div>
-
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* BARRE DE RECHERCHE, FILTRES ET ACTIONS DE MASSE */}
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      <motion.div variants={itemVariants} className="bento-card p-md space-y-md">
-        <div className="flex flex-wrap items-center justify-between gap-md">
-          {/* Recherche & Filtres */}
-          <div className="flex items-center gap-2 flex-1 min-w-[280px]">
-            <div className="relative flex-1">
-              <span className="material-symbols-outlined absolute left-3 top-2.5 text-on-surface-variant text-[18px]">search</span>
-              <input
-                type="text"
-                placeholder="Rechercher par nom, email, ID GLPI..."
-                value={searchQuery}
-                onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
-                className="w-full pl-9 pr-8 py-2 bg-surface border border-outline-variant/60 rounded-xl text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-              />
-              {searchQuery && (
-                <button onClick={() => setSearchQuery('')} className="absolute right-2.5 top-2.5 text-on-surface-variant hover:text-on-surface">
-                  <span className="material-symbols-outlined text-[16px]">close</span>
-                </button>
-              )}
+      {/* ── Error banner ─────────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {error && (
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+            <div className="px-4 sm:px-6 lg:px-8 py-2 bg-red-500/10 border-b border-red-500/20 text-red-600 dark:text-red-400 text-xs flex items-center gap-2 font-medium">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />{error}
+              <button onClick={() => setError('')} className="ml-auto p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"><X className="w-4 h-4" /></button>
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-            <select
-              value={roleFilter}
-              onChange={(e) => { setRoleFilter(e.target.value); setPage(1); }}
-              className="bg-surface border border-outline-variant/60 rounded-xl px-3 py-2 text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer"
+      {/* ── Stats bar ─────────────────────────────────────────────────────── */}
+      <div className="px-4 sm:px-6 lg:px-8 py-2.5 border-b border-outline-variant/10 flex items-center gap-6">
+        {[
+          { label: 'Total', value: total,         icon: UsersIcon,    color: 'text-blue-600 dark:text-blue-400'   },
+          { label: 'Staff',  value: staffCount,    icon: ShieldCheck,  color: 'text-emerald-600 dark:text-emerald-400'},
+          { label: 'Inactifs',value: inactiveCount,icon: UserX,        color: inactiveCount > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500' },
+        ].map(s => {
+          const Icon = s.icon;
+          return (
+            <div key={s.label} className="flex items-center gap-1.5">
+              <Icon className={`w-3.5 h-3.5 ${s.color}`} />
+              <span className="text-sm font-bold text-on-surface">{s.value}</span>
+              <span className="text-[11px] text-on-surface-variant font-medium hidden sm:block">{s.label}</span>
+            </div>
+          );
+        })}
+      </div>
+      {/* ── Search & Filter Controls Bar ───────────────────────────────── */}
+      <div className="px-4 sm:px-6 lg:px-8 py-3 bg-surface-container-low/30 border-b border-outline-variant/20 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+        {/* Live Search Input */}
+        <div className="relative flex-1 max-w-md">
+          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-on-surface-variant/60" />
+          <input
+            type="text"
+            placeholder="Rechercher par nom, email, ID GLPI..."
+            value={searchQuery}
+            onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
+            className="w-full bg-surface border border-outline-variant/40 rounded-xl pl-10 pr-9 py-2 text-xs font-medium text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => { setSearchQuery(''); setPage(1); }}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50 hover:text-on-surface p-0.5 rounded-md"
             >
-              <option value="">Tous les rôles</option>
-              <option value="SUPERADMIN">Superadmin</option>
-              <option value="ADMIN">Admin</option>
-              <option value="TECHNICIAN">Technicien</option>
-              <option value="REQUESTER">Demandeur</option>
-            </select>
-
-            <select
-              value={teamFilter}
-              onChange={(e) => { setTeamFilter(e.target.value); setPage(1); }}
-              className="bg-surface border border-outline-variant/60 rounded-xl px-3 py-2 text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer"
-            >
-              <option value="">Toutes les équipes</option>
-              <option value="null">Sans équipe</option>
-              {teams.map((t) => (<option key={t.id} value={t.id}>{t.name}</option>))}
-            </select>
-          </div>
-
-          {/* Affichage par page */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-on-surface-variant font-medium">Afficher :</span>
-            <select
-              value={limit}
-              onChange={(e) => { setLimit(Number(e.target.value)); setPage(1); }}
-              className="bg-surface border border-outline-variant/60 rounded-xl px-2.5 py-1.5 text-xs text-on-surface focus:outline-none transition-all cursor-pointer font-medium"
-            >
-              <option value={25}>25 par page</option>
-              <option value={50}>50 par page</option>
-              <option value={100}>100 par page</option>
-            </select>
-          </div>
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
-        {/* Barre d'actions par lot (quand des utilisateurs sont sélectionnés) */}
-        {selectedIds.length > 0 && (
-          <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
-            className="flex flex-wrap items-center justify-between gap-3 p-md bg-surface-container-low border border-primary/20 rounded-xl"
-          >
-            <span className="font-body-sm text-body-sm text-primary font-semibold flex items-center gap-1.5">
-              <span className="material-symbols-outlined text-[18px]">check_box</span>
-              {selectedIds.length} utilisateur(s) sélectionné(s)
-            </span>
+        {/* Role & Team Filters */}
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
+          {/* Role filter pills */}
+          <div className="flex items-center gap-1 bg-surface border border-outline-variant/30 rounded-xl p-1">
+            {[{ v: '', l: 'Tous les rôles' }, ...Object.entries(ROLE_CONFIG).map(([v, c]) => ({ v, l: c.label }))].map(({ v, l }) => (
+              <button
+                key={v}
+                onClick={() => { setRoleFilter(v); setPage(1); }}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                  roleFilter === v
+                    ? v ? `${ROLE_CONFIG[v]?.bg} ${ROLE_CONFIG[v]?.color} ${ROLE_CONFIG[v]?.border}` : 'bg-blue-600 text-white shadow-xs font-bold'
+                    : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'
+                }`}
+              >
+                {l}
+              </button>
+            ))}
+          </div>
 
-            <div className="flex items-center gap-2 flex-wrap">
-              {/* Assigner Groupe */}
+          {/* Team filter dropdown */}
+          <select
+            value={teamFilter}
+            onChange={(e) => { setTeamFilter(e.target.value); setPage(1); }}
+            className="bg-surface border border-outline-variant/40 rounded-xl px-3.5 py-2 text-xs font-semibold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer shadow-sm"
+          >
+            <option value="">Toutes les équipes</option>
+            <option value="null">Sans équipe</option>
+            {teams.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* ── Bulk action bar ───────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {selectedIds.length > 0 && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden border-b border-blue-500/20 bg-blue-500/5"
+          >
+            <div className="px-4 sm:px-6 lg:px-8 py-2.5 flex flex-wrap items-center gap-3">
+              <span className="text-[11px] font-bold text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                {selectedIds.length} sélectionné(s)
+              </span>
               <div className="flex items-center gap-1.5">
-                <select
-                  className="bg-surface border border-outline-variant/60 rounded-xl px-3 py-1.5 text-xs text-on-surface focus:outline-none"
-                  value={assignGroupId} onChange={(e) => setAssignGroupId(e.target.value)}
-                >
+                <select value={assignGroupId} onChange={e => setAssignGroupId(e.target.value)}
+                  className="bg-surface border border-outline-variant/40 rounded-xl px-3.5 py-2 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer">
                   <option value="">Assigner groupe...</option>
-                  {groups.map((g) => (<option key={g.id} value={g.id}>{g.name}</option>))}
+                  {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                 </select>
                 <button onClick={handleAssignToGroup} disabled={!assignGroupId || assigning}
-                  className="px-3 py-1.5 rounded-xl border border-outline-variant text-xs font-semibold hover:bg-surface-container-high transition-colors disabled:opacity-40"
-                >
-                  Groupe
+                  className="px-2.5 py-1.5 rounded-lg border border-outline-variant/40 text-xs font-semibold text-on-surface hover:bg-surface-container transition-colors disabled:opacity-40">
+                  OK
                 </button>
               </div>
-
-              {/* Assigner Équipe */}
               <div className="flex items-center gap-1.5">
-                <select
-                  className="bg-surface border border-outline-variant/60 rounded-xl px-3 py-1.5 text-xs text-on-surface focus:outline-none"
-                  value={assignTeamId} onChange={(e) => setAssignTeamId(e.target.value)}
-                >
+                <select value={assignTeamId} onChange={e => setAssignTeamId(e.target.value)}
+                  className="bg-surface border border-outline-variant/40 rounded-xl px-3.5 py-2 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer">
                   <option value="">Assigner équipe...</option>
                   <option value="none">Retirer l'équipe</option>
-                  {teams.map((t) => (<option key={t.id} value={t.id}>{t.name}</option>))}
+                  {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                 </select>
                 <button onClick={handleAssignToTeam} disabled={!assignTeamId || assigning}
-                  className="px-3 py-1.5 rounded-xl border border-outline-variant text-xs font-semibold hover:bg-surface-container-high transition-colors disabled:opacity-40"
-                >
-                  Équipe
+                  className="px-2.5 py-1.5 rounded-lg border border-outline-variant/40 text-xs font-semibold text-on-surface hover:bg-surface-container transition-colors disabled:opacity-40">
+                  OK
                 </button>
               </div>
-
-              {/* Supprimer la sélection */}
               <button onClick={handleBulkDelete} disabled={bulkDeleting}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/30 text-xs font-semibold transition-colors disabled:opacity-40"
-              >
-                <span className="material-symbols-outlined text-[16px]">delete</span>
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 text-xs font-semibold hover:bg-red-500/15 transition-all disabled:opacity-40 ml-auto">
+                <Trash2 className="w-3 h-3" />
                 Supprimer ({selectedIds.length})
               </button>
             </div>
           </motion.div>
         )}
-      </motion.div>
+      </AnimatePresence>
 
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* TABLEAU DES UTILISATEURS */}
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      <motion.div variants={itemVariants} className="bento-card overflow-hidden">
-        <div className="bento-card-header flex items-center justify-between border-b border-outline-variant/40 bg-surface-container-low/30 px-lg py-md">
-          <span className="font-headline-sm text-headline-sm text-on-surface flex items-center gap-2">
-            <span className="material-symbols-outlined text-[18px] text-primary" aria-hidden="true">badge</span>
-            Annuaire des comptes
-          </span>
-          <span className="text-on-surface-variant text-xs font-mono-sm bg-surface-container border border-outline-variant/50 px-3 py-1 rounded-full font-medium">
-            {total} utilisateur{total !== 1 ? 's' : ''} au total
-          </span>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[950px]">
-            <thead>
-              <tr className="bg-surface-container-low/60 border-b border-outline-variant/60 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">
-                <TH checkbox>
-                  <input type="checkbox" checked={users.length > 0 && selectedIds.length === users.length}
-                    onChange={toggleSelectAll} className="cursor-pointer accent-primary w-4 h-4 rounded" />
-                </TH>
-                <TH className="min-w-[240px]">Utilisateur</TH>
-                <TH className="w-44">Rôle</TH>
-                <TH className="w-48">Équipe</TH>
-                <TH className="w-28 text-center">Lien GLPI</TH>
-                <TH className="w-24 text-center">Statut</TH>
-                <TH className="w-24 text-center">Alertes IA</TH>
-                <TH className="w-28 text-right">Actions</TH>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-outline-variant/20 font-body-sm text-body-sm text-on-surface">
-              <AnimatePresence mode="popLayout">
-                {users.map((u, idx) => {
-                  const roleConf = ROLE_CONFIG[u.role] || ROLE_CONFIG.REQUESTER;
-                  return (
-                    <motion.tr key={u.id} layout
-                      initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, x: -16 }} transition={{ duration: 0.2, delay: idx * 0.015, ease: [0.16, 1, 0.3, 1] }}
-                      className="hover:bg-surface-container-high/40 transition-colors group"
-                    >
-                      {/* Checkbox */}
-                      <td className="p-md text-center">
-                        <input type="checkbox" checked={selectedIds.includes(u.id)}
-                          onChange={() => toggleSelect(u.id)} className="cursor-pointer accent-primary w-4 h-4 rounded" />
-                      </td>
+      {/* ── Users table ───────────────────────────────────────────────────── */}
+      <div className="flex-1 px-4 sm:px-6 lg:px-8 py-4">
+        <div className="rounded-2xl border border-outline-variant/30 overflow-hidden bg-surface-container-lowest">
+          {/* Table header */}
+          <div className="flex items-center gap-4 px-4 py-2.5 border-b border-outline-variant/20 bg-surface-container-low/40 text-[10px] font-black uppercase tracking-widest text-on-surface-variant">
+            <div className="w-5 shrink-0">
+              <input type="checkbox" checked={users.length > 0 && selectedIds.length === users.length}
+                onChange={toggleSelectAll} className="cursor-pointer accent-primary w-3.5 h-3.5 rounded" />
+            </div>
+            <div className="flex-1 min-w-0">Utilisateur</div>
+            <div className="w-28 shrink-0 hidden sm:block">Rôle</div>
+            <div className="w-32 shrink-0 hidden md:block">Équipe</div>
+            <div className="w-20 shrink-0 hidden lg:block text-center">GLPI</div>
+            <div className="w-16 shrink-0 text-center">Statut</div>
+            <div className="w-14 shrink-0 text-center hidden xl:block">Alertes</div>
+            <div className="w-20 shrink-0 text-right">Actions</div>
+          </div>
 
-                      {/* Utilisateur (Avatar + Nom + Email) */}
-                      <td className="p-md">
-                        {editingId === u.id ? (
-                          <div className="flex flex-col gap-2 max-w-xs">
-                            <input value={editForm.fullName} onChange={(e) => setEditForm({ ...editForm, fullName: e.target.value })}
-                              placeholder="Nom complet" className="border border-outline-variant/60 rounded-xl px-3 py-1.5 text-body-sm text-on-surface bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all" />
-                            <input type="email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
-                              placeholder="Email" className="border border-outline-variant/60 rounded-xl px-3 py-1.5 text-body-sm text-on-surface bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all" />
-                            <div className="flex gap-2 mt-1">
-                              <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-                                onClick={() => saveEdit(u.id)} disabled={savingEdit}
-                                className="text-xs px-3 py-1.5 rounded-lg btn-gradient font-semibold shadow-sm hover:shadow transition-all disabled:opacity-50"
-                              >{savingEdit ? '...' : 'Enregistrer'}</motion.button>
-                              <button onClick={() => setEditingId(null)} disabled={savingEdit}
-                                className="text-xs px-3 py-1.5 rounded-lg border border-outline-variant/60 text-on-surface hover:bg-surface-container-high transition-all font-medium"
-                              >Annuler</button>
-                            </div>
-                          </div>
-                        ) : (
-                          <button onClick={() => startEdit(u)}
-                            className="flex items-center gap-3 text-left group-hover:translate-x-0.5 transition-transform"
-                            title="Cliquer pour éditer le nom ou l'email"
-                          >
-                            <div className="relative">
-                              <div className="w-9 h-9 rounded-full border border-outline-variant/60 bg-gradient-to-br from-primary/10 to-primary/5 text-primary flex items-center justify-center font-bold text-xs shrink-0 shadow-sm">
-                                {initials(u.fullName)}
-                              </div>
-                              <span
-                                className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-surface ${
-                                  u.isActive ? 'bg-emerald-500' : 'bg-slate-400'
-                                }`}
-                                title={u.isActive ? 'Compte actif' : 'Compte inactif'}
-                              />
-                            </div>
-                            <div>
-                              <div className="font-headline-sm text-body-md text-on-surface font-semibold flex items-center gap-1.5">
-                                {u.fullName}
-                                <span className="material-symbols-outlined text-[14px] text-on-surface-variant opacity-0 group-hover:opacity-100 transition-opacity">edit</span>
-                              </div>
-                              <div className="text-on-surface-variant text-xs font-mono-sm">{u.email}</div>
-                            </div>
+          {/* Rows */}
+          <div className="divide-y divide-outline-variant/10">
+            <AnimatePresence mode="popLayout">
+              {users.map((u, idx) => {
+                const roleCfg = ROLE_CONFIG[u.role] || ROLE_CONFIG.REQUESTER;
+                return (
+                  <motion.div
+                    key={u.id}
+                    layout
+                    initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, x: -12 }}
+                    transition={{ duration: 0.15, delay: idx * 0.01, ease: [0.16, 1, 0.3, 1] }}
+                    className="flex items-center gap-4 px-4 py-3 hover:bg-surface-container-low/50 transition-colors group"
+                  >
+                    {/* Checkbox */}
+                    <div className="w-5 shrink-0">
+                      <input type="checkbox" checked={selectedIds.includes(u.id)} onChange={() => toggleSelect(u.id)}
+                        className="cursor-pointer accent-primary w-3.5 h-3.5 rounded" />
+                    </div>
+
+                    {/* User */}
+                    <div className="flex-1 min-w-0">
+                      {editingId === u.id ? (
+                        <div className="flex items-center gap-2">
+                          <input value={editForm.fullName} onChange={e => setEditForm({ ...editForm, fullName: e.target.value })}
+                            placeholder="Nom complet"
+                            className="bg-surface border border-outline-variant/40 rounded-xl px-2.5 py-1 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 w-32" />
+                          <input type="email" value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })}
+                            placeholder="Email"
+                            className="bg-surface border border-outline-variant/40 rounded-xl px-2.5 py-1 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 w-36" />
+                          <button onClick={() => saveEdit(u.id)} disabled={savingEdit}
+                            className="px-2.5 py-1 rounded-lg bg-primary text-white text-[10px] font-bold disabled:opacity-50">
+                            {savingEdit ? '...' : 'OK'}
                           </button>
-                        )}
-                      </td>
-
-                      {/* Rôle */}
-                      <td className="p-md">
-                        {(currentUser?.role === 'SUPERADMIN' || !ADMIN_LIKE_ROLES.includes(u.role)) ? (
-                          <div className="relative inline-block">
-                            <select value={u.role} onChange={(e) => updateField(u.id, 'role', e.target.value)}
-                              className={`appearance-none rounded-xl pl-8 pr-7 py-1.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer ${roleConf.bg}`}
-                            >
-                              {Array.from(new Set([...ROLES, u.role])).map((r) => (
-                                <option key={r} value={r} className="bg-surface text-on-surface font-medium">
-                                  {ROLE_LABELS[r] || r}
-                                </option>
-                              ))}
-                            </select>
-                            <span className="material-symbols-outlined absolute left-2.5 top-2 text-[14px] pointer-events-none">
-                              {roleConf.icon}
-                            </span>
-                            <span className="material-symbols-outlined absolute right-1.5 top-2 text-[14px] pointer-events-none opacity-70">
-                              expand_more
-                            </span>
+                          <button onClick={() => setEditingId(null)}
+                            className="p-1 rounded-lg text-on-surface-variant hover:text-on-surface transition-colors">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2.5">
+                          {/* Avatar */}
+                          <div className="relative shrink-0">
+                            <div className={`w-8 h-8 rounded-full border flex items-center justify-center text-[11px] font-bold ${roleCfg.bg} ${roleCfg.color} ${roleCfg.border}`}>
+                              {initials(u.fullName)}
+                            </div>
+                            <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-surface-container-lowest ${u.isActive ? 'bg-emerald-500' : 'bg-zinc-400'}`} />
                           </div>
-                        ) : (
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${roleConf.bg}`} title="Modification réservée aux Superadmins">
-                            <span className="material-symbols-outlined text-[14px]">{roleConf.icon}</span>
-                            {ROLE_LABELS[u.role] || u.role}
-                          </span>
-                        )}
-                      </td>
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-on-surface truncate">{u.fullName}</p>
+                            <p className="text-[10px] text-on-surface-variant truncate font-mono">{u.email}</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
 
-                      {/* Équipe */}
-                      <td className="p-md">
-                        <div className="relative inline-block">
-                          <select value={u.teamId || ''} onChange={(e) => updateField(u.id, 'teamId', e.target.value ? Number(e.target.value) : null)}
-                            className="appearance-none bg-surface-container-low border border-outline-variant/60 rounded-xl pl-8 pr-7 py-1.5 text-xs font-medium text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer"
-                          >
-                            <option value="">Aucune équipe</option>
-                            {teams.map((t) => (
-                              <option key={t.id} value={t.id}>{t.name}</option>
+                    {/* Role */}
+                    <div className="w-28 shrink-0 hidden sm:block">
+                      {(currentUser?.role === 'SUPERADMIN' || !ADMIN_LIKE_ROLES.includes(u.role)) ? (
+                        <div className="relative">
+                          <select value={u.role} onChange={e => updateField(u.id, 'role', e.target.value)}
+                            className={`appearance-none w-full rounded-xl pl-6 pr-5 py-1.5 text-[10px] font-bold border focus:outline-none cursor-pointer ${roleCfg.bg} ${roleCfg.color} ${roleCfg.border}`}>
+                            {Array.from(new Set([...ROLES, u.role])).map(r => (
+                              <option key={r} value={r} className="bg-surface text-on-surface">{ROLE_CONFIG[r]?.label || r}</option>
                             ))}
                           </select>
-                          <span className="material-symbols-outlined absolute left-2.5 top-2 text-[15px] text-on-surface-variant pointer-events-none">
-                            groups
-                          </span>
-                          <span className="material-symbols-outlined absolute right-1.5 top-2 text-[14px] text-on-surface-variant pointer-events-none opacity-70">
-                            expand_more
-                          </span>
+                          <span className="material-symbols-outlined absolute left-1.5 top-1.5 text-[12px] pointer-events-none">{roleCfg.icon}</span>
+                          <span className="material-symbols-outlined absolute right-1 top-1.5 text-[12px] pointer-events-none opacity-60">expand_more</span>
                         </div>
-                      </td>
-
-                      {/* GLPI */}
-                      <td className="p-md text-center">
-                        {u.glpiId ? (
-                          <span title={`Synchronisé depuis GLPI (ID: ${u.glpiId})`}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-sky-500/20 bg-sky-500/10 text-sky-600 dark:text-sky-400 font-semibold text-[11px]"
-                          >
-                            <span className="material-symbols-outlined text-[13px]">sync</span>
-                            #{u.glpiId}
-                          </span>
-                        ) : (
-                          <span className="text-outline/40 italic text-[11px] font-medium">—</span>
-                        )}
-                      </td>
-
-                      {/* Actif (Toggle Switch) */}
-                      <td className="p-md text-center">
-                        <ToggleSwitch
-                          checked={u.isActive}
-                          onChange={(val) => updateField(u.id, 'isActive', val)}
-                          title={u.isActive ? 'Désactiver ce compte' : 'Activer ce compte'}
-                        />
-                      </td>
-
-                      {/* Alertes IA (Toggle Switch) */}
-                      <td className="p-md text-center">
-                        {u.role !== 'REQUESTER' ? (
-                          <ToggleSwitch
-                            checked={u.receiveDraftAlerts}
-                            onChange={(val) => updateField(u.id, 'receiveDraftAlerts', val)}
-                            title={u.receiveDraftAlerts ? 'Désactiver les alertes de brouillons' : 'Activer les alertes de brouillons'}
-                          />
-                        ) : (
-                          <span className="text-outline/30 text-xs">—</span>
-                        )}
-                      </td>
-
-                      {/* Actions */}
-                      <td className="p-md text-right">
-                        {(currentUser?.role === 'SUPERADMIN' || !ADMIN_LIKE_ROLES.includes(u.role)) && (
-                          <div className="flex items-center justify-end gap-1">
-                            <button
-                              onClick={() => askResetPassword(u.id)}
-                              title="Réinitialiser le mot de passe"
-                              className="p-1.5 rounded-lg text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-colors"
-                            >
-                              <span className="material-symbols-outlined text-[18px]">lock_reset</span>
-                            </button>
-                            <button
-                              onClick={() => startEdit(u)}
-                              title="Éditer le nom ou l'email"
-                              className="p-1.5 rounded-lg text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-colors"
-                            >
-                              <span className="material-symbols-outlined text-[18px]">edit</span>
-                            </button>
-                            <button
-                              onClick={() => askDelete(u.id)}
-                              title="Supprimer l'utilisateur"
-                              className="p-1.5 rounded-lg text-on-surface-variant hover:text-red-500 hover:bg-red-500/10 transition-colors"
-                            >
-                              <span className="material-symbols-outlined text-[18px]">delete</span>
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                    </motion.tr>
-                  );
-                })}
-              </AnimatePresence>
-              {users.length === 0 && (
-                <motion.tr initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-                  <td colSpan={8} className="p-md py-12 text-center">
-                    <div className="flex flex-col items-center gap-2 text-on-surface-variant">
-                      <span className="material-symbols-outlined text-[40px] text-outline/40" aria-hidden="true">people</span>
-                      <p className="font-body-md text-body-md italic">Aucun utilisateur correspondant à votre recherche.</p>
+                      ) : (
+                        <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-xl text-[10px] font-bold border ${roleCfg.bg} ${roleCfg.color} ${roleCfg.border}`}>
+                          <span className="material-symbols-outlined text-[11px]">{roleCfg.icon}</span>
+                          {roleCfg.label}
+                        </span>
+                      )}
                     </div>
-                  </td>
-                </motion.tr>
-              )}
-            </tbody>
-          </table>
-        </div>
 
-        {/* Pagination à deux contrôles (Précédent / Suivant) */}
-        <div className="flex items-center justify-between p-md border-t border-outline-variant/40">
-          <div className="text-xs text-on-surface-variant font-medium">
-            Affichage page <strong>{page}</strong> sur <strong>{totalPages}</strong> ({total} utilisateurs)
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page <= 1}
-              className="flex items-center gap-1 px-3.5 py-1.5 rounded-xl border border-outline-variant/60 text-xs font-semibold text-on-surface hover:bg-surface-container-high transition-all disabled:opacity-40"
-            >
-              <span className="material-symbols-outlined text-[16px]">chevron_left</span>
-              Précédent
-            </button>
-            <span className="text-xs font-mono px-2">{page} / {totalPages}</span>
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page >= totalPages}
-              className="flex items-center gap-1 px-3.5 py-1.5 rounded-xl border border-outline-variant/60 text-xs font-semibold text-on-surface hover:bg-surface-container-high transition-all disabled:opacity-40"
-            >
-              Suivant
-              <span className="material-symbols-outlined text-[16px]">chevron_right</span>
-            </button>
-          </div>
-        </div>
-      </motion.div>
+                    {/* Team */}
+                    <div className="w-32 shrink-0 hidden md:block">
+                      <select value={u.teamId || ''} onChange={e => updateField(u.id, 'teamId', e.target.value ? Number(e.target.value) : null)}
+                        className="w-full appearance-none bg-surface border border-outline-variant/30 rounded-xl px-2.5 py-1.5 text-[10px] font-medium text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer truncate">
+                        <option value="">Sans équipe</option>
+                        {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                    </div>
 
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* MODAL D'IMPORT GLPI */}
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      <AnimatePresence>
-        {showGlpiImport && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => { if (!importing) setShowGlpiImport(false); }}
-              className="absolute inset-0 bg-black/60 backdrop-blur-[2px] cursor-pointer"
-            />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ type: 'spring', duration: 0.35, bounce: 0.12 }}
-              className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col"
-            >
-              <div className="sticky top-0 z-10 bg-surface-container-lowest rounded-t-2xl border-b border-outline-variant/40">
-                <div className="bento-card-header">
-                  <h3 className="font-headline-md text-headline-md text-on-background flex items-center gap-2">
-                    <span className="material-symbols-outlined text-primary text-[20px]">cloud_download</span>
-                    Importer depuis GLPI
-                  </h3>
-                  <button onClick={() => { if (!importing) setShowGlpiImport(false); }}
-                    className="text-on-surface-variant hover:text-on-surface transition-colors" aria-label="Fermer"
-                  >
-                    <span className="material-symbols-outlined">close</span>
-                  </button>
-                </div>
+                    {/* GLPI */}
+                    <div className="w-20 shrink-0 hidden lg:flex justify-center">
+                      {u.glpiId ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-sky-500/20 bg-sky-500/10 text-sky-600 dark:text-sky-400 text-[9px] font-bold">
+                          <Zap className="w-2.5 h-2.5" />#{u.glpiId}
+                        </span>
+                      ) : <span className="text-outline/30 text-xs">—</span>}
+                    </div>
+
+                    {/* Active toggle */}
+                    <div className="w-16 shrink-0 flex justify-center">
+                      <ToggleSwitch checked={u.isActive} onChange={val => updateField(u.id, 'isActive', val)} title={u.isActive ? 'Désactiver' : 'Activer'} />
+                    </div>
+
+                    {/* Draft alerts toggle */}
+                    <div className="w-14 shrink-0 hidden xl:flex justify-center">
+                      {u.role !== 'REQUESTER' ? (
+                        <ToggleSwitch checked={u.receiveDraftAlerts} onChange={val => updateField(u.id, 'receiveDraftAlerts', val)} title="Alertes brouillons IA" />
+                      ) : <span className="text-outline/30 text-xs">—</span>}
+                    </div>
+
+                    {/* Actions */}
+                    <div className="w-20 shrink-0 flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {(currentUser?.role === 'SUPERADMIN' || !ADMIN_LIKE_ROLES.includes(u.role)) && (
+                        <>
+                          <motion.button whileHover={{ scale: 1.15 }} whileTap={{ scale: 0.9 }}
+                            onClick={() => startEdit(u)} title="Éditer"
+                            className="p-1.5 rounded-lg text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-all">
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </motion.button>
+                          <motion.button whileHover={{ scale: 1.15 }} whileTap={{ scale: 0.9 }}
+                            onClick={() => setConfirmResetId(u.id)} title="Réinitialiser mot de passe"
+                            className="p-1.5 rounded-lg text-on-surface-variant hover:text-amber-500 hover:bg-amber-500/10 transition-all">
+                            <KeyRound className="w-3.5 h-3.5" />
+                          </motion.button>
+                          <motion.button whileHover={{ scale: 1.15 }} whileTap={{ scale: 0.9 }}
+                            onClick={() => setConfirmDeleteId(u.id)} title="Supprimer"
+                            className="p-1.5 rounded-lg text-on-surface-variant hover:text-red-500 hover:bg-red-500/10 transition-all">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </motion.button>
+                        </>
+                      )}
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
+
+            {users.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-16 gap-3 text-on-surface-variant">
+                <UsersIcon className="w-10 h-10 text-outline/30" />
+                <p className="text-sm italic">Aucun utilisateur trouvé.</p>
               </div>
+            )}
+          </div>
 
-              <div className="p-lg overflow-y-auto flex-1">
-                {importResult ? (
-                  <div className="space-y-4">
-                    <div className={`p-md rounded-xl font-body-sm ${
-                      importResult.imported > 0
-                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-                        : 'bg-amber-500/10 text-amber-600 border border-amber-500/20'
-                    }`}>
-                      {importResult.imported} utilisateur(s) importé(s) avec succès
-                    </div>
-                    {importResult.errors?.length > 0 && (
-                      <div className="bg-red-500/5 text-red-500 border border-red-500/20 rounded-xl p-md font-body-sm">
-                        <p className="font-semibold mb-2">Erreurs :</p>
-                        <ul className="list-disc pl-md space-y-1">
-                          {importResult.errors.map((e, i) => (
-                            <li key={i}>GLPI #{e.glpiId} : {e.reason}</li>
-                          ))}
-                        </ul>
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-2.5 border-t border-outline-variant/20 bg-surface-container-low/20">
+              <span className="text-[11px] text-on-surface-variant font-medium">Page <strong>{page}</strong> / <strong>{totalPages}</strong> ({total} utilisateurs)</span>
+              <div className="flex items-center gap-1">
+                <button disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}
+                  className="px-3 py-1.5 rounded-lg border border-outline-variant/30 text-[11px] font-semibold text-on-surface-variant disabled:opacity-30 hover:bg-surface-container transition-colors">
+                  ← Préc.
+                </button>
+                <span className="text-[11px] font-mono text-on-surface-variant px-2">{page}/{totalPages}</span>
+                <button disabled={page >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                  className="px-3 py-1.5 rounded-lg border border-outline-variant/30 text-[11px] font-semibold text-on-surface-variant disabled:opacity-30 hover:bg-surface-container transition-colors">
+                  Suiv. →
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Modals ────────────────────────────────────────────────────────── */}
+      {createPortal(
+        <AnimatePresence>
+          {showGlpiImport && (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { if (!importing) setShowGlpiImport(false); }} className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer" />
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} transition={{ type: 'spring', duration: 0.35, bounce: 0.12 }}
+                className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col"
+              >
+                <div className="flex items-center gap-3 px-5 py-4 border-b border-outline-variant/30">
+                  <div className="p-1.5 rounded-lg bg-sky-500/10"><Download className="w-4 h-4 text-sky-600 dark:text-sky-400" /></div>
+                  <h3 className="text-sm font-bold text-on-surface">Importer depuis GLPI</h3>
+                  <motion.button onClick={() => { if (!importing) setShowGlpiImport(false); }} whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }} className="ml-auto p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"><X className="w-4 h-4" /></motion.button>
+                </div>
+                <div className="p-5 overflow-y-auto flex-1">
+                  {importResult ? (
+                    <div className="space-y-3">
+                      <div className="p-4 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-sm">
+                        {importResult.imported} utilisateur(s) importé(s) avec succès
                       </div>
-                    )}
-                    <div className="flex justify-end">
-                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-                        onClick={() => { setShowGlpiImport(false); load(); }}
-                        className="px-5 py-2.5 rounded-xl btn-gradient font-semibold text-body-sm"
-                      >
-                        Terminé
-                      </motion.button>
+                      {importResult.errors?.length > 0 && (
+                        <div className="p-4 rounded-xl bg-red-500/5 text-red-600 dark:text-red-400 border border-red-500/20 text-xs">
+                          <p className="font-bold mb-2">Erreurs :</p>
+                          <ul className="list-disc pl-4 space-y-1">{importResult.errors.map((e, i) => <li key={i}>GLPI #{e.glpiId} : {e.reason}</li>)}</ul>
+                        </div>
+                      )}
+                      <div className="flex justify-end">
+                        <button onClick={() => { setShowGlpiImport(false); load(); }} className="px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-bold">Terminé</button>
+                      </div>
                     </div>
-                  </div>
-                ) : importableUsers.length === 0 ? (
-                  <div className="flex flex-col items-center gap-3 py-8 text-on-surface-variant">
-                    <span className="material-symbols-outlined text-[48px] text-outline/40">check_circle</span>
-                    <p className="font-body-md text-body-md">Tous les utilisateurs GLPI sont déjà importés.</p>
-                  </div>
-                ) : (
-                  <>
-                    <p className="font-body-sm text-body-sm text-on-surface-variant mb-md">
-                      {importableUsers.length} utilisateur(s) GLPI peuvent être importés.
-                      Ils recevront un rôle <strong>Technicien</strong> et devront changer leur mot de passe à la première connexion.
-                    </p>
-                    <div className="flex items-center gap-3 mb-md">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox"
-                          checked={selectedImportIds.length === importableUsers.length}
-                          onChange={() => {
-                            setSelectedImportIds(
-                              selectedImportIds.length === importableUsers.length ? [] : importableUsers.map((u) => u.glpiId)
-                            );
+                  ) : importableUsers.length === 0 ? (
+                    <div className="flex flex-col items-center gap-3 py-8 text-on-surface-variant">
+                      <CheckCircle2 className="w-10 h-10 text-emerald-500/40" />
+                      <p className="text-sm">Tous les utilisateurs GLPI sont déjà importés.</p>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-xs text-on-surface-variant mb-3">{importableUsers.length} utilisateur(s) GLPI disponibles. Ils recevront le rôle <strong>Technicien</strong>.</p>
+                      <label className="flex items-center gap-2 cursor-pointer mb-3">
+                        <input type="checkbox" checked={selectedImportIds.length === importableUsers.length}
+                          onChange={() => setSelectedImportIds(selectedImportIds.length === importableUsers.length ? [] : importableUsers.map(u => u.glpiId))}
+                          className="accent-primary w-3.5 h-3.5" />
+                        <span className="text-xs text-on-surface">Tout sélectionner ({selectedImportIds.length})</span>
+                      </label>
+                      <div className="border border-outline-variant/30 rounded-xl divide-y divide-outline-variant/15 max-h-60 overflow-y-auto">
+                        {importableUsers.map(u => (
+                          <label key={u.glpiId} className="flex items-center gap-3 px-3 py-2.5 hover:bg-surface-container-low/60 cursor-pointer">
+                            <input type="checkbox" checked={selectedImportIds.includes(u.glpiId)}
+                              onChange={() => setSelectedImportIds(ids => ids.includes(u.glpiId) ? ids.filter(id => id !== u.glpiId) : [...ids, u.glpiId])}
+                              className="accent-primary w-3.5 h-3.5" />
+                            <div className="w-7 h-7 rounded-full bg-surface-container border border-outline-variant/40 text-on-surface text-[10px] font-bold flex items-center justify-center">
+                              {u.fullName?.split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase() || '?'}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium text-on-surface truncate">{u.fullName}</p>
+                              <p className="text-[10px] text-on-surface-variant truncate">{u.email}</p>
+                            </div>
+                            <span className="text-[10px] text-outline/50 font-mono">#{u.glpiId}</span>
+                          </label>
+                        ))}
+                      </div>
+                      <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-outline-variant/30">
+                        <button onClick={() => setShowGlpiImport(false)} disabled={importing} className="px-4 py-2 rounded-xl border border-outline-variant/40 text-on-surface text-sm font-medium hover:bg-surface-container transition-colors disabled:opacity-50">Annuler</button>
+                        <button disabled={selectedImportIds.length === 0 || importing}
+                          onClick={async () => {
+                            setImporting(true);
+                            try { const { data } = await api.post('/glpi/import-users', { userIds: selectedImportIds }); setImportResult(data); }
+                            catch (err) { setError(err.response?.data?.error || "Erreur d'import"); setShowGlpiImport(false); }
+                            finally { setImporting(false); }
                           }}
-                          className="accent-primary w-4 h-4"
-                        />
-                        <span className="font-body-sm text-body-sm text-on-surface">Tout sélectionner</span>
-                      </label>
-                      <span className="text-on-surface-variant text-body-sm">{selectedImportIds.length} sélectionné(s)</span>
-                    </div>
-                    <div className="border border-outline-variant/60 rounded-xl divide-y divide-outline-variant/30 max-h-64 overflow-y-auto">
-                      {importableUsers.map((u) => (
-                        <label key={u.glpiId}
-                          className="flex items-center gap-3 px-md py-2.5 hover:bg-surface-container-low/60 cursor-pointer transition-colors"
-                        >
-                          <input type="checkbox"
-                            checked={selectedImportIds.includes(u.glpiId)}
-                            onChange={() => {
-                              setSelectedImportIds((ids) =>
-                                ids.includes(u.glpiId) ? ids.filter((id) => id !== u.glpiId) : [...ids, u.glpiId]
-                              );
-                            }}
-                            className="accent-primary w-4 h-4"
-                          />
-                          <div className="w-8 h-8 rounded-full border border-outline-variant/60 bg-surface-container-low text-on-surface flex items-center justify-center font-semibold text-[12px] shrink-0 shadow-sm">
-                            {u.fullName ? u.fullName.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase() : '?'}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="font-body-sm text-body-sm text-on-surface font-medium truncate">{u.fullName}</div>
-                            <div className="text-on-surface-variant text-xs truncate">{u.email}</div>
-                          </div>
-                          <span className="text-outline/60 text-xs font-mono">#{u.glpiId}</span>
-                        </label>
-                      ))}
-                    </div>
-                    <div className="flex justify-end gap-sm mt-lg pt-4 border-t border-outline-variant/50">
-                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-                        onClick={() => setShowGlpiImport(false)} disabled={importing}
-                        className="px-5 py-2.5 rounded-xl border border-outline-variant text-on-surface font-semibold text-body-sm hover:bg-surface-container-low transition-colors"
-                      >
-                        Annuler
-                      </motion.button>
-                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-                        onClick={async () => {
-                          if (selectedImportIds.length === 0) return;
-                          setImporting(true); setError('');
-                          try {
-                            const { data } = await api.post('/glpi/import-users', { userIds: selectedImportIds });
-                            setImportResult(data);
-                          } catch (err) {
-                            setError(err.response?.data?.error || "Erreur d'import");
-                            setShowGlpiImport(false);
-                          } finally {
-                            setImporting(false);
-                          }
-                        }}
-                        disabled={selectedImportIds.length === 0 || importing}
-                        className="px-5 py-2.5 rounded-xl btn-gradient font-semibold text-body-sm shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                      >
-                        {importing && <span className="material-symbols-outlined animate-spin text-[16px]">progress_activity</span>}
-                        {importing ? 'Import...' : `Importer (${selectedImportIds.length})`}
-                      </motion.button>
-                    </div>
-                  </>
-                )}
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* MODAL D'IMPORT CSV */}
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      <AnimatePresence>
-        {showCsvImport && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => { if (!csvImporting) setShowCsvImport(false); }}
-              className="absolute inset-0 bg-black/60 backdrop-blur-[2px] cursor-pointer"
-            />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ type: 'spring', duration: 0.35, bounce: 0.12 }}
-              className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col"
-            >
-              <div className="sticky top-0 z-10 bg-surface-container-lowest rounded-t-2xl border-b border-outline-variant/40">
-                <div className="bento-card-header flex justify-between items-center">
-                  <h3 className="font-headline-md text-headline-md text-on-background flex items-center gap-2">
-                    <span className="material-symbols-outlined text-primary text-[20px]">upload_file</span>
-                    Importer des utilisateurs via CSV
-                  </h3>
-                  <button onClick={() => { if (!csvImporting) setShowCsvImport(false); }}
-                    className="text-on-surface-variant hover:text-on-surface transition-colors" aria-label="Fermer"
-                  >
-                    <span className="material-symbols-outlined">close</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-lg overflow-y-auto flex-1 space-y-4">
-                {csvResult ? (
-                  <div className="space-y-4">
-                    <div className="p-md rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-body-sm">
-                      <p className="font-bold text-base mb-1">Importation CSV terminée avec succès !</p>
-                      <ul className="list-disc pl-md space-y-1">
-                        <li><strong>{csvResult.imported}</strong> utilisateur(s) créé(s)</li>
-                        <li><strong>{csvResult.updated}</strong> utilisateur(s) mis à jour</li>
-                        <li><strong>{csvResult.totalProcessed}</strong> ligne(s) traitée(s) au total</li>
-                      </ul>
-                    </div>
-                    {csvResult.errors?.length > 0 && (
-                      <div className="bg-red-500/5 text-red-500 border border-red-500/20 rounded-xl p-md font-body-sm">
-                        <p className="font-semibold mb-2">Erreurs rencontrées ({csvResult.errors.length}) :</p>
-                        <ul className="list-disc pl-md space-y-1 max-h-32 overflow-y-auto">
-                          {csvResult.errors.map((e, i) => (
-                            <li key={i}>{e.email || e.glpiId || `Ligne ${i+1}`} : {e.reason}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                    <div className="flex justify-end">
-                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-                        onClick={() => { setShowCsvImport(false); load(); }}
-                        className="px-5 py-2.5 rounded-xl btn-gradient font-semibold text-body-sm"
-                      >
-                        Terminé
-                      </motion.button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex items-center justify-between bg-surface-container-low border border-outline-variant/40 rounded-xl p-3">
-                      <div className="flex items-center gap-2">
-                        <span className="material-symbols-outlined text-primary text-[18px]">info</span>
-                        <span className="text-xs text-on-surface-variant font-medium">Format Prosuma / GLPI reconnu (`Identifiant`, `Nom`, `Courriels`, `Lieu`, `Actif`)</span>
-                      </div>
-                      <button
-                        onClick={downloadSampleCsv}
-                        className="text-xs text-primary font-semibold hover:underline flex items-center gap-1 shrink-0"
-                      >
-                        <span className="material-symbols-outlined text-[14px]">download</span>
-                        Télécharger le modèle
-                      </button>
-                    </div>
-
-                    <div className="border-2 border-dashed border-outline-variant/60 hover:border-primary/60 rounded-2xl p-6 flex flex-col items-center justify-center gap-3 transition-colors bg-surface-container-low/30">
-                      <span className="material-symbols-outlined text-[40px] text-primary/60">cloud_upload</span>
-                      <div className="text-center">
-                        <p className="text-body-sm font-semibold text-on-surface">Glissez-déposez votre fichier CSV ici</p>
-                        <p className="text-xs text-on-surface-variant mt-0.5">ou cliquez pour choisir un fichier (.csv)</p>
-                      </div>
-                      <input
-                        type="file"
-                        accept=".csv,text/csv"
-                        onChange={(e) => {
-                          if (e.target.files?.[0]) {
-                            setCsvFile(e.target.files[0]);
-                          }
-                        }}
-                        className="hidden"
-                        id="csv-file-input"
-                      />
-                      <label
-                        htmlFor="csv-file-input"
-                        className="cursor-pointer px-4 py-2 rounded-xl border border-outline-variant text-on-surface hover:bg-surface-container font-semibold text-xs transition-colors"
-                      >
-                        Parcourir les fichiers
-                      </label>
-                    </div>
-
-                    {csvFile && (
-                      <div className="flex items-center justify-between bg-surface border border-outline-variant/60 rounded-xl p-3">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="material-symbols-outlined text-emerald-500 text-[20px]">description</span>
-                          <div className="min-w-0">
-                            <p className="text-body-sm font-semibold text-on-surface truncate">{csvFile.name}</p>
-                            <p className="text-xs text-on-surface-variant">{(csvFile.size / 1024).toFixed(1)} KB</p>
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => setCsvFile(null)}
-                          className="text-on-surface-variant hover:text-error transition-colors p-1"
-                        >
-                          <span className="material-symbols-outlined text-[18px]">close</span>
+                          className="px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-bold disabled:opacity-50 flex items-center gap-2 shadow-md">
+                          {importing && <RotateCcw className="w-3.5 h-3.5 animate-spin" />}
+                          {importing ? 'Import...' : `Importer (${selectedImportIds.length})`}
                         </button>
                       </div>
-                    )}
+                    </>
+                  )}
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
 
-                    <div className="flex justify-end gap-sm mt-lg pt-4 border-t border-outline-variant/50">
-                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-                        onClick={() => setShowCsvImport(false)} disabled={csvImporting}
-                        className="px-5 py-2.5 rounded-xl border border-outline-variant text-on-surface font-semibold text-body-sm hover:bg-surface-container-low transition-colors"
-                      >
-                        Annuler
-                      </motion.button>
-                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-                        onClick={handleCsvUpload}
-                        disabled={!csvFile || csvImporting}
-                        className="px-5 py-2.5 rounded-xl btn-gradient font-semibold text-body-sm shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                      >
-                        {csvImporting && <span className="material-symbols-outlined animate-spin text-[16px]">progress_activity</span>}
-                        {csvImporting ? 'Importation...' : "Lancer l'importation"}
-                      </motion.button>
+      {createPortal(
+        <AnimatePresence>
+          {showCsvImport && (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { if (!csvImporting) setShowCsvImport(false); }} className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer" />
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} transition={{ type: 'spring', duration: 0.35, bounce: 0.12 }}
+                className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col"
+              >
+                <div className="flex items-center gap-3 px-5 py-4 border-b border-outline-variant/30">
+                  <div className="p-1.5 rounded-lg bg-emerald-500/10"><Upload className="w-4 h-4 text-emerald-600 dark:text-emerald-400" /></div>
+                  <h3 className="text-sm font-bold text-on-surface">Importer via CSV</h3>
+                  <motion.button onClick={() => { if (!csvImporting) setShowCsvImport(false); }} whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }} className="ml-auto p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"><X className="w-4 h-4" /></motion.button>
+                </div>
+                <div className="p-5 overflow-y-auto flex-1 space-y-4">
+                  {csvResult ? (
+                    <div className="space-y-3">
+                      <div className="p-4 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-sm space-y-1">
+                        <p className="font-bold">Import CSV terminé !</p>
+                        <p>{csvResult.imported} créé(s) · {csvResult.updated} mis à jour · {csvResult.totalProcessed} traité(s)</p>
+                      </div>
+                      {csvResult.errors?.length > 0 && (
+                        <div className="p-4 rounded-xl bg-red-500/5 text-red-600 dark:text-red-400 border border-red-500/20 text-xs">
+                          <p className="font-bold mb-1">Erreurs ({csvResult.errors.length}) :</p>
+                          <ul className="list-disc pl-4 space-y-0.5 max-h-24 overflow-y-auto">{csvResult.errors.map((e, i) => <li key={i}>{e.email || `Ligne ${i+1}`} : {e.reason}</li>)}</ul>
+                        </div>
+                      )}
+                      <div className="flex justify-end"><button onClick={() => { setShowCsvImport(false); load(); }} className="px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-bold">Terminé</button></div>
                     </div>
-                  </>
-                )}
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between bg-surface-container border border-outline-variant/30 rounded-xl p-3">
+                        <p className="text-xs text-on-surface-variant font-medium">Format : <code className="text-primary font-bold">Identifiant;Nom;Courriels;Lieu;Actif</code></p>
+                        <button onClick={downloadSampleCsv} className="text-xs text-primary font-semibold hover:underline flex items-center gap-1 shrink-0 ml-3">
+                          <Download className="w-3 h-3" />Modèle
+                        </button>
+                      </div>
+                      <label htmlFor="csv-file-input" className="cursor-pointer border-2 border-dashed border-outline-variant/40 hover:border-primary/50 rounded-2xl p-6 flex flex-col items-center justify-center gap-2 text-center transition-colors">
+                        <Upload className="w-8 h-8 text-on-surface-variant/40" />
+                        {csvFile ? (
+                          <>
+                            <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400">{csvFile.name}</p>
+                            <p className="text-[10px] text-on-surface-variant font-mono">{(csvFile.size / 1024).toFixed(1)} KB</p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-sm font-semibold text-on-surface-variant">Glissez votre fichier CSV ici</p>
+                            <p className="text-xs text-on-surface-variant/50">ou cliquez pour choisir</p>
+                          </>
+                        )}
+                        <input id="csv-file-input" type="file" accept=".csv,text/csv" onChange={e => e.target.files?.[0] && setCsvFile(e.target.files[0])} className="hidden" />
+                      </label>
+                      <div className="flex justify-end gap-2 pt-3 border-t border-outline-variant/30">
+                        <button onClick={() => setShowCsvImport(false)} disabled={csvImporting} className="px-4 py-2 rounded-xl border border-outline-variant/40 text-on-surface text-sm font-medium hover:bg-surface-container disabled:opacity-50">Annuler</button>
+                        <button onClick={handleCsvUpload} disabled={!csvFile || csvImporting}
+                          className="px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-bold disabled:opacity-50 flex items-center gap-2 shadow-md">
+                          {csvImporting && <RotateCcw className="w-3.5 h-3.5 animate-spin" />}
+                          {csvImporting ? 'Importation...' : 'Lancer l\'import'}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
 
       <ConfirmDialog open={!!confirmDeleteId} title="Supprimer l'utilisateur"
         message="Supprimer définitivement cet utilisateur ? Cette action est irréversible."
@@ -1097,49 +800,158 @@ export default function Users() {
       <ConfirmDialog open={!!confirmResetId} title="Réinitialiser le mot de passe"
         message="Un nouveau mot de passe temporaire sera généré et envoyé par email."
         confirmLabel="Réinitialiser" loading={resetting} onConfirm={handleResetPassword} onCancel={() => setConfirmResetId(null)} />
-      <ConfirmDialog open={showPurgeModal} title="Purger tous les utilisateurs importés"
-        message="Supprimer tous les comptes importés depuis GLPI / CSV ? Vos comptes Administrateurs et SuperAdministrateurs seront impérativement conservés. Cette action est irréversible."
-        confirmLabel="Purger les importés" danger loading={purging} onConfirm={handlePurgeImported} onCancel={() => setShowPurgeModal(false)} />
-    </motion.div>
-  );
-}
+      {/* ── Modale de Purge Intelligente ────────────────────────────────────────── */}
+      {createPortal(
+        <AnimatePresence>
+          {showPurgeModal && (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => { if (!purging) setShowPurgeModal(false); }}
+                className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer"
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                transition={{ type: 'spring', duration: 0.35, bounce: 0.12 }}
+                className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-3xl shadow-2xl w-full max-w-xl max-h-[85vh] flex flex-col overflow-hidden"
+              >
+                {/* Header */}
+                <div className="flex items-center gap-3 px-6 py-4 border-b border-outline-variant/30 bg-surface-container-low/40">
+                  <div className="p-2 rounded-xl bg-red-500/10 text-red-500 border border-red-500/20">
+                    <Trash2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-extrabold text-on-surface">Purge & Nettoyage Intelligent des Comptes</h3>
+                    <p className="text-[11px] text-on-surface-variant font-medium">Analyse d'impact automatisée pour préserver l'historique ITSM</p>
+                  </div>
+                  <motion.button onClick={() => { if (!purging) setShowPurgeModal(false); }} whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }} className="ml-auto p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer">
+                    <X className="w-4 h-4" />
+                  </motion.button>
+                </div>
 
-/* ── Sous-composants ────────────────────────────────────────────────────────── */
+                {/* Body */}
+                <div className="p-6 overflow-y-auto flex-1 space-y-5">
+                  {loadingPreview ? (
+                    <div className="flex flex-col items-center justify-center py-10 space-y-3">
+                      <RotateCcw className="w-8 h-8 text-primary animate-spin" />
+                      <p className="text-xs font-semibold text-on-surface-variant">Analyse d'impact de la base d'utilisateurs en cours...</p>
+                    </div>
+                  ) : purgePreview ? (
+                    <>
+                      {/* Bilan analytique 3-cartes */}
+                      <div className="grid grid-cols-3 gap-2.5">
+                        <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-center">
+                          <span className="text-lg font-black text-emerald-600 dark:text-emerald-400 block">{purgePreview.deletableOrphansCount}</span>
+                          <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300">Orphelins (Sans Ticket)</span>
+                          <span className="text-[9px] text-on-surface-variant block mt-0.5">100% supprimables</span>
+                        </div>
+                        <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-center">
+                          <span className="text-lg font-black text-amber-600 dark:text-amber-400 block">{purgePreview.inactivesWithTicketsCount}</span>
+                          <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300">Inactifs avec Tickets</span>
+                          <span className="text-[9px] text-on-surface-variant block mt-0.5">Désactivation seule</span>
+                        </div>
+                        <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-2xl text-center">
+                          <span className="text-lg font-black text-blue-600 dark:text-blue-400 block">{purgePreview.activeImportedCount}</span>
+                          <span className="text-[10px] font-bold text-blue-700 dark:text-blue-300">Comptes Actifs</span>
+                          <span className="text-[9px] text-on-surface-variant block mt-0.5">Conservés</span>
+                        </div>
+                      </div>
 
-function TH({ children, className, checkbox }) {
-  return (
-    <th className={`p-md font-label-md text-label-md text-on-surface-variant uppercase tracking-wider whitespace-nowrap ${checkbox ? 'w-10' : ''} ${className || ''}`}>
-      {children}
-    </th>
-  );
-}
+                      {/* Choix du mode de purge */}
+                      <div className="space-y-2.5">
+                        <label className="text-xs font-bold text-on-surface uppercase tracking-wider block">Stratégie de Nettoyage :</label>
 
-function Field({ label, required, children, className }) {
-  return (
-    <div className={`flex flex-col gap-1 ${className || ''}`}>
-      <label className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">
-        {label}{required && <span className="text-error ml-0.5">*</span>}
-      </label>
-      {children}
+                        {[
+                          {
+                            id: 'smart',
+                            title: '🛡️ Nettoyage Intelligent (Recommandé)',
+                            desc: `Supprime les ${purgePreview.deletableOrphansCount} comptes orphelins sans tickets et désactive les ${purgePreview.inactivesWithTicketsCount} comptes inactifs.`,
+                            badge: 'Zéro risque',
+                            color: 'emerald',
+                          },
+                          {
+                            id: 'deletable_only',
+                            title: '🗑️ Supprimer les orphelins uniquement',
+                            desc: `Supprime uniquement les ${purgePreview.deletableOrphansCount} comptes n'ayant aucun ticket associé.`,
+                            badge: 'Conservation',
+                            color: 'blue',
+                          },
+                          {
+                            id: 'deactivate_only',
+                            title: '💤 Désactiver les comptes inactifs',
+                            desc: 'Désactive les comptes sans supprimer aucune donnée.',
+                            badge: 'Sécurité',
+                            color: 'amber',
+                          },
+                          {
+                            id: 'full_force',
+                            title: '⚠️ Purge intégrale forcée',
+                            desc: `Supprime TOUS les ${purgePreview.totalNonAdmin} comptes non-admin (les tickets historiques seront déliés).`,
+                            badge: 'Action lourde',
+                            color: 'red',
+                          },
+                        ].map((mode) => (
+                          <div
+                            key={mode.id}
+                            onClick={() => setPurgeMode(mode.id)}
+                            className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-start gap-3 ${
+                              purgeMode === mode.id
+                                ? 'bg-primary/10 border-primary shadow-sm'
+                                : 'bg-surface border-outline-variant/30 hover:border-outline-variant/60'
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name="purgeMode"
+                              checked={purgeMode === mode.id}
+                              onChange={() => setPurgeMode(mode.id)}
+                              className="accent-primary mt-0.5 cursor-pointer"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between">
+                                <h4 className="text-xs font-bold text-on-surface">{mode.title}</h4>
+                                <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant">
+                                  {mode.badge}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-on-surface-variant mt-0.5 leading-relaxed">{mode.desc}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+
+                {/* Footer Actions */}
+                <div className="flex justify-end gap-2 px-6 py-4 border-t border-outline-variant/30 bg-surface-container-low/40">
+                  <button
+                    onClick={() => setShowPurgeModal(false)}
+                    disabled={purging}
+                    className="px-4 py-2 rounded-xl border border-outline-variant/40 text-on-surface text-xs font-semibold hover:bg-surface-container transition-colors disabled:opacity-50 cursor-pointer"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    onClick={handlePurgeSmart}
+                    disabled={purging || loadingPreview}
+                    className="px-5 py-2 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 text-white text-xs font-bold shadow-md hover:shadow-lg disabled:opacity-50 flex items-center gap-2 transition-all cursor-pointer"
+                  >
+                    {purging && <RotateCcw className="w-3.5 h-3.5 animate-spin" />}
+                    <span>{purging ? 'Purge en cours...' : 'Exécuter la Purge'}</span>
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
+
     </div>
-  );
-}
-
-function StatCard({ label, value, icon, critical }) {
-  return (
-    <motion.div variants={itemVariants}
-      className={`bento-card bento-col-1 flex flex-col p-lg justify-between ${critical ? 'stat-card-glow' : ''}`}
-      whileHover={{ y: -2, transition: { duration: 0.2 } }}
-    >
-      <div className="flex justify-between items-start mb-md">
-        <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-widest">{label}</p>
-        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-          critical ? 'bg-gradient-to-br from-red-500/10 to-orange-500/10 text-red-500 border border-red-500/20' : 'bg-primary/5 text-primary border border-primary/10'
-        }`}>
-          <span className="material-symbols-outlined text-sm">{icon}</span>
-        </div>
-      </div>
-      <h3 className="font-display-lg text-display-lg text-on-background font-bold">{value}</h3>
-    </motion.div>
   );
 }

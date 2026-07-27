@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
+const { auditLog } = require('../services/auditLogService');
 
 const router = express.Router();
 router.use(authenticate);
@@ -30,6 +31,7 @@ router.post('/', requirePermission('automation.manage', ['ADMIN']), [body('name'
   });
 
   return res.status(201).json(workflow);
+  auditLog('N8N_WORKFLOW_CREATED', { actor: req.user, targetType: 'N8nWorkflow', targetId: workflow.id, targetLabel: workflow.name }).catch(() => {});
 });
 
 // Update workflow (ADMIN only)

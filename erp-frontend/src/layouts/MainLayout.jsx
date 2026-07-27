@@ -1,6 +1,33 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import {
+  LayoutDashboard,
+  Ticket,
+  Users,
+  Inbox,
+  BookOpen,
+  Activity,
+  MailCheck,
+  BrainCircuit,
+  FileText,
+  User,
+  ShieldCheck,
+  Shield,
+  Terminal,
+  Settings,
+  History,
+  ShieldAlert,
+  LogOut,
+  Search,
+  Bell,
+  Sun,
+  Moon,
+  Pin,
+  Bot,
+  Sparkles,
+  MapPin,
+} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
 import { useTheme } from '../context/ThemeContext';
@@ -15,40 +42,49 @@ import { useNotifications } from '../context/NotificationContext';
 import { saveSessionLocation } from '../utils/sessionLocation';
 
 const platformItems = [
-  { to: '/', label: 'Dashboard', icon: 'house', end: true, permission: null },
-  { to: '/tickets', label: 'Tickets', icon: 'confirmation_number', permission: null },
-  { to: '/teams', label: 'Equipes', icon: 'groups', permission: null },
-  { to: '/inbox', label: 'Boite mail', icon: 'inbox', permission: null },
-  { to: '/knowledge-base', label: 'Base de connaissances', icon: 'library_books', permission: null },
+  { to: '/', label: 'Dashboard', icon: LayoutDashboard, color: 'text-amber-400', end: true, permission: null },
+  { to: '/tickets', label: 'Tickets', icon: Ticket, color: 'text-gold-400', permission: null },
+  { to: '/email-drafts', label: 'Centre de Validation', icon: ShieldCheck, color: 'text-amber-400', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
+  { to: '/inbox', label: 'Boîte mail', icon: Inbox, color: 'text-sky-400', permission: null },
+  { to: '/knowledge-base', label: 'Base de connaissances', icon: BookOpen, color: 'text-purple-400', permission: null },
+];
+
+const orgItems = [
+  { to: '/teams', label: 'Équipes', icon: Users, color: 'text-emerald-400', permission: null },
+  { to: '/users', label: 'Utilisateurs', icon: User, color: 'text-emerald-400', permission: 'users.manage', fallbackRoles: ['ADMIN'] },
+  { to: '/skills', label: 'Compétences', icon: BrainCircuit, color: 'text-teal-400', permission: null },
+  { to: '/locations', label: 'Lieux', icon: MapPin, color: 'text-amber-400', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE'] },
 ];
 
 const systemItems = [
-  { to: '/supervision', label: 'Supervision IA', icon: 'monitor_heart', permission: 'inbox.sync', fallbackRoles: ['ADMIN', 'TECHNICIAN'] },
-  { to: '/email-drafts', label: 'Reponses a valider', icon: 'mark_email_unread', permission: 'emaildrafts.manage', fallbackRoles: ['ADMIN', 'TECHNICIAN'] },
-  { to: '/skills', label: 'Competences', icon: 'psychology', permission: null },
-  { to: '/documentation', label: 'Documentation', icon: 'description', permission: null },
-  { to: '/users', label: 'Utilisateurs', icon: 'person', permission: 'users.manage', fallbackRoles: ['ADMIN'] },
-  { to: '/permission-groups', label: 'Groupes de droits', icon: 'shield', permission: 'users.manage', fallbackRoles: ['ADMIN'] },
-  { to: '/prompts', label: 'Prompts IA', icon: 'terminal', permission: 'prompts.manage', fallbackRoles: ['ADMIN'] },
-  { to: '/settings', label: 'Parametres', icon: 'settings', permission: ['settings.ai', 'settings.email', 'settings.integrations', 'automation.manage'], fallbackRoles: ['ADMIN'] },
-  { to: '/logs', label: 'Journal activité', icon: 'summarize', permission: null },
+  { to: '/supervision', label: 'Supervision IA', icon: Activity, color: 'text-indigo-400', permission: 'inbox.sync', fallbackRoles: ['ADMIN', 'TECHNICIAN'] },
+  { to: '/ai-weekly-reports', label: 'Apprentissage IA', icon: BrainCircuit, color: 'text-purple-400', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE'] },
+  { to: '/prompts', label: 'Prompts IA', icon: Terminal, color: 'text-violet-400', permission: 'prompts.manage', fallbackRoles: ['ADMIN'] },
+  { to: '/permission-groups', label: 'Groupes de droits', icon: ShieldCheck, color: 'text-cyan-400', permission: 'users.manage', fallbackRoles: ['ADMIN'] },
+  { to: '/settings', label: 'Paramètres', icon: Settings, color: 'text-gray-400', permission: ['settings.ai', 'settings.email', 'settings.integrations', 'automation.manage'], fallbackRoles: ['ADMIN'] },
+  { to: '/documentation', label: 'Documentation', icon: FileText, color: 'text-blue-400', permission: null },
+  { to: '/logs', label: 'Journal activité', icon: History, color: 'text-rose-400', permission: null },
+  { to: '/audit', label: 'Audit système', icon: Shield, color: 'text-amber-400', permission: null, fallbackRoles: ['ADMIN'] },
 ];
 
 const ROUTE_SEMANTICS = {
   '/': { zone: 'main', idx: 0 },
   '/tickets': { zone: 'main', idx: 1 },
-  '/teams': { zone: 'main', idx: 2 },
+  '/email-drafts': { zone: 'main', idx: 2 },
   '/inbox': { zone: 'main', idx: 3 },
   '/knowledge-base': { zone: 'main', idx: 4 },
+  '/teams': { zone: 'org', idx: 0 },
+  '/users': { zone: 'org', idx: 1 },
+  '/skills': { zone: 'org', idx: 2 },
+  '/locations': { zone: 'org', idx: 3 },
   '/supervision': { zone: 'admin', idx: 0 },
-  '/email-drafts': { zone: 'admin', idx: 1 },
-  '/skills': { zone: 'admin', idx: 2 },
-  '/documentation': { zone: 'admin', idx: 3 },
-  '/users': { zone: 'admin', idx: 4 },
-  '/permission-groups': { zone: 'admin', idx: 5 },
-  '/prompts': { zone: 'admin', idx: 6 },
-  '/settings': { zone: 'admin', idx: 7 },
-  '/logs': { zone: 'admin', idx: 8 },
+  '/ai-weekly-reports': { zone: 'admin', idx: 1 },
+  '/prompts': { zone: 'admin', idx: 2 },
+  '/permission-groups': { zone: 'admin', idx: 3 },
+  '/settings': { zone: 'admin', idx: 4 },
+  '/documentation': { zone: 'admin', idx: 5 },
+  '/logs': { zone: 'admin', idx: 6 },
+  '/audit': { zone: 'admin', idx: 7 },
 };
 
 function resolveSemantics(pathname) {
@@ -60,20 +96,23 @@ function resolveSemantics(pathname) {
   return match ? match[1] : null;
 }
 
+const ZONE_ORDER = ['main', 'org', 'admin'];
+
 const pageVariants = {
-  enter: ({ dir, axis }) => ({
+  initial: ({ direction: dir, axis }) => ({
     [axis]: dir > 0 ? '40%' : dir < 0 ? '-40%' : 0,
     opacity: 0,
   }),
-  center: {
-    x: 0, y: 0,
+  animate: {
+    x: 0,
+    y: 0,
     opacity: 1,
-    transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] },
+    transition: { duration: 0.45, ease: [0.16, 1, 0.3, 1] },
   },
-  exit: ({ dir, axis }) => ({
+  exit: ({ direction: dir, axis }) => ({
     [axis]: dir > 0 ? '-20%' : dir < 0 ? '20%' : 0,
     opacity: 0,
-    transition: { duration: 0.25, ease: [0.16, 1, 0.3, 1] },
+    transition: { duration: 0.3, ease: [0.16, 1, 0.3, 1] },
   }),
 };
 
@@ -92,7 +131,6 @@ export default function MainLayout() {
   const [sidebarPinned, setSidebarPinned] = useState(() => {
     return localStorage.getItem('sidebarPinned') === 'true';
   });
-  const [tooltipData, setTooltipData] = useState(null);
   const [badgeCounts, setBadgeCounts] = useState({ tickets: 0, drafts: 0 });
   const sidebarRef = useRef(null);
   const userMenuRef = useRef(null);
@@ -142,22 +180,26 @@ export default function MainLayout() {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }));
   }
 
-  const visibleSystemItems = systemItems.filter((item) => {
+  const filterItems = (items) => items.filter((item) => {
     if (item.permission === null) return true;
     const keys = Array.isArray(item.permission) ? item.permission : [item.permission];
     return keys.some((key) => hasPermission(user, key, item.fallbackRoles));
   });
 
+  const visibleOrgItems = filterItems(orgItems);
+  const visibleSystemItems = filterItems(systemItems);
+
   const hasAdminAccess = visibleSystemItems.length > 0;
-  const isInAdminSection = visibleSystemItems.some(
+  const allSecondaryItems = [...visibleOrgItems, ...visibleSystemItems];
+  const isInSecondarySection = allSecondaryItems.some(
     (item) => location.pathname === item.to || location.pathname.startsWith(item.to + '/')
   );
-  const currentAdminItem = visibleSystemItems.find(
+  const currentSecondaryItem = allSecondaryItems.find(
     (item) => location.pathname === item.to || location.pathname.startsWith(item.to + '/')
   );
 
   const navigationType = useNavigationType();
-  const [direction, setDirection] = useState({ dir: 0, axis: 'y' });
+  const [transition, setTransition] = useState({ direction: 1, axis: 'y' });
   const prevPathRef = useRef(location.pathname);
 
   useEffect(() => {
@@ -169,7 +211,7 @@ export default function MainLayout() {
   useEffect(() => {
     const prev = resolveSemantics(prevPathRef.current);
     const curr = resolveSemantics(location.pathname);
-    let dir = 0;
+    let dir = 1;
     let axis = 'y';
     if (prev && curr) {
       if (prev.zone === curr.zone) {
@@ -177,10 +219,14 @@ export default function MainLayout() {
         dir = navigationType === 'POP' ? (curr.idx < prev.idx ? -1 : 1) : (curr.idx > prev.idx ? 1 : -1);
       } else {
         axis = 'x';
-        dir = navigationType === 'POP' ? -1 : 1;
+        const prevZoneIdx = ZONE_ORDER.indexOf(prev.zone);
+        const currZoneIdx = ZONE_ORDER.indexOf(curr.zone);
+        dir = navigationType === 'POP' ? (currZoneIdx < prevZoneIdx ? -1 : 1) : (currZoneIdx > prevZoneIdx ? 1 : -1);
       }
+    } else {
+      dir = 1;
     }
-    setDirection({ dir, axis });
+    setTransition({ direction: dir, axis });
     prevPathRef.current = location.pathname;
   }, [location.pathname, navigationType]);
 
@@ -188,7 +234,7 @@ export default function MainLayout() {
   const sidebarW = isSidebarExpanded ? 240 : 64;
 
   function toggleSidebarPin() {
-    setSidebarPinned(prev => {
+    setSidebarPinned((prev) => {
       const next = !prev;
       localStorage.setItem('sidebarPinned', next);
       return next;
@@ -197,12 +243,9 @@ export default function MainLayout() {
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--color-background)' }}>
-
       <GlobalSearch />
 
-      {/* ═══════════════════════════════════════════════════════════════════ */}
-      {/* SIDEBAR — Dark, fixed left                                       */}
-      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* SIDEBAR */}
       <aside
         ref={sidebarRef}
         className={`app-sidebar ${isSidebarExpanded ? 'expanded' : ''}`}
@@ -210,21 +253,20 @@ export default function MainLayout() {
         onMouseLeave={() => { setSidebarHovered(false); setShowAdminMenu(false); }}
       >
         {/* Logo */}
-        <div className="sidebar-logo">
-          <div className="sidebar-logo-icon">
-            <span className="material-symbols-outlined text-white" style={{ fontSize: '18px' }}>
-              smart_toy
-            </span>
+        <div className="sidebar-logo flex items-center gap-3">
+          <div className="sidebar-logo-icon bg-gradient-to-tr from-indigo-600 to-violet-500 rounded-xl p-2 shadow-md shadow-indigo-500/20">
+            <Sparkles className="w-4 h-4 text-white" />
           </div>
-          <span className="sidebar-logo-text">IA HUB</span>
+          <span className="sidebar-logo-text font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-indigo-200 to-indigo-400">
+            IA HUB
+          </span>
         </div>
 
         {/* Navigation */}
         <nav className="sidebar-nav">
-          {/* Platform section */}
           <div className="sidebar-group-label">Plateforme</div>
           {platformItems.map((item) => {
-            const count = item.to === '/tickets' ? badgeCounts.tickets : 0;
+            const count = item.to === '/tickets' ? badgeCounts.tickets : item.to === '/email-drafts' ? badgeCounts.drafts : 0;
             return (
               <SidebarItem
                 key={item.to}
@@ -236,62 +278,50 @@ export default function MainLayout() {
             );
           })}
 
-          <div className="sidebar-separator" />
+          {(visibleOrgItems.length > 0 || visibleSystemItems.length > 0) && (
+            <div className="sidebar-separator" />
+          )}
 
-          {/* Admin section */}
-          {hasAdminAccess && (
+          {visibleOrgItems.length > 0 && (
+            <>
+              <div className="sidebar-group-label">Organisation</div>
+              {isSidebarExpanded ? (
+                visibleOrgItems.map((item) => (
+                  <SidebarItem key={item.to} item={item} user={user} isSidebarExpanded={isSidebarExpanded} />
+                ))
+              ) : (
+                <CompactSectionButton
+                  items={visibleOrgItems}
+                  isActive={isInSecondarySection}
+                  currentItem={currentSecondaryItem}
+                  label="Organisation"
+                  icon={Users}
+                  expanded={showAdminMenu}
+                  onToggle={() => setShowAdminMenu(!showAdminMenu)}
+                  onClose={() => setShowAdminMenu(false)}
+                />
+              )}
+            </>
+          )}
+
+          {visibleSystemItems.length > 0 && (
             <>
               <div className="sidebar-group-label">Administration</div>
               {isSidebarExpanded ? (
-                visibleSystemItems.map((item) => {
-                  const count = item.to === '/email-drafts' ? badgeCounts.drafts : 0;
-                  return (
-                    <SidebarItem
-                      key={item.to}
-                      item={item}
-                      user={user}
-                      isSidebarExpanded={isSidebarExpanded}
-                      count={count}
-                    />
-                  );
-                })
+                visibleSystemItems.map((item) => (
+                  <SidebarItem key={item.to} item={item} user={user} isSidebarExpanded={isSidebarExpanded} />
+                ))
               ) : (
-                <div className="relative">
-                  <button
-                    onClick={() => setShowAdminMenu(!showAdminMenu)}
-                    className={`sidebar-item ${isInAdminSection ? 'active' : ''}`}
-                    style={{ justifyContent: isSidebarExpanded ? undefined : 'center' }}
-                  >
-                    <span className="sidebar-item-icon">
-                      <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>
-                        admin_panel_settings
-                      </span>
-                    </span>
-                    <span className="sidebar-item-label">
-                      {currentAdminItem?.label || 'Administration'}
-                    </span>
-                  </button>
-                  {showAdminMenu && (
-                    <div className="sidebar-dropdown" style={{ top: 0 }}>
-                      {visibleSystemItems.map((item) => {
-                        const isActive = location.pathname === item.to || location.pathname.startsWith(item.to + '/');
-                        return (
-                          <NavLink
-                            key={item.to}
-                            to={item.to}
-                            onClick={() => setShowAdminMenu(false)}
-                            className={`sidebar-dropdown-item ${isActive ? 'active' : ''}`}
-                          >
-                            <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>
-                              {item.icon}
-                            </span>
-                            <span>{item.label}</span>
-                          </NavLink>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
+                <CompactSectionButton
+                  items={visibleSystemItems}
+                  isActive={isInSecondarySection}
+                  currentItem={currentSecondaryItem}
+                  label="Administration"
+                  icon={ShieldAlert}
+                  expanded={showAdminMenu}
+                  onToggle={() => setShowAdminMenu(!showAdminMenu)}
+                  onClose={() => setShowAdminMenu(false)}
+                />
               )}
             </>
           )}
@@ -300,13 +330,10 @@ export default function MainLayout() {
         {/* Pin toggle */}
         <button
           onClick={toggleSidebarPin}
-          className="sidebar-pin-btn"
+          className="sidebar-pin-btn hover:text-indigo-400 transition-colors"
           title={sidebarPinned ? 'Détacher la sidebar' : 'Épingler la sidebar'}
-          aria-label={sidebarPinned ? 'Détacher la sidebar' : 'Épingler la sidebar'}
         >
-          <span className="material-symbols-outlined" style={{ fontSize: '18px', fontVariationSettings: `'FILL' ${sidebarPinned ? 1 : 0}` }}>
-            keep
-          </span>
+          <Pin className={`w-4 h-4 transition-transform ${sidebarPinned ? 'rotate-45 text-indigo-400' : ''}`} />
         </button>
 
         {/* User profile at bottom */}
@@ -315,7 +342,7 @@ export default function MainLayout() {
           onClick={() => setShowUserMenu(!showUserMenu)}
           ref={userMenuRef}
         >
-          <div className="sidebar-user-avatar">
+          <div className="sidebar-user-avatar bg-indigo-600/20 border border-indigo-500/30 text-indigo-300 font-bold">
             {user?.fullName?.charAt(0)?.toUpperCase() || '?'}
           </div>
           <div className="sidebar-user-info min-w-0">
@@ -323,30 +350,25 @@ export default function MainLayout() {
             <p className="text-[10px] text-slate-400 truncate">{user?.role}</p>
           </div>
 
-          {/* User dropdown */}
           {showUserMenu && (
             <div className="sidebar-dropdown" style={{ bottom: '100%', left: 0, top: 'auto', marginBottom: 8 }}>
               <button
                 onClick={(e) => { e.stopPropagation(); setShowUserMenu(false); handleLogout(); }}
-                className="sidebar-dropdown-item"
-                style={{ color: '#ef4444' }}
+                className="sidebar-dropdown-item text-red-400 hover:text-red-300 flex items-center gap-2"
               >
-                <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>logout</span>
-                <span>Se deconnecter</span>
+                <LogOut className="w-4 h-4" />
+                <span>Se déconnecter</span>
               </button>
             </div>
           )}
         </div>
       </aside>
 
-      {/* ═══════════════════════════════════════════════════════════════════ */}
-      {/* MAIN CONTENT                                                      */}
-      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* MAIN CONTENT */}
       <div
         className="flex-1 flex flex-col overflow-hidden transition-all duration-200"
         style={{ marginLeft: sidebarW }}
       >
-        {/* Top bar — notifications, theme, global search trigger */}
         <header
           className="h-14 flex items-center justify-between px-6 shrink-0 border-b"
           style={{
@@ -355,42 +377,33 @@ export default function MainLayout() {
           }}
         >
           <div />
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             {/* Search trigger */}
             <button
               onClick={triggerGlobalSearch}
-              className="flex items-center gap-2 h-8 px-3 rounded-lg text-xs font-medium transition-colors"
+              className="flex items-center gap-2 h-9 px-3.5 rounded-xl text-xs font-medium transition-all hover:border-primary/50 shadow-sm"
               style={{
                 backgroundColor: 'var(--color-surface-container)',
                 color: 'var(--color-on-surface-variant)',
                 border: '1px solid var(--color-outline-variant)',
               }}
             >
-              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>search</span>
+              <Search className="w-3.5 h-3.5 text-on-surface-variant" />
               <span>Rechercher...</span>
-              <kbd className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-white/10 border border-white/10">Ctrl K</kbd>
+              <kbd className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-surface-container-high border border-outline-variant/60 font-mono">Ctrl K</kbd>
             </button>
 
             {/* Notifications */}
             <div className="relative" ref={notifBtnRef}>
               <button
                 onClick={toggleNotifications}
-                className="relative w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-black/5"
+                className="relative w-9 h-9 rounded-xl flex items-center justify-center transition-colors hover:bg-surface-container-high border border-outline-variant/60"
                 title={`Alertes${unreadCount > 0 ? ` (${unreadCount} non lues)` : ''}`}
               >
-                <span
-                  className="material-symbols-outlined"
-                  style={{
-                    fontSize: '20px',
-                    fontVariationSettings: `'FILL' ${unreadCount > 0 ? 1 : 0}`,
-                    color: 'var(--color-on-surface-variant)',
-                  }}
-                >
-                  notifications
-                </span>
+                <Bell className="w-4 h-4 text-on-surface-variant" />
                 {unreadCount > 0 && (
                   <span
-                    className="absolute -top-0.5 -right-0.5 flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full text-[9px] font-bold text-white"
+                    className="absolute -top-1 -right-1 flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full text-[9px] font-bold text-white shadow-sm"
                     style={{ backgroundColor: 'var(--color-primary)' }}
                   >
                     {unreadCount > 99 ? '99+' : unreadCount}
@@ -403,30 +416,32 @@ export default function MainLayout() {
             {/* Theme toggle */}
             <button
               onClick={toggleTheme}
-              className="w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-black/5"
+              className="w-9 h-9 rounded-xl flex items-center justify-center transition-colors hover:bg-surface-container-high border border-outline-variant/60"
               title={theme === 'dark' ? 'Mode clair' : 'Mode sombre'}
             >
-              <span className="material-symbols-outlined" style={{ fontSize: '20px', color: 'var(--color-on-surface-variant)' }}>
-                {theme === 'dark' ? 'light_mode' : 'dark_mode'}
-              </span>
+              {theme === 'dark' ? (
+                <Sun className="w-4 h-4 text-amber-400" />
+              ) : (
+                <Moon className="w-4 h-4 text-indigo-600" />
+              )}
             </button>
           </div>
         </header>
 
-        {/* Page content */}
         <main
-          className="flex-1 overflow-y-auto"
+          className="flex-1 min-w-0 relative bg-inherit overflow-y-auto overflow-x-hidden"
           style={{ backgroundColor: 'var(--color-background)' }}
         >
-          <AnimatePresence initial={false} mode="popLayout">
+          <AnimatePresence mode="popLayout" initial={false} custom={transition}>
             <motion.div
               key={location.pathname}
-              custom={direction}
+              custom={transition}
               variants={pageVariants}
-              initial="enter"
-              animate="center"
+              initial="initial"
+              animate="animate"
               exit="exit"
-              style={{ willChange: 'transform, opacity', minHeight: '100%' }}
+              style={{ willChange: 'auto' }}
+              className="w-full min-h-full"
             >
               <Outlet />
             </motion.div>
@@ -438,9 +453,9 @@ export default function MainLayout() {
 
       <ConfirmDialog
         open={showLogoutConfirm}
-        title="Deconnexion"
-        message="Etes-vous sur de vouloir vous deconnecter ?"
-        confirmLabel="Se deconnecter"
+        title="Déconnexion"
+        message="Êtes-vous sûr de vouloir vous déconnecter ?"
+        confirmLabel="Se déconnecter"
         cancelLabel="Annuler"
         danger
         onConfirm={confirmLogout}
@@ -452,25 +467,65 @@ export default function MainLayout() {
   );
 }
 
-/* ── Sidebar Item ──────────────────────────────────────────────────────────── */
+function CompactSectionButton({ items, isActive, currentItem, label, icon: Icon, expanded, onToggle, onClose }) {
+  const location = useLocation();
+  return (
+    <div className="relative">
+      <button
+        onClick={onToggle}
+        className={`sidebar-item ${isActive ? 'active' : ''}`}
+        style={{ justifyContent: 'center' }}
+      >
+        <span className="sidebar-item-icon">
+          <Icon className="w-5 h-5 text-indigo-400" />
+        </span>
+        <span className="sidebar-item-label">
+          {currentItem?.label || label}
+        </span>
+      </button>
+      {expanded && (
+        <div className="sidebar-dropdown" style={{ top: 0 }}>
+          {items.map((item) => {
+            const isItemActive = location.pathname === item.to || location.pathname.startsWith(item.to + '/');
+            const ItemIcon = item.icon;
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                viewTransition
+                onClick={onClose}
+                className={`sidebar-dropdown-item flex items-center gap-2 ${isItemActive ? 'active' : ''}`}
+              >
+                <ItemIcon className="w-4 h-4" />
+                <span>{item.label}</span>
+              </NavLink>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SidebarItem({ item, user, isSidebarExpanded, count }) {
   if (item.permission !== null) {
     const keys = Array.isArray(item.permission) ? item.permission : [item.permission];
     if (!keys.some((key) => hasPermission(user, key, item.fallbackRoles))) return null;
   }
 
+  const Icon = item.icon;
+
   return (
     <NavLink
       to={item.to}
       end={item.end}
+      viewTransition
       className={({ isActive }) =>
         `sidebar-item ${isActive ? 'active' : ''}`
       }
     >
       <span className="sidebar-item-icon relative">
-        <span className="material-symbols-outlined" style={{ fontSize: '20px' }}>
-          {item.icon}
-        </span>
+        <Icon className={`w-4 h-4 ${item.color || 'text-primary'}`} />
         {!isSidebarExpanded && count > 0 && (
           <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-primary animate-pulse" />
         )}

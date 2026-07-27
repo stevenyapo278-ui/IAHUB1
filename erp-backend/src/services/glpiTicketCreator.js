@@ -4,6 +4,10 @@ const bcrypt = require('bcryptjs');
 const prisma = require('../prismaClient');
 const { categoryToGlpiId, GLPI_AI_REQUESTER_ID } = require('../utils/glpiMapping');
 const { getActiveGlpiConfig } = require('../utils/glpiSync');
+const { fetchWithTimeout } = require('../utils/fetchWithTimeout');
+const { autoAssignTechnicianWithAI } = require('./ticketAutoAssign');
+const { sendAssignmentNotificationEmail } = require('./emailSender');
+const { getSystemSettings } = require('./systemSettings');
 
 const GLPI_STATUS_MAP = { NEW: 1, OPEN: 2, PENDING: 4, WAITING_FOR_USER: 4, SOLVED: 5, CLOSED: 6 };
 const ERP_PRIORITY_MAP = { P1: 6, P2: 4, P3: 3, P4: 2 };
@@ -12,7 +16,7 @@ const GLPI_URGENCY_IMPACT_MAP = { VERY_LOW: 1, LOW: 2, MEDIUM: 3, HIGH: 4, VERY_
 const GLPI_SOURCE_MAP = { Helpdesk: 1, Email: 4, Téléphone: 2 };
 
 async function withGlpiSession(config, fn) {
-  const sessionRes = await fetch(`${config.baseUrl}/initSession`, {
+  const sessionRes = await fetchWithTimeout(`${config.baseUrl}/initSession`, {
     headers: { 'App-Token': config.appToken, Authorization: `user_token ${config.userToken}` },
   });
   if (!sessionRes.ok) throw new Error(`GLPI initSession échoué (${sessionRes.status})`);
@@ -20,7 +24,7 @@ async function withGlpiSession(config, fn) {
   try {
     return await fn(session_token);
   } finally {
-    await fetch(`${config.baseUrl}/killSession`, {
+    await fetchWithTimeout(`${config.baseUrl}/killSession`, {
       headers: { 'App-Token': config.appToken, 'Session-Token': session_token },
     }).catch(() => {});
   }
@@ -71,7 +75,7 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
       },
     };
 
-    const ticketRes = await fetch(`${config.baseUrl}/Ticket`, {
+    const ticketRes = await fetchWithTimeout(`${config.baseUrl}/Ticket`, {
       method: 'POST',
       headers,
       body: JSON.stringify(ticketPayload),
@@ -92,7 +96,7 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
 
     if (followupParts.length > 0) {
       const combinedNote = followupParts.join('\n\n---\n\n');
-      await fetch(`${config.baseUrl}/Ticket/${glpiId}/ITILFollowup`, {
+      await fetchWithTimeout(`${config.baseUrl}/Ticket/${glpiId}/ITILFollowup`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -147,7 +151,7 @@ async function updateGlpiTicket(glpiTicketId, { status, priority, category, type
     };
 
     if (Object.keys(input).length > 0) {
-      await fetch(`${config.baseUrl}/Ticket/${glpiTicketId}`, {
+      await fetchWithTimeout(`${config.baseUrl}/Ticket/${glpiTicketId}`, {
         method: 'PUT',
         headers,
         body: JSON.stringify({ input: { id: glpiTicketId, ...input } }),
@@ -155,7 +159,7 @@ async function updateGlpiTicket(glpiTicketId, { status, priority, category, type
     }
 
     if (assignedToGlpiId) {
-      await fetch(`${config.baseUrl}/Ticket/${glpiTicketId}/Ticket_User`, {
+      await fetchWithTimeout(`${config.baseUrl}/Ticket/${glpiTicketId}/Ticket_User`, {
         method: 'POST',
         headers,
         body: JSON.stringify({ input: { tickets_id: glpiTicketId, users_id: assignedToGlpiId, type: 2 } }),
@@ -165,7 +169,7 @@ async function updateGlpiTicket(glpiTicketId, { status, priority, category, type
     }
 
     if (teamGlpiId) {
-      await fetch(`${config.baseUrl}/Ticket/${glpiTicketId}/Group_Ticket`, {
+      await fetchWithTimeout(`${config.baseUrl}/Ticket/${glpiTicketId}/Group_Ticket`, {
         method: 'POST',
         headers,
         body: JSON.stringify({ input: { tickets_id: glpiTicketId, groups_id: teamGlpiId, type: 2 } }),
@@ -174,6 +178,7 @@ async function updateGlpiTicket(glpiTicketId, { status, priority, category, type
       });
     }
   });
+  prisma.ticket.updateMany({ where: { glpiTicketId }, data: { lastGlpiSyncAt: new Date() } }).catch(() => {});
 }
 
 // Ajoute un suivi (ITILFollowup) à un ticket GLPI existant — utilisé pour répercuter chaque
@@ -206,7 +211,7 @@ async function addGlpiFollowup(glpiTicketId, content, { isPrivate = false } = {}
       'Session-Token': sessionToken,
       'Content-Type': 'application/json',
     };
-    const res = await fetch(`${config.baseUrl}/Ticket/${glpiTicketId}/ITILFollowup`, {
+    const res = await fetchWithTimeout(`${config.baseUrl}/Ticket/${glpiTicketId}/ITILFollowup`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -215,6 +220,7 @@ async function addGlpiFollowup(glpiTicketId, content, { isPrivate = false } = {}
     });
     if (!res.ok) throw new Error(`GLPI ajout followup échoué (${res.status})`);
     const { id } = await res.json();
+    prisma.ticket.updateMany({ where: { glpiTicketId }, data: { lastGlpiSyncAt: new Date() } }).catch(() => {});
     return id;
   });
 }
@@ -226,7 +232,7 @@ async function deleteGlpiTicket(glpiTicketId) {
   if (!config || !glpiTicketId) return false;
 
   return withGlpiSession(config, async (sessionToken) => {
-    const res = await fetch(`${config.baseUrl}/Ticket/${glpiTicketId}?force_purge=true`, {
+    const res = await fetchWithTimeout(`${config.baseUrl}/Ticket/${glpiTicketId}?force_purge=true`, {
       method: 'DELETE',
       headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken, 'Content-Type': 'application/json' },
     });
@@ -241,13 +247,7 @@ async function createTicketFromEmail({ subject, body, from, fromName, analysis, 
   const title = analysis.suggestedTitle || subject;
   const content = `${body || ''}\n\n---\nAnalyse IA : ${analysis.summary}\nConfiance : ${Math.round((analysis.confidence || 0) * 100)}%`;
   const followupNote = from ? `Email original de ${fromName || from} &lt;${from}&gt;\nSujet : ${subject}` : null;
-
-  let glpiTicketId = null;
-  try {
-    glpiTicketId = await createGlpiTicket({ title, content, priority: analysis.priority, category: analysis.category, followupNote, locationId });
-  } catch (err) {
-    console.error('[glpiTicketCreator] Création GLPI échouée:', err.message);
-  }
+  const glpiTicketId = null; // Le ticket GLPI sera créé lors de l'approbation
 
   let glpiLocationName = null;
   if (locationId) {
@@ -257,10 +257,10 @@ async function createTicketFromEmail({ subject, body, from, fromName, analysis, 
 
   const erpTicket = await tx.ticket.create({
     data: {
-      ...(glpiTicketId ? { glpiTicketId } : {}),
       title,
       content: body || '',
       status: 'NEW',
+      approvalStatus: 'PENDING',
       priority: analysis.priority || 'P3',
       category: analysis.category || null,
       ...(locationId ? { glpiLocationId: Number(locationId), glpiLocationName } : {}),
@@ -276,9 +276,6 @@ async function createTicketFromEmail({ subject, body, from, fromName, analysis, 
   // puis par équipe (fallback). L'assignation est journalisée dans ReassignmentLog pour le suivi
   // de précision et l'apprentissage futur.
   try {
-    const { autoAssignTechnicianWithAI } = require('./ticketAutoAssign');
-    const { sendAssignmentNotificationEmail } = require('./emailSender');
-    const { getSystemSettings } = require('./systemSettings');
     // Priorité : compétence exacte suggérée par l'IA (ex: "PORT USB") > catégorie générale (ex: "Matériel")
     const skillHint = analysis.suggestedSkill || analysis.category;
     const assigned = await autoAssignTechnicianWithAI(erpTicket.id, analysis.category, skillHint);
@@ -308,6 +305,29 @@ async function createTicketFromEmail({ subject, body, from, fromName, analysis, 
     console.error('[glpiTicketCreator] Auto-assignation échouée:', err.message);
   }
 
+  // Attacher automatiquement les observateurs par défaut de l'équipe associée
+  try {
+    const updatedTicket = await tx.ticket.findUnique({ where: { id: erpTicket.id }, select: { teamId: true } });
+    if (updatedTicket?.teamId) {
+      const teamObj = await tx.team.findUnique({
+        where: { id: updatedTicket.teamId },
+        include: { defaultObservers: { select: { id: true } } },
+      });
+      if (teamObj?.defaultObservers?.length > 0) {
+        await tx.ticket.update({
+          where: { id: erpTicket.id },
+          data: {
+            observers: {
+              connect: teamObj.defaultObservers.map((o) => ({ id: o.id })),
+            },
+          },
+        });
+      }
+    }
+  } catch (err) {
+    console.error('[glpiTicketCreator] Échec rattachement observateurs équipe:', err.message);
+  }
+
   return { glpiTicketId, erpTicketId: erpTicket.id };
 }
 
@@ -335,7 +355,7 @@ async function uploadGlpiAttachment({ glpiTicketId, buffer, filename, mimeType }
       form.resume();
     });
 
-    const docRes = await fetch(`${config.baseUrl}/Document`, {
+    const docRes = await fetchWithTimeout(`${config.baseUrl}/Document`, {
       method: 'POST',
       headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken, ...form.getHeaders() },
       body: formBuffer,
@@ -343,7 +363,7 @@ async function uploadGlpiAttachment({ glpiTicketId, buffer, filename, mimeType }
     if (!docRes.ok) throw new Error(`GLPI upload document échoué (${docRes.status})`);
     const { id: documentId } = await docRes.json();
 
-    await fetch(`${config.baseUrl}/Document_Item`, {
+    await fetchWithTimeout(`${config.baseUrl}/Document_Item`, {
       method: 'POST',
       headers: {
         'App-Token': config.appToken,
@@ -365,7 +385,7 @@ async function fetchAllGlpiItems(config, sessionToken, endpoint) {
 
   while (true) {
     const url = `${config.baseUrl}/${endpoint}?range=${offset}-${offset + PAGE_SIZE - 1}`;
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
       headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
     }).catch(() => null);
 
@@ -389,7 +409,7 @@ async function fetchGlpiUserEmails(config, sessionToken) {
   const emailMap = {};
 
   while (true) {
-    const res = await fetch(`${config.baseUrl}/UserEmail?range=${offset}-${offset + PAGE_SIZE - 1}`, {
+    const res = await fetchWithTimeout(`${config.baseUrl}/UserEmail?range=${offset}-${offset + PAGE_SIZE - 1}`, {
       headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
     }).catch(() => null);
     if (!res || !res.ok) break;
@@ -637,15 +657,12 @@ async function getImportableGlpiUsers() {
     const emailMap = await fetchGlpiUserEmails(config, sessionToken);
     const users = await fetchAllGlpiItems(config, sessionToken, 'User');
 
-    // Récupérer les glpiId déjà présents dans l'ERP
-    const existingIds = new Set(
-      (await prisma.user.findMany({ where: { glpiId: { not: null } }, select: { glpiId: true } }))
-        .map((u) => u.glpiId)
-    );
-    // Récupérer les emails déjà présents dans l'ERP
-    const existingEmails = new Set(
-      (await prisma.user.findMany({ select: { email: true } })).map((u) => u.email)
-    );
+    // Récupérer les utilisateurs déjà présents dans l'ERP
+    const existingUsers = await prisma.user.findMany({
+      select: { glpiId: true, email: true },
+    });
+    const existingIds = new Set(existingUsers.map((u) => u.glpiId).filter(Boolean));
+    const existingEmails = new Set(existingUsers.map((u) => u.email));
 
     const importable = [];
     for (const u of users) {
@@ -721,5 +738,68 @@ async function importGlpiUsers(glpiUserIds) {
   });
 }
 
-module.exports = { createTicketFromEmail, createGlpiTicket, updateGlpiTicket, deleteGlpiTicket, uploadGlpiAttachment, syncTeamsFromGlpi, syncCategoriesFromGlpi, syncLocationsFromGlpi, syncUsersFromGlpi, addGlpiFollowup, getImportableGlpiUsers, importGlpiUsers };
+// Crée un lieu (Location) dans GLPI — utilisé pour pousser un lieu custom créé dans l'ERP.
+// Retourne le glpiLocationId créé, ou null si GLPI n'est pas configuré.
+async function createGlpiLocation({ name, completename, address, postcode, town, country, building, room }) {
+  const config = await getActiveGlpiConfig();
+  if (!config) return null;
+
+  return withGlpiSession(config, async (sessionToken) => {
+    const input = {
+      name,
+      completename: completename || name,
+      ...(address ? { address } : {}),
+      ...(postcode ? { postcode } : {}),
+      ...(town ? { town } : {}),
+      ...(country ? { country } : {}),
+      ...(building ? { building } : {}),
+      ...(room ? { room } : {}),
+    };
+
+    const res = await fetchWithTimeout(`${config.baseUrl}/Location`, {
+      method: 'POST',
+      headers: {
+        'App-Token': config.appToken,
+        'Session-Token': sessionToken,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ input }),
+    });
+    if (!res.ok) throw new Error(`GLPI création lieu échoué (${res.status})`);
+    const { id } = await res.json();
+    return id;
+  });
+}
+
+// Met à jour un lieu (Location) dans GLPI
+async function updateGlpiLocation(glpiLocationId, { name, completename, address, postcode, town, country, building, room }) {
+  const config = await getActiveGlpiConfig();
+  if (!config) return;
+
+  return withGlpiSession(config, async (sessionToken) => {
+    const input = {};
+    if (name !== undefined) input.name = name;
+    if (completename !== undefined) input.completename = completename;
+    if (address !== undefined) input.address = address;
+    if (postcode !== undefined) input.postcode = postcode;
+    if (town !== undefined) input.town = town;
+    if (country !== undefined) input.country = country;
+    if (building !== undefined) input.building = building;
+    if (room !== undefined) input.room = room;
+
+    if (Object.keys(input).length === 0) return;
+
+    await fetchWithTimeout(`${config.baseUrl}/Location/${glpiLocationId}`, {
+      method: 'PUT',
+      headers: {
+        'App-Token': config.appToken,
+        'Session-Token': sessionToken,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ input: { id: glpiLocationId, ...input } }),
+    });
+  });
+}
+
+module.exports = { createTicketFromEmail, createGlpiTicket, updateGlpiTicket, deleteGlpiTicket, uploadGlpiAttachment, syncTeamsFromGlpi, syncCategoriesFromGlpi, syncLocationsFromGlpi, syncUsersFromGlpi, addGlpiFollowup, getImportableGlpiUsers, importGlpiUsers, createGlpiLocation, updateGlpiLocation };
 

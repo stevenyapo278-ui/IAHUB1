@@ -91,15 +91,15 @@ router.get('/needs-human-review', async (req, res) => {
   return res.json(stillWaiting);
 });
 
-// Réponses IA en attente de validation
+// Brouillons en attente de validation (réponses IA + relances automatiques)
 router.get('/pending-ai-drafts', async (req, res) => {
   const drafts = await prisma.aiEmailDraft.findMany({
     where: { status: 'PENDING' },
     include: {
-      ticket: { select: { id: true, title: true } },
+      ticket: { select: { id: true, title: true, glpiTicketId: true, approvalStatus: true, sourceEmail: true, sourceName: true } },
     },
     orderBy: { createdAt: 'asc' },
-    take: 10,
+    take: 20,
   });
   return res.json(drafts);
 });

@@ -1,24 +1,38 @@
 const prisma = require('../prismaClient');
-const { sendReminder } = require('./emailSender');
 const { logEvent } = require('./ticketEvent');
 const { updateGlpiTicket } = require('./glpiTicketCreator');
+const { processApprovalReminders } = require('./approvalReminderScheduler');
 
 function daysSince(date) {
   return Math.floor((Date.now() - new Date(date).getTime()) / (1000 * 60 * 60 * 24));
 }
 
-// Parcourt tous les tickets WAITING_FOR_USER et envoie les relances selon la config
+function buildReminderDraftBody({ toName, glpiTicketId, subject, isPreClose }) {
+  if (isPreClose) {
+    return `<p>Bonjour ${toName || ''},</p>
+<p>Sans réponse de votre part dans les 5 prochains jours, votre ticket <strong>#${glpiTicketId}</strong> (${subject}) sera automatiquement clôturé.</p>
+<p>Si le problème est résolu, vous n'avez rien à faire. Sinon, répondez à cet email.</p>`;
+  }
+  return `<p>Bonjour ${toName || ''},</p>
+<p>Nous revenons vers vous concernant votre ticket <strong>#${glpiTicketId}</strong> : ${subject}.</p>
+<p>Votre demande est toujours en attente. Pouvez-vous nous confirmer si le problème est résolu ou s'il persiste ?</p>
+<p>Répondez simplement à cet email.</p>`;
+}
+
 async function runReminderScheduler() {
   const anyConfig = await prisma.reminderConfig.findFirst();
-  // Si une config existe mais a été explicitement désactivée (isActive=false), on ne doit PAS
-  // retomber sur les délais par défaut : ce serait réactiver silencieusement les relances/clôtures
-  // auto qu'un admin a justement voulu désactiver. On ne tourne avec les défauts que si aucune
-  // configuration n'existe encore en base (première installation).
   if (anyConfig && !anyConfig.isActive) return [];
   const delays = anyConfig || { firstReminderDays: 2, secondReminderDays: 5, preCloseDays: 10, autoCloseDays: 15 };
 
   const tickets = await prisma.ticket.findMany({
     where: { status: 'WAITING_FOR_USER', sourceEmail: { not: null } },
+    include: {
+      messages: {
+        orderBy: { timestamp: 'desc' },
+        take: 1,
+        select: { timestamp: true },
+      },
+    },
   });
 
   const results = [];
@@ -27,8 +41,10 @@ async function runReminderScheduler() {
     const since = daysSince(ticket.lastUserReplyAt || ticket.updatedAt);
     const count = ticket.reminderCount || 0;
 
+    const latestMsg = ticket.messages?.[0];
+    if (latestMsg && daysSince(latestMsg.timestamp) < 1) continue;
+
     try {
-      // Clôture automatique
       if (since >= delays.autoCloseDays) {
         await prisma.ticket.update({
           where: { id: ticket.id },
@@ -46,39 +62,84 @@ async function runReminderScheduler() {
         continue;
       }
 
-      // Pré-clôture J+10
+      const hasPendingReminderDraft = await prisma.aiEmailDraft.findFirst({
+        where: { ticketId: ticket.id, draftKind: 'REMINDER', status: 'PENDING' },
+        orderBy: { createdAt: 'desc' },
+      });
+
       if (since >= delays.preCloseDays && count < 3) {
-        await sendReminder({
-          ticketId: ticket.id,
-          glpiTicketId: ticket.glpiTicketId,
-          toEmail: ticket.sourceEmail,
-          toName: ticket.sourceName,
-          subject: ticket.title,
-          reminderNumber: 3,
-          isPreClose: true,
-        });
+        if (!hasPendingReminderDraft) {
+          await prisma.aiEmailDraft.create({
+            data: {
+              ticketId: ticket.id,
+              glpiTicketId: ticket.glpiTicketId,
+              recipientEmail: ticket.sourceEmail,
+              recipientName: ticket.sourceName || ticket.sourceEmail,
+              subject: `[Ticket #${ticket.glpiTicketId || ticket.id}] ${ticket.title}`,
+              proposedContent: buildReminderDraftBody({
+                toName: ticket.sourceName, glpiTicketId: ticket.glpiTicketId || ticket.id,
+                subject: ticket.title, isPreClose: true,
+              }),
+              draftKind: 'REMINDER',
+            },
+          });
+        }
         await prisma.ticket.update({ where: { id: ticket.id }, data: { reminderCount: 3, reminderSentAt: new Date() } });
         results.push({ ticketId: ticket.id, action: 'REMINDER_PRE_CLOSE' });
         continue;
       }
 
-      // Deuxième relance J+5
       if (since >= delays.secondReminderDays && count < 2) {
-        await sendReminder({ ticketId: ticket.id, glpiTicketId: ticket.glpiTicketId, toEmail: ticket.sourceEmail, toName: ticket.sourceName, subject: ticket.title, reminderNumber: 2 });
+        if (!hasPendingReminderDraft) {
+          await prisma.aiEmailDraft.create({
+            data: {
+              ticketId: ticket.id,
+              glpiTicketId: ticket.glpiTicketId,
+              recipientEmail: ticket.sourceEmail,
+              recipientName: ticket.sourceName || ticket.sourceEmail,
+              subject: `[Ticket #${ticket.glpiTicketId || ticket.id}] ${ticket.title}`,
+              proposedContent: buildReminderDraftBody({
+                toName: ticket.sourceName, glpiTicketId: ticket.glpiTicketId || ticket.id,
+                subject: ticket.title, isPreClose: false,
+              }),
+              draftKind: 'REMINDER',
+            },
+          });
+        }
         await prisma.ticket.update({ where: { id: ticket.id }, data: { reminderCount: 2, reminderSentAt: new Date() } });
         results.push({ ticketId: ticket.id, action: 'REMINDER_2' });
         continue;
       }
 
-      // Première relance J+2
       if (since >= delays.firstReminderDays && count < 1) {
-        await sendReminder({ ticketId: ticket.id, glpiTicketId: ticket.glpiTicketId, toEmail: ticket.sourceEmail, toName: ticket.sourceName, subject: ticket.title, reminderNumber: 1 });
+        if (!hasPendingReminderDraft) {
+          await prisma.aiEmailDraft.create({
+            data: {
+              ticketId: ticket.id,
+              glpiTicketId: ticket.glpiTicketId,
+              recipientEmail: ticket.sourceEmail,
+              recipientName: ticket.sourceName || ticket.sourceEmail,
+              subject: `[Ticket #${ticket.glpiTicketId || ticket.id}] ${ticket.title}`,
+              proposedContent: buildReminderDraftBody({
+                toName: ticket.sourceName, glpiTicketId: ticket.glpiTicketId || ticket.id,
+                subject: ticket.title, isPreClose: false,
+              }),
+              draftKind: 'REMINDER',
+            },
+          });
+        }
         await prisma.ticket.update({ where: { id: ticket.id }, data: { reminderCount: 1, reminderSentAt: new Date() } });
         results.push({ ticketId: ticket.id, action: 'REMINDER_1' });
       }
     } catch (err) {
       results.push({ ticketId: ticket.id, action: 'ERROR', error: err.message });
     }
+  }
+
+  try {
+    await processApprovalReminders();
+  } catch (err) {
+    console.error('[reminderScheduler] Échec relances approbation Hotline:', err.message);
   }
 
   return results;

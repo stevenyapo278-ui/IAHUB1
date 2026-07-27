@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../api/client';
@@ -107,17 +108,17 @@ export default function GlobalSearch() {
     }
   }, [allResults, selectedIndex, handleSelect]);
 
-  return (
+  return createPortal(
     <AnimatePresence>
       {open && (
-        <>
+        <div className="fixed inset-0 z-[9999] flex items-start justify-center pt-[15%] p-4">
           {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.15 }}
-            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm"
+            className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer"
             onClick={() => setOpen(false)}
           />
 
@@ -127,7 +128,7 @@ export default function GlobalSearch() {
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: -10 }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="fixed top-[15%] left-1/2 -translate-x-1/2 z-50 w-full max-w-xl"
+            className="relative w-full max-w-xl z-10"
           >
             <div
               className="rounded-2xl shadow-2xl border overflow-hidden"
@@ -226,9 +227,10 @@ export default function GlobalSearch() {
               </div>
             </div>
           </motion.div>
-        </>
+        </div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }
 

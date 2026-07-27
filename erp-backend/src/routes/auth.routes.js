@@ -7,6 +7,7 @@ const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { getUserPermissions } = require('../middleware/permissions');
 const { sendPasswordResetLinkEmail } = require('../services/emailSender');
+const { auditLog } = require('../services/auditLogService');
 
 const router = express.Router();
 
@@ -16,7 +17,13 @@ router.post(
   '/register',
   [
     body('email').trim().isEmail(),
-    body('password').isLength({ min: 8 }),
+    body('password').isLength({ min: 8 }).custom((v) => {
+      if (!/(?=.*[a-z])/.test(v)) throw new Error('une minuscule');
+      if (!/(?=.*[A-Z])/.test(v)) throw new Error('une majuscule');
+      if (!/(?=.*\d)/.test(v)) throw new Error('un chiffre');
+      if (!/(?=.*[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?])/.test(v)) throw new Error('un caractère spécial');
+      return true;
+    }).withMessage('Le mot de passe doit contenir au moins 8 caractères avec une majuscule, une minuscule, un chiffre et un caractère spécial.'),
     body('fullName').notEmpty(),
   ],
   async (req, res) => {
@@ -51,6 +58,7 @@ router.post(
       fullName: user.fullName,
       role: user.role,
     });
+    auditLog('USER_REGISTERED', { actor: { sub: user.id, email: user.email, role: user.role }, targetType: 'User', targetId: user.id, targetLabel: user.fullName || user.email }).catch(() => {});
   }
 );
 
@@ -79,7 +87,7 @@ router.post(
     const token = jwt.sign(
       { sub: user.id, email: user.email, role: user.role, teamId: user.teamId },
       process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
+      { expiresIn: process.env.JWT_EXPIRES_IN || '2h' }
     );
 
     let permissions = null;
@@ -102,6 +110,7 @@ router.post(
         mustChangePassword: user.mustChangePassword,
       },
     });
+    auditLog('USER_LOGIN', { actor: { sub: user.id, email: user.email, role: user.role }, targetType: 'User', targetId: user.id, targetLabel: user.fullName || user.email }).catch(() => {});
   }
 );
 
@@ -139,7 +148,13 @@ router.get('/reset-password/:token', async (req, res) => {
   return res.json({ ok: true });
 });
 
-router.post('/reset-password/:token', [body('password').isLength({ min: 8 })], async (req, res) => {
+router.post('/reset-password/:token', [body('password').isLength({ min: 8 }).custom((v) => {
+  if (!/(?=.*[a-z])/.test(v)) throw new Error('une minuscule');
+  if (!/(?=.*[A-Z])/.test(v)) throw new Error('une majuscule');
+  if (!/(?=.*\d)/.test(v)) throw new Error('un chiffre');
+  if (!/(?=.*[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?])/.test(v)) throw new Error('un caractère spécial');
+  return true;
+})], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 8 caractères.' });
 
@@ -162,7 +177,13 @@ router.post('/reset-password/:token', [body('password').isLength({ min: 8 })], a
 router.post(
   '/change-password',
   authenticate,
-  [body('currentPassword').notEmpty(), body('newPassword').isLength({ min: 8 })],
+  [body('currentPassword').notEmpty(), body('newPassword').isLength({ min: 8 }).custom((v) => {
+    if (!/(?=.*[a-z])/.test(v)) throw new Error('une minuscule');
+    if (!/(?=.*[A-Z])/.test(v)) throw new Error('une majuscule');
+    if (!/(?=.*\d)/.test(v)) throw new Error('un chiffre');
+    if (!/(?=.*[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?])/.test(v)) throw new Error('un caractère spécial');
+    return true;
+  })],
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir au moins 8 caractères.' });

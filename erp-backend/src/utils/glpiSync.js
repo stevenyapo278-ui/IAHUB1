@@ -3,6 +3,9 @@ const bcrypt = require('bcryptjs');
 const prisma = require('../prismaClient');
 const { GLPI_AI_REQUESTER_ID, glpiIdToCategory } = require('./glpiMapping');
 const { getSystemSettings } = require('../services/systemSettings');
+const { getBreaker } = require('./circuitBreaker');
+
+const glpiBreaker = getBreaker('glpi-api', { maxFailures: 5, resetTimeoutMs: 60000 });
 
 const VALIDATION_STATUS_WAITING = 2;
 const VALIDATION_STATUS_APPROVED = 3;
@@ -64,16 +67,18 @@ async function getActiveGlpiConfig() {
 }
 
 async function glpiInitSession(config) {
-  const res = await fetch(`${config.baseUrl}/initSession`, {
-    method: 'GET',
-    headers: {
-      'App-Token': config.appToken,
-      Authorization: `user_token ${config.userToken}`,
-    },
+  return glpiBreaker.call(async () => {
+    const res = await fetch(`${config.baseUrl}/initSession`, {
+      method: 'GET',
+      headers: {
+        'App-Token': config.appToken,
+        Authorization: `user_token ${config.userToken}`,
+      },
+    });
+    if (!res.ok) throw new Error(`GLPI initSession a échoué (${res.status})`);
+    const data = await res.json();
+    return data.session_token;
   });
-  if (!res.ok) throw new Error(`GLPI initSession a échoué (${res.status})`);
-  const data = await res.json();
-  return data.session_token;
 }
 
 async function glpiKillSession(config, sessionToken) {

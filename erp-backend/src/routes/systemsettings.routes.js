@@ -8,6 +8,7 @@ const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { sendDailySummary } = require('../services/dailySummary');
 const { resolveBackendUrl } = require('../services/systemSettings');
+const { auditLog } = require('../services/auditLogService');
 
 const router = express.Router();
 router.use(authenticate);
@@ -101,6 +102,7 @@ router.patch(
     const updated = await prisma.systemSettings.update({ where: { id: 1 }, data });
 
     return res.json(updated);
+    auditLog('SYSTEM_SETTINGS_UPDATED', { actor: req.user, targetType: 'SystemSettings', targetId: 1, targetLabel: 'Réglages automatisation', metadata: { changedFields: Object.keys(data) } }).catch(() => {});
   }
 );
 

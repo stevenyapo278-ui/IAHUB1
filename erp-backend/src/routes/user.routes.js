@@ -6,6 +6,8 @@ const prisma = require('../prismaClient');
 const { authenticate, authorizeAdmin } = require('../middleware/auth');
 const { sendTemporaryPasswordEmail } = require('../services/emailSender');
 const { ADMIN_LIKE_ROLES } = require('../config/permissions');
+const { sanitizeError } = require('../utils/sanitizeError');
+const { auditLog } = require('../services/auditLogService');
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -13,8 +15,8 @@ const MIN_PASSWORD_LENGTH = 8;
 // TECHNICIAN/REQUESTER (jamais ADMIN ni SUPERADMIN, y compris en éditant un compte déjà à ce niveau)
 // — sinon un ADMIN pourrait se créer des pairs ou des supérieurs sans validation d'un SUPERADMIN.
 const ASSIGNABLE_ROLES_BY_ACTOR = {
-  SUPERADMIN: ['SUPERADMIN', 'ADMIN', 'TECHNICIAN', 'REQUESTER'],
-  ADMIN: ['TECHNICIAN', 'REQUESTER'],
+  SUPERADMIN: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN', 'REQUESTER'],
+  ADMIN: ['HOTLINE', 'TECHNICIAN', 'REQUESTER'],
 };
 
 function canAssignRole(actorRole, targetRole) {
@@ -138,7 +140,130 @@ router.post('/bulk-delete', async (req, res) => {
   return res.json({ deletedCount: deleted.count });
 });
 
-// Purge de tous les utilisateurs importés (hors Admin / SuperAdmin)
+// Aperçu analytique intelligent avant purge
+router.get('/purge-preview', async (req, res) => {
+  try {
+    const nonAdminUsers = await prisma.user.findMany({
+      where: {
+        role: { notIn: ADMIN_LIKE_ROLES },
+      },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        glpiId: true,
+        isActive: true,
+        createdAt: true,
+        _count: {
+          select: {
+            ticketsCreated: true,
+            ticketsAssigned: true,
+          },
+        },
+      },
+    });
+
+    const deletableOrphans = [];
+    const inactivesWithTickets = [];
+    const activeImported = [];
+
+    for (const u of nonAdminUsers) {
+      const ticketCount = (u._count?.ticketsCreated || 0) + (u._count?.ticketsAssigned || 0);
+      if (ticketCount === 0) {
+        deletableOrphans.push({ id: u.id, fullName: u.fullName, email: u.email, glpiId: u.glpiId });
+      } else if (!u.isActive) {
+        inactivesWithTickets.push({ id: u.id, fullName: u.fullName, email: u.email, ticketCount });
+      } else {
+        activeImported.push({ id: u.id, fullName: u.fullName, email: u.email, ticketCount });
+      }
+    }
+
+    return res.json({
+      totalNonAdmin: nonAdminUsers.length,
+      deletableOrphansCount: deletableOrphans.length,
+      inactivesWithTicketsCount: inactivesWithTickets.length,
+      activeImportedCount: activeImported.length,
+      deletableOrphans: deletableOrphans.slice(0, 10),
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || 'Erreur lors du calcul de l\'aperçu' });
+  }
+});
+
+// Purge Intelligente sécurisée
+router.post('/purge-smart', async (req, res) => {
+  try {
+    const { mode = 'smart' } = req.body;
+    let deletedCount = 0;
+    let deactivatedCount = 0;
+
+    const nonAdminUsers = await prisma.user.findMany({
+      where: { role: { notIn: ADMIN_LIKE_ROLES } },
+      select: {
+        id: true,
+        isActive: true,
+        _count: {
+          select: { ticketsCreated: true, ticketsAssigned: true },
+        },
+      },
+    });
+
+    const orphanIds = nonAdminUsers
+      .filter((u) => (u._count?.ticketsCreated || 0) + (u._count?.ticketsAssigned || 0) === 0)
+      .map((u) => u.id);
+
+    const inactiveWithTicketIds = nonAdminUsers
+      .filter((u) => (u._count?.ticketsCreated || 0) + (u._count?.ticketsAssigned || 0) > 0 && !u.isActive)
+      .map((u) => u.id);
+
+    if (mode === 'smart' || mode === 'deletable_only') {
+      if (orphanIds.length > 0) {
+        const delRes = await prisma.user.deleteMany({
+          where: { id: { in: orphanIds } },
+        });
+        deletedCount = delRes.count;
+      }
+    }
+
+    if (mode === 'smart' || mode === 'deactivate_only') {
+      if (inactiveWithTicketIds.length > 0) {
+        const deactRes = await prisma.user.updateMany({
+          where: { id: { in: inactiveWithTicketIds } },
+          data: { isActive: false },
+        });
+        deactivatedCount = deactRes.count;
+      }
+    }
+
+    if (mode === 'full_force') {
+      const allNonAdminIds = nonAdminUsers.map((u) => u.id);
+      // Pour éviter d'écraser les contraintes de clés étrangères, on délie les tickets demandés
+      await prisma.ticket.updateMany({
+        where: { requesterId: { in: allNonAdminIds } },
+        data: { requesterId: null },
+      });
+      await prisma.ticket.updateMany({
+        where: { assignedToId: { in: allNonAdminIds } },
+        data: { assignedToId: null },
+      });
+      const delRes = await prisma.user.deleteMany({
+        where: { id: { in: allNonAdminIds } },
+      });
+      deletedCount = delRes.count;
+    }
+
+    return res.json({
+      mode,
+      deletedCount,
+      deactivatedCount,
+      message: `Purge exécutée : ${deletedCount} compte(s) supprimé(s), ${deactivatedCount} compte(s) désactivé(s).`,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || 'Erreur lors de la purge intelligente' });
+  }
+});
+
+// Purge legacy de tous les utilisateurs importés (hors Admin / SuperAdmin)
 router.delete('/purge-imported', async (req, res) => {
   try {
     const deleted = await prisma.user.deleteMany({
@@ -207,6 +332,7 @@ router.post(
     });
 
     return res.status(201).json(user);
+    auditLog('USER_CREATED', { actor: req.user, targetType: 'User', targetId: user.id, targetLabel: user.fullName || user.email, metadata: { email: user.email, role: user.role } }).catch(() => {});
   }
 );
 
@@ -268,6 +394,7 @@ router.patch(
         select: userSelect,
       });
       return res.json(user);
+      auditLog('USER_UPDATED', { actor: req.user, targetType: 'User', targetId: user.id, targetLabel: user.fullName || user.email, metadata: { changedFields: Object.keys(data) } }).catch(() => {});
     } catch (err) {
       return res.status(404).json({ error: 'Utilisateur introuvable' });
     }
@@ -295,10 +422,11 @@ router.post('/:id/reset-password', async (req, res) => {
   try {
     await sendTemporaryPasswordEmail({ recipientEmail: user.email, recipientName: user.fullName, temporaryPassword });
   } catch (err) {
-    return res.status(502).json({ error: `Mot de passe réinitialisé mais échec de l'envoi de l'email : ${err.message}` });
+    return res.status(502).json({ error: `Mot de passe réinitialisé mais échec de l'envoi de l'email : ${sanitizeError(err)}` });
   }
 
   return res.json({ ok: true, message: `Nouveau mot de passe envoyé à ${user.email}` });
+  auditLog('USER_PASSWORD_RESET', { actor: req.user, targetType: 'User', targetId: user.id, targetLabel: user.fullName || user.email }).catch(() => {});
 });
 
 const multer = require('multer');
@@ -479,7 +607,7 @@ router.post('/import-csv', upload.single('file'), async (req, res) => {
 });
 
 router.delete('/:id', async (req, res) => {
-  const target = await prisma.user.findUnique({ where: { id: Number(req.params.id) }, select: { role: true } });
+  const target = await prisma.user.findUnique({ where: { id: Number(req.params.id) }, select: { id: true, fullName: true, email: true, role: true } });
   if (!target) return res.status(404).json({ error: 'Utilisateur introuvable' });
   if (!canActOnTarget(req.user.role, target.role)) {
     return res.status(403).json({ error: 'Vous ne pouvez pas supprimer un compte administrateur ou super-administrateur' });
@@ -487,6 +615,7 @@ router.delete('/:id', async (req, res) => {
 
   try {
     await prisma.user.delete({ where: { id: Number(req.params.id) } });
+    auditLog('USER_DELETED', { actor: req.user, targetType: 'User', targetId: target.id, targetLabel: target.fullName || target.email }).catch(() => {});
     return res.status(204).send();
   } catch (err) {
     return res.status(404).json({ error: 'Utilisateur introuvable' });

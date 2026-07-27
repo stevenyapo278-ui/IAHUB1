@@ -1,5 +1,8 @@
+require('express-async-errors');
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
 
@@ -31,14 +34,41 @@ const draftApprovalRoutes = require('./routes/draftapproval.routes');
 const triageRuleRoutes = require('./routes/triageRule.routes');
 const chatbotRoutes = require('./routes/chatbot.routes');
 const logsRoutes = require('./routes/logs.routes');
+const auditLogRoutes = require('./routes/auditLog.routes');
+const locationRoutes = require('./routes/location.routes');
+const { allBreakerStatuses } = require('./utils/circuitBreaker');
+
+const aiWeeklyReportRoutes = require('./routes/aiweeklyreport.routes');
 
 const { requestId } = require('./middleware/requestId');
 const { logger, childLogger } = require('./utils/logger');
 
 const app = express();
 
-app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
-app.use(express.json());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:', 'blob:'],
+      fontSrc: ["'self'"],
+      connectSrc: ["'self'", 'ws:', 'wss:'],
+      frameAncestors: ["'none'"],
+    },
+  },
+}));
+const corsOrigin = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()) : '*';
+app.use(cors({ origin: corsOrigin }));
+app.use(express.json({ limit: '10mb' }));
+
+const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, standardHeaders: true, legacyHeaders: false });
+app.use('/api', limiter);
+
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 15, standardHeaders: true, legacyHeaders: false, message: { error: 'Trop de tentatives. Réessayez dans 15 minutes.' } });
+app.use('/api/auth/login', authLimiter);
+
 app.use(requestId);
 
 // Middleware de logging HTTP : enregistre chaque requête avec son temps d'exécution
@@ -64,6 +94,7 @@ app.use((req, res, next) => {
 app.use('/uploads', express.static('uploads'));
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
+app.get('/api/system/circuit-breakers', (req, res) => res.json(allBreakerStatuses()));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/tickets', ticketRoutes);
@@ -91,8 +122,11 @@ app.use('/api/skills', skillRoutes);
 app.use('/api/reassignments', reassignmentRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/triage-rules', triageRuleRoutes);
+app.use('/api/locations', locationRoutes);
+app.use('/api/ai-weekly-reports', aiWeeklyReportRoutes);
 app.use('/api/chat', chatbotRoutes);
 app.use('/api/logs', logsRoutes);
+app.use('/api/audit-logs', auditLogRoutes);
 
 // Serve frontend static files in production
 const isProduction = process.env.NODE_ENV === 'production';

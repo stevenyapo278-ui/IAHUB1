@@ -1,56 +1,69 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
+import { motion, AnimatePresence } from 'framer-motion';
 import api from '../api/client';
+import { useTheme } from '../context/ThemeContext';
+import { useFilterParam } from '../hooks/useFilterParam';
+import {
+  Activity, Search, Filter, Calendar, RefreshCw, ChevronDown,
+  Sparkles, Mail, Send, CheckCircle2, AlertTriangle, XCircle, Clock,
+  FileText, ArrowUpRight, Bot, X, User
+} from 'lucide-react';
 
 const EVENT_META = {
-  CREATED:                      { icon: 'add_task',          color: '#3b82f6', label: 'Ticket créé' },
-  STATUS_CHANGED:               { icon: 'sync_alt',          color: '#8b5cf6', label: 'Statut changé' },
-  PRIORITY_CHANGED:             { icon: 'priority_high',     color: '#f59e0b', label: 'Priorité changée' },
-  ASSIGNED:                     { icon: 'person_pin',        color: '#6366f1', label: 'Assigné' },
-  EMAIL_RECEIVED:               { icon: 'mail',              color: '#f97316', label: 'Email reçu' },
-  EMAIL_SENT:                   { icon: 'send',              color: '#10b981', label: 'Email envoyé' },
-  FOLLOWUP_ADDED:               { icon: 'note_add',          color: '#14b8a6', label: 'Suivi ajouté' },
-  AI_ANALYZED:                  { icon: 'psychology',        color: '#a855f7', label: 'IA - Analyse' },
-  AI_DRAFT_GENERATED:           { icon: 'draft',             color: '#06b6d4', label: 'IA - Brouillon généré' },
-  AI_FOLLOWUP_DRAFT_GENERATED:  { icon: 'forum',             color: '#0ea5e9', label: 'IA - Brouillon suivi' },
-  AI_CONVERSATION_ESCALATED:    { icon: 'warning',           color: '#ef4444', label: 'IA - Escalade conversation' },
-  KNOWLEDGE_CREATED:            { icon: 'library_books',     color: '#84cc16', label: 'Article créé' },
-  REOPENED:                     { icon: 'replay',            color: '#f59e0b', label: 'Réouvert' },
-  ESCALATED:                    { icon: 'escalator_warning', color: '#dc2626', label: 'Escalade' },
-  REMINDER_SENT:                { icon: 'notifications',     color: '#eab308', label: 'Relance envoyée' },
-  CLOSED_AUTO:                  { icon: 'auto_delete',       color: '#6b7280', label: 'Fermeture auto' },
-  SPLIT_NEW_ISSUE:              { icon: 'call_split',        color: '#ec4899', label: 'Scission - Nouveau ticket' },
-  CREATED_FROM_SPLIT:           { icon: 'call_merge',        color: '#f43f5e', label: 'Créé depuis scission' },
-  AI_LOW_CONFIDENCE_CLOSE_SKIPPED:  { icon: 'block',        color: '#9ca3af', label: 'IA - Fermeture ignorée (confiance faible)' },
-  AI_LOW_CONFIDENCE_REOPEN_SKIPPED: { icon: 'block',        color: '#9ca3af', label: 'IA - Réouverture ignorée (confiance faible)' },
-  AI_AUTO_REPLY_IGNORED:        { icon: 'auto_delete',       color: '#a1a1aa', label: 'IA - Réponse auto ignorée' },
-  AI_LIFETIME_EXCEEDED:         { icon: 'timer_off',         color: '#ef4444', label: 'IA - Durée de vie dépassée' },
-  AI_SPLIT_LIMIT_REACHED:       { icon: 'call_split',        color: '#f97316', label: 'IA - Limite scissions atteinte' },
-  NEEDS_HUMAN_REVIEW:           { icon: 'contact_support',   color: '#eab308', label: 'Revue humaine nécessaire' },
-  GLPI_SYNC_FAILED:             { icon: 'sync_problem',      color: '#dc2626', label: 'Sync GLPI échouée' },
+  CREATED:                      { icon: Activity,         color: 'text-blue-600 dark:text-blue-400',   bg: 'bg-blue-500/10',   border: 'border-blue-500/20',   label: 'Ticket créé' },
+  STATUS_CHANGED:               { icon: RefreshCw,        color: 'text-purple-600 dark:text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20', label: 'Statut changé' },
+  PRIORITY_CHANGED:             { icon: AlertTriangle,    color: 'text-amber-600 dark:text-amber-400',  bg: 'bg-amber-500/10',  border: 'border-amber-500/20',  label: 'Priorité changée' },
+  ASSIGNED:                     { icon: User,             color: 'text-indigo-600 dark:text-indigo-400', bg: 'bg-indigo-500/10', border: 'border-indigo-500/20', label: 'Assigné' },
+  EMAIL_RECEIVED:               { icon: Mail,             color: 'text-orange-600 dark:text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20', label: 'Email reçu' },
+  EMAIL_SENT:                   { icon: Send,             color: 'text-emerald-600 dark:text-emerald-400',bg: 'bg-emerald-500/10',border: 'border-emerald-500/20',label: 'Email envoyé' },
+  FOLLOWUP_ADDED:               { icon: FileText,         color: 'text-teal-600 dark:text-teal-400',   bg: 'bg-teal-500/10',   border: 'border-teal-500/20',   label: 'Suivi ajouté' },
+  AI_ANALYZED:                  { icon: Sparkles,         color: 'text-purple-600 dark:text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20', label: 'IA - Analyse' },
+  AI_DRAFT_GENERATED:           { icon: Bot,              color: 'text-cyan-600 dark:text-cyan-400',   bg: 'bg-cyan-500/10',   border: 'border-cyan-500/20',   label: 'IA - Brouillon généré' },
+  AI_FOLLOWUP_DRAFT_GENERATED:  { icon: Bot,              color: 'text-sky-600 dark:text-sky-400',    bg: 'bg-sky-500/10',    border: 'border-sky-500/20',    label: 'IA - Brouillon suivi' },
+  AI_CONVERSATION_ESCALATED:    { icon: AlertTriangle,    color: 'text-red-600 dark:text-red-400',    bg: 'bg-red-500/10',    border: 'border-red-500/20',    label: 'IA - Escalade conversation' },
+  KNOWLEDGE_CREATED:            { icon: FileText,         color: 'text-lime-600 dark:text-lime-400',   bg: 'bg-lime-500/10',   border: 'border-lime-500/20',   label: 'Article créé' },
+  REOPENED:                     { icon: RefreshCw,        color: 'text-amber-600 dark:text-amber-400',  bg: 'bg-amber-500/10',  border: 'border-amber-500/20',  label: 'Réouvert' },
+  ESCALATED:                    { icon: AlertTriangle,    color: 'text-red-600 dark:text-red-400',    bg: 'bg-red-500/10',    border: 'border-red-500/20',    label: 'Escalade' },
+  REMINDER_SENT:                { icon: Clock,            color: 'text-yellow-600 dark:text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/20', label: 'Relance envoyée' },
+  CLOSED_AUTO:                  { icon: CheckCircle2,     color: 'text-slate-600 dark:text-zinc-400',   bg: 'bg-slate-500/10',   border: 'border-slate-500/20',   label: 'Fermeture auto' },
+  GLPI_SYNC_FAILED:             { icon: XCircle,          color: 'text-red-600 dark:text-red-400',    bg: 'bg-red-500/10',    border: 'border-red-500/20',    label: 'Sync GLPI échouée' },
+  APPROVED:                     { icon: CheckCircle2,     color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', label: 'Approuvé' },
+  REJECTED:                     { icon: XCircle,          color: 'text-red-600 dark:text-red-400',    bg: 'bg-red-500/10',    border: 'border-red-500/20',    label: 'Rejeté' },
+  NEEDS_HUMAN_REVIEW:           { icon: AlertTriangle,    color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-500/10',  border: 'border-amber-500/20',  label: 'Revue humaine nécessaire' },
+  MAJOR_INCIDENT_PROMOTED:      { icon: AlertTriangle,    color: 'text-red-600 dark:text-red-400',    bg: 'bg-red-500/10',    border: 'border-red-500/20',    label: 'Incident majeur promu' },
+  SPLIT_NEW_ISSUE:              { icon: ArrowUpRight,     color: 'text-blue-600 dark:text-blue-400',  bg: 'bg-blue-500/10',   border: 'border-blue-500/20',   label: 'Scission nouveau ticket' },
+  CREATED_FROM_SPLIT:           { icon: Activity,         color: 'text-blue-600 dark:text-blue-400',  bg: 'bg-blue-500/10',   border: 'border-blue-500/20',   label: 'Créé depuis scission' },
+  AI_AUTO_REPLY_IGNORED:        { icon: Bot,              color: 'text-slate-600 dark:text-zinc-400', bg: 'bg-slate-500/10',  border: 'border-slate-500/20',  label: 'IA - Reply ignoré' },
+  AI_LOW_CONFIDENCE_CLOSE_SKIPPED: { icon: Bot,           color: 'text-yellow-600 dark:text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/20', label: 'IA - Fermeture skip (conf faible)' },
+  AI_LIFETIME_EXCEEDED:         { icon: Bot,              color: 'text-orange-600 dark:text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20', label: 'IA - Durée de vie dépassée' },
+  AI_SPLIT_LIMIT_REACHED:       { icon: Bot,              color: 'text-red-600 dark:text-red-400',    bg: 'bg-red-500/10',    border: 'border-red-500/20',    label: 'IA - Limite scissions atteinte' },
 };
 
 const TYPE_OPTIONS = Object.keys(EVENT_META);
-
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 
 export default function ActivityLogs() {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
   const [events, setEvents] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 50, total: 0, totalPages: 0 });
   const [loading, setLoading] = useState(false);
-  const [typeFilter, setTypeFilter] = useState('');
-  const [actorFilter, setActorFilter] = useState('');
-  const [searchFilter, setSearchFilter] = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [pageSize, setPageSize] = useState(50);
+  const [typeFilter, setTypeFilter] = useFilterParam('type');
+  const [actorFilter, setActorFilter] = useFilterParam('actor');
+  const [searchFilter, setSearchFilter] = useFilterParam('search');
+  const [startDate, setStartDate] = useFilterParam('startDate');
+  const [endDate, setEndDate] = useFilterParam('endDate');
+  const [pageSize, setPageSize] = useFilterParam('pageSize', '50');
   const [expandedId, setExpandedId] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   function load(page = 1) {
     setLoading(true);
-    const params = { page, pageSize };
+    const pageSizeNum = parseInt(pageSize, 10) || 50;
+    const params = { page, pageSize: pageSizeNum };
     if (typeFilter) params.type = typeFilter;
     if (actorFilter) params.actor = actorFilter;
     if (searchFilter) params.search = searchFilter;
@@ -66,7 +79,7 @@ export default function ActivityLogs() {
       .finally(() => setLoading(false));
   }
 
-  useEffect(() => { load(); }, [pageSize]);
+  useEffect(() => { load(); }, [typeFilter, actorFilter, searchFilter, startDate, endDate, pageSize]);
 
   function applyFilters() { load(1); }
 
@@ -76,7 +89,7 @@ export default function ActivityLogs() {
     setSearchFilter('');
     setStartDate('');
     setEndDate('');
-    setPageSize(50);
+    setPageSize('50');
   }
 
   function formatDate(iso) {
@@ -99,292 +112,291 @@ export default function ActivityLogs() {
     return formatDate(iso);
   }
 
-  function countByType() {
-    const counts = {};
-    events.forEach((e) => {
-      counts[e.type] = (counts[e.type] || 0) + 1;
-    });
-    return counts;
-  }
-
-  const typeCounts = countByType();
-
   const hasActiveFilters = typeFilter || actorFilter || searchFilter || startDate || endDate;
 
   return (
-    <div className="p-lg flex flex-col gap-lg">
-      <header className="flex items-center justify-between">
-        <div>
-          <h2 className="font-display-lg text-display-lg text-on-background font-bold">Journal d'activité</h2>
-          <p className="font-body-lg text-body-lg text-on-surface-variant mt-1">
-            Tous les événements de la plateforme, y compris les interactions IA.
-          </p>
-        </div>
-        <button
-          onClick={() => setShowFilters(!showFilters)}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl border font-body-sm text-body-sm font-semibold transition-all duration-300 ${
-            showFilters || hasActiveFilters
-              ? 'border-primary bg-primary/10 text-primary'
-              : 'border-outline-variant/60 text-on-surface hover:bg-surface-container-low'
-          }`}
-        >
-          <span className="material-symbols-outlined text-[18px]">filter_list</span>
-          Filtres
-          {hasActiveFilters && (
-            <span className="bg-primary text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
-              !
-            </span>
-          )}
-        </button>
-      </header>
-
-      {showFilters && (
-        <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-md">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-            <div className="flex flex-col gap-1">
-              <label className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Type d'événement</label>
-              <select
-                value={typeFilter}
-                onChange={(e) => setTypeFilter(e.target.value)}
-                className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-              >
-                <option value="">Tous les types</option>
-                {TYPE_OPTIONS.map((t) => (
-                  <option key={t} value={t}>{EVENT_META[t]?.label || t}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Acteur</label>
-              <input
-                type="text"
-                value={actorFilter}
-                onChange={(e) => setActorFilter(e.target.value)}
-                placeholder="SYSTEM, AI, email..."
-                className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Recherche ticket</label>
-              <input
-                type="text"
-                value={searchFilter}
-                onChange={(e) => setSearchFilter(e.target.value)}
-                placeholder="N° ou titre..."
-                className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Du</label>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Au</label>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-              />
-            </div>
+    <div className="flex flex-col min-h-screen">
+      {/* ── Top Bar ─────────────────────────────────────────────────────── */}
+      <div className="sticky top-0 z-20 shrink-0 border-b border-outline-variant/30 bg-surface-container-lowest/95 backdrop-blur-sm px-4 sm:px-6 lg:px-8 py-3 flex items-center gap-4 flex-wrap">
+        {/* Title */}
+        <div className="flex items-center gap-3">
+          <div className="p-1.5 bg-blue-500/10 rounded-lg">
+            <Activity className="w-5 h-5 text-blue-600 dark:text-blue-400" />
           </div>
+          <div>
+            <h1 className="text-base font-bold text-on-surface">Journal d'activité</h1>
+            <p className="text-[11px] text-on-surface-variant font-medium">
+              {pagination.total} événement{pagination.total !== 1 ? 's' : ''} enregistrés
+            </p>
+          </div>
+        </div>
 
-          <div className="flex items-center justify-between mt-3 pt-3 border-t border-outline-variant/40">
+        {/* Search */}
+        <div className="relative flex-1 max-w-xs hidden sm:block">
+          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50" />
+          <input
+            type="text"
+            placeholder="Rechercher par ticket, titre, contenu..."
+            value={searchFilter}
+            onChange={(e) => setSearchFilter(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') applyFilters(); }}
+            className="w-full bg-surface border border-outline-variant/60 rounded-xl pl-8 pr-8 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+          />
+          {searchFilter && (
+            <button onClick={() => { setSearchFilter(''); load(1); }} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant/50 hover:text-on-surface">
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+
+        {/* Filter Toggle */}
+        <div className="flex items-center gap-2 ml-auto">
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition-all ${
+              showFilters || hasActiveFilters
+                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20'
+                : 'border-outline-variant/30 text-on-surface-variant hover:bg-surface-container'
+            }`}
+          >
+            <Filter className="w-3.5 h-3.5" />
+            <span>Filtres</span>
+            {hasActiveFilters && (
+              <span className="w-2 h-2 rounded-full bg-blue-500 dark:bg-blue-400 animate-pulse" />
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* ── Advanced Filters Strip ────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showFilters && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.22 }}
+            className="overflow-hidden border-b border-outline-variant/20 bg-surface-container-low/40"
+          >
+            <div className="px-4 sm:px-6 lg:px-8 py-3 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                <label className="flex flex-col gap-1">
+                  <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Type d'événement</span>
+                  <select
+                    value={typeFilter}
+                    onChange={(e) => setTypeFilter(e.target.value)}
+                    className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                  >
+                    <option value="">Tous les types</option>
+                    {TYPE_OPTIONS.map((t) => (
+                      <option key={t} value={t}>{EVENT_META[t]?.label || t}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="flex flex-col gap-1">
+                  <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Acteur</span>
+                  <input
+                    type="text"
+                    value={actorFilter}
+                    onChange={(e) => setActorFilter(e.target.value)}
+                    placeholder="SYSTEM, AI, email..."
+                    className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                  />
+                </label>
+
+                <label className="flex flex-col gap-1">
+                  <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Du</span>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                  />
+                </label>
+
+                <label className="flex flex-col gap-1">
+                  <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Au</span>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                  />
+                </label>
+              </div>
+
+              <div className="flex items-center justify-between pt-2 border-t border-outline-variant/15">
+                <button
+                  onClick={resetFilters}
+                  className="text-xs font-medium text-on-surface-variant hover:text-on-surface underline underline-offset-2"
+                >
+                  Réinitialiser les filtres
+                </button>
+                <button
+                  onClick={applyFilters}
+                  className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-bold shadow-md shadow-blue-500/20"
+                >
+                  Appliquer
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Main Stream List ──────────────────────────────────────────────── */}
+      <div className="flex-1 px-4 sm:px-6 lg:px-8 py-6 space-y-4">
+        <div className="rounded-2xl border border-outline-variant/30 overflow-hidden bg-surface-container-lowest">
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-outline-variant/20 bg-surface-container-low/40">
+            <span className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">
+              Flux d'événements ({pagination.total})
+            </span>
             <div className="flex items-center gap-2">
-              <label className="font-label-md text-label-md text-on-surface-variant">Lignes/page :</label>
+              <span className="text-[10px] font-bold text-on-surface-variant uppercase">Lignes :</span>
               <select
                 value={pageSize}
-                onChange={(e) => setPageSize(Number(e.target.value))}
-                className="bg-surface border border-outline-variant/60 rounded-lg px-2 py-1.5 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20"
+                onChange={(e) => setPageSize(e.target.value)}
+                className="bg-surface border border-outline-variant/30 rounded-lg px-2 py-0.5 text-[10px] text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
               >
                 {PAGE_SIZE_OPTIONS.map((s) => (
-                  <option key={s} value={s}>{s}</option>
+                  <option key={s} value={String(s)}>{s}</option>
                 ))}
               </select>
             </div>
-            <div className="flex gap-2">
-              <button
-                onClick={resetFilters}
-                className="px-4 py-2 rounded-xl border border-outline-variant/60 text-on-surface font-body-sm hover:bg-surface-container-low transition-colors"
-              >
-                Réinitialiser
-              </button>
-              <button
-                onClick={applyFilters}
-                className="px-4 py-2 rounded-xl bg-primary text-white font-body-sm font-semibold hover:bg-primary/90 transition-colors shadow-sm"
-              >
-                Appliquer
-              </button>
+          </div>
+
+          {/* Rows Stream */}
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-20 gap-3 text-on-surface-variant">
+              <RefreshCw className="w-6 h-6 text-blue-600 dark:text-blue-400 animate-spin" />
+              <p className="text-xs italic">Chargement du journal...</p>
             </div>
-          </div>
-        </div>
-      )}
+          ) : events.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 gap-3 text-on-surface-variant">
+              <Activity className="w-10 h-10 text-outline/30" />
+              <p className="text-sm italic">Aucun événement trouvé.</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-outline-variant/10">
+              {events.map((event) => {
+                const meta = EVENT_META[event.type] || { icon: Activity, color: 'text-slate-600 dark:text-zinc-400', bg: 'bg-slate-500/10', border: 'border-slate-500/20', label: event.type };
+                const IconComponent = meta.icon;
+                const isExpanded = expandedId === event.id;
 
-      {events.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {Object.entries(typeCounts).sort((a, b) => b[1] - a[1]).map(([type, count]) => {
-            const meta = EVENT_META[type] || { icon: 'event', color: '#6b7280', label: type };
-            return (
-              <button
-                key={type}
-                onClick={() => { setTypeFilter(type === typeFilter ? '' : type); applyFilters(); }}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold transition-all ${
-                  typeFilter === type
-                    ? 'border-primary bg-primary/10 text-primary shadow-sm'
-                    : 'border-outline-variant/60 text-on-surface-variant hover:bg-surface-container-low'
-                }`}
-                style={typeFilter !== type ? {} : { borderColor: meta.color, color: meta.color }}
-              >
-                <span className="material-symbols-outlined text-[14px]">{meta.icon}</span>
-                {meta.label}
-                <span className="ml-0.5 opacity-60">({count})</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow overflow-hidden">
-        <div className="p-md border-b border-outline-variant/40 bg-surface-container-low/20 flex justify-between items-center">
-          <span className="font-headline-sm text-headline-sm text-on-surface font-semibold">
-            Événements
-          </span>
-          <span className="text-on-surface-variant text-xs font-mono-sm bg-surface-container border border-outline-variant/50 px-2.5 py-0.5 rounded-full font-medium">
-            {pagination.total}
-          </span>
-        </div>
-
-        {loading ? (
-          <div className="p-xl text-center text-on-surface-variant">
-            <span className="material-symbols-outlined text-[32px] animate-spin block mx-auto mb-2">sync</span>
-            Chargement...
-          </div>
-        ) : events.length === 0 ? (
-          <div className="p-xl text-center text-on-surface-variant font-body-md text-body-md italic">
-            Aucun événement trouvé.
-          </div>
-        ) : (
-          <div className="divide-y divide-outline-variant/40">
-            {events.map((event) => {
-              const meta = EVENT_META[event.type] || { icon: 'event', color: '#6b7280', label: event.type };
-              const isExpanded = expandedId === event.id;
-
-              return (
-                <div key={event.id}>
-                  <div
-                    onClick={() => setExpandedId(isExpanded ? null : event.id)}
-                    className="flex items-center gap-3 p-md hover:bg-surface-container-low/40 transition-colors cursor-pointer"
-                  >
-                    <span
-                      className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-                      style={{ backgroundColor: `${meta.color}18`, color: meta.color }}
+                return (
+                  <div key={event.id} className="group">
+                    <div
+                      onClick={() => setExpandedId(isExpanded ? null : event.id)}
+                      className={`flex items-center gap-3 px-4 py-3.5 hover:bg-surface-container-low/50 transition-colors cursor-pointer ${
+                        isExpanded ? 'bg-surface-container-low/40' : ''
+                      }`}
                     >
-                      <span className="material-symbols-outlined text-[18px]">{meta.icon}</span>
-                    </span>
+                      {/* Event Icon */}
+                      <div className={`w-8 h-8 rounded-xl border shrink-0 flex items-center justify-center ${meta.bg} ${meta.border} ${meta.color}`}>
+                        <IconComponent className="w-4 h-4" />
+                      </div>
 
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-body-sm text-body-sm text-on-surface font-semibold">{meta.label}</span>
-                        {event.type.startsWith('AI_') && (
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-primary/10 text-primary border border-primary/20">IA</span>
-                        )}
-                        {event.type === 'GLPI_SYNC_FAILED' && (
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-error/10 text-error border border-error/20">Erreur</span>
-                        )}
+                      {/* Info */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                          <span className="text-xs font-bold text-on-surface">{meta.label}</span>
+                          {event.type.startsWith('AI_') && (
+                            <span className="px-1.5 py-0.5 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 text-[9px] font-bold border border-purple-500/20">
+                              IA Gemini
+                            </span>
+                          )}
+                          {event.type === 'GLPI_SYNC_FAILED' && (
+                            <span className="px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 text-[9px] font-bold border border-red-500/20">
+                              Erreur Sync
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-on-surface-variant flex items-center gap-2 flex-wrap font-medium">
+                          <span className="font-semibold text-on-surface">{event.actor}</span>
+                          <span>·</span>
+                          <span>{relativeTime(event.createdAt)}</span>
+                          {event.ticketId && (
+                            <>
+                              <span>·</span>
+                              <Link
+                                to={`/tickets/${event.ticketId}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-primary hover:underline font-bold inline-flex items-center gap-0.5"
+                              >
+                                <ArrowUpRight className="w-3 h-3" />
+                                Ticket #{event.ticketId}
+                              </Link>
+                            </>
+                          )}
+                        </div>
                       </div>
-                      <div className="text-body-sm text-on-surface-variant mt-0.5 flex items-center gap-2 flex-wrap">
-                        <span className="font-medium">{event.actor}</span>
-                        <span className="text-outline-variant">·</span>
-                        <span>{relativeTime(event.createdAt)}</span>
-                        {event.ticketId && (
-                          <>
-                            <span className="text-outline-variant">·</span>
-                            <Link
-                              to={`/tickets/${event.ticketId}`}
-                              onClick={(e) => e.stopPropagation()}
-                              className="text-primary hover:underline font-semibold inline-flex items-center gap-0.5"
-                            >
-                              <span className="material-symbols-outlined text-[12px]">confirmation_number</span>
-                              #{event.ticketId}
-                            </Link>
-                          </>
-                        )}
-                      </div>
+
+                      <ChevronDown className={`w-4 h-4 text-on-surface-variant transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
                     </div>
 
-                    <span className="material-symbols-outlined text-[16px] text-on-surface-variant transition-transform duration-200"
-                      style={{ transform: isExpanded ? 'rotate(180deg)' : '' }}>
-                      expand_more
-                    </span>
-                  </div>
+                    {/* Expanded payload */}
+                    <AnimatePresence>
+                      {isExpanded && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          className="overflow-hidden bg-surface-container-low/30 border-t border-outline-variant/10 px-4 py-3 pl-14"
+                        >
+                          <div className="text-xs space-y-2">
+                            <div className="flex flex-wrap gap-4 text-[11px] text-on-surface-variant font-medium">
+                              <div><strong className="text-on-surface">Date exacte :</strong> {formatDate(event.createdAt)}</div>
+                              {event.glpiTicketId && <div><strong className="text-on-surface">GLPI Ticket :</strong> #{event.glpiTicketId}</div>}
+                            </div>
 
-                  {isExpanded && (
-                    <div className="px-md pb-md pl-[4.25rem] text-body-sm text-on-surface-variant space-y-2">
-                      <div className="flex gap-6 flex-wrap">
-                        {event.glpiTicketId && (
-                          <div>
-                            <span className="font-semibold text-on-surface">GLPI :</span> #{event.glpiTicketId}
+                            {event.payload && (
+                              <div>
+                                <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1">Payload JSON</span>
+                                <pre className={`p-3 rounded-xl border text-[11px] font-mono overflow-x-auto max-h-60 overflow-y-auto ${
+                                  isDark ? 'bg-space-900 border-space-700 text-purple-200' : 'bg-slate-900 text-slate-100 border-slate-800'
+                                }`}>
+                                  {JSON.stringify(event.payload, null, 2)}
+                                </pre>
+                              </div>
+                            )}
                           </div>
-                        )}
-                        <div>
-                          <span className="font-semibold text-on-surface">Acteur :</span> {event.actor}
-                        </div>
-                        <div>
-                          <span className="font-semibold text-on-surface">Date :</span> {formatDate(event.createdAt)}
-                        </div>
-                        {event.payload && (
-                          <div>
-                            <span className="font-semibold text-on-surface">Payload :</span>
-                          </div>
-                        )}
-                      </div>
-                      {event.payload && (
-                        <pre className="bg-surface border border-outline-variant/60 rounded-xl p-3 text-[11px] font-mono overflow-x-auto max-h-[300px] overflow-y-auto">
-                          {JSON.stringify(event.payload, null, 2)}
-                        </pre>
+                        </motion.div>
                       )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {pagination.totalPages > 1 && (
-          <div className="flex items-center justify-between p-md border-t border-outline-variant/40 bg-surface-container-low/20">
-            <span className="text-body-sm text-on-surface-variant">
-              Page {pagination.page} / {pagination.totalPages} ({pagination.total} événements)
-            </span>
-            <div className="flex gap-2">
-              <button
-                disabled={pagination.page <= 1}
-                onClick={() => load(pagination.page - 1)}
-                className="px-3 py-1.5 rounded-lg border border-outline-variant/60 text-on-surface font-body-sm disabled:opacity-40 hover:bg-surface-container-low transition-colors"
-              >
-                <span className="material-symbols-outlined text-[16px] align-middle">chevron_left</span>
-                Précédent
-              </button>
-              <button
-                disabled={pagination.page >= pagination.totalPages}
-                onClick={() => load(pagination.page + 1)}
-                className="px-3 py-1.5 rounded-lg border border-outline-variant/60 text-on-surface font-body-sm disabled:opacity-40 hover:bg-surface-container-low transition-colors"
-              >
-                Suivant
-                <span className="material-symbols-outlined text-[16px] align-middle">chevron_right</span>
-              </button>
+                    </AnimatePresence>
+                  </div>
+                );
+              })}
             </div>
-          </div>
-        )}
+          )}
+
+          {/* Pagination */}
+          {pagination.totalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-2.5 border-t border-outline-variant/20 bg-surface-container-low/20">
+              <span className="text-[11px] text-on-surface-variant font-medium">
+                Page <strong>{pagination.page}</strong> / <strong>{pagination.totalPages}</strong> ({pagination.total} événements)
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  disabled={pagination.page <= 1}
+                  onClick={() => load(pagination.page - 1)}
+                  className="px-3 py-1.5 rounded-lg border border-outline-variant/30 text-[11px] font-semibold text-on-surface-variant disabled:opacity-30 hover:bg-surface-container transition-colors"
+                >
+                  ← Préc.
+                </button>
+                <span className="text-[11px] font-mono text-on-surface-variant px-2">{pagination.page}/{pagination.totalPages}</span>
+                <button
+                  disabled={pagination.page >= pagination.totalPages}
+                  onClick={() => load(pagination.page + 1)}
+                  className="px-3 py-1.5 rounded-lg border border-outline-variant/30 text-[11px] font-semibold text-on-surface-variant disabled:opacity-30 hover:bg-surface-container transition-colors"
+                >
+                  Suiv. →
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

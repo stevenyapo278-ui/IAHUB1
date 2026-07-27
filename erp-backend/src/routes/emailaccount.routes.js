@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
+const { auditLog } = require('../services/auditLogService');
 
 const router = express.Router();
 router.use(authenticate);
@@ -75,6 +76,7 @@ router.post(
     });
 
     return res.status(201).json(serialize(account));
+    auditLog('EMAIL_ACCOUNT_CREATED', { actor: req.user, targetType: 'EmailAccount', targetId: account.id, targetLabel: account.label, metadata: { email: account.emailAddress, provider: account.provider } }).catch(() => {});
   }
 );
 
@@ -109,7 +111,9 @@ router.patch('/:id', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
+    const account = await prisma.emailAccount.findUnique({ where: { id: Number(req.params.id) }, select: { id: true, label: true, emailAddress: true } });
     await prisma.emailAccount.delete({ where: { id: Number(req.params.id) } });
+    auditLog('EMAIL_ACCOUNT_DELETED', { actor: req.user, targetType: 'EmailAccount', targetId: account.id, targetLabel: account.label, metadata: { email: account.emailAddress } }).catch(() => {});
     return res.status(204).send();
   } catch (err) {
     return res.status(404).json({ error: 'Compte introuvable' });

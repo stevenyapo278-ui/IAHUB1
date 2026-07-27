@@ -4,6 +4,7 @@ const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { syncTeamsFromGlpi, syncCategoriesFromGlpi } = require('../services/glpiTicketCreator');
+const { auditLog } = require('../services/auditLogService');
 
 const router = express.Router();
 router.use(authenticate);
@@ -22,6 +23,7 @@ router.get('/', async (req, res) => {
     take: limit ? Number(limit) : undefined,
     include: {
       members: { select: { id: true, fullName: true, email: true, role: true } },
+      defaultObservers: { select: { id: true, fullName: true, email: true, role: true } },
       _count: { select: { tickets: true } },
     },
     orderBy: { name: 'asc' },
@@ -38,6 +40,7 @@ router.get('/:id', async (req, res) => {
     where: { id: Number(req.params.id) },
     include: {
       members: { select: { id: true, fullName: true, email: true, role: true } },
+      defaultObservers: { select: { id: true, fullName: true, email: true, role: true } },
     },
   });
   if (!team) return res.status(404).json({ error: 'Équipe introuvable' });
@@ -56,31 +59,58 @@ router.get('/:id', async (req, res) => {
   return res.json({ ...team, members: membersWithLoad });
 });
 
-router.post('/', requirePermission('teams.manage', ['ADMIN']), [body('name').notEmpty()], async (req, res) => {
+router.post('/', requirePermission('teams.manage', ['ADMIN', 'HOTLINE']), [body('name').notEmpty()], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-  const { name, category, groupEmail } = req.body;
+  const { name, category, groupEmail, defaultObserverIds } = req.body;
 
   const existing = await prisma.team.findUnique({ where: { name } });
   if (existing) return res.status(409).json({ error: 'Une équipe avec ce nom existe déjà' });
 
-  const team = await prisma.team.create({ data: { name, category: category || null, groupEmail: groupEmail || null } });
+  const ids = Array.isArray(defaultObserverIds) ? defaultObserverIds.map(Number) : [];
+  const team = await prisma.team.create({
+    data: {
+      name,
+      category: category || null,
+      groupEmail: groupEmail || null,
+      ...(ids.length > 0 ? { defaultObservers: { connect: ids.map((id) => ({ id })) } } : {}),
+    },
+    include: {
+      members: { select: { id: true, fullName: true, email: true, role: true } },
+      defaultObservers: { select: { id: true, fullName: true, email: true, role: true } },
+    },
+  });
   return res.status(201).json(team);
+  auditLog('TEAM_CREATED', { actor: req.user, targetType: 'Team', targetId: team.id, targetLabel: team.name }).catch(() => {});
 });
 
-router.patch('/:id', requirePermission('teams.manage', ['ADMIN']), async (req, res) => {
-  const { name, category, groupEmail } = req.body;
+router.patch('/:id', requirePermission('teams.manage', ['ADMIN', 'HOTLINE']), async (req, res) => {
+  const { name, category, groupEmail, defaultObserverIds } = req.body;
   const data = {};
   if (name !== undefined) data.name = name;
   if (category !== undefined) data.category = category;
   if (groupEmail !== undefined) data.groupEmail = groupEmail || null;
+  if (defaultObserverIds !== undefined) {
+    const ids = Array.isArray(defaultObserverIds) ? defaultObserverIds.map(Number) : [];
+    data.defaultObservers = { set: ids.map((id) => ({ id })) };
+  }
 
   try {
-    const team = await prisma.team.update({ where: { id: Number(req.params.id) }, data });
+    const team = await prisma.team.update({
+      where: { id: Number(req.params.id) },
+      data,
+      include: {
+        members: { select: { id: true, fullName: true, email: true, role: true } },
+        defaultObservers: { select: { id: true, fullName: true, email: true, role: true } },
+      },
+    });
     return res.json(team);
+    auditLog('TEAM_UPDATED', { actor: req.user, targetType: 'Team', targetId: team.id, targetLabel: team.name, metadata: { changedFields: Object.keys(data) } }).catch(() => {});
   } catch (err) {
-    return res.status(404).json({ error: 'Équipe introuvable' });
+    if (err.code === 'P2025') return res.status(404).json({ error: 'Équipe introuvable' });
+    console.error('[team.routes] Erreur mise à jour équipe:', err);
+    return res.status(500).json({ error: 'Erreur interne' });
   }
 });
 
@@ -93,6 +123,7 @@ router.post('/sync-glpi', requirePermission('teams.manage', ['ADMIN']), async (r
     }
     const syncedCategories = await syncCategoriesFromGlpi();
     return res.json({ synced, syncedCategories: syncedCategories || 0 });
+    auditLog('TEAMS_SYNCED_FROM_GLPI', { actor: req.user, targetType: 'Team', targetLabel: `${synced} équipes, ${syncedCategories || 0} catégories`, metadata: { teamsCount: synced, categoriesCount: syncedCategories || 0 } }).catch(() => {});
   } catch (err) {
     return res.status(502).json({ error: err.message || 'Erreur lors de la synchronisation GLPI' });
   }
@@ -100,10 +131,14 @@ router.post('/sync-glpi', requirePermission('teams.manage', ['ADMIN']), async (r
 
 router.delete('/:id', requirePermission('teams.manage', ['ADMIN']), async (req, res) => {
   try {
+    const team = await prisma.team.findUnique({ where: { id: Number(req.params.id) }, select: { id: true, name: true } });
     await prisma.team.delete({ where: { id: Number(req.params.id) } });
+    auditLog('TEAM_DELETED', { actor: req.user, targetType: 'Team', targetId: team.id, targetLabel: team.name }).catch(() => {});
     return res.status(204).send();
   } catch (err) {
-    return res.status(404).json({ error: 'Équipe introuvable' });
+    if (err.code === 'P2025') return res.status(404).json({ error: 'Équipe introuvable' });
+    console.error('[team.routes] Erreur suppression équipe:', err);
+    return res.status(500).json({ error: 'Erreur interne' });
   }
 });
 

@@ -13,6 +13,7 @@ import Settings from './pages/Settings';
 import KnowledgeBase from './pages/KnowledgeBase';
 import Inbox from './pages/Inbox';
 import AiEmailDrafts from './pages/AiEmailDrafts';
+import ValidationCenter from './pages/ValidationCenter';
 import Prompts from './pages/Prompts';
 import ApprovalPage from './pages/ApprovalPage';
 import ForgotPassword from './pages/ForgotPassword';
@@ -21,6 +22,9 @@ import Supervision from './pages/Supervision';
 import Documentation from './pages/Documentation';
 import SkillsManagement from './pages/SkillsManagement';
 import ActivityLogs from './pages/ActivityLogs';
+import AuditLogs from './pages/AuditLogs';
+import AiWeeklyReports from './pages/AiWeeklyReports';
+import Locations from './pages/Locations';
 
 export default function App() {
   // Les transitions de pages sont gérées dans MainLayout (Outlet uniquement).
@@ -46,7 +50,7 @@ export default function App() {
           <Route path="teams" element={<Teams />} />
           <Route path="knowledge-base" element={<KnowledgeBase />} />
           <Route path="inbox" element={<Inbox />} />
-          <Route path="email-drafts" element={<AiEmailDrafts />} />
+          <Route path="email-drafts" element={<ValidationCenter />} />
           <Route
             path="supervision"
             element={
@@ -102,8 +106,32 @@ export default function App() {
           <Route
             path="logs"
             element={
-              <ProtectedRoute roles={['ADMIN', 'TECHNICIAN']}>
+              <ProtectedRoute roles={['ADMIN', 'TECHNICIAN', 'HOTLINE']}>
                 <ActivityLogs />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="audit"
+            element={
+              <ProtectedRoute roles={['ADMIN']}>
+                <AuditLogs />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="locations"
+            element={
+              <ProtectedRoute roles={['ADMIN', 'HOTLINE', 'TECHNICIAN']}>
+                <Locations />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="ai-weekly-reports"
+            element={
+              <ProtectedRoute roles={['ADMIN', 'HOTLINE']}>
+                <AiWeeklyReports />
               </ProtectedRoute>
             }
           />

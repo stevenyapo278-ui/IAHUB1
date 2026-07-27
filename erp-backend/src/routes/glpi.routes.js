@@ -5,6 +5,7 @@ const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { syncGlpiTickets, fullReimportFromGlpi, getActiveGlpiConfig, glpiInitSession, glpiKillSession } = require('../utils/glpiSync');
 const { syncLocationsFromGlpi, syncUsersFromGlpi, getImportableGlpiUsers, importGlpiUsers } = require('../services/glpiTicketCreator');
+const { auditLog } = require('../services/auditLogService');
 
 const router = express.Router();
 router.use(authenticate);
@@ -36,6 +37,7 @@ router.post('/sync', requirePermission('glpi.manage', ['ADMIN', 'TECHNICIAN']), 
       return res.status(422).json({ error: 'GLPI non configuré ou inactif' });
     }
     return res.json(result);
+    auditLog('GLPI_TICKETS_SYNCED', { actor: req.user, targetType: 'Ticket', targetLabel: 'Synchronisation incrémentale GLPI', metadata: result }).catch(() => {});
   } catch (err) {
     return res.status(502).json({ error: err.message || 'Erreur de synchronisation GLPI' });
   }
@@ -59,6 +61,7 @@ router.post(
       const { dateFrom, dateTo } = req.body;
       const result = await fullReimportFromGlpi({ dateFrom, dateTo });
       return res.json(result);
+      auditLog('GLPI_TICKETS_SYNCED', { actor: req.user, targetType: 'Ticket', targetLabel: 'Réimport complet GLPI', metadata: { dateFrom, dateTo, ...result } }).catch(() => {});
     } catch (err) {
       return res.status(502).json({ error: err.message || 'Erreur de réimport GLPI' });
     }
@@ -75,6 +78,7 @@ router.post('/sync-locations', requirePermission('glpi.manage', ['ADMIN', 'TECHN
       return res.status(422).json({ error: 'GLPI non configuré' });
     }
     return res.json({ synced: result });
+    auditLog('GLPI_LOCATIONS_SYNCED', { actor: req.user, targetType: 'GlpiLocation', targetLabel: 'Synchronisation des lieux GLPI', metadata: { synced: result } }).catch(() => {});
   } catch (err) {
     return res.status(502).json({ error: err.message || 'Erreur de synchronisation des lieux GLPI' });
   }
@@ -90,6 +94,7 @@ router.post('/sync-users', requirePermission('glpi.manage', ['ADMIN', 'TECHNICIA
       return res.status(422).json({ error: 'GLPI non configuré' });
     }
     return res.json({ synced: result });
+    auditLog('GLPI_USERS_SYNCED', { actor: req.user, targetType: 'User', targetLabel: 'Synchronisation des utilisateurs GLPI', metadata: { synced: result } }).catch(() => {});
   } catch (err) {
     return res.status(502).json({ error: err.message || 'Erreur de synchronisation des utilisateurs GLPI' });
   }

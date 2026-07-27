@@ -33,12 +33,27 @@ const itemVariants = {
   visible: { opacity: 1, y: 0 },
 };
 
-function CustomToggle({ checked, onChange }) {
+function CustomToggle({ checked, onChange, disabled = false }) {
   return (
-    <motion.label className="relative inline-flex items-center cursor-pointer" whileTap={{ scale: 0.92 }}>
-      <input checked={checked} onChange={(e) => onChange(e.target.checked)} className="sr-only peer" type="checkbox" />
-      <div className="w-11 h-6 bg-surface-container-high rounded-full peer peer-focus:ring-2 peer-focus:ring-primary/20 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-outline-variant/60 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-    </motion.label>
+    <motion.button
+      type="button"
+      onClick={() => onChange(!checked)}
+      disabled={disabled}
+      whileTap={{ scale: 0.92 }}
+      className={`relative w-12 h-6 rounded-full border transition-all duration-300 outline-none ${
+        checked
+          ? 'bg-primary border-primary/60 shadow-sm shadow-primary/20'
+          : 'bg-surface-container-high border-outline-variant/60'
+      } disabled:opacity-50 disabled:cursor-not-allowed`}
+    >
+      <motion.span
+        animate={{ x: checked ? 24 : 0 }}
+        transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+        className={`absolute top-[2px] left-[2px] w-[18px] h-[18px] rounded-full shadow-sm ${
+          checked ? 'bg-white' : 'bg-on-surface-variant/80'
+        }`}
+      />
+    </motion.button>
   );
 }
 

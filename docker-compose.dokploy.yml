@@ -32,6 +32,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api}
     restart: always
     depends_on:
       postgres:
@@ -43,11 +45,11 @@ services:
       PORT: 4000
       DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD:-erp_password}@postgres:5432/${POSTGRES_DB:-erp_itsm}?schema=public
       JWT_SECRET: ${JWT_SECRET}
-      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
-      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-2h}
+      CORS_ORIGIN: ${CORS_ORIGIN}
       MICROSOFT_REDIRECT_URI: ${MICROSOFT_REDIRECT_URI:-}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:4000}
-      BACKEND_URL: ${BACKEND_URL:-http://localhost:4000}
+      FRONTEND_URL: ${FRONTEND_URL}
+      BACKEND_URL: ${BACKEND_URL:-${FRONTEND_URL}}
       GLPI_URL: ${GLPI_URL:-}
       GLPI_APP_TOKEN: ${GLPI_APP_TOKEN:-}
       GLPI_USER_TOKEN: ${GLPI_USER_TOKEN:-}

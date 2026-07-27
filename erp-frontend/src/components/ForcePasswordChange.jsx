@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 
@@ -35,8 +36,8 @@ export default function ForcePasswordChange() {
     }
   }
 
-  return (
-    <div className="fixed inset-0 bg-background/95 backdrop-blur-sm flex items-center justify-center z-50 p-md">
+  return createPortal(
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-[9999] p-md">
       <div className="w-full max-w-[420px] bg-surface-container-lowest border border-outline-variant rounded-none p-lg flex flex-col gap-md">
         <div>
           <h2 className="font-headline-lg text-headline-lg text-on-surface">Changement de mot de passe requis</h2>
@@ -100,6 +101,7 @@ export default function ForcePasswordChange() {
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

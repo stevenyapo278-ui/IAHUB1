@@ -10,6 +10,7 @@ datasource db {
 enum Role {
   SUPERADMIN
   ADMIN
+  HOTLINE
   TECHNICIAN
   REQUESTER
 }
@@ -54,6 +55,8 @@ enum TicketEventType {
   GLPI_SYNC_FAILED
   AI_CONVERSATION_ESCALATED
   AI_FOLLOWUP_DRAFT_GENERATED
+  APPROVED
+  REJECTED
 }
 
 enum TicketPriority {
@@ -119,6 +122,12 @@ model User {
   skills          UserSkill[]
   chatMessages    ChatMessage[]
   permissionGroups PermissionGroup[] @relation("UserPermissionGroups")
+  fieldCorrections TicketFieldCorrection[]
+  weeklyPatternReportsReviewed AiWeeklyPatternReport[]
+  observedTeams Team[] @relation("TeamDefaultObservers")
+  requesterAssignments RequesterLocation[] @relation("RequesterAssignment")
+
+  @@index([teamId])
 }
 
 model PermissionGroup {
@@ -143,6 +152,7 @@ model Team {
 
   members User[]
   tickets Ticket[]
+  defaultObservers User[] @relation("TeamDefaultObservers")
 }
 
 // Catégories de tickets synchronisées depuis les ITILCategory de GLPI — évite de coder en
@@ -158,11 +168,14 @@ model TicketCategory {
 
 // Lieux synchronisés depuis les Location de GLPI ("Lieu" / "Locations" dans le formulaire
 // de ticket). Le glpiLocationId est stocké sur le Ticket pour conserver la référence exacte.
+// isCustom=true pour les lieux créés manuellement dans l'ERP (pas encore poussés vers GLPI).
 model GlpiLocation {
   id              Int      @id @default(autoincrement())
   name            String   // nom simple ("Bâtiment A")
   completename    String?  // nom complet hiérarchique ("Siège > Bâtiment A > Salle 201")
-  glpiLocationId  Int      @unique
+  glpiLocationId  Int?     @unique // null si lieu custom pas encore pushé vers GLPI
+  isCustom        Boolean  @default(false)
+  isActive        Boolean  @default(true)
   address         String?
   postcode        String?
   town            String?
@@ -171,6 +184,8 @@ model GlpiLocation {
   room            String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  requesterLinks RequesterLocation[]
 }
 
 model Ticket {
@@ -208,6 +223,7 @@ model Ticket {
   updatedAt     DateTime @updatedAt
   solvedAt      DateTime?
   closedAt      DateTime?
+  lastGlpiSyncAt DateTime? // dernière synchro réussie vers GLPI (création, maj statut, followup)
 
   // Identifiants de conversation Outlook pour le rattachement automatique
   outlookConversationId String?
@@ -243,6 +259,14 @@ model Ticket {
   knowledgeDrafts KnowledgeDraft[]
   messages        TicketMessage[]
   events          TicketEvent[]
+  fieldCorrections TicketFieldCorrection[]
+
+  @@index([requesterId])
+  @@index([assignedToId])
+  @@index([teamId])
+  @@index([approvedById])
+  @@index([glpiTicketId])
+  @@index([status, createdAt])
 }
 
 // Suggestion d'action interne générée par l'agent IA pour le technicien (ex: réassigner, changer priorité, ticket similaire)
@@ -265,14 +289,17 @@ model TicketAttachment {
   id              Int                   @id @default(autoincrement())
   ticket          Ticket                @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   ticketId        Int
-  glpiDocumentId  Int                   @unique
+  glpiDocumentId  Int?                  @unique
   filename        String
   mimeType        String?
   source          EmailAttachmentSource @default(MANUAL_UPLOAD)
   incomingEmail   IncomingEmail?        @relation(fields: [incomingEmailId], references: [id], onDelete: SetNull)
   incomingEmailId Int?
   contentHash     String? // hash sha256 du contenu binaire, pour détecter les logos/signatures dupliqués entre messages d'un même ticket
+  localFilepath   String? // chemin fichier local si pas encore uploadé vers GLPI (attente approbation)
   createdAt       DateTime              @default(now())
+
+  @@index([incomingEmailId])
 }
 
 model Followup {
@@ -285,6 +312,8 @@ model Followup {
   source          String   @default("erp")
   glpiFollowupId  Int?     @unique
   createdAt       DateTime @default(now())
+
+  @@index([authorId])
 }
 
 model ApiConfig {
@@ -321,6 +350,7 @@ model SystemSettings {
   glpiTicketsSyncIntervalSeconds         Int @default(20)   // tickets GLPI + pièces jointes + approbations auto
   emailSyncIntervalSeconds               Int @default(15)   // relevé des boîtes mail entrantes
   glpiTeamsCategoriesSyncIntervalMinutes Int @default(10)   // groupes GLPI -> équipes, ITILCategory -> catégories
+  glpiLocationsSyncIntervalMinutes       Int @default(30)   // lieux GLPI -> GlpiLocation
   aiModelsSyncIntervalHours              Int @default(24)   // liste des modèles disponibles par fournisseur IA
 
   // Relance des brouillons AiEmailDraft non validés (Paramètres > Automatisation).
@@ -376,6 +406,9 @@ model SystemSettings {
   //   enableGlpiTicketClosure    — permet de fermer/résoudre des tickets dans GLPI
   enableGlpiFollowupCreation Boolean @default(true)
   enableGlpiTicketClosure   Boolean @default(true)
+
+  // Relance des tickets en attente d'approbation Hotline (Paramètres > Automatisation).
+  approvalReminderMinutes   Int     @default(30) // délai en minutes avant relance des tickets PENDING à la Hotline
 
   updatedAt              DateTime @updatedAt
 }
@@ -446,6 +479,9 @@ model AiKey {
   isDefault  Boolean    @default(false)
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
+
+  @@index([providerId])
+  @@index([modelId])
 }
 
 enum EmailProvider {
@@ -519,6 +555,9 @@ model IncomingEmail {
 
   status              String        @default("PENDING")
   error               String?
+  retryCount          Int           @default(0)
+  nextRetryAt         DateTime?
+  lastError           String?
 
   ccRecipients        String[]      @default([])
   hasAttachments      Boolean       @default(false)
@@ -590,6 +629,7 @@ model AiEmailDraft {
 
   glpiTicketId    Int?
   recipientEmail  String
+  recipientName   String? // nom du destinataire (ex: pour affichage dans le centre de validation)
   ccRecipients    String[]       @default([])
   subject         String
   proposedContent String
@@ -619,6 +659,10 @@ model AiEmailDraft {
 
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
+
+  @@index([ticketId])
+  @@index([reviewedById])
+  @@index([status])
 }
 
 // Lien d'approbation à distance envoyé par email de relance, pour qu'un responsable hors du
@@ -679,6 +723,10 @@ model ReassignmentLog {
   wasAutoAssigned       Boolean  @default(false) // true si le ticket avait été assigné automatiquement
   assignedByUserId      Int?     // utilisateur qui a fait la réassignation
   createdAt             DateTime @default(now())
+
+  @@index([ticketId])
+  @@index([newTechnicianId])
+  @@index([assignedByUserId])
 }
 
 // ── Notifications temps réel ────────────────────────────────────────────
@@ -711,6 +759,8 @@ model PasswordResetToken {
   expiresAt DateTime
   usedAt    DateTime?
   createdAt DateTime  @default(now())
+
+  @@index([userId])
 }
 
 enum KnowledgeDocumentStatus {
@@ -799,6 +849,9 @@ model KnowledgeDraft {
 
   createdAt   DateTime             @default(now())
   updatedAt   DateTime             @updatedAt
+
+  @@index([ticketId])
+  @@index([reviewedById])
 }
 
 // Prompt IA modifiable depuis Paramètres > Prompts IA. key = identifiant technique fixe (un par
@@ -856,6 +909,7 @@ model MailEvent {
 
   @@index([messageId])
   @@index([conversationId])
+  @@index([relatedTicketId])
 }
 
 // File d'attente des erreurs de workflow ITSM
@@ -906,20 +960,28 @@ model TicketSimilarityIndex {
 
 // Règles de triage automatique déterminant l'assignation des tickets sans appeler l'IA
 model TriageRule {
-  id             Int      @id @default(autoincrement())
-  isActive       Boolean  @default(true)
-  priority       Int      @default(0)   // plus élevé = évalué en premier
-  matchField     String   // 'subject' | 'body' | 'subject_or_body' | 'from'
-  matchType      String   // 'contains' | 'regex' | 'equals' | 'starts_with'
-  matchValue     String   // valeur à chercher (insensible à la casse)
-  category       String?  // catégorie ITSM assignée (ex: "Matériel", "VPN", etc.)
-  skillName      String?  // compétence cible (ex: "PORT USB")
-  teamName       String?  // équipe cible (ex: "Sécurité")
-  ticketPriority String?  // P1|P2|P3|P4
-  isSpam         Boolean  @default(false)
-  label          String   // Description humaine de la règle
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                  Int      @id @default(autoincrement())
+  isActive            Boolean  @default(true)
+  priority            Int      @default(0)   // plus élevé = évalué en premier
+  matchField          String   // 'subject' | 'body' | 'subject_or_body' | 'from' | 'sentiment' | 'time_window' | 'domain'
+  matchType           String   // 'contains' | 'regex' | 'equals' | 'starts_with' | 'ai_semantic'
+  matchValue          String   // valeur à chercher (insensible à la casse)
+  sentiment           String?  // 'FRUSTRATED' | 'URGENT' | 'NEUTRAL'
+  timeWindow          String?  // 'WORK_HOURS' | 'OFF_HOURS'
+  minTicketsLast24h   Int?
+  category            String?  // catégorie ITSM assignée (ex: "Matériel", "VPN", etc.)
+  skillName           String?  // compétence cible (ex: "PORT USB")
+  teamName            String?  // équipe cible (ex: "Sécurité")
+  ticketPriority      String?  // P1|P2|P3|P4|URGENT
+  isSpam              Boolean  @default(false)
+  autoApproveGlpi     Boolean  @default(false)
+  assignMode          String   @default("SPECIFIC") // "SPECIFIC" | "LEAST_BUSY"
+  tags                String[] @default([])
+  autoEscalateMinutes Int?
+  notificationWebhook String?
+  label               String   // Description humaine de la règle
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 }
 
 model ChatMessage {
@@ -934,4 +996,82 @@ model ChatMessage {
 
   @@index([userId, createdAt])
 }
+
+// Consigne chaque modification/correction de champ effectuée par un membre de la Hotline sur un ticket
+model TicketFieldCorrection {
+  id              Int      @id @default(autoincrement())
+  ticket          Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ticketId        Int
+  fieldName       String   // "category", "priority", "type", "assignedToId", "teamId", "title", "content", "urgency", "impact", "glpiLocationId"
+  oldValue        String?  @db.Text
+  newValue        String?  @db.Text
+  aiPrediction    String?  @db.Text // valeur initiale suggérée par l'IA lors de la création
+  correctedBy     User?    @relation(fields: [correctedById], references: [id], onDelete: SetNull)
+  correctedById   Int?
+  createdAt       DateTime @default(now())
+
+  @@index([ticketId])
+  @@index([fieldName])
+  @@index([correctedById])
+  @@index([createdAt])
+}
+
+// Rapport hebdomadaire des patterns d'apprentissage IA issus des corrections de la Hotline
+model AiWeeklyPatternReport {
+  id               Int            @id @default(autoincrement())
+  startDate        DateTime
+  endDate          DateTime
+  totalCorrections Int            @default(0)
+  totalRejections  Int            @default(0)
+  proposedRules    Json           // Tableau de règles de triage suggérées [{ matchField, matchValue, suggestedCategory, suggestedPriority, confidence }]
+  status           ApprovalStatus @default(PENDING) // PENDING | APPROVED | REJECTED
+  reviewedBy       User?          @relation(fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedById     Int?
+  reviewedAt       DateTime?
+  reviewNote       String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([startDate, endDate])
+  @@index([reviewedById])
+}
+
+// Association entre un expéditeur d'email (demandeur externe) et un lieu GLPI.
+// Créée automatiquement quand la Hotline approuve un ticket ou corrige son lieu.
+// Un même email peut être lié à plusieurs lieux (ex: technicien itinérant).
+model RequesterLocation {
+  id              Int         @id @default(autoincrement())
+  email           String      // email normalisé du demandeur (lowercase)
+  glpiLocation    GlpiLocation @relation(fields: [glpiLocationId], references: [id], onDelete: Cascade)
+  glpiLocationId  Int
+  assignedBy      User?       @relation("RequesterAssignment", fields: [assignedById], references: [id], onDelete: SetNull)
+  assignedById    Int?
+  assignmentCount Int         @default(1)
+  lastUsedAt      DateTime    @default(now())
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@unique([email, glpiLocationId])
+  @@index([email])
+}
+
+// Audit log générique pour tracer les actions globales (settings, users, teams, permissions, etc.)
+// Indépendant du ticket contrairement à TicketEvent.
+model AuditLog {
+  id          Int      @id @default(autoincrement())
+  action      String   // "USER_CREATED" | "TEAM_DELETED" | "SETTINGS_UPDATED" | ...
+  actorId     Int?
+  actorEmail  String?
+  targetType  String?  // "User" | "Team" | "Ticket" | "GlpiLocation" | "SystemSettings" | ...
+  targetId    Int?
+  targetLabel String?  // libellé lisible (nom, titre, etc.)
+  metadata    Json?
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  @@index([action])
+  @@index([actorEmail])
+  @@index([createdAt])
+}
+
 

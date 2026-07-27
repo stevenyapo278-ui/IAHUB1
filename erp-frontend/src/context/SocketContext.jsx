@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import io from 'socket.io-client';
 import { toast } from 'sonner';
 import { useAuth } from './AuthContext';
+import { sendBrowserNotification, requestBrowserNotifPermission } from '../utils/browserNotification';
 
 const SocketContext = createContext(null);
 
@@ -33,6 +34,7 @@ export function SocketProvider({ children }) {
 
     newSocket.on('connect', () => {
       console.log('[Socket.io] Connecté au serveur');
+      requestBrowserNotifPermission();
     });
 
     newSocket.on('connect_error', (err) => {
@@ -42,6 +44,14 @@ export function SocketProvider({ children }) {
     // ── Ticket créé ────────────────────────────────────────────────────
     newSocket.on('ticket_created', (ticket) => {
       const p1 = ticket.priority === 'P1';
+      sendBrowserNotification(
+        p1 ? '🚨 Incident critique' : 'Nouveau ticket',
+        {
+          body: `#${ticket.id} — ${ticket.title}`,
+          tag: `ticket-${ticket.id}`,
+          onClick: () => navigate(`/tickets/${ticket.id}`),
+        }
+      );
       toast(
         <div className="toast-clickable-content">
           <div className="toast-icon-wrap">
@@ -77,6 +87,17 @@ export function SocketProvider({ children }) {
 
     // ── Ticket assigné ─────────────────────────────────────────────────
     newSocket.on('ticket_assigned_to_you', (data) => {
+      const methodLabel =
+        data.method === 'ai_skills' ? 'Par compétence IA' :
+        data.method === 'by_category' ? 'Par catégorie' : 'Manuellement';
+      sendBrowserNotification(
+        'Ticket assigné à vous',
+        {
+          body: `#${data.ticketId} — ${data.title} (${methodLabel})`,
+          tag: `ticket-${data.ticketId}`,
+          onClick: () => navigate(`/tickets/${data.ticketId}`),
+        }
+      );
       toast(
         <div className="toast-clickable-content">
           <div className="toast-icon-wrap" style={{ backgroundColor: 'rgba(99,102,241,0.1)' }}>
@@ -108,6 +129,14 @@ export function SocketProvider({ children }) {
     // ── Ticket mis à jour ──────────────────────────────────────────────
     newSocket.on('ticket_updated', (data) => {
       if (data.changes?.status) {
+        sendBrowserNotification(
+          'Ticket mis à jour',
+          {
+            body: `#${data.id} → ${data.status}`,
+            tag: `ticket-${data.id}`,
+            onClick: () => navigate(`/tickets/${data.id}`),
+          }
+        );
         toast.info(
           <div className="toast-clickable-content">
             <div className="toast-icon-wrap" style={{ backgroundColor: 'rgba(245,158,11,0.1)' }}>

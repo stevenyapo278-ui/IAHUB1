@@ -4,6 +4,7 @@ const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { syncProviderModels } = require('../utils/modelSync');
+const { auditLog } = require('../services/auditLogService');
 
 const router = express.Router();
 router.use(authenticate);
@@ -62,6 +63,7 @@ router.post('/', [body('name').notEmpty(), body('label').notEmpty()], async (req
   });
 
   return res.status(201).json(provider);
+  auditLog('AI_PROVIDER_CREATED', { actor: req.user, targetType: 'AiProvider', targetId: provider.id, targetLabel: provider.label, metadata: { name: provider.name } }).catch(() => {});
 });
 
 router.patch('/:id', async (req, res) => {
@@ -81,7 +83,9 @@ router.patch('/:id', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
+    const provider = await prisma.aiProvider.findUnique({ where: { id: Number(req.params.id) }, select: { id: true, name: true, label: true } });
     await prisma.aiProvider.delete({ where: { id: Number(req.params.id) } });
+    auditLog('AI_PROVIDER_DELETED', { actor: req.user, targetType: 'AiProvider', targetId: provider.id, targetLabel: provider.label, metadata: { name: provider.name } }).catch(() => {});
     return res.status(204).send();
   } catch (err) {
     return res.status(404).json({ error: 'Fournisseur introuvable' });
@@ -134,6 +138,7 @@ router.post('/:id/models', [body('name').notEmpty()], async (req, res) => {
   });
 
   return res.status(201).json(model);
+  auditLog('AI_MODEL_CREATED', { actor: req.user, targetType: 'AiModel', targetId: model.id, targetLabel: model.label || model.name, metadata: { providerId, name: model.name, type: model.type } }).catch(() => {});
 });
 
 router.patch('/models/:modelId', async (req, res) => {
@@ -193,6 +198,7 @@ router.post('/:id/keys', [body('label').notEmpty(), body('apiKey').notEmpty()], 
   });
 
   return res.status(201).json({ ...key, apiKey: maskKey(key.apiKey) });
+  auditLog('AI_KEY_CREATED', { actor: req.user, targetType: 'AiKey', targetId: key.id, targetLabel: key.label, metadata: { providerId } }).catch(() => {});
 });
 
 router.patch('/keys/:keyId', async (req, res) => {

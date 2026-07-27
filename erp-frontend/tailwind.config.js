@@ -5,6 +5,21 @@ export default {
   theme: {
     extend: {
       colors: {
+        // Colors SEVEN-T
+        gold: {
+          300: '#fde68a',
+          400: '#fbbf24',
+          500: '#f59e0b',
+          600: '#d97706',
+        },
+        space: {
+          950: '#0a0c10',
+          900: '#12141c',
+          800: '#1a1d27',
+          700: '#2d313f',
+          600: '#3f4456',
+        },
+
         // ── Mode clair (valeurs par défaut) ──────────────────────────────────
         'surface-container-high': 'var(--color-surface-container-high)',
         'on-secondary-container': 'var(--color-on-secondary-container)',

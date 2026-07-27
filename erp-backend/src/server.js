@@ -11,6 +11,7 @@ const { runDraftReminderScheduler } = require('./services/draftReminderScheduler
 const { runReminderScheduler } = require('./services/reminderScheduler');
 const { checkAndSendDailySummary } = require('./services/dailySummary');
 const { withHealthTracking } = require('./services/schedulerHealth');
+const { seedPermissionGroups } = require('./services/permissionGroupSeeder');
 const { logger } = require('./utils/logger');
 
 // Validation des variables d'environnement critiques au démarrage
@@ -41,6 +42,7 @@ initSocket(server);
 
 server.listen(PORT, () => {
   logger.info(`Backend ERP démarré sur le port ${PORT}`);
+  seedPermissionGroups().catch((err) => logger.error(`[Seeder] Error seeding permission groups: ${err.message}`));
   if (process.env.NODE_ENV === 'production') {
     logger.info(`Frontend attendu sur : ${process.env.FRONTEND_URL || 'http://localhost:' + PORT}`);
   }
@@ -49,8 +51,11 @@ server.listen(PORT, () => {
 async function syncGlpiTeamsAndCategories() {
   await syncTeamsFromGlpi();
   await syncCategoriesFromGlpi();
-  await syncLocationsFromGlpi();
   await syncUsersFromGlpi();
+}
+
+async function syncGlpiLocationsOnly() {
+  await syncLocationsFromGlpi();
 }
 
 // Lance périodiquement `syncFn`, en relisant à chaque cycle la fréquence configurée via
@@ -82,6 +87,7 @@ function scheduleSync(name, syncFn, getIntervalSeconds) {
 scheduleSync('tickets GLPI', syncGlpiTickets, (s) => s.glpiTicketsSyncIntervalSeconds);
 scheduleSync('emails entrants', runEmailPipeline, (s) => s.emailSyncIntervalSeconds);
 scheduleSync('équipes/catégories GLPI', syncGlpiTeamsAndCategories, (s) => s.glpiTeamsCategoriesSyncIntervalMinutes * 60);
+scheduleSync('lieux GLPI', syncGlpiLocationsOnly, (s) => s.glpiLocationsSyncIntervalMinutes * 60);
 scheduleSync('modèles IA', syncAllProviders, (s) => s.aiModelsSyncIntervalHours * 3600);
 
 // Relance des brouillons AiEmailDraft en attente (Paramètres > Automatisation > Relance des

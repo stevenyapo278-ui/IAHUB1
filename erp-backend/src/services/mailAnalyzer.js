@@ -1,4 +1,11 @@
 const prisma = require('../prismaClient');
+const { getBreaker } = require('../utils/circuitBreaker');
+
+const aiBreakers = {
+  openai: getBreaker('ai-openai', { maxFailures: 3, resetTimeoutMs: 30000, halfOpenMaxRequests: 1 }),
+  gemini: getBreaker('ai-gemini', { maxFailures: 3, resetTimeoutMs: 30000, halfOpenMaxRequests: 1 }),
+  anthropic: getBreaker('ai-anthropic', { maxFailures: 3, resetTimeoutMs: 30000, halfOpenMaxRequests: 1 }),
+};
 
 // Récupère le premier provider actif avec au moins une clé active
 // Priorité : provider marqué isDefault, sinon le premier trouvé
@@ -20,67 +27,73 @@ async function getActiveProvider() {
 
 // Appelle l'API du provider avec le format OpenAI-compatible (NVIDIA, OpenAI, Mistral)
 async function callOpenAICompat(provider, apiKey, model, prompt) {
-  const baseUrl = provider.baseUrl || 'https://api.openai.com/v1';
-  const res = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    signal: AbortSignal.timeout(15000),
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.1,
-      max_tokens: 2048,
-    }),
+  return aiBreakers.openai.call(async () => {
+    const baseUrl = provider.baseUrl || 'https://api.openai.com/v1';
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(15000),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.1,
+        max_tokens: 2048,
+      }),
+    });
+    if (!res.ok) throw new Error(`Erreur ${provider.label} (${res.status}) : ${await res.text()}`);
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content || '';
   });
-  if (!res.ok) throw new Error(`Erreur ${provider.label} (${res.status}) : ${await res.text()}`);
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content || '';
 }
 
 // Appelle l'API Gemini
 async function callGemini(provider, apiKey, prompt, modelName) {
-  const base = provider.baseUrl || 'https://generativelanguage.googleapis.com/v1beta';
-  const model = modelName || 'gemini-1.5-flash';
-  const res = await fetch(
-    `${base}/models/${model}:generateContent`,
-    {
-      method: 'POST',
-      signal: AbortSignal.timeout(20000),
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
-      }),
-    }
-  );
-  if (!res.ok) throw new Error(`Erreur Gemini (${res.status}) : ${await res.text()}`);
-  const data = await res.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  return aiBreakers.gemini.call(async () => {
+    const base = provider.baseUrl || 'https://generativelanguage.googleapis.com/v1beta';
+    const model = modelName || 'gemini-1.5-flash';
+    const res = await fetch(
+      `${base}/models/${model}:generateContent`,
+      {
+        method: 'POST',
+        signal: AbortSignal.timeout(20000),
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
+        }),
+      }
+    );
+    if (!res.ok) throw new Error(`Erreur Gemini (${res.status}) : ${await res.text()}`);
+    const data = await res.json();
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  });
 }
 
 // Appelle l'API Anthropic
 async function callAnthropic(provider, apiKey, prompt) {
-  const baseUrl = provider.baseUrl || 'https://api.anthropic.com';
-  const res = await fetch(`${baseUrl}/v1/messages`, {
-    method: 'POST',
-    signal: AbortSignal.timeout(15000),
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 2048,
-      messages: [{ role: 'user', content: prompt }],
-    }),
+  return aiBreakers.anthropic.call(async () => {
+    const baseUrl = provider.baseUrl || 'https://api.anthropic.com';
+    const res = await fetch(`${baseUrl}/v1/messages`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(15000),
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 2048,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+    if (!res.ok) throw new Error(`Erreur Anthropic (${res.status}) : ${await res.text()}`);
+    const data = await res.json();
+    return data.content?.[0]?.text || '';
   });
-  if (!res.ok) throw new Error(`Erreur Anthropic (${res.status}) : ${await res.text()}`);
-  const data = await res.json();
-  return data.content?.[0]?.text || '';
 }
 
 async function callProvider(provider, prompt) {

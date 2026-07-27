@@ -7,6 +7,7 @@ const { extractText } = require('../utils/documentExtract');
 const { chunkText } = require('../utils/chunking');
 const { generateEmbedding, toVectorLiteral } = require('../utils/embeddings');
 const { rerank, listRerankCandidates } = require('../utils/reranking');
+const { auditLog } = require('../services/auditLogService');
 
 const router = express.Router();
 const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); // 20 Mo max
@@ -96,6 +97,7 @@ router.post('/documents', requirePermission('knowledge.manage', ['ADMIN', 'TECHN
     });
 
     return res.status(201).json(updated);
+    auditLog('KNOWLEDGE_DOCUMENT_UPLOADED', { actor: req.user, targetType: 'KnowledgeDocument', targetId: updated.id, targetLabel: updated.title, metadata: { sourceType: updated.sourceType, chunksCount: updated._count?.chunks } }).catch(() => {});
   } catch (err) {
     await prisma.knowledgeDocument.update({
       where: { id: document.id },
@@ -189,7 +191,9 @@ router.put('/documents/:id/replace', requirePermission('knowledge.manage', ['ADM
 // Supprime un document et ses chunks (cascade)
 router.delete('/documents/:id', requirePermission('knowledge.manage', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   try {
+    const doc = await prisma.knowledgeDocument.findUnique({ where: { id: Number(req.params.id) }, select: { id: true, title: true } });
     await prisma.knowledgeDocument.delete({ where: { id: Number(req.params.id) } });
+    auditLog('KNOWLEDGE_DOCUMENT_DELETED', { actor: req.user, targetType: 'KnowledgeDocument', targetId: doc.id, targetLabel: doc.title }).catch(() => {});
     return res.status(204).send();
   } catch (err) {
     return res.status(404).json({ error: 'Document introuvable' });

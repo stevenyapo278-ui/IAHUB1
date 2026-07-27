@@ -2,6 +2,7 @@
 // barre latérale (cosmétique) — la vraie protection de ces routes reste le rôle ADMIN/SUPERADMIN
 // (authorizeAdmin côté backend, non délégable via groupe). Ne pas s'y fier comme seul rempart.
 export const PERMISSION_DEFINITIONS = [
+  { key: 'tickets.view', label: 'Consulter les documents attachés aux tickets (GLPI)' },
   { key: 'tickets.delete', label: 'Supprimer un ticket' },
   { key: 'tickets.bulkDelete', label: 'Supprimer des tickets en masse' },
   { key: 'tickets.assign', label: 'Assigner un ticket' },
@@ -16,5 +17,7 @@ export const PERMISSION_DEFINITIONS = [
   { key: 'glpi.manage', label: 'Gérer la synchronisation GLPI' },
   { key: 'prompts.manage', label: 'Modifier les prompts IA' },
   { key: 'emaildrafts.manage', label: 'Approuver / rejeter les réponses email IA' },
+  { key: 'aiweeklyreports.manage', label: "Valider les rapports hebdo & patterns d'apprentissage IA (Hotline)" },
   { key: 'automation.manage', label: "Gérer l'automatisation (auto-envoi, auto-approbation, synchro GLPI)" },
+  { key: 'locations.manage', label: 'Gérer les lieux (synchronisation GLPI, création)' },
 ];

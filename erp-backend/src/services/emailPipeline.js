@@ -15,6 +15,29 @@ const { logEvent } = require('./ticketEvent');
 const { getSystemSettings } = require('./systemSettings');
 const { emitTicketCreated, emitTicketAssigned } = require('../utils/socket');
 const { tryHandleReminderReply } = require('./draftReplyApproval');
+const { getBreaker } = require('../utils/circuitBreaker');
+
+const MAX_RETRIES = 3;
+const RETRY_DELAYS_MS = [60000, 300000, 900000]; // 1min, 5min, 15min
+
+function isTransientError(err) {
+  const msg = (err?.message || '').toLowerCase();
+  const status = err?.status || err?.response?.status;
+  return (
+    status === 429 ||
+    status >= 500 ||
+    msg.includes('timeout') ||
+    msg.includes('econnrefused') ||
+    msg.includes('econnreset') ||
+    msg.includes('etimedout') ||
+    msg.includes('socket hang up') ||
+    msg.includes('too many requests') ||
+    msg.includes('rate limit') ||
+    msg.includes('service unavailable') ||
+    msg.includes('temporarily') ||
+    msg.includes('circuit_open')
+  );
+}
 
 // Selon le réglage "Auto-envoi des emails sans validation humaine" (Paramètres > Automatisation) :
 // envoie directement l'email, ou crée un AiEmailDraft en attente d'approbation comme aujourd'hui.
@@ -393,14 +416,31 @@ async function processMessage(message, account) {
       return updated;
     }
 
-    // Résoudre le lieu détecté par l'IA en un ID de lieu GLPI
+    // Résoudre le lieu : d'abord via l'historique du demandeur (RequesterLocation), puis IA
     let locationId = null;
+
+    // 1. Vérifier si l'expéditeur a un lieu connu (appris des corrections Hotline)
+    const knownLinks = fromEmail
+      ? await prisma.requesterLocation.findMany({
+          where: { email: fromEmail.toLowerCase().trim() },
+          include: { glpiLocation: { select: { glpiLocationId: true, name: true, completename: true } } },
+          orderBy: { assignmentCount: 'desc' },
+          take: 3,
+        })
+      : [];
+
+    // 2. Suggestion IA (peut override l'historique du demandeur)
     if (analysis.location) {
       const loc = await prisma.glpiLocation.findFirst({
         where: { completename: analysis.location },
         select: { glpiLocationId: true },
       });
       if (loc) locationId = loc.glpiLocationId;
+    }
+
+    // 3. Fallback : si l'IA n'a rien trouvé mais qu'on a un historique, utiliser le lieu connu
+    if (!locationId && knownLinks.length > 0) {
+      locationId = knownLinks[0].glpiLocation.glpiLocationId;
     }
 
     // Étape 3 : créer ticket GLPI + ERP dans une transaction pour éviter l'incohérence
@@ -515,8 +555,39 @@ async function processMessage(message, account) {
     });
     if (io) io.emit('email_updated', updated);
   } catch (err) {
-    const updated = await prisma.incomingEmail.update({ where: { id: incoming.id }, data: { status: 'ERROR', error: err.message } });
-    if (io) io.emit('email_updated', updated);
+    const isTransient = isTransientError(err);
+    const currentRetryCount = incoming.retryCount || 0;
+
+    if (isTransient && currentRetryCount < MAX_RETRIES) {
+      const nextDelay = RETRY_DELAYS_MS[currentRetryCount] || RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1];
+      const updated = await prisma.incomingEmail.update({
+        where: { id: incoming.id },
+        data: {
+          status: 'RETRY',
+          error: err.message,
+          lastError: err.message,
+          retryCount: currentRetryCount + 1,
+          nextRetryAt: new Date(Date.now() + nextDelay),
+        },
+      });
+      if (io) io.emit('email_updated', updated);
+      logger?.warn?.('[emailPipeline] Erreur transitoire, mise en file d\'attente de réessai', {
+        incomingId: incoming.id, retryCount: currentRetryCount + 1, nextRetryAt: updated.nextRetryAt, error: err.message,
+      }) || console.warn(`[emailPipeline] Retry ${currentRetryCount + 1}/${MAX_RETRIES} pour incoming #${incoming.id} dans ${nextDelay / 1000}s`);
+    } else {
+      const deadLetter = !isTransient || currentRetryCount >= MAX_RETRIES;
+      const updated = await prisma.incomingEmail.update({
+        where: { id: incoming.id },
+        data: {
+          status: deadLetter ? 'DEAD_LETTER' : 'ERROR',
+          error: err.message,
+          lastError: err.message,
+          retryCount: currentRetryCount + (deadLetter ? 0 : 1),
+        },
+      });
+      if (io) io.emit('email_updated', updated);
+      console.error(`[emailPipeline] ${deadLetter ? 'DEAD_LETTER' : 'ERROR'} incoming #${incoming.id}:`, err.message);
+    }
   }
 
   return prisma.incomingEmail.findUnique({ where: { id: incoming.id } });

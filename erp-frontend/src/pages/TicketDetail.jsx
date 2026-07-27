@@ -5,74 +5,22 @@ import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import ConfirmDialog from '../components/ConfirmDialog';
+import { useTheme } from '../context/ThemeContext';
+import SearchableSelect from '../components/SearchableSelect';
+import SearchableMultiSelect from '../components/SearchableMultiSelect';
+import {
+  ArrowLeft, Clock, User, Tag, AlertTriangle, CheckCircle2,
+  Trash2, Paperclip, MessageSquare, Sparkles, Shield, MapPin,
+  RefreshCw, Mail, FileText, Check, X, Send, ChevronRight,
+  Flame, Radio, Info, ArrowDown, UserCheck, HelpCircle, Layers, History
+} from 'lucide-react';
+import {
+  STATUS_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS,
+  URGENCY_IMPACT_OPTIONS, PRIORITY_CONFIG, STATUS_CONFIG, initials
+} from '../constants/tickets';
 
-const STATUS_OPTIONS = ['NEW', 'OPEN', 'PENDING', 'SOLVED', 'CLOSED'];
-const PRIORITY_OPTIONS = ['P1', 'P2', 'P3', 'P4'];
-const TYPE_OPTIONS = [
-  { value: 'INCIDENT', label: 'Incident' },
-  { value: 'REQUEST', label: 'Demande' },
-];
-const SOURCE_OPTIONS = ['Helpdesk', 'Email', 'Téléphone'];
-const URGENCY_IMPACT_OPTIONS = [
-  { value: 'VERY_LOW', label: 'Très basse' },
-  { value: 'LOW', label: 'Basse' },
-  { value: 'MEDIUM', label: 'Moyenne' },
-  { value: 'HIGH', label: 'Haute' },
-  { value: 'VERY_HIGH', label: 'Très haute' },
-  { value: 'MAJOR', label: 'Majeure' },
-];
+import { sanitizeHtml } from '../utils/sanitize';
 
-const PRIORITY_BADGE = {
-  P1: 'bg-error/10 text-error border border-error/20 rounded-full px-2.5 py-0.5',
-  P2: 'bg-tertiary/10 text-tertiary border border-tertiary/20 rounded-full px-2.5 py-0.5',
-  P3: 'bg-secondary/10 text-secondary border border-secondary/20 rounded-full px-2.5 py-0.5',
-  P4: 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 rounded-full px-2.5 py-0.5',
-};
-
-function initials(name) {
-  if (!name) return '?';
-  return name
-    .split(' ')
-    .map((p) => p[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase();
-}
-
-// Sanitisation minimale du HTML provenant des suivis GLPI : supprime les event handlers
-// (onclick, onerror...) et les protocoles javascript: dans les URLs, en complément de la
-// sanitisation déjà faite côté serveur (suppression des balises <script>).
-function decodeHtmlEntities(str) {
-  if (!str) return '';
-  const textarea = document.createElement('textarea');
-  textarea.innerHTML = str;
-  return textarea.value;
-}
-
-function sanitizeFollowupHtml(html) {
-  if (!html) return '';
-  // D'abord : décoder les entités HTML (&#60; → <, &#62; → >, &amp; → &, etc.)
-  // pour que le HTML soit propre avant l'injection via dangerouslySetInnerHTML
-  const decoded = decodeHtmlEntities(html);
-  return decoded
-    .replace(/<script\b[^<]*(?:<\/script>|<\/script\s*>)/gi, '')
-    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*')/gi, '')
-    .replace(/\s+on\w+\s*=\s*\S+/gi, '')
-    .replace(/href\s*=\s*"\s*javascript:/gi, 'href="#')
-    .replace(/href\s*=\s*'\s*javascript:/gi, "href='#")
-    .replace(/src\s*=\s*"\s*javascript:/gi, 'src="#')
-    .replace(/src\s*=\s*'\s*javascript:/gi, "src='#")
-    // Supprime les <a href="/glpi/document/X/file"><img ...></a> — garde l'img, enlève le lien cassé
-    .replace(/<a\s[^>]*href=["']\/glpi\/document\/\d+\/file["'][^>]*>\s*(<img[^>]*\/?>)\s*<\/a>/gi, '$1')
-    .replace(/<a\s[^>]*href=["']\/glpi\/document\/\d+\/file["'][^>]*>\s*<\/a>/gi, '');
-}
-
-// Note : containsHtmlTags a été supprimée car les suivis GLPI utilisent des entités HTML
-// (&#60; &#62;) au lieu de vrais tags. On utilise systématiquement dangerouslySetInnerHTML
-// avec sanitisation — sans risque puisque la sanitisation est faite côté serveur ET client.
-
-// Les pièces jointes exigent un token JWT (Authorization header), qu'une balise <img src> ne peut pas envoyer :
-// on les récupère via axios puis on les affiche via une URL blob.
 function AttachmentThumbnail({ ticketId, attachment }) {
   const [blobUrl, setBlobUrl] = useState(null);
 
@@ -89,9 +37,9 @@ function AttachmentThumbnail({ ticketId, attachment }) {
   }, [ticketId, attachment.id]);
 
   if (!blobUrl) {
-    return <div className="h-24 w-24 border border-outline-variant bg-surface-container-low rounded-xl animate-pulse" />;
+    return <div className="h-20 w-20 border border-outline-variant/60 bg-surface-container-low rounded-xl animate-pulse" />;
   }
-  return <img src={blobUrl} alt={attachment.filename} className="h-24 w-24 object-cover border border-outline-variant/60 rounded-xl shadow-sm hover:shadow-md transition-all duration-300" />;
+  return <img src={blobUrl} alt={attachment.filename} className="h-20 w-20 object-cover border border-outline-variant/60 rounded-xl shadow-sm hover:shadow-md transition-all duration-300" />;
 }
 
 export default function TicketDetail() {
@@ -104,29 +52,34 @@ export default function TicketDetail() {
   const [teams, setTeams] = useState([]);
   const [users, setUsers] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [locations, setLocations] = useState([]);
   const [glpiUsers, setGlpiUsers] = useState([]);
   const [syncFailures, setSyncFailures] = useState([]);
   const [savingField, setSavingField] = useState(null);
+  const [corrections, setCorrections] = useState([]);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejecting, setRejecting] = useState(false);
 
-  const canAssign = hasPermission(user, 'tickets.assign');
-  const canApprove = hasPermission(user, 'tickets.approve');
-  const canDelete = hasPermission(user, 'tickets.delete');
+  const canAssign = hasPermission(user, 'tickets.assign') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN';
+  const canApprove = hasPermission(user, 'tickets.approve') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN';
+  const canDelete = hasPermission(user, 'tickets.delete') || user?.role === 'SUPERADMIN';
 
-  // Référence au conteneur des suivis pour post-traiter les images GLPI
   const followupContainerRef = useRef(null);
-  // Référence persistante aux blob URLs pour le nettoyage entre les cycles de rendu — évite
-  // les fuites mémoire quand le useEffect se re-déclenche (auto-refresh) avant que toutes les
-  // requêtes images soient résolues.
   const followupBlobUrlsRef = useRef([]);
 
   const load = useCallback(() => {
     api
       .get(`/tickets/${id}`)
       .then(({ data }) => setTicket(data))
-      .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
+      .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement du ticket'));
     api
       .get(`/tickets/${id}/events`)
       .then(({ data }) => setSyncFailures(data.filter((e) => e.type === 'GLPI_SYNC_FAILED')))
+      .catch(() => {});
+    api
+      .get(`/tickets/${id}/corrections`)
+      .then(({ data }) => setCorrections(data))
       .catch(() => {});
   }, [id]);
 
@@ -137,22 +90,10 @@ export default function TicketDetail() {
     return () => clearInterval(intervalId);
   }, [load]);
 
-    // Post-traite les images des suivis GLPI et emails : les balises <img src="/glpi/document/X/file">
-  // sont chargées via axios (qui envoie le JWT dans Authorization header) et converties en blob URLs.
-  // Sans ce contournement, le navigateur tente de les charger directement mais reçoit une 401
-  // car une balise <img> est incapable d'envoyer des en-têtes d'authentification personnalisés.
-  // Les balises <a href="/glpi/document/X/file"> sont aussi réécrites pour pointer vers le blob URL
-  // une fois l'image chargée, afin que le clic fonctionne aussi.
   useEffect(() => {
     const container = followupContainerRef.current;
     if (!container) return;
 
-    // NE PAS révoquer les blob URLs du cycle précédent ici : React préserve le DOM quand le
-    // contenu __html de dangerouslySetInnerHTML n'a pas changé (optimisation de React). Les
-    // anciennes images référencent encore leurs blob URLs. Les révoquer les briserait.
-    // Les blob URLs accumulées sont nettoyées UNIQUEMENT au démontage du composant (return).
-
-    // Traite les images
     container.querySelectorAll('img[src^="/glpi/document/"]').forEach((img) => {
       if (img.getAttribute('data-blob-processed')) return;
       img.setAttribute('data-blob-processed', 'true');
@@ -169,17 +110,14 @@ export default function TicketDetail() {
           followupBlobUrlsRef.current.push(url);
           img.setAttribute('data-blob-url', url);
           img.src = url;
-          if (parentLink) {
-            parentLink.href = url;
-          }
+          if (parentLink) { parentLink.href = url; }
         })
         .catch(() => {});
     });
 
-    // Traite les liens seuls (sans image) vers les documents GLPI
     container.querySelectorAll('a[href^="/glpi/document/"]').forEach((link) => {
       if (link.getAttribute('data-blob-processed')) return;
-      if (link.querySelector('img[src^="/glpi/document/"]')) return; // déjà traité via l'image
+      if (link.querySelector('img[src^="/glpi/document/"]')) return;
       link.setAttribute('data-blob-processed', 'true');
 
       const href = link.getAttribute('href');
@@ -195,8 +133,6 @@ export default function TicketDetail() {
         .catch(() => {});
     });
 
-    // Nettoyage UNIQUEMENT au démontage du composant — ne JAMAIS révoquer entre les cycles
-    // (cf. explication ci-dessus sur la préservation du DOM par React).
     return () => {
       followupBlobUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
       followupBlobUrlsRef.current = [];
@@ -221,6 +157,7 @@ export default function TicketDetail() {
 
   useEffect(() => {
     api.get('/glpi/categories').then(({ data }) => setCategories(data)).catch(() => {});
+    api.get('/glpi/locations').then(({ data }) => setLocations(data)).catch(() => {});
     api.get('/glpi/users').then(({ data }) => setGlpiUsers(data)).catch(() => {});
     if (!canAssign) return;
     api.get('/teams').then(({ data }) => setTeams(data)).catch(() => {});
@@ -231,7 +168,7 @@ export default function TicketDetail() {
     try {
       setSavingField(field);
       await api.patch(`/tickets/${id}`, { [field]: value });
-      toast.success(`${field} mis à jour`);
+      toast.success('Mise à jour enregistrée');
       load();
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la mise à jour');
@@ -269,7 +206,7 @@ export default function TicketDetail() {
     setDeleting(true);
     try {
       await api.delete(`/tickets/${id}`);
-      navigate('/tickets');
+      navigate(-1);
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la suppression');
       setDeleting(false);
@@ -279,63 +216,78 @@ export default function TicketDetail() {
   async function handleApprove() {
     try {
       await api.post(`/tickets/${id}/approve`);
+      toast.success('Ticket approuvé');
       load();
     } catch (err) {
       setError(err.response?.data?.error || "Erreur lors de l'approbation");
     }
   }
 
-  async function handleReject() {
+  function handleReject() {
+    setRejectReason('');
+    setShowRejectModal(true);
+  }
+
+  async function handleRejectConfirm() {
+    if (!rejectReason.trim()) {
+      toast.error('La raison du rejet est obligatoire');
+      return;
+    }
+    setRejecting(true);
     try {
-      await api.post(`/tickets/${id}/reject`);
+      await api.post(`/tickets/${id}/reject`, { reason: rejectReason.trim() });
+      toast.success('Ticket rejeté');
+      setShowRejectModal(false);
+      setRejectReason('');
       load();
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors du rejet');
+    } finally {
+      setRejecting(false);
     }
   }
 
   async function handleRequestApproval() {
     try {
       await api.patch(`/tickets/${id}`, { approvalStatus: 'PENDING' });
+      toast.success('Soumis pour approbation');
       load();
     } catch (err) {
-      setError(err.response?.data?.error || 'Erreur');
+      setError(err.response?.data?.error || 'Erreur lors de la demande d\'approbation');
     }
   }
 
   if (error) {
     return (
-      <div className="p-lg flex flex-col items-center gap-3">
-        <div className="border border-red-500/20 bg-red-500/5 text-red-500 p-md rounded-xl font-body-md">{error}</div>
-        <button onClick={load} className="px-4 py-1.5 rounded-lg text-sm font-semibold bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20 transition-colors">
+      <div className="p-8 flex flex-col items-center gap-4">
+        <div className="border border-red-500/20 bg-red-500/10 text-red-600 dark:text-red-400 p-4 rounded-xl font-semibold text-sm flex items-center gap-2 max-w-lg">
+          <AlertTriangle className="w-5 h-5 shrink-0" />
+          <span>{error}</span>
+        </div>
+        <button onClick={load} className="px-5 py-2 rounded-xl text-xs font-bold bg-blue-600 text-white shadow-md shadow-blue-500/20 hover:brightness-110 transition-all">
           Réessayer
         </button>
       </div>
     );
   }
+
   if (!ticket) {
     return (
-      <div className="p-lg flex flex-col gap-lg animate-pulse">
-        <div className="flex items-center gap-sm">
-          <div className="h-4 w-16 bg-surface-container-high/60 rounded" />
-          <div className="h-4 w-8 bg-surface-container-high/60 rounded" />
-          <div className="h-4 w-12 bg-surface-container-high/60 rounded" />
-        </div>
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-lg">
-          <div className="xl:col-span-8 flex flex-col gap-lg">
-            <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl p-lg space-y-4">
-              <div className="h-6 w-48 bg-surface-container-high/60 rounded-xl" />
-              <div className="h-4 w-full bg-surface-container-high/40 rounded" />
-              <div className="h-4 w-3/4 bg-surface-container-high/40 rounded" />
-              <div className="h-20 w-full bg-surface-container-high/30 rounded-xl" />
+      <div className="p-6 sm:p-8 flex flex-col gap-6 animate-pulse">
+        <div className="h-6 w-48 bg-surface-container-high rounded-xl" />
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+          <div className="xl:col-span-8 space-y-6">
+            <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-3xl p-6 space-y-4">
+              <div className="h-8 w-3/4 bg-surface-container-high rounded-xl" />
+              <div className="h-4 w-full bg-surface-container-high/60 rounded" />
+              <div className="h-24 w-full bg-surface-container-high/40 rounded-xl" />
             </div>
           </div>
-          <div className="xl:col-span-4 flex flex-col gap-lg">
-            <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl p-lg space-y-3">
-              <div className="h-5 w-32 bg-surface-container-high/60 rounded" />
-              <div className="h-4 w-full bg-surface-container-high/40 rounded" />
-              <div className="h-4 w-full bg-surface-container-high/40 rounded" />
-              <div className="h-4 w-2/3 bg-surface-container-high/40 rounded" />
+          <div className="xl:col-span-4 space-y-6">
+            <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-3xl p-6 space-y-4">
+              <div className="h-6 w-32 bg-surface-container-high rounded-xl" />
+              <div className="h-10 w-full bg-surface-container-high/40 rounded-xl" />
+              <div className="h-10 w-full bg-surface-container-high/40 rounded-xl" />
             </div>
           </div>
         </div>
@@ -343,20 +295,83 @@ export default function TicketDetail() {
     );
   }
 
+  const pConfig = PRIORITY_CONFIG[ticket.priority] || PRIORITY_CONFIG.P3;
+  const sConfig = STATUS_CONFIG[ticket.status] || STATUS_CONFIG.NEW;
+  const PIcon = pConfig.Icon;
+  const SIcon = sConfig.Icon;
+
   return (
-    <div className="p-lg flex flex-col gap-lg">
-      <div className="flex items-center gap-sm text-on-surface-variant font-body-sm text-body-sm">
-        <Link to="/tickets" className="hover:text-on-surface hover:underline transition-colors">Tickets</Link>
-        <span className="material-symbols-outlined text-[16px]">chevron_right</span>
-        <span className="font-headline-sm text-headline-sm text-on-surface">#{ticket.id}</span>
+    <div className="p-4 sm:p-6 lg:p-8 flex flex-col gap-6 max-w-7xl mx-auto">
+      {/* Top Header Bar */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-outline-variant/30">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate(-1)}
+            className="p-2 rounded-xl border border-outline-variant/40 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer"
+            title="Retour aux tickets"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-sm font-bold text-primary">#{ticket.id}</span>
+              {ticket.glpiTicketId && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 dark:bg-surface-container-high dark:text-on-surface-variant border border-slate-200 dark:border-outline-variant/40 flex items-center gap-1">
+                  <RefreshCw className="w-2.5 h-2.5" />
+                  GLPI #{ticket.glpiTicketId}
+                </span>
+              )}
+            </div>
+            <h1 className="text-lg font-bold text-on-surface leading-snug line-clamp-1">{ticket.title}</h1>
+          </div>
+        </div>
+
+        {/* Right Badges & Actions */}
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
+          <button
+            onClick={async () => {
+              try {
+                toast.loading('Génération de la fiche KB...', { id: 'kb-gen' });
+                await api.post(`/tickets/${id}/generate-knowledge`);
+                toast.success('Fiche capturée avec succès dans la Base de Connaissances !', { id: 'kb-gen' });
+              } catch (err) {
+                toast.error(err.response?.data?.error || 'Erreur lors de la capture KB', { id: 'kb-gen' });
+              }
+            }}
+            className="px-3 py-1.5 rounded-xl border border-purple-500/30 bg-purple-500/10 text-purple-600 dark:text-purple-300 hover:bg-purple-500/20 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+            title="Créer automatiquement un article dans la Base de Connaissances d'après la résolution de ce ticket"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Capturer dans la KB</span>
+          </button>
+
+          <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${sConfig.bg}`}>
+            <SIcon className="w-3.5 h-3.5" />
+            {sConfig.label}
+          </span>
+          <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${pConfig.bg}`}>
+            <PIcon className="w-3.5 h-3.5" />
+            {pConfig.label}
+          </span>
+          {canDelete && (
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              className="p-2 rounded-xl border border-red-500/20 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer ml-2"
+              title="Supprimer le ticket"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
+        </div>
       </div>
 
+      {/* Sync Failure Banner */}
       {syncFailures.length > 0 && (
-        <div className="border border-red-500/20 text-red-500 bg-red-500/5 rounded-xl p-md mb-lg flex items-start gap-sm">
-          <span className="material-symbols-outlined text-red-500">sync_problem</span>
+        <div className="border border-red-500/25 bg-red-500/10 rounded-xl p-4 flex items-start gap-3 text-red-700 dark:text-red-400">
+          <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
           <div>
-            <div className="font-headline-sm text-headline-sm font-semibold">Synchronisation GLPI incomplète</div>
-            <ul className="font-body-sm text-body-sm mt-1 list-disc pl-md">
+            <h4 className="text-xs font-bold uppercase tracking-wider">Synchronisation GLPI incomplète</h4>
+            <ul className="text-xs mt-1 space-y-1 list-disc pl-4">
               {syncFailures.map((e) => (
                 <li key={e.id}>
                   {new Date(e.createdAt).toLocaleString('fr-FR')} — {e.payload?.action || 'action'} : {e.payload?.error || 'erreur inconnue'}
@@ -367,56 +382,52 @@ export default function TicketDetail() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-lg">
-        <div className="xl:col-span-8 flex flex-col gap-lg">
-          <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg">
-            <div className="flex items-start justify-between mb-md">
-              <div>
-                <div className="flex items-center gap-sm mb-xs">
-                  <span className={`font-label-md text-label-md px-2.5 py-0.5 rounded-full uppercase tracking-wide font-medium ${PRIORITY_BADGE[ticket.priority] || ''}`}>
-                    {ticket.priority}
+      {/* Grid Layout */}
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+        {/* Left Column: Main Ticket Content & Timeline */}
+        <div className="xl:col-span-8 flex flex-col gap-6">
+          {/* Main Ticket Card */}
+          <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-5">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-4 border-b border-outline-variant/20">
+              <div className="flex items-center gap-2 flex-wrap">
+                {ticket.category && (
+                  <span className="bg-slate-100 text-slate-700 dark:bg-surface-container-high dark:text-on-surface-variant border border-slate-200 dark:border-outline-variant/40 text-[11px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                    {ticket.category}
                   </span>
-                  {ticket.category && (
-                    <span className="bg-surface-container-high/60 text-on-surface-variant border border-outline-variant font-label-md text-[11px] px-2.5 py-0.5 rounded-full uppercase tracking-wider font-medium">
-                      {ticket.category}
-                    </span>
-                  )}
-                </div>
-                <h2 className="font-display-lg text-display-lg text-on-surface mb-sm flex items-center gap-sm font-bold">
-                  {ticket.title}
-                  {ticket.aiProcessed && (
-                    <span
-                      title="Traité par l'agent IA"
-                      className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border border-primary/20 bg-primary/5 text-primary font-medium text-[11px]"
-                    >
-                      <span className="material-symbols-outlined text-[14px]">smart_toy</span>
-                      IA
-                    </span>
-                  )}
-                </h2>
+                )}
+                {ticket.aiProcessed && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border border-purple-200 bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-400 text-[11px] font-bold">
+                    <Sparkles className="w-3 h-3 text-purple-600 dark:text-purple-400" />
+                    Traité par IA
+                  </span>
+                )}
               </div>
-              <div className="flex flex-col items-end shrink-0 ml-md">
-                <span className="font-headline-md text-headline-md text-on-surface font-semibold">#{ticket.id}</span>
-                <span className="font-body-sm text-body-sm text-on-surface-variant italic">
-                  {new Date(ticket.createdAt).toLocaleString('fr-FR')}
-                </span>
+              <div className="text-[11px] font-medium text-on-surface-variant flex items-center gap-1">
+                <Clock className="w-3.5 h-3.5 text-on-surface-variant/60" />
+                <span>Créé le {new Date(ticket.createdAt).toLocaleString('fr-FR')}</span>
               </div>
             </div>
+
+            {/* Ticket Description Content */}
             {ticket.content && (ticket.content.includes('<') || ticket.content.includes('&#') || ticket.content.includes('&lt;')) ? (
               <div
-                className="leading-relaxed text-body-md text-on-surface-variant border-t border-outline-variant/40 pt-md mt-md [&_img]:max-w-full [&_img]:rounded-lg [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-2 [&_a]:text-primary [&_a]:underline [&_a]:hover:text-primary/80 [&_p]:mb-2 [&_p]:last:mb-0"
-                dangerouslySetInnerHTML={{ __html: sanitizeFollowupHtml(ticket.content) }}
+                className="leading-relaxed text-sm text-on-surface [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-3 [&_a]:text-blue-600 [&_a]:underline [&_p]:mb-2 [&_p]:last:mb-0"
+                dangerouslySetInnerHTML={{ __html: sanitizeHtml(ticket.content) }}
               />
             ) : (
-              <div className="font-body-md text-body-md text-on-surface-variant border-t border-outline-variant/40 pt-md mt-md whitespace-pre-wrap leading-relaxed">
+              <div className="text-sm text-on-surface leading-relaxed whitespace-pre-wrap font-normal">
                 {ticket.content}
               </div>
             )}
 
+            {/* Attachments */}
             {ticket.attachments?.length > 0 && (
-              <div className="border-t border-outline-variant/40 pt-md mt-md">
-                <h4 className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-sm font-semibold">Pièces jointes</h4>
-                <div className="flex flex-wrap gap-sm">
+              <div className="border-t border-outline-variant/30 pt-4 mt-4">
+                <h4 className="text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-3 flex items-center gap-1.5">
+                  <Paperclip className="w-3.5 h-3.5 text-primary" />
+                  Pièces jointes ({ticket.attachments.length})
+                </h4>
+                <div className="flex flex-wrap gap-3">
                   {ticket.attachments.map((a) => {
                     const isImage = a.mimeType?.startsWith('image/');
                     const fromEmail = a.source === 'INCOMING_EMAIL';
@@ -426,11 +437,13 @@ export default function TicketDetail() {
                         type="button"
                         onClick={() => downloadAttachment(a)}
                         title={fromEmail ? `${a.filename} (reçu par email)` : a.filename}
-                        className="relative hover:opacity-90 transition-opacity"
+                        className="relative hover:opacity-90 transition-opacity group cursor-pointer"
                       >
                         <AttachmentThumbnail ticketId={ticket.id} attachment={a} />
                         {fromEmail && (
-                          <span className="material-symbols-outlined text-[14px] absolute top-1.5 right-1.5 bg-surface rounded-full p-1 text-on-surface-variant shadow-sm border border-outline-variant/30">mail</span>
+                          <span className="p-1 bg-surface rounded-full text-on-surface-variant shadow-sm border border-outline-variant/40 absolute top-1 right-1">
+                            <Mail className="w-3 h-3 text-primary" />
+                          </span>
                         )}
                       </button>
                     ) : (
@@ -439,10 +452,10 @@ export default function TicketDetail() {
                         type="button"
                         onClick={() => downloadAttachment(a)}
                         title={fromEmail ? 'Reçu par email' : undefined}
-                        className="flex items-center gap-xs px-3.5 py-1.5 border border-outline-variant/60 text-on-surface font-body-sm text-body-sm rounded-xl hover:bg-surface-container-high transition-colors"
+                        className="flex items-center gap-2 px-3.5 py-2 border border-outline-variant/50 bg-surface-container-low/40 text-on-surface text-xs font-semibold rounded-xl hover:bg-surface-container hover:border-primary/40 transition-all cursor-pointer"
                       >
-                        <span className="material-symbols-outlined text-[16px]">{fromEmail ? 'mail' : 'attach_file'}</span>
-                        {a.filename}
+                        {fromEmail ? <Mail className="w-4 h-4 text-primary" /> : <Paperclip className="w-4 h-4 text-primary" />}
+                        <span className="truncate max-w-[180px]">{a.filename}</span>
                       </button>
                     );
                   })}
@@ -451,13 +464,15 @@ export default function TicketDetail() {
             )}
           </div>
 
-          <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg">
-            <h3 className="font-headline-md text-headline-md border-b border-outline-variant/60 pb-md mb-md flex items-center gap-sm font-semibold">
-              <span className="material-symbols-outlined text-primary">forum</span>
-              Suivi
+          {/* Follow-up / Timeline Card */}
+          <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-6">
+            <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface border-b border-outline-variant/20 pb-3 flex items-center gap-2">
+              <MessageSquare className="w-4 h-4 text-primary" />
+              Suivi & Échanges
             </h3>
 
-            <div className="space-y-md" ref={followupContainerRef}>
+            {/* Timeline entries */}
+            <div className="space-y-4" ref={followupContainerRef}>
               {(() => {
                 const timeline = [
                   ...ticket.followups.map((f) => ({ kind: 'followup', date: f.createdAt, data: f })),
@@ -465,57 +480,61 @@ export default function TicketDetail() {
                 ].sort((a, b) => new Date(a.date) - new Date(b.date));
 
                 if (timeline.length === 0) {
-                  return <p className="font-body-sm text-body-sm text-on-surface-variant italic">Aucun commentaire pour le moment.</p>;
+                  return (
+                    <div className="py-8 text-center text-on-surface-variant/60 text-xs italic">
+                      Aucun commentaire pour le moment.
+                    </div>
+                  );
                 }
 
                 return timeline.map((item) =>
                   item.kind === 'followup' ? (
-                    <div key={`f-${item.data.id}`} className="p-md rounded-2xl border border-outline-variant/50 bg-surface-container-low/60 flex gap-md">
-                      <div className="w-9 h-9 rounded-full border border-outline-variant/75 text-on-surface bg-surface-container-high flex items-center justify-center font-label-md text-label-md font-bold shrink-0 shadow-sm">
+                    <div key={`f-${item.data.id}`} className="p-4 rounded-2xl border border-outline-variant/30 bg-surface-container-low/30 flex gap-3">
+                      <div className="w-9 h-9 rounded-full border border-outline-variant/60 bg-surface-container-high text-on-surface flex items-center justify-center text-xs font-bold shrink-0 shadow-sm">
                         {initials(item.data.author?.fullName)}
                       </div>
-                      <div className="flex-1">
-                        <div className="flex items-center justify-between mb-1">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
                           <div className="flex items-center gap-2">
-                            <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">
+                            <span className="text-xs font-bold text-on-surface">
                               {item.data.source === 'glpi' ? 'GLPI' : (item.data.author?.fullName || 'Inconnu')}
-                            </div>
+                            </span>
                             {item.data.source === 'glpi' && (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-600 font-medium border border-amber-500/20">GLPI</span>
+                              <span className="text-[9px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400 font-bold border border-amber-500/25">GLPI</span>
                             )}
                           </div>
-                          <time className="font-mono-sm text-mono-sm text-on-surface-variant bg-surface-container-lowest border border-outline-variant/30 px-2 py-0.5 rounded-full">
+                          <time className="text-[10px] font-mono text-on-surface-variant bg-surface-container border border-outline-variant/30 px-2 py-0.5 rounded-full">
                             {new Date(item.data.createdAt).toLocaleString('fr-FR')}
                           </time>
                         </div>
                         <div
-                          className="leading-relaxed text-body-sm text-on-surface-variant [&_img]:max-w-full [&_img]:rounded-lg [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-2 [&_a]:text-primary [&_a]:underline [&_a]:hover:text-primary/80 [&_p]:mb-2 [&_p]:last:mb-0 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:mb-1 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-outline-variant/40 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-outline-variant/40 [&_th]:px-2 [&_th]:py-1 [&_th]:bg-surface-container-high/40 [&_pre]:bg-surface-container-high [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:overflow-x-auto [&_code]:bg-surface-container-high [&_code]:rounded [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-sm"
-                          dangerouslySetInnerHTML={{ __html: sanitizeFollowupHtml(item.data.content) }}
+                          className="leading-relaxed text-xs text-on-surface [&_img]:max-w-full [&_img]:rounded-lg [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-2 [&_a]:text-blue-600 [&_a]:underline [&_p]:mb-1.5 [&_p]:last:mb-0"
+                          dangerouslySetInnerHTML={{ __html: sanitizeHtml(item.data.content) }}
                         />
                       </div>
                     </div>
                   ) : (
-                    <div key={`m-${item.data.id}`} className="p-md rounded-2xl border border-outline-variant/50 bg-surface-container-lowest flex gap-md">
-                      <div className="w-9 h-9 rounded-full border border-outline-variant/70 bg-surface-container-low text-on-surface-variant flex items-center justify-center shrink-0 shadow-sm">
-                        <span className="material-symbols-outlined text-[18px]">mail</span>
+                    <div key={`m-${item.data.id}`} className="p-4 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest flex gap-3">
+                      <div className="w-9 h-9 rounded-full border border-outline-variant/50 bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 shadow-sm">
+                        <Mail className="w-4 h-4" />
                       </div>
-                      <div className="flex-1">
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
+                          <span className="text-xs font-bold text-on-surface">
                             {item.data.direction === 'INBOUND' ? `Email de ${item.data.sender}` : `Email envoyé à ${item.data.recipients?.join(', ')}`}
-                          </div>
-                          <time className="font-mono-sm text-mono-sm text-on-surface-variant bg-surface-container-low/70 px-2 py-0.5 rounded-full">
+                          </span>
+                          <time className="text-[10px] font-mono text-on-surface-variant bg-surface-container border border-outline-variant/30 px-2 py-0.5 rounded-full">
                             {new Date(item.data.timestamp).toLocaleString('fr-FR')}
                           </time>
                         </div>
-                        <div className="text-xs text-outline mb-1 font-medium italic">{item.data.subject}</div>
-                        {(item.data.bodyHtml) ? (
+                        <div className="text-[11px] text-on-surface-variant mb-1 font-semibold italic">{item.data.subject}</div>
+                        {item.data.bodyHtml ? (
                           <div
-                            className="leading-relaxed text-body-sm text-on-surface-variant [&_img]:max-w-full [&_img]:rounded-lg [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-2 [&_a]:text-primary [&_a]:underline [&_a]:hover:text-primary/80 [&_p]:mb-2 [&_p]:last:mb-0 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:mb-1 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-outline-variant/40 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-outline-variant/40 [&_th]:px-2 [&_th]:py-1 [&_th]:bg-surface-container-high/40 [&_pre]:bg-surface-container-high [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:overflow-x-auto [&_code]:bg-surface-container-high [&_code]:rounded [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-sm"
-                            dangerouslySetInnerHTML={{ __html: sanitizeFollowupHtml(item.data.bodyHtml) }}
+                            className="leading-relaxed text-xs text-on-surface [&_img]:max-w-full [&_img]:rounded-lg [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-2 [&_a]:text-blue-600 [&_a]:underline [&_p]:mb-1.5 [&_p]:last:mb-0"
+                            dangerouslySetInnerHTML={{ __html: sanitizeHtml(item.data.bodyHtml) }}
                           />
                         ) : (
-                          <div className="font-body-sm text-body-sm text-on-surface-variant whitespace-pre-wrap leading-relaxed">{item.data.body}</div>
+                          <div className="text-xs text-on-surface whitespace-pre-wrap leading-relaxed">{item.data.body}</div>
                         )}
                       </div>
                     </div>
@@ -524,72 +543,79 @@ export default function TicketDetail() {
               })()}
             </div>
 
-            <form onSubmit={handleAddFollowup} className="mt-lg pt-md border-t border-outline-variant/60">
+            {/* Add Comment Form */}
+            <form onSubmit={handleAddFollowup} className="pt-4 border-t border-outline-variant/30 space-y-3">
               <textarea
-                className="w-full bg-surface border border-outline-variant/60 rounded-xl p-md font-body-sm text-body-sm text-on-surface placeholder-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 resize-y"
-                placeholder="Ajouter un commentaire... (Ctrl+Entrée pour envoyer)"
+                className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-none"
+                placeholder="Ajouter un commentaire ou suivi... (Ctrl+Entrée pour envoyer)"
                 rows={3}
                 value={followup}
                 onChange={(e) => setFollowup(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleAddFollowup(e); } }}
               />
-              <div className="flex justify-end mt-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-on-surface-variant font-medium">Astuce : Appuyez sur <kbd className="px-1.5 py-0.5 bg-surface-container border border-outline-variant/40 rounded text-[9px] font-mono">Ctrl+Entrée</kbd> pour soumettre</span>
                 <button
                   type="submit"
-                  className="btn-gradient font-semibold shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 rounded-xl px-5 py-2.5 text-body-sm"
+                  disabled={!followup.trim()}
+                  className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-bold shadow-md shadow-blue-500/20 disabled:opacity-40 hover:brightness-110 transition-all cursor-pointer"
                 >
-                  Envoyer
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Envoyer</span>
                 </button>
               </div>
             </form>
           </div>
         </div>
 
-        <div className="xl:col-span-4 flex flex-col gap-lg">
+        {/* Right Column: Properties Sidebar */}
+        <div className="xl:col-span-4 flex flex-col gap-6">
+          {/* Source Email Details */}
           {ticket.sourceEmail && (
-            <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg">
-              <h3 className="font-headline-sm text-headline-sm text-on-surface mb-md uppercase tracking-wider flex items-center gap-sm font-semibold">
-                <span className="material-symbols-outlined text-[18px] text-primary">mail</span>
+            <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-3">
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2 border-b border-outline-variant/20 pb-3">
+                <Mail className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                 Email d'origine
               </h3>
-              <dl className="flex flex-col gap-xs font-body-sm text-body-sm">
-                <div className="flex justify-between gap-sm">
-                  <dt className="text-on-surface-variant">De</dt>
-                  <dd className="text-on-surface text-right truncate font-medium">
+              <dl className="space-y-2 text-xs">
+                <div className="flex justify-between gap-2">
+                  <dt className="text-on-surface-variant font-medium">De :</dt>
+                  <dd className="text-on-surface font-semibold truncate text-right">
                     {ticket.sourceName ? `${ticket.sourceName} <${ticket.sourceEmail}>` : ticket.sourceEmail}
                   </dd>
                 </div>
                 {ticket.sourceSubject && (
-                  <div className="flex justify-between gap-sm border-t border-outline-variant/40 pt-2 mt-1">
-                    <dt className="text-on-surface-variant">Sujet</dt>
-                    <dd className="text-on-surface text-right truncate font-medium">{ticket.sourceSubject}</dd>
+                  <div className="flex justify-between gap-2 border-t border-outline-variant/20 pt-2">
+                    <dt className="text-on-surface-variant font-medium">Sujet :</dt>
+                    <dd className="text-on-surface font-semibold truncate text-right">{ticket.sourceSubject}</dd>
                   </div>
                 )}
               </dl>
             </div>
           )}
 
+          {/* AI Suggestions */}
           {ticket.aiSuggestions?.length > 0 && (
-            <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg">
-              <h3 className="font-headline-sm text-headline-sm text-on-surface mb-md uppercase tracking-wider flex items-center gap-sm font-semibold">
-                <span className="material-symbols-outlined text-[18px] text-primary">smart_toy</span>
+            <div className="rounded-3xl border border-purple-500/20 bg-purple-500/5 p-6 shadow-sm space-y-3">
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-purple-700 dark:text-purple-400 flex items-center gap-2 border-b border-purple-500/20 pb-3">
+                <Sparkles className="w-4 h-4 text-purple-600 dark:text-purple-400" />
                 Suggestions IA
               </h3>
-              <div className="flex flex-col gap-sm">
+              <div className="space-y-2">
                 {ticket.aiSuggestions.map((s) => (
-                  <div key={s.id} className="border border-outline-variant/60 bg-surface-container-low/30 rounded-xl p-sm">
-                    <div className="flex items-start justify-between gap-sm">
-                      <p className="font-body-sm text-body-sm text-on-surface leading-relaxed">{s.suggestion}</p>
+                  <div key={s.id} className="border border-purple-500/20 bg-surface-container-lowest rounded-xl p-3 space-y-1.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-xs text-on-surface font-medium leading-relaxed">{s.suggestion}</p>
                       <button
                         onClick={() => handleDismissSuggestion(s.id)}
+                        className="text-on-surface-variant hover:text-red-500 p-0.5 rounded transition-colors"
                         title="Ignorer"
-                        className="text-on-surface-variant hover:text-error shrink-0 transition-colors"
                       >
-                        <span className="material-symbols-outlined text-[16px]">close</span>
+                        <X className="w-3.5 h-3.5" />
                       </button>
                     </div>
                     {s.reason && (
-                      <p className="font-body-sm text-body-sm text-on-surface-variant mt-xs border-t border-outline-variant/30 pt-1.5 italic">{s.reason}</p>
+                      <p className="text-[10px] text-on-surface-variant border-t border-outline-variant/20 pt-1.5 italic">{s.reason}</p>
                     )}
                   </div>
                 ))}
@@ -597,19 +623,20 @@ export default function TicketDetail() {
             </div>
           )}
 
+          {/* Approval Workflow Card */}
           {ticket.approvalStatus !== 'NOT_REQUIRED' && (
-            <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg">
-              <h3 className="font-headline-sm text-headline-sm text-on-surface mb-md uppercase tracking-wider flex items-center gap-sm font-semibold">
-                <span className="material-symbols-outlined text-[18px] text-primary">fact_check</span>
+            <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-4">
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2 border-b border-outline-variant/20 pb-3">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                 Approbation
               </h3>
 
-              <div className={`px-3 py-2 mb-md font-label-md text-label-md uppercase tracking-wide text-center rounded-xl border ${
-                ticket.approvalStatus === 'REJECTED' 
-                  ? 'bg-error/10 text-error border-error/20' 
+              <div className={`px-3 py-2 text-xs font-extrabold uppercase tracking-wider text-center rounded-xl border ${
+                ticket.approvalStatus === 'REJECTED'
+                  ? 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-400 border-red-200 dark:border-red-500/25'
                   : ticket.approvalStatus === 'APPROVED'
-                  ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
-                  : 'bg-surface-container border-outline-variant text-on-surface-variant'
+                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/25'
+                  : 'bg-amber-50 text-amber-800 dark:bg-amber-500/15 dark:text-amber-400 border-amber-300 dark:border-amber-500/25'
               }`}>
                 {ticket.approvalStatus === 'PENDING' && 'En attente d\'approbation'}
                 {ticket.approvalStatus === 'APPROVED' && 'Approuvé'}
@@ -617,70 +644,55 @@ export default function TicketDetail() {
               </div>
 
               {ticket.approvedBy && (
-                <p className="font-body-sm text-body-sm text-on-surface-variant mb-md italic">
+                <p className="text-[11px] text-on-surface-variant italic">
                   Par {ticket.approvedBy.fullName} le {new Date(ticket.approvedAt).toLocaleString('fr-FR')}
                 </p>
               )}
 
               {canApprove && ticket.approvalStatus === 'PENDING' && (
-                <div className="flex gap-2">
+                <div className="flex gap-2 pt-2">
                   <button
                     onClick={handleApprove}
-                    className="flex-1 flex items-center justify-center gap-2 btn-gradient font-semibold py-2 rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm"
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white text-xs font-bold shadow-md shadow-emerald-500/20 hover:brightness-110 cursor-pointer transition-all"
                   >
-                    <span className="material-symbols-outlined text-[18px]">check</span>
+                    <Check className="w-3.5 h-3.5" />
                     Approuver
                   </button>
                   <button
                     onClick={handleReject}
-                    className="flex-1 flex items-center justify-center gap-2 bg-transparent border border-error text-error hover:bg-error-container transition-colors py-2 rounded-xl font-semibold text-body-sm"
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-bold hover:bg-red-500/10 cursor-pointer transition-all"
                   >
-                    <span className="material-symbols-outlined text-[18px]">close</span>
+                    <X className="w-3.5 h-3.5" />
                     Rejeter
                   </button>
                 </div>
               )}
-
-              {canApprove && ticket.approvalStatus !== 'PENDING' && (
-                <button
-                  onClick={handleRequestApproval}
-                  className="w-full text-primary font-semibold text-body-sm hover:underline"
-                >
-                  Remettre en attente d'approbation
-                </button>
-              )}
             </div>
           )}
 
-          {canApprove && ticket.approvalStatus === 'NOT_REQUIRED' && (
-            <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg">
-              <h3 className="font-headline-sm text-headline-sm text-on-surface mb-md uppercase tracking-wider flex items-center gap-sm font-semibold">
-                <span className="material-symbols-outlined text-[18px] text-primary">fact_check</span>
-                Approbation
-              </h3>
-              <button
-                onClick={handleRequestApproval}
-                className="w-full bg-surface-container hover:bg-surface-container-high text-on-surface py-2.5 rounded-xl border border-outline-variant/60 font-semibold text-body-sm transition-all duration-300"
-              >
-                Soumettre pour approbation
-              </button>
-            </div>
-          )}
+          {/* Properties Card */}
+          <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-4">
+            <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface border-b border-outline-variant/20 pb-3 flex items-center gap-2">
+              <Layers className="w-4 h-4 text-primary" />
+              Propriétés du ticket
+            </h3>
 
-          <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-1 bg-primary"></div>
-            <h3 className="font-headline-sm text-headline-sm text-on-surface mb-md uppercase tracking-wider font-semibold">Propriétés du ticket</h3>
-            <div className="space-y-md">
+            <div className="space-y-3.5">
               <div>
-                <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Date d'ouverture</label>
-                <div className="w-full bg-surface-container-low/60 border border-outline-variant/60 rounded-xl py-2.5 px-3.5 font-body-sm text-body-sm text-on-surface-variant">
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                  Date d'ouverture
+                </label>
+                <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
                   {new Date(ticket.createdAt).toLocaleString('fr-FR')}
                 </div>
               </div>
+
               <div>
-                <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Type</label>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                  Type
+                </label>
                 <select
-                  className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
+                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                   value={ticket.type}
                   disabled={!canAssign || savingField === 'type'}
                   onChange={(e) => updateField('type', e.target.value)}
@@ -690,11 +702,14 @@ export default function TicketDetail() {
                   ))}
                 </select>
               </div>
+
               <div>
-                <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Catégorie</label>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                  Catégorie
+                </label>
                 {canAssign ? (
                   <select
-                    className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
+                    className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                     value={ticket.category || ''}
                     disabled={savingField === 'category'}
                     onChange={(e) => updateField('category', e.target.value)}
@@ -705,15 +720,18 @@ export default function TicketDetail() {
                     ))}
                   </select>
                 ) : (
-                  <div className="w-full bg-surface-container-low/60 border border-outline-variant/60 rounded-xl py-2.5 px-3.5 font-body-sm text-body-sm text-on-surface-variant">
+                  <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
                     {ticket.category || '-'}
                   </div>
                 )}
               </div>
+
               <div>
-                <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Statut</label>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                  Statut
+                </label>
                 <select
-                  className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
+                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                   value={ticket.status}
                   disabled={!canAssign || savingField === 'status'}
                   onChange={(e) => updateField('status', e.target.value)}
@@ -723,10 +741,13 @@ export default function TicketDetail() {
                   ))}
                 </select>
               </div>
+
               <div>
-                <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Source de la demande</label>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                  Source de la demande
+                </label>
                 <select
-                  className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
+                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                   value={ticket.source || ''}
                   disabled={!canAssign || savingField === 'source'}
                   onChange={(e) => updateField('source', e.target.value)}
@@ -737,10 +758,13 @@ export default function TicketDetail() {
                   ))}
                 </select>
               </div>
+
               <div>
-                <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Urgence</label>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                  Urgence
+                </label>
                 <select
-                  className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
+                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                   value={ticket.urgency}
                   disabled={!canAssign || savingField === 'urgency'}
                   onChange={(e) => updateField('urgency', e.target.value)}
@@ -750,10 +774,13 @@ export default function TicketDetail() {
                   ))}
                 </select>
               </div>
+
               <div>
-                <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Impact</label>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                  Impact
+                </label>
                 <select
-                  className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
+                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                   value={ticket.impact}
                   disabled={!canAssign || savingField === 'impact'}
                   onChange={(e) => updateField('impact', e.target.value)}
@@ -763,10 +790,13 @@ export default function TicketDetail() {
                   ))}
                 </select>
               </div>
+
               <div>
-                <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Priorité</label>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                  Priorité
+                </label>
                 <select
-                  className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
+                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                   value={ticket.priority}
                   disabled={!canAssign || savingField === 'priority'}
                   onChange={(e) => updateField('priority', e.target.value)}
@@ -776,20 +806,26 @@ export default function TicketDetail() {
                   ))}
                 </select>
               </div>
+
               <div>
-                <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">ID externe</label>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                  ID externe
+                </label>
                 <input
-                  className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
+                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
                   defaultValue={ticket.externalId || ''}
                   disabled={!canAssign}
                   onBlur={(e) => updateField('externalId', e.target.value)}
                 />
               </div>
+
               <div>
-                <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Équipe</label>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                  Équipe
+                </label>
                 {canAssign ? (
                   <select
-                    className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
+                    className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                     value={ticket.teamId || ''}
                     disabled={savingField === 'teamId'}
                     onChange={(e) => updateField('teamId', e.target.value ? Number(e.target.value) : null)}
@@ -800,102 +836,185 @@ export default function TicketDetail() {
                     ))}
                   </select>
                 ) : (
-                  <div className="w-full bg-surface-container-low/60 border border-outline-variant/60 rounded-xl py-2.5 px-3.5 font-body-sm text-body-sm text-on-surface-variant">
+                  <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
                     {ticket.team?.name || 'Non assignée'}
                   </div>
                 )}
               </div>
+
               <div>
-                <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Attribué à</label>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                  Attribué à
+                </label>
                 {canAssign ? (
-                  <select
-                    className="w-full bg-surface border border-outline-variant/60 rounded-xl py-2 px-3 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60 transition-all duration-300"
+                  <SearchableSelect
+                    options={Array.isArray(users) ? users : []}
                     value={ticket.assignedToId || ''}
                     disabled={savingField === 'assignedToId'}
-                    onChange={(e) => updateField('assignedToId', e.target.value ? Number(e.target.value) : null)}
-                  >
-                    <option value="">Non assigné</option>
-                    {(Array.isArray(users) ? users : []).map((u) => {
-                      const isGlpi = glpiUsers.some((gu) => gu.id === u.id);
-                      return <option key={u.id} value={u.id}>{u.fullName}{isGlpi ? ' 🔗' : ''}</option>;
-                    })}
-                  </select>
+                    onChange={(val) => updateField('assignedToId', val ? Number(val) : null)}
+                    placeholder="Non assigné"
+                    searchPlaceholder="Rechercher un technicien..."
+                    labelKey="fullName"
+                    valueKey="id"
+                    subLabelKey="email"
+                    icon={User}
+                  />
                 ) : (
-                  <div className="w-full flex items-center gap-2 bg-surface-container-low/60 border border-outline-variant/60 rounded-xl py-2.5 px-3.5 font-body-sm text-body-sm text-on-surface">
+                  <div className="w-full flex items-center gap-2 bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
                     {ticket.assignedTo ? (
                       <>
-                        <div className="w-6 h-6 rounded-full border border-outline-variant/70 bg-surface-container-low text-on-surface flex items-center justify-center text-[10px] font-bold shrink-0 shadow-sm">
+                        <div className="w-5 h-5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center text-[9px] font-bold border border-blue-500/20">
                           {initials(ticket.assignedTo.fullName)}
                         </div>
                         {ticket.assignedTo.fullName}
                       </>
                     ) : (
-                      <span className="text-outline/65 italic">Non assigné</span>
+                      <span className="text-slate-500 italic">Non assigné</span>
                     )}
                   </div>
                 )}
               </div>
+
               {ticket.observers?.length > 0 && (
                 <div>
-                  <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Observateur(s)</label>
-                  <div className="w-full bg-surface-container-low/60 border border-outline-variant/60 rounded-xl py-2.5 px-3.5 font-body-sm text-body-sm text-on-surface-variant">
+                  <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                    Observateur(s)
+                  </label>
+                  <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
                     {ticket.observers.map((o) => o.fullName).join(', ')}
                   </div>
                 </div>
               )}
-              {ticket.glpiLocationName && (
-                <div>
-                  <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">
-                    <span className="material-symbols-outlined text-[14px] align-middle mr-1">location_on</span>
-                    Lieu
-                  </label>
-                  <div className="w-full bg-surface-container-low/60 border border-outline-variant/60 rounded-xl py-2.5 px-3.5 font-body-sm text-body-sm text-on-surface flex items-center gap-2">
-                    <span className="material-symbols-outlined text-[16px] text-primary">location_on</span>
-                    {ticket.glpiLocationName}
+
+              <div>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
+                  <MapPin className="w-3 h-3 text-primary" />
+                  Lieu
+                </label>
+                {canAssign ? (
+                  <SearchableSelect
+                    options={locations}
+                    value={ticket.glpiLocationId || ''}
+                    disabled={savingField === 'glpiLocationId'}
+                    onChange={(val) => {
+                      const selectedLoc = locations.find((l) => String(l.id) === String(val));
+                      updateField('glpiLocationId', val ? Number(val) : null);
+                      if (selectedLoc) updateField('glpiLocationName', selectedLoc.completename || selectedLoc.name);
+                    }}
+                    placeholder="Sélectionner un lieu..."
+                    searchPlaceholder="Rechercher un lieu GLPI..."
+                    labelKey="name"
+                    valueKey="id"
+                    subLabelKey="completename"
+                    icon={MapPin}
+                  />
+                ) : (
+                  <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                    <MapPin className="w-3.5 h-3.5 text-primary shrink-0" />
+                    {ticket.glpiLocationName || <span className="text-slate-500 italic font-normal">Non spécifié</span>}
                   </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                  Ticket GLPI ID
+                </label>
+                <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-bold font-mono text-slate-800 dark:text-slate-200">
+                  {ticket.glpiTicketId ? (
+                    <span className="text-blue-600 dark:text-blue-400 font-bold">#{ticket.glpiTicketId}</span>
+                  ) : (
+                    <span className="text-slate-500 italic font-sans font-medium">Non lié GLPI</span>
+                  )}
                 </div>
-              )}
-              {ticket.glpiTicketId && (
-                <div>
-                  <label className="block font-label-md text-label-md text-on-surface-variant mb-xs">Ticket GLPI</label>
-                  <div className="w-full bg-surface-container-low/60 border border-outline-variant/60 rounded-xl py-2.5 px-3.5 font-body-sm text-body-sm text-on-surface-variant">
-                    #{ticket.glpiTicketId}
-                  </div>
-                </div>
-              )}
+              </div>
             </div>
           </div>
 
-          <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow p-lg">
-            <h3 className="font-headline-sm text-headline-sm text-on-surface mb-md uppercase tracking-wider flex items-center gap-sm font-semibold">
-              <span className="material-symbols-outlined text-[18px] text-primary">account_circle</span>
+          {/* Requester Details Card */}
+          <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-3">
+            <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2 border-b border-outline-variant/20 pb-3">
+              <User className="w-4 h-4 text-primary" />
               Demandeur
             </h3>
-            <div className="flex items-start gap-md">
-              <div className="w-12 h-12 rounded-xl border border-outline-variant/60 bg-surface-container-low text-on-surface flex items-center justify-center font-headline-md text-headline-md font-bold shrink-0 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl border border-outline-variant/40 bg-surface-container text-on-surface flex items-center justify-center font-bold text-sm shrink-0 shadow-sm">
                 {initials(ticket.requester?.fullName)}
               </div>
-              <div>
-                <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">{ticket.requester?.fullName || '-'}</div>
-                <div className="font-body-sm text-body-sm text-on-surface-variant mb-2">{ticket.requester?.email}</div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold text-on-surface truncate">{ticket.requester?.fullName || '-'}</p>
+                <p className="text-[11px] text-on-surface-variant font-medium truncate">{ticket.requester?.email || '-'}</p>
               </div>
             </div>
           </div>
 
-          {canDelete && (
-            <div className="pt-lg border-t border-outline-variant border-dashed">
-              <button
-                onClick={() => setShowDeleteConfirm(true)}
-                className="w-full flex items-center justify-center gap-2 bg-transparent border border-error text-error hover:bg-error/5 transition-all duration-300 rounded-xl py-2.5 font-semibold text-body-sm"
-              >
-                <span className="material-symbols-outlined text-[18px]">delete</span>
-                Supprimer le ticket
-              </button>
+          {/* Audit Trail / Corrections History Card */}
+          {corrections.length > 0 && (
+            <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-4">
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2 border-b border-outline-variant/20 pb-3">
+                <History className="w-4 h-4 text-primary" />
+                Historique des Corrections ({corrections.length})
+              </h3>
+              <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+                {corrections.map((c) => (
+                  <div key={c.id} className="p-3 rounded-2xl border border-outline-variant/20 bg-surface-container-low/30 text-xs space-y-1">
+                    <div className="flex items-center justify-between text-on-surface-variant text-[10px]">
+                      <span className="font-bold text-on-surface">{c.correctedBy?.fullName || 'Hotline / Système'}</span>
+                      <span className="font-mono">{new Date(c.createdAt).toLocaleString('fr-FR')}</span>
+                    </div>
+                    <p className="text-xs text-on-surface font-medium">
+                      Modification de <span className="font-bold text-primary">{c.fieldName}</span> :
+                      <span className="line-through text-red-500 mx-1.5">{c.oldValue || 'vide'}</span> →
+                      <span className="font-bold text-emerald-600 dark:text-emerald-400 ml-1.5">{c.newValue || 'vide'}</span>
+                    </p>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>
       </div>
 
+      {/* Rejection Modal */}
+      {showRejectModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fadeIn">
+          <div className="bg-surface border border-outline-variant/40 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-red-600 dark:text-red-400">
+              <AlertTriangle className="w-6 h-6" />
+              <h3 className="text-base font-bold">Raison du rejet du ticket</h3>
+            </div>
+            <p className="text-xs text-on-surface-variant">
+              Veuillez spécifier la raison du rejet. Cette raison sera enregistrée pour alimenter l'apprentissage IA de la plateforme.
+            </p>
+            <textarea
+              className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-none"
+              rows={3}
+              placeholder="Ex: Doublon du ticket #42, demande non conforme..."
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+            />
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowRejectModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold border border-outline-variant/40 hover:bg-surface-container text-on-surface transition-all"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                disabled={!rejectReason.trim() || rejecting}
+                onClick={handleRejectConfirm}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 text-white shadow-md shadow-red-500/20 hover:brightness-110 disabled:opacity-50 transition-all flex items-center gap-1.5"
+              >
+                {rejecting ? 'Rejet en cours...' : 'Confirmer le rejet'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Delete Dialog */}
       <ConfirmDialog
         open={showDeleteConfirm}
         title="Supprimer le ticket"

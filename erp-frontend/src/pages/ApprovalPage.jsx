@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
+import { sanitizeHtml } from '../utils/sanitize';
 
 // Client axios séparé de api/client.js : cette page est publique (accessible via un lien
 // email sans login), elle ne doit jamais envoyer le token JWT de session ni être redirigée
@@ -122,10 +123,10 @@ export default function ApprovalPage() {
               <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Contenu (modifiable avant envoi)</span>
               <div
                 className="bg-surface border border-outline-variant/60 rounded-2xl p-md text-body-sm text-on-surface min-h-[260px] max-h-[420px] overflow-y-auto focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300 shadow-sm"
-                dangerouslySetInnerHTML={{ __html: toDisplayHtml(editedContent) }}
+                dangerouslySetInnerHTML={{ __html: sanitizeHtml(toDisplayHtml(editedContent)) }}
                 contentEditable
                 suppressContentEditableWarning
-                onBlur={(e) => setEditedContent(fromDisplayHtml(e.currentTarget.innerHTML))}
+                onBlur={(e) => setEditedContent(fromDisplayHtml(sanitizeHtml(e.currentTarget.innerHTML)))}
               />
             </div>
 

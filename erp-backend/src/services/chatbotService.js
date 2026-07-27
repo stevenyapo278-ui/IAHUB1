@@ -1,40 +1,42 @@
 const prisma = require('../prismaClient');
 const { getActiveProvider, callProvider } = require('./mailAnalyzer');
 const { emitTicketCreated } = require('../utils/socket');
+const analyticsTools = require('./analyticsTools');
 
-const SYSTEM_PROMPT = `Tu es l'assistant IA intelligent du helpdesk IT de Prosuma (IA Hub). Tu réponds en français, de manière claire, concise, précise et professionnelle.
+const SYSTEM_PROMPT = `Tu es l'assistant IA intelligent et analyste Business Intelligence du helpdesk IT de Prosuma (IA Hub). Tu réponds en français, de manière claire, concise, précise et professionnelle.
 
 Tu peux répondre aux questions sur :
-1. Les TICKETS du système ERP (/tickets) : recherche par sujet, numéro, statut (Nouveau, Ouvert, En attente, Résolu, Fermé), catégorie, priorités, demandeur, technicien ou lieu.
-2. Les procédures et informations de la Base de Connaissances IT.
-3. La création de nouveaux tickets d'incident ou de demande.
-4. L'état détaillé d'un ticket par son numéro (ex: #123).
-5. L'escalade immédiate d'un incident vers un technicien (création automatique de ticket P2).
-6. La génération d'un rapport ou d'une synthèse des tickets ouverts.
+1. Les TICKETS du système ERP et GLPI (/tickets) : recherche par sujet, numéro, statut, catégorie, priorités, demandeur, technicien ou lieu.
+2. Les STATISTIQUES & ANALYTICS : classement des magasins/lieux (ex: "quel magasin a eu le plus de soucis par rapport à asten"), récapitulatif par catégorie, temps de résolution et cause racine ("pourquoi ?").
+3. Les procédures et informations de la Base de Connaissances IT.
+4. La création de nouveaux tickets d'incident ou de demande.
+5. L'état détaillé d'un ticket par son numéro (ex: #123).
+6. L'escalade immédiate d'un incident vers un technicien.
 
 RÈGLES IMPORTANTES :
-- Quand des tickets pertinents de la base de données sont fournis dans le contexte, utilise-les pour répondre précisément à la question de l'utilisateur avec leur numéro #ID, leur statut et leurs détails.
+- Quand des résultats statistiques ou des tickets pertinents sont fournis dans le contexte, utilise-les pour structurer ta réponse.
+- Si un graphique Recharts est généré en bas de message, résume les points clés (le #1, les chiffres marquants) en Markdown.
+- Pour les questions de cause racine ("Pourquoi asten a eu des pannes ?"), résume les motifs fréquents d'après la base d'incidents.
 - Si tu trouves une solution dans la base de connaissances, cite la source.
-- Pour créer un ticket, demande la confirmation de l'utilisateur avec le titre et le problème.
-- Réponds toujours avec un format Markdown soigné (listes à puces, gras, italique).`;
+- Réponds toujours avec un format Markdown soigné (listes à puces, gras, tableaux).`;
 
 const INTENT_PROMPT = `Tu es un classificateur d'intentions. Analyse le message utilisateur et réponds UNIQUEMENT avec un JSON valide (pas de texte avant ou après).
 
 Intents possibles :
+- "analytics" : l'utilisateur demande des statistiques, comparaisons, classements de magasins/lieux, répartitions ou causes racines (ex: "quel magasin a eu le plus de tickets", "stats asten", "pourquoi ce magasin a des pannes")
 - "general" : question générale, salutation, conversation
 - "search_tickets" : l'utilisateur pose une question sur les tickets existants (ex: "quelles sont les pannes vpn", "tickets imprimantes", "tickets de Paul")
 - "create_ticket" : l'utilisateur veut créer/ouvrir un ticket, signale un problème
 - "check_ticket" : l'utilisateur veut connaître le statut d'un ticket spécifique
-- "report" : l'utilisateur veut un rapport/statistique des tickets
+- "report" : l'utilisateur veut un rapport/statistique global
 - "escalate" : l'utilisateur veut parler à un humain/technicien
 - "help" : l'utilisateur demande de l'aide sur les fonctionnalités
 
 Réponds avec :
 {"intent": "nom_intent", "params": {}}
 
-Si l'utilisateur mentionne un numéro de ticket (#123 ou "ticket 123"), ajoute "params": {"ticketId": 123}.
-Si l'utilisateur veut créer un ticket et mentionne déjà un titre ou un problème, ajoute "params": {"title": "...", "description": "..."}.
-Si l'utilisateur mentionne une priorité (urgent, critique, important, etc.), ajoute "params": {"priorityHint": "P1|P2|P3|P4"}.`;
+Si l'utilisateur mentionne un mot-clé spécifique (ex: "asten", "caisse", "vpn"), ajoute "params": {"keyword": "..."}.
+Si l'utilisateur pose une question "pourquoi", ajoute "params": {"isWhy": true}.`;
 
 // ── Recherche RAG (Base de connaissances) ─────────────────────────────
 
@@ -177,9 +179,10 @@ async function callIntentAI(message) {
 
 function detectIntentRegex(message) {
   const lower = message.toLowerCase();
+  if (lower.match(/\b(magasin|lieu|site|top|comparer|plus de probl[èe]mes?|statistiques?|stats?|analyse|pourquoi|cause)\b/)) return 'analytics';
   if (lower.match(/\b(cr[ée]er?|ouvrir?|nouveau ticket|nouvelle demande|signaler|probl[èe]me|incident)\b/)) return 'create_ticket';
   if (lower.match(/\b(statut|état|avancement|suiv[ie]|ticket\s*#?\s*\d+|#\d+|num[ée]ro)\b/)) return 'check_ticket';
-  if (lower.match(/\b(rapport|synth[èe]se|r[ée]sum[ée]|statistiques?|stats?|combien|nombre|total)\b/)) return 'report';
+  if (lower.match(/\b(rapport|synth[èe]se|r[ée]sum[ée]|combien|nombre|total)\b/)) return 'report';
   if (lower.match(/\b(escalade|technicien|humain|agent|support|parler|[aà] quelqu'un|transfer)\b/)) return 'escalate';
   if (lower.match(/\b(aide|commandes?|fonctionnalit[ée]s?|que sais|que peux|help|menu)\b/)) return 'help';
   return 'general';
@@ -313,8 +316,43 @@ async function handleMessage(message, conversationHistory = [], userId = null) {
   }
 
   let action = null;
+  let widget = null;
 
   switch (intent) {
+    case 'analytics': {
+      const lower = message.toLowerCase();
+      // Extraction d'un mot-clé s'il est mentionné (ex: "asten", "caisse", "vpn", "reseau")
+      const kwMatch = message.match(/\b(asten|caisse|vpn|réseau|reseau|imprimante|telephonie|logiciel)\b/i);
+      const kw = params?.keyword || (kwMatch ? kwMatch[1] : null);
+
+      if (lower.includes('pourquoi') || params?.isWhy) {
+        // Analyse de cause racine
+        const rootCause = await analyticsTools.analyzeRootCause({ locationName: kw, filterKeyword: kw });
+        contextParts.push(`**Données d'analyse de cause racine pour ${kw || 'l\'ensemble des tickets'} (${rootCause.sampleCount} incidents analysés) :**\n` +
+          rootCause.ticketsSample.map(t => `• Ticket #${t.id} [${t.category || 'Général'}]: ${t.subject}`).join('\n')
+        );
+      } else {
+        // Stats par Magasin / Lieu
+        const stats = await analyticsTools.getTopLocationsStats({ filterKeyword: kw, period: '30d', limit: 5 });
+        if (stats.rankings.length > 0) {
+          widget = {
+            type: 'chart',
+            chartType: 'bar',
+            title: `📊 Top Magasins / Lieux ${kw ? `(Filtre: ${kw})` : ''}`,
+            data: stats.chartData,
+            columns: ['name', 'Tickets', 'Urgents'],
+            rankings: stats.rankings,
+          };
+
+          let statsText = `**Analyse statistique par Lieu / Magasin :**\n`;
+          for (const r of stats.rankings) {
+            statsText += `• **Rang #${r.rank} : ${r.locationName}** — ${r.totalTickets} tickets (${r.percentage}% du total, ${r.urgentTickets} urgents)\n`;
+          }
+          contextParts.push(statsText);
+        }
+      }
+      break;
+    }
     case 'check_ticket': {
       const tid = params?.ticketId || message.match(/#?(\d+)/)?.[1];
       if (tid) {
@@ -355,7 +393,7 @@ async function handleMessage(message, conversationHistory = [], userId = null) {
       break;
     }
     case 'help': {
-      contextParts.push(`**Fonctionnalités disponibles :**\n• **Recherche de tickets** : "Pose des questions sur les pannes, les catégories, les demandeurs..."\n• **Créer un ticket** : "Je veux signaler un problème"\n• **Consulter un ticket** : "Quel est le statut du ticket #123"\n• **Rapport** : "Donne-moi un rapport des tickets ouverts"\n• **Escalade** : "Je veux parler à un technicien"\n• **Base de connaissances** : pose une question sur l'IT`);
+      contextParts.push(`**Fonctionnalités disponibles :**\n• **Analyses & Stats** : "Quel magasin a le plus de problèmes ?", "Stats du magasin Asten", "Pourquoi ce magasin a des pannes ?"\n• **Recherche de tickets** : "Pose des questions sur les pannes, les catégories..."\n• **Créer un ticket** : "Je veux signaler un problème"\n• **Consulter un ticket** : "Quel est le statut du ticket #123"\n• **Base de connaissances** : Pose une question sur une procédure IT`);
       break;
     }
   }
@@ -381,6 +419,7 @@ async function handleMessage(message, conversationHistory = [], userId = null) {
     reply,
     intent,
     action,
+    widget,
     sources: knowledgeChunks.map((c) => ({ title: c.title, id: c.documentId })),
   };
 }

@@ -226,10 +226,16 @@ export default function AdvancedTab() {
           <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Décisions & Actions Automatiques</h4>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-md">
+        <p className="text-xs text-on-surface-variant leading-relaxed max-w-2xl">
+          Ces options définissent ce que la plateforme peut faire sans intervention humaine. 
+          Activées, elles accélèrent le traitement mais réduisent le contrôle. 
+          Désactivées, les actions correspondantes passent par le <strong>Centre de Validation</strong>.
+        </p>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-md">
           <SettingRow
             title="Auto-envoi des emails IA"
-            description="Envoie directement les emails générés par l'IA (accusés de réception, etc.) sans passer par la validation humaine."
+            description="Expédie automatiquement les accusés de réception et réponses IA sans validation humaine."
             checked={settings.autoSendAiEmails}
             onChange={(v) => updateSetting('autoSendAiEmails', v)}
             disabled={saving}
@@ -237,15 +243,15 @@ export default function AdvancedTab() {
 
           <SettingRow
             title="Auto-approbation GLPI"
-            description="Approuve automatiquement la solution de l'ERP dès qu'un technicien ferme/résout le ticket dans GLPI."
+            description="Valide automatiquement la solution ERP quand le technicien résout le ticket dans GLPI — supprime la relecture manuelle."
             checked={settings.autoApproveGlpiSolutions}
             onChange={(v) => updateSetting('autoApproveGlpiSolutions', v)}
             disabled={saving}
           />
 
           <SettingRow
-            title="Création de tickets GLPI"
-            description="Lorsqu'un ticket est créé dans l'ERP, un ticket correspondant est automatiquement créé dans GLPI."
+            title="Création GLPI automatique"
+            description="Crée un ticket correspondant dans GLPI dès qu'un ticket est approuvé dans l'ERP."
             checked={settings.enableGlpiTicketCreation !== false}
             onChange={(v) => updateSetting('enableGlpiTicketCreation', v)}
             disabled={saving}
@@ -321,10 +327,15 @@ export default function AdvancedTab() {
           <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Fréquences de synchronisation</h4>
         </div>
 
+        <p className="text-xs text-on-surface-variant leading-relaxed max-w-2xl">
+          Définit à quel intervalle chaque service vérifie les nouvelles données. 
+          Une valeur basse réduit la latence mais augmente la charge serveur.
+        </p>
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-md">
           <IntervalRow
             title="Tickets GLPI"
-            description="Fréquence d'import des tickets, pièces jointes et approbations depuis GLPI."
+            description="Import des nouveaux tickets, suivis et approbations depuis GLPI vers l'ERP."
             value={settings.glpiTicketsSyncIntervalSeconds}
             onChange={(v) => updateSetting('glpiTicketsSyncIntervalSeconds', v)}
             disabled={saving}
@@ -333,8 +344,8 @@ export default function AdvancedTab() {
           />
 
           <IntervalRow
-            title="Mails entrants"
-            description="Fréquence de relevé des emails via les comptes Outlook/IMAP connectés."
+            title="Relevé des emails"
+            description="Vérification des nouveaux emails entrants sur les comptes Outlook/IMAP connectés."
             value={settings.emailSyncIntervalSeconds}
             onChange={(v) => updateSetting('emailSyncIntervalSeconds', v)}
             disabled={saving}
@@ -343,8 +354,8 @@ export default function AdvancedTab() {
           />
 
           <IntervalRow
-            title="Groupes & Catégories GLPI"
-            description="Fréquence de synchronisation de la structure organisationnelle GLPI."
+            title="Structure GLPI"
+            description="Synchronisation des groupes, catégories et utilisateurs depuis GLPI."
             value={settings.glpiTeamsCategoriesSyncIntervalMinutes}
             onChange={(v) => updateSetting('glpiTeamsCategoriesSyncIntervalMinutes', v)}
             disabled={saving}
@@ -354,7 +365,7 @@ export default function AdvancedTab() {
 
           <IntervalRow
             title="Modèles IA disponibles"
-            description="Fréquence de détection des modèles actifs chez les fournisseurs configurés."
+            description="Actualisation de la liste des modèles actifs chez les fournisseurs d'IA configurés."
             value={settings.aiModelsSyncIntervalHours}
             onChange={(v) => updateSetting('aiModelsSyncIntervalHours', v)}
             disabled={saving}
@@ -895,7 +906,7 @@ function TriageRulesSection({ saving, setSaving, setError }) {
               </label>
 
               <label className="flex flex-col gap-xs">
-                <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Champ cible</span>
+                <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Champ / Critère de Triage</span>
                 <select
                   value={matchField}
                   onChange={(e) => setMatchField(e.target.value)}
@@ -905,6 +916,9 @@ function TriageRulesSection({ saving, setSaving, setError }) {
                   <option value="subject">Sujet uniquement</option>
                   <option value="body">Corps uniquement</option>
                   <option value="from">Adresse expéditeur (De)</option>
+                  <option value="domain">Domaine client / VIP (ex: @direction.ci)</option>
+                  <option value="sentiment">🔥 Analyse de Sentiment IA (Frustré / Urgent)</option>
+                  <option value="time_window">🌙 Plage Horaire (Nuit / Off-Hours)</option>
                 </select>
               </label>
 

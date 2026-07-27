@@ -9,21 +9,22 @@ export default function ConfirmDialog({
   cancelLabel = 'Annuler',
   danger = false,
   loading = false,
+  error = null,
   onConfirm,
   onCancel,
 }) {
   return createPortal(
     <AnimatePresence>
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          {/* Backdrop avec flou léger */}
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+          {/* Backdrop avec flou SEVEN-T */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
             onClick={loading ? undefined : onCancel}
-            className="absolute inset-0 bg-black/60 backdrop-blur-[2px] cursor-pointer"
+            className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer"
           />
 
           {/* Fenêtre de dialogue animée */}
@@ -42,6 +43,13 @@ export default function ConfirmDialog({
                 {message}
               </p>
             </div>
+
+            {error && (
+              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-xs font-bold flex items-center gap-2">
+                <span className="material-symbols-outlined text-[16px] shrink-0">error</span>
+                <span className="flex-1">{error}</span>
+              </div>
+            )}
 
             <div className="flex justify-end gap-sm mt-1">
               <button

@@ -10,6 +10,12 @@ import {
   isSpeechSynthesisAvailable,
   VOICE_ALERT_LANGUAGES,
 } from '../../utils/voiceAlertPreference';
+import {
+  isBrowserNotifEnabled,
+  setBrowserNotifEnabled,
+  requestBrowserNotifPermission,
+} from '../../utils/browserNotification';
+import { sanitizeHtml } from '../../utils/sanitize';
 
 const inputClass =
   'bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300';
@@ -116,6 +122,7 @@ export default function AutomationTab() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [voiceAlerts, setVoiceAlerts] = useState(isVoiceAlertEnabled());
+  const [browserNotif, setBrowserNotif] = useState(isBrowserNotifEnabled());
   const [voiceLang, setVoiceLang] = useState(getVoiceAlertLang());
   const [ackMessageDraft, setAckMessageDraft] = useState('');
   const [signatureDraft, setSignatureDraft] = useState('');
@@ -401,7 +408,7 @@ export default function AutomationTab() {
               {/* Mail body styled strictly inside white container for realistic markup */}
               <div className="p-md bg-white text-gray-800 flex-1 overflow-auto font-body-sm leading-relaxed max-h-[310px] min-h-[250px]">
                 <div
-                  dangerouslySetInnerHTML={{ __html: buildAckPreviewHtml(ackMessageDraft, signatureDraft, settings.signatureLogoUrl, settings.signatureLogoHeight) }}
+                  dangerouslySetInnerHTML={{ __html: sanitizeHtml(buildAckPreviewHtml(ackMessageDraft, signatureDraft, settings.signatureLogoUrl, settings.signatureLogoHeight)) }}
                 />
               </div>
             </div>
@@ -439,57 +446,38 @@ export default function AutomationTab() {
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* SECTION 2 : AUTRES AUTOMATISATIONS & RELANCES */}
+      {/* SECTION 2 : INTELLIGENCE & TRIAGE */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-lg">
-        {/* Colonne gauche : Triage & Relance Brouillons */}
-        <div className="space-y-md">
-          <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
-            <span className="material-symbols-outlined text-primary text-2xl">neurology</span>
-            <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Apprentissage & Brouillons</h4>
-          </div>
-
-          <div className="space-y-md">
-            <SettingRow
-              title="Apprentissage Few-Shot historique"
-              description="Utilise les tickets résolus ou clos par les techniciens comme modèles de référence pour classer les nouveaux tickets (catégorie, priorité, équipe)."
-              checked={settings.enableFewShotTriage}
-              onChange={(v) => updateSetting('enableFewShotTriage', v)}
-              disabled={saving}
-            />
-
-            <SettingRow
-              title="Relance email des brouillons en attente"
-              description="Avertit par email si un brouillon reste en attente de validation plus longtemps que le délai ci-dessous."
-              checked={settings.draftReminderEnabled}
-              onChange={(v) => updateSetting('draftReminderEnabled', v)}
-              disabled={saving}
-            />
-
-            <IntervalRow
-              title="Délai de relance brouillon"
-              description="Temps d'attente avant de déclencher l'alerte."
-              value={settings.draftReminderDelayMinutes}
-              onChange={(v) => updateSetting('draftReminderDelayMinutes', v)}
-              disabled={saving || !settings.draftReminderEnabled}
-              max={1440}
-              unit="minutes"
-            />
-          </div>
+      <div className="space-y-md">
+        <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
+          <span className="material-symbols-outlined text-primary text-2xl">neurology</span>
+          <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Intelligence & Triage</h4>
         </div>
 
-        {/* Colonne droite : Relance Tickets en attente */}
+        <SettingRow
+            title="Apprentissage Few-Shot historique"
+            description="Utilise les tickets résolus ou clos par les techniciens comme modèles de référence pour classer les nouveaux tickets (catégorie, priorité, équipe)."
+            checked={settings.enableFewShotTriage}
+            onChange={(v) => updateSetting('enableFewShotTriage', v)}
+            disabled={saving}
+          />
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* SECTION 3 : RELANCES & CLÔTURE */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-lg">
         <div className="space-y-md">
           <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
             <span className="material-symbols-outlined text-primary text-2xl">schedule</span>
-            <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Relances Tickets Automatiques</h4>
+            <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Relances Tickets</h4>
           </div>
 
           {reminderConfig && (
             <div className="space-y-md">
               <SettingRow
                 title="Relance & Clôture automatique"
-                description="Relance les tickets en attente de réponse utilisateur, puis les clôture automatiquement s'ils restent sans réponse."
+                description="Crée des brouillons de relance (à valider dans le Centre de Validation) pour les tickets en attente de réponse utilisateur. Clôture automatiquement les tickets restés sans réponse."
                 checked={reminderConfig.isActive}
                 onChange={(v) => updateReminderConfig({ isActive: v })}
                 disabled={reminderSaving}
@@ -514,7 +502,7 @@ export default function AutomationTab() {
               />
               <IntervalRow
                 title="Avertissement avant clôture"
-                description="Préviens que le ticket sera clôturé automatiquement."
+                description="Préviens le demandeur que le ticket sera clôturé automatiquement."
                 value={reminderConfig.preCloseDays}
                 onChange={(v) => updateReminderConfig({ preCloseDays: v })}
                 disabled={reminderSaving || !reminderConfig.isActive}
@@ -523,7 +511,7 @@ export default function AutomationTab() {
               />
               <IntervalRow
                 title="Clôture automatique"
-                description="Délai avant clôture définitive du ticket."
+                description="Délai avant clôture définitive d'un ticket sans réponse."
                 value={reminderConfig.autoCloseDays}
                 onChange={(v) => updateReminderConfig({ autoCloseDays: v })}
                 disabled={reminderSaving || !reminderConfig.isActive}
@@ -533,19 +521,58 @@ export default function AutomationTab() {
             </div>
           )}
         </div>
+
+        {/* Bloc validation des brouillons : notification et lien */}
+        <div className="space-y-md">
+          <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
+            <span className="material-symbols-outlined text-primary text-2xl">rate_review</span>
+            <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Validation des Brouillons</h4>
+          </div>
+
+          <div className="space-y-md">
+            <SettingRow
+              title="Relance email des brouillons en attente"
+              description="Avertit les techniciens par email si un brouillon (réponse IA ou relance) reste en attente de validation plus longtemps que le délai ci-dessous."
+              checked={settings.draftReminderEnabled}
+              onChange={(v) => updateSetting('draftReminderEnabled', v)}
+              disabled={saving}
+            />
+
+            <IntervalRow
+              title="Délai de relance"
+              description="Temps d'attente avant de déclencher l'alerte."
+              value={settings.draftReminderDelayMinutes}
+              onChange={(v) => updateSetting('draftReminderDelayMinutes', v)}
+              disabled={saving || !settings.draftReminderEnabled}
+              max={1440}
+              unit="minutes"
+            />
+
+            <motion.div
+              variants={itemVariants}
+              className="bento-card p-md bg-surface-container-low/30 border border-dashed border-outline-variant/30 text-center"
+            >
+              <p className="text-xs text-on-surface-variant">
+                Les brouillons à valider sont accessibles depuis{' '}
+                <strong className="text-primary">Centre de Validation &gt; Réponses Email IA</strong> et{' '}
+                <strong className="text-amber-600 dark:text-amber-400">Relances Auto.</strong>
+              </p>
+            </motion.div>
+          </div>
+        </div>
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* SECTION 4 : RAPPORTS & NOTIFICATIONS */}
+      {/* SECTION 4 : NOTIFICATIONS */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       <div className="space-y-md">
         <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
-          <span className="material-symbols-outlined text-primary text-2xl">monitoring</span>
-          <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Rapports & Notifications locales</h4>
+          <span className="material-symbols-outlined text-primary text-2xl">notifications</span>
+          <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Notifications</h4>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-lg">
-          {/* Récapitulatif Quotidien */}
+          {/* Colonne gauche : Récapitulatif quotidien + Technicien assigné */}
           <div className="space-y-md">
             <SettingRow
               title="Récapitulatif quotidien"
@@ -669,19 +696,47 @@ export default function AutomationTab() {
                 )}
               </AnimatePresence>
             </motion.div>
+
+            <SettingRow
+              title="Email au technicien assigné"
+              description="Envoie un email de notification au technicien lorsqu'un ticket créé par email lui est automatiquement assigné par l'IA."
+              checked={settings.notifyTechnicianOnAssignment}
+              onChange={(v) => updateSetting('notifyTechnicianOnAssignment', v)}
+              disabled={saving}
+            />
           </div>
 
-          {/* Notification Email au Technicien Assigné */}
-          <SettingRow
-            title="Email au technicien assigné"
-            description="Envoie un email de notification au technicien lorsqu'un ticket créé par email lui est automatiquement assigné par l'IA."
-            checked={settings.notifyTechnicianOnAssignment}
-            onChange={(v) => updateSetting('notifyTechnicianOnAssignment', v)}
-            disabled={saving}
-          />
-
-          {/* Alertes Vocales & Sonores */}
+          {/* Colonne droite : Notifications navigateur + Alertes vocales */}
           <div className="space-y-md">
+            <SettingRow
+              title="Notifications navigateur"
+              description="Affiche une notification bureau lors des nouveaux tickets, assignations et mises à jour."
+              checked={browserNotif}
+              onChange={async (v) => {
+                if (v) {
+                  const perm = await requestBrowserNotifPermission();
+                  if (perm !== 'granted') {
+                    if (typeof window !== 'undefined' && Notification.permission === 'denied') {
+                      alert('Notifications bloquées par le navigateur. Réactivez-les dans les paramètres du site.');
+                      return;
+                    }
+                  }
+                }
+                setBrowserNotif(v);
+                setBrowserNotifEnabled(v);
+              }}
+            />
+            {browserNotif && typeof window !== 'undefined' && Notification.permission === 'denied' && (
+              <div className="bento-card p-md flex items-start gap-3" style={{ borderLeft: '3px solid #ef4444' }}>
+                <span className="material-symbols-outlined text-red-500 shrink-0" style={{ fontSize: '20px', fontVariationSettings: "'FILL' 1" }}>block</span>
+                <div>
+                  <p className="text-[13px] font-semibold text-on-surface">Notifications bloquées</p>
+                  <p className="text-[12px] text-on-surface-variant mt-0.5">
+                    Le navigateur refuse les notifications. Cliquez sur l'icône 🔒 dans la barre d'adresse et autorisez les notifications.
+                  </p>
+                </div>
+              </div>
+            )}
             <SettingRow
               title="Alerte vocale interactive"
               description="Une voix annonce dans ce navigateur l'arrivée de nouvelles actions requérant votre validation locale."

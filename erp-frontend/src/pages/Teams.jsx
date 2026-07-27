@@ -5,23 +5,23 @@ import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import ConfirmDialog from '../components/ConfirmDialog';
-
-const containerVariants = {
-  hidden: { opacity: 0 },
-  visible: { opacity: 1, transition: { staggerChildren: 0.05 } },
-};
-const itemVariants = {
-  hidden: { opacity: 0, y: 12 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: [0.16, 1, 0.3, 1] } },
-};
+import { useTheme } from '../context/ThemeContext';
+import { Users, ShieldCheck, Ticket, Plus, RefreshCw, ChevronRight, Trash2, X, AlertTriangle, Mail, Layers, CheckCircle2, User } from 'lucide-react';
+import SearchableMultiSelect from '../components/SearchableMultiSelect';
 
 export default function Teams() {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
   const { user } = useAuth();
   const canManageTeams = hasPermission(user, 'teams.manage');
+
   const [teams, setTeams] = useState([]);
-  const [form, setForm] = useState({ name: '', category: '', groupEmail: '' });
+  const [allUsers, setAllUsers] = useState([]);
+  const [form, setForm] = useState({ name: '', category: '', groupEmail: '', defaultObserverIds: [] });
   const [groupEmailDraft, setGroupEmailDraft] = useState('');
+  const [selectedObserverIds, setSelectedObserverIds] = useState([]);
   const [savingGroupEmail, setSavingGroupEmail] = useState(false);
+  const [savingObservers, setSavingObservers] = useState(false);
   const [error, setError] = useState('');
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState('');
@@ -45,6 +45,7 @@ export default function Teams() {
       const { data } = await api.get(`/teams/${teamId}`);
       setOpenTeamDetail(data);
       setGroupEmailDraft(data.groupEmail || '');
+      setSelectedObserverIds((data.defaultObservers || []).map((o) => o.id));
     } catch (err) {
       setError(err.response?.data?.error || "Erreur lors du chargement de l'équipe");
     } finally {
@@ -56,6 +57,9 @@ export default function Teams() {
     api.get('/teams')
       .then(({ data }) => setTeams(data))
       .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
+    api.get('/users')
+      .then(({ data }) => setAllUsers(Array.isArray(data) ? data : (data.users || [])))
+      .catch(() => {});
   }
   useEffect(load, []);
 
@@ -90,6 +94,26 @@ export default function Teams() {
     finally { setSavingGroupEmail(false); }
   }
 
+  async function saveDefaultObservers(teamId) {
+    setSavingObservers(true);
+    setError('');
+    try {
+      const { data } = await api.patch(`/teams/${teamId}`, { defaultObserverIds: selectedObserverIds });
+      setOpenTeamDetail((prev) => ({ ...prev, defaultObservers: data.defaultObservers }));
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur lors de la sauvegarde des observateurs');
+    } finally {
+      setSavingObservers(false);
+    }
+  }
+
+  function toggleObserverSelect(userId) {
+    setSelectedObserverIds((prev) =>
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+    );
+  }
+
   async function handleDelete() {
     if (!confirmDeleteId) return;
     setDeleting(true);
@@ -113,318 +137,331 @@ export default function Teams() {
   const maxTickets = Math.max(1, ...teams.map((t) => t._count.tickets));
 
   return (
-    <motion.div className="p-lg space-y-lg" variants={containerVariants} initial="hidden" animate="visible">
-      {/* ── En-tête ─────────────────────────────────────────────────────────── */}
-      <motion.header variants={itemVariants} className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-md">
-        <div>
-          <h2 className="font-display-lg text-display-lg text-on-background tracking-tight">Équipes</h2>
-          <p className="font-body-lg text-body-lg text-on-surface-variant">Configuration des groupes de support et niveaux d'escalade.</p>
+    <div className="flex flex-col min-h-screen">
+      {/* ── Top Bar Sticky ────────────────────────────────────────────────── */}
+      <div className="sticky top-0 z-20 shrink-0 border-b border-outline-variant/30 bg-surface-container-lowest/95 backdrop-blur-sm px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between gap-4 flex-wrap">
+        {/* Title */}
+        <div className="flex items-center gap-3">
+          <div className="p-1.5 bg-blue-500/10 rounded-lg">
+            <Users className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+          </div>
+          <div>
+            <h1 className="text-base font-bold text-on-surface">Équipes</h1>
+            <p className="text-[11px] text-on-surface-variant font-medium">
+              Configuration des groupes de support, compétences et niveaux d'escalade
+            </p>
+          </div>
         </div>
+
+        {/* Actions */}
         {canManageTeams && (
-          <div className="flex flex-wrap gap-2 items-center">
-            <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-              onClick={openCreateModal}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-white btn-gradient font-body-sm text-body-sm font-semibold transition-all shadow-md shadow-primary/20 hover:shadow-lg whitespace-nowrap cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-[18px]" aria-hidden="true">add</span>
-              Nouvelle équipe
-            </motion.button>
-            <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+          <div className="flex items-center gap-2 ml-auto">
+            <motion.button
+              whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
               onClick={handleSyncGlpi} disabled={syncing}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-outline-variant text-on-surface bg-surface-container-lowest font-body-sm text-body-sm hover:bg-surface-container-low transition-all shadow-sm disabled:opacity-50 whitespace-nowrap cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/40 text-on-surface-variant hover:text-on-surface hover:bg-surface-container text-xs font-semibold disabled:opacity-50 transition-all"
             >
-              <motion.span animate={syncing ? { rotate: 360 } : { rotate: 0 }}
-                transition={syncing ? { repeat: Infinity, duration: 1, ease: 'linear' } : {}}
-                className="material-symbols-outlined text-[18px]" aria-hidden="true"
-              >sync</motion.span>
-              {syncing ? 'Synchronisation...' : 'Sync GLPI'}
+              <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
+              <span>{syncing ? 'Syncing...' : 'Sync GLPI'}</span>
+            </motion.button>
+
+            <motion.button
+              whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+              onClick={openCreateModal}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-bold shadow-md shadow-blue-500/20"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Nouvelle équipe</span>
             </motion.button>
           </div>
         )}
-      </motion.header>
+      </div>
 
-      {/* ── Messages ────────────────────────────────────────────────────────── */}
+      {/* ── Bannières d'erreur ou d'information ───────────────────────────── */}
       <AnimatePresence>
         {error && (
-          <motion.div initial={{ opacity: 0, y: -8, height: 0 }} animate={{ opacity: 1, y: 0, height: 'auto' }} exit={{ opacity: 0, y: -8, height: 0 }}
-            className="border border-red-500/20 bg-red-500/5 text-red-500 p-md rounded-xl font-body-md"
-          >{error}</motion.div>
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+            <div className="px-4 sm:px-6 lg:px-8 py-2 bg-red-500/10 border-b border-red-500/20 text-red-600 dark:text-red-400 text-xs flex items-center gap-2 font-medium">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              {error}
+              <button onClick={() => setError('')} className="ml-auto p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"><X className="w-4 h-4" /></button>
+            </div>
+          </motion.div>
         )}
         {syncMessage && (
-          <motion.div initial={{ opacity: 0, y: -8, height: 0 }} animate={{ opacity: 1, y: 0, height: 'auto' }} exit={{ opacity: 0, y: -8, height: 0 }}
-            className="border border-primary/20 bg-primary/5 text-primary p-md rounded-xl font-body-md"
-          >{syncMessage}</motion.div>
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+            <div className="px-4 sm:px-6 lg:px-8 py-2 bg-emerald-500/10 border-b border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs flex items-center gap-2 font-medium">
+              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+              {syncMessage}
+              <button onClick={() => setSyncMessage('')} className="ml-auto p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"><X className="w-4 h-4" /></button>
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* STATISTIQUES */}
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-3 gap-gutter">
-        <StatCard label="Total équipes" value={teams.length} icon="hub" />
-        <StatCard label="Membres actifs" value={totalMembers} icon="badge" />
-        <StatCard label="Tickets totaux" value={totalTickets} icon="confirmation_number" />
-      </motion.div>
+      {/* ── Bento Stats Items ─────────────────────────────────────────────── */}
+      <div className="px-4 sm:px-6 lg:px-8 py-4 border-b border-outline-variant/15 bg-surface-container-low/20">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="p-4 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest flex items-center gap-4">
+            <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
+              <Users className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-on-surface leading-none">{teams.length}</p>
+              <p className="text-xs text-on-surface-variant font-medium uppercase tracking-wider mt-1">Total Équipes</p>
+            </div>
+          </div>
 
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* TABLEAU DES ÉQUIPES (PLEINE LARGEUR) */}
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      <motion.div variants={itemVariants} className="space-y-md w-full">
-        <h3 className="font-headline-md text-headline-md text-on-surface font-semibold">Équipes actives</h3>
-        <div className="rounded-2xl border border-outline-variant/60 bg-surface-container-lowest overflow-hidden card-shadow">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse min-w-[700px]">
-              <thead>
-                <tr className="bg-primary/10 border-b-2 border-primary/20">
-                  <TH>Nom</TH>
-                  <TH>Catégorie</TH>
-                  <TH>GLPI</TH>
-                  <TH className="text-center">Membres</TH>
-                  <TH className="text-right">Tickets</TH>
-                  {canManageTeams && <TH className="w-10"></TH>}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-outline-variant/30 text-sm">
-                <AnimatePresence mode="popLayout">
-                  {teams.map((t, idx) => (
-                    <Fragment key={t.id}>
-                      <motion.tr layout
-                        initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.25, delay: idx * 0.02 }}
-                        className="hover:bg-primary/[0.08] transition-colors duration-150 group cursor-pointer"
-                        onClick={() => toggleTeamDetail(t.id)}
+          <div className="p-4 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest flex items-center gap-4">
+            <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center shrink-0">
+              <ShieldCheck className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-on-surface leading-none">{totalMembers}</p>
+              <p className="text-xs text-on-surface-variant font-medium uppercase tracking-wider mt-1">Membres Actifs</p>
+            </div>
+          </div>
+
+          <div className="p-4 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest flex items-center gap-4">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
+              <Ticket className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-on-surface leading-none">{totalTickets}</p>
+              <p className="text-xs text-on-surface-variant font-medium uppercase tracking-wider mt-1">Tickets Traités</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Teams Table / List ────────────────────────────────────────────── */}
+      <div className="flex-1 px-4 sm:px-6 lg:px-8 py-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-bold text-on-surface">Équipes actives ({teams.length})</h2>
+        </div>
+
+        <div className="rounded-2xl border border-outline-variant/30 overflow-hidden bg-surface-container-lowest shadow-sm">
+          {/* Header */}
+          <div className="flex items-center gap-4 px-4 py-2.5 border-b border-outline-variant/20 bg-surface-container-low/40 text-[10px] font-black uppercase tracking-widest text-on-surface-variant">
+            <div className="w-8 shrink-0" />
+            <div className="flex-1 min-w-0">Équipe</div>
+            <div className="w-24 shrink-0 hidden sm:block text-center">Membres</div>
+            <div className="w-36 shrink-0 hidden md:block">Tickets assignés</div>
+            <div className="w-12 shrink-0 text-right" />
+          </div>
+
+          {/* Rows */}
+          <div className="divide-y divide-outline-variant/10">
+            {teams.map((t) => {
+              const isOpen = openTeamId === t.id;
+              const percent = Math.round((t._count.tickets / maxTickets) * 100);
+
+              return (
+                <Fragment key={t.id}>
+                  <div
+                    onClick={() => toggleTeamDetail(t.id)}
+                    className={`flex items-center gap-4 px-4 py-3.5 hover:bg-surface-container-low/50 transition-colors cursor-pointer group ${
+                      isOpen ? 'bg-blue-500/5' : ''
+                    }`}
+                  >
+                    {/* Expand icon */}
+                    <div className="w-8 shrink-0 flex justify-center">
+                      <ChevronRight className={`w-4 h-4 text-on-surface-variant transition-transform duration-200 ${isOpen ? 'rotate-90 text-blue-600 dark:text-blue-400' : ''}`} />
+                    </div>
+
+                    {/* Team info */}
+                    <div className="flex-1 min-w-0 flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 font-bold text-xs flex items-center justify-center shrink-0">
+                        {t.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-on-surface group-hover:text-primary transition-colors truncate">{t.name}</p>
+                        {t.category && (
+                          <span className="text-[10px] text-on-surface-variant font-medium uppercase tracking-wider">{t.category}</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Members count */}
+                    <div className="w-24 shrink-0 hidden sm:flex justify-center">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-surface-container border border-outline-variant/30 text-xs font-bold text-on-surface">
+                        <Users className="w-3 h-3 text-purple-600 dark:text-purple-400" />
+                        {t.members.length}
+                      </span>
+                    </div>
+
+                    {/* Tickets count progress */}
+                    <div className="w-36 shrink-0 hidden md:block">
+                      <div className="flex items-center justify-between text-[10px] font-bold text-on-surface-variant mb-1">
+                        <span>{t._count.tickets} ticket{t._count.tickets !== 1 ? 's' : ''}</span>
+                      </div>
+                      <div className="h-1.5 rounded-full overflow-hidden bg-surface-container border border-outline-variant/30">
+                        <div className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full" style={{ width: `${percent}%` }} />
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="w-12 shrink-0 flex justify-end">
+                      {canManageTeams && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); askDelete(t.id); }}
+                          className="p-1.5 rounded-lg text-on-surface-variant/40 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Open Detail view */}
+                  <AnimatePresence>
+                    {isOpen && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden bg-surface-container-low/30 border-t border-outline-variant/10 px-6 py-4 space-y-4"
                       >
-                        <td className="py-5 px-6">
-                          <button onClick={(e) => { e.stopPropagation(); toggleTeamDetail(t.id); }}
-                            className="font-headline-sm text-headline-sm text-on-surface font-semibold hover:text-primary transition-colors text-left focus-visible:outline-2 focus-visible:outline-primary rounded"
-                          >
-                            <span className="flex items-center gap-2">
-                              <motion.span
-                                animate={{ rotate: openTeamId === t.id ? 90 : 0 }}
-                                transition={{ duration: 0.2 }}
-                                className="material-symbols-outlined text-[16px] text-on-surface-variant" aria-hidden="true"
-                              >chevron_right</motion.span>
-                              {t.name}
-                            </span>
-                          </button>
-                        </td>
-                        <td className="py-5 px-6">
-                          {t.category ? (
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border border-primary/20 bg-primary/5 text-primary">
-                              {t.category}
-                            </span>
-                          ) : <span className="text-outline/60">-</span>}
-                        </td>
-                        <td className="py-5 px-6">
-                          {t.glpiGroupId ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border border-outline-variant bg-surface-container-low text-on-surface-variant font-medium text-[11px]">
-                              <span className="material-symbols-outlined text-[14px]" aria-hidden="true">sync</span>
-                              #{t.glpiGroupId}
-                            </span>
-                          ) : <span className="text-outline/60 italic text-[11px]">Non lié</span>}
-                        </td>
-                        <td className="py-5 px-6 text-center font-medium">{t.members.length}</td>
-                        <td className="py-5 px-6">
-                          <div className="flex items-center justify-end gap-2">
-                            <span className="font-medium">{t._count.tickets}</span>
-                            <div className="w-16 h-2 bg-surface-container/60 rounded-full overflow-hidden shrink-0">
-                              <motion.div
-                                animate={{ width: `${(t._count.tickets / maxTickets) * 100}%` }}
-                                transition={{ duration: 0.6, delay: idx * 0.05 }}
-                                className="progress-gradient h-full rounded-full"
+                        {loadingDetail ? (
+                          <div className="flex items-center justify-center py-4 gap-2 text-on-surface-variant text-xs">
+                            <RefreshCw className="w-4 h-4 animate-spin text-blue-600 dark:text-blue-400" />
+                            Chargement des détails...
+                          </div>
+                        ) : openTeamDetail ? (
+                          <div className="space-y-4">
+                            {/* Group Email */}
+                            <div className="flex items-center gap-3 bg-surface border border-outline-variant/30 rounded-xl p-3">
+                              <Mail className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block">Email de groupe</span>
+                                <input
+                                  type="email"
+                                  value={groupEmailDraft}
+                                  onChange={e => setGroupEmailDraft(e.target.value)}
+                                  placeholder="support-equipe@domaine.ci"
+                                  className="w-full bg-transparent text-xs text-on-surface font-mono focus:outline-none"
+                                />
+                              </div>
+                              {canManageTeams && (
+                                <button
+                                  onClick={() => saveGroupEmail(t.id)}
+                                  disabled={savingGroupEmail || groupEmailDraft === (openTeamDetail.groupEmail || '')}
+                                  className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-bold disabled:opacity-40 hover:bg-blue-700 transition-all shrink-0"
+                                >
+                                  {savingGroupEmail ? '...' : 'Enregistrer'}
+                                </button>
+                              )}
+                            </div>
+
+                             {/* Members list */}
+                            <div>
+                              <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-2">
+                                Membres de l'équipe ({openTeamDetail.members?.length || 0})
+                              </span>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                                {openTeamDetail.members?.map(m => (
+                                  <div key={m.id} className="flex items-center gap-2 p-2 rounded-xl bg-surface border border-outline-variant/30">
+                                    <div className="w-7 h-7 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 font-bold text-[10px] flex items-center justify-center shrink-0">
+                                      {m.fullName?.charAt(0)?.toUpperCase()}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-semibold text-on-surface truncate">{m.fullName}</p>
+                                      <p className="text-[10px] text-on-surface-variant font-mono truncate">{m.email}</p>
+                                    </div>
+                                  </div>
+                                ))}
+                                {openTeamDetail.members?.length === 0 && (
+                                  <p className="text-xs text-on-surface-variant italic col-span-full">Aucun membre dans cette équipe.</p>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Default Observers Configuration */}
+                            <div className="pt-2 border-t border-outline-variant/20 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider flex items-center gap-1.5">
+                                  <User className="w-3.5 h-3.5 text-purple-500" />
+                                  Observateurs par défaut pour cette équipe ({selectedObserverIds.length})
+                                </span>
+                                {canManageTeams && (
+                                  <button
+                                    onClick={() => saveDefaultObservers(t.id)}
+                                    disabled={savingObservers}
+                                    className="px-3 py-1 rounded-lg bg-purple-600 text-white text-[11px] font-bold disabled:opacity-40 hover:bg-purple-700 transition-all shrink-0"
+                                  >
+                                    {savingObservers ? '...' : 'Enregistrer les observateurs'}
+                                  </button>
+                                )}
+                              </div>
+                              <p className="text-[11px] text-on-surface-variant">
+                                Les observateurs configurés ici seront automatiquement ajoutés à tous les tickets associés à cette équipe (via l'IA ou formulaire).
+                              </p>
+                              <SearchableMultiSelect
+                                options={allUsers}
+                                selectedIds={selectedObserverIds}
+                                onChange={(nextIds) => setSelectedObserverIds(nextIds)}
+                                placeholder="Rechercher un observateur par nom ou email..."
+                                labelKey="fullName"
+                                valueKey="id"
+                                subLabelKey="email"
                               />
                             </div>
                           </div>
-                        </td>
-                        {canManageTeams && (
-                          <td className="py-5 px-6">
-                            <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-                              onClick={(e) => { e.stopPropagation(); askDelete(t.id); }}
-                              className="text-on-surface-variant/50 hover:text-error transition-all opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                            >
-                              <span className="material-symbols-outlined text-[18px]" aria-hidden="true">delete</span>
-                            </motion.button>
-                          </td>
-                        )}
-                      </motion.tr>
-                      {/* ── Ligne extensible ─────────────────────────────────── */}
-                      <AnimatePresence>
-                        {openTeamId === t.id && (
-                          <motion.tr key={`${t.id}-detail`}
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: 'auto' }}
-                            exit={{ opacity: 0, height: 0 }}
-                            transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-                            className="overflow-hidden"
-                          >
-                            <td colSpan={canManageTeams ? 6 : 5} className="p-0">
-                              <div className="bg-surface-container-low/40 border-t border-outline-variant/40 px-md py-md">
-                                {loadingDetail ? (
-                                  <div className="flex items-center gap-2 text-on-surface-variant font-body-sm text-body-sm">
-                                    <div className="w-4 h-4 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
-                                    Chargement...
-                                  </div>
-                                ) : openTeamDetail && (
-                                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1 }}
-                                    className="flex flex-col gap-3"
-                                  >
-                                    {canManageTeams && (
-                                      <div className="flex items-center gap-2 pb-3 border-b border-outline-variant/50 flex-wrap">
-                                        <span className="font-label-md text-label-md text-on-surface-variant uppercase shrink-0">Email de groupe</span>
-                                        <input type="email"
-                                          className="flex-1 min-w-[200px] h-10 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-sm text-body-sm text-on-surface"
-                                          placeholder="ex: reseau@entreprise.com"
-                                          value={groupEmailDraft} onChange={(e) => setGroupEmailDraft(e.target.value)}
-                                          disabled={savingGroupEmail}
-                                        />
-                                        <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-                                          onClick={() => saveGroupEmail(t.id)}
-                                          disabled={savingGroupEmail || groupEmailDraft === (openTeamDetail.groupEmail || '')}
-                                          className="px-4 py-2.5 rounded-xl border border-outline-variant text-on-surface-variant hover:bg-surface-container-high transition-all disabled:opacity-50 font-medium shrink-0"
-                                        >{savingGroupEmail ? '...' : 'Enregistrer'}</motion.button>
-                                      </div>
-                                    )}
-                                    <span className="font-label-md text-label-md text-on-surface-variant uppercase">Charge active par technicien</span>
-                                    {openTeamDetail.members.length === 0 ? (
-                                      <p className="text-on-surface-variant font-body-sm text-body-sm italic">Aucun membre dans cette équipe.</p>
-                                    ) : (
-                                      <div className="flex flex-col divide-y divide-outline-variant/40">
-                                        {openTeamDetail.members.map((m) => (
-                                          <div key={m.id} className="py-2 flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                              <span className="font-body-md text-body-md text-on-surface font-semibold">{m.fullName}</span>
-                                              <span className="text-[11px] text-on-surface-variant border border-outline-variant/50 px-2 py-0.5 rounded-full bg-surface-container-low font-medium">{m.role}</span>
-                                            </div>
-                                            <span className="font-mono-sm text-mono-sm text-on-surface-variant flex items-center gap-1.5">
-                                              <span className={`w-1.5 h-1.5 rounded-full ${m.activeTicketCount > 0 ? 'bg-primary animate-pulse-soft' : 'bg-outline/30'}`} />
-                                              {m.activeTicketCount} actif(s)
-                                            </span>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </motion.div>
-                                )}
-                              </div>
-                            </td>
-                          </motion.tr>
-                        )}
-                      </AnimatePresence>
-                    </Fragment>
-                  ))}
-                </AnimatePresence>
-                {teams.length === 0 && (
-                  <motion.tr initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-                    <td colSpan={6} className="py-12 px-md text-center">
-                      <div className="flex flex-col items-center gap-2 text-on-surface-variant">
-                        <span className="material-symbols-outlined text-[40px] text-outline/40" aria-hidden="true">groups</span>
-                        <p className="font-body-md text-body-md italic">Aucune équipe.</p>
-                      </div>
-                    </td>
-                  </motion.tr>
-                )}
-              </tbody>
-            </table>
+                        ) : null}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </Fragment>
+              );
+            })}
           </div>
         </div>
-      </motion.div>
+      </div>
 
-      {/* ── Confirm Delete Dialog ────────────────────────────────────────── */}
-      <ConfirmDialog open={!!confirmDeleteId} title="Supprimer l'équipe"
-        message="Supprimer définitivement cette équipe ? Cette action est irréversible."
-        confirmLabel="Supprimer" danger loading={deleting} onConfirm={handleDelete} onCancel={() => setConfirmDeleteId(null)} />
-
-      {/* ── Create Team Modal ───────────────────────────────────────────── */}
-      {canManageTeams && createPortal(
+      {/* ── Modal de Création d'équipe ───────────────────────────────────── */}
+      {createPortal(
         <AnimatePresence>
           {showCreateModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-              {/* Backdrop */}
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.2 }}
-                onClick={() => setShowCreateModal(false)}
-                className="absolute inset-0 bg-black/60 backdrop-blur-[2px] cursor-pointer"
-              />
-
-              {/* Dialog Window */}
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: 16 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 16 }}
-                transition={{ type: 'spring', duration: 0.35, bounce: 0.15 }}
-                className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl max-w-md w-full p-lg card-shadow flex flex-col gap-md"
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowCreateModal(false)} className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer" />
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} transition={{ type: 'spring', duration: 0.35, bounce: 0.12 }}
+                className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden"
               >
-                {/* Header */}
-                <div className="flex justify-between items-start pb-2 border-b border-outline-variant/30">
-                  <h3 className="font-headline-md text-headline-md text-on-background font-bold flex items-center gap-2">
-                    <span className="material-symbols-outlined text-primary text-[22px]" aria-hidden="true">add_circle</span>
-                    Nouvelle équipe
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => setShowCreateModal(false)}
-                    className="text-on-surface-variant/70 hover:text-on-surface hover:bg-surface-container-low p-1.5 rounded-lg transition-all cursor-pointer"
-                  >
-                    <span className="material-symbols-outlined text-[20px]" aria-hidden="true">close</span>
-                  </button>
+                <div className="flex items-center gap-3 px-5 py-4 border-b border-outline-variant/30">
+                  <div className="p-1.5 rounded-lg bg-blue-500/10"><Users className="w-4 h-4 text-blue-600 dark:text-blue-400" /></div>
+                  <h3 className="text-sm font-bold text-on-surface">Créer une nouvelle équipe</h3>
+                  <motion.button onClick={() => setShowCreateModal(false)} whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }} className="ml-auto p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"><X className="w-4 h-4" /></motion.button>
                 </div>
-
-                {/* Error Box */}
-                {modalError && (
-                  <div className="border border-red-500/20 bg-red-500/5 text-red-500 p-md rounded-xl font-body-sm text-body-sm">
-                    {modalError}
-                  </div>
-                )}
-
-                {/* Form */}
-                <form onSubmit={handleCreate} className="space-y-4">
-                  <Field label="Nom de l'équipe">
-                    <input
-                      className="w-full h-10 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-sm text-body-sm text-on-surface"
-                      placeholder="ex: Réseau L1"
-                      value={form.name}
-                      onChange={(e) => setForm({ ...form, name: e.target.value })}
-                      required
-                      autoFocus
+                <form onSubmit={handleCreate} className="p-5 space-y-4">
+                  {modalError && (
+                    <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-xs font-medium">
+                      {modalError}
+                    </div>
+                  )}
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Nom de l'équipe *</span>
+                    <input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
+                      placeholder="ex: Support Réseau Niveau 2"
+                      className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
                     />
-                  </Field>
-                  <Field label="Catégorie">
-                    <input
-                      className="w-full h-10 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-sm text-body-sm text-on-surface"
-                      placeholder="ex: Infrastructure"
-                      value={form.category}
-                      onChange={(e) => setForm({ ...form, category: e.target.value })}
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Catégorie</span>
+                    <input value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}
+                      placeholder="ex: Réseau, Infrastructure"
+                      className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
                     />
-                  </Field>
-                  <Field label="Email de groupe">
-                    <input
-                      type="email"
-                      className="w-full h-10 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-sm text-body-sm text-on-surface"
-                      placeholder="ex: reseau@entreprise.com"
-                      value={form.groupEmail}
-                      onChange={(e) => setForm({ ...form, groupEmail: e.target.value })}
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Email de groupe</span>
+                    <input type="email" value={form.groupEmail} onChange={e => setForm({ ...form, groupEmail: e.target.value })}
+                      placeholder="equipe-reseau@domaine.ci"
+                      className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
                     />
-                    <p className="font-body-sm text-body-sm text-on-surface-variant mt-1 italic">Reçoit le récapitulatif quotidien.</p>
-                  </Field>
-
-                  {/* Actions */}
-                  <div className="pt-4 border-t border-outline-variant/30 flex justify-end gap-sm">
-                    <button
-                      type="button"
-                      onClick={() => setShowCreateModal(false)}
-                      className="px-4 py-2.5 rounded-xl border border-outline-variant bg-surface text-on-surface font-body-sm text-body-sm hover:bg-surface-container-low transition-colors duration-300 font-medium cursor-pointer"
-                    >
-                      Annuler
-                    </button>
-                    <button
-                      type="submit"
-                      className="px-5 py-2.5 rounded-xl text-white font-body-sm text-body-sm font-semibold shadow-md btn-gradient shadow-primary/20 hover:shadow-lg transition-all cursor-pointer"
-                    >
-                      Créer l'équipe
-                    </button>
+                  </label>
+                  <div className="flex justify-end gap-2 pt-3 border-t border-outline-variant/30">
+                    <button type="button" onClick={() => setShowCreateModal(false)} className="px-4 py-2 rounded-xl border border-outline-variant/40 text-on-surface text-xs font-semibold hover:bg-surface-container">Annuler</button>
+                    <button type="submit" className="px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-bold shadow-md shadow-blue-500/20">Créer l'équipe</button>
                   </div>
                 </form>
               </motion.div>
@@ -433,42 +470,10 @@ export default function Teams() {
         </AnimatePresence>,
         document.body
       )}
-    </motion.div>
-  );
-}
 
-/* ── Sous-composants ────────────────────────────────────────────────────────── */
-
-function TH({ children, className }) {
-  return (
-    <th className={`py-3 px-6 text-[10px] font-black uppercase tracking-widest text-on-surface-variant whitespace-nowrap ${className || ''}`}>
-      {children}
-    </th>
-  );
-}
-
-function Field({ label, children }) {
-  return (
-    <div>
-      <label className="block font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">{label}</label>
-      {children}
+      <ConfirmDialog open={!!confirmDeleteId} title="Supprimer l'équipe"
+        message="Supprimer définitivement cette équipe ? Cette action est irréversible."
+        confirmLabel="Supprimer" danger loading={deleting} onConfirm={handleDelete} onCancel={() => setConfirmDeleteId(null)} />
     </div>
-  );
-}
-
-function StatCard({ label, value, icon }) {
-  return (
-    <motion.div variants={itemVariants}
-      className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl card-shadow flex flex-col p-lg justify-between hover-interactive"
-      whileHover={{ y: -2, transition: { duration: 0.2 } }}
-    >
-      <div className="flex justify-between items-start mb-md">
-        <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-widest">{label}</p>
-        <div className="w-10 h-10 rounded-xl bg-primary/5 text-primary border border-primary/10 flex items-center justify-center">
-          <span className="material-symbols-outlined text-sm">{icon}</span>
-        </div>
-      </div>
-      <h3 className="font-display-lg text-display-lg text-on-background font-bold">{value}</h3>
-    </motion.div>
   );
 }

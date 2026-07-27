@@ -4,6 +4,7 @@ const prisma = require('../prismaClient');
 const { authenticate, authorizeAdmin } = require('../middleware/auth');
 const { requireSuperAdmin } = require('../middleware/permissions');
 const { PERMISSION_KEYS } = require('../config/permissions');
+const { auditLog } = require('../services/auditLogService');
 
 const router = express.Router();
 router.use(authenticate);
@@ -53,6 +54,7 @@ router.post('/', requireSuperAdmin, [body('name').notEmpty()], async (req, res) 
     data: { name, description: description || null, permissions: permissions || [] },
   });
   return res.status(201).json(group);
+  auditLog('PERMISSION_GROUP_CREATED', { actor: req.user, targetType: 'PermissionGroup', targetId: group.id, targetLabel: group.name }).catch(() => {});
 });
 
 router.patch('/:id', requireSuperAdmin, async (req, res) => {
@@ -71,6 +73,7 @@ router.patch('/:id', requireSuperAdmin, async (req, res) => {
   try {
     const group = await prisma.permissionGroup.update({ where: { id: Number(req.params.id) }, data });
     return res.json(group);
+    auditLog('PERMISSION_GROUP_UPDATED', { actor: req.user, targetType: 'PermissionGroup', targetId: group.id, targetLabel: group.name, metadata: { changedFields: Object.keys(data) } }).catch(() => {});
   } catch (err) {
     return res.status(404).json({ error: 'Groupe introuvable' });
   }
@@ -78,7 +81,9 @@ router.patch('/:id', requireSuperAdmin, async (req, res) => {
 
 router.delete('/:id', requireSuperAdmin, async (req, res) => {
   try {
+    const group = await prisma.permissionGroup.findUnique({ where: { id: Number(req.params.id) }, select: { id: true, name: true } });
     await prisma.permissionGroup.delete({ where: { id: Number(req.params.id) } });
+    auditLog('PERMISSION_GROUP_DELETED', { actor: req.user, targetType: 'PermissionGroup', targetId: group.id, targetLabel: group.name }).catch(() => {});
     return res.status(204).send();
   } catch (err) {
     return res.status(404).json({ error: 'Groupe introuvable' });
@@ -100,6 +105,7 @@ router.post('/:id/assign', [body('userIds').isArray({ min: 1 })], async (req, re
       include: { members: { select: { id: true, fullName: true, email: true } } },
     });
     return res.json(group);
+    auditLog('PERMISSION_GROUP_ASSIGNED', { actor: req.user, targetType: 'PermissionGroup', targetId: group.id, targetLabel: group.name, metadata: { userIds } }).catch(() => {});
   } catch (err) {
     return res.status(404).json({ error: 'Groupe introuvable' });
   }

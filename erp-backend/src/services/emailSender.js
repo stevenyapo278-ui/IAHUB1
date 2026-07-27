@@ -1,8 +1,10 @@
 const fs = require('fs');
 const path = require('path');
+const nodemailer = require('nodemailer');
 const prisma = require('../prismaClient');
 const { graphFetch } = require('../utils/graphClient');
 const { getSystemSettings, resolveFrontendUrl } = require('./systemSettings');
+const { logEvent } = require('./ticketEvent');
 
 const LOGO_CONTENT_ID = 'logo-signature';
 
@@ -38,8 +40,25 @@ function getLogoAttachmentIfReferenced(bodyHtml, signatureLogoUrl) {
 // si fourni, on répond via /createReply au lieu de créer un message de zéro — sans ça, Outlook
 // affiche la réponse comme un email totalement séparé du fil de conversation de l'utilisateur,
 // au lieu de s'enchaîner avec "RE:" au même endroit que les échanges précédents.
+async function sendEmailViaSmtp({ to, cc, subject, bodyHtml, account }) {
+  const transporter = nodemailer.createTransport({
+    host: account.smtpHost,
+    port: account.smtpPort || 587,
+    secure: account.useTls === false ? false : account.smtpPort === 465,
+    auth: { user: account.username, pass: account.password },
+  });
+  const mailOptions = {
+    from: account.emailAddress,
+    to: Array.isArray(to) ? to.join(', ') : to,
+    cc: cc && cc.length > 0 ? cc.join(', ') : undefined,
+    subject,
+    html: bodyHtml,
+  };
+  return transporter.sendMail(mailOptions);
+}
+
 async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo = null, conversationId = null, inReplyToGraphMessageId = null, saveAsMessage = true }) {
-  // Priorité au compte par défaut, sinon on prend n'importe quel compte Outlook actif connecté
+  // Priorité au compte par défaut Outlook, sinon Outlook actif, sinon SMTP
   let account = await prisma.emailAccount.findFirst({
     where: { provider: 'OUTLOOK', isActive: true, isDefault: true, refreshToken: { not: null } },
   });
@@ -48,7 +67,43 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
       where: { provider: 'OUTLOOK', isActive: true, refreshToken: { not: null } },
     });
   }
-  if (!account) throw new Error('Aucun compte Outlook configuré et connecté');
+  const isOutlook = !!account;
+
+  if (!account) {
+    account = await prisma.emailAccount.findFirst({
+      where: { provider: 'IMAP_SMTP', isActive: true, isDefault: true, smtpHost: { not: null } },
+    });
+  }
+  if (!account) {
+    account = await prisma.emailAccount.findFirst({
+      where: { provider: 'IMAP_SMTP', isActive: true, smtpHost: { not: null } },
+    });
+  }
+
+  if (!account) throw new Error('Aucun compte email configuré pour l\'envoi (Outlook/M365 ou SMTP)');
+
+  // Route SMTP
+  if (!isOutlook) {
+    await sendEmailViaSmtp({ to, cc, subject, bodyHtml, account });
+    if (saveAsMessage && ticketId) {
+      const sender = account.emailAddress || account.username;
+      await prisma.ticketMessage.create({
+        data: {
+          ticketId,
+          direction: 'OUTBOUND',
+          sender,
+          recipients: Array.isArray(to) ? to : [to],
+          ccRecipients: cc || [],
+          subject,
+          body: bodyHtml.replace(/<[^>]+>/g, ' '),
+          bodyHtml,
+          timestamp: new Date(),
+        },
+      });
+      await logEvent(ticketId, 'EMAIL_SENT', 'SYSTEM', { to, cc, subject, method: 'SMTP' });
+    }
+    return;
+  }
 
   const settings = await getSystemSettings();
   const logoAttachment = getLogoAttachmentIfReferenced(bodyHtml, settings.signatureLogoUrl);
@@ -58,8 +113,6 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
     : [{ emailAddress: { address: to } }];
   const ccRecipientsPayload = cc && cc.length > 0 ? cc.map((addr) => ({ emailAddress: { address: addr } })) : [];
 
-  // Les IDs commençant par "SIM-" sont des IDs de messages simulés (endpoint /inbox/simulate) qui
-  // n'existent pas dans Outlook — on ne peut pas faire de createReply dessus. On crée un nouveau message.
   const isSimulatedId = typeof inReplyToGraphMessageId === 'string' && inReplyToGraphMessageId.startsWith('SIM-');
 
   let draft;
@@ -83,8 +136,6 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
       ...(ccRecipientsPayload.length > 0 ? { ccRecipients: ccRecipientsPayload } : {}),
       ...(logoAttachment ? { attachments: [logoAttachment] } : {}),
     };
-    // On crée le message comme brouillon puis on l'envoie (au lieu de /sendMail) pour récupérer son id
-    // et son internetMessageId — nécessaires pour reconnaître la réponse du destinataire (In-Reply-To) plus tard.
     draft = await graphFetch(account, '/me/messages', { method: 'POST', body: JSON.stringify(message) });
   }
   await graphFetch(account, `/me/messages/${draft.id}/send`, { method: 'POST' });
@@ -108,8 +159,7 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
       },
     });
 
-    const { logEvent } = require('./ticketEvent');
-    await logEvent(ticketId, 'EMAIL_SENT', 'SYSTEM', { to, cc, subject });
+    await logEvent(ticketId, 'EMAIL_SENT', 'SYSTEM', { to, cc, subject, method: 'OUTLOOK' });
   }
 
   return draft;
@@ -176,7 +226,6 @@ ${signature}`
 <p>Répondez simplement à cet email.</p>
 ${signature}`;
 
-  const { logEvent } = require('./ticketEvent');
   await logEvent(ticketId, 'REMINDER_SENT', 'SYSTEM', { reminderNumber, isPreClose });
 
   return sendEmail({ ticketId, to: toEmail, subject: emailSubject, bodyHtml, saveAsMessage: true });
@@ -314,6 +363,39 @@ async function sendTemporaryPasswordEmail({ recipientEmail, recipientName, tempo
   return sendEmail({ to: recipientEmail, subject, bodyHtml, saveAsMessage: false });
 }
 
+// Envoie une notification / relance aux membres de la Hotline pour un ticket en attente d'approbation (PENDING)
+async function sendHotlineApprovalReminderEmail({ recipientEmail, recipientName, ticketId, ticketTitle, priority, category, requesterName, reminderCount, minutesWaiting }) {
+  const frontendUrl = resolveFrontendUrl(await getSystemSettings());
+  const ticketLink = `${frontendUrl}/tickets/${ticketId}`;
+  const subject = reminderCount > 0
+    ? `[Relance #${reminderCount}] Ticket #${ticketId} en attente d'approbation Hotline depuis ${minutesWaiting} min`
+    : `[Validation Hotline] Nouveau ticket #${ticketId} en attente d'approbation`;
+  const signature = await getEmailSignature();
+
+  const priorityLabel = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' }[priority] || priority;
+  const priorityColor = { P1: '#dc2626', P2: '#d97706', P3: '#2563eb', P4: '#16a34a' }[priority] || '#666';
+
+  const bodyHtml = `
+<p>Bonjour ${recipientName || 'l\'équipe Hotline'},</p>
+<p>Un ticket est actuellement <strong>en attente d'approbation Hotline</strong> avant d'être transmis à GLPI (en attente depuis ${minutesWaiting} minute${minutesWaiting > 1 ? 's' : ''}).</p>
+<table style="border-collapse:collapse;margin:16px 0">
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Identifiant ERP</td><td><strong>#${ticketId}</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Sujet</td><td>${ticketTitle}</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Demandeur</td><td>${requesterName || 'Non spécifié'}</td></tr>
+  ${category ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Catégorie</td><td>${category}</td></tr>` : ''}
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Priorité</td><td style="color:${priorityColor};font-weight:600">${priorityLabel}</td></tr>
+  ${reminderCount > 0 ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Relance n°</td><td><strong>${reminderCount}</strong></td></tr>` : ''}
+</table>
+<p style="margin:20px 0">
+  <a href="${ticketLink}" style="background:#2563eb;color:#fff;padding:10px 20px;text-decoration:none;display:inline-block;border-radius:8px;font-weight:bold">Examiner et Approuver le ticket</a>
+</p>
+<p>Vous pouvez corriger les champs (catégorie, priorité, technicien, etc.) avant de cliquer sur "Approuver".</p>
+${signature}
+`.trim();
+
+  return sendEmail({ to: recipientEmail, subject, bodyHtml, saveAsMessage: false });
+}
+
 module.exports = {
   sendEmail,
   sendAcknowledgement,
@@ -324,6 +406,7 @@ module.exports = {
   sendPasswordResetLinkEmail,
   sendTemporaryPasswordEmail,
   sendAssignmentNotificationEmail,
+  sendHotlineApprovalReminderEmail,
   buildAcknowledgementHtml,
   buildKnownIncidentNotificationHtml,
   getEmailSignature,

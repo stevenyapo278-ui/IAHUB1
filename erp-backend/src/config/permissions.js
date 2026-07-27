@@ -1,4 +1,5 @@
 const PERMISSION_KEYS = [
+  'tickets.view',
   'tickets.delete',
   'tickets.bulkDelete',
   'tickets.assign',
@@ -14,6 +15,8 @@ const PERMISSION_KEYS = [
   'prompts.manage',
   'emaildrafts.manage',
   'automation.manage',
+  'locations.manage',
+  'aiweeklyreports.manage',
 ];
 
 // Libellés affichés sur l'écran Groupes de droits — tenus à jour avec PERMISSION_KEYS.
@@ -21,6 +24,7 @@ const PERMISSION_KEYS = [
 // restent protégés par authorizeAdmin, donc par le rôle, non délégable) — elle ne pilote que
 // l'affichage des liens "Utilisateurs"/"Groupes de droits" côté frontend (cosmétique).
 const PERMISSION_LABELS = {
+  'tickets.view': 'Consulter les documents attachés aux tickets (GLPI)',
   'tickets.delete': 'Supprimer un ticket',
   'tickets.bulkDelete': 'Supprimer des tickets en masse',
   'tickets.assign': 'Assigner un ticket',
@@ -36,6 +40,8 @@ const PERMISSION_LABELS = {
   'prompts.manage': "Modifier les prompts IA",
   'emaildrafts.manage': 'Approuver / rejeter les réponses email IA',
   'automation.manage': "Gérer l'automatisation (auto-envoi, auto-approbation, synchro GLPI)",
+  'locations.manage': 'Gérer les lieux (synchronisation GLPI, création)',
+  'aiweeklyreports.manage': "Valider les rapports hebdo & patterns d'apprentissage IA (Hotline)",
 };
 
 // Rôles bénéficiant du bypass total des vérifications de permission (requirePermission/authorizeAdmin).

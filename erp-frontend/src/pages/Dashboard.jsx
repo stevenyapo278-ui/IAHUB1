@@ -4,21 +4,20 @@ import { motion } from 'framer-motion';
 import {
   AreaChart,
   Area,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
   ResponsiveContainer,
   PieChart,
   Pie,
   Cell,
   LineChart,
   Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
 } from 'recharts';
 import api from '../api/client';
-import ConfirmDialog from '../components/ConfirmDialog';
+import { useTheme } from '../context/ThemeContext';
+import { LayoutDashboard, Ticket, CheckCircle2, AlertTriangle, TrendingUp, Download, RefreshCw, Sparkles, ChevronRight, Zap, Bot, Layers, ArrowUpRight } from 'lucide-react';
 
 /* ── Constantes ─────────────────────────────────────────────────────────────── */
 const STATUS_LABELS = {
@@ -43,77 +42,14 @@ const PERIODS = ['7 Jours', '1 Mois', '3 Mois', '6 Mois'];
 function EfferdTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   return (
-    <div
-      className="px-3 py-2 rounded-lg shadow-xl text-sm"
-      style={{
-        backgroundColor: 'var(--color-surface-container-lowest)',
-        border: '1px solid var(--color-outline-variant)',
-        color: 'var(--color-on-surface)',
-      }}
-    >
-      <p className="font-semibold mb-1" style={{ color: 'var(--color-on-surface-variant)', fontSize: '11px' }}>{label}</p>
+    <div className="px-3 py-2 rounded-xl shadow-xl text-xs bg-surface-container-lowest border border-outline-variant/40 text-on-surface">
+      <p className="font-semibold mb-1 text-on-surface-variant text-[11px]">{label}</p>
       {payload.map((p, i) => (
-        <p key={i} className="font-bold" style={{ color: 'var(--color-on-surface)' }}>
-          {p.value}
+        <p key={i} className="font-bold text-on-surface">
+          {p.value} tickets
         </p>
       ))}
     </div>
-  );
-}
-
-/* ── KPI Card style M3 (Cliquable) ─────────────────────────────────────────── */
-function KpiCard({ label, value, icon, trendUp, trendValue, critical, onClick }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-      onClick={onClick}
-      className={`bento-card ${onClick ? 'cursor-pointer hover:border-primary/40 hover:shadow-md transition-all group' : ''}`}
-      style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}
-    >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="stat-icon-gradient" style={{ width: 36, height: 36, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>{icon}</span>
-          </div>
-          <span className="text-[12px] font-medium uppercase tracking-wide" style={{ color: 'var(--color-on-surface-variant)' }}>
-            {label}
-          </span>
-        </div>
-        {trendValue !== undefined && (
-          <span className={trendUp ? 'efferd-trend-up' : 'efferd-trend-down'}>
-            {trendUp ? '\u25B2' : '\u25BC'} {trendValue}
-          </span>
-        )}
-      </div>
-
-      <motion.div
-        initial={{ opacity: 0, scale: 0.92 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.4, delay: 0.08 }}
-        className="font-bold flex items-center justify-between"
-        style={{
-          fontSize: '2rem',
-          lineHeight: 1.1,
-          color: critical ? 'var(--color-error)' : 'var(--color-on-surface)',
-        }}
-      >
-        <span>{value}</span>
-        {onClick && (
-          <span className="material-symbols-outlined text-[18px] text-on-surface-variant/40 group-hover:text-primary group-hover:translate-x-1 transition-all">
-            arrow_forward
-          </span>
-        )}
-      </motion.div>
-
-      {critical && (
-        <div className="flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ flexShrink: 0, backgroundColor: 'var(--color-error)' }} />
-          <span className="text-[11px]" style={{ color: 'var(--color-error)' }}>Nécessite une attention immédiate</span>
-        </div>
-      )}
-    </motion.div>
   );
 }
 
@@ -123,17 +59,10 @@ function LoadingSkeleton() {
     <div className="p-6 space-y-6">
       <div className="grid grid-cols-4 gap-4">
         {[1, 2, 3, 4].map((i) => (
-          <div
-            key={i}
-            className="bento-card animate-pulse"
-            style={{ height: 100 }}
-          />
+          <div key={i} className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest p-6 h-28 animate-pulse" />
         ))}
       </div>
-      <div
-        className="bento-card animate-pulse"
-        style={{ height: 280 }}
-      />
+      <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest h-64 animate-pulse" />
     </div>
   );
 }
@@ -145,22 +74,16 @@ function SectionCard({ title, icon, action, children, className = '' }) {
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35 }}
-      className={`bento-card overflow-hidden ${className}`}
+      className={`rounded-2xl border border-outline-variant/30 bg-surface-container-lowest overflow-hidden shadow-sm ${className}`}
     >
-      <div
-        className="flex items-center justify-between px-4 py-3"
-        style={{ borderBottom: '1px solid var(--color-outline-variant)' }}
-      >
+      <div className="flex items-center justify-between px-4 py-3 border-b border-outline-variant/20 bg-surface-container-low/40">
         <div className="flex items-center gap-2">
           {icon && (
-            <span
-              className="material-symbols-outlined"
-              style={{ fontSize: '15px', color: 'var(--color-on-surface-variant)' }}
-            >
+            <span className="material-symbols-outlined text-[16px] text-on-surface-variant">
               {icon}
             </span>
           )}
-          <h3 className="text-[13px] font-semibold" style={{ color: 'var(--color-on-surface)' }}>
+          <h3 className="text-xs font-bold text-on-surface">
             {title}
           </h3>
         </div>
@@ -171,79 +94,16 @@ function SectionCard({ title, icon, action, children, className = '' }) {
   );
 }
 
-/* ── Badge statut pour le tableau ───────────────────────────────────────────── */
-function StatusBadge({ status }) {
-  const cfg = {
-    NEW:     { cls: 'badge-status-new', label: 'Nouveau' },
-    OPEN:    { cls: 'badge-status-open', label: 'Ouvert' },
-    PENDING: { cls: 'badge-status-pending', label: 'En attente' },
-    SOLVED:  { cls: 'badge-status-closed', label: 'Resolu' },
-    CLOSED:  { cls: 'badge-status-closed', label: 'Ferme' },
-  }[status] || { cls: 'badge-status-closed', label: status };
-
-  return <span className={`badge ${cfg.cls}`}>{cfg.label}</span>;
-}
-
-function PriorityBadge({ priority }) {
-  const cfg = {
-    P1: { cls: 'badge-priority-p1', label: 'P1' },
-    P2: { cls: 'badge-priority-p2',  label: 'P2' },
-    P3: { cls: 'badge-priority-p3',    label: 'P3' },
-    P4: { cls: 'badge-priority-p4',    label: 'P4' },
-  }[priority] || { cls: 'badge-status-closed', label: priority };
-
-  return <span className={`badge ${cfg.cls}`}>{cfg.label}</span>;
-}
-
 /* ── Connection Dot ─────────────────────────────────────────────────────────── */
 function ConnectionDot({ connected }) {
   return (
-    <span className="relative inline-flex items-center justify-center">
-      <span
-        className="inline-block w-1.5 h-1.5 rounded-full"
-        style={{ backgroundColor: connected ? '#16a34a' : 'var(--color-on-surface-variant)' }}
-      />
-      {connected && (
-        <span
-          className="absolute inset-0 w-1.5 h-1.5 rounded-full animate-ping"
-          style={{ backgroundColor: '#16a34a', opacity: 0.4 }}
-        />
-      )}
-    </span>
+    <span className={`inline-block w-2 h-2 rounded-full ${connected ? 'bg-emerald-500' : 'bg-zinc-400'}`} />
   );
 }
 
-/* ── IntegrationGroup ────────────────────────────────────────────────────────── */
-function IntegrationGroup({ label, items, getConnected, suffix }) {
-  if (!items?.length) return null;
-  return (
-    <div>
-      <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--color-on-surface-variant)' }}>
-        {label}
-      </p>
-      <div className="space-y-1">
-        {items.map((item) => (
-          <div key={item.id} className="flex items-center justify-between py-1">
-            <span className="text-[12px] font-medium truncate capitalize" style={{ color: 'var(--color-on-surface)' }}>
-              {item.name || item.label}
-            </span>
-            <div className="flex items-center gap-1.5 shrink-0 ml-2">
-              <ConnectionDot connected={getConnected(item)} />
-              <span className="text-[10px] uppercase" style={{ color: 'var(--color-on-surface-variant)' }}>
-                {suffix ? suffix(item) : getConnected(item) ? 'Connecte' : 'Non connecte'}
-              </span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/* ══════════════════════════════════════════════════════════════════════════════ */
-/* DASHBOARD PRINCIPAL                                                           */
-/* ══════════════════════════════════════════════════════════════════════════════ */
 export default function Dashboard() {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
   const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [pendingApprovals, setPendingApprovals] = useState([]);
@@ -257,10 +117,7 @@ export default function Dashboard() {
   const [activePeriod, setActivePeriod] = useState('1 Mois');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
-  const [selectedRows, setSelectedRows] = useState(new Set());
   const [reportLoading, setReportLoading] = useState(false);
-  const signatureLogoUrlRef = useRef(null);
-  const draftReminderDelayMinutesRef = useRef(30);
 
   function loadPendingAiDrafts() {
     api.get('/dashboard/pending-ai-drafts').then(({ data }) => setPendingAiDrafts(data)).catch(() => {});
@@ -287,146 +144,49 @@ export default function Dashboard() {
     api.get('/dashboard/recent-activity').then(({ data }) => setRecentActivity(data)).catch(() => {});
     api.get('/dashboard/integrations').then(({ data }) => setIntegrations(data)).catch(() => {});
     api.get(`/dashboard/technician-performance${queryParams}`).then(({ data }) => setTechPerformance(data)).catch(() => {});
-    api.get('/system-settings').then(({ data }) => {
-      signatureLogoUrlRef.current = data.signatureLogoUrl || null;
-      draftReminderDelayMinutesRef.current = data.draftReminderDelayMinutes || 30;
-    }).catch(() => {});
     loadPendingAiDrafts();
     loadNeedsReview();
-
-    let trendParams = '';
-    if (customStartDate && customEndDate) {
-      trendParams = `?startDate=${customStartDate}&endDate=${customEndDate}`;
-    } else {
-      const days = PERIOD_DAYS[activePeriod] || 30;
-      trendParams = `?days=${days}`;
-    }
-    api.get(`/dashboard/activity-trend${trendParams}`).then(({ data }) => setActivityTrend(data)).catch(() => {});
   }
+
+  useEffect(() => { loadAll(); }, [activePeriod, customStartDate, customEndDate]);
 
   async function handleDownloadReport() {
     setReportLoading(true);
     try {
-      let queryParams = '';
-      if (customStartDate || customEndDate) {
-        const params = new URLSearchParams();
-        if (customStartDate) params.append('startDate', customStartDate);
-        if (customEndDate) params.append('endDate', customEndDate);
-        queryParams = '?' + params.toString();
-      } else {
-        const days = PERIOD_DAYS[activePeriod] || 30;
-        queryParams = `?days=${days}`;
-      }
-
-      const response = await api.get(`/dashboard/report${queryParams}`, { responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'text/csv;charset=utf-8;' }));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `rapport-itsm-${new Date().toISOString().slice(0, 10)}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-    } catch (err) {
+      const days = PERIOD_DAYS[activePeriod] || 30;
+      const res = await api.get(`/dashboard/report?days=${days}`, { responseType: 'blob' });
+      const blob = new Blob([res.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `Rapport_ITSM_${activePeriod.replace(' ', '_')}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove(); window.URL.revokeObjectURL(url);
+    } catch {
       setError('Erreur lors du téléchargement du rapport');
     } finally {
       setReportLoading(false);
     }
   }
 
-  useEffect(() => {
-    loadAll();
-    const id = setInterval(loadAll, 15000);
-    return () => clearInterval(id);
-  }, [activePeriod, customStartDate, customEndDate]);
-
-  /* ── Édition brouillons ── */
-  const [editedDrafts, setEditedDrafts] = useState({});
-  const [editedRecipients, setEditedRecipients] = useState({});
-  const [editedCc, setEditedCc] = useState({});
-  const [ccInput, setCcInput] = useState({});
-  const [confirmReview, setConfirmReview] = useState(null);
-  const [reviewSubmitting, setReviewSubmitting] = useState(false);
-
-  function toDisplayHtml(html) {
-    if (!signatureLogoUrlRef.current) return html;
-    return html.replaceAll('cid:logo-signature', signatureLogoUrlRef.current);
-  }
-  function fromDisplayHtml(html) {
-    if (!signatureLogoUrlRef.current) return html;
-    return html.split(signatureLogoUrlRef.current).join('cid:logo-signature');
-  }
-  function setDraftContent(id, content) {
-    setEditedDrafts((prev) => ({ ...prev, [id]: fromDisplayHtml(content) }));
-  }
-  function getCcList(draft) {
-    return editedCc[draft.id] !== undefined ? editedCc[draft.id] : (draft.ccRecipients || []);
-  }
-  function addCc(draft) {
-    const value = (ccInput[draft.id] || '').trim();
-    if (!value) return;
-    const current = getCcList(draft);
-    if (!current.includes(value)) setEditedCc((prev) => ({ ...prev, [draft.id]: [...current, value] }));
-    setCcInput((prev) => ({ ...prev, [draft.id]: '' }));
-  }
-  function removeCc(draft, email) {
-    setEditedCc((prev) => ({ ...prev, [draft.id]: getCcList(draft).filter((e) => e !== email) }));
-  }
-  function askReview(id, action, draft) { setConfirmReview({ id, action, draft }); }
-  async function confirmReviewRun() {
-    if (!confirmReview) return;
-    const { id, action, draft } = confirmReview;
-    setReviewSubmitting(true);
-    try {
-      const body = action === 'approve'
-        ? {
-            proposedContent: editedDrafts[id] !== undefined ? editedDrafts[id] : draft.proposedContent,
-            recipientEmail: editedRecipients[id] !== undefined ? editedRecipients[id] : draft.recipientEmail,
-            ccRecipients: getCcList(draft),
-          }
-        : {};
-      await api.post(`/ai-email-drafts/${id}/${action}`, body);
-      setEditedDrafts((prev) => { const n = { ...prev }; delete n[id]; return n; });
-      setEditedRecipients((prev) => { const n = { ...prev }; delete n[id]; return n; });
-      setEditedCc((prev) => { const n = { ...prev }; delete n[id]; return n; });
-      setConfirmReview(null);
-      loadPendingAiDrafts();
-    } catch (err) {
-      setError(err.response?.data?.error || 'Erreur lors de la validation');
-    } finally {
-      setReviewSubmitting(false);
-    }
-  }
-
-  /* ── Etats d'erreur et chargement ── */
   if (error) {
     return (
-      <div className="m-6 p-4 rounded-xl flex flex-col items-center gap-3 text-center"
-        style={{ backgroundColor: 'rgba(220,38,38,0.05)', border: '1px solid rgba(220,38,38,0.2)', color: 'var(--color-error)' }}
-      >
-        <span className="font-body-md">{error}</span>
+      <div className="m-6 p-4 rounded-xl flex flex-col items-center gap-3 text-center bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400">
+        <span className="text-sm font-semibold">{error}</span>
         <button onClick={loadAll} className="px-4 py-1.5 rounded-lg text-xs font-semibold border border-current hover:opacity-80 transition-opacity">
-          Reessayer
+          Réessayer
         </button>
       </div>
     );
   }
   if (!stats) return <LoadingSkeleton />;
 
-  /* ── Données dérivées ── */
   const statusData = stats.byStatus.map((s) => ({ name: STATUS_LABELS[s.status] || s.status, value: s.count }));
   const priorityData = stats.byPriority.map((p) => ({ name: PRIORITY_LABELS[p.priority] || p.priority, value: p.count }));
   const teamData = stats.byTeam.map((t) => ({ name: t.teamName || 'Non assigné', value: t.count }));
   const p1Count = priorityData.find((p) => p.name.startsWith('P1'))?.value ?? 0;
   const totalTeamTickets = teamData.reduce((s, t) => s + t.value, 0);
 
-  // Données réelles depuis l'API
   const trendData = activityTrend.map((d, i) => ({ day: i + 1, date: d.date, tickets: d.tickets, resolved: d.resolved }));
-
-  // Sparkline (7 derniers jours)
   const sparkData = trendData.slice(-7);
 
-  // Métriques calculées
   const resolvedCount = stats.byStatus.find(s => s.status === 'SOLVED')?.count ?? 0;
   const closedCount = stats.byStatus.find(s => s.status === 'CLOSED')?.count ?? 0;
   const resolvedTotal = resolvedCount + closedCount;
@@ -436,279 +196,123 @@ export default function Dashboard() {
   const currHalf = trendData.slice(Math.floor(trendData.length / 2)).reduce((s, d) => s + d.tickets, 0);
   const globalTrendUp = currHalf >= prevHalf;
 
-  // Checkbox helpers
-  function toggleRow(id) {
-    setSelectedRows((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }
-  function toggleAll() {
-    if (selectedRows.size === recentActivity.length) setSelectedRows(new Set());
-    else setSelectedRows(new Set(recentActivity.map((t) => t.id)));
-  }
-
   return (
-    <div className="p-6 space-y-5 min-h-screen" style={{ backgroundColor: 'var(--color-background)' }}>
+    <div className="px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-8 space-y-6 min-h-screen">
 
-      {/* ══════════════════════════════════════════════════════════════════════ */}
-      {/* HEADER — filtres de periode + action                                  */}
-      {/* ══════════════════════════════════════════════════════════════════════ */}
-      <motion.div
-        initial={{ opacity: 0, y: -8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-        className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
-      >
-        {/* Filtres de periode & Date range */}
-        <div className="flex flex-wrap items-center gap-3">
-          <div
-            className="flex items-center gap-1 p-1 rounded-lg"
-            style={{ backgroundColor: 'var(--color-surface-container-lowest)', border: '1px solid var(--color-outline-variant)' }}
-          >
-            {PERIODS.map((p) => (
-              <button
-                key={p}
-                onClick={() => {
-                  setActivePeriod(p);
-                  setCustomStartDate('');
-                  setCustomEndDate('');
-                }}
-                className={`efferd-period-btn ${activePeriod === p && !customStartDate && !customEndDate ? 'active' : ''}`}
-              >
-                {p}
-              </button>
-            ))}
+      {/* HERO HEADER SEVEN-T */}
+      <div className="p-6 sm:p-8 rounded-2xl sm:rounded-3xl border border-outline-variant/30 bg-surface-container-lowest shadow-sm">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+          <div className="min-w-0">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="p-2 bg-amber-500/10 rounded-xl">
+                <LayoutDashboard className="w-6 h-6 text-amber-600 dark:text-amber-400" />
+              </div>
+              <h1 className="text-2xl sm:text-3xl font-display font-bold truncate text-on-surface">Tableau de Bord Operations</h1>
+              <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold uppercase tracking-wider animate-pulse border border-emerald-500/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                Live Hub
+              </span>
+            </div>
+            <p className="text-sm sm:text-base text-on-surface-variant font-medium">Vue d'ensemble analytique, tickets, SLA et métriques de performance en temps réel.</p>
           </div>
 
-          <div
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm"
-            style={{ backgroundColor: 'var(--color-surface-container-lowest)', border: '1px solid var(--color-outline-variant)', color: 'var(--color-on-surface)' }}
-          >
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-on-surface-variant)' }}>Du</span>
-              <input
-                type="date"
-                value={customStartDate}
-                onChange={(e) => {
-                  setCustomStartDate(e.target.value);
-                  setActivePeriod('');
-                }}
-                className="bg-transparent border-none text-xs focus:outline-none cursor-pointer"
-                style={{ color: 'var(--color-on-surface)', colorScheme: 'dark' }}
-              />
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Period selector */}
+            <div className="flex items-center gap-1 p-1 rounded-xl bg-surface-container border border-outline-variant/30">
+              {PERIODS.map((p) => {
+                const isActive = activePeriod === p && !customStartDate && !customEndDate;
+                return (
+                  <button
+                    key={p}
+                    onClick={() => {
+                      setActivePeriod(p);
+                      setCustomStartDate('');
+                      setCustomEndDate('');
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      isActive
+                        ? 'bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-400 text-slate-950 shadow-md'
+                        : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                );
+              })}
             </div>
-            <div className="w-[1px] h-4" style={{ backgroundColor: 'var(--color-outline-variant)' }} />
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-on-surface-variant)' }}>Au</span>
-              <input
-                type="date"
-                value={customEndDate}
-                onChange={(e) => {
-                  setCustomEndDate(e.target.value);
-                  setActivePeriod('');
-                }}
-                className="bg-transparent border-none text-xs focus:outline-none cursor-pointer"
-                style={{ color: 'var(--color-on-surface)', colorScheme: 'dark' }}
-              />
-            </div>
-            {(customStartDate || customEndDate) && (
-              <button
-                onClick={() => {
-                  setCustomStartDate('');
-                  setCustomEndDate('');
-                  setActivePeriod('1 Mois');
-                }}
-                className="ml-1 text-[16px] material-symbols-outlined hover:text-red-500 cursor-pointer flex items-center"
-                title="Reinitialiser"
-              >
-                close
-              </button>
-            )}
+
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={handleDownloadReport}
+              disabled={reportLoading}
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-400 text-slate-950 font-bold text-xs transition-all shadow-md shadow-amber-500/20 hover:brightness-110 flex items-center gap-2 disabled:opacity-50 cursor-pointer"
+            >
+              <Download className="w-4 h-4" />
+              {reportLoading ? 'Génération...' : 'Télécharger Rapport'}
+            </motion.button>
           </div>
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleDownloadReport}
-            disabled={reportLoading}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[13px] font-medium transition-colors"
-            style={{
-              backgroundColor: 'var(--color-surface-container-lowest)',
-              border: '1px solid var(--color-outline-variant)',
-              color: reportLoading ? 'var(--color-on-surface-variant)' : 'var(--color-on-surface)',
-              cursor: reportLoading ? 'not-allowed' : 'pointer',
-              opacity: reportLoading ? 0.7 : 1,
-            }}
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>
-              {reportLoading ? 'hourglass_empty' : 'download'}
-            </span>
-            {reportLoading ? 'Generation...' : 'Telecharger rapport'}
-          </button>
-        </div>
-      </motion.div>
+        {/* Bento Stat Items SEVEN-T */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
+          <div onClick={() => navigate('/tickets')} className="p-4 rounded-2xl border border-outline-variant/30 bg-surface-container-low/40 flex flex-col items-start cursor-pointer hover:border-blue-500/50 transition-all group">
+            <div className="p-2 rounded-xl mb-2 text-blue-600 dark:text-blue-400 bg-blue-500/10">
+              <Ticket className="w-5 h-5" />
+            </div>
+            <p className="text-2xl font-bold text-on-surface leading-none mb-1">{stats.total}</p>
+            <div className="flex items-center justify-between w-full">
+              <p className="text-xs text-on-surface-variant uppercase font-black tracking-wider">Total Tickets</p>
+              <ChevronRight className="w-4 h-4 text-on-surface-variant/50 group-hover:translate-x-1 transition-transform" />
+            </div>
+          </div>
 
-      {/* ══════════════════════════════════════════════════════════════════════ */}
-      {/* RANGÉE 1 — 4 KPI Cards                                                */}
-      {/* ══════════════════════════════════════════════════════════════════════ */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <KpiCard
-          label="Total tickets"
-          value={stats.total}
-          icon="confirmation_number"
-          trendUp={globalTrendUp}
-          trendValue={`${trendTicketsSum} sur ${activePeriod.toLowerCase()}`}
-          onClick={() => navigate('/tickets')}
-        />
-        <KpiCard
-          label="Tickets ouverts"
-          value={stats.open}
-          icon="pending_actions"
-          trendUp={stats.open < stats.total / 2}
-          trendValue={stats.total > 0 ? `${Math.round((stats.open / stats.total) * 100)}% du total` : '0%'}
-          onClick={() => navigate('/tickets?status=OPEN')}
-        />
-        <KpiCard
-          label="Taux résolution"
-          value={`${resolutionRate}%`}
-          icon="check_circle"
-          trendUp={resolutionRate >= 50}
-          trendValue={`${resolvedTotal} résolus`}
-          onClick={() => navigate('/tickets?status=SOLVED')}
-        />
-        <KpiCard
-          label="Priorités P1"
-          value={p1Count}
-          icon="warning"
-          critical={p1Count > 0}
-          trendUp={false}
-          trendValue={p1Count > 0 ? `${p1Count} urgent${p1Count > 1 ? 's' : ''}` : undefined}
-          onClick={() => navigate('/tickets?priority=P1')}
-        />
+          <div onClick={() => navigate('/tickets?status=OPEN')} className="p-4 rounded-2xl border border-outline-variant/30 bg-surface-container-low/40 flex flex-col items-start cursor-pointer hover:border-indigo-500/50 transition-all group">
+            <div className="p-2 rounded-xl mb-2 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10">
+              <RefreshCw className="w-5 h-5" />
+            </div>
+            <p className="text-2xl font-bold text-on-surface leading-none mb-1">{stats.open}</p>
+            <div className="flex items-center justify-between w-full">
+              <p className="text-xs text-on-surface-variant uppercase font-black tracking-wider">Tickets Ouverts</p>
+              <ChevronRight className="w-4 h-4 text-on-surface-variant/50 group-hover:translate-x-1 transition-transform" />
+            </div>
+          </div>
+
+          <div onClick={() => navigate('/tickets?status=SOLVED')} className="p-4 rounded-2xl border border-outline-variant/30 bg-surface-container-low/40 flex flex-col items-start cursor-pointer hover:border-emerald-500/50 transition-all group">
+            <div className="p-2 rounded-xl mb-2 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10">
+              <CheckCircle2 className="w-5 h-5" />
+            </div>
+            <p className="text-2xl font-bold text-on-surface leading-none mb-1">{resolutionRate}%</p>
+            <div className="flex items-center justify-between w-full">
+              <p className="text-xs text-on-surface-variant uppercase font-black tracking-wider">Résolution ({resolvedTotal})</p>
+              <ChevronRight className="w-4 h-4 text-on-surface-variant/50 group-hover:translate-x-1 transition-transform" />
+            </div>
+          </div>
+
+          <div onClick={() => navigate('/tickets?priority=P1')} className="p-4 rounded-2xl border border-outline-variant/30 bg-surface-container-low/40 flex flex-col items-start cursor-pointer hover:border-red-500/50 transition-all group">
+            <div className={`p-2 rounded-xl mb-2 ${p1Count > 0 ? 'text-red-600 dark:text-red-400 bg-red-500/10 animate-pulse' : 'text-slate-500 bg-slate-500/10'}`}>
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <p className="text-2xl font-bold text-on-surface leading-none mb-1">{p1Count}</p>
+            <div className="flex items-center justify-between w-full">
+              <p className="text-xs text-on-surface-variant uppercase font-black tracking-wider">Critiques P1</p>
+              <ChevronRight className="w-4 h-4 text-on-surface-variant/50 group-hover:translate-x-1 transition-transform" />
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* ══════════════════════════════════════════════════════════════════════ */}
-      {/* RANGÉE 2 — Graphique Area pleine largeur                              */}
-      {/* ══════════════════════════════════════════════════════════════════════ */}
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.1 }}
-        className="bento-card overflow-hidden"
-      >
-        {/* Header du graphique */}
-        <div
-          className="flex items-center justify-between px-5 pt-4 pb-2"
-          style={{ borderBottom: '1px solid var(--color-outline-variant)' }}
-        >
-          <div className="flex items-center gap-3">
-            <span className="text-[13px] font-semibold" style={{ color: 'var(--color-on-surface)' }}>
-              Activite des tickets
-            </span>
-            <span className={globalTrendUp ? 'efferd-trend-up' : 'efferd-trend-down'}>
-              {globalTrendUp ? '\u25B2' : '\u25BC'} {trendTicketsSum} tickets sur {activePeriod.toLowerCase()}
-            </span>
-          </div>
-        </div>
-
-        {/* Area Chart */}
-        <div style={{ padding: '1rem 1rem 0' }}>
-          {trendData.length === 0 ? (
-            <div className="flex items-center justify-center h-[260px] text-[13px]" style={{ color: 'var(--color-on-surface-variant)' }}>
-              Aucune activite sur la periode
-            </div>
-          ) : (
-          <ResponsiveContainer width="100%" height={260}>
-            <AreaChart data={trendData} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
-              <defs>
-                <linearGradient id="ticketGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="var(--color-primary)" stopOpacity={0.12} />
-                  <stop offset="95%" stopColor="var(--color-primary)" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid
-                strokeDasharray="3 3"
-                vertical={false}
-                stroke="var(--color-outline-variant)"
-                strokeOpacity={1}
-              />
-              <XAxis
-                dataKey="day"
-                axisLine={false}
-                tickLine={false}
-                tick={{ fill: 'var(--color-on-surface-variant)', fontSize: 11 }}
-                tickFormatter={(v) => `Jour ${v}`}
-                interval={4}
-              />
-              <YAxis
-                allowDecimals={false}
-                axisLine={false}
-                tickLine={false}
-                tick={{ fill: 'var(--color-on-surface-variant)', fontSize: 11 }}
-                tickFormatter={(v) => `${v}`}
-              />
-              <Tooltip content={<EfferdTooltip />} />
-              <Area
-                type="monotone"
-                dataKey="tickets"
-                stroke="var(--color-primary)"
-                strokeWidth={1.5}
-                fill="url(#ticketGradient)"
-                dot={false}
-                activeDot={{ r: 4, fill: 'var(--color-primary)', strokeWidth: 0 }}
-                animationDuration={800}
-              />
-              <Area
-                type="monotone"
-                dataKey="resolved"
-                stroke="#16a34a"
-                strokeWidth={1}
-                fill="none"
-                dot={false}
-                strokeDasharray="3 3"
-                activeDot={{ r: 3, fill: '#16a34a', strokeWidth: 0 }}
-                animationDuration={800}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-          )}
-        </div>
-      </motion.div>
-
-      {/* ══════════════════════════════════════════════════════════════════════ */}
-      {/* RANGÉE 3 — Donut + Sparkline + Panel performances                     */}
-      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {/* RANGÉE 2 — Performance IA & Actions Rapides */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-
-        {/* Donut — Répartition par équipe (style Lead Sources Efferd) */}
-        <SectionCard
-          title="Répartition par équipe"
-          icon="pie_chart"
-          action={
-            <button className="text-[12px] font-medium flex items-center gap-1 transition-opacity hover:opacity-70"
-              style={{ color: 'var(--color-on-surface-variant)' }}>
-              Détails →
-            </button>
-          }
-        >
+        <SectionCard title="Répartition par équipe" icon="pie_chart">
           <div className="flex items-center gap-4">
-            {/* Donut */}
             <div className="shrink-0">
               <ResponsiveContainer width={100} height={100}>
                 <PieChart>
                   <Pie
                     data={teamData.length > 0 ? teamData : [{ name: 'Aucune', value: 1 }]}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={30}
-                    outerRadius={45}
-                    paddingAngle={3}
-                    dataKey="value"
-                    stroke="none"
-                    animationDuration={700}
+                    cx="50%" cy="50%" innerRadius={30} outerRadius={45} paddingAngle={3}
+                    dataKey="value" stroke="none" animationDuration={700}
                   >
                     {(teamData.length > 0 ? teamData : [{ name: 'Aucune', value: 1 }]).map((entry, index) => (
                       <Cell key={entry.name} fill={PIE_COLORS[index % PIE_COLORS.length]} />
@@ -716,360 +320,75 @@ export default function Dashboard() {
                   </Pie>
                 </PieChart>
               </ResponsiveContainer>
-              <p className="text-center text-[10px] mt-0.5" style={{ color: 'var(--color-on-surface-variant)' }}>
+              <p className="text-center text-[10px] font-bold text-on-surface-variant mt-0.5">
                 {totalTeamTickets} tickets
               </p>
             </div>
 
-            {/* Liste des sources */}
             <div className="flex-1 space-y-2 min-w-0">
               {teamData.slice(0, 4).map((t, i) => (
                 <div key={t.name} className="flex items-center justify-between">
                   <div className="flex items-center gap-2 min-w-0">
-                    <span
-                      className="w-2 h-2 rounded-sm shrink-0"
-                      style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}
-                    />
-                    <span className="text-[12px] truncate" style={{ color: 'var(--color-on-surface)' }}>{t.name}</span>
+                    <span className="w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }} />
+                    <span className="text-xs font-semibold text-on-surface truncate">{t.name}</span>
                   </div>
-                  <span className="text-[12px] font-semibold ml-2 shrink-0" style={{ color: 'var(--color-on-surface)' }}>
-                    {t.value}
-                  </span>
+                  <span className="text-xs font-bold text-on-surface ml-2 shrink-0">{t.value}</span>
                 </div>
               ))}
               {teamData.length === 0 && (
-                <p className="text-[12px] italic" style={{ color: 'var(--color-on-surface-variant)' }}>Aucune équipe</p>
+                <p className="text-xs italic text-on-surface-variant">Aucune équipe</p>
               )}
             </div>
           </div>
         </SectionCard>
 
-        {/* Sparkline — Nouveaux tickets / jour */}
-        <SectionCard
-          title="Nouveaux tickets / jour"
-          icon="trending_up"
-          action={
-            <Link to="/tickets" className="text-[12px] font-medium flex items-center gap-1 transition-opacity hover:opacity-70"
-              style={{ color: 'var(--color-on-surface-variant)' }}>
-              Voir les tickets →
-            </Link>
-          }
-        >
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="text-[28px] font-bold leading-none" style={{ color: 'var(--color-on-surface)' }}>
-                {trendTicketsSum}
-              </span>
-              <span className={globalTrendUp ? 'efferd-trend-up' : 'efferd-trend-down'}>
-                {globalTrendUp ? '▲' : '▼'} sur {activePeriod.toLowerCase()}
-              </span>
-            </div>
-            <p className="text-[11px]" style={{ color: 'var(--color-on-surface-variant)' }}>
-              {resolvedTotal > 0 && `${resolvedTotal} résolus · `}{stats.open} ouverts actuellement
-            </p>
-            {/* Sparkline réelle */}
-            <div className="mt-2">
-              {sparkData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={60}>
-                  <LineChart data={sparkData} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
-                    <Line
-                      type="monotone"
-                      dataKey="tickets"
-                      stroke="var(--color-on-surface)"
-                      strokeWidth={1.5}
-                      dot={false}
-                      animationDuration={600}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-[60px] flex items-center justify-center text-[11px]" style={{ color: 'var(--color-on-surface-variant)' }}>
-                  Pas encore de données
-                </div>
-              )}
-            </div>
-          </div>
-        </SectionCard>
-
-        {/* Panel Performance IA — style Campaign ROI Efferd */}
-        <SectionCard
-          title="Performance IA"
-          icon="smart_toy"
-          action={
-            <Link to="/supervision" className="text-[12px] font-medium transition-opacity hover:opacity-70"
-              style={{ color: 'var(--color-on-surface-variant)' }}>
-              Supervision →
-            </Link>
-          }
-        >
+        <SectionCard title="Performance IA" icon="smart_toy">
           <div className="space-y-3">
-            {/* Métriques style ROI Efferd */}
             <div className="grid grid-cols-3 gap-2">
               {[
-                { label: 'Brouillons', value: pendingAiDrafts.length, icon: 'drafts' },
-                { label: 'À valider', value: needsReview.length, icon: 'rate_review' },
-                { label: 'Approbation', value: pendingApprovals.length, icon: 'fact_check' },
+                { label: 'Brouillons', value: pendingAiDrafts.length },
+                { label: 'À valider', value: needsReview.length },
+                { label: 'Approbation', value: pendingApprovals.length },
               ].map((m) => (
                 <div key={m.label}>
-                  <p className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--color-on-surface-variant)' }}>{m.label}</p>
-                  <p className="text-[20px] font-bold leading-tight mt-0.5" style={{ color: 'var(--color-on-surface)' }}>
-                    {m.value}
-                  </p>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">{m.label}</p>
+                  <p className="text-xl font-bold leading-tight mt-0.5 text-on-surface">{m.value}</p>
                 </div>
               ))}
             </div>
-
-            {/* Progress bar style "Spend vs return mix" Efferd */}
             <div>
               <div className="flex justify-between items-center mb-1">
-                <p className="text-[11px]" style={{ color: 'var(--color-on-surface-variant)' }}>Charge IA vs humain</p>
-                <p className="text-[11px] font-semibold" style={{ color: 'var(--color-on-surface-variant)' }}>
+                <p className="text-[11px] font-medium text-on-surface-variant">Charge IA vs humain</p>
+                <p className="text-[11px] font-bold text-on-surface-variant">
                   {stats.total > 0 ? `${Math.round(((pendingAiDrafts.length + needsReview.length) / Math.max(stats.total, 1)) * 100)}% IA` : '0%'}
                 </p>
               </div>
-              <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--color-outline-variant)' }}>
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{
-                    width: `${Math.min(100, Math.round(((pendingAiDrafts.length + needsReview.length) / Math.max(stats.total, 1)) * 100))}%`
-                  }}
-                  transition={{ duration: 0.8, ease: 'easeOut' }}
-                  className="h-full rounded-full"
-                  style={{ backgroundColor: 'var(--color-on-surface)' }}
-                />
-              </div>
-            </div>
-
-            {/* Sous-métriques */}
-            <div className="flex justify-between">
-              <div>
-                <div className="flex items-center gap-1.5 mb-0.5">
-                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--color-on-surface-variant)' }} />
-                  <span className="text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>IA traitée</span>
-                </div>
-                <p className="text-[14px] font-bold" style={{ color: 'var(--color-on-surface)' }}>
-                  {pendingAiDrafts.length + needsReview.length}
-                </p>
-              </div>
-              <div>
-                <div className="flex items-center gap-1.5 mb-0.5">
-                  <span className="w-2 h-2 rounded-full border" style={{ borderColor: 'var(--color-on-surface-variant)' }} />
-                  <span className="text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>Humain requis</span>
-                </div>
-                <p className="text-[14px] font-bold" style={{ color: 'var(--color-on-surface)' }}>
-                  {pendingApprovals.length}
-                </p>
+              <div className="h-2 rounded-full overflow-hidden bg-surface-container border border-outline-variant/30">
+                <div className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full" style={{ width: `${Math.min(100, Math.round(((pendingAiDrafts.length + needsReview.length) / Math.max(stats.total, 1)) * 100))}%` }} />
               </div>
             </div>
           </div>
         </SectionCard>
-      </div>
 
-      {/* ══════════════════════════════════════════════════════════════════════ */}
-      {/* RANGÉE 4 — Tableau "Tickets récents" style Efferd + sidebar droite     */}
-      {/* ══════════════════════════════════════════════════════════════════════ */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-
-        {/* Tableau principal */}
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.15 }}
-          className="bento-card overflow-hidden lg:col-span-2"
-        >
-          {/* Header tableau */}
-          <div
-            className="flex items-center justify-between px-4 py-3"
-            style={{ borderBottom: '1px solid var(--color-outline-variant)' }}
-          >
-            <div className="flex items-center gap-2">
-              <span className="material-symbols-outlined" style={{ fontSize: '15px', width: '15px', height: '15px', color: 'var(--color-on-surface-variant)' }}>
-                table_rows
-              </span>
-              <h3 className="text-[13px] font-semibold" style={{ color: 'var(--color-on-surface)' }}>Tickets récents</h3>
-            </div>
-          </div>
-
-          {/* Tableau */}
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr>
-                  <th>
-                    <input
-                      type="checkbox"
-                      className="rounded"
-                      checked={selectedRows.size === recentActivity.length && recentActivity.length > 0}
-                      onChange={toggleAll}
-                      style={{ accentColor: 'var(--color-on-surface)', cursor: 'pointer' }}
-                    />
-                  </th>
-                  {['ID ↕', 'Demandeur ↕', 'Titre ↕', 'Statut ↕', 'Priorité ↕', 'Assigné ↕', 'Actions'].map((h) => (
-                    <th key={h}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {recentActivity.length === 0 && (
-                  <tr>
-                    <td colSpan={8} className="text-center py-8 text-[12px]" style={{ color: 'var(--color-on-surface-variant)' }}>
-                      Aucune activité récente
-                    </td>
-                  </tr>
-                )}
-                {recentActivity.slice(0, 8).map((t) => (
-                  <tr key={t.id}>
-                    <td>
-                      <input
-                        type="checkbox"
-                        className="rounded"
-                        checked={selectedRows.has(t.id)}
-                        onChange={() => toggleRow(t.id)}
-                        style={{ accentColor: 'var(--color-on-surface)', cursor: 'pointer' }}
-                      />
-                    </td>
-                    <td>
-                      <span className="font-mono text-[11px]" style={{ color: 'var(--color-on-surface-variant)' }}>
-                        #{t.id}
-                      </span>
-                    </td>
-                    <td>
-                      <span className="font-semibold text-[12px]" style={{ color: 'var(--color-on-surface)' }}>
-                        {t.requester?.fullName || t.assignedTo?.fullName || '—'}
-                      </span>
-                    </td>
-                    <td>
-                      <Link
-                        to={`/tickets/${t.id}`}
-                        className="text-[12px] hover:underline truncate max-w-[140px] block"
-                        style={{ color: 'var(--color-on-surface)' }}
-                      >
-                        {t.title}
-                      </Link>
-                    </td>
-                    <td><StatusBadge status={t.status} /></td>
-                    <td><PriorityBadge priority={t.priority} /></td>
-                    <td>
-                      <span className="text-[12px]" style={{ color: 'var(--color-on-surface-variant)' }}>
-                        {t.assignedTo?.fullName || '—'}
-                      </span>
-                    </td>
-                    <td>
-                      <Link
-                        to={`/tickets/${t.id}`}
-                        className="w-7 h-7 rounded flex items-center justify-center transition-colors"
-                        style={{ color: 'var(--color-on-surface-variant)' }}
-                        onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-on-surface)'; e.currentTarget.style.backgroundColor = 'var(--color-surface-container-high)'; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-on-surface-variant)'; e.currentTarget.style.backgroundColor = 'transparent'; }}
-                      >
-                        <span className="material-symbols-outlined" style={{ fontSize: '16px', width: '16px', height: '16px' }}>
-                          more_horiz
-                        </span>
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </motion.div>
-
-        {/* Panneau latéral droit — Approbations + Intégrations */}
-        <div className="space-y-4">
-
-          {/* Répartition par statut — mini bar chart */}
-          <SectionCard title="Par statut" icon="bar_chart">
-            <div className="space-y-2">
-              {statusData.map((s) => (
-                <div key={s.name}>
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="text-[11px]" style={{ color: 'var(--color-on-surface-variant)' }}>{s.name}</span>
-                    <span className="text-[12px] font-semibold" style={{ color: 'var(--color-on-surface)' }}>{s.value}</span>
-                  </div>
-                  <div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--color-outline-variant)' }}>
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: `${stats.total > 0 ? (s.value / stats.total) * 100 : 0}%` }}
-                      transition={{ duration: 0.7, ease: 'easeOut' }}
-                      className="h-full rounded-full"
-                      style={{ backgroundColor: 'var(--color-on-surface)' }}
-                    />
-                  </div>
-                </div>
-              ))}
-              {statusData.length === 0 && (
-                <p className="text-[12px] italic" style={{ color: 'var(--color-on-surface-variant)' }}>Aucun ticket</p>
-              )}
-            </div>
-          </SectionCard>
-
-          {/* Approbations en attente */}
-          <SectionCard
-            title="En attente d'approbation"
-            icon="fact_check"
-            action={
-              <span
-                className="text-[11px] font-semibold px-2 py-0.5 rounded-full"
-                style={{ backgroundColor: 'var(--color-outline-variant)', color: 'var(--color-on-surface-variant)' }}
+        <SectionCard title="Accès Rapides" icon="bolt">
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { label: 'Inbox Email', path: '/inbox', icon: 'mail' },
+              { label: 'Brouillons IA', path: '/email-drafts', icon: 'edit_note' },
+              { label: 'Base Connaissances', path: '/knowledge-base', icon: 'menu_book' },
+              { label: 'NOC Supervision', path: '/supervision', icon: 'monitor' },
+            ].map(item => (
+              <button key={item.label} onClick={() => navigate(item.path)}
+                className="flex items-center gap-2 p-2.5 rounded-xl border border-outline-variant/30 bg-surface-container-low/40 hover:bg-surface-container transition-all text-left group"
               >
-                {pendingApprovals.length}
-              </span>
-            }
-          >
-            <div className="space-y-1">
-              {pendingApprovals.length === 0 && (
-                <p className="text-[12px] italic" style={{ color: 'var(--color-on-surface-variant)' }}>Aucun ticket en attente.</p>
-              )}
-              {pendingApprovals.slice(0, 5).map((t) => (
-                <Link
-                  key={t.id}
-                  to={`/tickets/${t.id}`}
-                  className="flex items-center justify-between py-1.5 px-2 rounded-lg transition-colors"
-                  style={{ color: 'var(--color-on-surface)' }}
-                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--color-surface-container-high)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[12px] font-medium truncate">#{t.id} {t.title}</p>
-                    <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-on-surface-variant)' }}>
-                      {t.requester?.fullName || '—'}
-                    </p>
-                  </div>
-                  <PriorityBadge priority={t.priority} />
-                </Link>
-              ))}
-            </div>
-          </SectionCard>
-
-          {/* Statut des intégrations */}
-          <SectionCard title="Intégrations" icon="cable">
-            {integrations ? (
-              <div className="space-y-3">
-                <IntegrationGroup label="Services" items={integrations.apiConfigs} getConnected={(c) => c.connected} />
-                <IntegrationGroup label="Modèles IA" items={integrations.aiProviders} getConnected={(p) => p.connected} suffix={(p) => p.connected ? `${p.activeKeys} clé(s)` : 'Non connecté'} />
-              </div>
-            ) : (
-              <p className="text-[12px] italic" style={{ color: 'var(--color-on-surface-variant)' }}>Chargement...</p>
-            )}
-          </SectionCard>
-        </div>
+                <span className="material-symbols-outlined text-[18px] text-primary">{item.icon}</span>
+                <span className="text-xs font-semibold text-on-surface group-hover:text-primary transition-colors">{item.label}</span>
+              </button>
+            ))}
+          </div>
+        </SectionCard>
       </div>
 
-      {/* ── ConfirmDialog brouillons IA ── */}
-      <ConfirmDialog
-        open={!!confirmReview}
-        title={confirmReview?.action === 'approve' ? 'Approuver et envoyer' : 'Rejeter cette réponse'}
-        message={
-          confirmReview?.action === 'approve'
-            ? "Cette réponse va être envoyée immédiatement par email. Confirmer ?"
-            : 'Ce brouillon sera rejeté définitivement.'
-        }
-        confirmLabel={confirmReview?.action === 'approve' ? 'Envoyer' : 'Rejeter'}
-        danger={confirmReview?.action === 'reject'}
-        loading={reviewSubmitting}
-        onConfirm={confirmReviewRun}
-        onCancel={() => setConfirmReview(null)}
-      />
     </div>
   );
 }

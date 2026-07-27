@@ -4,6 +4,7 @@ const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { DEFAULTS } = require('../services/promptTemplates');
+const { auditLog } = require('../services/auditLogService');
 
 const router = express.Router();
 router.use(authenticate);
@@ -44,6 +45,7 @@ router.patch(
       create: { key, label: def.label, template: req.body.template },
     });
     return res.json(updated);
+    auditLog('PROMPT_TEMPLATE_UPDATED', { actor: req.user, targetType: 'PromptTemplate', targetId: key, targetLabel: def.label, metadata: { key } }).catch(() => {});
   }
 );
 

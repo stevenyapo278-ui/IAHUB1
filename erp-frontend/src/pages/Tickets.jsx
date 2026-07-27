@@ -1,36 +1,59 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Link, useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
+import {
+  Ticket,
+  Radio,
+  Clock,
+  CheckCircle2,
+  Lock,
+  Flame,
+  AlertTriangle,
+  Info,
+  ArrowDown,
+  Sparkles,
+  Table,
+  LayoutGrid,
+  RefreshCw,
+  Download,
+  FileSpreadsheet,
+  FileCode2,
+  Plus,
+  X,
+  Search,
+  SlidersHorizontal,
+  FilterX,
+  User,
+  Users,
+  MapPin,
+  Tag,
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
+  ArrowUpDown,
+  ArrowUp,
+  Settings,
+  Paperclip,
+  CheckSquare,
+  Building2,
+  Bot,
+  FileText,
+  MessageSquare
+} from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
 import { hasPermission } from '../utils/permissions';
 import ConfirmDialog from '../components/ConfirmDialog';
 import EmptyState from '../components/EmptyState';
-
-const STATUS_OPTIONS = ['NEW', 'OPEN', 'PENDING', 'SOLVED', 'CLOSED'];
-const PRIORITY_OPTIONS = ['P1', 'P2', 'P3', 'P4'];
-const TYPE_OPTIONS = [
-  { value: 'INCIDENT', label: 'Incident' },
-  { value: 'REQUEST', label: 'Demande' },
-];
-const SOURCE_OPTIONS = ['Helpdesk', 'Email', 'Téléphone'];
-const URGENCY_IMPACT_OPTIONS = [
-  { value: 'VERY_LOW', label: 'Très basse' },
-  { value: 'LOW', label: 'Basse' },
-  { value: 'MEDIUM', label: 'Moyenne' },
-  { value: 'HIGH', label: 'Haute' },
-  { value: 'VERY_HIGH', label: 'Très haute' },
-  { value: 'MAJOR', label: 'Majeure' },
-];
-
-const PRIORITY_LABEL = {
-  P1: 'Critique',
-  P2: 'Haute',
-  P3: 'Moyenne',
-  P4: 'Basse',
-};
+import TicketCoverflowCarousel from '../components/TicketCoverflowCarousel';
+import SearchableSelect from '../components/SearchableSelect';
+import SearchableMultiSelect from '../components/SearchableMultiSelect';
+import {
+  STATUS_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS, URGENCY_IMPACT_OPTIONS,
+} from '../constants/tickets';
 
 const EMPTY_FORM = {
   title: '',
@@ -63,9 +86,10 @@ const itemVariants = {
 
 export default function Tickets() {
   const { user } = useAuth();
-  const canAssign = hasPermission(user, 'tickets.assign');
-  const canDelete = hasPermission(user, 'tickets.delete');
-  const canBulkDelete = hasPermission(user, 'tickets.bulkDelete');
+  const canAssign = hasPermission(user, 'tickets.assign') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN';
+  const canApprove = hasPermission(user, 'tickets.approve') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN';
+  const canDelete = hasPermission(user, 'tickets.delete') || user?.role === 'SUPERADMIN';
+  const canBulkDelete = hasPermission(user, 'tickets.bulkDelete') || user?.role === 'SUPERADMIN';
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
@@ -78,6 +102,10 @@ export default function Tickets() {
   const [glpiUsers, setGlpiUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const isFirstLoad = useRef(true);
+
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
 
   // Vue (Tableau vs Grille)
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('tickets_view_mode') || 'table');
@@ -89,6 +117,7 @@ export default function Tickets() {
   // Filtres
   const [filters, setFilters] = useState({
     status: searchParams.get('status') || '',
+    approvalStatus: searchParams.get('approvalStatus') || '',
     priority: searchParams.get('priority') || '',
     source: searchParams.get('source') || '',
     category: searchParams.get('category') || '',
@@ -105,7 +134,10 @@ export default function Tickets() {
   const [selectedIds, setSelectedIds] = useState([]);
   const [deleting, setDeleting] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(() => {
+    const p = searchParams.get('page');
+    return p ? parseInt(p, 10) : 1;
+  });
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const [searchQuery, setSearchQuery] = useState(() => searchParams.get('search') || '');
@@ -124,11 +156,12 @@ export default function Tickets() {
     if (debouncedSearch) params.set('search', debouncedSearch); else params.delete('search');
     if (sortBy && sortBy !== 'createdAt') params.set('sortBy', sortBy); else params.delete('sortBy');
     if (sortOrder && sortOrder !== 'desc') params.set('sortOrder', sortOrder); else params.delete('sortOrder');
+    if (page && page !== 1) params.set('page', String(page)); else params.delete('page');
     Object.entries(filters).forEach(([k, v]) => {
       if (v) params.set(k, v); else params.delete(k);
     });
     setSearchParams(params, { replace: true });
-  }, [debouncedSearch, sortBy, sortOrder, filters]);
+  }, [debouncedSearch, sortBy, sortOrder, filters, page]);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -184,7 +217,15 @@ export default function Tickets() {
   }
 
   function loadTickets(isManualRefresh = false) {
-    if (isManualRefresh) setRefreshing(true); else setLoading(true);
+    if (isManualRefresh) {
+      setRefreshing(true);
+    } else if (isFirstLoad.current) {
+      // Premier chargement : spinner complet
+      setLoading(true);
+    } else {
+      // Changement de filtre/recherche : indicateur discret uniquement
+      setRefreshing(true);
+    }
     const params = { page, limit: 100, sortBy, sortOrder };
     if (filters.status) params.status = filters.status;
     if (filters.priority) params.priority = filters.priority;
@@ -205,7 +246,11 @@ export default function Tickets() {
         if (isManualRefresh) toast.success('Tickets rafraîchis');
       })
       .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'))
-      .finally(() => { setLoading(false); setRefreshing(false); });
+      .finally(() => {
+        isFirstLoad.current = false;
+        setLoading(false);
+        setRefreshing(false);
+      });
   }
 
   function refreshTicketsSilently() {
@@ -235,7 +280,6 @@ export default function Tickets() {
     setSelectedIds((ids) => (ids.length === tickets.length ? [] : tickets.map((t) => t.id)));
   }
 
-  // Changement rapide de statut depuis la liste/grille
   async function handleQuickStatusChange(ticketId, newStatus, e) {
     if (e) e.stopPropagation();
     try {
@@ -247,7 +291,6 @@ export default function Tickets() {
     }
   }
 
-  // Exportation CSV
   function exportCSV() {
     if (tickets.length === 0) return toast.error('Aucun ticket à exporter');
     const headers = ['ID', 'Titre', 'Statut', 'Priorité', 'Catégorie', 'Équipe', 'Assigné à', 'Demandeur', 'Lieu', 'GLPI ID', 'Date de création'];
@@ -275,7 +318,6 @@ export default function Tickets() {
     toast.success(`${tickets.length} ticket(s) exporté(s) en CSV`);
   }
 
-  // Exportation JSON
   function exportJSON() {
     if (tickets.length === 0) return toast.error('Aucun ticket à exporter');
     const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(tickets, null, 2));
@@ -402,7 +444,12 @@ export default function Tickets() {
 
   function toggleForm() {
     setShowForm((v) => !v);
-    setSearchParams({});
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (next.get('new') === '1') next.delete('new');
+      else next.set('new', '1');
+      return next;
+    });
   }
 
   useEffect(() => {
@@ -419,422 +466,402 @@ export default function Tickets() {
 
   return (
     <motion.div
-      className="p-lg space-y-lg"
+      className="max-w-full mx-auto w-full space-y-6 px-4 sm:px-6 lg:px-8 min-w-0 pt-4 sm:pt-6 pb-8"
       variants={containerVariants}
       initial="hidden"
       animate="visible"
     >
-      {/* ── En-tête ─────────────────────────────────────────────────────────── */}
-      <motion.header variants={itemVariants} className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h2 className="font-display-lg text-display-lg text-on-background tracking-tight flex items-center gap-3">
-            Tickets
-            <span className="text-body-md font-semibold px-3 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">
-              {totalCount}
-            </span>
-          </h2>
-          <p className="font-body-lg text-body-lg text-on-surface-variant">Gestion, filtres et suivi temps réel des demandes IT.</p>
-        </div>
-
-        {/* Action bar (Refresh, View switcher, Export, New Ticket) */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Bouton Rafraîchir */}
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={() => loadTickets(true)}
-            disabled={refreshing}
-            title="Rafraîchir les tickets"
-            className="p-2.5 rounded-xl border border-outline-variant/60 bg-surface-container-low hover:bg-surface-container-high text-on-surface transition-all disabled:opacity-50"
-          >
-            <span className={`material-symbols-outlined text-[18px] block ${refreshing ? 'animate-spin' : ''}`}>
-              refresh
-            </span>
-          </motion.button>
-
-          {/* Mode d'affichage (Tableau vs Grille) */}
-          <div className="flex items-center p-1 rounded-xl bg-surface-container-high/60 border border-outline-variant/40">
-            <button
-              onClick={() => changeViewMode('table')}
-              title="Vue Tableau"
-              className={`p-1.5 rounded-lg transition-all ${viewMode === 'table' ? 'bg-primary text-white shadow-sm' : 'text-on-surface-variant hover:text-on-surface'}`}
-            >
-              <span className="material-symbols-outlined text-[18px] block">table_rows</span>
-            </button>
-            <button
-              onClick={() => changeViewMode('grid')}
-              title="Vue Grille (Cartes)"
-              className={`p-1.5 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-primary text-white shadow-sm' : 'text-on-surface-variant hover:text-on-surface'}`}
-            >
-              <span className="material-symbols-outlined text-[18px] block">grid_view</span>
-            </button>
+      {/* Hero Header SEVEN-T */}
+      <div className="p-6 sm:p-8 rounded-2xl sm:rounded-3xl border border-outline-variant/30 bg-surface-container-lowest shadow-sm mb-6">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+          <div className="min-w-0">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="p-2 bg-blue-500/10 rounded-xl">
+                <Ticket className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+              </div>
+              <h1 className="text-2xl sm:text-3xl font-display font-bold truncate text-on-surface">Tickets</h1>
+              <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold uppercase tracking-wider animate-pulse border border-emerald-500/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                Live
+              </span>
+            </div>
+            <p className="text-sm sm:text-base text-on-surface-variant font-medium">Gérez, filtrez et suivez en temps réel l'ensemble des tickets d'assistance IT.</p>
           </div>
-
-          {/* Exporter */}
-          <div className="relative group">
-            <button
-              className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-outline-variant/60 bg-surface-container-low hover:bg-surface-container-high text-on-surface font-semibold text-body-sm transition-all"
+          <div className="flex flex-wrap items-center gap-2">
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={toggleForm}
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold text-xs flex items-center gap-2 transition-all shadow-md shadow-blue-500/20 hover:brightness-110 cursor-pointer"
             >
-              <span className="material-symbols-outlined text-[18px]">download</span>
-              <span>Exporter</span>
+              {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+              {showForm ? 'Fermer' : 'Nouveau Ticket'}
+            </motion.button>
+            <button
+              onClick={() => loadTickets(true)}
+              disabled={refreshing}
+              className="p-2 rounded-xl border border-outline-variant/40 bg-surface-container hover:bg-surface-container-high text-on-surface-variant transition-all disabled:opacity-50"
+              title="Rafraîchir les tickets"
+            >
+              <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
             </button>
-            <div className="absolute right-0 top-full mt-1 hidden group-hover:flex flex-col bg-surface-container-lowest border border-outline-variant/60 rounded-xl shadow-xl py-1 z-20 min-w-[140px]">
+            {/* 3-way View Mode Toggle: Tableau, Grille, Coverflow 3D */}
+            <div className="p-1 rounded-xl border border-outline-variant/30 bg-surface-container flex items-center gap-1">
               <button
-                onClick={exportCSV}
-                className="px-4 py-2 text-left font-body-sm text-body-sm text-on-surface hover:bg-primary/10 hover:text-primary flex items-center gap-2 transition-colors"
+                onClick={() => changeViewMode('table')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  viewMode === 'table'
+                    ? 'bg-blue-600 text-white shadow-sm font-bold'
+                    : 'text-on-surface-variant hover:text-on-surface'
+                }`}
+                title="Vue Tableau"
               >
-                <span className="material-symbols-outlined text-[16px]">csv</span>
-                Export CSV
+                <Table className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Tableau</span>
               </button>
               <button
-                onClick={exportJSON}
-                className="px-4 py-2 text-left font-body-sm text-body-sm text-on-surface hover:bg-primary/10 hover:text-primary flex items-center gap-2 transition-colors"
+                onClick={() => changeViewMode('grid')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  viewMode === 'grid'
+                    ? 'bg-blue-600 text-white shadow-sm font-bold'
+                    : 'text-on-surface-variant hover:text-on-surface'
+                }`}
+                title="Vue Grille"
               >
-                <span className="material-symbols-outlined text-[16px]">javascript</span>
-                Export JSON
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Grille</span>
+              </button>
+              <button
+                onClick={() => changeViewMode('carousel')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  viewMode === 'carousel'
+                    ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-sm font-bold'
+                    : 'text-on-surface-variant hover:text-on-surface'
+                }`}
+                title="Vue Coverflow 3D Carousel"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-purple-300" />
+                <span className="hidden sm:inline">Coverflow 3D</span>
               </button>
             </div>
           </div>
-
-          {/* Nouveau Ticket */}
-          <motion.button
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-            onClick={toggleForm}
-            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl btn-gradient font-body-sm text-body-sm font-semibold shadow-md shadow-primary/10 hover:shadow-lg transition-all whitespace-nowrap"
-          >
-            <span className="material-symbols-outlined text-[18px]">{showForm ? 'close' : 'add'}</span>
-            {showForm ? 'Fermer' : 'Nouveau ticket'}
-          </motion.button>
         </div>
-      </motion.header>
 
-      {/* ── Message d'erreur ────────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {error && (
-          <motion.div
-            initial={{ opacity: 0, y: -8, height: 0 }}
-            animate={{ opacity: 1, y: 0, height: 'auto' }}
-            exit={{ opacity: 0, y: -8, height: 0 }}
-            role="alert"
-            className="border border-red-500/20 bg-red-500/5 text-red-500 p-md rounded-xl font-body-md"
-          >
-            {error}
-          </motion.div>
-        )}
-      </AnimatePresence>
+        {/* Bento Stat Items — affichage uniquement */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5 mt-6">
+          {[
+            { label: 'Total',      value: ticketStats.total,    Icon: Ticket,       color: 'text-blue-600 dark:text-blue-400 bg-blue-500/10'    },
+            { label: 'Ouverts',    value: ticketStats.open,     Icon: Radio,        color: 'text-amber-600 dark:text-amber-400 bg-amber-500/10'  },
+            { label: 'En attente', value: ticketStats.pending,  Icon: Clock,        color: 'text-yellow-600 dark:text-yellow-400 bg-yellow-500/10'},
+            { label: 'Résolus',    value: ticketStats.resolved, Icon: CheckCircle2, color: 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10'},
+            { label: 'P1 Critique',value: ticketStats.p1,       Icon: Flame,        color: 'text-red-600 dark:text-red-400 bg-red-500/10'      },
+            { label: 'P2 Haute',   value: ticketStats.p2,       Icon: AlertTriangle,color: 'text-orange-600 dark:text-orange-400 bg-orange-500/10'},
+            { label: 'IA Process', value: ticketStats.ai,       Icon: Sparkles,     color: 'text-purple-600 dark:text-purple-400 bg-purple-500/10'},
+          ].map((s) => {
+            const IconComponent = s.Icon;
+            return (
+              <div
+                key={s.label}
+                className="p-3 rounded-2xl border border-outline-variant/30 bg-surface-container-low/40 flex flex-col items-start"
+              >
+                <div className={`p-2 rounded-xl mb-2 ${s.color}`}>
+                  <IconComponent className="w-4 h-4" />
+                </div>
+                <p className="text-xl font-bold leading-none mb-1 text-on-surface">{s.value}</p>
+                <p className="text-[10px] uppercase font-black tracking-wider truncate w-full text-on-surface-variant">{s.label}</p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* MODAL DE CRÉATION DE TICKET */}
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* MODALE DE CRÉATION DE TICKET SEVEN-T */}
       {createPortal(
         <AnimatePresence>
           {showForm && (
-            <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-8 sm:pt-12 overflow-y-auto">
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                transition={{ duration: 0.2 }}
                 onClick={toggleForm}
-                className="absolute inset-0 bg-black/60 backdrop-blur-[2px] cursor-pointer"
+                className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer"
               />
 
-              <motion.form
-                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 16 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                transition={{ type: 'spring', duration: 0.35, bounce: 0.12 }}
-                onSubmit={handleCreate}
-                className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-y-auto card-shadow flex flex-col"
+                exit={{ opacity: 0, scale: 0.95, y: 16 }}
+                transition={{ type: 'spring', duration: 0.35, bounce: 0.15 }}
+                className={`relative max-w-2xl w-full rounded-3xl border p-6 sm:p-8 card-shadow overflow-hidden max-h-[90vh] flex flex-col z-10 ${
+                  isDark ? 'bg-surface-container-lowest border-outline-variant/60 text-on-surface' : 'bg-white border-slate-200 text-slate-900'
+                }`}
               >
-                <div className="sticky top-0 z-10 bg-surface-container-lowest rounded-t-2xl border-b border-outline-variant/40">
-                  <div className="bento-card-header">
-                    <h3 className="font-headline-md text-headline-md text-on-background flex items-center gap-2 font-bold">
-                      <span className="material-symbols-outlined text-primary text-[20px]">add_circle</span>
-                      Nouveau ticket
-                    </h3>
-                    <motion.button
+                <div className="flex items-center justify-between pb-4 border-b border-outline-variant/30 mb-6 shrink-0">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-blue-500/10 rounded-xl border border-blue-500/20">
+                      <Plus className="size-6 text-blue-600 dark:text-blue-400" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold font-display text-on-surface">Nouveau Ticket d'Assistance</h3>
+                      <p className="text-xs text-slate-600 dark:text-slate-400 font-medium">Remplissez les informations ci-dessous pour ouvrir une demande.</p>
+                    </div>
+                  </div>
+                  <motion.button
+                    type="button"
+                    onClick={toggleForm}
+                    whileHover={{ scale: 1.1, rotate: 90 }}
+                    whileTap={{ scale: 0.9 }}
+                    className="p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </motion.button>
+                </div>
+
+                <form onSubmit={handleCreate} className="flex-1 overflow-y-auto space-y-5 pr-1">
+                  {error && (
+                    <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-700 dark:text-red-400 text-xs font-bold flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      <span className="flex-1">{error}</span>
+                      <button type="button" onClick={() => setError('')} className="p-1 hover:bg-red-500/20 rounded-lg">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Titre de la demande *</label>
+                    <input
+                      type="text"
+                      required
+                      value={form.title}
+                      onChange={(e) => setForm({ ...form, title: e.target.value })}
+                      placeholder="ex: Problème d'impression ou d'accès réseau..."
+                      className="w-full px-4 py-2.5 rounded-xl border font-medium text-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-surface border-outline-variant/60 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Catégorie</label>
+                      <select
+                        value={form.category}
+                        onChange={(e) => setForm({ ...form, category: e.target.value })}
+                        className="w-full px-4 py-2.5 rounded-xl border font-medium text-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-surface border-outline-variant/60 text-slate-900 dark:text-white"
+                      >
+                        <option value="">Sélectionner une catégorie</option>
+                        {categories.map((c) => (
+                          <option key={c.id || c.name} value={c.name}>{c.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Priorité</label>
+                      <select
+                        value={form.priority}
+                        onChange={(e) => setForm({ ...form, priority: e.target.value })}
+                        className="w-full px-4 py-2.5 rounded-xl border font-medium text-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-surface border-outline-variant/60 text-slate-900 dark:text-white"
+                      >
+                        {PRIORITY_OPTIONS.map((p) => (
+                          <option key={p} value={p}>{p} - {p === 'P1' ? 'Critique' : p === 'P2' ? 'Haute' : p === 'P3' ? 'Moyenne' : 'Basse'}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Type de demande</label>
+                      <select
+                        value={form.type}
+                        onChange={(e) => setForm({ ...form, type: e.target.value })}
+                        className="w-full px-4 py-2.5 rounded-xl border font-medium text-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-surface border-outline-variant/60 text-slate-900 dark:text-white"
+                      >
+                        {TYPE_OPTIONS.map((t) => (
+                          <option key={t.value} value={t.value}>{t.label}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {locations.length > 0 && (
+                      <div>
+                        <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Lieu / Emplacement</label>
+                        <SearchableSelect
+                          options={locations}
+                          value={form.locationId}
+                          onChange={(val) => setForm({ ...form, locationId: val })}
+                          placeholder="Rechercher un lieu GLPI..."
+                          searchPlaceholder="Rechercher un lieu par nom..."
+                          labelKey="name"
+                          valueKey="id"
+                          subLabelKey="completename"
+                          icon={MapPin}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Équipe assignée</label>
+                      <select
+                        value={form.teamId}
+                        onChange={(e) => setForm({ ...form, teamId: e.target.value })}
+                        className="w-full px-4 py-2.5 rounded-xl border font-medium text-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-surface border-outline-variant/60 text-slate-900 dark:text-white"
+                      >
+                        <option value="">Sélectionner une équipe</option>
+                        {teams.map((t) => (
+                          <option key={t.id} value={t.id}>{t.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Technicien assigné</label>
+                      <SearchableSelect
+                        options={users}
+                        value={form.assignedToId}
+                        onChange={(val) => setForm({ ...form, assignedToId: val })}
+                        placeholder="Auto-assignation ou rechercher un technicien..."
+                        searchPlaceholder="Rechercher un technicien par nom ou email..."
+                        labelKey="fullName"
+                        valueKey="id"
+                        subLabelKey="email"
+                        icon={User}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Urgence</label>
+                      <select
+                        value={form.urgency}
+                        onChange={(e) => setForm({ ...form, urgency: e.target.value })}
+                        className="w-full px-4 py-2.5 rounded-xl border font-medium text-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-surface border-outline-variant/60 text-slate-900 dark:text-white"
+                      >
+                        {URGENCY_IMPACT_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Impact</label>
+                      <select
+                        value={form.impact}
+                        onChange={(e) => setForm({ ...form, impact: e.target.value })}
+                        className="w-full px-4 py-2.5 rounded-xl border font-medium text-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-surface border-outline-variant/60 text-slate-900 dark:text-white"
+                      >
+                        {URGENCY_IMPACT_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {canAssign && (
+                    <div>
+                      <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Demandeur (Création pour un tier)</label>
+                      <SearchableSelect
+                        options={users}
+                        value={form.requesterId}
+                        onChange={(val) => setForm({ ...form, requesterId: val })}
+                        placeholder={`Moi-même (${user?.fullName || ''})`}
+                        searchPlaceholder="Rechercher un demandeur par nom ou email..."
+                        labelKey="fullName"
+                        valueKey="id"
+                        subLabelKey="email"
+                        icon={User}
+                      />
+                    </div>
+                  )}
+
+                  {/* Observateurs avec barre de recherche intégrée */}
+                  <div>
+                    <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <User className="w-3.5 h-3.5 text-purple-500" />
+                      Observateurs du ticket ({form.observerIds?.length || 0})
+                    </label>
+                    <SearchableMultiSelect
+                      options={users}
+                      selectedIds={form.observerIds || []}
+                      onChange={(nextIds) => setForm({ ...form, observerIds: nextIds })}
+                      placeholder="Rechercher des observateurs par nom ou email..."
+                      labelKey="fullName"
+                      valueKey="id"
+                      subLabelKey="email"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Description détaillée *</label>
+                    <textarea
+                      rows={4}
+                      required
+                      value={form.content}
+                      onChange={(e) => setForm({ ...form, content: e.target.value })}
+                      placeholder="Décrivez votre problème ou besoin en détails..."
+                      className="w-full px-4 py-2.5 rounded-xl border font-medium text-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary resize-none bg-surface border-outline-variant/60 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Pièce jointe (optionnel)</label>
+                    <input
+                      type="file"
+                      onChange={(e) => setAttachment(e.target.files[0])}
+                      className="block w-full text-xs text-slate-600 dark:text-slate-400 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border file:border-blue-500/20 file:text-xs file:font-bold file:bg-blue-500/10 file:text-blue-600 dark:file:text-blue-400 hover:file:bg-blue-500/20 cursor-pointer"
+                    />
+                  </div>
+
+                  <div className="pt-4 border-t border-outline-variant/30 flex justify-end gap-3 shrink-0">
+                    <button
                       type="button"
                       onClick={toggleForm}
-                      whileHover={{ scale: 1.1 }}
-                      whileTap={{ scale: 0.9 }}
-                      className="text-on-surface-variant hover:text-on-surface transition-colors"
-                    >
-                      <span className="material-symbols-outlined">close</span>
-                    </motion.button>
-                  </div>
-                </div>
-
-                <div className="p-lg flex flex-col gap-lg">
-                  <div className="flex flex-col lg:flex-row gap-lg">
-                    <div className="flex-1 min-w-0 flex flex-col gap-md">
-                      <FieldRow label="Titre" required>
-                        <input
-                          className="w-full h-10 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-md text-body-md text-on-surface"
-                          value={form.title}
-                          onChange={(e) => setForm({ ...form, title: e.target.value })}
-                          required
-                        />
-                      </FieldRow>
-                      <FieldRow label="Description" required>
-                        <textarea
-                          className="w-full px-sm py-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-md text-body-md text-on-surface min-h-[200px]"
-                          value={form.content}
-                          onChange={(e) => setForm({ ...form, content: e.target.value })}
-                          required
-                        />
-                      </FieldRow>
-                      <FieldRow label="Pièce jointe (2 Mio max)">
-                        <input
-                          type="file"
-                          className="font-body-sm text-body-sm text-on-surface-variant file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 file:transition-all file:duration-300 file:cursor-pointer cursor-pointer"
-                          onChange={(e) => setAttachment(e.target.files?.[0] || null)}
-                        />
-                      </FieldRow>
-                    </div>
-
-                    <div className="w-full lg:w-80 xl:w-96 shrink-0 flex flex-col gap-md">
-                      <div className="bg-surface-bright/35 border border-outline-variant/65 p-md rounded-2xl flex flex-col gap-sm">
-                        <h4 className="font-headline-sm text-headline-sm text-on-background font-semibold flex items-center gap-1.5">
-                          <span className="material-symbols-outlined text-[16px] text-on-surface-variant">settings</span>
-                          Propriétés
-                        </h4>
-                        <div className="grid grid-cols-1 gap-x-md gap-y-sm">
-                          <SelectRow label="Type">
-                            <select className="h-9 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-sm text-body-sm text-on-surface w-full"
-                              value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}
-                            >{TYPE_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select>
-                          </SelectRow>
-                          <SelectRow label="Catégorie">
-                            <select className="h-9 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-sm text-body-sm text-on-surface w-full"
-                              value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}
-                            ><option value="">-----</option>{categories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}</select>
-                          </SelectRow>
-                          <SelectRow label="Lieu">
-                            <select className="h-9 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-sm text-body-sm text-on-surface w-full"
-                              value={form.locationId} onChange={(e) => setForm({ ...form, locationId: e.target.value })}
-                            ><option value="">Sélectionner un lieu</option>{locations.map((l) => <option key={l.glpiLocationId} value={l.glpiLocationId}>{l.completename || l.name}</option>)}</select>
-                          </SelectRow>
-                          {canAssign && (
-                            <SelectRow label="Statut">
-                              <select className="h-9 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-sm text-body-sm text-on-surface w-full"
-                                value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}
-                              >{STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}</select>
-                            </SelectRow>
-                          )}
-                          <SelectRow label="Source">
-                            <select className="h-9 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-sm text-body-sm text-on-surface w-full"
-                              value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })}
-                            >{SOURCE_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}</select>
-                          </SelectRow>
-                          <SelectRow label="Priorité">
-                            <select className="h-9 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-sm text-body-sm text-on-surface w-full"
-                              value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}
-                            >{PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}</select>
-                          </SelectRow>
-                          <div className="grid grid-cols-2 gap-x-md gap-y-sm">
-                            <SelectRow label="Urgence">
-                              <select className="h-9 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-sm text-body-sm text-on-surface w-full"
-                                value={form.urgency} onChange={(e) => setForm({ ...form, urgency: e.target.value })}
-                              >{URGENCY_IMPACT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
-                            </SelectRow>
-                            <SelectRow label="Impact">
-                              <select className="h-9 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-sm text-body-sm text-on-surface w-full"
-                                value={form.impact} onChange={(e) => setForm({ ...form, impact: e.target.value })}
-                              >{URGENCY_IMPACT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
-                            </SelectRow>
-                          </div>
-                          <SelectRow label="Date d'ouverture">
-                            <input type="datetime-local" className="h-9 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-sm text-body-sm text-on-surface w-full"
-                              value={form.openedAt} onChange={(e) => setForm({ ...form, openedAt: e.target.value })}
-                            />
-                          </SelectRow>
-                          <SelectRow label="ID externe">
-                            <input className="h-9 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-sm text-body-sm text-on-surface w-full"
-                              value={form.externalId} onChange={(e) => setForm({ ...form, externalId: e.target.value })}
-                            />
-                          </SelectRow>
-                          <label className="flex items-center gap-2 font-body-sm text-body-sm text-on-surface-variant cursor-pointer select-none pt-1">
-                            <input type="checkbox" className="w-4 h-4 rounded accent-primary cursor-pointer"
-                              checked={form.requiresApproval} onChange={(e) => setForm({ ...form, requiresApproval: e.target.checked })}
-                            />
-                            <span className="material-symbols-outlined text-[16px]">fact_check</span>
-                            Approbation
-                          </label>
-                        </div>
-                      </div>
-
-                      {canAssign && (
-                        <div className="bg-surface-bright/35 border border-outline-variant/65 p-md rounded-2xl flex flex-col gap-sm">
-                          <h4 className="font-headline-sm text-headline-sm text-on-background font-semibold flex items-center gap-1.5">
-                            <span className="material-symbols-outlined text-[16px] text-on-surface-variant">people</span>
-                            Acteurs
-                          </h4>
-
-                          <div className="relative">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[14px] text-on-surface-variant pointer-events-none">search</span>
-                            <input
-                              className="w-full h-9 pl-8 pr-8 rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-sm text-body-sm text-on-surface"
-                              placeholder="Rechercher…"
-                              value={actorSearch}
-                              onChange={(e) => setActorSearch(e.target.value)}
-                            />
-                            {actorSearch && (
-                              <button
-                                type="button"
-                                onClick={() => setActorSearch('')}
-                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface transition-colors"
-                              >
-                                <span className="material-symbols-outlined text-[14px]">close</span>
-                              </button>
-                            )}
-                          </div>
-
-                          <div className="flex flex-col gap-sm">
-                            <SelectRow label="Demandeur">
-                              <select className="h-9 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-sm text-body-sm text-on-surface w-full"
-                                value={form.requesterId} onChange={(e) => setForm({ ...form, requesterId: e.target.value })}
-                              ><option value="">Moi-même</option>{filteredUsers.map((u) => <option key={u.id} value={u.id}>{u.fullName}</option>)}</select>
-                            </SelectRow>
-                            <SelectRow label="Observateur(s)">
-                              <div className="w-full min-h-[140px] px-sm py-1 rounded-xl border border-outline-variant bg-surface focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all font-body-sm text-body-sm text-on-surface overflow-y-auto flex flex-col gap-0.5">
-                                {filteredUsers.length === 0 ? (
-                                  <span className="text-outline/60 italic font-body-sm text-body-sm py-1 px-1">Aucun utilisateur trouvé</span>
-                                ) : (
-                                  filteredUsers.map((u) => {
-                                    const isSelected = form.observerIds.includes(u.id);
-                                    return (
-                                      <label
-                                        key={u.id}
-                                        className={`flex items-center gap-2 px-2 py-1 rounded-lg cursor-pointer transition-colors ${
-                                          isSelected ? 'bg-primary/10 text-primary' : 'hover:bg-surface-container-low text-on-surface'
-                                        }`}
-                                      >
-                                        <input
-                                          type="checkbox"
-                                          className="accent-primary w-3.5 h-3.5 rounded cursor-pointer"
-                                          checked={isSelected}
-                                          onChange={() => {
-                                            setForm((prev) => ({
-                                              ...prev,
-                                              observerIds: isSelected
-                                                ? prev.observerIds.filter((id) => id !== u.id)
-                                                : [...prev.observerIds, u.id],
-                                            }));
-                                          }}
-                                        />
-                                        <span className="font-body-sm text-body-sm">{u.fullName}</span>
-                                      </label>
-                                    );
-                                  })
-                                )}
-                              </div>
-                            </SelectRow>
-                            <SelectRow label="Assigné à">
-                              <select className="h-9 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-sm text-body-sm text-on-surface w-full"
-                                value={form.assignedToId} onChange={(e) => setForm({ ...form, assignedToId: e.target.value })}
-                              ><option value="">Non assigné</option>{filteredUsers.map((u) => {
-                                const isGlpi = glpiUsers.some((gu) => gu.id === u.id);
-                                return <option key={u.id} value={u.id}>{u.fullName}{isGlpi ? ' 🔗' : ''}</option>;
-                              })}</select>
-                            </SelectRow>
-                            <SelectRow label="Équipe">
-                              <select className="h-9 px-sm rounded-xl border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-body-sm text-body-sm text-on-surface w-full"
-                                value={form.teamId} onChange={(e) => setForm({ ...form, teamId: e.target.value })}
-                              ><option value="">Aucune</option>{filteredTeams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
-                            </SelectRow>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex gap-sm pt-4 border-t border-outline-variant/50 justify-end">
-                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} type="button" onClick={toggleForm}
-                      className="px-5 py-2.5 rounded-xl border border-outline-variant text-on-surface font-semibold text-body-sm hover:bg-surface-container-low transition-colors"
+                      className="px-4 py-2.5 rounded-xl border border-outline-variant/40 font-semibold text-sm transition-all cursor-pointer bg-surface text-on-surface hover:bg-surface-container"
                     >
                       Annuler
-                    </motion.button>
-                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} type="submit" disabled={creating}
-                      className="px-5 py-2.5 rounded-xl btn-gradient font-semibold text-body-sm shadow-md shadow-primary/20 hover:shadow-lg transition-all disabled:opacity-50 flex items-center gap-2"
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={creating}
+                      className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold text-sm transition-all shadow-md shadow-blue-500/20 disabled:opacity-50 hover:brightness-110 cursor-pointer"
                     >
-                      {creating && <span className="material-symbols-outlined animate-spin text-[16px]">progress_activity</span>}
                       {creating ? 'Création...' : 'Créer le ticket'}
-                    </motion.button>
+                    </button>
                   </div>
-                </div>
-              </motion.form>
+                </form>
+              </motion.div>
             </div>
           )}
         </AnimatePresence>,
         document.body
       )}
 
-      {/* ── STATISTIQUES INTERACTIVES (BENTO CARDS CLIQUABLES) ───────────────── */}
-      <motion.div variants={itemVariants} className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-        {[
-          { label: 'Total', value: ticketStats.total, icon: 'confirmation_number', color: '#3B82F6', filterKey: 'status', filterVal: '' },
-          { label: 'Ouverts', value: ticketStats.open, icon: 'radio_button_checked', color: '#F97316', filterKey: 'status', filterVal: 'OPEN_GROUP' },
-          { label: 'En attente', value: ticketStats.pending, icon: 'hourglass_empty', color: '#EAB308', filterKey: 'status', filterVal: 'PENDING' },
-          { label: 'Résolus', value: ticketStats.resolved, icon: 'check_circle', color: '#10B981', filterKey: 'status', filterVal: 'CLOSED_GROUP' },
-          { label: 'P1 - Critique', value: ticketStats.p1, icon: 'emergency', color: '#EF4444', filterKey: 'priority', filterVal: 'P1' },
-          { label: 'P2 - Haute', value: ticketStats.p2, icon: 'report', color: '#F97316', filterKey: 'priority', filterVal: 'P2' },
-          { label: 'IA Process', value: ticketStats.ai, icon: 'smart_toy', color: '#8B5CF6', filterKey: 'aiProcessed', filterVal: 'true' },
-        ].map((s) => {
-          const isActive = filters[s.filterKey] === s.filterVal && (s.filterVal !== '' || (!filters.status && !filters.priority && !filters.aiProcessed));
-          return (
-            <motion.div
-              key={s.label}
-              whileHover={{ y: -2, scale: 1.02 }}
-              whileTap={{ scale: 0.97 }}
-              onClick={() => updateFilter(s.filterKey, isActive && s.filterVal !== '' ? '' : s.filterVal)}
-              className={`bento-card px-4 py-3 flex items-center gap-3 min-w-0 cursor-pointer transition-all border ${
-                isActive ? 'border-primary shadow-sm shadow-primary/10 bg-primary/5' : 'hover:border-outline-variant'
-              }`}
-            >
-              <span className="material-symbols-outlined text-[22px] shrink-0" style={{ color: s.color }}>{s.icon}</span>
-              <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant truncate">{s.label}</p>
-                <motion.p
-                  key={s.value}
-                  initial={{ scale: 1.15, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  className="text-lg font-bold tabular-nums text-on-surface leading-tight"
-                >
-                  {s.value}
-                </motion.p>
-              </div>
-            </motion.div>
-          );
-        })}
-      </motion.div>
-
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* BARRE DE FILTRES BENTO & RECHERCHE AVANCÉE */}
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* BARRE DE FILTRES BENTO */}
       <motion.div variants={itemVariants} className="bento-card p-lg space-y-md">
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-end gap-md">
-          {/* Grille de filtres */}
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 w-full lg:w-auto">
             {/* Recherche */}
             <div className="col-span-2 flex flex-col gap-1">
               <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Recherche</span>
               <div className="relative">
-                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[16px] text-outline">search</span>
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Titre, n° ticket, contenu, lieu..."
-                  className="w-full pl-9 pr-8 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface font-body-sm text-body-sm transition-all focus:border-primary focus:outline-none"
+                  className="w-full pl-9 pr-8 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface font-body-sm text-body-sm transition-all focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none"
                 />
                 {searchQuery && (
                   <button
                     onClick={() => { setSearchQuery(''); setDebouncedSearch(''); setPage(1); }}
                     className="absolute right-2.5 top-1/2 -translate-y-1/2 text-outline hover:text-on-surface transition-colors"
                   >
-                    <span className="material-symbols-outlined text-[14px]">close</span>
+                    <X className="w-3.5 h-3.5" />
                   </button>
                 )}
               </div>
@@ -843,13 +870,19 @@ export default function Tickets() {
             <FilterSelect value={filters.status} onChange={(v) => updateFilter('status', v)}
               label="Statut" options={[
                 { v: '', l: 'Tous les statuts' },
-                { v: 'OPEN_GROUP', l: '⚡ Tickets ouverts' },
-                { v: 'CLOSED_GROUP', l: '✅ Tickets fermés' },
                 { v: 'NEW', l: 'Nouveau' },
                 { v: 'OPEN', l: 'Ouvert' },
                 { v: 'PENDING', l: 'En attente' },
                 { v: 'SOLVED', l: 'Résolu' },
                 { v: 'CLOSED', l: 'Fermé' },
+              ]} />
+
+            <FilterSelect value={filters.approvalStatus} onChange={(v) => updateFilter('approvalStatus', v)}
+              label="Approbation" options={[
+                { v: '', l: 'Toutes' },
+                { v: 'PENDING', l: '🛡️ En attente Hotline' },
+                { v: 'APPROVED', l: '✅ Approuvés' },
+                { v: 'REJECTED', l: '❌ Rejetés' },
               ]} />
 
             <FilterSelect value={filters.priority} onChange={(v) => updateFilter('priority', v)}
@@ -875,14 +908,13 @@ export default function Tickets() {
               ]} />
           </div>
 
-          {/* Actions filtres */}
           <div className="flex items-center gap-2 shrink-0">
             {hasActiveFilters && (
               <button
                 onClick={clearFilters}
                 className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-primary/10 text-primary text-body-sm font-semibold hover:bg-primary/20 transition-colors"
               >
-                <span className="material-symbols-outlined text-[16px]">filter_alt_off</span>
+                <FilterX className="w-4 h-4" />
                 Réinitialiser
               </button>
             )}
@@ -895,7 +927,7 @@ export default function Tickets() {
                 disabled={deleting}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-error/30 text-error font-body-sm text-body-sm font-semibold hover:bg-error/5 transition-colors disabled:opacity-50"
               >
-                <span className="material-symbols-outlined text-[18px]">delete</span>
+                <Trash2 className="w-4 h-4" />
                 Supprimer ({selectedIds.length})
               </motion.button>
             )}
@@ -908,34 +940,48 @@ export default function Tickets() {
           <ChipFilter
             active={filters.mine === 'true'}
             onClick={() => updateFilter('mine', filters.mine === 'true' ? '' : 'true')}
-            icon="person"
+            Icon={User}
             label="Mes tickets"
           />
           <ChipFilter
             active={filters.aiProcessed === 'true'}
             onClick={() => updateFilter('aiProcessed', filters.aiProcessed === 'true' ? '' : 'true')}
-            icon="smart_toy"
+            Icon={Sparkles}
             label="Traité par IA"
           />
           <ChipFilter
             active={filters.priority === 'P1'}
             onClick={() => updateFilter('priority', filters.priority === 'P1' ? '' : 'P1')}
-            icon="emergency"
+            Icon={Flame}
             label="Critiques P1"
           />
         </div>
       </motion.div>
 
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* CONTENU PRINCIPAL : TABLEAU OU GRILLE */}
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {loading ? (
-        <div className="bento-card p-xl flex flex-col items-center justify-center gap-3">
-          <span className="material-symbols-outlined animate-spin text-primary text-3xl">progress_activity</span>
-          <p className="font-body-md text-body-md text-on-surface-variant">Chargement des tickets...</p>
-        </div>
+      {/* CONTENU PRINCIPAL */}
+      <div className="relative">
+        {/* Overlay de chargement discret (filtre/recherche) */}
+        {refreshing && !loading && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none rounded-2xl">
+            <div className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-semibold shadow-lg ${
+              isDark ? 'bg-space-800/90 text-zinc-300 border border-space-700' : 'bg-white/90 text-gray-600 border border-gray-200'
+            }`}>
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              Mise à jour...
+            </div>
+          </div>
+        )}
+
+        {loading ? (
+          <div className="bento-card p-xl flex flex-col items-center justify-center gap-3">
+            <RefreshCw className="w-8 h-8 animate-spin text-primary" />
+            <p className="font-body-md text-body-md text-on-surface-variant">Chargement des tickets...</p>
+          </div>
+        ) : viewMode === 'carousel' ? (
+          <motion.div variants={itemVariants} className="w-full">
+            <TicketCoverflowCarousel tickets={tickets} isDark={isDark} />
+          </motion.div>
       ) : viewMode === 'grid' ? (
-        /* ── VUE GRILLE (BENTO CARDS) ────────────────────────────────────────── */
         <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-md">
           <AnimatePresence mode="popLayout">
             {tickets.map((t, idx) => (
@@ -948,7 +994,6 @@ export default function Tickets() {
                 onClick={() => navigate(`/tickets/${t.id}`)}
                 className="bento-card p-md flex flex-col justify-between hover:border-primary/50 transition-all cursor-pointer group relative overflow-hidden"
               >
-                {/* Status indicator bar top */}
                 <div className={`absolute top-0 left-0 right-0 h-1 ${
                   t.status === 'NEW' ? 'bg-amber-500' :
                   t.status === 'OPEN' ? 'bg-blue-500' :
@@ -957,19 +1002,18 @@ export default function Tickets() {
                 }`} />
 
                 <div className="space-y-sm pt-1">
-                  {/* Top row badges */}
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5">
                       <span className="font-mono text-xs text-primary font-bold">#{t.id}</span>
                       {t.glpiTicketId && (
                         <span className="px-2 py-0.5 rounded-full border border-outline-variant/60 bg-surface-container-low text-[10px] text-on-surface-variant font-medium flex items-center gap-1">
-                          <span className="material-symbols-outlined text-[11px]">sync</span>
+                          <RefreshCw className="w-3 h-3" />
                           #{t.glpiTicketId}
                         </span>
                       )}
                       {t.aiProcessed && (
                         <span className="px-2 py-0.5 rounded-full border border-primary/20 bg-primary/5 text-primary text-[10px] font-medium flex items-center gap-1">
-                          <span className="material-symbols-outlined text-[11px]">smart_toy</span>
+                          <Sparkles className="w-3 h-3" />
                           IA
                         </span>
                       )}
@@ -977,7 +1021,6 @@ export default function Tickets() {
                     <PriorityBadge priority={t.priority} />
                   </div>
 
-                  {/* Title & Category */}
                   <div>
                     <h3 className="font-headline-sm text-headline-sm text-on-surface font-bold group-hover:text-primary transition-colors line-clamp-2">
                       {t.title}
@@ -989,24 +1032,21 @@ export default function Tickets() {
                     )}
                   </div>
 
-                  {/* Location if any */}
                   {t.glpiLocationName && (
                     <div className="flex items-center gap-1 text-[12px] text-on-surface-variant truncate">
-                      <span className="material-symbols-outlined text-[14px] text-primary">location_on</span>
+                      <MapPin className="w-3.5 h-3.5 text-primary shrink-0" />
                       <span className="truncate">{t.glpiLocationName}</span>
                     </div>
                   )}
                 </div>
 
-                {/* Footer card */}
                 <div className="pt-md mt-md border-t border-outline-variant/40 flex items-center justify-between gap-2 text-body-sm">
-                  {/* Quick status change or badge */}
                   {canAssign ? (
                     <div onClick={(e) => e.stopPropagation()}>
                       <select
                         value={t.status}
                         onChange={(e) => handleQuickStatusChange(t.id, e.target.value, e)}
-                        className="text-xs font-semibold px-2 py-1 rounded-lg border border-outline-variant/60 bg-surface text-on-surface hover:border-primary transition-all"
+                        className="text-xs font-semibold px-2 py-1 rounded-lg border border-outline-variant/60 bg-surface text-on-surface hover:border-primary transition-all cursor-pointer"
                       >
                         {STATUS_OPTIONS.map((s) => (
                           <option key={s} value={s}>{s}</option>
@@ -1017,7 +1057,6 @@ export default function Tickets() {
                     <StatusBadge status={t.status} />
                   )}
 
-                  {/* Assignee & Date */}
                   <div className="flex items-center gap-2">
                     {t.assignedTo ? (
                       <div className="flex items-center gap-1.5" title={`Assigné à : ${t.assignedTo.fullName}`}>
@@ -1046,182 +1085,205 @@ export default function Tickets() {
           )}
         </motion.div>
       ) : (
-        /* ── VUE TABLEAU MODERNE ────────────────────────────────────────────── */
-        <motion.div variants={itemVariants} className="bento-card">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse min-w-[900px]">
-              <thead>
-                <tr className="bg-surface-bright/50 dark:bg-[rgba(129,140,248,0.03)] border-b border-outline-variant/60 select-none">
-                  {showSelectionColumn && (
-                    <th className="px-md py-3.5 w-10">
-                      <input type="checkbox"
-                        checked={tickets.length > 0 && selectedIds.length === tickets.length}
-                        onChange={toggleSelectAll}
-                        className="cursor-pointer accent-primary w-4 h-4"
-                      />
-                    </th>
-                  )}
-                  <SortableTH field="id" current={sortBy} order={sortOrder} onSort={toggleSort}>ID</SortableTH>
-                  <SortableTH field="createdAt" current={sortBy} order={sortOrder} onSort={toggleSort}>Date</SortableTH>
-                  <SortableTH field="title" current={sortBy} order={sortOrder} onSort={toggleSort}>Titre</SortableTH>
-                  <TH className="w-16">IA</TH>
-                  <TH className="w-28">GLPI</TH>
-                  <SortableTH field="status" current={sortBy} order={sortOrder} onSort={toggleSort} className="w-36">Statut</SortableTH>
-                  <SortableTH field="priority" current={sortBy} order={sortOrder} onSort={toggleSort} className="w-32">Priorité</SortableTH>
-                  <TH className="w-36">Équipe</TH>
-                  <SortableTH field="assignedTo" current={sortBy} order={sortOrder} onSort={toggleSort} className="w-44">Assigné à</SortableTH>
-                  <SortableTH field="requester" current={sortBy} order={sortOrder} onSort={toggleSort} className="w-44">Demandeur</SortableTH>
-                  {canDelete && <TH className="w-12"></TH>}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-outline-variant/30">
-                <AnimatePresence mode="popLayout">
-                  {tickets.map((t, idx) => (
-                    <motion.tr
-                      key={t.id}
-                      initial={{ opacity: 0, y: -8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, x: -20 }}
-                      transition={{ duration: 0.2, delay: idx * 0.015, ease: [0.16, 1, 0.3, 1] }}
-                      className="hover:bg-surface-container-low/60 transition-colors group cursor-pointer"
-                      layout
-                      onMouseMove={handleMouseMove}
-                      onMouseEnter={() => handleRowEnter(t)}
-                      onMouseLeave={handleRowLeave}
-                      onClick={() => navigate(`/tickets/${t.id}`)}
-                    >
-                      {showSelectionColumn && (
-                        <td className="px-md py-3.5" onClick={(e) => e.stopPropagation()}>
-                          <input type="checkbox" checked={selectedIds.includes(t.id)}
-                            onChange={() => toggleSelect(t.id)} className="cursor-pointer accent-primary w-4 h-4"
-                          />
-                        </td>
-                      )}
-                      <td className="px-md py-3.5 font-mono-sm text-mono-sm text-outline font-bold">
-                        #{t.id}
-                      </td>
-                      <td className="px-md py-3.5 text-on-surface-variant text-body-sm whitespace-nowrap">
-                        {new Date(t.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })}
-                      </td>
-                      <td className="px-md py-3.5">
-                        <div className="flex flex-col">
-                          <span className="font-medium text-on-surface group-hover:text-primary transition-colors line-clamp-1">
-                            {t.title}
-                          </span>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            {t.category && (
-                              <span className="text-[10px] font-medium text-on-surface-variant bg-surface-container-high px-2 py-0.5 rounded-full">
-                                {t.category}
-                              </span>
-                            )}
-                            {t.glpiLocationName && (
-                              <span className="text-[11px] text-on-surface-variant flex items-center gap-0.5 truncate max-w-[150px]">
-                                <span className="material-symbols-outlined text-[12px] text-primary">location_on</span>
-                                <span className="truncate">{t.glpiLocationName}</span>
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-md py-3.5">
+        <motion.div variants={itemVariants} className="rounded-2xl border border-outline-variant/30 overflow-hidden bg-surface-container-lowest shadow-sm">
+          {/* Table Header */}
+          <div className={`flex items-center gap-4 px-5 py-3 border-b text-[11px] font-black uppercase tracking-widest select-none ${
+            isDark ? 'border-outline-variant/30 text-slate-400 bg-surface-container-low/40' : 'border-slate-200/80 text-slate-600 bg-slate-100/70'
+          }`}>
+            {showSelectionColumn && (
+              <div className="w-5 shrink-0">
+                <input type="checkbox"
+                  checked={tickets.length > 0 && selectedIds.length === tickets.length}
+                  onChange={toggleSelectAll}
+                  className="cursor-pointer accent-primary w-4 h-4 rounded"
+                />
+              </div>
+            )}
+            <div className="w-9 shrink-0" />
+            <div className="flex-1 min-w-0">Ticket</div>
+            <div className="w-28 shrink-0 hidden md:block">Statut</div>
+            <div className="w-28 shrink-0 hidden lg:block">Priorité</div>
+            <div className="w-36 shrink-0 hidden xl:block">Assigné à</div>
+            <div className="w-24 shrink-0 hidden lg:block text-right">Date</div>
+            <div className="w-16 shrink-0" />
+          </div>
+
+          {/* Rows */}
+          <div className="divide-y divide-outline-variant/20">
+            <AnimatePresence mode="popLayout">
+              {tickets.map((t, idx) => {
+                const PCOLOR = {
+                  P1: { bg: 'bg-red-500',    ring: 'ring-red-500/30',    text: 'text-red-600 dark:text-red-400 font-bold',    badge: 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-400 border border-red-200 dark:border-red-500/25 font-bold'    },
+                  P2: { bg: 'bg-orange-500', ring: 'ring-orange-500/30', text: 'text-orange-600 dark:text-orange-400 font-bold', badge: 'bg-orange-50 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400 border border-orange-200 dark:border-orange-500/25 font-bold' },
+                  P3: { bg: 'bg-amber-500',  ring: 'ring-amber-500/30',  text: 'text-amber-700 dark:text-amber-400 font-bold',  badge: 'bg-amber-50 text-amber-800 dark:bg-amber-500/15 dark:text-amber-400 border border-amber-300 dark:border-amber-500/25 font-bold'  },
+                  P4: { bg: 'bg-blue-500',   ring: 'ring-blue-500/30',   text: 'text-blue-600 dark:text-blue-400 font-bold',   badge: 'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400 border border-blue-200 dark:border-blue-500/25 font-bold'   },
+                }[t.priority] || { bg: 'bg-slate-500', ring: 'ring-slate-500/30', text: 'text-slate-600 dark:text-slate-400', badge: 'bg-slate-50 text-slate-700 dark:bg-slate-500/15 dark:text-slate-300 border border-slate-200 dark:border-slate-500/25 font-bold' };
+
+                const SCOLOR = {
+                  NEW:     'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400 border border-blue-200 dark:border-blue-500/25 font-bold',
+                  OPEN:    'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/25 font-bold',
+                  PENDING: 'bg-amber-50 text-amber-800 dark:bg-yellow-500/15 dark:text-yellow-400 border border-amber-300 dark:border-yellow-500/25 font-bold',
+                  SOLVED:  'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/25 font-bold',
+                  CLOSED:  'bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-400 border border-slate-300 dark:border-slate-500/25 font-bold',
+                }[t.status] || 'bg-slate-50 text-slate-700 border border-slate-200 font-bold';
+
+                const SLABEL = { NEW: 'Nouveau', OPEN: 'En cours', PENDING: 'En attente', SOLVED: 'Résolu', CLOSED: 'Fermé' }[t.status] || t.status;
+                const PLABEL = { P1: 'P1 Critique', P2: 'P2 Haute', P3: 'P3 Moyenne', P4: 'P4 Basse' }[t.priority] || t.priority;
+
+                const PIcon = { P1: Flame, P2: AlertTriangle, P3: Info, P4: ArrowDown }[t.priority] || Ticket;
+
+                const dateStr = new Date(t.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
+
+                return (
+                  <motion.div
+                    key={t.id}
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    transition={{ duration: 0.18, delay: idx * 0.012, ease: [0.16, 1, 0.3, 1] }}
+                    layout
+                    onClick={() => navigate(`/tickets/${t.id}`)}
+                    onMouseMove={handleMouseMove}
+                    onMouseEnter={() => handleRowEnter(t)}
+                    onMouseLeave={handleRowLeave}
+                    className="flex items-center gap-4 px-5 py-3.5 cursor-pointer group transition-colors hover:bg-slate-50/80 dark:hover:bg-white/[0.03]"
+                  >
+                    {/* Checkbox */}
+                    {showSelectionColumn && (
+                      <div className="w-5 shrink-0" onClick={e => e.stopPropagation()}>
+                        <input type="checkbox"
+                          checked={selectedIds.includes(t.id)}
+                          onChange={() => toggleSelect(t.id)}
+                          className="cursor-pointer accent-primary w-4 h-4 rounded"
+                        />
+                      </div>
+                    )}
+
+                    {/* Priority Icon */}
+                    <div className={`w-9 h-9 shrink-0 rounded-xl flex items-center justify-center ring-1 ${PCOLOR.ring}`}>
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${PCOLOR.badge}`}>
+                        <PIcon className="w-4 h-4" />
+                      </div>
+                    </div>
+
+                    {/* Main content */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className={`font-mono text-[10px] font-bold ${PCOLOR.text}`}>#{t.id}</span>
                         {t.aiProcessed && (
-                          <span title="Traité par l'agent IA"
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-primary/20 bg-primary/5 text-primary font-medium text-[10px]"
-                          >
-                            <span className="material-symbols-outlined text-[12px]">smart_toy</span>
-                            IA
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-400 text-[9px] font-bold border border-purple-200 dark:border-purple-500/20">
+                            <Sparkles className="w-2.5 h-2.5" />IA
                           </span>
                         )}
-                      </td>
-                      <td className="px-md py-3.5">
-                        {t.glpiTicketId ? (
-                          <span title="Synchronisé avec GLPI"
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-outline-variant bg-surface-container-low text-on-surface-variant font-medium text-[10px]"
-                          >
-                            <span className="material-symbols-outlined text-[12px]">sync</span>
-                            #{t.glpiTicketId}
+                        {t.glpiTicketId && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 dark:bg-surface-container-high dark:text-on-surface-variant text-[9px] font-semibold border border-slate-200 dark:border-outline-variant/50">
+                            <RefreshCw className="w-2.5 h-2.5" />GLPI
                           </span>
-                        ) : (
-                          <span className="text-outline/60 italic text-[11px]">Interne</span>
                         )}
-                      </td>
-                      <td className="px-md py-3.5" onClick={(e) => e.stopPropagation()}>
-                        {canAssign ? (
-                          <select
-                            value={t.status}
-                            onChange={(e) => handleQuickStatusChange(t.id, e.target.value, e)}
-                            className="text-xs font-semibold px-2 py-1 rounded-lg border border-outline-variant/60 bg-surface text-on-surface hover:border-primary transition-all cursor-pointer"
-                          >
-                            {STATUS_OPTIONS.map((s) => (
-                              <option key={s} value={s}>{s}</option>
-                            ))}
-                          </select>
-                        ) : (
-                          <StatusBadge status={t.status} />
+                      </div>
+                      <p className="font-bold text-sm text-slate-900 dark:text-white truncate leading-tight group-hover:text-primary transition-colors">
+                        {t.title}
+                      </p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        {t.category && (
+                          <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 truncate">
+                            {t.category}
+                          </span>
                         )}
-                      </td>
-                      <td className="px-md py-3.5">
-                        <PriorityBadge priority={t.priority} />
-                      </td>
-                      <td className="px-md py-3.5 text-on-surface-variant text-body-sm font-medium">{t.team?.name || '-'}</td>
-                      <td className="px-md py-3.5 text-on-surface text-body-sm">
-                        {t.assignedTo ? (
-                          <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[10px] font-bold shrink-0 border border-primary/20">
-                              {t.assignedTo.fullName?.charAt(0)?.toUpperCase()}
-                            </div>
-                            <span className="font-medium truncate max-w-[120px]">{t.assignedTo.fullName}</span>
-                          </div>
-                        ) : (
-                          <span className="text-outline/65 italic text-xs font-medium">Non assigné</span>
+                        {t.glpiLocationName && (
+                          <span className="text-[11px] font-medium text-slate-600 dark:text-slate-400 flex items-center gap-0.5 truncate max-w-[140px]">
+                            <MapPin className="w-2.5 h-2.5 shrink-0 text-primary" />
+                            {t.glpiLocationName}
+                          </span>
                         )}
-                      </td>
-                      <td className="px-md py-3.5 text-on-surface-variant text-body-sm">
-                        {t.requester ? (
-                          <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-full bg-surface-container-high text-on-surface flex items-center justify-center text-[10px] font-bold shrink-0 border border-outline-variant/60">
-                              {t.requester.fullName?.charAt(0)?.toUpperCase()}
-                            </div>
-                            <span className="font-medium truncate max-w-[120px]">{t.requester.fullName}</span>
-                          </div>
-                        ) : (
-                          <span className="text-outline/65 italic text-xs font-medium">-</span>
+                        {!t.category && !t.glpiLocationName && (
+                          <span className="text-[11px] font-medium text-slate-500 dark:text-slate-500">
+                            {t.team?.name || 'Aucune équipe'}
+                          </span>
                         )}
-                      </td>
-                      {canDelete && (
-                        <td className="px-md py-3.5" onClick={(e) => e.stopPropagation()}>
-                          <motion.button
-                            whileHover={{ scale: 1.1 }}
-                            whileTap={{ scale: 0.9 }}
-                            onClick={() => askDeleteOne(t.id)}
-                            title="Supprimer ce ticket"
-                            className="text-outline/50 hover:text-error transition-all opacity-60 lg:opacity-0 lg:group-hover:opacity-100"
-                          >
-                            <span className="material-symbols-outlined text-[18px]">delete</span>
-                          </motion.button>
-                        </td>
+                      </div>
+                    </div>
+
+                    {/* Status badge / Select */}
+                    <div className="w-28 shrink-0 hidden md:block" onClick={e => { if (canAssign) e.stopPropagation(); }}>
+                      {canAssign ? (
+                        <select
+                          value={t.status}
+                          onChange={(e) => handleQuickStatusChange(t.id, e.target.value, e)}
+                          className={`text-[10px] font-bold px-2.5 py-1 rounded-full border cursor-pointer transition-all w-full focus:outline-none focus:ring-2 focus:ring-primary/20 ${SCOLOR}`}
+                        >
+                          {STATUS_OPTIONS.map(s => <option key={s} value={s} className="bg-surface text-on-surface">{s}</option>)}
+                        </select>
+                      ) : (
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold border ${SCOLOR}`}>
+                          {SLABEL}
+                        </span>
                       )}
-                    </motion.tr>
-                  ))}
-                </AnimatePresence>
-                {tickets.length === 0 && (
-                  <tr>
-                    <td colSpan={10 + (showSelectionColumn ? 1 : 0) + (canDelete ? 1 : 0)} className="px-md py-12 text-center">
-                      <EmptyState
-                        icon="tickets"
-                        title="Aucun ticket trouvé"
-                        description="Modifie les filtres ou crée un nouveau ticket."
-                      />
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                    </div>
+
+                    {/* Priority badge */}
+                    <div className="w-28 shrink-0 hidden lg:block">
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold border ${PCOLOR.badge}`}>
+                        <PIcon className="w-3 h-3" />
+                        {PLABEL}
+                      </span>
+                    </div>
+
+                    {/* Assigned to */}
+                    <div className="w-36 shrink-0 hidden xl:flex items-center gap-2">
+                      {t.assignedTo ? (
+                        <div className="flex items-center gap-2 min-w-0" title={`Assigné à : ${t.assignedTo.fullName}`}>
+                          <div className="w-6 h-6 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center text-[10px] font-bold border border-blue-500/20 shrink-0">
+                            {t.assignedTo.fullName?.charAt(0)?.toUpperCase()}
+                          </div>
+                          <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">{t.assignedTo.fullName}</span>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-500 dark:text-slate-400 italic font-medium">Non assigné</span>
+                      )}
+                    </div>
+
+                    {/* Date */}
+                    <div className="w-24 shrink-0 hidden lg:block text-right">
+                      <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">{dateStr}</span>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="w-16 shrink-0 flex items-center justify-end gap-1">
+                      {canDelete && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); askDeleteOne(t.id); }}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100"
+                          title="Supprimer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      <div className="p-1.5 rounded-lg text-slate-400 group-hover:text-primary group-hover:bg-primary/10 transition-all">
+                        <ChevronRight className="w-4 h-4" />
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
+
+            {tickets.length === 0 && (
+              <div className="py-16 flex flex-col items-center justify-center">
+                <EmptyState
+                  icon="tickets"
+                  title="Aucun ticket trouvé"
+                  description="Modifie les filtres ou crée un nouveau ticket."
+                />
+              </div>
+            )}
           </div>
         </motion.div>
       )}
 
-      {/* ── Pagination ──────────────────────────────────────────────────────── */}
+      </div>
+
+      {/* Pagination */}
       {totalPages > 1 && (
         <motion.div variants={itemVariants}
           className="flex items-center justify-between px-4 py-3 rounded-xl border border-outline-variant/60 bg-surface-container-lowest"
@@ -1235,7 +1297,7 @@ export default function Tickets() {
               disabled={page <= 1}
               className="w-8 h-8 flex items-center justify-center rounded-lg border border-outline-variant/60 hover:bg-surface-container-low transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             >
-              <span className="material-symbols-outlined text-sm text-on-surface-variant">chevron_left</span>
+              <ChevronLeft className="w-4 h-4 text-on-surface-variant" />
             </button>
             {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
               let pageNum;
@@ -1262,83 +1324,19 @@ export default function Tickets() {
               disabled={page >= totalPages}
               className="w-8 h-8 flex items-center justify-center rounded-lg border border-outline-variant/60 hover:bg-surface-container-low transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             >
-              <span className="material-symbols-outlined text-sm text-on-surface-variant">chevron_right</span>
+              <ChevronRight className="w-4 h-4 text-on-surface-variant" />
             </button>
           </div>
         </motion.div>
       )}
 
-      {/* ── Ticket Hover Preview ─────────────────────────────────────────────── */}
-      {createPortal(
-        <AnimatePresence>
-          {hoveredTicket && (
-            <motion.div
-              initial={{ opacity: 0, x: -8, scale: 0.97 }}
-              animate={{ opacity: 1, x: 0, scale: 1 }}
-              exit={{ opacity: 0, x: -8, scale: 0.97 }}
-              transition={{ duration: 0.15 }}
-              className="ticket-preview-panel"
-              style={{ top: hoverPos.y, left: hoverPos.x }}
-              onMouseEnter={handlePreviewEnter}
-              onMouseLeave={handlePreviewLeave}
-            >
-              <div className="ticket-preview-header">
-                <span className="font-mono text-[11px] text-primary font-bold">#{hoveredTicket.id}</span>
-                <StatusBadge status={hoveredTicket.status} />
-                <PriorityBadge priority={hoveredTicket.priority} />
-              </div>
-              <h4 className="ticket-preview-title">{hoveredTicket.title}</h4>
-              {hoveredTicket.content && (
-                <p className="ticket-preview-content">{hoveredTicket.content}</p>
-              )}
-              <div className="ticket-preview-meta">
-                {hoveredTicket.category && (
-                  <div className="ticket-preview-meta-row">
-                    <span className="material-symbols-outlined text-[13px]">category</span>
-                    <span>{hoveredTicket.category}</span>
-                  </div>
-                )}
-                {hoveredTicket.glpiLocationName && (
-                  <div className="ticket-preview-meta-row">
-                    <span className="material-symbols-outlined text-[13px]">location_on</span>
-                    <span>{hoveredTicket.glpiLocationName}</span>
-                  </div>
-                )}
-                {hoveredTicket.requester?.fullName && (
-                  <div className="ticket-preview-meta-row">
-                    <span className="material-symbols-outlined text-[13px]">person</span>
-                    <span>{hoveredTicket.requester.fullName}</span>
-                  </div>
-                )}
-                {hoveredTicket.assignedTo?.fullName && (
-                  <div className="ticket-preview-meta-row">
-                    <span className="material-symbols-outlined text-[13px]">person_pin</span>
-                    <span>{hoveredTicket.assignedTo.fullName}</span>
-                  </div>
-                )}
-                <div className="ticket-preview-meta-row">
-                  <span className="material-symbols-outlined text-[13px]">schedule</span>
-                  <span>{new Date(hoveredTicket.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-                </div>
-              </div>
-              <div className="ticket-preview-footer">
-                <span className="material-symbols-outlined text-[12px] text-primary">arrow_forward</span>
-                <span className="text-[11px] text-primary font-semibold">Voir les détails</span>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>,
-        document.body
-      )}
-
-      {/* ── ConfirmDialog ──────────────────────────────────────────────────── */}
       <ConfirmDialog
         open={!!confirmDelete}
         title="Supprimer le ticket"
         message={
           confirmDelete?.mode === 'bulk'
-            ? `Supprimer définitivement ${selectedIds.length} ticket(s) ? Cette action est irréversible et supprime aussi le(s) ticket(s) GLPI lié(s).`
-            : `Supprimer définitivement le ticket #${confirmDelete?.id} ? Cette action est irréversible et supprime aussi le ticket GLPI lié.`
+            ? `Supprimer définitivement ${selectedIds.length} ticket(s) ? Cette action est irréversible.`
+            : `Supprimer définitivement le ticket #${confirmDelete?.id} ? Cette action est irréversible.`
         }
         confirmLabel="Supprimer"
         danger
@@ -1349,8 +1347,6 @@ export default function Tickets() {
     </motion.div>
   );
 }
-
-/* ── Sous-composants ────────────────────────────────────────────────────────── */
 
 function TH({ children, className }) {
   return (
@@ -1371,32 +1367,13 @@ function SortableTH({ children, field, current, order, onSort, className }) {
     >
       <div className="flex items-center gap-1">
         <span>{children}</span>
-        <span className="material-symbols-outlined text-[14px]">
-          {isActive ? (order === 'asc' ? 'arrow_upward' : 'arrow_downward') : 'unfold_more'}
-        </span>
+        {isActive ? (
+          order === 'asc' ? <ArrowUp className="w-3.5 h-3.5" /> : <ArrowDown className="w-3.5 h-3.5" />
+        ) : (
+          <ArrowUpDown className="w-3.5 h-3.5 text-outline/50" />
+        )}
       </div>
     </th>
-  );
-}
-
-function FieldRow({ label, required, children }) {
-  return (
-    <label className="flex flex-col gap-1.5">
-      <span className="font-label-md text-label-md text-on-surface-variant uppercase flex items-center gap-1">
-        {label}
-        {required && <span className="text-error text-[10px]">*</span>}
-      </span>
-      {children}
-    </label>
-  );
-}
-
-function SelectRow({ label, children }) {
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="font-label-md text-label-md text-on-surface-variant uppercase text-[11px]">{label}</span>
-      {children}
-    </label>
   );
 }
 
@@ -1410,14 +1387,14 @@ function FilterSelect({ value, onChange, label, options }) {
         onChange={(e) => onChange(e.target.value)}
       >
         {options.map((o) => (
-          <option key={o.v} value={o.v}>{o.l}</option>
+          <option key={o.v} value={o.v} disabled={o.disabled}>{o.l}</option>
         ))}
       </select>
     </label>
   );
 }
 
-function ChipFilter({ active, onClick, icon, label }) {
+function ChipFilter({ active, onClick, Icon, label }) {
   return (
     <button
       onClick={onClick}
@@ -1427,32 +1404,33 @@ function ChipFilter({ active, onClick, icon, label }) {
           : 'bg-surface border-outline-variant/60 text-on-surface-variant hover:bg-surface-container-high'
       }`}
     >
-      <span className="material-symbols-outlined text-[13px]">{icon}</span>
+      <Icon className="w-3.5 h-3.5" />
       {label}
     </button>
   );
 }
 
 const STATUS_CONFIG = {
-  NEW: { label: 'Nouveau', bg: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20', icon: 'star' },
-  OPEN: { label: 'Ouvert', bg: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20', icon: 'radio_button_checked' },
-  PENDING: { label: 'En attente', bg: 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border border-yellow-500/20', icon: 'hourglass_empty' },
-  SOLVED: { label: 'Résolu', bg: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20', icon: 'check_circle' },
-  CLOSED: { label: 'Fermé', bg: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20', icon: 'lock' },
+  NEW: { label: 'Nouveau', bg: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20', Icon: Sparkles },
+  OPEN: { label: 'Ouvert', bg: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20', Icon: Radio },
+  PENDING: { label: 'En attente', bg: 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border border-yellow-500/20', Icon: Clock },
+  SOLVED: { label: 'Résolu', bg: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20', Icon: CheckCircle2 },
+  CLOSED: { label: 'Fermé', bg: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20', Icon: Lock },
 };
 
 const PRIORITY_CONFIG = {
-  P1: { label: 'P1 - Critique', bg: 'bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30', icon: 'emergency' },
-  P2: { label: 'P2 - Haute', bg: 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20', icon: 'report' },
-  P3: { label: 'P3 - Moyenne', bg: 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20', icon: 'info' },
-  P4: { label: 'P4 - Basse', bg: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20', icon: 'arrow_downward' },
+  P1: { label: 'P1 - Critique', bg: 'bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30', Icon: Flame },
+  P2: { label: 'P2 - Haute', bg: 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20', Icon: AlertTriangle },
+  P3: { label: 'P3 - Moyenne', bg: 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20', Icon: Info },
+  P4: { label: 'P4 - Basse', bg: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20', Icon: ArrowDown },
 };
 
 function StatusBadge({ status }) {
   const conf = STATUS_CONFIG[status] || STATUS_CONFIG.NEW;
+  const Icon = conf.Icon;
   return (
     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${conf.bg}`}>
-      <span className="material-symbols-outlined text-[13px]">{conf.icon}</span>
+      <Icon className="w-3.5 h-3.5" />
       {conf.label}
     </span>
   );
@@ -1460,9 +1438,10 @@ function StatusBadge({ status }) {
 
 function PriorityBadge({ priority }) {
   const conf = PRIORITY_CONFIG[priority] || PRIORITY_CONFIG.P3;
+  const Icon = conf.Icon;
   return (
     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${conf.bg}`}>
-      <span className="material-symbols-outlined text-[13px]">{conf.icon}</span>
+      <Icon className="w-3.5 h-3.5" />
       {conf.label}
     </span>
   );

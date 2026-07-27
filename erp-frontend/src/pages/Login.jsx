@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/context/AuthContext';
+import { useTheme } from '@/context/ThemeContext';
 import { Button } from '@/components/ui/button';
 import {
   InputGroup,
@@ -10,6 +11,10 @@ import {
 } from '@/components/ui/input-group';
 import { FloatingPaths } from '@/components/floating-paths';
 import AnimatedBackground from '@/components/AnimatedBackground';
+import {
+  ShieldCheck, Zap, RefreshCw, Sun, Moon, ArrowRight,
+  Lock, Mail, Eye, EyeOff, CheckCircle2, AlertTriangle, Sparkles
+} from 'lucide-react';
 
 /* ── Variants d'animation ──────────────────────────────────────────────────── */
 const containerVariants = {
@@ -40,6 +45,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { login, getLastLocation } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
@@ -64,74 +70,134 @@ export default function Login() {
   }
 
   return (
-    <main className="relative md:h-screen md:overflow-hidden lg:grid lg:grid-cols-2 bg-background antialiased selection:bg-primary/20 selection:text-primary">
+    <main className="relative min-h-screen md:h-screen md:overflow-hidden lg:grid lg:grid-cols-2 bg-surface antialiased selection:bg-primary/20 selection:text-primary">
       <AnimatedBackground />
+
+      {/* Bouton de bascule de Thème (Fixe en haut à droite) */}
+      <div className="absolute top-4 right-4 z-50">
+        <motion.button
+          whileHover={{ scale: 1.08 }}
+          whileTap={{ scale: 0.92 }}
+          onClick={toggleTheme}
+          title={theme === 'dark' ? 'Passer en mode clair' : 'Passer en mode sombre'}
+          className="p-2.5 rounded-2xl bg-surface-container-lowest/90 border border-outline-variant/40 text-on-surface shadow-md backdrop-blur-md hover:bg-surface-container transition-all flex items-center gap-2 text-xs font-bold"
+        >
+          {theme === 'dark' ? (
+            <>
+              <Sun className="w-4 h-4 text-amber-400" />
+              <span className="hidden sm:inline">Mode Clair</span>
+            </>
+          ) : (
+            <>
+              <Moon className="w-4 h-4 text-indigo-600" />
+              <span className="hidden sm:inline">Mode Sombre</span>
+            </>
+          )}
+        </motion.button>
+      </div>
+
       {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* PANEL GAUCHE — Marque & Animation */}
+      {/* PANEL GAUCHE — Branding & Pépites Fonctionnelles */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.8 }}
-        className="relative hidden h-full flex-col border-r bg-zinc-950 p-10 lg:flex justify-between overflow-hidden"
+        className="relative hidden h-full flex-col border-r border-outline-variant/20 bg-zinc-950 p-10 lg:flex justify-between overflow-hidden"
       >
-        {/* Overlay gradient */}
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/20" />
+        {/* Gradients ambiants d'arrière-plan */}
+        <div className="absolute inset-0 bg-gradient-to-b from-blue-950/20 via-zinc-950 to-black/60" />
+        <div className="absolute -top-32 -left-32 w-96 h-96 bg-blue-600/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-32 -right-32 w-96 h-96 bg-indigo-600/15 rounded-full blur-3xl pointer-events-none" />
 
-        {/* Fond animé */}
-        <div className="absolute inset-0">
+        {/* Fond vectoriel animé */}
+        <div className="absolute inset-0 opacity-40">
           <FloatingPaths position={1} />
           <FloatingPaths position={-1} />
         </div>
 
-        {/* Logo / Marque */}
-        <motion.div
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.6, delay: 0.1 }}
-          className="flex items-center gap-2.5 z-10 text-white"
-        >
-          <motion.span
-            initial={{ scale: 0.8, rotate: -10 }}
-            animate={{ scale: 1, rotate: 0 }}
-            transition={{ duration: 0.5, type: 'spring', bounce: 0.5, delay: 0.2 }}
-            className="material-symbols-outlined text-primary text-[30px]"
-            style={{ fontVariationSettings: "'FILL' 1" }}
+        {/* Header Marque + Status Badge */}
+        <div className="flex items-center justify-between z-10">
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.6, delay: 0.1 }}
+            className="flex items-center gap-3 text-white"
           >
-            dashboard
-          </motion.span>
-          <span className="font-bold text-xl tracking-tight">ERP ITSM</span>
-        </motion.div>
+            <div className="p-2.5 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-purple-600 shadow-lg shadow-blue-500/25">
+              <Sparkles className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <span className="font-extrabold text-xl tracking-tight text-white block">ERP ITSM</span>
+              <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest block">AI HUB PLATFORM</span>
+            </div>
+          </motion.div>
 
-        {/* Tagline centrée */}
+          <span className="px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold flex items-center gap-1.5 backdrop-blur-md">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            Services IA & GLPI Opérationnels
+          </span>
+        </div>
+
+        {/* Tagline & Cartes d'Atouts */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.7, delay: 0.4 }}
-          className="z-10 text-center max-w-md mx-auto"
+          transition={{ duration: 0.7, delay: 0.3 }}
+          className="z-10 text-left max-w-lg space-y-6"
         >
-          <h2 className="text-3xl font-bold text-white tracking-tight mb-3">
-            Gestion IT<br/>Intelligente
-          </h2>
-          <p className="text-zinc-400 text-sm leading-relaxed">
-            Plateforme ITSM nouvelle génération avec orchestration IA,
-            synchronisation GLPI et automatisations avancées.
-          </p>
+          <div className="space-y-2">
+            <h2 className="text-3xl lg:text-4xl font-black text-white tracking-tight leading-tight">
+              Gestion IT Nouvelle Génération & IA
+            </h2>
+            <p className="text-zinc-400 text-sm leading-relaxed font-normal">
+              Plateforme d'assistance unifiée avec qualification Hotline différée, prédictions d'apprentissage IA et synchronisation GLPI en temps réel.
+            </p>
+          </div>
+
+          {/* Liste à puces d'atouts visuels */}
+          <div className="space-y-3 pt-2">
+            {[
+              { icon: ShieldCheck, title: 'Validation Hotline GLPI', desc: 'Contrôle complet avant création officielle dans GLPI' },
+              { icon: Zap,          title: 'IA & Réponses Automatiques', desc: 'Brouillons intelligents Gemini et suggestions de triage' },
+              { icon: RefreshCw,    title: 'Synchro Bi-directionnelle', desc: 'Mise à jour en temps réel des tickets et pièces jointes' },
+            ].map((item, idx) => {
+              const Icon = item.icon;
+              return (
+                <motion.div
+                  key={item.title}
+                  initial={{ opacity: 0, x: -16 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.4, delay: 0.4 + idx * 0.1 }}
+                  className="flex items-center gap-3.5 p-3 rounded-2xl bg-zinc-900/60 border border-zinc-800/80 backdrop-blur-md"
+                >
+                  <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400 shrink-0">
+                    <Icon className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-white">{item.title}</h4>
+                    <p className="text-[11px] text-zinc-400">{item.desc}</p>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
         </motion.div>
 
-        {/* Footer */}
-        <motion.p
+        {/* Footer Panel Gauche */}
+        <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.5, delay: 0.7 }}
-          className="z-10 text-xs text-zinc-600"
+          className="z-10 flex items-center justify-between text-xs text-zinc-500 border-t border-zinc-900 pt-4"
         >
-          &copy; {new Date().getFullYear()} ERP ITSM — Tous droits réservés
-        </motion.p>
+          <span>&copy; {new Date().getFullYear()} ERP ITSM — Tous droits réservés</span>
+          <span className="font-mono text-[10px] text-zinc-600">v2.4.0 • Enterprise Edition</span>
+        </motion.div>
       </motion.div>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* PANEL DROIT — Formulaire de connexion */}
+      {/* PANEL DROIT — Formulaire de Connexion Premium */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       <motion.div
         initial={{ opacity: 0 }}
@@ -139,18 +205,11 @@ export default function Login() {
         transition={{ duration: 0.6 }}
         className="relative flex min-h-screen flex-col justify-center px-6 sm:px-12 lg:px-16"
       >
-        {/* Effets de fond — radial gradients */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 0.6 }}
-          transition={{ duration: 1, delay: 0.3 }}
-          aria-hidden
-          className="absolute inset-0 isolate -z-10 opacity-60 contain-strict pointer-events-none"
-        >
-          <div className="absolute top-0 right-0 h-320 w-140 -translate-y-87.5 rounded-full bg-[radial-gradient(68.54%_68.72%_at_55.02%_31.46%,--theme(--color-foreground/.06)_0,hsla(0,0%,55%,.02)_50%,--theme(--color-foreground/.01)_80%)]" />
-          <div className="absolute top-0 right-0 h-320 w-60 rounded-full bg-[radial-gradient(50%_50%_at_50%_50%,--theme(--color-foreground/.04)_0,--theme(--color-foreground/.01)_80%,transparent_100%)] [translate:5%_-50%]" />
-          <div className="absolute top-0 right-0 h-320 w-60 -translate-y-87.5 rounded-full bg-[radial-gradient(50%_50%_at_50%_50%,--theme(--color-foreground/.04)_0,--theme(--color-foreground/.01)_80%,transparent_100%)]" />
-        </motion.div>
+        {/* Halos de lumière radiale */}
+        <div aria-hidden className="absolute inset-0 -z-10 overflow-hidden pointer-events-none">
+          <div className="absolute top-1/4 right-1/4 w-96 h-96 rounded-full bg-blue-500/10 blur-3xl" />
+          <div className="absolute bottom-1/4 left-1/4 w-96 h-96 rounded-full bg-indigo-500/10 blur-3xl" />
+        </div>
 
         <motion.div
           className="mx-auto w-full max-w-[420px] space-y-6"
@@ -158,27 +217,25 @@ export default function Login() {
           initial="hidden"
           animate="visible"
         >
-          {/* ── En-tête ──────────────────────────────────────────────────────── */}
+          {/* En-tête du formulaire */}
           <motion.div variants={itemVariants} className="flex flex-col items-center text-center space-y-2">
             <motion.div
               initial={{ scale: 0.8 }}
               animate={{ scale: 1 }}
               transition={{ duration: 0.4, type: 'spring', bounce: 0.4 }}
-              className="flex items-center gap-2 lg:hidden mb-2 text-on-surface"
+              className="flex items-center gap-2.5 lg:hidden mb-2 text-on-surface"
             >
-              <span className="material-symbols-outlined text-primary text-[28px]"
-                style={{ fontVariationSettings: "'FILL' 1" }}
-              >
-                dashboard
-              </span>
-              <span className="font-bold text-xl tracking-tight">ERP ITSM</span>
+              <div className="p-2 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white shadow-md">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <span className="font-black text-xl tracking-tight">ERP ITSM</span>
             </motion.div>
 
             <motion.h1
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, delay: 0.1 }}
-              className="font-bold text-3xl tracking-tight text-on-surface"
+              className="font-black text-3xl tracking-tight text-on-surface"
             >
               Connexion
             </motion.h1>
@@ -186,25 +243,19 @@ export default function Login() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.4, delay: 0.15 }}
-              className="text-sm text-muted-foreground"
+              className="text-xs font-medium text-on-surface-variant max-w-sm"
             >
-              Accédez à la console de gestion intelligente ERP ITSM
+              Accédez à votre console de gestion ITSM & d'automatisation IA
             </motion.p>
           </motion.div>
 
-          {/* ── Carte formulaire (bento glass) ────────────────────────────────── */}
+          {/* Carte glassmorphism */}
           <motion.div
             variants={cardVariants}
-            className="bg-surface-container-lowest rounded-2xl border border-outline-variant/60 p-[28px] card-shadow"
+            className="bg-surface-container-lowest/90 backdrop-blur-md rounded-3xl border border-outline-variant/40 p-7 shadow-xl shadow-surface-container-high/20"
           >
-            <motion.form
-              className="space-y-4"
-              onSubmit={handleSubmit}
-              variants={containerVariants}
-              initial="hidden"
-              animate="visible"
-            >
-              {/* ── Message d'erreur animé ────────────────────────────────────── */}
+            <form className="space-y-4" onSubmit={handleSubmit}>
+              {/* Message d'erreur animé */}
               <AnimatePresence>
                 {error && (
                   <motion.div
@@ -213,26 +264,25 @@ export default function Login() {
                     animate={{ opacity: 1, y: 0, height: 'auto' }}
                     exit={{ opacity: 0, y: -8, height: 0 }}
                     transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-                    id="login-error"
-                    role="alert"
-                    className="border border-red-500/20 bg-red-500/5 text-red-500 p-4 rounded-xl flex items-start gap-3 font-body-sm"
+                    className="border border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400 p-3 rounded-xl flex items-start gap-3 text-xs"
                   >
-                    <span className="material-symbols-outlined text-red-500 shrink-0" style={{ fontSize: '20px' }}>warning</span>
+                    <AlertTriangle className="w-4 h-4 shrink-0 text-red-500 mt-0.5" />
                     <div>
-                      <strong className="font-semibold text-sm">Échec de connexion</strong>
-                      <p className="mt-0.5 text-xs text-red-500/80">{error}</p>
+                      <strong className="font-bold block">Échec de connexion</strong>
+                      <span className="opacity-90">{error}</span>
                     </div>
                   </motion.div>
                 )}
               </AnimatePresence>
 
-              {/* ── Champ Email ────────────────────────────────────────────────── */}
+              {/* Champ Email */}
               <motion.div variants={itemVariants} className="space-y-1.5">
-                <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground" htmlFor="email">
-                  Identifiant / Email professionnel
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface-variant" htmlFor="email">
+                  Adresse email professionnel
                 </label>
-                <InputGroup className="h-10">
-                  <InputGroupInput
+                <div className="relative">
+                  <Mail className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-on-surface-variant/60 pointer-events-none" />
+                  <input
                     id="email"
                     name="email"
                     type="email"
@@ -241,29 +291,27 @@ export default function Login() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="nom@entreprise.ci"
-                    aria-describedby={error ? 'login-error' : undefined}
+                    className="w-full bg-surface border border-outline-variant/40 rounded-xl pl-10 pr-4 py-2.5 text-xs text-on-surface font-medium placeholder-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all shadow-sm"
                   />
-                  <InputGroupAddon align="inline-start" aria-hidden="true">
-                    <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>mail</span>
-                  </InputGroupAddon>
-                </InputGroup>
+                </div>
               </motion.div>
 
-              {/* ── Champ Mot de passe ────────────────────────────────────────── */}
+              {/* Champ Mot de passe */}
               <motion.div variants={itemVariants} className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground" htmlFor="password">
+                  <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface-variant" htmlFor="password">
                     Mot de passe
                   </label>
                   <Link
                     to="/forgot-password"
-                    className="text-xs text-primary hover:underline hover:text-primary/80 transition-colors font-medium"
+                    className="text-xs text-blue-600 dark:text-blue-400 hover:underline transition-colors font-bold"
                   >
-                    Mot de passe oublié ?
+                    Oublié ?
                   </Link>
                 </div>
-                <InputGroup className="h-10">
-                  <InputGroupInput
+                <div className="relative">
+                  <Lock className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-on-surface-variant/60 pointer-events-none" />
+                  <input
                     id="password"
                     name="password"
                     type={showPassword ? 'text' : 'password'}
@@ -271,65 +319,56 @@ export default function Login() {
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Votre mot de passe"
-                    aria-describedby={error ? 'login-error' : undefined}
+                    placeholder="••••••••"
+                    className="w-full bg-surface border border-outline-variant/40 rounded-xl pl-10 pr-10 py-2.5 text-xs text-on-surface font-medium placeholder-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all shadow-sm"
                   />
-                  <InputGroupAddon align="inline-start" aria-hidden="true">
-                    <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>lock</span>
-                  </InputGroupAddon>
-                  <button type="button" tabIndex={-1} onClick={() => setShowPassword((v) => !v)}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant/60 hover:text-on-surface transition-colors p-1"
                     aria-label={showPassword ? 'Masquer' : 'Afficher'}
                   >
-                    <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>
-                      {showPassword ? 'visibility_off' : 'visibility'}
-                    </span>
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
-                </InputGroup>
+                </div>
               </motion.div>
 
-              {/* ── Bouton de connexion animé ──────────────────────────────────── */}
-              <motion.div variants={itemVariants}>
-                <Button
-                  className="w-full h-10 mt-6 transition-all duration-300 active:scale-[0.98] group"
+              {/* Bouton de connexion */}
+              <motion.div variants={itemVariants} className="pt-2">
+                <motion.button
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.98 }}
                   type="submit"
                   disabled={loading}
+                  className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-extrabold text-xs shadow-lg shadow-blue-500/25 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   {loading ? (
-                    <motion.span
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="flex items-center gap-2"
-                    >
-                      <span className="material-symbols-outlined animate-spin" style={{ fontSize: '16px' }}>progress_activity</span>
-                      Connexion en cours...
-                    </motion.span>
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Connexion en cours...</span>
+                    </>
                   ) : (
-                    <span className="flex items-center gap-2">
-                      Se connecter
-                      <motion.span
-                        initial={{ x: 0 }}
-                        whileHover={{ x: 3 }}
-                        transition={{ duration: 0.2 }}
-                      >
-                        <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>arrow_forward</span>
-                      </motion.span>
-                    </span>
+                    <>
+                      <span>Se connecter</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
                   )}
-                </Button>
+                </motion.button>
               </motion.div>
-            </motion.form>
+            </form>
           </motion.div>
 
-          {/* ── Footer ────────────────────────────────────────────────────────── */}
-          <motion.p
-            variants={itemVariants}
-            className="mt-8 text-center text-xs text-muted-foreground/80 font-medium"
-          >
-            ERP ITSM &mdash; Système d'assistance et d'automatisations IA
-          </motion.p>
+          {/* Footer & Aide */}
+          <motion.div variants={itemVariants} className="text-center space-y-2">
+            <p className="text-[11px] text-on-surface-variant font-medium">
+              Besoin d'un compte ou d'une réinitialisation ?{' '}
+              <span className="text-on-surface font-bold">Contactez l'équipe IT Hotline</span>
+            </p>
+          </motion.div>
         </motion.div>
       </motion.div>
     </main>
   );
 }
+

@@ -1,22 +1,65 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip } from 'recharts';
+import { Download, BarChart2, Sparkles } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
 
 const QUICK_ACTIONS = [
-  { label: 'Créer un ticket', icon: 'add_circle', message: 'Je veux créer un ticket' },
-  { label: 'Mes tickets', icon: 'confirmation_number', message: 'Quel est le statut de mes tickets ?' },
-  { label: 'Rapport', icon: 'assessment', message: 'Donne-moi un rapport des tickets ouverts' },
-  { label: 'Aide', icon: 'help', message: 'Que peux-tu faire ?' },
+  { label: '📊 Top Magasins', icon: 'bar_chart', message: 'Quel est le magasin qui a eu le plus de problèmes ?' },
+  { label: '🔍 Incidents Asten', icon: 'store', message: 'Montre-moi les statistiques et incidents du magasin Asten' },
+  { label: '⚡ Temps de résolution', icon: 'timer', message: 'Quel est le temps moyen de résolution des tickets ?' },
+  { label: 'Aide & Commandes', icon: 'help', message: 'Que peux-tu faire ?' },
 ];
 
-const PRIORITY_OPTIONS = [
-  { value: 'P1', label: 'Critique', color: 'text-red-500' },
-  { value: 'P2', label: 'Haute', color: 'text-orange-500' },
-  { value: 'P3', label: 'Moyenne', color: 'text-blue-500' },
-  { value: 'P4', label: 'Basse', color: 'text-emerald-500' },
-];
+function WidgetRenderer({ widget }) {
+  if (!widget || !widget.data || widget.data.length === 0) return null;
+
+  function exportCsv() {
+    const headers = Object.keys(widget.data[0]).join(',');
+    const rows = widget.data.map((row) => Object.values(row).join(','));
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers, ...rows].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `${widget.title || 'stats'}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
+  return (
+    <div className="mt-3 p-3 rounded-xl bg-surface border border-outline-variant/40 space-y-2">
+      <div className="flex items-center justify-between border-b border-outline-variant/30 pb-1.5">
+        <h4 className="text-[11px] font-bold text-on-surface flex items-center gap-1.5">
+          <BarChart2 className="w-3.5 h-3.5 text-primary" />
+          {widget.title}
+        </h4>
+        <button
+          onClick={exportCsv}
+          className="px-2 py-0.5 rounded-lg bg-surface-container-high hover:bg-surface-container text-on-surface text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+          title="Télécharger les données sous format CSV"
+        >
+          <Download className="w-3 h-3 text-primary" />
+          <span>CSV</span>
+        </button>
+      </div>
+
+      <div className="h-36 w-full pt-2">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={widget.data} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+            <XAxis dataKey="name" tick={{ fontSize: 9 }} />
+            <YAxis tick={{ fontSize: 9 }} />
+            <RechartsTooltip contentStyle={{ fontSize: '11px', borderRadius: '8px', backgroundColor: 'var(--color-surface, #fff)' }} />
+            <Bar dataKey="Tickets" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="Urgents" fill="#ef4444" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
 
 function MarkdownContent({ content }) {
   return (
@@ -82,7 +125,7 @@ export default function ChatWidget() {
   const { user } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState([
-    { role: 'assistant', content: "Bonjour ! Je suis l'assistant IA du helpdesk IT. Comment puis-je vous aider ?" },
+    { role: 'assistant', content: "Bonjour ! Je suis votre Assistant IA & Analyste Helpdesk IT. Posez-moi des questions sur vos tickets ou des demandes de statistiques sur vos magasins/lieux !" },
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -107,8 +150,8 @@ export default function ChatWidget() {
       api.get('/chat/history').then(({ data }) => {
         if (data.length > 0) {
           setMessages([
-            { role: 'assistant', content: "Bonjour ! Je suis l'assistant IA du helpdesk IT. Comment puis-je vous aider ?" },
-            ...data.map((m) => ({ id: m.id, role: m.role, content: m.content, sources: m.sources, rating: m.rating })),
+            { role: 'assistant', content: "Bonjour ! Je suis votre Assistant IA & Analyste Helpdesk IT. Posez-moi des questions sur vos tickets ou des demandes de statistiques sur vos magasins/lieux !" },
+            ...data.map((m) => ({ id: m.id, role: m.role, content: m.content, sources: m.sources, rating: m.rating, widget: m.widget })),
           ]);
         }
         setHistoryLoaded(true);
@@ -154,10 +197,10 @@ export default function ChatWidget() {
         formData.append('history', JSON.stringify(history));
         formData.append('attachment', attachment);
         const { data } = await api.post('/chat', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-        setMessages((prev) => [...prev, { role: 'assistant', content: data.reply, sources: data.sources, action: data.action }]);
+        setMessages((prev) => [...prev, { role: 'assistant', content: data.reply, sources: data.sources, action: data.action, widget: data.widget }]);
       } else {
         const { data } = await api.post('/chat', { message: userMessage, history });
-        setMessages((prev) => [...prev, { role: 'assistant', content: data.reply, sources: data.sources, action: data.action }]);
+        setMessages((prev) => [...prev, { role: 'assistant', content: data.reply, sources: data.sources, action: data.action, widget: data.widget }]);
       }
       removeAttachment();
     } catch (err) {
@@ -236,6 +279,8 @@ export default function ChatWidget() {
                     }`}
                   >
                     {msg.role === 'assistant' ? <MarkdownContent content={msg.content} /> : msg.content}
+
+                    {msg.widget && <WidgetRenderer widget={msg.widget} />}
 
                     {msg.sources && msg.sources.length > 0 && (
                       <div className="mt-2 pt-2 border-t border-outline-variant/30">

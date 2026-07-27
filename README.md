@@ -364,7 +364,10 @@ curl -s -X POST http://localhost:4000/api/inbox/simulate \
 | Fonctionnalité | Description |
 |---|---|
 | Analyse email IA | Catégorie, priorité P1-P4, résumé, détection spam |
-| Création ticket GLPI | Automatique à la réception d'un email |
+| Workflow Hotline & Approbation | Tout ticket créé (manuel ou email) est conservé dans l'ERP en attente d'approbation (`approvalStatus = PENDING`). Rien n'est envoyé à GLPI avant validation par la Hotline. |
+| Création ticket GLPI | Déclenchée à l'approbation du ticket par la Hotline, attribuant l'ID séquentiel GLPI de production |
+| Relances Hotline | Notification email immédiate avec lien d'approbation rapide et relances automatiques configurables (`approvalReminderMinutes`) |
+| Apprentissage IA par Correction | Chaque modification apportée par la Hotline alimente l'apprentissage IA. Rapport hebdomadaire des patterns d'apprentissage soumis à validation admin (*Batch Approval*) |
 | Déduplication | Gemini compare les nouveaux emails avec les tickets ouverts des 4 dernières heures |
 | Threading | Suivi des réponses sur le même fil email |
 | Accusé de réception | Email automatique envoyé à l'utilisateur |
@@ -376,12 +379,11 @@ curl -s -X POST http://localhost:4000/api/inbox/simulate \
 | Charge par équipe | Visualisation du nombre de tickets actifs par technicien, page Équipes |
 | Auto-approbation GLPI | Approuve automatiquement la solution d'un ticket marqué résolu côté GLPI si activé dans Paramètres |
 | Alertes vocales | Annonce vocale configurable (activation, langue) des nouveaux tickets/brouillons à valider |
-| Groupes de droits | Permissions fines par groupe — remplacent entièrement l'accès par rôle pour ADMIN/TECHNICIAN dès qu'un groupe est assigné (voir section dédiée) |
+| Groupes de droits | Permissions fines par groupe — remplacent entièrement l'accès par rôle pour ADMIN/TECHNICIAN/HOTLINE dès qu'un groupe est assigné (voir section dédiée) |
 | Brouillons de réponse email | Validation humaine avant envoi, avec restauration possible d'un brouillon rejeté |
 
 ---
 
-### Suppression de tickets
 
 Contrôlée par les permissions `tickets.delete` (unitaire) et `tickets.bulkDelete` (en masse) — voir [Rôles et groupes de droits](#rôles-et-groupes-de-droits-permissions). SUPERADMIN les a toujours ; un ADMIN/TECHNICIAN doit appartenir à un groupe cochant ces permissions.
 

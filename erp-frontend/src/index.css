@@ -149,10 +149,25 @@
   --color-on-error-container:          #fca5a5;
 
   --color-outline:                     #63636e;
-  --color-outline-variant:             #2a2e3a;
+  --color-outline-variant:             rgba(255, 255, 255, 0.08);
 
   color-scheme: dark;
 }
+
+/* SEVEN-T Design Tokens & Utilities */
+.bg-space-950 { background-color: #0a0c10 !important; }
+.bg-space-900 { background-color: #12141c !important; }
+.bg-space-800 { background-color: #1a1d27 !important; }
+.bg-space-700 { background-color: #2d313f !important; }
+.border-space-700 { border-color: rgba(255, 255, 255, 0.08) !important; }
+.border-space-600 { border-color: rgba(255, 255, 255, 0.15) !important; }
+.text-gold-300 { color: #fde68a !important; }
+.text-gold-400 { color: #fbbf24 !important; }
+.text-gold-500 { color: #f59e0b !important; }
+.bg-gold-400\/10 { background-color: rgba(251, 191, 36, 0.1) !important; }
+.bg-gold-400\/20 { background-color: rgba(251, 191, 36, 0.2) !important; }
+.border-gold-400\/20 { border-color: rgba(251, 191, 36, 0.2) !important; }
+.border-gold-400\/30 { border-color: rgba(251, 191, 36, 0.3) !important; }
 
 /* ─── Variables Efferd — legacy aliases pointing to M3 tokens ────────────────── */
 :root {
