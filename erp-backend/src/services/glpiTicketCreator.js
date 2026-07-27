@@ -77,7 +77,10 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
 
     const ticketRes = await fetchWithTimeout(`${config.baseUrl}/Ticket`, {
       method: 'POST',
-      headers,
+      headers: {
+        ...headers,
+        'Accept': 'application/json',
+      },
       body: JSON.stringify(ticketPayload),
     });
     // Lire le body une seule fois (le stream ne peut être consommé qu'une fois)
@@ -89,9 +92,24 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
 
     let glpiId;
     try {
-      glpiId = JSON.parse(rawBody).id;
+      const parsed = JSON.parse(rawBody);
+      glpiId = parsed.id || (Array.isArray(parsed) ? parsed[0]?.id : null);
     } catch (parseErr) {
-      throw new Error(`Réponse GLPI invalide après création ticket (${ticketRes.status}) : ${rawBody}`);
+      // Si le body est vide mais la réponse est 200, essayer l'en-tête Location
+      const locationHeader = ticketRes.headers.get('Location') || ticketRes.headers.get('Content-Location') || '';
+      const locationMatch = locationHeader.match(/\/Ticket\/(\d+)/);
+      if (locationMatch) {
+        glpiId = parseInt(locationMatch[1], 10);
+        console.log(`[glpiTicketCreator] ID ticket GLPI ${glpiId} extrait depuis l'en-tête Location (body était vide)`);
+      } else {
+        console.error(`[glpiTicketCreator] Réponse GLPI vide (${ticketRes.status}):`, {
+          status: ticketRes.status,
+          statusText: ticketRes.statusText,
+          headers: Object.fromEntries(ticketRes.headers.entries()),
+          bodyLength: rawBody.length,
+        });
+        throw new Error(`Réponse GLPI invalide après création ticket (${ticketRes.status}) : ${rawBody || '(corps vide)'}`);
+      }
     }
 
     // Notes privées à ajouter au ticket GLPI
