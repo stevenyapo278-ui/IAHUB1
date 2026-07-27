@@ -60,6 +60,8 @@ export default function TicketDetail() {
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [rejecting, setRejecting] = useState(false);
+  const [showApproveModal, setShowApproveModal] = useState(false);
+  const [approving, setApproving] = useState(false);
 
   const canAssign = hasPermission(user, 'tickets.assign') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN';
   const canApprove = hasPermission(user, 'tickets.approve') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN';
@@ -213,13 +215,21 @@ export default function TicketDetail() {
     }
   }
 
-  async function handleApprove() {
+  function handleApprove() {
+    setShowApproveModal(true);
+  }
+
+  async function handleApproveConfirm() {
+    setApproving(true);
     try {
       await api.post(`/tickets/${id}/approve`);
       toast.success('Ticket approuvé');
+      setShowApproveModal(false);
       load();
     } catch (err) {
       setError(err.response?.data?.error || "Erreur lors de l'approbation");
+    } finally {
+      setApproving(false);
     }
   }
 
@@ -896,10 +906,24 @@ export default function TicketDetail() {
                     options={locations}
                     value={ticket.glpiLocationId || ''}
                     disabled={savingField === 'glpiLocationId'}
-                    onChange={(val) => {
+                    onChange={async (val) => {
                       const selectedLoc = locations.find((l) => String(l.id) === String(val));
-                      updateField('glpiLocationId', val ? Number(val) : null);
-                      if (selectedLoc) updateField('glpiLocationName', selectedLoc.completename || selectedLoc.name);
+                      const locName = selectedLoc ? (selectedLoc.completename || selectedLoc.name) : null;
+                      const suffix = ticket.title?.includes(' : ') ? ticket.title.split(' : ').slice(1).join(' : ') : ticket.title;
+                      const newTitle = locName && suffix ? `${locName} : ${suffix}` : (locName || suffix || ticket.title);
+                      try {
+                        setSavingField('glpiLocationId');
+                        await api.patch(`/tickets/${id}`, {
+                          locationId: val ? Number(val) : null,
+                          title: newTitle,
+                        });
+                        toast.success('Lieu et titre mis à jour');
+                        load();
+                      } catch (err) {
+                        setError(err.response?.data?.error || 'Erreur lors de la mise à jour');
+                      } finally {
+                        setSavingField(null);
+                      }
                     }}
                     placeholder="Sélectionner un lieu..."
                     searchPlaceholder="Rechercher un lieu GLPI..."
@@ -974,6 +998,138 @@ export default function TicketDetail() {
           )}
         </div>
       </div>
+
+      {/* Approval Modal */}
+      {showApproveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fadeIn">
+          <div className="bg-surface border border-outline-variant/40 rounded-3xl p-6 max-w-lg w-full shadow-2xl space-y-5 max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center gap-3 text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="w-6 h-6" />
+              <h3 className="text-base font-bold">Approuver le ticket #{ticket.id}</h3>
+            </div>
+            <p className="text-xs text-on-surface-variant border-b border-outline-variant/20 pb-3">
+              Veuillez vérifier les informations ci-dessous avant de confirmer l'approbation.
+            </p>
+
+            {/* Ticket Summary */}
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 text-xs">
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant block mb-0.5">Titre</span>
+                  <span className="font-semibold text-on-surface break-words col-span-2 block">{ticket.title}</span>
+                </div>
+                <div className="col-span-2 border-t border-outline-variant/20 pt-2" />
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant block mb-0.5">Demandeur</span>
+                  <span className="font-semibold text-on-surface">{ticket.requester?.fullName || ticket.sourceName || ticket.sourceEmail || 'Non spécifié'}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant block mb-0.5">Email</span>
+                  <span className="font-semibold text-on-surface truncate block">{ticket.requester?.email || ticket.sourceEmail || '-'}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant block mb-0.5">Catégorie</span>
+                  <span className="font-semibold text-on-surface">{ticket.category || '-'}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant block mb-0.5">Type</span>
+                  <span className="font-semibold text-on-surface">{ticket.type || '-'}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant block mb-0.5">Statut</span>
+                  <span className="font-semibold">{sConfig ? (
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${sConfig.bg}`}>
+                      <SIcon className="w-3 h-3" />
+                      {sConfig.label}
+                    </span>
+                  ) : ticket.status}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant block mb-0.5">Priorité</span>
+                  <span className="font-semibold">{pConfig ? (
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${pConfig.bg}`}>
+                      <PIcon className="w-3 h-3" />
+                      {pConfig.label}
+                    </span>
+                  ) : ticket.priority}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant block mb-0.5">Urgence</span>
+                  <span className="font-semibold text-on-surface">{ticket.urgency || '-'}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant block mb-0.5">Impact</span>
+                  <span className="font-semibold text-on-surface">{ticket.impact || '-'}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant block mb-0.5">Équipe</span>
+                  <span className="font-semibold text-on-surface">{ticket.team?.name || 'Non assignée'}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant block mb-0.5">Assigné à</span>
+                  <span className="font-semibold text-on-surface">{ticket.assignedTo?.fullName || 'Non assigné'}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant block mb-0.5">Lieu</span>
+                  <span className="font-semibold text-on-surface">{ticket.glpiLocationName || 'Non spécifié'}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant block mb-0.5">Source</span>
+                  <span className="font-semibold text-on-surface">{ticket.source || 'N/A'}</span>
+                </div>
+              </div>
+
+              {ticket.content && (
+                <div className="border-t border-outline-variant/20 pt-3">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant block mb-1.5">Description</span>
+                  <div className="bg-surface-container-low rounded-xl p-3 max-h-24 overflow-y-auto text-xs text-on-surface leading-relaxed">
+                    {ticket.content.includes('<') || ticket.content.includes('&#') ? (
+                      <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(ticket.content) }} />
+                    ) : (
+                      <span className="whitespace-pre-wrap">{ticket.content}</span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {ticket.sourceEmail && (
+                <div className="border-t border-outline-variant/20 pt-3 flex items-center gap-2 text-xs text-on-surface-variant">
+                  <Mail className="w-3.5 h-3.5" />
+                  <span>Reçu de : {ticket.sourceName ? `${ticket.sourceName} <${ticket.sourceEmail}>` : ticket.sourceEmail}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-outline-variant/20">
+              <button
+                type="button"
+                onClick={() => setShowApproveModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold border border-outline-variant/40 hover:bg-surface-container text-on-surface transition-all"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                disabled={approving}
+                onClick={handleApproveConfirm}
+                className="px-5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-500/20 hover:brightness-110 disabled:opacity-50 transition-all flex items-center gap-1.5"
+              >
+                {approving ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    Approbation en cours...
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    Confirmer l'approbation
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Rejection Modal */}
       {showRejectModal && (
