@@ -105,12 +105,15 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
         headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
       });
       console.log(`[glpiTicketCreator] GET fallback status=${recentRes.status} ok=${recentRes.ok}`);
+      // Stocker dans une variable accessible aussi à l'étape 4 (dernier recours)
+      let recentBody = '';
+      let recentTickets = [];
       if (recentRes.ok) {
-        const recentBody = await recentRes.text().catch(() => '');
+        recentBody = await recentRes.text().catch(() => '');
         console.log(`[glpiTicketCreator] GET fallback body (200 premiers):`, recentBody.slice(0, 200));
         try {
           const recentParsed = JSON.parse(recentBody);
-          const recentTickets = Array.isArray(recentParsed) ? recentParsed : (recentParsed.data || []);
+          recentTickets = Array.isArray(recentParsed) ? recentParsed : (recentParsed.data || []);
           console.log(`[glpiTicketCreator] GET fallback tickets trouvés: ${recentTickets.length}`);
           if (recentTickets.length > 0) {
             const first = recentTickets[0];
@@ -176,16 +179,11 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
 
       // 4) Dernier recours : si on a un ticket récent mais que le nom ne match pas exactement,
       // on prend quand même le premier (risque calculé — GLPI peut modifier le nom)
-      if (!glpiId && recentRes && recentRes.ok) {
-        try {
-          const recentBody = await recentRes.clone().text();
-          const recentParsed = JSON.parse(recentBody);
-          const recentTickets = Array.isArray(recentParsed) ? recentParsed : (recentParsed.data || []);
-          if (recentTickets.length > 0) {
-            console.log(`[glpiTicketCreator] Dernier recours: utilisation du ticket #${recentTickets[0].id} (nom="${recentTickets[0].name}")`);
-            glpiId = recentTickets[0].id;
-          }
-        } catch (e) { /* ignore */ }
+      // Note: recentBody est déjà lu dans l'étape 1, pas besoin de re-cloner
+      if (!glpiId && recentBody && recentTickets.length > 0) {
+        const first = recentTickets[0];
+        console.log(`[glpiTicketCreator] Dernier recours: utilisation du ticket #${first.id} (nom="${first.name}") bien qu'il diffère de "${title}"`);
+        glpiId = first.id;
       }
 
       if (!glpiId) {
