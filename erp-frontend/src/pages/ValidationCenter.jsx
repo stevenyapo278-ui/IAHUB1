@@ -302,7 +302,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                     <div className="flex items-center gap-4 text-[11px] text-on-surface-variant pt-1 flex-wrap">
                       <span className="flex items-center gap-1">
                         <User className="w-3.5 h-3.5 text-primary" />
-                        {t.requester?.fullName || 'Demandeur anonyme'}
+                        {t.requester?.fullName || t.sourceName || t.sourceEmail || 'Demandeur anonyme'}
                       </span>
                       <span className="flex items-center gap-1">
                         <Clock className="w-3.5 h-3.5 text-primary" />
