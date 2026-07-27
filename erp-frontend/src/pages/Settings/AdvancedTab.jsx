@@ -256,6 +256,14 @@ export default function AdvancedTab() {
             onChange={(v) => updateSetting('enableGlpiTicketCreation', v)}
             disabled={saving}
           />
+
+          <SettingRow
+            title="🔴 Dry Run Mode (simulation)"
+            description="Mode simulation : aucune action n'est réellement écrite dans GLPI (création, mise à jour, suivi). Les tickets reçoivent un ID fictif négatif. À désactiver en production."
+            checked={settings.dryRunMode === true}
+            onChange={(v) => updateSetting('dryRunMode', v)}
+            disabled={saving}
+          />
         </div>
 
 
