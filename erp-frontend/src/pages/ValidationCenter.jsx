@@ -385,6 +385,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                           <p className="text-[11px] text-on-surface-variant">
                             Demandeur : <strong className="text-on-surface">{ticketObj?.requester?.fullName || draft.recipientEmail || 'Inconnu'}</strong>
                           </p>
+                          <p className="text-[11px] text-on-surface-variant mt-0.5">
+                            Créé le <strong className="text-on-surface font-semibold">{new Date(draft.createdAt).toLocaleString('fr-FR')}</strong>
+                          </p>
                         </div>
                       </div>
 
@@ -444,7 +447,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                           </div>
                         </div>
                       ) : (
-                        <div className="text-xs text-on-surface leading-relaxed font-serif prose prose-sm dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: sanitizeHtml(draft.proposedContent) }} />
+                        <div className="text-xs text-on-surface leading-relaxed font-serif prose prose-sm dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: sanitizeHtml((draft.proposedContent || '').replace(/#null\b/g, `#${draft.glpiTicketId || draft.ticketId || 'N/A'}`)) }} />
                       )}
                     </div>
 
@@ -523,6 +526,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                           <p className="text-[11px] text-on-surface-variant">
                             Destinataire : <strong className="text-on-surface">{draft.recipientName || draft.recipientEmail}</strong>
                           </p>
+                          <p className="text-[11px] text-on-surface-variant mt-0.5">
+                            Créé le <strong className="text-on-surface font-semibold">{new Date(draft.createdAt).toLocaleString('fr-FR')}</strong>
+                          </p>
                         </div>
                       </div>
                       <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 dark:bg-amber-500/15 dark:text-amber-400 border border-amber-300 dark:border-amber-500/30 flex items-center gap-1.5 self-start sm:self-auto">
@@ -533,7 +539,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
 
                     <div className="p-4 rounded-2xl bg-surface-container-low/40 border border-outline-variant/20">
                       <div className="text-[11px] font-bold text-on-surface-variant mb-2">Contenu de la relance</div>
-                      <div className="text-xs text-on-surface leading-relaxed font-serif prose prose-sm dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: sanitizeHtml(draft.proposedContent) }} />
+                      <div className="text-xs text-on-surface leading-relaxed font-serif prose prose-sm dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: sanitizeHtml((draft.proposedContent || '').replace(/#null\b/g, `#${draft.glpiTicketId || draft.ticketId || 'N/A'}`)) }} />
                     </div>
 
                     <div className="flex items-center justify-end gap-2 pt-2">
