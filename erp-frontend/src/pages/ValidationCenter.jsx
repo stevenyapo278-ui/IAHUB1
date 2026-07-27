@@ -47,7 +47,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
       .then(([ticketsRes, draftsRes]) => {
         const ticketList = Array.isArray(ticketsRes.data)
           ? ticketsRes.data
-          : ticketsRes.data?.tickets || [];
+          : ticketsRes.data?.items || [];
         setPendingTickets(ticketList);
 
         const draftList = Array.isArray(draftsRes.data) ? draftsRes.data : [];
