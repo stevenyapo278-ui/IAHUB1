@@ -7,6 +7,7 @@ import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import { useSocket } from '../context/SocketContext';
+import DOMPurify from 'dompurify';
 import {
   Mail, MailOpen, RefreshCw, Sparkles, AlertTriangle, Flame,
   CheckCircle2, XCircle, Ban, Clock, ChevronRight, ExternalLink,
@@ -505,13 +506,18 @@ export default function Inbox() {
                       <span className="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Corps du message</span>
                     </div>
                     <div className="p-5">
-                      {selected.body ? (
-                        <pre className="text-sm text-on-surface leading-relaxed whitespace-pre-wrap font-sans">
-                          {selected.body}
-                        </pre>
-                      ) : (
-                        <p className="text-sm text-on-surface-variant italic">Corps du message non disponible.</p>
-                      )}
+                      {(() => {
+                        const bodyContent = selected.bodyHtml || selected.bodyPreview;
+                        return bodyContent ? (
+                          selected.bodyHtml ? (
+                            <div className="text-sm text-on-surface leading-relaxed prose prose-sm dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(bodyContent) }} />
+                          ) : (
+                            <pre className="text-sm text-on-surface leading-relaxed whitespace-pre-wrap font-sans">{bodyContent}</pre>
+                          )
+                        ) : (
+                          <p className="text-sm text-on-surface-variant italic">Corps du message non disponible.</p>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>
