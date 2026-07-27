@@ -939,11 +939,11 @@ export default function TicketDetail() {
             </h3>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-2xl border border-outline-variant/40 bg-surface-container text-on-surface flex items-center justify-center font-bold text-sm shrink-0 shadow-sm">
-                {initials(ticket.requester?.fullName)}
+                {initials(ticket.requester?.fullName || ticket.sourceName)}
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-bold text-on-surface truncate">{ticket.requester?.fullName || '-'}</p>
-                <p className="text-[11px] text-on-surface-variant font-medium truncate">{ticket.requester?.email || '-'}</p>
+                <p className="text-xs font-bold text-on-surface truncate">{ticket.requester?.fullName || ticket.sourceName || ticket.sourceEmail || '-'}</p>
+                <p className="text-[11px] text-on-surface-variant font-medium truncate">{ticket.requester?.email || ticket.sourceEmail || '-'}</p>
               </div>
             </div>
           </div>
