@@ -226,7 +226,7 @@ export default function Tickets() {
       // Changement de filtre/recherche : indicateur discret uniquement
       setRefreshing(true);
     }
-    const params = { page, limit: 100, sortBy, sortOrder };
+    const params = { page, limit: 50, sortBy, sortOrder };
     if (filters.status) params.status = filters.status;
     if (filters.priority) params.priority = filters.priority;
     if (filters.source) params.source = filters.source;
@@ -254,7 +254,7 @@ export default function Tickets() {
   }
 
   function refreshTicketsSilently() {
-    const params = { page, limit: 100, sortBy, sortOrder };
+    const params = { page, limit: 50, sortBy, sortOrder };
     if (filters.status) params.status = filters.status;
     if (filters.priority) params.priority = filters.priority;
     if (filters.source) params.source = filters.source;

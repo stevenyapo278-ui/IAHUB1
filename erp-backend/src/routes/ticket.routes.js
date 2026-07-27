@@ -26,7 +26,7 @@ router.get('/', async (req, res) => {
   const searchQuery = title || search || req.query.query;
 
   const pageNum = Math.max(1, parseInt(page) || 1);
-  const pageSize = Math.min(500, Math.max(1, parseInt(limit) || 100));
+  const pageSize = Math.min(500, Math.max(1, parseInt(limit) || 50));
   const skip = (pageNum - 1) * pageSize;
 
   const where = {};
@@ -97,10 +97,7 @@ router.get('/', async (req, res) => {
       include: {
         requester: { select: { id: true, fullName: true, email: true } },
         assignedTo: { select: { id: true, fullName: true, email: true } },
-        observers: { select: { id: true, fullName: true, email: true } },
         team: { select: { id: true, name: true } },
-        approvedBy: { select: { id: true, fullName: true, email: true } },
-        _count: { select: { followups: true, attachments: true } },
       },
       orderBy,
     }),
