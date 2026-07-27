@@ -59,21 +59,27 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
       'Content-Type': 'application/json',
     };
 
-    const ticketPayload = {
-      input: {
-        name: title,
-        content: content || '',
-        status: 1,
-        type: GLPI_TYPE_MAP[type] || 1,
-        urgency: GLPI_URGENCY_IMPACT_MAP[urgency] || ERP_PRIORITY_MAP[priority] || 3,
-        impact: GLPI_URGENCY_IMPACT_MAP[impact] || 3,
-        priority: ERP_PRIORITY_MAP[priority] || 3,
-        itilcategories_id: (await categoryToGlpiId(category)) || 0,
-        requesttypes_id: GLPI_SOURCE_MAP[source] || 1,
-        users_id_recipient: GLPI_AI_REQUESTER_ID,
-        ...(locationId ? { locations_id: Number(locationId) } : {}),
-      },
+    // GLPI 10.0.9 peut ignorer silencieusement certains champs inconnus ou IDs invalides.
+    // On construit un payload minimal puis on ajoute les champs optionnels un par un.
+    const inputFields = {
+      name: title,
+      content: content || '',
+      status: 1,
+      type: GLPI_TYPE_MAP[type] || 1,
+      priority: ERP_PRIORITY_MAP[priority] || 3,
     };
+    // Ajouter les champs optionnels progressivement
+    try {
+      const catId = await categoryToGlpiId(category);
+      if (catId) inputFields.itilcategories_id = catId;
+    } catch (e) {}
+    if (urgency) inputFields.urgency = GLPI_URGENCY_IMPACT_MAP[urgency] || 3;
+    if (impact) inputFields.impact = GLPI_URGENCY_IMPACT_MAP[impact] || 3;
+    if (source) inputFields.requesttypes_id = GLPI_SOURCE_MAP[source] || 1;
+    if (GLPI_AI_REQUESTER_ID) inputFields.users_id_recipient = GLPI_AI_REQUESTER_ID;
+    if (locationId) inputFields.locations_id = Number(locationId);
+
+    const ticketPayload = { input: inputFields };
 
     console.log(`[glpiTicketCreator] POST /Ticket payload:`, JSON.stringify(ticketPayload).slice(0, 300));
     const ticketRes = await fetchWithTimeout(`${config.baseUrl}/Ticket`, {
@@ -177,13 +183,20 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
         }
       }
 
-      // 4) Dernier recours : si on a un ticket récent mais que le nom ne match pas exactement,
-      // on prend quand même le premier (risque calculé — GLPI peut modifier le nom)
-      // Note: recentBody est déjà lu dans l'étape 1, pas besoin de re-cloner
+      // 4) Dernier recours : si on a un ticket récent, qu'il a été créé dans la dernière minute
+      // (date_creation récente) et que le nom contient le titre (même partiellement).
+      // Évite de prendre un ticket vieux de 6 ans (comme le #2 de 2020).
       if (!glpiId && recentBody && recentTickets.length > 0) {
         const first = recentTickets[0];
-        console.log(`[glpiTicketCreator] Dernier recours: utilisation du ticket #${first.id} (nom="${first.name}") bien qu'il diffère de "${title}"`);
-        glpiId = first.id;
+        const createdAgo = first.date_creation ? (Date.now() - new Date(first.date_creation).getTime()) / 1000 : Infinity;
+        const nameMatch = first.name && title && (first.name === title || first.name.includes(title) || title.includes(first.name));
+        console.log(`[glpiTicketCreator] Dernier recours: ticket #${first.id} nom="${first.name}" créé il y a ${createdAgo.toFixed(0)}s, nameMatch=${nameMatch}`);
+        if (nameMatch && createdAgo < 60) {
+          glpiId = first.id;
+          console.log(`[glpiTicketCreator] ID ${glpiId} récupéré via dernier recours`);
+        } else {
+          console.log(`[glpiTicketCreator] Dernier recours ignoré: ticket trop vieux ou nom trop différent`);
+        }
       }
 
       if (!glpiId) {
