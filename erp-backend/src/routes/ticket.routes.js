@@ -430,23 +430,34 @@ router.post('/:id/approve', requirePermission('tickets.approve', ['ADMIN', 'TECH
 
     let glpiTicketId = existing.glpiTicketId;
     let glpiCreationError = null;
+    let glpiSkippedReason = null;
 
+    // Vérifier en amont si la création GLPI est désactivée pour prévenir l'utilisateur
     if (!glpiTicketId) {
-      try {
-        glpiTicketId = await createGlpiTicket({
-          title: existing.title,
-          content: existing.content,
-          priority: existing.priority,
-          category: existing.category,
-          type: existing.type,
-          urgency: existing.urgency,
-          impact: existing.impact,
-          source: existing.source,
-          locationId: existing.glpiLocationId,
-        });
-      } catch (err) {
-        console.error('[ticket.routes] Création GLPI lors de l\'approbation échouée:', err.message);
-        glpiCreationError = err.message;
+      const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+      if (settings?.enableGlpiTicketCreation === false) {
+        glpiSkippedReason = 'Création GLPI automatique désactivée dans les paramètres';
+      } else {
+        try {
+          glpiTicketId = await createGlpiTicket({
+            title: existing.title,
+            content: existing.content,
+            priority: existing.priority,
+            category: existing.category,
+            type: existing.type,
+            urgency: existing.urgency,
+            impact: existing.impact,
+            source: existing.source,
+            locationId: existing.glpiLocationId,
+          });
+          // Si createGlpiTicket retourne null sans exception (ex: GLPI non configuré)
+          if (!glpiTicketId) {
+            glpiSkippedReason = 'GLPI non configuré — aucune synchronisation effectuée';
+          }
+        } catch (err) {
+          console.error('[ticket.routes] Création GLPI lors de l\'approbation échouée:', err.message);
+          glpiCreationError = err.message;
+        }
       }
     }
 
@@ -464,8 +475,8 @@ router.post('/:id/approve', requirePermission('tickets.approve', ['ADMIN', 'TECH
     if (glpiCreationError) {
       await logEvent(id, 'GLPI_SYNC_FAILED', 'SYSTEM', { action: 'approve-create', error: glpiCreationError });
     } else {
-      await logEvent(id, 'APPROVED', req.user.email || 'HOTLINE', { glpiTicketId });
-      await auditLog('TICKET_APPROVED', { actor: req.user, targetType: 'Ticket', targetId: id, targetLabel: ticket.title, metadata: { glpiTicketId } });
+      await logEvent(id, 'APPROVED', req.user.email || 'HOTLINE', { glpiTicketId, glpiSkippedReason });
+      await auditLog('TICKET_APPROVED', { actor: req.user, targetType: 'Ticket', targetId: id, targetLabel: ticket.title, metadata: { glpiTicketId, glpiSkippedReason } });
       // Uploader les pièces jointes en attente (stockées localement en attendant GLPI)
       if (glpiTicketId) {
         uploadPendingAttachments(id, glpiTicketId).then((uploaded) => {
@@ -499,7 +510,11 @@ router.post('/:id/approve', requirePermission('tickets.approve', ['ADMIN', 'TECH
       }
     }
 
-    return res.json(ticket);
+    return res.json({
+      ...ticket,
+      ...(glpiSkippedReason ? { warning: glpiSkippedReason } : {}),
+      ...(glpiCreationError ? { glpiCreationError } : {}),
+    });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }

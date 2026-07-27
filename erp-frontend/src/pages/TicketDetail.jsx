@@ -265,8 +265,11 @@ export default function TicketDetail() {
   async function handleApproveConfirm() {
     setApproving(true);
     try {
-      await api.post(`/tickets/${id}/approve`);
+      const { data } = await api.post(`/tickets/${id}/approve`);
       toast.success('Ticket approuvé');
+      if (data.warning) {
+        toast.warning(data.warning, { duration: 8000 });
+      }
       setShowApproveModal(false);
       load();
     } catch (err) {
