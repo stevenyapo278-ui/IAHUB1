@@ -528,6 +528,7 @@ async function processMessage(message, account) {
     const acknowledgementHtml = buildAcknowledgementHtml({
       toName: fromName,
       glpiTicketId,
+      ticketId: erpTicketId,
       originalSubject: subject,
       customMessage: pipelineSettings.acknowledgementMessage,
       signature: await getEmailSignature(),
@@ -537,7 +538,7 @@ async function processMessage(message, account) {
       glpiTicketId,
       recipientEmail: fromEmail,
       ccRecipients,
-      subject: `[Ticket #${glpiTicketId}] ${subject}`,
+      subject: `[Ticket #${glpiTicketId || erpTicketId || 'N/A'}] ${subject}`,
       html: acknowledgementHtml,
       draftType: 'ACKNOWLEDGEMENT',
       inReplyToGraphMessageId: graphMessageId,

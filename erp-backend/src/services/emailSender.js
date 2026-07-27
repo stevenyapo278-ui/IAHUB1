@@ -182,16 +182,17 @@ async function getEmailSignature() {
 // Génère le HTML de l'accusé de réception (fonction pure, sans envoi).
 // `customMessage` vient de SystemSettings.acknowledgementMessage (Paramètres > Automatisation > Emails) ;
 // placeholders supportés : {ticketId}, {subject}, {toName}.
-function buildAcknowledgementHtml({ toName, glpiTicketId, originalSubject, customMessage, signature }) {
+function buildAcknowledgementHtml({ toName, glpiTicketId, ticketId, originalSubject, customMessage, signature }) {
+  const displayId = glpiTicketId || ticketId || 'N/A';
   const introMessage = (customMessage || DEFAULT_ACKNOWLEDGEMENT_MESSAGE)
-    .replaceAll('{ticketId}', glpiTicketId)
+    .replaceAll('{ticketId}', displayId)
     .replaceAll('{subject}', originalSubject)
     .replaceAll('{toName}', toName || '');
   return `
 <p>Bonjour ${toName || ''},</p>
 <p>${introMessage}</p>
 <table style="border-collapse:collapse;margin:16px 0">
-  <tr><td style="padding:4px 12px 4px 0;color:#666">Numéro de ticket</td><td><strong>#${glpiTicketId}</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Numéro de ticket</td><td><strong>#${displayId}</strong></td></tr>
   <tr><td style="padding:4px 12px 4px 0;color:#666">Sujet</td><td>${originalSubject}</td></tr>
 </table>
 <p>Notre équipe va analyser votre demande et vous contactera dans les meilleurs délais.</p>
@@ -204,24 +205,26 @@ ${signature || DEFAULT_EMAIL_SIGNATURE}
 async function sendAcknowledgement({ ticketId, glpiTicketId, toEmail, toName, originalSubject }) {
   // On garde le sujet original de l'utilisateur (juste préfixé du numéro de ticket), pour ne pas
   // casser le fil de conversation côté client mail et rester reconnaissable pour l'utilisateur.
-  const subject = `[Ticket #${glpiTicketId}] ${originalSubject}`;
+  const displayId = glpiTicketId || ticketId || 'N/A';
+  const subject = `[Ticket #${displayId}] ${originalSubject}`;
   const settings = await getSystemSettings();
   const signature = await getEmailSignature();
-  const bodyHtml = buildAcknowledgementHtml({ toName, glpiTicketId, originalSubject, customMessage: settings.acknowledgementMessage, signature });
+  const bodyHtml = buildAcknowledgementHtml({ toName, glpiTicketId, ticketId, originalSubject, customMessage: settings.acknowledgementMessage, signature });
   return sendEmail({ ticketId, to: toEmail, subject, bodyHtml, saveAsMessage: true });
 }
 
 // Envoie une relance automatique pour un ticket en attente de réponse utilisateur
 async function sendReminder({ ticketId, glpiTicketId, toEmail, toName, subject, reminderNumber, isPreClose = false }) {
-  const emailSubject = `[Ticket #${glpiTicketId}] ${subject}`;
+  const displayId = glpiTicketId || ticketId || 'N/A';
+  const emailSubject = `[Ticket #${displayId}] ${subject}`;
   const signature = await getEmailSignature();
   const bodyHtml = isPreClose
     ? `<p>Bonjour ${toName || ''},</p>
-<p>Sans réponse de votre part dans les 5 prochains jours, votre ticket <strong>#${glpiTicketId}</strong> (${subject}) sera automatiquement clôturé.</p>
+<p>Sans réponse de votre part dans les 5 prochains jours, votre ticket <strong>#${displayId}</strong> (${subject}) sera automatiquement clôturé.</p>
 <p>Si le problème est résolu, vous n'avez rien à faire. Sinon, répondez à cet email.</p>
 ${signature}`
     : `<p>Bonjour ${toName || ''},</p>
-<p>Nous revenons vers vous concernant votre ticket <strong>#${glpiTicketId}</strong> : ${subject}.</p>
+<p>Nous revenons vers vous concernant votre ticket <strong>#${displayId}</strong> : ${subject}.</p>
 <p>Votre demande est toujours en attente. Pouvez-vous nous confirmer si le problème est résolu ou s'il persiste ?</p>
 <p>Répondez simplement à cet email.</p>
 ${signature}`;
@@ -232,7 +235,8 @@ ${signature}`;
 }
 
 // Génère le HTML de la notification "incident déjà connu" (fonction pure, sans envoi)
-function buildKnownIncidentNotificationHtml({ toName, glpiTicketId, originalSubject, isMajor, impactedCount, signature }) {
+function buildKnownIncidentNotificationHtml({ toName, glpiTicketId, ticketId, originalSubject, isMajor, impactedCount, signature }) {
+  const displayId = glpiTicketId || ticketId || 'N/A';
   const majorNote = isMajor
     ? `<p>⚠️ Cet incident a été promu en <strong>incident majeur</strong> (${impactedCount} sites impactés). Notre équipe est mobilisée en priorité.</p>`
     : '';
@@ -241,7 +245,7 @@ function buildKnownIncidentNotificationHtml({ toName, glpiTicketId, originalSubj
 <p>Votre demande a bien été prise en compte.</p>
 <p>Un incident déjà identifié est actuellement en cours d'investigation par nos équipes :</p>
 <table style="border-collapse:collapse;margin:16px 0">
-  <tr><td style="padding:4px 12px 4px 0;color:#666">Numéro de ticket</td><td><strong>#${glpiTicketId}</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Numéro de ticket</td><td><strong>#${displayId}</strong></td></tr>
   <tr><td style="padding:4px 12px 4px 0;color:#666">Sujet</td><td>${originalSubject}</td></tr>
   <tr><td style="padding:4px 12px 4px 0;color:#666">Sites impactés</td><td>${impactedCount}</td></tr>
 </table>
@@ -253,9 +257,10 @@ ${signature || DEFAULT_EMAIL_SIGNATURE}
 
 // Envoie une notification "incident déjà connu" quand un site est rattaché à un incident existant
 async function sendKnownIncidentNotification({ ticketId, glpiTicketId, toEmail, toName, originalSubject, isMajor, impactedCount }) {
-  const subject = `[Ticket #${glpiTicketId}] ${originalSubject}`;
+  const displayId = glpiTicketId || ticketId || 'N/A';
+  const subject = `[Ticket #${displayId}] ${originalSubject}`;
   const signature = await getEmailSignature();
-  const bodyHtml = buildKnownIncidentNotificationHtml({ toName, glpiTicketId, originalSubject, isMajor, impactedCount, signature });
+  const bodyHtml = buildKnownIncidentNotificationHtml({ toName, glpiTicketId, ticketId, originalSubject, isMajor, impactedCount, signature });
   return sendEmail({ ticketId, to: toEmail, subject, bodyHtml, saveAsMessage: true });
 }
 
