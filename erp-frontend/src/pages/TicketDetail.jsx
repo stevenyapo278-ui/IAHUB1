@@ -738,24 +738,30 @@ export default function TicketDetail() {
                 </p>
               )}
 
-              {canApprove && ticket.approvalStatus === 'PENDING' && (
+              {(canApprove && ticket.approvalStatus === 'PENDING') || (canApprove && ticket.approvalStatus === 'APPROVED' && !ticket.glpiTicketId) ? (
                 <div className="flex gap-2 pt-2">
                   <button
                     onClick={handleApprove}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white text-xs font-bold shadow-md shadow-emerald-500/20 hover:brightness-110 cursor-pointer transition-all"
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold shadow-md cursor-pointer transition-all ${
+                      ticket.approvalStatus === 'APPROVED' && !ticket.glpiTicketId
+                        ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 shadow-amber-500/20 hover:brightness-110'
+                        : 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-emerald-500/20 hover:brightness-110'
+                    }"
                   >
-                    <Check className="w-3.5 h-3.5" />
-                    Approuver
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    {ticket.approvalStatus === 'APPROVED' && !ticket.glpiTicketId ? 'Réessayer synchro GLPI' : 'Approuver'}
                   </button>
-                  <button
-                    onClick={handleReject}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-bold hover:bg-red-500/10 cursor-pointer transition-all"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                    Rejeter
-                  </button>
+                  {ticket.approvalStatus === 'PENDING' && (
+                    <button
+                      onClick={handleReject}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-bold hover:bg-red-500/10 cursor-pointer transition-all"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      Rejeter
+                    </button>
+                  )}
                 </div>
-              )}
+              ) : null}
             </div>
           )}
 

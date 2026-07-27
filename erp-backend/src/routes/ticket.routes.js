@@ -429,6 +429,12 @@ router.post('/:id/approve', requirePermission('tickets.approve', ['ADMIN', 'TECH
     if (!existing) return res.status(404).json({ error: 'Ticket introuvable' });
 
     let glpiTicketId = existing.glpiTicketId;
+
+    // Réinitialiser les IDs négatifs (dry-run fake) pour permettre un retry
+    if (glpiTicketId && glpiTicketId < 0) {
+      glpiTicketId = null;
+    }
+
     let glpiCreationError = null;
     let glpiSkippedReason = null;
 
