@@ -99,6 +99,19 @@ export default function Users() {
   const [csvImporting, setCsvImporting] = useState(false);
   const [csvResult, setCsvResult] = useState(null);
   const [searchQuery, setSearchQuery] = useFilterParam('search');
+  const [searchInput, setSearchInput] = useState('');
+  const debouncedSearch = searchQuery;
+  const searchDebounceRef = useRef(null);
+
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      setSearchQuery(searchInput);
+      setPage(1);
+    }, 300);
+    return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
+  }, [searchInput]);
+
   const [roleFilter, setRoleFilter] = useFilterParam('role');
   const [teamFilter, setTeamFilter] = useFilterParam('teamId');
   const [page, setPage] = useState(1);
@@ -141,7 +154,7 @@ export default function Users() {
       })
       .catch(err => { if (reqId === loadReqIdRef.current) setError(err.response?.data?.error || 'Erreur de chargement'); });
   }
-  useEffect(() => { load(); }, [page, searchQuery, roleFilter, teamFilter]);
+  useEffect(() => { load(); }, [page, debouncedSearch, roleFilter, teamFilter]);
 
   function toggleSelect(id) { setSelectedIds(ids => ids.includes(id) ? ids.filter(i => i !== id) : [...ids, id]); }
   function toggleSelectAll() { setSelectedIds(ids => ids.length === users.length ? [] : users.map(u => u.id)); }
@@ -367,13 +380,13 @@ export default function Users() {
           <input
             type="text"
             placeholder="Rechercher par nom, email, ID GLPI..."
-            value={searchQuery}
-            onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
             className="w-full bg-surface border border-outline-variant/40 rounded-xl pl-10 pr-9 py-2 text-xs font-medium text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm"
           />
-          {searchQuery && (
+          {searchInput && (
             <button
-              onClick={() => { setSearchQuery(''); setPage(1); }}
+              onClick={() => { setSearchInput(''); setSearchQuery(''); setPage(1); }}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50 hover:text-on-surface p-0.5 rounded-md"
             >
               <X className="w-3.5 h-3.5" />
