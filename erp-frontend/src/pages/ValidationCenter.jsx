@@ -7,6 +7,7 @@ import {
   Sparkles, ExternalLink, Send, ArrowRight, Shield, Check, X,
   Bell,
 } from 'lucide-react';
+import { sanitizeHtml } from '../utils/sanitize';
 import api from '../api/client';
 
 export default function ValidationCenter({ defaultTab = 'tickets' }) {
@@ -443,9 +444,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                           </div>
                         </div>
                       ) : (
-                        <p className="text-xs text-on-surface leading-relaxed whitespace-pre-line font-serif italic">
-                          "{draft.proposedContent}"
-                        </p>
+                        <div className="text-xs text-on-surface leading-relaxed font-serif prose prose-sm dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: sanitizeHtml(draft.proposedContent) }} />
                       )}
                     </div>
 
@@ -534,9 +533,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
 
                     <div className="p-4 rounded-2xl bg-surface-container-low/40 border border-outline-variant/20">
                       <div className="text-[11px] font-bold text-on-surface-variant mb-2">Contenu de la relance</div>
-                      <p className="text-xs text-on-surface leading-relaxed whitespace-pre-line font-serif italic">
-                        "{draft.proposedContent}"
-                      </p>
+                      <div className="text-xs text-on-surface leading-relaxed font-serif prose prose-sm dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: sanitizeHtml(draft.proposedContent) }} />
                     </div>
 
                     <div className="flex items-center justify-end gap-2 pt-2">
