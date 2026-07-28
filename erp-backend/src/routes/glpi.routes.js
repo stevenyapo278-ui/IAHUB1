@@ -196,23 +196,6 @@ router.get('/document/:docId/file', requirePermission('tickets.view', ['ADMIN', 
 // MIGRATION VERS UNE NOUVELLE INSTANCE GLPI
 // ──────────────────────────────────────────────────────────────────────────────
 
-// Helper : cherche un item par nom dans le nouveau GLPI (évite les doublons en re-run)
-async function findItemByName(baseUrl, sessionToken, appToken, endpoint, name) {
-  const encoded = encodeURIComponent(name);
-  const url = `${baseUrl}/${endpoint.replace(/^\/+/, '')}?range=0-100&is_deleted=0&searchText=${encoded}&criteria[0][field]=name&criteria[0][searchtype]=equals&criteria[0][value]=${encoded}`;
-  try {
-    const res = await fetch(url, {
-      headers: { 'App-Token': appToken, 'Session-Token': sessionToken },
-    });
-    if (!res.ok) return null;
-    const data = await res.json().catch(() => []);
-    const items = Array.isArray(data) ? data : data.data || [];
-    return items.length > 0 ? items[0] : null;
-  } catch {
-    return null;
-  }
-}
-
 // Helper : récupère tous les items d'un endpoint GLPI avec pagination
 async function fetchAllItems(baseUrl, sessionToken, appToken, endpoint) {
   const PAGE_SIZE = 100;
@@ -324,7 +307,7 @@ router.get('/migration-preview', requirePermission('glpi.manage', ['ADMIN', 'TEC
 
 // ── Helpers internes à la migration ────────────────────────────────────────
 
-async function migrateEntityType({ oldUrl, oldSession, oldAppToken, newUrl, newSession, newAppToken, endpoint, filter, buildInput, idMapKey, label, findExisting }) {
+async function migrateEntityType({ oldUrl, oldSession, oldAppToken, newUrl, newSession, newAppToken, endpoint, filter, buildInput, idMapKey, label }) {
   let items;
   try {
     items = await fetchAllItems(oldUrl, oldSession, oldAppToken, endpoint);
@@ -335,17 +318,7 @@ async function migrateEntityType({ oldUrl, oldSession, oldAppToken, newUrl, newS
   for (const item of items) {
     if (filter && !filter(item)) continue;
     try {
-      // Éviter les doublons en re-run : chercher si l'entité existe déjà dans le nouveau GLPI
-      let newId = null;
-      if (findExisting) {
-        const existing = await findExisting(item);
-        if (existing) {
-          newId = existing.id;
-        }
-      }
-      if (!newId) {
-        newId = await createItem(newUrl, newSession, newAppToken, endpoint, buildInput(item));
-      }
+      const newId = await createItem(newUrl, newSession, newAppToken, endpoint, buildInput(item));
       results.push({ oldId: item.id, newId });
     } catch (e) {
       results.push({ oldId: item.id, error: `${label} #${item.id}: ${e.message}` });
@@ -466,7 +439,6 @@ router.post(
               email: (u.name?.includes('@') ? u.name : `${u.name || u.id}@migrated.local`),
               is_active: 1,
             }),
-            findExisting: (u) => findItemByName(newUrl, newSession, newAppToken, 'User', u.name || u.realname || u.firstname),
             label: 'Utilisateur',
           }),
           migrateEntityType({
@@ -478,7 +450,6 @@ router.post(
               completename: c.completename || c.name,
               comment: c.comment || '',
             }),
-            findExisting: (c) => findItemByName(newUrl, newSession, newAppToken, 'ITILCategory', c.name),
             label: 'Catégorie',
           }),
           migrateEntityType({
@@ -495,7 +466,6 @@ router.post(
               building: l.building || '',
               room: l.room || '',
             }),
-            findExisting: (l) => findItemByName(newUrl, newSession, newAppToken, 'Location', l.name || l.completename),
             label: 'Lieu',
           }),
           migrateEntityType({
@@ -510,7 +480,6 @@ router.post(
               is_task: g.is_task ?? 1,
               is_notify: g.is_notify ?? 1,
             }),
-            findExisting: (g) => findItemByName(newUrl, newSession, newAppToken, 'Group', g.name),
             label: 'Groupe',
           }),
         ]);
