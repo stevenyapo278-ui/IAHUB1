@@ -754,4 +754,27 @@ router.post('/bulk-delete', requirePermission('tickets.bulkDelete', ['ADMIN']), 
   });
 });
 
+// Lier manuellement un ticket GLPI existant à un ticket ERP
+// Utilisé quand la création GLPI automatique retourne 200 vide (bug GLPI 10.0.x)
+router.patch('/:id/glpi-link', requirePermission('tickets.edit', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+  const id = Number(req.params.id);
+  const { glpiTicketId } = req.body;
+  if (!glpiTicketId || !Number.isInteger(Number(glpiTicketId))) {
+    return res.status(400).json({ error: 'glpiTicketId (nombre) requis' });
+  }
+  try {
+    const ticket = await prisma.ticket.findUnique({ where: { id } });
+    if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
+
+    await prisma.ticket.update({
+      where: { id },
+      data: { glpiTicketId: Number(glpiTicketId), lastGlpiSyncAt: new Date() },
+    });
+    await logEvent(id, 'GLPI_LINKED', req.user.email, { glpiTicketId });
+    return res.json({ success: true, glpiTicketId: Number(glpiTicketId) });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

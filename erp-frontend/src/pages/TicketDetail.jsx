@@ -62,6 +62,23 @@ export default function TicketDetail() {
   const [rejecting, setRejecting] = useState(false);
   const [showApproveModal, setShowApproveModal] = useState(false);
   const [approving, setApproving] = useState(false);
+  const [manualGlpiId, setManualGlpiId] = useState('');
+  const [linking, setLinking] = useState(false);
+
+  const handleLinkGlpi = async () => {
+    if (!manualGlpiId) return;
+    setLinking(true);
+    try {
+      await api.patch(`/tickets/${id}/glpi-link`, { glpiTicketId: Number(manualGlpiId) });
+      toast.success(`Ticket GLPI #${manualGlpiId} lié avec succès`);
+      setManualGlpiId('');
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Échec de la liaison GLPI');
+    } finally {
+      setLinking(false);
+    }
+  };
 
   const canAssign = hasPermission(user, 'tickets.assign') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN';
   const canApprove = hasPermission(user, 'tickets.approve') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN';
@@ -425,7 +442,7 @@ export default function TicketDetail() {
       {syncFailures.length > 0 && (
         <div className="border border-red-500/25 bg-red-500/10 rounded-xl p-4 flex items-start gap-3 text-red-700 dark:text-red-400">
           <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
-          <div>
+          <div className="flex-1">
             <h4 className="text-xs font-bold uppercase tracking-wider">Synchronisation GLPI incomplète</h4>
             <ul className="text-xs mt-1 space-y-1 list-disc pl-4">
               {syncFailures.map((e) => (
@@ -434,6 +451,24 @@ export default function TicketDetail() {
                 </li>
               ))}
             </ul>
+            {!ticket.glpiTicketId && (
+              <div className="mt-3 flex items-center gap-2">
+                <input
+                  type="number"
+                  placeholder="ID ticket GLPI (manuel)"
+                  className="w-40 px-2.5 py-1.5 text-xs rounded-lg border border-red-500/30 bg-white dark:bg-surface-container-high text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-red-500/40"
+                  value={manualGlpiId}
+                  onChange={(e) => setManualGlpiId(e.target.value)}
+                />
+                <button
+                  onClick={handleLinkGlpi}
+                  disabled={linking || !manualGlpiId}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-red-500/20 text-red-600 dark:text-red-400 hover:bg-red-500/30 border border-red-500/30 transition-all disabled:opacity-40"
+                >
+                  {linking ? 'Liaison...' : 'Lier'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
