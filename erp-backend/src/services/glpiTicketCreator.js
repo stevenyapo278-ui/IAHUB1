@@ -113,28 +113,79 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
       const parsed = JSON.parse(rawBody);
       glpiId = parsed.id || (Array.isArray(parsed) ? parsed[0]?.id : null);
     } catch (parseErr) {
-      console.warn(`[glpiTicketCreator] POST minimal aussi vide (200). Sondage IDs 1..200...`);
+      console.warn(`[glpiTicketCreator] POST minimal aussi vide (200). Recherche du max ID...`);
+
       const location = ticketRes.headers.get('location');
       if (location) {
         const m = location.match(/\/(\d+)$/);
         if (m) glpiId = Number(m[1]);
       }
+
+      // Recherche exponentielle du dernier ID existant
+      // Étape 1 : trouver un ID existant (les premiers IDs peuvent être purgés)
       if (!glpiId) {
-        for (let id = 1; id <= 200; id++) {
-          try {
-            const r = await fetchWithTimeout(`${config.baseUrl}/Ticket/${id}`, {
+        let pivot = 1;
+        try {
+          while (pivot < 1000000) {
+            const r = await fetchWithTimeout(`${config.baseUrl}/Ticket/${pivot}`, {
               headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
             });
-            if (!r.ok) continue;
-            const t = await r.json().catch(() => null);
-            if (t && t.name && (t.name === title || t.name.includes(title) || title.includes(t.name))) {
-              glpiId = id;
-              console.log(`[glpiTicketCreator] ID ${glpiId} trouvé par sondage`);
-              break;
+            if (r.ok) break;
+            pivot *= 2;
+          }
+        } catch {}
+
+        // Si aucun ID trouvé (GLPI vide), on abandonne
+        if (pivot < 1000000) {
+          // Étape 2 : doubler depuis pivot pour trouver la borne haute
+          let lo = pivot;
+          let hi = pivot;
+          try {
+            while (hi < 1000000) {
+              const r = await fetchWithTimeout(`${config.baseUrl}/Ticket/${hi}`, {
+                headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
+              });
+              if (!r.ok) break;
+              lo = hi;
+              hi *= 2;
             }
           } catch {}
+
+          // Étape 3 : dichotomie entre lo et hi
+          while (lo < hi) {
+            const mid = Math.floor((lo + hi + 1) / 2);
+            try {
+              const r = await fetchWithTimeout(`${config.baseUrl}/Ticket/${mid}`, {
+                headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
+              });
+              if (r.ok) lo = mid;
+              else hi = mid - 1;
+            } catch { hi = mid - 1; }
+          }
+          const maxId = lo;
+          console.log(`[glpiTicketCreator] Dernier ID GLPI trouvé: ${maxId}`);
+
+          // Étape 4 : sonder les IDs autour du max (maxId-20 à maxId+5)
+          const startId = Math.max(1, maxId - 20);
+          const endId = maxId + 5;
+          console.log(`[glpiTicketCreator] Sondage IDs ${startId}..${endId} pour "${title}"`);
+          for (let id = startId; id <= endId; id++) {
+            try {
+              const r = await fetchWithTimeout(`${config.baseUrl}/Ticket/${id}`, {
+                headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
+              });
+              if (!r.ok) continue;
+              const t = await r.json().catch(() => null);
+              if (t && t.name && (t.name === title || t.name.includes(title) || title.includes(t.name))) {
+                glpiId = id;
+                console.log(`[glpiTicketCreator] ID ${glpiId} trouvé par sondage`);
+                break;
+              }
+            } catch {}
+          }
         }
       }
+
       if (!glpiId) {
         throw new Error(`Réponse GLPI invalide après création ticket (200) : (corps vide)`);
       }
