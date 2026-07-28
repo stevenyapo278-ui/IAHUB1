@@ -307,18 +307,34 @@ router.get('/migration-preview', requirePermission('glpi.manage', ['ADMIN', 'TEC
 
 // ── Helpers internes à la migration ────────────────────────────────────────
 
-async function migrateEntityType({ oldUrl, oldSession, oldAppToken, newUrl, newSession, newAppToken, endpoint, filter, buildInput, idMapKey, label }) {
+async function migrateEntityType({ oldUrl, oldSession, oldAppToken, newUrl, newSession, newAppToken, endpoint, filter, buildInput, idMapKey, label, nameKey }) {
   let items;
   try {
     items = await fetchAllItems(oldUrl, oldSession, oldAppToken, endpoint);
   } catch (e) {
     return { idMapKey, results: [], fetchError: `${label} (fetch depuis ancien GLPI): ${e.message}` };
   }
+
+  // Cache nom→ID des entités déjà présentes dans le nouveau GLPI (évite les doublons en re-run)
+  let existingByName;
+  try {
+    const existingItems = await fetchAllItems(newUrl, newSession, newAppToken, endpoint);
+    existingByName = new Map();
+    for (const e of existingItems) {
+      const n = e[nameKey] || e.name || e.completename;
+      if (n) existingByName.set(n.toLowerCase().trim(), e.id);
+    }
+  } catch {
+    existingByName = new Map();
+  }
+
   const results = [];
   for (const item of items) {
     if (filter && !filter(item)) continue;
     try {
-      const newId = await createItem(newUrl, newSession, newAppToken, endpoint, buildInput(item));
+      const name = item[nameKey] || item.name || item.completename;
+      const existingId = name ? existingByName.get(name.toLowerCase().trim()) : null;
+      const newId = existingId || await createItem(newUrl, newSession, newAppToken, endpoint, buildInput(item));
       results.push({ oldId: item.id, newId });
     } catch (e) {
       results.push({ oldId: item.id, error: `${label} #${item.id}: ${e.message}` });
@@ -439,6 +455,7 @@ router.post(
               email: (u.name?.includes('@') ? u.name : `${u.name || u.id}@migrated.local`),
               is_active: 1,
             }),
+            nameKey: 'name',
             label: 'Utilisateur',
           }),
           migrateEntityType({
@@ -450,6 +467,7 @@ router.post(
               completename: c.completename || c.name,
               comment: c.comment || '',
             }),
+            nameKey: 'completename',
             label: 'Catégorie',
           }),
           migrateEntityType({
@@ -466,6 +484,7 @@ router.post(
               building: l.building || '',
               room: l.room || '',
             }),
+            nameKey: 'completename',
             label: 'Lieu',
           }),
           migrateEntityType({
@@ -480,6 +499,7 @@ router.post(
               is_task: g.is_task ?? 1,
               is_notify: g.is_notify ?? 1,
             }),
+            nameKey: 'name',
             label: 'Groupe',
           }),
         ]);
