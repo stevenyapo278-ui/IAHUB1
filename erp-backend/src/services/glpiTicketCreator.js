@@ -14,6 +14,7 @@ const ERP_PRIORITY_MAP = { P1: 6, P2: 4, P3: 3, P4: 2 };
 const GLPI_TYPE_MAP = { INCIDENT: 1, REQUEST: 2 };
 const GLPI_URGENCY_IMPACT_MAP = { VERY_LOW: 1, LOW: 2, MEDIUM: 3, HIGH: 4, VERY_HIGH: 5, MAJOR: 6 };
 const GLPI_SOURCE_MAP = { Helpdesk: 1, Email: 4, Téléphone: 2 };
+const GLPI_PROBE_MAX = 10000;
 
 async function withGlpiSession(config, fn) {
   const sessionRes = await fetchWithTimeout(`${config.baseUrl}/initSession`, {
@@ -79,81 +80,80 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
     if (GLPI_AI_REQUESTER_ID) inputFields.users_id_recipient = GLPI_AI_REQUESTER_ID;
     if (locationId) inputFields.locations_id = Number(locationId);
 
-    const ticketPayload = { input: inputFields };
+    const minimalFields = { name: title, status: 1, type: inputFields.type || 1, priority: inputFields.priority || 3 };
 
-    console.log(`[glpiTicketCreator] POST /Ticket payload:`, JSON.stringify(ticketPayload).slice(0, 300));
-    const ticketRes = await fetchWithTimeout(`${config.baseUrl}/Ticket`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(ticketPayload),
+    // 1) POST complet
+    console.log(`[glpiTicketCreator] POST complet /Ticket:`, JSON.stringify({ input: inputFields }).slice(0, 300));
+    let didMinimal = false;
+    let ticketRes = await fetchWithTimeout(`${config.baseUrl}/Ticket`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ input: inputFields }),
     });
-    const rawBody = await ticketRes.text().catch(() => '(corps vide)');
+    let rawBody = await ticketRes.text().catch(() => '');
 
-    if (!ticketRes.ok) {
-      throw new Error(`GLPI création ticket échoué (${ticketRes.status}) : ${rawBody}`);
+    // 2) Si POST complet → corps vide, réessayer avec payload minimal (sans content)
+    //    pour éviter un éventuel crash PHP lié à la serialisation du content long.
+    if (ticketRes.ok && !rawBody.trim()) {
+      didMinimal = true;
+      console.warn(`[glpiTicketCreator] POST complet → corps vide. Tentative minimale...`);
+      ticketRes = await fetchWithTimeout(`${config.baseUrl}/Ticket`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ input: minimalFields }),
+      });
+      rawBody = await ticketRes.text().catch(() => '');
     }
 
+    if (!ticketRes.ok) {
+      throw new Error(`GLPI création ticket échoué (${ticketRes.status}) : ${rawBody || '(corps vide)'}`);
+    }
+
+    // 3) Parse l'ID depuis le body JSON ou recovery
     let glpiId;
     try {
       const parsed = JSON.parse(rawBody);
       glpiId = parsed.id || (Array.isArray(parsed) ? parsed[0]?.id : null);
     } catch (parseErr) {
-      console.warn(`[glpiTicketCreator] POST /Ticket body vide (200). Content-Type=${ticketRes.headers.get('content-type')}. Recherche du ticket créé...`);
-
-      // 0) Location header
+      console.warn(`[glpiTicketCreator] POST minimal aussi vide (200). Sondage IDs 1..200...`);
       const location = ticketRes.headers.get('location');
       if (location) {
-        const match = location.match(/\/(\d+)$/);
-        if (match) {
-          glpiId = Number(match[1]);
-          console.log(`[glpiTicketCreator] ID ${glpiId} récupéré via Location header`);
-        }
+        const m = location.match(/\/(\d+)$/);
+        if (m) glpiId = Number(m[1]);
       }
-
-      // 1) Trouver le max ID connu — récupère les 100 premiers tickets (tri par défaut = nom)
-      let maxKnownId = 0;
-      try {
-        const pageRes = await fetchWithTimeout(`${config.baseUrl}/Ticket?range=0-99`, {
-          headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
-        });
-        if (pageRes.ok) {
-          const pageData = await pageRes.json().catch(() => []);
-          const pageTickets = Array.isArray(pageData) ? pageData : (pageData.data || []);
-          for (const t of pageTickets) {
-            if (t.id > maxKnownId) maxKnownId = t.id;
-          }
-          console.log(`[glpiTicketCreator] Max ID connu= ${maxKnownId} (${pageTickets.length} tickets dans la 1ère page)`);
-        }
-      } catch (e) {}
-
-      // 2) Sondage séquentiel : du max connu jusqu'à max+100
-      if (!glpiId && maxKnownId > 0) {
-        const startId = maxKnownId + 1;
-        const endId = maxKnownId + 100;
-        console.log(`[glpiTicketCreator] Sondage IDs ${startId}..${endId} pour "${title}"`);
-        for (let id = startId; id <= endId; id++) {
+      if (!glpiId) {
+        for (let id = 1; id <= 200; id++) {
           try {
-            const checkRes = await fetchWithTimeout(`${config.baseUrl}/Ticket/${id}`, {
+            const r = await fetchWithTimeout(`${config.baseUrl}/Ticket/${id}`, {
               headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
             });
-            if (!checkRes.ok) continue;
-            const ticket = await checkRes.json().catch(() => null);
-            if (!ticket || !ticket.name) continue;
-            const nameMatch = ticket.name === title || (ticket.name && title && (ticket.name.includes(title) || title.includes(ticket.name)));
-            if (nameMatch) {
+            if (!r.ok) continue;
+            const t = await r.json().catch(() => null);
+            if (t && t.name && (t.name === title || t.name.includes(title) || title.includes(t.name))) {
               glpiId = id;
-              console.log(`[glpiTicketCreator] ID ${glpiId} récupéré via sondage d'ID`);
+              console.log(`[glpiTicketCreator] ID ${glpiId} trouvé par sondage`);
               break;
             }
-          } catch (e) {
-            // ID inexistant — continuer
-          }
+          } catch {}
         }
       }
-
       if (!glpiId) {
-        console.error(`[glpiTicketCreator] ÉCHEC total récupération ticket GLPI après POST vide. Headers: ${JSON.stringify(Object.fromEntries(ticketRes.headers.entries()))}`);
-        throw new Error(`Réponse GLPI invalide après création ticket (${ticketRes.status}) : (corps vide)`);
+        throw new Error(`Réponse GLPI invalide après création ticket (200) : (corps vide)`);
+      }
+    }
+
+    // 4) Si on a utilisé le POST minimal, compléter les champs manquants via PUT
+    if (glpiId && didMinimal) {
+      const updatePayload = {};
+      for (const [k, v] of Object.entries(inputFields)) {
+        if (!['name', 'status', 'type', 'priority'].includes(k) && v !== undefined && v !== null) {
+          updatePayload[k] = v;
+        }
+      }
+      if (Object.keys(updatePayload).length > 0) {
+        console.log(`[glpiTicketCreator] PUT /Ticket/${glpiId} pour ajouter champs restants`);
+        await fetchWithTimeout(`${config.baseUrl}/Ticket/${glpiId}`, {
+          method: 'PUT', headers,
+          body: JSON.stringify({ input: { id: glpiId, ...updatePayload } }),
+        }).catch((err) => console.error(`[glpiTicketCreator] Échec PUT complémentaire:`, err.message));
       }
     }
 
