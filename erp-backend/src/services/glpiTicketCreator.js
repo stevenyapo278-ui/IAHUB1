@@ -115,7 +115,7 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
       let recentBody = '';
       let recentTickets = [];
       if (!glpiId) {
-        const recentUrl = `${config.baseUrl}/Ticket?range=0-0`;
+        const recentUrl = `${config.baseUrl}/Ticket?range=0-0&sort=2&order=DESC`;
         console.log(`[glpiTicketCreator] GET fallback: ${recentUrl}`);
         const recentRes = await fetchWithTimeout(recentUrl, {
           headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
