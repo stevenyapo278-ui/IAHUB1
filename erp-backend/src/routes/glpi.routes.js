@@ -222,8 +222,42 @@ async function fetchAllItems(baseUrl, sessionToken, appToken, endpoint) {
   return allItems;
 }
 
-// Helper : crée un item dans GLPI via POST /:endpoint
-async function createItem(baseUrl, sessionToken, appToken, endpoint, input) {
+// Helper : cherche un item existant dans GLPI par nom via POST /search/{endpoint}
+async function findGlpiItemBySearch(baseUrl, sessionToken, appToken, endpoint, name) {
+  try {
+    const res = await fetch(`${baseUrl}/search/${endpoint.replace(/^\/+/, '')}`, {
+      method: 'POST',
+      headers: {
+        'App-Token': appToken,
+        'Session-Token': sessionToken,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        criteria: [{ field: 1, searchtype: 'equals', value: name }],
+        range: '0-0',
+      }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const rows = data.data || [];
+    if (rows.length === 0) return null;
+    // GLPI search rows use numeric keys: "2" = id, "1" = name
+    const id = rows[0]['2'] || rows[0].id;
+    if (!id) return null;
+    // Fetch full item to get complete data
+    const itemRes = await fetch(`${baseUrl}/${endpoint.replace(/^\/+/, '')}/${id}`, {
+      headers: { 'App-Token': appToken, 'Session-Token': sessionToken },
+    });
+    if (!itemRes.ok) return null;
+    return await itemRes.json();
+  } catch {
+    return null;
+  }
+}
+
+// Helper : crée ou récupère un item dans GLPI
+// Tente POST /:endpoint ; si échec avec "existe déjà", cherche par recherche
+async function createOrFindItem(baseUrl, sessionToken, appToken, endpoint, input, searchName) {
   const url = `${baseUrl}/${endpoint.replace(/^\/+/, '')}`;
   let res;
   try {
@@ -239,13 +273,23 @@ async function createItem(baseUrl, sessionToken, appToken, endpoint, input) {
   } catch (e) {
     throw new Error(`POST ${url} — ${e.message}`);
   }
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`GLPI création ${endpoint} échoué (${res.status}): ${body.slice(0, 200)}`);
+
+  if (res.ok) {
+    const rawBody = await res.text();
+    const parsed = JSON.parse(rawBody);
+    return parsed.id || (Array.isArray(parsed) ? parsed[0]?.id : null);
   }
-  const rawBody = await res.text();
-  const parsed = JSON.parse(rawBody);
-  return parsed.id || (Array.isArray(parsed) ? parsed[0]?.id : null);
+
+  // En cas d'erreur 400 avec "existe déjà" ou "Duplicate", chercher l'existant
+  const body = await res.text().catch(() => '');
+  if (body.includes('existe déjà') || body.includes('Duplicate') || body.includes('unicity')) {
+    if (searchName) {
+      const existing = await findGlpiItemBySearch(baseUrl, sessionToken, appToken, endpoint, searchName);
+      if (existing && existing.id) return existing.id;
+    }
+  }
+
+  throw new Error(`GLPI création ${endpoint} échoué (${res.status}): ${body.slice(0, 200)}`);
 }
 
 // Aperçu des données à migrer depuis l'ancien GLPI
@@ -307,7 +351,7 @@ router.get('/migration-preview', requirePermission('glpi.manage', ['ADMIN', 'TEC
 
 // ── Helpers internes à la migration ────────────────────────────────────────
 
-async function migrateEntityType({ oldUrl, oldSession, oldAppToken, newUrl, newSession, newAppToken, endpoint, filter, buildInput, idMapKey, label, nameKey }) {
+async function migrateEntityType({ oldUrl, oldSession, oldAppToken, newUrl, newSession, newAppToken, endpoint, filter, buildInput, idMapKey, label, searchNameKey }) {
   let items;
   try {
     items = await fetchAllItems(oldUrl, oldSession, oldAppToken, endpoint);
@@ -315,26 +359,12 @@ async function migrateEntityType({ oldUrl, oldSession, oldAppToken, newUrl, newS
     return { idMapKey, results: [], fetchError: `${label} (fetch depuis ancien GLPI): ${e.message}` };
   }
 
-  // Cache nom→ID des entités déjà présentes dans le nouveau GLPI (évite les doublons en re-run)
-  let existingByName;
-  try {
-    const existingItems = await fetchAllItems(newUrl, newSession, newAppToken, endpoint);
-    existingByName = new Map();
-    for (const e of existingItems) {
-      const n = e[nameKey] || e.name || e.completename;
-      if (n) existingByName.set(n.toLowerCase().trim(), e.id);
-    }
-  } catch {
-    existingByName = new Map();
-  }
-
   const results = [];
   for (const item of items) {
     if (filter && !filter(item)) continue;
     try {
-      const name = item[nameKey] || item.name || item.completename;
-      const existingId = name ? existingByName.get(name.toLowerCase().trim()) : null;
-      const newId = existingId || await createItem(newUrl, newSession, newAppToken, endpoint, buildInput(item));
+      const searchName = searchNameKey ? (item[searchNameKey] || item.name || item.completename) : null;
+      const newId = await createOrFindItem(newUrl, newSession, newAppToken, endpoint, buildInput(item), searchName);
       results.push({ oldId: item.id, newId });
     } catch (e) {
       results.push({ oldId: item.id, error: `${label} #${item.id}: ${e.message}` });
@@ -455,7 +485,7 @@ router.post(
               email: (u.name?.includes('@') ? u.name : `${u.name || u.id}@migrated.local`),
               is_active: 1,
             }),
-            nameKey: 'name',
+            searchNameKey: 'name',
             label: 'Utilisateur',
           }),
           migrateEntityType({
@@ -467,7 +497,7 @@ router.post(
               completename: c.completename || c.name,
               comment: c.comment || '',
             }),
-            nameKey: 'completename',
+            searchNameKey: 'completename',
             label: 'Catégorie',
           }),
           migrateEntityType({
@@ -484,7 +514,7 @@ router.post(
               building: l.building || '',
               room: l.room || '',
             }),
-            nameKey: 'completename',
+            searchNameKey: 'completename',
             label: 'Lieu',
           }),
           migrateEntityType({
@@ -499,7 +529,7 @@ router.post(
               is_task: g.is_task ?? 1,
               is_notify: g.is_notify ?? 1,
             }),
-            nameKey: 'name',
+            searchNameKey: 'name',
             label: 'Groupe',
           }),
         ]);
