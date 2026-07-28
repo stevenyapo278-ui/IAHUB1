@@ -112,11 +112,18 @@ async function getGlpiConfig(serviceName) {
   };
 }
 
-// Récupère la config GLPI active, en fonction du paramètre SystemSettings.activeGlpiInstance
+// Récupère la config GLPI active, en fonction du paramètre SystemSettings.activeGlpiInstance.
+// Si l'instance nommée n'existe pas (ex: vestige de migration), on fallback sur 'glpi'.
 async function getActiveGlpiConfig() {
   const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
   const instanceName = settings?.activeGlpiInstance || 'glpi';
-  return getGlpiConfig(instanceName);
+  const config = await getGlpiConfig(instanceName);
+  if (config) return config;
+  if (instanceName !== 'glpi') {
+    console.warn(`[glpiSync] activeGlpiInstance="${instanceName}" introuvable, fallback sur "glpi"`);
+    return getGlpiConfig('glpi');
+  }
+  return null;
 }
 
 async function glpiInitSession(config) {

@@ -627,11 +627,22 @@ async function syncCategoriesFromGlpi() {
 
       const existingByName = await prisma.ticketCategory.findUnique({ where: { name: cat.name } });
       if (existingByName) {
-        await prisma.ticketCategory.update({ where: { id: existingByName.id }, data: { glpiCategoryId: cat.id } });
+        // Vérifier que le glpiCategoryId visé n'est pas déjà pris par une autre ligne
+        const conflicting = await prisma.ticketCategory.findUnique({ where: { glpiCategoryId: cat.id } });
+        if (conflicting) {
+          // L'autre ligne a déjà ce glpiCategoryId → supprimer le doublon par nom
+          await prisma.ticketCategory.delete({ where: { id: existingByName.id } });
+        } else {
+          await prisma.ticketCategory.update({ where: { id: existingByName.id }, data: { glpiCategoryId: cat.id } });
+        }
         synced++;
         continue;
       }
 
+      const conflicting = await prisma.ticketCategory.findUnique({ where: { glpiCategoryId: cat.id } });
+      if (conflicting) {
+        await prisma.ticketCategory.delete({ where: { id: conflicting.id } });
+      }
       await prisma.ticketCategory.create({ data: { name: cat.name, glpiCategoryId: cat.id } });
       synced++;
     }
@@ -652,30 +663,32 @@ async function syncLocationsFromGlpi() {
     for (const loc of locations) {
       if (!loc.name && !loc.completename) continue;
 
-      await prisma.glpiLocation.upsert({
+      const recordData = {
+        name: loc.name || loc.completename,
+        completename: loc.completename || loc.name,
+        address: loc.address || null,
+        postcode: loc.postcode || null,
+        town: loc.town || null,
+        country: loc.country || null,
+        building: loc.building || null,
+        room: loc.room || null,
+      };
+
+      const existingByGlpiId = await prisma.glpiLocation.findUnique({ where: { glpiLocationId: loc.id } });
+      if (existingByGlpiId) {
+        await prisma.glpiLocation.update({ where: { id: existingByGlpiId.id }, data: recordData });
+        synced++;
+        continue;
+      }
+
+      // glpiLocationId est nul (lieu custom) ou inconnu → vérifier si une ligne conflictuelle existe
+      const conflicting = await prisma.glpiLocation.findFirst({
         where: { glpiLocationId: loc.id },
-        update: {
-          name: loc.name || loc.completename,
-          completename: loc.completename || loc.name,
-          address: loc.address || null,
-          postcode: loc.postcode || null,
-          town: loc.town || null,
-          country: loc.country || null,
-          building: loc.building || null,
-          room: loc.room || null,
-        },
-        create: {
-          glpiLocationId: loc.id,
-          name: loc.name || loc.completename,
-          completename: loc.completename || loc.name,
-          address: loc.address || null,
-          postcode: loc.postcode || null,
-          town: loc.town || null,
-          country: loc.country || null,
-          building: loc.building || null,
-          room: loc.room || null,
-        },
       });
+      if (conflicting) {
+        await prisma.glpiLocation.delete({ where: { id: conflicting.id } });
+      }
+      await prisma.glpiLocation.create({ data: { ...recordData, glpiLocationId: loc.id } });
       synced++;
     }
 
