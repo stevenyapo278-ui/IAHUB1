@@ -196,6 +196,23 @@ router.get('/document/:docId/file', requirePermission('tickets.view', ['ADMIN', 
 // MIGRATION VERS UNE NOUVELLE INSTANCE GLPI
 // ──────────────────────────────────────────────────────────────────────────────
 
+// Helper : cherche un item par nom dans le nouveau GLPI (évite les doublons en re-run)
+async function findItemByName(baseUrl, sessionToken, appToken, endpoint, name) {
+  const encoded = encodeURIComponent(name);
+  const url = `${baseUrl}/${endpoint.replace(/^\/+/, '')}?range=0-100&is_deleted=0&searchText=${encoded}&criteria[0][field]=name&criteria[0][searchtype]=equals&criteria[0][value]=${encoded}`;
+  try {
+    const res = await fetch(url, {
+      headers: { 'App-Token': appToken, 'Session-Token': sessionToken },
+    });
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => []);
+    const items = Array.isArray(data) ? data : data.data || [];
+    return items.length > 0 ? items[0] : null;
+  } catch {
+    return null;
+  }
+}
+
 // Helper : récupère tous les items d'un endpoint GLPI avec pagination
 async function fetchAllItems(baseUrl, sessionToken, appToken, endpoint) {
   const PAGE_SIZE = 100;
@@ -307,7 +324,7 @@ router.get('/migration-preview', requirePermission('glpi.manage', ['ADMIN', 'TEC
 
 // ── Helpers internes à la migration ────────────────────────────────────────
 
-async function migrateEntityType({ oldUrl, oldSession, oldAppToken, newUrl, newSession, newAppToken, endpoint, filter, buildInput, idMapKey, label }) {
+async function migrateEntityType({ oldUrl, oldSession, oldAppToken, newUrl, newSession, newAppToken, endpoint, filter, buildInput, idMapKey, label, findExisting }) {
   let items;
   try {
     items = await fetchAllItems(oldUrl, oldSession, oldAppToken, endpoint);
@@ -318,7 +335,17 @@ async function migrateEntityType({ oldUrl, oldSession, oldAppToken, newUrl, newS
   for (const item of items) {
     if (filter && !filter(item)) continue;
     try {
-      const newId = await createItem(newUrl, newSession, newAppToken, endpoint, buildInput(item));
+      // Éviter les doublons en re-run : chercher si l'entité existe déjà dans le nouveau GLPI
+      let newId = null;
+      if (findExisting) {
+        const existing = await findExisting(item);
+        if (existing) {
+          newId = existing.id;
+        }
+      }
+      if (!newId) {
+        newId = await createItem(newUrl, newSession, newAppToken, endpoint, buildInput(item));
+      }
       results.push({ oldId: item.id, newId });
     } catch (e) {
       results.push({ oldId: item.id, error: `${label} #${item.id}: ${e.message}` });
@@ -347,36 +374,38 @@ function buildIdMap(migratedTypes) {
 }
 
 async function applyIdMapToErp(idMap) {
-  const updates = [];
-  if (Object.keys(idMap.users).length > 0) {
-    updates.push(
-      ...Object.entries(idMap.users).map(([oldId, newId]) =>
-        prisma.user.updateMany({ where: { glpiId: Number(oldId) }, data: { glpiId: newId } })
-      )
-    );
+  const errors = [];
+
+  async function migrateIdField({ model, uniqueField, oldId, newId, label }) {
+    // 1. Vérifier si l'ancien ID existe dans l'ERP
+    const record = await model.findUnique({ where: { [uniqueField]: Number(oldId) } });
+    if (!record) return;
+
+    // 2. Vérifier si le nouvel ID est déjà pris par un AUTRE enregistrement
+    const conflict = await model.findUnique({ where: { [uniqueField]: newId } }).catch(() => null);
+    if (conflict && conflict.id !== record.id) {
+      errors.push(`${label} ${oldId}→${newId}: conflit avec #${conflict.id}`);
+      return;
+    }
+
+    // 3. Appliquer la mise à jour
+    await model.update({ where: { id: record.id }, data: { [uniqueField]: newId } });
   }
-  if (Object.keys(idMap.locations).length > 0) {
-    updates.push(
-      ...Object.entries(idMap.locations).map(([oldId, newId]) =>
-        prisma.glpiLocation.updateMany({ where: { glpiLocationId: Number(oldId) }, data: { glpiLocationId: newId } })
-      )
-    );
+
+  for (const [oldId, newId] of Object.entries(idMap.users)) {
+    await migrateIdField({ model: prisma.user, uniqueField: 'glpiId', oldId, newId, label: 'Utilisateur' });
   }
-  if (Object.keys(idMap.groups).length > 0) {
-    updates.push(
-      ...Object.entries(idMap.groups).map(([oldId, newId]) =>
-        prisma.team.updateMany({ where: { glpiGroupId: Number(oldId) }, data: { glpiGroupId: newId } })
-      )
-    );
+  for (const [oldId, newId] of Object.entries(idMap.locations)) {
+    await migrateIdField({ model: prisma.glpiLocation, uniqueField: 'glpiLocationId', oldId, newId, label: 'Lieu' });
   }
-  if (Object.keys(idMap.categories).length > 0) {
-    updates.push(
-      ...Object.entries(idMap.categories).map(([oldId, newId]) =>
-        prisma.ticketCategory.updateMany({ where: { glpiCategoryId: Number(oldId) }, data: { glpiCategoryId: newId } })
-      )
-    );
+  for (const [oldId, newId] of Object.entries(idMap.groups)) {
+    await migrateIdField({ model: prisma.team, uniqueField: 'glpiGroupId', oldId, newId, label: 'Groupe' });
   }
-  await Promise.all(updates);
+  for (const [oldId, newId] of Object.entries(idMap.categories)) {
+    await migrateIdField({ model: prisma.ticketCategory, uniqueField: 'glpiCategoryId', oldId, newId, label: 'Catégorie' });
+  }
+
+  return errors;
 }
 
 // LANCER LA MIGRATION : lit depuis l'ancien GLPI, crée dans le nouveau, met à jour l'ERP
@@ -437,6 +466,7 @@ router.post(
               email: (u.name?.includes('@') ? u.name : `${u.name || u.id}@migrated.local`),
               is_active: 1,
             }),
+            findExisting: (u) => findItemByName(newUrl, newSession, newAppToken, 'User', u.name || u.realname || u.firstname),
             label: 'Utilisateur',
           }),
           migrateEntityType({
@@ -448,6 +478,7 @@ router.post(
               completename: c.completename || c.name,
               comment: c.comment || '',
             }),
+            findExisting: (c) => findItemByName(newUrl, newSession, newAppToken, 'ITILCategory', c.name),
             label: 'Catégorie',
           }),
           migrateEntityType({
@@ -464,6 +495,7 @@ router.post(
               building: l.building || '',
               room: l.room || '',
             }),
+            findExisting: (l) => findItemByName(newUrl, newSession, newAppToken, 'Location', l.name || l.completename),
             label: 'Lieu',
           }),
           migrateEntityType({
@@ -478,6 +510,7 @@ router.post(
               is_task: g.is_task ?? 1,
               is_notify: g.is_notify ?? 1,
             }),
+            findExisting: (g) => findItemByName(newUrl, newSession, newAppToken, 'Group', g.name),
             label: 'Groupe',
           }),
         ]);
@@ -525,8 +558,12 @@ router.post(
         });
 
         // ── 6. Mettre à jour les IDs ERP via l'idMap (au lieu de tout détruire) ──
+        let idMapErrors;
         try {
-          await applyIdMapToErp(idMap);
+          idMapErrors = await applyIdMapToErp(idMap);
+          if (idMapErrors.length > 0) {
+            results.errors.push(...idMapErrors);
+          }
         } catch (applyErr) {
           // Rollback : restaurer l'ancienne config
           await prisma.apiConfig.update({
