@@ -57,6 +57,7 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
       'App-Token': config.appToken,
       'Session-Token': sessionToken,
       'Content-Type': 'application/json',
+      'Accept': 'application/json',
     };
 
     // GLPI 10.0.9 peut ignorer silencieusement certains champs inconnus ou IDs invalides.
@@ -81,13 +82,24 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
 
     const ticketPayload = { input: inputFields };
 
+    // Snapshot des IDs tickets avant création (pour retrouver le nouveau ID si la réponse POST est vide)
+    let snapshotBefore = [];
+    try {
+      const snapRes = await fetchWithTimeout(`${config.baseUrl}/Ticket?range=0-99&sort=id&order=DESC`, {
+        headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
+      });
+      if (snapRes.ok) {
+        const snapData = await snapRes.json().catch(() => []);
+        snapshotBefore = Array.isArray(snapData) ? snapData : (snapData.data || []);
+      }
+    } catch (e) {}
+
     console.log(`[glpiTicketCreator] POST /Ticket payload:`, JSON.stringify(ticketPayload).slice(0, 300));
     const ticketRes = await fetchWithTimeout(`${config.baseUrl}/Ticket`, {
       method: 'POST',
-      headers,  // pas de Accept: application/json — GLPI 10.0.9 peut mal réagir
+      headers,
       body: JSON.stringify(ticketPayload),
     });
-    // Lire le body une seule fois (le stream ne peut être consommé qu'une fois)
     const rawBody = await ticketRes.text().catch(() => '(corps vide)');
 
     if (!ticketRes.ok) {
@@ -101,7 +113,7 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
     } catch (parseErr) {
       console.warn(`[glpiTicketCreator] POST /Ticket body vide (200). Content-Type=${ticketRes.headers.get('content-type')}. Recherche du ticket créé...`);
 
-      // 0) L'en-tête Location contient souvent l'URL du ticket créé
+      // 0) Location header
       const location = ticketRes.headers.get('location');
       if (location) {
         const match = location.match(/\/(\d+)$/);
@@ -111,22 +123,49 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
         }
       }
 
-      // 1) GET /Ticket?range=0-0 — GLPI trie par ID descendant (nouveau en premier)
-      let recentBody = '';
-      let recentTickets = [];
+      // 1) Comparaison avant/après des IDs — trouver les tickets créés entre-temps
+      if (!glpiId && snapshotBefore.length > 0) {
+        const idsBefore = new Set(snapshotBefore.map((t) => t.id));
+        const idsBeforeByName = {};
+        for (const t of snapshotBefore) {
+          idsBeforeByName[t.name] = t.id;
+        }
+        try {
+          const afterRes = await fetchWithTimeout(`${config.baseUrl}/Ticket?range=0-99&sort=id&order=DESC`, {
+            headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
+          });
+          if (afterRes.ok) {
+            const afterData = await afterRes.json().catch(() => []);
+            const afterTickets = Array.isArray(afterData) ? afterData : (afterData.data || []);
+            for (const t of afterTickets) {
+              if (idsBefore.has(t.id)) continue;
+              const nameMatch = t.name === title || (t.name && title && (t.name.includes(title) || title.includes(t.name)));
+              const recentCreated = t.date_creation ? (Date.now() - new Date(t.date_creation).getTime()) / 1000 < 120 : true;
+              console.log(`[glpiTicketCreator]   NOUVEAU ticket? #${t.id} name="${t.name}" recent=${recentCreated} match=${nameMatch}`);
+              if (nameMatch && recentCreated) {
+                glpiId = t.id;
+                console.log(`[glpiTicketCreator] ID ${glpiId} récupéré via comparaison avant/après`);
+                break;
+              }
+            }
+          }
+        } catch (e) {
+          console.log(`[glpiTicketCreator] Comparaison avant/après error: ${e.message}`);
+        }
+      }
+
+      // 2) GET /Ticket?range=0-0 avec sort=id&order=DESC
       if (!glpiId) {
         const recentUrl = `${config.baseUrl}/Ticket?range=0-0&sort=id&order=DESC`;
         console.log(`[glpiTicketCreator] GET fallback: ${recentUrl}`);
         const recentRes = await fetchWithTimeout(recentUrl, {
           headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
         });
-        console.log(`[glpiTicketCreator] GET fallback status=${recentRes.status} ok=${recentRes.ok}`);
         if (recentRes.ok) {
-          recentBody = await recentRes.text().catch(() => '');
+          const recentBody = await recentRes.text().catch(() => '');
           try {
             const recentParsed = JSON.parse(recentBody);
-            recentTickets = Array.isArray(recentParsed) ? recentParsed : (recentParsed.data || []);
-            console.log(`[glpiTicketCreator] GET fallback tickets trouvés: ${recentTickets.length}`);
+            const recentTickets = Array.isArray(recentParsed) ? recentParsed : (recentParsed.data || []);
             for (const t of recentTickets) {
               const nameMatch = t.name === title || (t.name && title && (t.name.includes(title) || title.includes(t.name)));
               const recentCreated = t.date_creation ? (Date.now() - new Date(t.date_creation).getTime()) / 1000 < 120 : false;
@@ -146,10 +185,8 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
         }
       }
 
-      // 2) Pause avant recherche par nom
+      // 3) Pause + POST /search/Ticket
       await new Promise((r) => setTimeout(r, 500));
-
-      // 3) POST /search/Ticket (field 1 = name)
       if (!glpiId) {
         console.log(`[glpiTicketCreator] Fallback search: POST /search/Ticket pour "${title}"`);
         try {
@@ -165,12 +202,10 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
             const searchBody = await searchRes.text().catch(() => '');
             const searchParsed = JSON.parse(searchBody);
             const searchItems = Array.isArray(searchParsed) ? searchParsed : (searchParsed.data || []);
-            console.log(`[glpiTicketCreator] Search fallback items: ${searchItems.length}`);
             for (const item of searchItems) {
               const itemName = item['1'] || item.name || '(inconnu)';
               const itemIdNum = item['2'] || item.id;
               const nameMatch = itemName === title || (itemName && title && (itemName.includes(title) || title.includes(itemName)));
-              console.log(`[glpiTicketCreator]   item: name="${itemName}" id=${itemIdNum} match=${nameMatch}`);
               if (nameMatch && itemIdNum) {
                 glpiId = Number(itemIdNum);
                 console.log(`[glpiTicketCreator] ID ${glpiId} récupéré via /search/Ticket`);
@@ -183,19 +218,6 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
           }
         } catch (e) {
           console.log(`[glpiTicketCreator] Search fallback error: ${e.message}`);
-        }
-      }
-
-      // 4) Dernier recours : n'importe quel ticket créé dans les 2 dernières minutes
-      if (!glpiId && recentTickets.length > 0) {
-        for (const t of recentTickets) {
-          const createdAgo = t.date_creation ? (Date.now() - new Date(t.date_creation).getTime()) / 1000 : Infinity;
-          const nameMatch = t.name && title && (t.name === title || t.name.includes(title) || title.includes(t.name));
-          if (nameMatch && createdAgo < 120) {
-            glpiId = t.id;
-            console.log(`[glpiTicketCreator] ID ${glpiId} récupéré via dernier recours`);
-            break;
-          }
         }
       }
 
