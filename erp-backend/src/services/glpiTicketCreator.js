@@ -99,53 +99,57 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
       const parsed = JSON.parse(rawBody);
       glpiId = parsed.id || (Array.isArray(parsed) ? parsed[0]?.id : null);
     } catch (parseErr) {
-      // GLPI 10.0.x retourne 200 OK avec body vide mais le ticket est bien créé.
-      // Stratégie : récupérer le ticket le plus récent via GET /Ticket?range=0-0
-      // et vérifier que son nom correspond au titre qu'on a envoyé.      console.warn(`[glpiTicketCreator] POST /Ticket body vide (200). Statut=${ticketRes.status}, Content-Type=${ticketRes.headers.get('content-type')}. Récupération du dernier ticket GLPI...`);
+      console.warn(`[glpiTicketCreator] POST /Ticket body vide (200). Content-Type=${ticketRes.headers.get('content-type')}. Recherche du ticket créé...`);
 
-      // 1) GET /Ticket?range=0-0 — GLPI trie par ID descendant (nouveau en premier)
-      // NOTE: PAS de header Accept pour être compatible GLPI 10.0.9 + Apache
-      const recentUrl = `${config.baseUrl}/Ticket?range=0-0`;
-      console.log(`[glpiTicketCreator] GET fallback: ${recentUrl}`);
-      const recentRes = await fetchWithTimeout(recentUrl, {
-        headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
-      });
-      console.log(`[glpiTicketCreator] GET fallback status=${recentRes.status} ok=${recentRes.ok}`);
-      // Stocker dans une variable accessible aussi à l'étape 4 (dernier recours)
-      let recentBody = '';
-      let recentTickets = [];
-      if (recentRes.ok) {
-        recentBody = await recentRes.text().catch(() => '');
-        console.log(`[glpiTicketCreator] GET fallback body (200 premiers):`, recentBody.slice(0, 200));
-        try {
-          const recentParsed = JSON.parse(recentBody);
-          recentTickets = Array.isArray(recentParsed) ? recentParsed : (recentParsed.data || []);
-          console.log(`[glpiTicketCreator] GET fallback tickets trouvés: ${recentTickets.length}`);
-          if (recentTickets.length > 0) {
-            const first = recentTickets[0];
-            console.log(`[glpiTicketCreator] Premier ticket: id=${first.id} name="${first.name}"`);
-            if (first.name === title) {
-              glpiId = first.id;
-              console.log(`[glpiTicketCreator] ID ${glpiId} récupéré via GET /Ticket?range=0-0`);
-            } else {
-              console.log(`[glpiTicketCreator] Nom différent: attendu="${title}" reçu="${first.name}"`);
-            }
-          } else {
-            console.log(`[glpiTicketCreator] GET fallback: aucun ticket trouvé (tableau vide)`);
-          }
-        } catch (e) {
-          console.log(`[glpiTicketCreator] GET fallback parse error: ${e.message}`);
+      // 0) L'en-tête Location contient souvent l'URL du ticket créé
+      const location = ticketRes.headers.get('location');
+      if (location) {
+        const match = location.match(/\/(\d+)$/);
+        if (match) {
+          glpiId = Number(match[1]);
+          console.log(`[glpiTicketCreator] ID ${glpiId} récupéré via Location header: ${location}`);
         }
-      } else {
-        // Lire le body même si pas ok pour diagnostic
-        const errBody = await recentRes.text().catch(() => '');
-        console.log(`[glpiTicketCreator] GET fallback NON-OK body:`, errBody.slice(0, 300));
       }
 
-      // 2) Pause courte avant de chercher (GLPI peut avoir besoin d'indexer)
+      // 1) GET /Ticket?range=0-0 — GLPI trie par ID descendant (nouveau en premier)
+      let recentBody = '';
+      let recentTickets = [];
+      if (!glpiId) {
+        const recentUrl = `${config.baseUrl}/Ticket?range=0-0`;
+        console.log(`[glpiTicketCreator] GET fallback: ${recentUrl}`);
+        const recentRes = await fetchWithTimeout(recentUrl, {
+          headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
+        });
+        console.log(`[glpiTicketCreator] GET fallback status=${recentRes.status} ok=${recentRes.ok}`);
+        if (recentRes.ok) {
+          recentBody = await recentRes.text().catch(() => '');
+          try {
+            const recentParsed = JSON.parse(recentBody);
+            recentTickets = Array.isArray(recentParsed) ? recentParsed : (recentParsed.data || []);
+            console.log(`[glpiTicketCreator] GET fallback tickets trouvés: ${recentTickets.length}`);
+            for (const t of recentTickets) {
+              const nameMatch = t.name === title || (t.name && title && (t.name.includes(title) || title.includes(t.name)));
+              const recentCreated = t.date_creation ? (Date.now() - new Date(t.date_creation).getTime()) / 1000 < 120 : false;
+              console.log(`[glpiTicketCreator]   ticket #${t.id} name="${t.name}" recent=${recentCreated} match=${nameMatch}`);
+              if (nameMatch && recentCreated) {
+                glpiId = t.id;
+                console.log(`[glpiTicketCreator] ID ${glpiId} récupéré via GET /Ticket?range=0-0`);
+                break;
+              }
+            }
+          } catch (e) {
+            console.log(`[glpiTicketCreator] GET fallback parse error: ${e.message}`);
+          }
+        } else {
+          const errBody = await recentRes.text().catch(() => '');
+          console.log(`[glpiTicketCreator] GET fallback NON-OK body:`, errBody.slice(0, 300));
+        }
+      }
+
+      // 2) Pause avant recherche par nom
       await new Promise((r) => setTimeout(r, 500));
 
-      // 3) Fallback : recherche par nom via POST /search/Ticket (field 1 = name)
+      // 3) POST /search/Ticket (field 1 = name)
       if (!glpiId) {
         console.log(`[glpiTicketCreator] Fallback search: POST /search/Ticket pour "${title}"`);
         try {
@@ -157,18 +161,17 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
               range: '0-5',
             }),
           });
-          console.log(`[glpiTicketCreator] Search fallback status=${searchRes.status} ok=${searchRes.ok}`);
           if (searchRes.ok) {
             const searchBody = await searchRes.text().catch(() => '');
-            console.log(`[glpiTicketCreator] Search fallback body (300 premiers):`, searchBody.slice(0, 300));
             const searchParsed = JSON.parse(searchBody);
             const searchItems = Array.isArray(searchParsed) ? searchParsed : (searchParsed.data || []);
             console.log(`[glpiTicketCreator] Search fallback items: ${searchItems.length}`);
             for (const item of searchItems) {
-              const itemName = item['1'] || item.name || item['name'] || '(inconnu)';
-              const itemIdNum = item['2'] || item.id || item['id'] || item['2'];
-              console.log(`[glpiTicketCreator]   item: name="${itemName}" id=${itemIdNum}`);
-              if (itemName === title && itemIdNum) {
+              const itemName = item['1'] || item.name || '(inconnu)';
+              const itemIdNum = item['2'] || item.id;
+              const nameMatch = itemName === title || (itemName && title && (itemName.includes(title) || title.includes(itemName)));
+              console.log(`[glpiTicketCreator]   item: name="${itemName}" id=${itemIdNum} match=${nameMatch}`);
+              if (nameMatch && itemIdNum) {
                 glpiId = Number(itemIdNum);
                 console.log(`[glpiTicketCreator] ID ${glpiId} récupéré via /search/Ticket`);
                 break;
@@ -183,19 +186,16 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
         }
       }
 
-      // 4) Dernier recours : si on a un ticket récent, qu'il a été créé dans la dernière minute
-      // (date_creation récente) et que le nom contient le titre (même partiellement).
-      // Évite de prendre un ticket vieux de 6 ans (comme le #2 de 2020).
-      if (!glpiId && recentBody && recentTickets.length > 0) {
-        const first = recentTickets[0];
-        const createdAgo = first.date_creation ? (Date.now() - new Date(first.date_creation).getTime()) / 1000 : Infinity;
-        const nameMatch = first.name && title && (first.name === title || first.name.includes(title) || title.includes(first.name));
-        console.log(`[glpiTicketCreator] Dernier recours: ticket #${first.id} nom="${first.name}" créé il y a ${createdAgo.toFixed(0)}s, nameMatch=${nameMatch}`);
-        if (nameMatch && createdAgo < 60) {
-          glpiId = first.id;
-          console.log(`[glpiTicketCreator] ID ${glpiId} récupéré via dernier recours`);
-        } else {
-          console.log(`[glpiTicketCreator] Dernier recours ignoré: ticket trop vieux ou nom trop différent`);
+      // 4) Dernier recours : n'importe quel ticket créé dans les 2 dernières minutes
+      if (!glpiId && recentTickets.length > 0) {
+        for (const t of recentTickets) {
+          const createdAgo = t.date_creation ? (Date.now() - new Date(t.date_creation).getTime()) / 1000 : Infinity;
+          const nameMatch = t.name && title && (t.name === title || t.name.includes(title) || title.includes(t.name));
+          if (nameMatch && createdAgo < 120) {
+            glpiId = t.id;
+            console.log(`[glpiTicketCreator] ID ${glpiId} récupéré via dernier recours`);
+            break;
+          }
         }
       }
 
