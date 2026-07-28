@@ -377,14 +377,15 @@ async function fullReimportFromGlpi({ dateFrom, dateTo } = {}) {
     wait++;
   }
 
-  const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
-  const activeInstance = settings?.activeGlpiInstance || 'glpi';
-  const config = await getGlpiConfig(activeInstance);
+  const config = await getActiveGlpiConfig();
   if (!config) {
     throw new Error('GLPI non configuré ou inactif');
   }
 
   isGlpiSyncRunning = true;
+
+  const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+  const activeInstance = settings?.activeGlpiInstance || 'glpi';
 
   // Persister les filtres de dates dans ApiConfig pour que les synchros automatiques (arrière-plan) les respectent aussi
   try {
