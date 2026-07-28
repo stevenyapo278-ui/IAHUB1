@@ -203,9 +203,14 @@ async function fetchAllItems(baseUrl, sessionToken, appToken, endpoint) {
   let offset = 0;
   while (true) {
     const url = `${baseUrl}/${endpoint.replace(/^\/+/, '')}?range=${offset}-${offset + PAGE_SIZE - 1}`;
-    const res = await fetch(url, {
-      headers: { 'App-Token': appToken, 'Session-Token': sessionToken },
-    });
+    let res;
+    try {
+      res = await fetch(url, {
+        headers: { 'App-Token': appToken, 'Session-Token': sessionToken },
+      });
+    } catch (e) {
+      throw new Error(`GET ${url} — ${e.message}`);
+    }
     if (!res.ok) break;
     const data = await res.json().catch(() => []);
     const items = Array.isArray(data) ? data : data.data || [];
@@ -219,15 +224,21 @@ async function fetchAllItems(baseUrl, sessionToken, appToken, endpoint) {
 
 // Helper : crée un item dans GLPI via POST /:endpoint
 async function createItem(baseUrl, sessionToken, appToken, endpoint, input) {
-  const res = await fetch(`${baseUrl}/${endpoint.replace(/^\/+/, '')}`, {
-    method: 'POST',
-    headers: {
-      'App-Token': appToken,
-      'Session-Token': sessionToken,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ input }),
-  });
+  const url = `${baseUrl}/${endpoint.replace(/^\/+/, '')}`;
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'App-Token': appToken,
+        'Session-Token': sessionToken,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ input }),
+    });
+  } catch (e) {
+    throw new Error(`POST ${url} — ${e.message}`);
+  }
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     throw new Error(`GLPI création ${endpoint} échoué (${res.status}): ${body.slice(0, 200)}`);
@@ -250,10 +261,15 @@ router.get('/migration-preview', requirePermission('glpi.manage', ['ADMIN', 'TEC
     const userToken = config.apiKey;
 
     // Init session
-    const sessionRes = await fetch(`${baseUrl}/initSession`, {
-      headers: { 'App-Token': appToken, Authorization: `user_token ${userToken}` },
-    });
-    if (!sessionRes.ok) throw new Error('Impossible de se connecter à l\'ancien GLPI');
+    let sessionRes;
+    try {
+      sessionRes = await fetch(`${baseUrl}/initSession`, {
+        headers: { 'App-Token': appToken, Authorization: `user_token ${userToken}` },
+      });
+    } catch (e) {
+      throw new Error(`Ancien GLPI inaccessible (${baseUrl}/initSession): ${e.message}`);
+    }
+    if (!sessionRes.ok) throw new Error(`Impossible de se connecter à l'ancien GLPI (${baseUrl}): ${sessionRes.status}`);
     const { session_token } = await sessionRes.json();
 
     try {
@@ -292,7 +308,12 @@ router.get('/migration-preview', requirePermission('glpi.manage', ['ADMIN', 'TEC
 // ── Helpers internes à la migration ────────────────────────────────────────
 
 async function migrateEntityType({ oldUrl, oldSession, oldAppToken, newUrl, newSession, newAppToken, endpoint, filter, buildInput, idMapKey, label }) {
-  const items = await fetchAllItems(oldUrl, oldSession, oldAppToken, endpoint);
+  let items;
+  try {
+    items = await fetchAllItems(oldUrl, oldSession, oldAppToken, endpoint);
+  } catch (e) {
+    return { idMapKey, results: [], fetchError: `${label} (fetch depuis ancien GLPI): ${e.message}` };
+  }
   const results = [];
   for (const item of items) {
     if (filter && !filter(item)) continue;
@@ -309,7 +330,11 @@ async function migrateEntityType({ oldUrl, oldSession, oldAppToken, newUrl, newS
 function buildIdMap(migratedTypes) {
   const idMap = { users: {}, categories: {}, locations: {}, groups: {} };
   const errors = [];
-  for (const { idMapKey, results } of migratedTypes) {
+  for (const { idMapKey, results, fetchError } of migratedTypes) {
+    if (fetchError) {
+      errors.push(fetchError);
+      continue;
+    }
     for (const r of results) {
       if (r.error) {
         errors.push(r.error);
@@ -381,7 +406,7 @@ router.post(
       const oldUserToken = oldConfig.apiKey;
 
       // ── 2. Connexion aux deux GLPI en parallèle ──
-      const [oldSessionRes, newSessionRes] = await Promise.all([
+      const [oldSettled, newSettled] = await Promise.allSettled([
         fetch(`${oldUrl}/initSession`, {
           headers: { 'App-Token': oldAppToken, Authorization: `user_token ${oldUserToken}` },
         }),
@@ -389,8 +414,12 @@ router.post(
           headers: { 'App-Token': newAppToken, Authorization: `user_token ${newUserToken}` },
         }),
       ]);
-      if (!oldSessionRes.ok) throw new Error('Connexion à l\'ancien GLPI impossible');
-      if (!newSessionRes.ok) throw new Error('Connexion au nouveau GLPI impossible — vérifiez les tokens');
+      if (oldSettled.status === 'rejected') throw new Error(`Ancien GLPI inaccessible (${oldUrl}): ${oldSettled.reason?.message}`);
+      if (newSettled.status === 'rejected') throw new Error(`Nouveau GLPI inaccessible (${newUrl}): ${newSettled.reason?.message}`);
+      const oldSessionRes = oldSettled.value;
+      const newSessionRes = newSettled.value;
+      if (!oldSessionRes.ok) throw new Error(`Connexion à l'ancien GLPI impossible (${oldUrl}): ${oldSessionRes.status}`);
+      if (!newSessionRes.ok) throw new Error(`Connexion au nouveau GLPI impossible (${newUrl}): ${newSessionRes.status}`);
       const { session_token: oldSession } = await oldSessionRes.json();
       const { session_token: newSession } = await newSessionRes.json();
 
@@ -454,6 +483,11 @@ router.post(
         ]);
 
         const { idMap, errors: migErrors } = buildIdMap(migratedTypes);
+        const totalMigrated =
+          Object.keys(idMap.users).length +
+          Object.keys(idMap.categories).length +
+          Object.keys(idMap.locations).length +
+          Object.keys(idMap.groups).length;
         const results = {
           users: Object.keys(idMap.users).length,
           categories: Object.keys(idMap.categories).length,
@@ -461,6 +495,10 @@ router.post(
           groups: Object.keys(idMap.groups).length,
           errors: migErrors,
         };
+
+        if (totalMigrated === 0 && migErrors.length > 0) {
+          throw new Error(`Aucune entité migrée — premiers erreurs: ${migErrors.slice(0, 3).join('; ')}`);
+        }
 
         // ── 4. Sauvegarder la config actuelle pour rollback ──
         const configBackup = {
