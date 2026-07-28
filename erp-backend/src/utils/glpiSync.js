@@ -268,7 +268,7 @@ async function fetchAllGlpiTickets(config, sessionToken, { dateFrom, dateTo } = 
 async function syncGlpiTickets() {
   if (isGlpiSyncRunning) return null;
   isGlpiSyncRunning = true;
-  const config = await getGlpiConfig();
+  const config = await getActiveGlpiConfig();
   if (!config) {
     isGlpiSyncRunning = false;
     return null;
@@ -370,7 +370,9 @@ async function fullReimportFromGlpi({ dateFrom, dateTo } = {}) {
     wait++;
   }
 
-  const config = await getGlpiConfig();
+  const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+  const activeInstance = settings?.activeGlpiInstance || 'glpi';
+  const config = await getGlpiConfig(activeInstance);
   if (!config) {
     throw new Error('GLPI non configuré ou inactif');
   }
@@ -379,10 +381,10 @@ async function fullReimportFromGlpi({ dateFrom, dateTo } = {}) {
 
   // Persister les filtres de dates dans ApiConfig pour que les synchros automatiques (arrière-plan) les respectent aussi
   try {
-    const currentApi = await prisma.apiConfig.findUnique({ where: { serviceName: 'glpi' } });
+    const currentApi = await prisma.apiConfig.findUnique({ where: { serviceName: activeInstance } });
     if (currentApi) {
       await prisma.apiConfig.update({
-        where: { serviceName: 'glpi' },
+        where: { serviceName: activeInstance },
         data: {
           extra: {
             ...(currentApi.extra || {}),

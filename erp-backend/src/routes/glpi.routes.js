@@ -289,6 +289,71 @@ router.get('/migration-preview', requirePermission('glpi.manage', ['ADMIN', 'TEC
   }
 });
 
+// ── Helpers internes à la migration ────────────────────────────────────────
+
+async function migrateEntityType({ oldUrl, oldSession, oldAppToken, newUrl, newSession, newAppToken, endpoint, filter, buildInput, idMapKey, label }) {
+  const items = await fetchAllItems(oldUrl, oldSession, oldAppToken, endpoint);
+  const results = [];
+  for (const item of items) {
+    if (filter && !filter(item)) continue;
+    try {
+      const newId = await createItem(newUrl, newSession, newAppToken, endpoint, buildInput(item));
+      results.push({ oldId: item.id, newId });
+    } catch (e) {
+      results.push({ oldId: item.id, error: `${label} #${item.id}: ${e.message}` });
+    }
+  }
+  return { idMapKey, results };
+}
+
+function buildIdMap(migratedTypes) {
+  const idMap = { users: {}, categories: {}, locations: {}, groups: {} };
+  const errors = [];
+  for (const { idMapKey, results } of migratedTypes) {
+    for (const r of results) {
+      if (r.error) {
+        errors.push(r.error);
+      } else {
+        idMap[idMapKey][r.oldId] = r.newId;
+      }
+    }
+  }
+  return { idMap, errors };
+}
+
+async function applyIdMapToErp(idMap) {
+  const updates = [];
+  if (Object.keys(idMap.users).length > 0) {
+    updates.push(
+      ...Object.entries(idMap.users).map(([oldId, newId]) =>
+        prisma.user.updateMany({ where: { glpiId: Number(oldId) }, data: { glpiId: newId } })
+      )
+    );
+  }
+  if (Object.keys(idMap.locations).length > 0) {
+    updates.push(
+      ...Object.entries(idMap.locations).map(([oldId, newId]) =>
+        prisma.glpiLocation.updateMany({ where: { glpiLocationId: Number(oldId) }, data: { glpiLocationId: newId } })
+      )
+    );
+  }
+  if (Object.keys(idMap.groups).length > 0) {
+    updates.push(
+      ...Object.entries(idMap.groups).map(([oldId, newId]) =>
+        prisma.team.updateMany({ where: { glpiGroupId: Number(oldId) }, data: { glpiGroupId: newId } })
+      )
+    );
+  }
+  if (Object.keys(idMap.categories).length > 0) {
+    updates.push(
+      ...Object.entries(idMap.categories).map(([oldId, newId]) =>
+        prisma.ticketCategory.updateMany({ where: { glpiCategoryId: Number(oldId) }, data: { glpiCategoryId: newId } })
+      )
+    );
+  }
+  await Promise.all(updates);
+}
+
 // LANCER LA MIGRATION : lit depuis l'ancien GLPI, crée dans le nouveau, met à jour l'ERP
 router.post(
   '/migrate',
@@ -306,7 +371,7 @@ router.post(
     const newUrl = newBaseUrl.replace(/\/+$/, '');
 
     try {
-      // ── 1. Connexion à l'ANCIEN GLPI ──
+      // ── 1. Lire l'ancienne config ──
       const oldConfig = await prisma.apiConfig.findUnique({ where: { serviceName: 'glpi' } });
       if (!oldConfig || !oldConfig.isActive) {
         return res.status(422).json({ error: 'Ancien GLPI non configuré ou inactif' });
@@ -315,66 +380,52 @@ router.post(
       const oldAppToken = oldConfig.extra?.appToken;
       const oldUserToken = oldConfig.apiKey;
 
-      const oldSessionRes = await fetch(`${oldUrl}/initSession`, {
-        headers: { 'App-Token': oldAppToken, Authorization: `user_token ${oldUserToken}` },
-      });
+      // ── 2. Connexion aux deux GLPI en parallèle ──
+      const [oldSessionRes, newSessionRes] = await Promise.all([
+        fetch(`${oldUrl}/initSession`, {
+          headers: { 'App-Token': oldAppToken, Authorization: `user_token ${oldUserToken}` },
+        }),
+        fetch(`${newUrl}/initSession`, {
+          headers: { 'App-Token': newAppToken, Authorization: `user_token ${newUserToken}` },
+        }),
+      ]);
       if (!oldSessionRes.ok) throw new Error('Connexion à l\'ancien GLPI impossible');
-      const { session_token: oldSession } = await oldSessionRes.json();
-
-      // ── 2. Connexion au NOUVEAU GLPI ──
-      const newSessionRes = await fetch(`${newUrl}/initSession`, {
-        headers: { 'App-Token': newAppToken, Authorization: `user_token ${newUserToken}` },
-      });
       if (!newSessionRes.ok) throw new Error('Connexion au nouveau GLPI impossible — vérifiez les tokens');
+      const { session_token: oldSession } = await oldSessionRes.json();
       const { session_token: newSession } = await newSessionRes.json();
 
-      const results = { users: 0, categories: 0, locations: 0, groups: 0, errors: [] };
-      const idMap = { users: {}, categories: {}, locations: {}, groups: {} };
-
       try {
-        // ── 3. MIGRATION DES UTILISATEURS ──
-        const oldUsers = await fetchAllItems(oldUrl, oldSession, oldAppToken, 'User');
-        for (const u of oldUsers) {
-          if (!u.name && !u.realname && !u.firstname) continue;
-          try {
-            // Chercher si un utilisateur avec le même nom existe déjà dans le nouveau GLPI
-            const newId = await createItem(newUrl, newSession, newAppToken, 'User', {
+        // ── 3. Migrer tous les types d'entités en parallèle ──
+        const migratedTypes = await Promise.all([
+          migrateEntityType({
+            oldUrl, oldSession, oldAppToken, newUrl, newSession, newAppToken,
+            endpoint: 'User', idMapKey: 'users',
+            filter: (u) => u.name || u.realname || u.firstname,
+            buildInput: (u) => ({
               name: u.name || `user_${u.id}`,
               realname: u.realname || '',
               firstname: u.firstname || '',
               email: (u.name?.includes('@') ? u.name : `${u.name || u.id}@migrated.local`),
               is_active: 1,
-            });
-            idMap.users[u.id] = newId;
-            results.users++;
-          } catch (e) {
-            results.errors.push(`Utilisateur #${u.id} (${u.name || u.realname}): ${e.message}`);
-          }
-        }
-
-        // ── 4. MIGRATION DES CATÉGORIES ──
-        const oldCats = await fetchAllItems(oldUrl, oldSession, oldAppToken, 'ITILCategory');
-        for (const c of oldCats) {
-          if (!c.name) continue;
-          try {
-            const newId = await createItem(newUrl, newSession, newAppToken, 'ITILCategory', {
+            }),
+            label: 'Utilisateur',
+          }),
+          migrateEntityType({
+            oldUrl, oldSession, oldAppToken, newUrl, newSession, newAppToken,
+            endpoint: 'ITILCategory', idMapKey: 'categories',
+            filter: (c) => c.name,
+            buildInput: (c) => ({
               name: c.name,
               completename: c.completename || c.name,
               comment: c.comment || '',
-            });
-            idMap.categories[c.id] = newId;
-            results.categories++;
-          } catch (e) {
-            results.errors.push(`Catégorie #${c.id} (${c.name}): ${e.message}`);
-          }
-        }
-
-        // ── 5. MIGRATION DES LIEUX ──
-        const oldLocs = await fetchAllItems(oldUrl, oldSession, oldAppToken, 'Location');
-        for (const l of oldLocs) {
-          if (!l.name && !l.completename) continue;
-          try {
-            const newId = await createItem(newUrl, newSession, newAppToken, 'Location', {
+            }),
+            label: 'Catégorie',
+          }),
+          migrateEntityType({
+            oldUrl, oldSession, oldAppToken, newUrl, newSession, newAppToken,
+            endpoint: 'Location', idMapKey: 'locations',
+            filter: (l) => l.name || l.completename,
+            buildInput: (l) => ({
               name: l.name || l.completename,
               completename: l.completename || l.name,
               address: l.address || '',
@@ -383,47 +434,42 @@ router.post(
               country: l.country || '',
               building: l.building || '',
               room: l.room || '',
-            });
-            idMap.locations[l.id] = newId;
-            results.locations++;
-          } catch (e) {
-            results.errors.push(`Lieu #${l.id} (${l.name}): ${e.message}`);
-          }
-        }
-
-        // ── 6. MIGRATION DES GROUPES ──
-        const oldGroups = await fetchAllItems(oldUrl, oldSession, oldAppToken, 'Group');
-        for (const g of oldGroups) {
-          if (!g.name) continue;
-          try {
-            const newId = await createItem(newUrl, newSession, newAppToken, 'Group', {
+            }),
+            label: 'Lieu',
+          }),
+          migrateEntityType({
+            oldUrl, oldSession, oldAppToken, newUrl, newSession, newAppToken,
+            endpoint: 'Group', idMapKey: 'groups',
+            filter: (g) => g.name,
+            buildInput: (g) => ({
               name: g.name,
               comment: g.comment || '',
               is_requester: g.is_requester ?? 1,
               is_assign: g.is_assign ?? 1,
               is_task: g.is_task ?? 1,
               is_notify: g.is_notify ?? 1,
-            });
-            idMap.groups[g.id] = newId;
-            results.groups++;
-          } catch (e) {
-            results.errors.push(`Groupe #${g.id} (${g.name}): ${e.message}`);
-          }
-        }
+            }),
+            label: 'Groupe',
+          }),
+        ]);
 
-        // ── 7. METTRE À JOUR L'ERP ──
-        // Détacher les liens vers l'ancien GLPI
-        const detachTickets = await prisma.ticket.updateMany({
-          where: { glpiTicketId: { not: null } },
-          data: { glpiTicketId: null },
-        });
-        await prisma.team.updateMany({
-          where: { glpiGroupId: { not: null } },
-          data: { glpiGroupId: null },
-        });
-        await prisma.ticketCategory.deleteMany({});
+        const { idMap, errors: migErrors } = buildIdMap(migratedTypes);
+        const results = {
+          users: Object.keys(idMap.users).length,
+          categories: Object.keys(idMap.categories).length,
+          locations: Object.keys(idMap.locations).length,
+          groups: Object.keys(idMap.groups).length,
+          errors: migErrors,
+        };
 
-        // Enregistrer les mappings old→new dans la config du nouveau GLPI
+        // ── 4. Sauvegarder la config actuelle pour rollback ──
+        const configBackup = {
+          baseUrl: oldConfig.baseUrl,
+          apiKey: oldConfig.apiKey,
+          extra: { ...oldConfig.extra },
+        };
+
+        // ── 5. Basculer la config vers le nouveau GLPI ──
         await prisma.apiConfig.update({
           where: { serviceName: 'glpi' },
           data: {
@@ -434,11 +480,45 @@ router.post(
               migrationIdMap: idMap,
               migratedFrom: oldUrl,
               migratedAt: new Date().toISOString(),
-              dateFrom: null,
-              dateTo: null,
+              dateFrom: oldConfig.extra?.dateFrom || null,
+              dateTo: oldConfig.extra?.dateTo || null,
             },
           },
         });
+
+        // ── 6. Mettre à jour les IDs ERP via l'idMap (au lieu de tout détruire) ──
+        try {
+          await applyIdMapToErp(idMap);
+        } catch (applyErr) {
+          // Rollback : restaurer l'ancienne config
+          await prisma.apiConfig.update({
+            where: { serviceName: 'glpi' },
+            data: configBackup,
+          }).catch(() => {});
+          throw new Error(`Échec mise à jour des IDs ERP — config restaurée: ${applyErr.message}`);
+        }
+
+        // ── 7. Détacher les tickets ERP de l'ancien GLPI (non migrés) ──
+        const detachTickets = await prisma.ticket.updateMany({
+          where: { glpiTicketId: { not: null } },
+          data: { glpiTicketId: null },
+        });
+
+        // ── 8. Post-migration : synchroniser depuis le nouveau GLPI ──
+        try {
+          const [syncedLocs, syncedUsers] = await Promise.allSettled([
+            syncLocationsFromGlpi(),
+            syncUsersFromGlpi({ createMissing: false }),
+          ]);
+          results.postSync = {
+            locations: syncedLocs.status === 'fulfilled' ? syncedLocs.value : -1,
+            users: syncedUsers.status === 'fulfilled' ? syncedUsers.value : -1,
+          };
+          if (syncedLocs.status === 'rejected') results.errors.push(`Synchro lieux: ${syncedLocs.reason?.message}`);
+          if (syncedUsers.status === 'rejected') results.errors.push(`Synchro utilisateurs: ${syncedUsers.reason?.message}`);
+        } catch (syncErr) {
+          results.errors.push(`Synchro post-migration: ${syncErr.message}`);
+        }
 
         results.detachedTickets = detachTickets.count;
         results.idMap = idMap;
