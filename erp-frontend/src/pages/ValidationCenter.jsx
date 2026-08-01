@@ -19,6 +19,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   const [pendingDrafts, setPendingDrafts] = useState([]);
   const [reminderDrafts, setReminderDrafts] = useState([]);
   const [pendingKnowledgeDrafts, setPendingKnowledgeDrafts] = useState([]);
+  const [pendingClosures, setPendingClosures] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -27,6 +28,13 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   const [rejectTicketId, setRejectTicketId] = useState(null);
   const [rejectReason, setRejectReason] = useState('');
   const [rejecting, setRejecting] = useState(false);
+
+  // Modale de rejet de clôture suggérée
+  const [showClosureRejectModal, setShowClosureRejectModal] = useState(false);
+  const [closureRejectTicketId, setClosureRejectTicketId] = useState(null);
+  const [closureRejectReason, setClosureRejectReason] = useState('');
+  const [rejectingClosure, setRejectingClosure] = useState(false);
+  const [validatingClosureId, setValidatingClosureId] = useState(null);
 
   // Modale d'approbation combinée (Ticket GLPI + Réponse IA)
   const [showCombinedModal, setShowCombinedModal] = useState(false);
@@ -60,14 +68,23 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
 
     Promise.all([
       api.get('/tickets?approvalStatus=PENDING&limit=100').catch(() => ({ data: { tickets: [] } })),
+      api.get('/tickets?closeSuggested=true&limit=100').catch(() => ({ data: { tickets: [] } })),
       api.get('/dashboard/pending-ai-drafts').catch(() => ({ data: [] })),
       api.get('/knowledge/drafts').catch(() => ({ data: [] })),
     ])
-      .then(([ticketsRes, draftsRes, knowledgeRes]) => {
+      .then(([ticketsRes, closuresRes, draftsRes, knowledgeRes]) => {
         const ticketList = Array.isArray(ticketsRes.data)
           ? ticketsRes.data
           : ticketsRes.data?.items || [];
+        // Les tickets d'expéditeurs à risque passent en tête de file pour la revue Hotline
+        ticketList.sort((a, b) => (b.lowTrustSender ? 1 : 0) - (a.lowTrustSender ? 1 : 0));
         setPendingTickets(ticketList);
+
+        const closureList = Array.isArray(closuresRes.data)
+          ? closuresRes.data
+          : closuresRes.data?.items || [];
+        closureList.sort((a, b) => new Date(b.closeSuggestedAt || 0) - new Date(a.closeSuggestedAt || 0));
+        setPendingClosures(closureList);
 
         const draftList = Array.isArray(draftsRes.data) ? draftsRes.data : [];
         setPendingDrafts(draftList.filter((d) => d.draftKind !== 'REMINDER'));
@@ -123,6 +140,44 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
       toast.error(err.response?.data?.error || 'Erreur lors du rejet');
     } finally {
       setRejecting(false);
+    }
+  }
+
+  // --- ACTIONS CLÔTURE SUGGÉRÉE IA ---
+  async function handleValidateClosure(ticketId) {
+    setValidatingClosureId(ticketId);
+    try {
+      await api.post(`/tickets/${ticketId}/validate-close`);
+      toast.success(`Clôture du ticket #${ticketId} validée`);
+      loadAllData(true);
+    } catch (err) {
+      toast.error(err.response?.data?.error || "Erreur lors de la validation de la clôture");
+    } finally {
+      setValidatingClosureId(null);
+    }
+  }
+
+  function openClosureRejectModal(ticketId) {
+    setClosureRejectTicketId(ticketId);
+    setClosureRejectReason('');
+    setShowClosureRejectModal(true);
+  }
+
+  async function handleConfirmClosureReject() {
+    if (!closureRejectReason.trim()) {
+      toast.error('La raison du rejet est obligatoire');
+      return;
+    }
+    setRejectingClosure(true);
+    try {
+      await api.post(`/tickets/${closureRejectTicketId}/reject-close`, { reason: closureRejectReason.trim() });
+      toast.success('Clôture rejetée — le ticket reste actif');
+      setShowClosureRejectModal(false);
+      loadAllData(true);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors du rejet de la clôture');
+    } finally {
+      setRejectingClosure(false);
     }
   }
 
@@ -353,6 +408,23 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
         </button>
 
         <button
+          onClick={() => handleTabChange('closures')}
+          className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+            activeTab === 'closures'
+              ? 'bg-cyan-600 text-white shadow-md font-extrabold'
+              : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
+          }`}
+        >
+          <CheckCircle2 className="w-4 h-4" />
+          <span className="whitespace-nowrap">Clôtures IA</span>
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black whitespace-nowrap ${
+            activeTab === 'closures' ? 'bg-white/20 text-white' : 'bg-cyan-500/20 text-cyan-600 dark:text-cyan-400'
+          }`}>
+            {pendingClosures.length}
+          </span>
+        </button>
+
+        <button
           onClick={() => handleTabChange('knowledge')}
           className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
             activeTab === 'knowledge'
@@ -399,6 +471,14 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                       <span className="px-2.5 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-400 text-[10px] font-extrabold border border-amber-500/30 uppercase tracking-wider">
                         🛡️ En attente Hotline
                       </span>
+                      {t.lowTrustSender && (
+                        <span
+                          className="px-2.5 py-0.5 rounded-md bg-red-500/15 text-red-600 dark:text-red-400 text-[10px] font-extrabold border border-red-500/40 uppercase tracking-wider"
+                          title="Cet expéditeur a un taux de rejets élevé par la Hotline : sa suggestion IA est à vérifier avec une attention particulière"
+                        >
+                          ⚠️ Expéditeur à risque
+                        </span>
+                      )}
                       {t.category && (
                         <span className="px-2.5 py-0.5 rounded-md bg-surface-container text-on-surface-variant text-[10px] font-bold border border-outline-variant/30">
                           {t.category}
@@ -671,6 +751,97 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                   </div>
                 );
               })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* CONTENU DE L'ONGLET CLÔTURES IA */}
+      {activeTab === 'closures' && (
+        <div className="space-y-4">
+          {loading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-32 rounded-3xl bg-surface-container-low animate-pulse border border-outline-variant/20" />
+              ))}
+            </div>
+          ) : pendingClosures.length === 0 ? (
+            <div className="p-12 text-center rounded-3xl border border-dashed border-outline-variant/40 bg-surface-container-lowest space-y-3">
+              <CheckCircle2 className="w-12 h-12 text-cyan-500 mx-auto" />
+              <h3 className="text-base font-bold text-on-surface">Aucune clôture suggérée en attente</h3>
+              <p className="text-xs text-on-surface-variant max-w-md mx-auto">
+                L'IA ne clôt plus les tickets automatiquement : lorsqu'elle détecte un problème résolu,
+                elle propose la clôture ici pour validation par la Hotline.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {pendingClosures.map((t) => (
+                <div
+                  key={t.id}
+                  className="rounded-3xl border border-cyan-200 dark:border-cyan-500/20 bg-surface-container-lowest p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6 hover:border-cyan-300 dark:hover:border-cyan-500/30 transition-all"
+                >
+                  <div className="space-y-2 flex-1 min-w-0">
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <span className="px-2.5 py-0.5 rounded-md bg-cyan-500/15 text-cyan-700 dark:text-cyan-400 text-[10px] font-extrabold border border-cyan-500/30 uppercase tracking-wider">
+                        🤖 Clôture suggérée par l'IA
+                      </span>
+                      {typeof t.closeSuggestionConfidence === 'number' && (
+                        <span className="px-2.5 py-0.5 rounded-md bg-surface-container text-on-surface-variant text-[10px] font-bold border border-outline-variant/30">
+                          Confiance : {Math.round(t.closeSuggestionConfidence * 100)}%
+                        </span>
+                      )}
+                      {t.category && (
+                        <span className="px-2.5 py-0.5 rounded-md bg-surface-container text-on-surface-variant text-[10px] font-bold border border-outline-variant/30">
+                          {t.category}
+                        </span>
+                      )}
+                      <span className="text-[11px] text-on-surface-variant font-mono">#{t.id}</span>
+                    </div>
+
+                    <h3 className="text-base font-bold text-on-surface truncate">{t.title}</h3>
+                    <p className="text-xs text-on-surface-variant line-clamp-2">{t.content}</p>
+
+                    <div className="flex items-center gap-4 text-[11px] text-on-surface-variant pt-1 flex-wrap">
+                      <span className="flex items-center gap-1">
+                        <User className="w-3.5 h-3.5 text-primary" />
+                        {t.requester?.fullName || t.sourceName || t.sourceEmail || 'Demandeur anonyme'}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5 text-primary" />
+                        Suggérée le {t.closeSuggestedAt ? new Date(t.closeSuggestedAt).toLocaleString('fr-FR') : new Date(t.createdAt).toLocaleString('fr-FR')}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Actions Hotline */}
+                  <div className="flex items-center gap-2 shrink-0 border-t md:border-t-0 pt-4 md:pt-0 border-outline-variant/20">
+                    <button
+                      onClick={() => navigate(`/tickets/${t.id}`)}
+                      className="px-3.5 py-2 rounded-xl text-xs font-semibold border border-outline-variant/40 hover:bg-surface-container text-on-surface transition-all flex items-center gap-1"
+                    >
+                      <span>Détails</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      onClick={() => openClosureRejectModal(t.id)}
+                      className="px-3.5 py-2 rounded-xl text-xs font-bold border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-all"
+                    >
+                      Refuser
+                    </button>
+
+                    <button
+                      onClick={() => handleValidateClosure(t.id)}
+                      disabled={validatingClosureId === t.id}
+                      className="px-4 py-2 rounded-xl text-xs font-bold bg-cyan-600 hover:bg-cyan-700 text-white shadow-md shadow-cyan-500/20 transition-all flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>{validatingClosureId === t.id ? 'Validation...' : 'Valider la clôture'}</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -994,8 +1165,46 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
         </div>
       )}
 
-      {/* MODALE D'APPROBATION COMBINÉE (TICKET GLPI + RÉPONSE IA) */}
-      {showCombinedModal && combinedDraft && (
+      {/* MODALE DE REJET DE CLÔTURE SUGGÉRÉE */}
+      {showClosureRejectModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fadeIn">
+          <div className="bg-surface border border-outline-variant/40 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-red-600 dark:text-red-400">
+              <AlertTriangle className="w-6 h-6" />
+              <h3 className="text-base font-bold">Raison du refus de clôture</h3>
+            </div>
+            <p className="text-xs text-on-surface-variant">
+              Veuillez indiquer pourquoi le ticket ne doit pas être clos. Cette raison alimente l'apprentissage IA de la plateforme.
+            </p>
+            <textarea
+              className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-none"
+              rows={3}
+              placeholder="Ex: Le problème persiste côté utilisateur..."
+              value={closureRejectReason}
+              onChange={(e) => setClosureRejectReason(e.target.value)}
+            />
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowClosureRejectModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold border border-outline-variant/40 hover:bg-surface-container text-on-surface transition-all"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                disabled={!closureRejectReason.trim() || rejectingClosure}
+                onClick={handleConfirmClosureReject}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 text-white shadow-md shadow-red-500/20 hover:brightness-110 disabled:opacity-50 transition-all"
+              >
+                {rejectingClosure ? 'Refus en cours...' : 'Confirmer le refus'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODALE D'APPROBATION COMBINÉE (TICKET GLPI + RÉPONSE IA) */}      {showCombinedModal && combinedDraft && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fadeIn">
           <div className="bg-surface border border-outline-variant/40 rounded-3xl p-6 max-w-lg w-full shadow-2xl space-y-5">
             <div className="flex items-center gap-3 text-amber-600 dark:text-amber-400">

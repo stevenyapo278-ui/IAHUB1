@@ -368,7 +368,7 @@ async function deleteGlpiTicket(glpiTicketId) {
 // Crée un ticket dans GLPI depuis les données d'un email analysé par l'IA,
 // puis crée ou met à jour l'entrée correspondante dans la table Ticket de l'ERP.
 // Si GLPI n'est pas configuré, le ticket est créé uniquement dans l'ERP.
-async function createTicketFromEmail({ subject, body, from, fromName, analysis, emailAccountId, locationId, tx = prisma }) {
+async function createTicketFromEmail({ subject, body, from, fromName, analysis, emailAccountId, locationId, lowTrustSender = false, tx = prisma }) {
   const title = analysis.suggestedTitle || subject;
   const content = `${body || ''}\n\n---\nAnalyse IA : ${analysis.summary}\nConfiance : ${Math.round((analysis.confidence || 0) * 100)}%`;
   const followupNote = from ? `Email original de ${fromName || from} &lt;${from}&gt;\nSujet : ${subject}` : null;
@@ -394,6 +394,7 @@ async function createTicketFromEmail({ subject, body, from, fromName, analysis, 
       sourceSubject: subject || null,
       aiProcessed: true,
       aiSummary: analysis.summary || null,
+      lowTrustSender,
     },
   });
 

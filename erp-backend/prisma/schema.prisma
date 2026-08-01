@@ -55,6 +55,10 @@ enum TicketEventType {
   GLPI_SYNC_FAILED
   AI_CONVERSATION_ESCALATED
   AI_FOLLOWUP_DRAFT_GENERATED
+  AI_LOW_TRUST_SENDER
+  CLOSURE_SUGGESTED
+  CLOSURE_VALIDATED
+  CLOSURE_REJECTED
   APPROVED
   REJECTED
 }
@@ -244,6 +248,16 @@ model Ticket {
   firstDetectedAt DateTime?
   lastDetectedAt  DateTime?
 
+  // Expéditeur dégradé par la boucle de rétroaction (taux de rejets élevé)
+  lowTrustSender Boolean  @default(false)
+
+  // Clôture suggérée par l'IA (détection de résolution) — doit être validée par un humain
+  // dans le Centre de Validation avant de passer SOLVED. closeSuggestionConfidence garde
+  // le score IA pour affichage et statistiques.
+  closeSuggested             Boolean   @default(false)
+  closeSuggestedAt           DateTime?
+  closeSuggestionConfidence  Float?
+
   // Champs alignés sur le formulaire de ticket GLPI
   type        TicketType   @default(INCIDENT)
   source      String?      // "Helpdesk", "Email", "Téléphone", etc.
@@ -277,6 +291,26 @@ model AiTicketSuggestion {
   suggestion  String   // texte de la suggestion ("Augmenter la priorité à P1", "Ticket similaire #42", ...)
   reason      String?  // justification donnée par l'IA
   createdAt   DateTime @default(now())
+}
+
+// Réputation d'un expéditeur, apprise exclusivement des décisions humaines (approbations/rejets).
+// Aucune liste de confiance préétablie : un expéditeur n'est dégradé (LOW_TRUST) qu'après un
+// taux de rejets élevé constaté par la Hotline, puis ses tickets sont marqués lowTrustSender.
+model SenderReputation {
+  id              Int       @id @default(autoincrement())
+  email           String    @unique // adresse de l'expéditeur (minuscules)
+  domain          String    // domaine extrait de l'adresse, pour l'agrégation du rapport hebdomadaire
+  ticketsTotal    Int       @default(0)
+  ticketsApproved Int       @default(0)
+  ticketsRejected Int       @default(0)
+  status          String    @default("NORMAL") // NORMAL | LOW_TRUST
+  degradedAt      DateTime?
+  lastDecisionAt  DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([domain])
+  @@index([status])
 }
 
 // Pièce jointe d'un ticket, importée depuis GLPI (Document_Item) lors de la synchronisation

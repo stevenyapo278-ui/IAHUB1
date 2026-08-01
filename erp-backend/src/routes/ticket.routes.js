@@ -13,6 +13,7 @@ const { logEvent } = require('../services/ticketEvent');
 const { auditLog } = require('../services/auditLogService');
 const { uploadPendingAttachments } = require('../services/emailAttachmentProcessor');
 const { emitTicketCreated, emitTicketUpdated, emitTicketAssigned } = require('../utils/socket');
+const { recordDecision } = require('../services/senderReputation');
 const multer = require('multer');
 
 const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); // 20 Mo max
@@ -57,6 +58,10 @@ router.get('/', async (req, res) => {
   }
 
   if (req.query.approvalStatus) where.approvalStatus = req.query.approvalStatus;
+
+  // Filtrer les tickets dont la clôture a été suggérée par l'IA (en attente de validation Hotline)
+  if (req.query.closeSuggested === 'true') where.closeSuggested = true;
+  if (req.query.closeSuggested === 'false') where.closeSuggested = false;
 
   // source=glpi -> uniquement les tickets synchronisés avec GLPI
   // source=erp  -> uniquement les tickets internes (jamais envoyés à GLPI)
@@ -497,6 +502,12 @@ router.post('/:id/approve', requirePermission('tickets.approve', ['ADMIN', 'TECH
 
     emitTicketUpdated(ticket, { approvalStatus: 'APPROVED', glpiTicketId });
 
+    // Boucle de rétroaction : l'approbation humaine renforce la réputation de l'expéditeur
+    if (ticket.sourceEmail) {
+      recordDecision({ email: ticket.sourceEmail, decision: 'APPROVED' })
+        .catch((err) => console.error('[senderReputation] Échec enregistrement approbation:', err.message));
+    }
+
     // Associer l'expéditeur au lieu (RequesterLocation) pour les prochains emails
     if (ticket.sourceEmail && ticket.glpiLocationId) {
       try {
@@ -546,13 +557,113 @@ router.post('/:id/reject', requirePermission('tickets.approve', ['ADMIN', 'TECHN
     await logEvent(id, 'REJECTED', req.user.email || 'HOTLINE', { reason: note.trim() });
     await auditLog('TICKET_REJECTED', { actor: req.user, targetType: 'Ticket', targetId: id, targetLabel: ticket.title, metadata: { reason: note.trim() } });
     emitTicketUpdated(ticket, { approvalStatus: 'REJECTED' });
+
+    // Boucle de rétroaction : un rejet humain dégrade la réputation de l'expéditeur
+    if (ticket.sourceEmail) {
+      recordDecision({ email: ticket.sourceEmail, decision: 'REJECTED' })
+        .catch((err) => console.error('[senderReputation] Échec enregistrement rejet:', err.message));
+    }
+
     return res.json(ticket);
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
 });
 
-// ── Réassignation intelligente avec compétences ──────────────────────────
+// ── Validation humaine de la clôture suggérée par l'IA ────────────────────
+// L'IA ne clôt plus jamais un ticket seule : elle marque closeSuggested=true (détection
+// de résolution). La Hotline valide ici → SOLVED, ou rejette → le ticket reste actif.
+
+// Valider la clôture suggérée : passe le ticket en SOLVED et synchronise GLPI.
+router.post('/:id/validate-close', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+  const id = Number(req.params.id);
+  try {
+    const existing = await prisma.ticket.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ error: 'Ticket introuvable' });
+    if (!existing.closeSuggested) {
+      return res.status(400).json({ error: 'Aucune clôture suggérée en attente sur ce ticket.' });
+    }
+
+    const ticket = await prisma.ticket.update({
+      where: { id },
+      data: {
+        status: 'SOLVED',
+        solvedAt: new Date(),
+        closeSuggested: false,
+        closeSuggestedAt: null,
+        closeSuggestionConfidence: null,
+        aiExchangeCount: 0, // conversation résolue : repart à zéro pour un futur fil sur ce ticket
+      },
+    });
+
+    await logEvent(id, 'CLOSURE_VALIDATED', req.user.email || 'HOTLINE', {
+      confidence: existing.closeSuggestionConfidence,
+      note: req.body.note || null,
+    });
+    await auditLog('TICKET_CLOSURE_VALIDATED', {
+      actor: req.user, targetType: 'Ticket', targetId: id,
+      targetLabel: ticket.title,
+      metadata: { confidence: existing.closeSuggestionConfidence, note: req.body.note || null },
+    });
+
+    if (ticket.glpiTicketId) {
+      try {
+        await updateGlpiTicket(ticket.glpiTicketId, { status: 'SOLVED' });
+      } catch (err) {
+        console.error('[ticket.routes] Synchro GLPI clôture validée échouée:', err.message);
+        await logEvent(id, 'GLPI_SYNC_FAILED', 'SYSTEM', { action: 'validate-close', error: err.message });
+      }
+    }
+
+    emitTicketUpdated(ticket, { status: 'SOLVED', closeSuggested: false });
+    return res.json(ticket);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Rejeter la clôture suggérée : le problème n'est pas résolu, le ticket reste actif.
+router.post('/:id/reject-close', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+  const id = Number(req.params.id);
+  const note = req.body.note || req.body.reason;
+  if (!note || !note.trim()) {
+    return res.status(400).json({ error: 'Une raison de rejet est obligatoire.' });
+  }
+  try {
+    const existing = await prisma.ticket.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ error: 'Ticket introuvable' });
+    if (!existing.closeSuggested) {
+      return res.status(400).json({ error: 'Aucune clôture suggérée en attente sur ce ticket.' });
+    }
+
+    const ticket = await prisma.ticket.update({
+      where: { id },
+      data: {
+        status: 'OPEN',
+        firstOpenedAt: existing.firstOpenedAt || new Date(),
+        closeSuggested: false,
+        closeSuggestedAt: null,
+        closeSuggestionConfidence: null,
+        lastUserReplyAt: new Date(),
+      },
+    });
+
+    await logEvent(id, 'CLOSURE_REJECTED', req.user.email || 'HOTLINE', {
+      confidence: existing.closeSuggestionConfidence,
+      reason: note.trim(),
+    });
+    await auditLog('TICKET_CLOSURE_REJECTED', {
+      actor: req.user, targetType: 'Ticket', targetId: id,
+      targetLabel: ticket.title,
+      metadata: { confidence: existing.closeSuggestionConfidence, reason: note.trim() },
+    });
+
+    emitTicketUpdated(ticket, { status: 'OPEN', closeSuggested: false });
+    return res.json(ticket);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
 // Met à jour l'assignation, journalise dans ReassignmentLog et émet socket event.
 router.patch('/:id/reassign', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const id = Number(req.params.id);

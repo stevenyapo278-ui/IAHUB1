@@ -16,6 +16,7 @@ const { getSystemSettings } = require('./systemSettings');
 const { emitTicketCreated, emitTicketAssigned } = require('../utils/socket');
 const { tryHandleReminderReply } = require('./draftReplyApproval');
 const { getBreaker } = require('../utils/circuitBreaker');
+const { isLowTrustSender } = require('./senderReputation');
 
 const MAX_RETRIES = 3;
 const RETRY_DELAYS_MS = [60000, 300000, 900000]; // 1min, 5min, 15min
@@ -444,9 +445,12 @@ async function processMessage(message, account) {
     }
 
     // Étape 3 : créer ticket GLPI + ERP dans une transaction pour éviter l'incohérence
+    // Vérifier la réputation de l'expéditeur (boucle de rétroaction : taux de rejets humains)
+    const lowTrustSender = await isLowTrustSender(fromEmail).catch(() => false);
+
     const { glpiTicketId, erpTicketId, ticketMessageId } = await prisma.$transaction(async (tx) => {
       const created = await createTicketFromEmail({
-        subject, body: bodyPreview, from: fromEmail, fromName, analysis, emailAccountId: account.id, locationId, tx
+        subject, body: bodyPreview, from: fromEmail, fromName, analysis, emailAccountId: account.id, locationId, lowTrustSender, tx
       });
 
       // Étape 4 : stocker conversationId + aiSummary sur le ticket ERP
@@ -475,6 +479,13 @@ async function processMessage(message, account) {
 
       await logEvent(created.erpTicketId, 'CREATED', fromEmail, { glpiTicketId: created.glpiTicketId, source: 'EMAIL' }, tx);
       await logEvent(created.erpTicketId, 'AI_ANALYZED', 'AI', { analysis }, tx);
+
+      // Expéditeur dégradé par la boucle de rétroaction (taux de rejets élevé) : tracer pour la Hotline
+      if (lowTrustSender) {
+        await logEvent(created.erpTicketId, 'AI_LOW_TRUST_SENDER', 'SYSTEM', {
+          note: `Expéditeur ${fromEmail} dégradé par la boucle de rétroaction (taux de rejets élevé) — ticket marqué à risque`,
+        }, tx);
+      }
 
       return { ...created, ticketMessageId: ticketMsg.id };
     });

@@ -25,7 +25,7 @@ async function runReminderScheduler() {
   const delays = anyConfig || { firstReminderDays: 2, secondReminderDays: 5, preCloseDays: 10, autoCloseDays: 15 };
 
   const tickets = await prisma.ticket.findMany({
-    where: { status: 'WAITING_FOR_USER', sourceEmail: { not: null } },
+    where: { status: 'WAITING_FOR_USER', sourceEmail: { not: null }, closeSuggested: false },
     include: {
       messages: {
         orderBy: { timestamp: 'desc' },

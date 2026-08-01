@@ -76,20 +76,18 @@ async function applyIntentActions(ticketId, { intent, confidence, newIssueSummar
   const lifetimeExceeded = daysSince(ticket?.firstOpenedAt || ticket?.createdAt) > MAX_TICKET_LIFETIME_DAYS;
 
   const updates = {};
-  const canCloseAutomatically = confidence >= CONFIDENCE_THRESHOLD_FOR_CLOSE;
   const canReopenAutomatically = confidence >= CONFIDENCE_THRESHOLD_FOR_REOPEN;
 
   if (intent === 'RESOLVED') {
-    if (canCloseAutomatically) {
-      updates.status = 'SOLVED';
-      updates.solvedAt = new Date();
-      updates.aiExchangeCount = 0; // conversation résolue : repart à zéro pour un futur fil sur ce ticket
-    } else {
-      // Confiance insuffisante pour fermer automatiquement : on laisse la main à un humain.
-      updates.status = 'WAITING_FOR_USER';
-      updates.lastUserReplyAt = new Date();
-      await logEvent(ticketId, 'AI_LOW_CONFIDENCE_CLOSE_SKIPPED', actor, { intent, confidence });
-    }
+    // Toute détection de résolution est soumise à validation humaine : plus aucune
+    // clôture automatique. Le ticket est marqué "clôture suggérée" et apparaît dans
+    // le Centre de Validation jusqu'à la décision de la Hotline.
+    updates.closeSuggested = true;
+    updates.closeSuggestedAt = new Date();
+    updates.closeSuggestionConfidence = confidence;
+    updates.status = 'WAITING_FOR_USER';
+    updates.lastUserReplyAt = new Date();
+    await logEvent(ticketId, 'CLOSURE_SUGGESTED', actor, { intent, confidence });
   } else if (intent === 'STILL_PRESENT' || intent === 'NEW_INFO') {
     updates.status = 'OPEN';
     updates.lastUserReplyAt = new Date();
@@ -116,15 +114,15 @@ async function applyIntentActions(ticketId, { intent, confidence, newIssueSummar
       await logEvent(ticketId, 'AI_LOW_CONFIDENCE_REOPEN_SKIPPED', actor, { intent, confidence });
     }
   } else if (intent === 'NEW_ISSUE_IN_THREAD') {
-    // Le problème initial est résolu : on ferme ce ticket (si confiance suffisante), et on ouvre
-    // un ticket séparé pour le nouveau sujet évoqué dans le même mail, plutôt que de tout mélanger.
-    if (canCloseAutomatically) {
-      updates.status = 'SOLVED';
-      updates.solvedAt = new Date();
-    } else {
-      updates.status = 'WAITING_FOR_USER';
-      updates.lastUserReplyAt = new Date();
-    }
+    // Le problème initial est (probablement) résolu : la clôture est suggérée à la Hotline
+    // (validation humaine obligatoire), et on ouvre un ticket séparé pour le nouveau sujet
+    // évoqué dans le même mail, plutôt que de tout mélanger.
+    updates.closeSuggested = true;
+    updates.closeSuggestedAt = new Date();
+    updates.closeSuggestionConfidence = confidence;
+    updates.status = 'WAITING_FOR_USER';
+    updates.lastUserReplyAt = new Date();
+    await logEvent(ticketId, 'CLOSURE_SUGGESTED', actor, { intent, confidence, newIssueSummary });
 
     const splitCount = ticket?.splitCount || 0;
     if (newIssueSummary && fromEmail && splitCount < MAX_SPLITS_PER_TICKET) {
@@ -158,7 +156,9 @@ async function applyIntentActions(ticketId, { intent, confidence, newIssueSummar
       await logEvent(ticketId, 'NEEDS_HUMAN_REVIEW', actor, { intent, confidence, reason: 'low_confidence_or_split_limit' });
     }
 
-    if (updates.status && updated.glpiTicketId) {
+    // Tant qu'une clôture suggérée est en attente de validation, on ne touche pas au
+    // statut GLPI : la synchro SOLVED n'aura lieu qu'à la validation humaine.
+    if (updates.status && !updates.closeSuggested && updated.glpiTicketId) {
       try {
         await updateGlpiTicket(updated.glpiTicketId, { status: updates.status });
       } catch (err) {
