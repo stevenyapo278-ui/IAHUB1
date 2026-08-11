@@ -578,6 +578,29 @@ function rewriteGlpiDocumentUrls(html, config, ticketId) {
   );
 }
 
+// GLPI stocke le HTML des suivis avec les entités encodées (&lt;p&gt;, &quot;, &#60;...),
+// parfois double-encodées (&amp;#60;). On décode jusqu'à stabilisation pour obtenir
+// un vrai HTML qui pourra être rendu correctement côté frontend.
+function decodeHtmlEntities(str) {
+  if (!str || typeof str !== 'string') return str;
+  let prev;
+  let result = str;
+  do {
+    prev = result;
+    result = result
+      .replace(/&amp;/g, '&')   // En premier pour gérer le double-encodage (&amp;#60; -> &#60; -> <)
+      .replace(/&#38;/g, '&')
+      .replace(/&#62;/g, '>')
+      .replace(/&gt;/g, '>')
+      .replace(/&#60;/g, '<')
+      .replace(/&lt;/g, '<')
+      .replace(/&#39;/g, "'")
+      .replace(/&quot;/g, '"')
+      .replace(/&#34;/g, '"');
+  } while (result !== prev);
+  return result;
+}
+
 function sanitizeGlpiHtml(html) {
   // Nettoie le HTML GLPI : supprime les balises <script>, les attributs on* (event handlers),
   // et les <a> qui embarquent directement une image GLPI (le lien est inutile et déclenche une
@@ -612,6 +635,11 @@ async function syncGlpiFollowups(config, sessionToken, glpiTicketId, ticketId) {
     // est automatiquement réécrit vers notre proxy interne pour rester accessible depuis l'ERP.
     let content = fu.content.trim();
     if (!content) continue;
+
+    // GLPI renvoie le HTML avec des entités encodées (&lt;p&gt;, &quot;, &#60;...). On les décode
+    // jusqu'à stabilité (double-encodage possible) pour stocker un vrai HTML : sinon le frontend
+    // afficherait le code source en texte brut au lieu de le rendre.
+    content = decodeHtmlEntities(content);
 
     // Réécrit les URLs des documents GLPI vers le proxy ERP
     content = rewriteGlpiDocumentUrls(content, config, ticketId);
