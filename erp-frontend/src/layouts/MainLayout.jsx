@@ -27,6 +27,7 @@ import {
   Bot,
   Sparkles,
   MapPin,
+  ChevronRight,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
@@ -97,6 +98,21 @@ function resolveSemantics(pathname) {
 }
 
 const ZONE_ORDER = ['main', 'org', 'admin'];
+
+function getPageBreadcrumb(pathname) {
+  const allItems = [...platformItems, ...orgItems, ...systemItems];
+  const item = allItems.find((i) => i.to === pathname || (i.to !== '/' && pathname.startsWith(i.to)));
+  if (!item) {
+    if (pathname.startsWith('/tickets/')) {
+      return { section: 'Plateforme', label: 'Détail Ticket', icon: Ticket, color: 'text-amber-400' };
+    }
+    return { section: 'IA Hub', label: 'Dashboard', icon: LayoutDashboard, color: 'text-indigo-400' };
+  }
+  let section = 'Plateforme';
+  if (orgItems.some((i) => i.to === item.to)) section = 'Organisation';
+  if (systemItems.some((i) => i.to === item.to)) section = 'Administration';
+  return { section, label: item.label, icon: item.icon, color: item.color };
+}
 
 const pageVariants = {
   initial: ({ direction: dir, axis }) => ({
@@ -241,6 +257,9 @@ export default function MainLayout() {
     });
   }
 
+  const currentPage = getPageBreadcrumb(location.pathname);
+  const PageIcon = currentPage.icon;
+
   return (
     <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--color-background)' }}>
       <GlobalSearch />
@@ -342,7 +361,7 @@ export default function MainLayout() {
           onClick={() => setShowUserMenu(!showUserMenu)}
           ref={userMenuRef}
         >
-          <div className="sidebar-user-avatar bg-indigo-600/20 border border-indigo-500/30 text-indigo-300 font-bold">
+          <div className="sidebar-user-avatar border border-indigo-500/30 text-indigo-300 font-bold">
             {user?.fullName?.charAt(0)?.toUpperCase() || '?'}
           </div>
           <div className="sidebar-user-info min-w-0">
@@ -370,40 +389,56 @@ export default function MainLayout() {
         style={{ marginLeft: sidebarW }}
       >
         <header
-          className="h-14 flex items-center justify-between px-6 shrink-0 border-b"
+          className="h-14 flex items-center justify-between px-6 shrink-0 border-b backdrop-blur-md sticky top-0 z-30 transition-all duration-200"
           style={{
             backgroundColor: 'var(--color-surface-container-lowest)',
             borderColor: 'var(--color-outline-variant)',
           }}
         >
-          <div />
+          {/* Dynamic Breadcrumb Header */}
+          <div className="flex items-center gap-2 text-xs font-medium min-w-0">
+            <span className="text-slate-400 font-normal hidden sm:inline-block">
+              {currentPage.section}
+            </span>
+            <ChevronRight className="w-3.5 h-3.5 text-slate-500 shrink-0 hidden sm:inline-block" />
+            <div className="flex items-center gap-2 truncate">
+              {PageIcon && <PageIcon className={`w-4 h-4 shrink-0 ${currentPage.color || 'text-indigo-400'}`} />}
+              <span className="font-bold text-slate-900 dark:text-slate-100 text-sm tracking-tight truncate">
+                {currentPage.label}
+              </span>
+            </div>
+          </div>
+
           <div className="flex items-center gap-3">
             {/* Search trigger */}
             <button
               onClick={triggerGlobalSearch}
-              className="flex items-center gap-2 h-9 px-3.5 rounded-xl text-xs font-medium transition-all hover:border-primary/50 shadow-sm"
+              className="flex items-center gap-2 h-9 px-3.5 rounded-xl text-xs font-medium transition-all hover:border-indigo-500/50 hover:shadow-sm group"
               style={{
                 backgroundColor: 'var(--color-surface-container)',
                 color: 'var(--color-on-surface-variant)',
                 border: '1px solid var(--color-outline-variant)',
               }}
             >
-              <Search className="w-3.5 h-3.5 text-on-surface-variant" />
-              <span>Rechercher...</span>
-              <kbd className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-surface-container-high border border-outline-variant/60 font-mono">Ctrl K</kbd>
+              <Search className="w-3.5 h-3.5 text-on-surface-variant group-hover:text-indigo-400 transition-colors" />
+              <span className="hidden md:inline">Rechercher dans l'IA Hub...</span>
+              <span className="md:hidden">Rechercher...</span>
+              <kbd className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-surface-container-high border border-outline-variant/60 font-mono font-semibold opacity-75 group-hover:opacity-100">
+                Ctrl K
+              </kbd>
             </button>
 
             {/* Notifications */}
             <div className="relative" ref={notifBtnRef}>
               <button
                 onClick={toggleNotifications}
-                className="relative w-9 h-9 rounded-xl flex items-center justify-center transition-colors hover:bg-surface-container-high border border-outline-variant/60"
+                className="relative w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:bg-surface-container-high hover:border-indigo-500/40 border border-outline-variant/60 group"
                 title={`Alertes${unreadCount > 0 ? ` (${unreadCount} non lues)` : ''}`}
               >
-                <Bell className="w-4 h-4 text-on-surface-variant" />
+                <Bell className="w-4 h-4 text-on-surface-variant group-hover:text-indigo-400 transition-colors" />
                 {unreadCount > 0 && (
                   <span
-                    className="absolute -top-1 -right-1 flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full text-[9px] font-bold text-white shadow-sm"
+                    className="absolute -top-1 -right-1 flex items-center justify-center min-w-[17px] h-[17px] px-1 rounded-full text-[9.5px] font-bold text-white shadow-md animate-pulse"
                     style={{ backgroundColor: 'var(--color-primary)' }}
                   >
                     {unreadCount > 99 ? '99+' : unreadCount}
@@ -416,13 +451,13 @@ export default function MainLayout() {
             {/* Theme toggle */}
             <button
               onClick={toggleTheme}
-              className="w-9 h-9 rounded-xl flex items-center justify-center transition-colors hover:bg-surface-container-high border border-outline-variant/60"
-              title={theme === 'dark' ? 'Mode clair' : 'Mode sombre'}
+              className="w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:bg-surface-container-high hover:border-indigo-500/40 border border-outline-variant/60 group"
+              title={theme === 'dark' ? 'Basculer en Mode clair' : 'Basculer en Mode sombre'}
             >
               {theme === 'dark' ? (
-                <Sun className="w-4 h-4 text-amber-400" />
+                <Sun className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
               ) : (
-                <Moon className="w-4 h-4 text-indigo-600" />
+                <Moon className="w-4 h-4 text-indigo-600 group-hover:scale-110 transition-transform" />
               )}
             </button>
           </div>
