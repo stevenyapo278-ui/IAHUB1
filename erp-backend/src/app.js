@@ -45,15 +45,24 @@ const { logger, childLogger } = require('./utils/logger');
 
 const app = express();
 
+// Si l'app est derrière un reverse proxy (Traefik/Nginx/Dokploy avec domaine),
+// activer trust proxy pour que req.protocol retourne 'https' correctement.
+// En accès direct IP:port, cette option n'est pas nécessaire.
+if (process.env.TRUST_PROXY === '1') {
+  app.set('trust proxy', 1);
+}
+
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
+  // Désactivation de la CSP upgrade-insecure-requests pour éviter que le navigateur
+  // force HTTPS quand l'app tourne en HTTP pur (accès via IP locale sans TLS).
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", 'data:', 'blob:'],
-      fontSrc: ["'self'"],
+      fontSrc: ["'self'", 'data:'],
       connectSrc: ["'self'", 'ws:', 'wss:'],
       frameAncestors: ["'none'"],
     },
