@@ -54,8 +54,11 @@ if (process.env.TRUST_PROXY === '1') {
 
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
-  // Désactivation de la CSP upgrade-insecure-requests pour éviter que le navigateur
-  // force HTTPS quand l'app tourne en HTTP pur (accès via IP locale sans TLS).
+
+  // Helmet v8 ajoute upgrade-insecure-requests par défaut dans la CSP.
+  // Cela force le navigateur à charger tous les assets en HTTPS,
+  // ce qui provoque ERR_CONNECTION_CLOSED quand l'app tourne en HTTP pur (IP locale).
+  // On le désactive explicitement avec `null`.
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
@@ -65,8 +68,17 @@ app.use(helmet({
       fontSrc: ["'self'", 'data:'],
       connectSrc: ["'self'", 'ws:', 'wss:'],
       frameAncestors: ["'none'"],
+      upgradeInsecureRequests: null, // désactivé : obligatoire en HTTP sans TLS
     },
   },
+
+  // HSTS dit au navigateur de forcer HTTPS pour toutes les visites futures.
+  // Désactivé en HTTP pur — à réactiver uniquement si un vrai certificat TLS est en place.
+  strictTransportSecurity: false,
+
+  // COOP same-origin génère des warnings dans la console sur les origines HTTP non sécurisées.
+  // On le désactive pour éviter la confusion en environnement local/IP.
+  crossOriginOpenerPolicy: false,
 }));
 const corsOrigin = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()) : '*';
 app.use(cors({ origin: corsOrigin }));
