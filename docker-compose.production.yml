@@ -62,8 +62,11 @@ services:
       GLPI_APP_TOKEN: ${GLPI_APP_TOKEN:-}
       GLPI_USER_TOKEN: ${GLPI_USER_TOKEN:-}
       FRONTEND_DIST_PATH: /app/erp-frontend/dist
+      TLS_CERT_PATH: ${TLS_CERT_PATH:-/app/certs/server.crt}
+      TLS_KEY_PATH: ${TLS_KEY_PATH:-/app/certs/server.key}
     volumes:
       - app_uploads:/app/erp-backend/uploads
+      - ./certs:/app/certs:ro
     ports:
       - "${PORT:-4000}:4000"
     networks:
