@@ -1,5 +1,5 @@
 const prisma = require('../prismaClient');
-const { getActiveProvider, callProvider } = require('./mailAnalyzer');
+const { getActiveProviders, callProviderWithFallback } = require('./mailAnalyzer');
 
 const VALID_INTENTS = ['RESOLVED', 'STILL_PRESENT', 'NEW_INFO', 'QUESTION', 'REOPEN', 'NEW_ISSUE_IN_THREAD', 'UNKNOWN'];
 
@@ -16,8 +16,8 @@ const MAX_TICKET_LIFETIME_DAYS = 60; // au-delà, on ne réinitialise plus le co
 // conversationHistory (optionnel) = derniers messages du fil, pour donner du contexte réel à l'IA.
 // Retourne { intent, confidence, newIssueSummary, isAutoReply }.
 async function analyzeIntent({ subject, body, ticketTitle, ticketSummary, conversationHistory = [], fromEmail }) {
-  const provider = await getActiveProvider();
-  if (!provider) return { intent: 'UNKNOWN', confidence: 0, newIssueSummary: null, isAutoReply: false };
+  const providers = await getActiveProviders();
+  if (providers.length === 0) return { intent: 'UNKNOWN', confidence: 0, newIssueSummary: null, isAutoReply: false };
 
   const historyText = conversationHistory.length > 0
     ? conversationHistory
@@ -36,7 +36,7 @@ async function analyzeIntent({ subject, body, ticketTitle, ticketSummary, conver
 
   let raw;
   try {
-    raw = (await callProvider(provider, prompt)).trim();
+    raw = (await callProviderWithFallback(providers, prompt)).trim();
   } catch {
     return { intent: 'UNKNOWN', confidence: 0, newIssueSummary: null, isAutoReply: false };
   }

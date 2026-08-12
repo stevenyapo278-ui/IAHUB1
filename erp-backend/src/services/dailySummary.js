@@ -1,7 +1,7 @@
 const prisma = require('../prismaClient');
 const { sendEmail, getEmailSignature } = require('./emailSender');
 const { getSystemSettings } = require('./systemSettings');
-const { getActiveProvider, callProvider } = require('./mailAnalyzer');
+const { getActiveProviders, callProviderWithFallback } = require('./mailAnalyzer');
 const { getPrompt } = require('./promptTemplates');
 
 const OPEN_STATUSES = ['NEW', 'OPEN', 'PENDING', 'WAITING_FOR_USER'];
@@ -21,8 +21,8 @@ function requesterLabel(ticket) {
 // aucun fournisseur IA n'est actif ou en cas d'échec, le mail reste utile sans ce résumé.
 async function generateInsight(tickets) {
   if (tickets.length === 0) return null;
-  const provider = await getActiveProvider();
-  if (!provider) return null;
+  const providers = await getActiveProviders();
+  if (providers.length === 0) return null;
 
   const ticketsList = tickets
     .map((t) => `- #${t.glpiTicketId || t.id} "${t.title}" — ${PRIORITY_LABEL[t.priority] || t.priority}, ${t.status}, assigné à ${t.assignedTo?.fullName || 'personne'}, demandeur ${requesterLabel(t)}, ouvert depuis ${daysSince(t.createdAt)} j`)
@@ -30,7 +30,7 @@ async function generateInsight(tickets) {
 
   try {
     const prompt = await getPrompt('dailySummaryInsight', { ticketsList });
-    const raw = await callProvider(provider, prompt);
+    const raw = await callProviderWithFallback(providers, prompt);
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
     return parsed.insight || null;

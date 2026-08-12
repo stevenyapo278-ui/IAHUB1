@@ -1,5 +1,5 @@
 const prisma = require('../prismaClient');
-const { getActiveProvider, callProvider } = require('./mailAnalyzer');
+const { getActiveProviders, callProviderWithFallback } = require('./mailAnalyzer');
 const { emitTicketCreated } = require('../utils/socket');
 const analyticsTools = require('./analyticsTools');
 
@@ -154,21 +154,21 @@ async function searchTickets(query, limit = 5) {
 // ── Appel IA ───────────────────────────────────────────────────────────
 
 async function callAI(messages) {
-  const provider = await getActiveProvider();
-  if (!provider) throw new Error('Aucun fournisseur IA configuré.');
+  const providers = await getActiveProviders();
+  if (providers.length === 0) throw new Error('Aucun fournisseur IA configuré.');
 
   const formattedMessages = messages.map((m) => `${m.role === 'user' ? 'Utilisateur' : 'Assistant'} : ${m.content}`).join('\n\n');
   const prompt = `${SYSTEM_PROMPT}\n\n---\n\n${formattedMessages}`;
-  return callProvider(provider, prompt);
+  return callProviderWithFallback(providers, prompt);
 }
 
 async function callIntentAI(message) {
-  const provider = await getActiveProvider();
-  if (!provider) return null;
+  const providers = await getActiveProviders();
+  if (providers.length === 0) return null;
 
   try {
     const formatted = `${INTENT_PROMPT}\n\nUser: "${message}"\nJSON:`;
-    const raw = await callProvider(provider, formatted);
+    const raw = await callProviderWithFallback(providers, formatted);
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (jsonMatch) return JSON.parse(jsonMatch[0]);
   } catch {}

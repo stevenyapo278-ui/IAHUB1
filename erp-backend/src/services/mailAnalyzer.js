@@ -1,15 +1,18 @@
 const prisma = require('../prismaClient');
 const { getBreaker } = require('../utils/circuitBreaker');
+const { logger } = require('../utils/logger');
 
-const aiBreakers = {
-  openai: getBreaker('ai-openai', { maxFailures: 3, resetTimeoutMs: 30000, halfOpenMaxRequests: 1 }),
-  gemini: getBreaker('ai-gemini', { maxFailures: 3, resetTimeoutMs: 30000, halfOpenMaxRequests: 1 }),
-  anthropic: getBreaker('ai-anthropic', { maxFailures: 3, resetTimeoutMs: 30000, halfOpenMaxRequests: 1 }),
-};
+// Circuit breakers créés à la demande par nom de provider (ex: 'ai-openai', 'ai-gemini').
+// On ne pré-crée plus des breakers hardcodés par type : plusieurs providers peuvent
+// partager le même type (ex: deux instances OpenAI-compat distinctes).
+function getBreakerForProvider(providerName) {
+  return getBreaker(`ai-${providerName}`, { maxFailures: 3, resetTimeoutMs: 30000, halfOpenMaxRequests: 1 });
+}
 
-// Récupère le premier provider actif avec au moins une clé active
-// Priorité : provider marqué isDefault, sinon le premier trouvé
-async function getActiveProvider() {
+// Récupère TOUS les providers actifs avec au moins une clé active.
+// Ordre : alphabétique sur le label (isDefault géré côté DB via orderBy).
+// Utilisé pour le fallback automatique : on essaie le premier, si ça échoue on passe au suivant.
+async function getActiveProviders() {
   const providers = await prisma.aiProvider.findMany({
     where: { isActive: true },
     include: {
@@ -18,16 +21,19 @@ async function getActiveProvider() {
     },
     orderBy: { label: 'asc' },
   });
+  // On ne retient que les providers qui ont au moins une clé configurée
+  return providers.filter((p) => p.keys.length > 0);
+}
 
-  for (const p of providers) {
-    if (p.keys.length > 0) return p;
-  }
-  return null;
+// Rétrocompatibilité : retourne le premier provider actif
+async function getActiveProvider() {
+  const providers = await getActiveProviders();
+  return providers[0] || null;
 }
 
 // Appelle l'API du provider avec le format OpenAI-compatible (NVIDIA, OpenAI, Mistral)
 async function callOpenAICompat(provider, apiKey, model, prompt) {
-  return aiBreakers.openai.call(async () => {
+  return getBreakerForProvider(provider.name).call(async () => {
     const baseUrl = provider.baseUrl || 'https://api.openai.com/v1';
     const res = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
@@ -51,7 +57,7 @@ async function callOpenAICompat(provider, apiKey, model, prompt) {
 
 // Appelle l'API Gemini
 async function callGemini(provider, apiKey, prompt, modelName) {
-  return aiBreakers.gemini.call(async () => {
+  return getBreakerForProvider(provider.name).call(async () => {
     const base = provider.baseUrl || 'https://generativelanguage.googleapis.com/v1beta';
     const model = modelName || 'gemini-1.5-flash';
     const res = await fetch(
@@ -74,7 +80,7 @@ async function callGemini(provider, apiKey, prompt, modelName) {
 
 // Appelle l'API Anthropic
 async function callAnthropic(provider, apiKey, prompt) {
-  return aiBreakers.anthropic.call(async () => {
+  return getBreakerForProvider(provider.name).call(async () => {
     const baseUrl = provider.baseUrl || 'https://api.anthropic.com';
     const res = await fetch(`${baseUrl}/v1/messages`, {
       method: 'POST',
@@ -122,6 +128,32 @@ async function callProvider(provider, prompt) {
     }
   }
   throw new Error(lastError || `Toutes les clés ${provider.label} ont échoué`);
+}
+
+// Tente les providers dans l'ordre (défaut en premier, puis alphabétique).
+// Si un provider échoue (timeout, circuit ouvert, toutes les clés KO),
+// on passe automatiquement au suivant — fallback inter-providers.
+// Lève une exception récapitulative seulement si TOUS les providers ont échoué.
+async function callProviderWithFallback(providers, prompt) {
+  if (!providers || providers.length === 0) {
+    throw new Error('Aucun provider IA configuré (Paramètres → Intelligence Artificielle)');
+  }
+
+  const errors = [];
+  for (const provider of providers) {
+    try {
+      const result = await callProvider(provider, prompt);
+      if (errors.length > 0) {
+        logger.warn(`[AI] Fallback utilisé : "${provider.label}" a répondu après ${errors.length} échec(s)`);
+      }
+      return result;
+    } catch (err) {
+      logger.warn(`[AI] Provider "${provider.label}" indisponible, tentative suivante : ${err.message}`);
+      errors.push(`${provider.label}: ${err.message}`);
+    }
+  }
+
+  throw new Error(`Tous les providers IA ont échoué :\n${errors.join('\n')}`);
 }
 
 async function getFewShotExamples(subject, body) {
@@ -228,10 +260,11 @@ function guessSkillFromText(subject, body, skills) {
   return bestScore > 0 ? best : null;
 }
 
-// Analyse un email brut via le provider IA actif et retourne les métadonnées ITSM structurées
+// Analyse un email brut via les providers IA configurés (avec fallback automatique)
+// et retourne les métadonnées ITSM structurées.
 async function analyzeEmail({ subject, body, from, fromName }) {
-  const provider = await getActiveProvider();
-  if (!provider) throw new Error('Aucun provider IA configuré (Settings → Intelligence Artificielle)');
+  const providers = await getActiveProviders();
+  if (providers.length === 0) throw new Error('Aucun provider IA configuré (Paramètres → Intelligence Artificielle)');
 
   const { getSystemSettings } = require('./systemSettings');
   const settings = await getSystemSettings();
@@ -257,10 +290,10 @@ async function analyzeEmail({ subject, body, from, fromName }) {
     availableLocations,
   });
 
-  const raw = await callProvider(provider, prompt);
+  const raw = await callProviderWithFallback(providers, prompt);
 
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error(`${provider.label} n'a pas retourné de JSON valide : ${raw.substring(0, 200)}`);
+  if (!jsonMatch) throw new Error(`Le provider IA n'a pas retourné de JSON valide : ${raw.substring(0, 200)}`);
 
   const result = JSON.parse(jsonMatch[0]);
 
@@ -277,6 +310,6 @@ async function analyzeEmail({ subject, body, from, fromName }) {
   return result;
 }
 
-module.exports = { analyzeEmail, getActiveProvider, callProvider };
+module.exports = { analyzeEmail, getActiveProvider, getActiveProviders, callProvider, callProviderWithFallback };
 
 

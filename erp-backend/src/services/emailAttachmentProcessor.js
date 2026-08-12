@@ -4,7 +4,7 @@ const path = require('path');
 const prisma = require('../prismaClient');
 const { fetchMessageAttachments } = require('./emailPoller');
 const { uploadGlpiAttachment } = require('./glpiTicketCreator');
-const { getActiveProvider, callProvider } = require('./mailAnalyzer');
+const { getActiveProviders, callProviderWithFallback } = require('./mailAnalyzer');
 
 const GENERIC_IMAGE_NAME = /^(image|img|photo)\d*\.(png|jpe?g|gif|bmp)$/i;
 const ATTACHMENT_MENTION_KEYWORDS = /capture|screenshot|écran|piece jointe|pièce jointe|ci-joint|photo du|voir le fichier|en attache/i;
@@ -31,8 +31,8 @@ async function filterOutSignatureImages(attachments, bodyText) {
   const remainingInlineImages = inlineImages.filter((a) => genericFiltered.includes(a));
   if (remainingInlineImages.length === 0) return genericFiltered;
 
-  const provider = await getActiveProvider();
-  if (!provider) return genericFiltered;
+  const providers = await getActiveProviders();
+  if (providers.length === 0) return genericFiltered;
 
   const { getPrompt } = require('./promptTemplates');
   const prompt = await getPrompt('filterOutSignatureImages', {
@@ -41,7 +41,7 @@ async function filterOutSignatureImages(attachments, bodyText) {
   });
 
   try {
-    const raw = await callProvider(provider, prompt);
+    const raw = await callProviderWithFallback(providers, prompt);
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
     const signatureIndexes = new Set(

@@ -1,72 +1,8 @@
 const prisma = require('../prismaClient');
+const { getActiveProviders, callProviderWithFallback } = require('./mailAnalyzer');
 
 const WINDOW_HOURS = 4;
 const MAJOR_INCIDENT_THRESHOLD = 3; // nb de sites pour promouvoir en incident majeur
-
-// Récupère le provider actif avec au moins une clé
-async function getActiveProvider() {
-  const providers = await prisma.aiProvider.findMany({
-    where: { isActive: true },
-    include: {
-      keys: { where: { isActive: true }, orderBy: { isDefault: 'desc' } },
-      models: { where: { isActive: true, isDefault: true }, take: 1 },
-    },
-  });
-  return providers.find((p) => p.keys.length > 0) || null;
-}
-
-async function callAI(provider, prompt, maxTokens = 10) {
-  const key = provider.keys[0].apiKey;
-
-  if (provider.name === 'gemini') {
-    const base = provider.baseUrl || 'https://generativelanguage.googleapis.com/v1beta';
-    const model = provider.models?.[0]?.name || 'gemini-1.5-flash';
-    const res = await fetch(`${base}/models/${model}:generateContent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0, maxOutputTokens: maxTokens },
-      }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim().toUpperCase() || null;
-  }
-
-  if (provider.name === 'anthropic') {
-    const baseUrl = provider.baseUrl || 'https://api.anthropic.com';
-    const res = await fetch(`${baseUrl}/v1/messages`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: maxTokens,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.content?.[0]?.text?.trim().toUpperCase() || null;
-  }
-
-  // OpenAI-compatible (nvidia, openai, mistral…)
-  const baseUrl = provider.baseUrl || 'https://api.openai.com/v1';
-  const model = provider.models?.[0]?.name || 'meta/llama-3.1-8b-instruct';
-  const res = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0,
-      max_tokens: maxTokens,
-    }),
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content?.trim().toUpperCase() || null;
-}
 
 /**
  * Cherche un ticket ouvert récent décrivant le même incident.
@@ -87,9 +23,9 @@ async function findSimilarOpenTicket({ subject, body, category }) {
 
   if (recentTickets.length === 0) return null;
 
-  const provider = await getActiveProvider();
+  const providers = await getActiveProviders();
 
-  if (!provider) {
+  if (providers.length === 0) {
     return fallbackJaccard({ subject, body }, recentTickets);
   }
 
@@ -107,7 +43,8 @@ Ticket B: "${ticket.title}" - "${ticket.aiSummary || ticket.title}"
 Same problem? Reply YES or NO only.`;
 
     try {
-      const answer = await callAI(provider, prompt, 10);
+      const raw = await callProviderWithFallback(providers, prompt);
+      const answer = (raw || '').trim().toUpperCase();
       if (answer && (answer.startsWith('YES') || answer.startsWith('OUI'))) {
         return { ticketId: ticket.id, ticketTitle: ticket.title, similarity: 1, method: 'SIMILAR_INCIDENT' };
       }

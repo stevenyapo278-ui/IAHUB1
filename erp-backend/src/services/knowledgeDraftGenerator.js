@@ -1,5 +1,5 @@
 const prisma = require('../prismaClient');
-const { getActiveProvider, callProvider } = require('./mailAnalyzer');
+const { getActiveProviders, callProviderWithFallback } = require('./mailAnalyzer');
 const { getPrompt } = require('./promptTemplates');
 
 // Génère automatiquement un KnowledgeDraft à partir d'un ticket résolu
@@ -13,8 +13,8 @@ async function generateKnowledgeDraft({ ticketId, resolutionNote, technicianEmai
   const existing = await prisma.knowledgeDraft.findFirst({ where: { ticketId } });
   if (existing) return existing;
 
-  const provider = await getActiveProvider();
-  if (!provider) throw new Error('Aucun provider IA configuré (Settings → Intelligence Artificielle)');
+  const providers = await getActiveProviders();
+  if (providers.length === 0) throw new Error('Aucun provider IA configuré (Paramètres → Intelligence Artificielle)');
 
   const history = ticket.messages
     .map((m) => `[${m.direction}] ${m.sender}: ${m.body?.substring(0, 300)}`)
@@ -29,9 +29,9 @@ async function generateKnowledgeDraft({ ticketId, resolutionNote, technicianEmai
     history: history || ticket.content?.substring(0, 500) || '',
   });
 
-  const raw = await callProvider(provider, prompt);
+  const raw = await callProviderWithFallback(providers, prompt);
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error(`${provider.label} n'a pas retourné un JSON valide`);
+  if (!jsonMatch) throw new Error(`Le provider IA n'a pas retourné un JSON valide`);
 
   const draft = JSON.parse(jsonMatch[0]);
 

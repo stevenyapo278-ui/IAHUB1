@@ -1,5 +1,5 @@
 const prisma = require('../prismaClient');
-const { getActiveProvider, callProvider } = require('./mailAnalyzer');
+const { getActiveProviders, callProviderWithFallback } = require('./mailAnalyzer');
 const { getPrompt } = require('./promptTemplates');
 const { searchKnowledge } = require('./knowledgeSearch');
 
@@ -27,8 +27,8 @@ function formatKnowledgeResults(results) {
 // Ne lève jamais d'exception : toute défaillance (pas de provider, erreur réseau, JSON invalide)
 // dégrade vers { canAnswer: false }, qui déclenche l'escalade côté appelant.
 async function generateFollowupReply({ ticketId, lastMessageBody, fromEmail, fromName }) {
-  const provider = await getActiveProvider();
-  if (!provider) return { canAnswer: false, replyHtml: '', usedKnowledgeChunkIds: [], confidence: 0 };
+  const providers = await getActiveProviders();
+  if (providers.length === 0) return { canAnswer: false, replyHtml: '', usedKnowledgeChunkIds: [], confidence: 0 };
 
   const ticket = await prisma.ticket.findUnique({ where: { id: ticketId } });
   const messages = await prisma.ticketMessage.findMany({
@@ -56,7 +56,7 @@ async function generateFollowupReply({ ticketId, lastMessageBody, fromEmail, fro
 
   let raw;
   try {
-    raw = (await callProvider(provider, prompt)).trim();
+    raw = (await callProviderWithFallback(providers, prompt)).trim();
   } catch (err) {
     console.error('[followupReplyGenerator] Échec appel provider IA:', err.message);
     return { canAnswer: false, replyHtml: '', usedKnowledgeChunkIds: [], confidence: 0 };

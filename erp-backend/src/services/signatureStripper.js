@@ -1,4 +1,4 @@
-const { getActiveProvider, callProvider } = require('./mailAnalyzer');
+const { getActiveProviders, callProviderWithFallback } = require('./mailAnalyzer');
 
 // Extrait le corps utile d'un email (message réellement rédigé par l'expéditeur) en retirant
 // la signature, les coordonnées, et les disclaimers répétés à chaque message du fil — pour que
@@ -7,14 +7,14 @@ const { getActiveProvider, callProvider } = require('./mailAnalyzer');
 async function stripSignature(rawBody) {
   if (!rawBody || rawBody.trim().length === 0) return rawBody;
 
-  const provider = await getActiveProvider();
-  if (!provider) return rawBody; // pas d'IA disponible : on retombe sur le texte brut tel quel
+  const providers = await getActiveProviders();
+  if (providers.length === 0) return rawBody; // pas d'IA disponible : on retombe sur le texte brut tel quel
 
   const { getPrompt } = require('./promptTemplates');
   const prompt = await getPrompt('stripSignature', { rawBody: rawBody.substring(0, 2000) });
 
   try {
-    const raw = await callProvider(provider, prompt);
+    const raw = await callProviderWithFallback(providers, prompt);
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
     const cleaned = (parsed.body || '').trim();
