@@ -15,7 +15,7 @@ import {
   Trash2, Paperclip, MessageSquare, Sparkles, Shield, MapPin,
   RefreshCw, Mail, FileText, Check, X, Send, ChevronRight,
   Flame, Radio, Info, ArrowDown, UserCheck, HelpCircle, Layers, History,
-  TrendingUp, Lock, Link2, Merge
+  TrendingUp, Lock, Link2, Merge, Plus
 } from 'lucide-react';
 import {
   STATUS_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS,
