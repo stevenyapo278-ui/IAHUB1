@@ -59,6 +59,8 @@ router.patch(
     body('dryRunMode').optional().isBoolean(),
     body('enableGlpiFollowupCreation').optional().isBoolean(),
     body('enableGlpiTicketClosure').optional().isBoolean(),
+    body('slaHours').optional().isObject(),
+    body('slaMonitorIntervalSeconds').optional().isInt({ min: 0, max: 3600 }),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -85,6 +87,8 @@ router.patch(
     if (req.body.dryRunMode !== undefined) data.dryRunMode = req.body.dryRunMode;
     if (req.body.enableGlpiFollowupCreation !== undefined) data.enableGlpiFollowupCreation = req.body.enableGlpiFollowupCreation;
     if (req.body.enableGlpiTicketClosure !== undefined) data.enableGlpiTicketClosure = req.body.enableGlpiTicketClosure;
+    if (req.body.slaHours !== undefined) data.slaHours = req.body.slaHours;
+    if (req.body.slaMonitorIntervalSeconds !== undefined) data.slaMonitorIntervalSeconds = req.body.slaMonitorIntervalSeconds;
 
     const updated = await prisma.systemSettings.update({ where: { id: 1 }, data });
     return res.json(updated);

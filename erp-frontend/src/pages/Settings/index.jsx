@@ -8,13 +8,15 @@ import EmailAccountsTab from './EmailAccountsTab';
 import OtherApisTab from './OtherApisTab';
 import AutomationTab from './AutomationTab';
 import AdvancedTab from './AdvancedTab';
-import { Settings as SettingsIcon, Cpu, Mail, Zap, Globe, Sliders } from 'lucide-react';
+import TemplatesTab from './TemplatesTab';
+import { Settings as SettingsIcon, Cpu, Mail, Zap, Globe, Sliders, FileText } from 'lucide-react';
 
 const BASE_TABS = [
   { id: 'ai', label: 'Intelligence Artificielle', desc: 'Fournisseurs, modèles et clés API Gemini', icon: Cpu, permission: 'settings.ai' },
   { id: 'email', label: 'Comptes Emails', desc: 'Outlook, Microsoft 365, IMAP / SMTP', icon: Mail, permission: 'settings.email' },
   { id: 'other', label: 'Autres intégrations', desc: 'GLPI, Supabase et webhooks n8n', icon: Globe, permission: 'settings.integrations' },
   { id: 'automation', label: 'Automatisation', desc: 'Relances, signatures et alertes', icon: Zap, permission: 'automation.manage' },
+  { id: 'templates', label: 'Modèles de tickets', desc: 'Modèles réutilisables pour créer des tickets', icon: FileText, permission: 'tickets.assign' },
 ];
 
 export default function Settings() {
@@ -108,6 +110,7 @@ export default function Settings() {
                   {activeTab === 'email' && "Configurez les boîtes mail utilisées pour la réception/réponse aux tickets (Outlook / M365, IMAP/SMTP)."}
                   {activeTab === 'other' && "Gérez les autres intégrations externes (Supabase, GLPI) et connectez des webhooks n8n."}
                   {activeTab === 'automation' && "Contrôlez les automatisations IA, accusés de réception, signatures d'email et alertes vocales."}
+                  {activeTab === 'templates' && "Créez et gérez des modèles de tickets réutilisables par l'équipe."}
                   {activeTab === 'advanced' && "Réglages système avancés réservés au super-administrateur (intervalles de sync, durées de rétention)."}
                 </p>
               </div>
@@ -119,6 +122,7 @@ export default function Settings() {
               {activeTab === 'email' && <EmailAccountsTab />}
               {activeTab === 'other' && <OtherApisTab />}
               {activeTab === 'automation' && <AutomationTab />}
+              {activeTab === 'templates' && <TemplatesTab />}
               {activeTab === 'advanced' && user?.role === 'SUPERADMIN' && <AdvancedTab />}
             </div>
           </motion.div>

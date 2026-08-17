@@ -61,6 +61,13 @@ enum TicketEventType {
   CLOSURE_REJECTED
   APPROVED
   REJECTED
+  SLA_BREACHED
+  SLA_UPDATED
+  ESCALATION_REQUESTED
+  MERGED_INTO
+  MERGED_FROM
+  LINKED
+  UNLINKED
 }
 
 enum TicketPriority {
@@ -229,6 +236,24 @@ model Ticket {
   closedAt      DateTime?
   lastGlpiSyncAt DateTime? // dernière synchro réussie vers GLPI (création, maj statut, followup)
 
+  // Moteur SLA — échéances calculées à la création et à chaque changement de priorité,
+  // seuils configurables par priorité dans SystemSettings.slaHours
+  slaResponseDueAt    DateTime? // échéance de première réponse
+  slaResolutionDueAt  DateTime? // échéance de résolution
+  slaBreachedAt       DateTime? // date du premier dépassement SLA
+  firstResponseAt     DateTime? // temps de première réponse (premier followup technicien)
+  csatScore           Int?      // satisfaction demandeur (1-5)
+  csatComment         String?   // commentaire CSAT optionnel
+  csatRatedAt         DateTime? // date de notation CSAT
+
+  // Moteur d'escalade — escalationLevel s'incrémente à chaque escalade (auto ou manuelle),
+  // escalatedAt = dernière escalade, escalateAt = déclenchement planifié (règle de triage),
+  // triageRuleId = règle de triage ayant défini l'escalade automatique
+  escalationLevel Int       @default(0)
+  escalatedAt     DateTime?
+  escalateAt      DateTime?
+  triageRuleId    Int?
+
   // Identifiants de conversation Outlook pour le rattachement automatique
   outlookConversationId String?
   lastUserReplyAt       DateTime?
@@ -274,6 +299,8 @@ model Ticket {
   messages        TicketMessage[]
   events          TicketEvent[]
   fieldCorrections TicketFieldCorrection[]
+  linksA          TicketLink[] @relation("TicketLinksA")
+  linksB          TicketLink[] @relation("TicketLinksB")
 
   @@index([requesterId])
   @@index([assignedToId])
@@ -345,9 +372,43 @@ model Followup {
   content         String
   source          String   @default("erp")
   glpiFollowupId  Int?     @unique
+  isPrivate       Boolean  @default(false)
   createdAt       DateTime @default(now())
 
   @@index([authorId])
+}
+
+// Liens entre tickets (liés, doublon, bloque/bloqué)
+model TicketLink {
+  id          Int      @id @default(autoincrement())
+  ticketA     Ticket   @relation("TicketLinksA", fields: [ticketAId], references: [id], onDelete: Cascade)
+  ticketAId   Int
+  ticketB     Ticket   @relation("TicketLinksB", fields: [ticketBId], references: [id], onDelete: Cascade)
+  ticketBId   Int
+  type        String   @default("RELATED") // RELATED, DUPLICATE_OF, BLOCKS, BLOCKED_BY
+  createdById Int?
+  createdAt   DateTime @default(now())
+
+  @@unique([ticketAId, ticketBId, type])
+  @@index([ticketBId])
+}
+
+// Modèles de ticket réutilisables
+model TicketTemplate {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  title       String
+  content     String
+  priority    String?
+  category    String?
+  type        String?
+  urgency     String?
+  impact      String?
+  isActive    Boolean  @default(true)
+  createdById Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model ApiConfig {
@@ -390,6 +451,13 @@ model SystemSettings {
   // Relance des brouillons AiEmailDraft non validés (Paramètres > Automatisation).
   draftReminderEnabled      Boolean @default(true)
   draftReminderDelayMinutes Int     @default(30) // délai après lequel une relance est envoyée si le brouillon est toujours PENDING
+
+  // Moteur SLA (outil de ticketing) — seuils par priorité en heures :
+  //   { P1: { response: 1, resolution: 4 }, P2: { response: 2, resolution: 8 },
+  //     P3: { response: 4, resolution: 24 }, P4: { response: 8, resolution: 72 } }
+  // slaMonitorIntervalSeconds = fréquence de détection des dépassements (0 = désactivé)
+  slaHours                  Json?   // seuils par priorité, ex: {"P1":{"response":1,"resolution":4}}
+  slaMonitorIntervalSeconds Int     @default(60)
 
   // Texte de l'accusé de réception automatique (Paramètres > Automatisation > Emails).
   // Placeholders disponibles : {ticketId}, {subject}, {toName}. Laisser vide = texte par défaut codé en dur.

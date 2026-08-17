@@ -11,8 +11,8 @@ import DOMPurify from 'dompurify';
 import {
   Mail, MailOpen, RefreshCw, Sparkles, AlertTriangle, Flame,
   CheckCircle2, XCircle, Ban, Clock, ChevronRight, ExternalLink,
-  Search, X, FlaskConical, Bot, Inbox as InboxIcon, SlidersHorizontal,
-  ArrowUpRight
+  Search, X, FlaskConical, Bot, Inbox as InboxIcon, ArrowUpRight,
+  Reply, Paperclip, Users
 } from 'lucide-react';
 
 const STATUS_LABELS = {
@@ -40,16 +40,39 @@ const PRIORITY_CONFIG = {
 
 const FILTERS = ['Tous', 'PENDING', 'DONE', 'ERROR', 'SPAM'];
 
+const AVATAR_COLORS = ['bg-sky-600', 'bg-indigo-600', 'bg-emerald-600', 'bg-violet-600', 'bg-rose-600'];
+
+function initialOf(name, email) {
+  return ((name || email) || '?').charAt(0).toUpperCase();
+}
+
+function participantsLabel(participants) {
+  if (!participants || participants.length === 0) return 'Inconnu';
+  const names = participants.slice(0, 2).map((p) => p.name || p.email);
+  if (participants.length > 2) return `${names.join(', ')} +${participants.length - 2}`;
+  return names.join(', ');
+}
+
+function formatDate(d) {
+  return new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
+}
+
+function formatDateTime(d) {
+  return new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
 export default function Inbox() {
   const { user } = useAuth();
   const canSync = hasPermission(user, 'inbox.sync');
-  const [emails, setEmails] = useState([]);
+  const [threads, setThreads] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState('Tous');
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState('');
-  const [selected, setSelected] = useState(null);
+  const [selectedThread, setSelectedThread] = useState(null);
+  const [threadDetail, setThreadDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testForm, setTestForm] = useState({ subject: '', body: '', from: '', fromName: '' });
   const [testResult, setTestResult] = useState(null);
@@ -68,9 +91,39 @@ export default function Inbox() {
     if (f && f !== 'Tous') params.set('status', f);
     if (q && q.trim()) params.set('q', q.trim());
     api.get(`/inbox?${params}`)
-      .then(({ data }) => { setEmails(data.items); setTotal(data.total); })
+      .then(({ data }) => { setThreads(data.items); setTotal(data.total); })
       .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
   }, []);
+
+  // Recharge le fil sélectionné (après un event socket) si besoin
+  const refreshSelection = useCallback(() => {
+    if (!selectedThread) return;
+    api.get(`/inbox/thread?key=${encodeURIComponent(selectedThread.id)}`)
+      .then(({ data }) => setThreadDetail(data))
+      .catch(() => {});
+  }, [selectedThread]);
+
+  function openThread(thread) {
+    setSelectedThread(thread);
+    setDetailLoading(true);
+    api.get(`/inbox/thread?key=${encodeURIComponent(thread.id)}`)
+      .then(({ data }) => setThreadDetail(data))
+      .catch((err) => {
+        setThreadDetail(null);
+        toast.error(err.response?.data?.error || 'Erreur de chargement de la conversation');
+      })
+      .finally(() => setDetailLoading(false));
+  }
+
+  function closeThread() {
+    setSelectedThread(null);
+    setThreadDetail(null);
+  }
+
+  // À quelle clé de fil appartient un email (pour rafraîchir la sélection après un event)
+  function keyOfEmail(email) {
+    return email.conversationId || `single-${email.id}`;
+  }
 
   useEffect(() => {
     const t = setTimeout(() => { load(1, filter, search); setPage(1); }, 350);
@@ -92,15 +145,17 @@ export default function Inbox() {
       if (p === 1) load(1, f, s);
       setNewCount(c => c + 1);
       toast.info('Nouveau mail reçu', { description: `Sujet : ${email.subject}` });
+      if (selectedThread && email.conversationId === selectedThread.conversationId) refreshSelection();
     };
     const onUpdated = (email) => {
-      setEmails(cur => cur.map(e => e.id === email.id ? email : e));
-      setSelected(cur => cur?.id === email.id ? email : cur);
+      const { page: p, filter: f, search: s } = stateRef.current;
+      if (p === 1) load(1, f, s);
+      if (selectedThread && (keyOfEmail(email) === selectedThread.id)) refreshSelection();
     };
     socket.on('email_received', onReceived);
     socket.on('email_updated', onUpdated);
     return () => { socket.off('email_received', onReceived); socket.off('email_updated', onUpdated); };
-  }, [socket, load]);
+  }, [socket, load, selectedThread, refreshSelection]);
 
   async function handleSync() {
     setSyncing(true); setError(''); setNewCount(0);
@@ -128,7 +183,7 @@ export default function Inbox() {
   }
 
   // Counts per status for filter tabs
-  const pendingCount = emails.filter(e => e.status === 'PENDING').length;
+  const pendingCount = threads.filter(t => t.latest?.status === 'PENDING').length;
 
   return (
     <div className="flex flex-col h-[calc(100vh-64px)] max-h-[calc(100vh-64px)] overflow-hidden">
@@ -151,7 +206,7 @@ export default function Inbox() {
                 </motion.span>
               )}
             </h1>
-            <p className="text-[11px] text-on-surface-variant">{total} email{total !== 1 ? 's' : ''} — triés par l'IA</p>
+            <p className="text-[11px] text-on-surface-variant">{total} conversation{total !== 1 ? 's' : ''} — triées par l'IA</p>
           </div>
         </div>
 
@@ -238,14 +293,14 @@ export default function Inbox() {
       {/* ── Main Split Pane ───────────────────────────────────────────────── */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
 
-        {/* Left: Email list */}
+        {/* Left: Conversation list */}
         <div className={`flex flex-col border-r border-outline-variant/30 bg-surface-container-lowest overflow-hidden transition-all duration-300 ${
-          selected ? 'w-80 xl:w-96 shrink-0' : 'flex-1'
+          selectedThread ? 'w-80 xl:w-96 shrink-0' : 'flex-1'
         }`}>
           {/* List header */}
           <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-outline-variant/20 bg-surface-bright/20">
             <span className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">
-              {total} message{total !== 1 ? 's' : ''}
+              {total} conversation{total !== 1 ? 's' : ''}
             </span>
             {pendingCount > 0 && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-yellow-500/10 text-yellow-400 text-[10px] font-bold border border-yellow-500/20">
@@ -257,10 +312,10 @@ export default function Inbox() {
 
           {/* Scrollable list */}
           <div className="flex-1 overflow-y-auto">
-            {emails.length === 0 ? (
+            {threads.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full gap-3 text-on-surface-variant">
                 <Mail className="w-10 h-10 text-outline/30" />
-                <p className="text-sm italic">Aucun email trouvé.</p>
+                <p className="text-sm italic">Aucune conversation trouvée.</p>
                 {canSync && (
                   <button onClick={handleSync} className="text-xs text-sky-400 underline underline-offset-2">
                     Synchroniser maintenant
@@ -269,22 +324,24 @@ export default function Inbox() {
               </div>
             ) : (
               <AnimatePresence mode="popLayout">
-                {emails.map((email, idx) => {
-                  const pCfg = PRIORITY_CONFIG[email.aiPriority];
-                  const sCfg = STATUS_CONFIG[email.status];
+                {threads.map((thread, idx) => {
+                  const latest = thread.latest || {};
+                  const pCfg = PRIORITY_CONFIG[latest.aiPriority];
+                  const sCfg = STATUS_CONFIG[latest.status];
                   const SIcon = sCfg?.icon;
-                  const isSelected = selected?.id === email.id;
-                  const senderInitial = (email.fromName || email.fromEmail || '?').charAt(0).toUpperCase();
+                  const isSelected = selectedThread?.id === thread.id;
+                  const label = participantsLabel(thread.participants);
+                  const snippet = latest.aiSummary || latest.bodyPreview;
 
                   return (
                     <motion.button
-                      key={email.id}
+                      key={thread.id}
                       layout
                       initial={{ opacity: 0, y: -4 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, x: -20 }}
                       transition={{ duration: 0.15, delay: idx * 0.008 }}
-                      onClick={() => setSelected(email)}
+                      onClick={() => openThread(thread)}
                       className={`w-full text-left flex items-stretch gap-0 border-b border-outline-variant/15 transition-all group ${
                         isSelected
                           ? 'bg-sky-500/5 ring-1 ring-inset ring-sky-500/20'
@@ -298,38 +355,60 @@ export default function Inbox() {
                       />
 
                       <div className="flex items-center gap-3 px-4 py-3.5 flex-1 min-w-0">
-                        {/* Sender avatar */}
-                        <div className={`w-8 h-8 shrink-0 rounded-full flex items-center justify-center text-xs font-bold text-white ${pCfg ? pCfg.bg : 'bg-zinc-600'}`}>
-                          {senderInitial}
+                        {/* Participant avatars */}
+                        <div className="flex -space-x-2 shrink-0">
+                          {(thread.participants || []).slice(0, 2).map((p, i) => (
+                            <div
+                              key={`${p.email}-${i}`}
+                              className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold text-white ring-2 ring-surface-container-lowest ${
+                                i === 0 ? (pCfg ? pCfg.bg : 'bg-zinc-600') : AVATAR_COLORS[1]
+                              }`}
+                            >
+                              {initialOf(p.name, p.email)}
+                            </div>
+                          ))}
                         </div>
 
                         {/* Content */}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5 mb-0.5">
                             <span className={`text-xs font-bold truncate ${isSelected ? 'text-sky-400' : 'text-on-surface group-hover:text-primary transition-colors'}`}>
-                              {email.fromName || email.fromEmail}
+                              {label}
                             </span>
-                            {email.aiProcessed && (
+                            {latest.aiSummary && (
                               <Bot className="w-2.5 h-2.5 text-purple-400 shrink-0" />
                             )}
+                            {thread.sentCount > 0 && (
+                              <Reply className="w-2.5 h-2.5 text-on-surface-variant/60 shrink-0" />
+                            )}
                           </div>
-                          <p className="text-[11px] font-semibold text-on-surface truncate mb-0.5">{email.subject}</p>
-                          {email.aiSummary && (
-                            <p className="text-[10px] text-on-surface-variant truncate italic">{email.aiSummary}</p>
+                          <p className="text-[11px] font-semibold text-on-surface truncate mb-0.5">{latest.subject}</p>
+                          {snippet && (
+                            <p className={`text-[10px] truncate ${latest.aiSummary ? 'text-on-surface-variant italic' : 'text-on-surface-variant/70'}`}>
+                              {snippet}
+                            </p>
                           )}
                         </div>
 
                         {/* Right meta */}
                         <div className="shrink-0 flex flex-col items-end gap-1">
-                          <span className="text-[10px] text-on-surface-variant whitespace-nowrap">
-                            {new Date(email.receivedAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
+                          <span className="text-[10px] text-on-surface-variant whitespace-nowrap flex items-center gap-1">
+                            {latest.hasAttachments && <Paperclip className="w-2.5 h-2.5" />}
+                            {formatDate(latest.receivedAt || latest.date)}
                           </span>
-                          {sCfg && (
-                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold border ${sCfg.bg} ${sCfg.color} ${sCfg.border}`}>
-                              <SIcon className="w-2 h-2" />
-                              {sCfg.label}
-                            </span>
-                          )}
+                          <div className="flex items-center gap-1">
+                            {thread.count > 1 && (
+                              <span className="inline-flex items-center justify-center min-w-[1rem] px-1 py-0.5 rounded-full bg-sky-500/10 text-sky-400 text-[9px] font-bold border border-sky-500/20">
+                                {thread.count}
+                              </span>
+                            )}
+                            {sCfg && (
+                              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold border ${sCfg.bg} ${sCfg.color} ${sCfg.border}`}>
+                                <SIcon className="w-2 h-2" />
+                                {sCfg.label}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </motion.button>
@@ -357,170 +436,190 @@ export default function Inbox() {
           )}
         </div>
 
-        {/* Right: Immersive reader */}
+        {/* Right: Conversation thread view */}
         <AnimatePresence mode="wait">
-          {selected ? (
+          {selectedThread ? (
             <motion.div
-              key={selected.id}
+              key={selectedThread.id}
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
               transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
               className="flex-1 flex flex-col min-h-0 overflow-hidden bg-surface-container-lowest"
             >
-              {/* Reader top bar */}
+              {/* Thread top bar */}
               <div className="shrink-0 flex items-center gap-3 px-6 py-4 border-b border-outline-variant/20">
                 <motion.button
-                  onClick={() => setSelected(null)}
+                  onClick={closeThread}
                   whileHover={{ scale: 1.1, rotate: 90 }}
                   whileTap={{ scale: 0.9 }}
                   className="p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"
                 >
-                    <X className="w-4 h-4" />
-                  </motion.button>
-                  <div className="flex-1 min-w-0">
-                    <h2 className="text-base font-bold text-on-surface truncate">{selected.subject}</h2>
+                  <X className="w-4 h-4" />
+                </motion.button>
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-base font-bold text-on-surface truncate">{selectedThread.latest?.subject}</h2>
                   <p className="text-[11px] text-on-surface-variant truncate">
-                    {selected.fromName ? `${selected.fromName} — ${selected.fromEmail}` : selected.fromEmail}
+                    {participantsLabel(selectedThread.participants)}
                     {' · '}
-                    {new Date(selected.receivedAt).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    {selectedThread.count} message{selectedThread.count !== 1 ? 's' : ''}
+                    {selectedThread.sentCount > 0 && ` · ${selectedThread.sentCount} envoyé${selectedThread.sentCount !== 1 ? 's' : ''}`}
                   </p>
                 </div>
-                {selected.erpTicketId && (
+                {selectedThread.latest?.erpTicketId && (
                   <motion.button
                     whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-                    onClick={() => navigate(`/tickets/${selected.erpTicketId}`)}
+                    onClick={() => navigate(`/tickets/${selectedThread.latest.erpTicketId}`)}
                     className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary/10 text-primary border border-primary/20 text-xs font-bold hover:bg-primary/15 transition-all"
                   >
                     <ArrowUpRight className="w-3.5 h-3.5" />
-                    Ticket #{selected.erpTicketId}
+                    Ticket #{selectedThread.latest.erpTicketId}
                   </motion.button>
                 )}
               </div>
 
-              {/* Reader body */}
+              {/* Thread body */}
               <div className="flex-1 overflow-y-auto">
-                <div className="max-w-3xl mx-auto px-6 py-6 space-y-6">
-
-                  {/* Status + Priority pills */}
-                  <div className="flex flex-wrap gap-2">
-                    {(() => {
-                      const cfg = STATUS_CONFIG[selected.status];
-                      if (!cfg) return null;
-                      const Icon = cfg.icon;
-                      return (
-                        <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${cfg.bg} ${cfg.color} ${cfg.border}`}>
-                          <Icon className="w-3.5 h-3.5" />
-                          {cfg.label}
-                        </span>
-                      );
-                    })()}
-                    {selected.aiPriority && (() => {
-                      const cfg = PRIORITY_CONFIG[selected.aiPriority];
-                      if (!cfg) return null;
-                      const Icon = cfg.icon;
-                      return (
-                        <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${cfg.color} border-current bg-current/10`}>
-                          <Icon className="w-3.5 h-3.5" />
-                          {cfg.label}
-                        </span>
-                      );
-                    })()}
+                {detailLoading && !threadDetail ? (
+                  <div className="h-full flex items-center justify-center text-on-surface-variant">
+                    <RefreshCw className="w-5 h-5 animate-spin" />
                   </div>
+                ) : (
+                  <div className="max-w-3xl mx-auto px-6 py-6 space-y-6">
+                    {(threadDetail?.messages || []).map((msg) => {
+                      const isInbound = msg.kind === 'inbound';
+                      const sCfg = STATUS_CONFIG[msg.status];
+                      const pCfg = PRIORITY_CONFIG[msg.aiPriority];
+                      return (
+                        <div key={`${msg.kind}-${msg.emailId || msg.messageId}`} className="space-y-4">
+                          {/* Message header */}
+                          <div className="flex items-start gap-3">
+                            <div className={`w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-xs font-bold text-white ${isInbound ? (pCfg ? pCfg.bg : 'bg-zinc-600') : 'bg-sky-600'}`}>
+                              {initialOf(msg.fromName, msg.fromEmail)}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs font-bold text-on-surface truncate">{msg.fromName || msg.fromEmail}</span>
+                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${
+                                  isInbound ? 'bg-surface-container text-on-surface-variant border-outline-variant/40' : 'bg-sky-500/10 text-sky-400 border-sky-500/20'
+                                }`}>
+                                  {isInbound ? <MailOpen className="w-2.5 h-2.5" /> : <Reply className="w-2.5 h-2.5" />}
+                                  {isInbound ? 'Reçu' : 'Envoyé'}
+                                </span>
+                                {sCfg && isInbound && (
+                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${sCfg.bg} ${sCfg.color} ${sCfg.border}`}>
+                                    <sCfg.icon className="w-2.5 h-2.5" />
+                                    {sCfg.label}
+                                  </span>
+                                )}
+                                {pCfg && isInbound && (
+                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${pCfg.color} border-current bg-current/10`}>
+                                    <pCfg.icon className="w-2.5 h-2.5" />
+                                    {pCfg.label}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-on-surface-variant mt-0.5">{formatDateTime(msg.receivedAt || msg.timestamp)}</p>
+                            </div>
+                          </div>
 
-                  {/* AI Analysis Card */}
-                  {(selected.aiSummary || selected.aiCategory || selected.aiTeam || selected.aiConfidence != null) && (
-                    <div className="rounded-2xl border border-purple-500/20 bg-purple-500/5 overflow-hidden">
-                      <div className="flex items-center gap-2 px-4 py-3 border-b border-purple-500/15">
-                        <div className="p-1.5 rounded-lg bg-purple-500/10">
-                          <Sparkles className="w-4 h-4 text-purple-400" />
-                        </div>
-                        <span className="text-xs font-bold text-purple-400 uppercase tracking-wider">Analyse IA — Gemini</span>
-                        {selected.aiConfidence != null && (
-                          <span className="ml-auto text-[11px] font-bold text-purple-300">
-                            {Math.round(selected.aiConfidence * 100)}% confiance
-                          </span>
-                        )}
-                      </div>
+                          {/* AI Analysis (inbound only) */}
+                          {isInbound && (msg.aiSummary || msg.aiCategory || msg.aiTeam || msg.aiConfidence != null) && (
+                            <div className="ml-12 rounded-2xl border border-purple-500/20 bg-purple-500/5 overflow-hidden">
+                              <div className="flex items-center gap-2 px-4 py-2.5 border-b border-purple-500/15">
+                                <div className="p-1.5 rounded-lg bg-purple-500/10">
+                                  <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                                </div>
+                                <span className="text-[10px] font-bold text-purple-400 uppercase tracking-wider">Analyse IA — Gemini</span>
+                                {msg.aiConfidence != null && (
+                                  <span className="ml-auto text-[10px] font-bold text-purple-300">
+                                    {Math.round(msg.aiConfidence * 100)}% confiance
+                                  </span>
+                                )}
+                              </div>
+                              <div className="p-4 space-y-3">
+                                {msg.aiSummary && (
+                                  <p className="text-sm text-on-surface leading-relaxed italic">"{msg.aiSummary}"</p>
+                                )}
+                                <div className="grid grid-cols-2 gap-3">
+                                  {msg.aiCategory && (
+                                    <div className="bg-surface-container/40 rounded-xl p-3">
+                                      <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Catégorie</p>
+                                      <p className="text-sm font-semibold text-on-surface">{msg.aiCategory}</p>
+                                    </div>
+                                  )}
+                                  {msg.aiTeam && (
+                                    <div className="bg-surface-container/40 rounded-xl p-3">
+                                      <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Équipe suggérée</p>
+                                      <p className="text-sm font-semibold text-on-surface">{msg.aiTeam}</p>
+                                    </div>
+                                  )}
+                                  {msg.glpiTicketId && (
+                                    <div className="bg-surface-container/40 rounded-xl p-3">
+                                      <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Ticket GLPI</p>
+                                      <p className="text-sm font-semibold text-on-surface">#{msg.glpiTicketId}</p>
+                                    </div>
+                                  )}
+                                  {msg.erpTicketId && (
+                                    <div className="bg-surface-container/40 rounded-xl p-3">
+                                      <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Ticket ERP</p>
+                                      <p className="text-sm font-semibold text-primary" onClick={() => navigate(`/tickets/${msg.erpTicketId}`)}>#{msg.erpTicketId}</p>
+                                    </div>
+                                  )}
+                                </div>
+                                {msg.aiConfidence != null && (
+                                  <div className="h-1.5 bg-surface-container rounded-full overflow-hidden">
+                                    <motion.div
+                                      initial={{ width: 0 }}
+                                      animate={{ width: `${Math.round(msg.aiConfidence * 100)}%` }}
+                                      transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+                                      className="h-full bg-gradient-to-r from-purple-500 to-violet-400 rounded-full"
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
 
-                      <div className="p-4 space-y-3">
-                        {selected.aiSummary && (
-                          <p className="text-sm text-on-surface leading-relaxed italic">"{selected.aiSummary}"</p>
-                        )}
-                        <div className="grid grid-cols-2 gap-3">
-                          {selected.aiCategory && (
-                            <div className="bg-surface-container/40 rounded-xl p-3">
-                              <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Catégorie</p>
-                              <p className="text-sm font-semibold text-on-surface">{selected.aiCategory}</p>
+                          {/* Error */}
+                          {isInbound && msg.error && (
+                            <div className="ml-12 rounded-xl border border-red-500/20 bg-red-500/5 p-4 flex items-start gap-3">
+                              <XCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                              <p className="text-sm text-red-400">{msg.error}</p>
                             </div>
                           )}
-                          {selected.aiTeam && (
-                            <div className="bg-surface-container/40 rounded-xl p-3">
-                              <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Équipe suggérée</p>
-                              <p className="text-sm font-semibold text-on-surface">{selected.aiTeam}</p>
-                            </div>
-                          )}
-                          {selected.glpiTicketId && (
-                            <div className="bg-surface-container/40 rounded-xl p-3">
-                              <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Ticket GLPI</p>
-                              <p className="text-sm font-semibold text-on-surface">#{selected.glpiTicketId}</p>
-                            </div>
-                          )}
-                          {selected.erpTicketId && (
-                            <div className="bg-surface-container/40 rounded-xl p-3">
-                              <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Ticket ERP</p>
-                              <p className="text-sm font-semibold text-primary">#{selected.erpTicketId}</p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
 
-                      {/* Confidence bar */}
-                      {selected.aiConfidence != null && (
-                        <div className="px-4 pb-4">
-                          <div className="h-1.5 bg-surface-container rounded-full overflow-hidden">
-                            <motion.div
-                              initial={{ width: 0 }}
-                              animate={{ width: `${Math.round(selected.aiConfidence * 100)}%` }}
-                              transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-                              className="h-full bg-gradient-to-r from-purple-500 to-violet-400 rounded-full"
-                            />
+                          {/* Message body */}
+                          <div className="ml-12 rounded-2xl border border-outline-variant/30 bg-surface-container-low/30 overflow-hidden">
+                            <div className="flex items-center gap-2 px-4 py-3 border-b border-outline-variant/20">
+                              <MailOpen className="w-4 h-4 text-on-surface-variant" />
+                              <span className="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Corps du message</span>
+                            </div>
+                            <div className="p-5">
+                              {(() => {
+                                const html = msg.bodyHtml;
+                                const plain = isInbound ? msg.bodyPreview : msg.body;
+                                return html ? (
+                                  <div className="text-sm text-on-surface leading-relaxed prose prose-sm dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />
+                                ) : plain ? (
+                                  <pre className="text-sm text-on-surface leading-relaxed whitespace-pre-wrap font-sans">{plain}</pre>
+                                ) : (
+                                  <p className="text-sm text-on-surface-variant italic">Corps du message non disponible.</p>
+                                );
+                              })()}
+                            </div>
                           </div>
                         </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Error */}
-                  {selected.error && (
-                    <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-4 flex items-start gap-3">
-                      <XCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                      <p className="text-sm text-red-400">{selected.error}</p>
-                    </div>
-                  )}
-
-                  {/* Raw email body */}
-                  <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-low/30 overflow-hidden">
-                    <div className="flex items-center gap-2 px-4 py-3 border-b border-outline-variant/20">
-                      <MailOpen className="w-4 h-4 text-on-surface-variant" />
-                      <span className="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Corps du message</span>
-                    </div>
-                    <div className="p-5">
-                      {(() => {
-                        const bodyContent = selected.bodyHtml || selected.bodyPreview;
-                        return bodyContent ? (
-                          selected.bodyHtml ? (
-                            <div className="text-sm text-on-surface leading-relaxed prose prose-sm dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(bodyContent) }} />
-                          ) : (
-                            <pre className="text-sm text-on-surface leading-relaxed whitespace-pre-wrap font-sans">{bodyContent}</pre>
-                          )
-                        ) : (
-                          <p className="text-sm text-on-surface-variant italic">Corps du message non disponible.</p>
-                        );
-                      })()}
-                    </div>
+                      );
+                    })}
+                    {threadDetail && threadDetail.messages.length === 0 && (
+                      <div className="flex flex-col items-center justify-center gap-3 text-on-surface-variant py-16">
+                        <Mail className="w-10 h-10 text-outline/30" />
+                        <p className="text-sm italic">Aucun message dans cette conversation.</p>
+                      </div>
+                    )}
                   </div>
-                </div>
+                )}
               </div>
             </motion.div>
           ) : (
@@ -530,10 +629,10 @@ export default function Inbox() {
               className="flex-1 flex flex-col items-center justify-center gap-4 text-on-surface-variant bg-surface-container-lowest"
             >
               <div className="p-6 rounded-full bg-surface-container">
-                <MailOpen className="w-10 h-10 text-outline/40" />
+                <Users className="w-10 h-10 text-outline/40" />
               </div>
               <div className="text-center">
-                <p className="text-sm font-semibold">Sélectionnez un email</p>
+                <p className="text-sm font-semibold">Sélectionnez une conversation</p>
                 <p className="text-xs text-on-surface-variant/60 mt-1">pour voir son contenu et l'analyse IA</p>
               </div>
             </motion.div>

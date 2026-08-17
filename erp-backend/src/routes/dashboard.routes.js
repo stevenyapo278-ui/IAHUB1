@@ -231,10 +231,11 @@ router.get('/activity-trend', async (req, res) => {
 });
 
 // Export rapport CSV
-router.get('/report', async (req, res) => {
-  try {
-    const { startDate, endDate } = req.query;
-    let since, until, periodStr;
+ router.get('/report', async (req, res) => {
+   try {
+     const { startDate, endDate } = req.query;
+     const format = req.query.format === 'pdf' ? 'pdf' : 'csv';
+     let since, until, periodStr;
 
     if (startDate && endDate) {
       since = new Date(startDate);
@@ -310,11 +311,160 @@ router.get('/report', async (req, res) => {
       ].join(','));
     }
 
+    if (format === 'pdf') {
+      // Génération PDF via pdfkit
+      const PDFDocument = require('pdfkit');
+      const doc = new PDFDocument({ size: 'A4', margin: 48 });
+      const chunks = [];
+      doc.on('data', (c) => chunks.push(c));
+      doc.on('end', () => {
+        const filename = `rapport-itsm-${new Date().toISOString().slice(0, 10)}.pdf`;
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.send(Buffer.concat(chunks));
+      });
+
+      const head = (text) => { doc.font('Helvetica-Bold').fontSize(9).fillColor('#334155').text(text, { continued: false }); };
+      const cell = (text, x, y, w) => doc.font('Helvetica').fontSize(7).fillColor('#0f172a').text(text, x, y, { width: w, lineBreak: false, ellipsis: true });
+
+      doc.font('Helvetica-Bold').fontSize(16).fillColor('#0f172a').text('Rapport ERP ITSM', 48, 48);
+      doc.font('Helvetica').fontSize(9).fillColor('#64748b').text(`Période : ${periodStr} — généré le ${new Date().toLocaleString('fr-FR')}`, 48, 70);
+
+      doc.font('Helvetica-Bold').fontSize(11).fillColor('#0f172a').text('Résumé', 48, 96);
+      let y = 114;
+      const summaryRows = [
+        ['Total tickets', totalTickets],
+        ['Tickets résolus', resolved],
+        ['Taux de résolution', `${totalTickets > 0 ? Math.round((resolved / totalTickets) * 100) : 0}%`],
+        ['Tickets P1 critiques', p1],
+        ['Délai résolution moyen', `${avgResolution} h`],
+        ['Brouillons IA approuvés', aiDrafts],
+        ['Techniciens actifs', techPerf.length],
+      ];
+      for (const [label, value] of summaryRows) {
+        doc.font('Helvetica').fontSize(8).fillColor('#334155').text(label, 48, y, { width: 200 });
+        doc.font('Helvetica-Bold').fontSize(8).fillColor('#0f172a').text(String(value), 250, y, { width: 100 });
+        y += 14;
+      }
+
+      doc.font('Helvetica-Bold').fontSize(11).fillColor('#0f172a').text('Tickets', 48, y + 8);
+      y += 26;
+      const cols = [28, 150, 45, 42, 120, 100, 75, 60];
+      const headers = ['ID', 'Titre', 'Statut', 'Priorité', 'Demandeur', 'Assigné', 'Équipe', 'Créé le'];
+      let x = 48;
+      doc.rect(48, y - 14, 500, 14).fill('#f1f5f9');
+      headers.forEach((h, i) => { cell(h, x, y - 12, cols[i]); x += cols[i]; });
+      y += 8;
+      for (const t of tickets) {
+        if (y > 780) { doc.addPage(); y = 48; }
+        x = 48;
+        cell(String(t.id), x, y, cols[0]); x += cols[0];
+        cell(t.title || '', x, y, cols[1]); x += cols[1];
+        cell(t.status, x, y, cols[2]); x += cols[2];
+        cell(t.priority, x, y, cols[3]); x += cols[3];
+        cell(t.requester?.fullName || '', x, y, cols[4]); x += cols[4];
+        cell(t.assignedTo?.fullName || '', x, y, cols[5]); x += cols[5];
+        cell(t.team?.name || 'Non assignée', x, y, cols[6]); x += cols[6];
+        cell(new Date(t.createdAt).toLocaleDateString('fr-FR'), x, y, cols[7]);
+        y += 12;
+      }
+
+      doc.end();
+      return;
+    }
+
     const csv = lines.join('\n');
     const filename = `rapport-itsm-${new Date().toISOString().slice(0, 10)}.csv`;
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send('\uFEFF' + csv); // BOM pour Excel
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Pilotage SLA : respect des échéances, temps de réponse/résolution, CSAT ──
+router.get('/sla-analytics', async (req, res) => {
+  if (!['SUPERADMIN', 'ADMIN', 'TECHNICIAN', 'HOTLINE'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Accès réservé à l\'équipe' });
+  }
+  try {
+    const days = Math.min(parseInt(req.query.days) || 30, 365);
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    since.setHours(0, 0, 0, 0);
+
+    const tickets = await prisma.ticket.findMany({
+      where: { createdAt: { gte: since } },
+      select: {
+        id: true, priority: true, status: true, createdAt: true, solvedAt: true,
+        slaBreachedAt: true, slaResolutionDueAt: true, slaResponseDueAt: true,
+        firstResponseAt: true, csatScore: true,
+      },
+    });
+
+    const RESOLVED = ['SOLVED', 'CLOSED'];
+    const OPEN = ['NEW', 'OPEN', 'PENDING'];
+
+    // Statistiques par priorité
+    const byPriority = {};
+    for (const p of ['P1', 'P2', 'P3', 'P4']) {
+      const pool = tickets.filter((t) => t.priority === p);
+      const resolvedPool = pool.filter((t) => RESOLVED.includes(t.status));
+      const withSla = pool.filter((t) => t.slaResolutionDueAt || t.slaResponseDueAt);
+      const breached = pool.filter((t) => t.slaBreachedAt);
+      const avgResolutionH = resolvedPool.length
+        ? Math.round(
+            resolvedPool.reduce((sum, t) => sum + (new Date(t.solvedAt) - new Date(t.createdAt)), 0) /
+            resolvedPool.length / (1000 * 60 * 60) * 10) / 10
+        : null;
+      const avgFirstResponseH = pool.filter((t) => t.firstResponseAt).length
+        ? Math.round(
+            pool.filter((t) => t.firstResponseAt)
+              .reduce((sum, t) => sum + (new Date(t.firstResponseAt) - new Date(t.createdAt)), 0) /
+            pool.filter((t) => t.firstResponseAt).length / (1000 * 60 * 60) * 10) / 10
+        : null;
+      byPriority[p] = {
+        total: pool.length,
+        resolved: resolvedPool.length,
+        open: pool.filter((t) => OPEN.includes(t.status)).length,
+        withSla,
+        breached: breached.length,
+        breachRate: withSla.length ? Math.round((breached.length / withSla.length) * 100) : 0,
+        avgResolutionHours: avgResolutionH,
+        avgFirstResponseHours: avgFirstResponseH,
+      };
+    }
+
+    // Tickets ouverts en retard SLA (échéance de résolution dépassée)
+    const overdue = await prisma.ticket.findMany({
+      where: {
+        status: { in: OPEN },
+        slaResolutionDueAt: { not: null, lt: new Date() },
+        slaBreachedAt: null,
+      },
+      select: { id: true, title: true, priority: true, status: true, slaResolutionDueAt: true, assignedTo: { select: { fullName: true } } },
+      orderBy: { slaResolutionDueAt: 'asc' },
+      take: 50,
+    });
+
+    // CSAT global
+    const rated = tickets.filter((t) => t.csatScore);
+    const csat = {
+      rated: rated.length,
+      average: rated.length ? Math.round((rated.reduce((s, t) => s + t.csatScore, 0) / rated.length) * 10) / 10 : null,
+      distribution: [5, 4, 3, 2, 1].map((star) => ({ star, count: rated.filter((t) => t.csatScore === star).length })),
+    };
+
+    const totals = {
+      total: tickets.length,
+      breached: tickets.filter((t) => t.slaBreachedAt).length,
+      breachRate: tickets.filter((t) => t.slaResponseDueAt || t.slaResolutionDueAt).length
+        ? Math.round((tickets.filter((t) => t.slaBreachedAt).length / tickets.filter((t) => t.slaResponseDueAt || t.slaResolutionDueAt).length) * 100)
+        : 0,
+    };
+
+    return res.json({ days, byPriority, overdue, csat, totals });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }

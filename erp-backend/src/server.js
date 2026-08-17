@@ -14,6 +14,7 @@ const { runReminderScheduler } = require('./services/reminderScheduler');
 const { checkAndSendDailySummary } = require('./services/dailySummary');
 const { withHealthTracking } = require('./services/schedulerHealth');
 const { seedPermissionGroups } = require('./services/permissionGroupSeeder');
+const { runSlaMonitor } = require('./services/slaService');
 const { logger } = require('./utils/logger');
 
 // Validation des variables d'environnement critiques au démarrage
@@ -111,6 +112,11 @@ scheduleSync('emails entrants', runEmailPipeline, (s) => s.emailSyncIntervalSeco
 scheduleSync('équipes/catégories GLPI', syncGlpiTeamsAndCategories, (s) => s.glpiTeamsCategoriesSyncIntervalMinutes * 60);
 scheduleSync('lieux GLPI', syncGlpiLocationsOnly, (s) => s.glpiLocationsSyncIntervalMinutes * 60);
 scheduleSync('modèles IA', syncAllProviders, (s) => s.aiModelsSyncIntervalHours * 3600);
+
+// Moteur SLA (outil de ticketing) : détecte les dépassements de délai de réponse des tickets
+// actifs et notifie (socket + notification persistée + email au technicien assigné).
+// Fréquence configurable dans Paramètres > Automatisation (slaMonitorIntervalSeconds, 0 = désactivé).
+scheduleSync('SLA', runSlaMonitor, (s) => s.slaMonitorIntervalSeconds);
 
 // Relance des brouillons AiEmailDraft en attente (Paramètres > Automatisation > Relance des
 // brouillons) — le délai d'attente avant relance est configurable, mais la vérification elle-même

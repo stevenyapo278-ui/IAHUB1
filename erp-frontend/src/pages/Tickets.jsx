@@ -8,6 +8,7 @@ import {
   Radio,
   Clock,
   CheckCircle2,
+  Flag,
   Lock,
   Flame,
   AlertTriangle,
@@ -40,7 +41,9 @@ import {
   Building2,
   Bot,
   FileText,
-  MessageSquare
+  MessageSquare,
+  KanbanSquare,
+  Bookmark
 } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -49,8 +52,10 @@ import { hasPermission } from '../utils/permissions';
 import ConfirmDialog from '../components/ConfirmDialog';
 import EmptyState from '../components/EmptyState';
 import TicketCoverflowCarousel from '../components/TicketCoverflowCarousel';
+import KanbanBoard from '../components/KanbanBoard';
 import SearchableSelect from '../components/SearchableSelect';
 import SearchableMultiSelect from '../components/SearchableMultiSelect';
+import SlaBadge from '../components/SlaBadge';
 import {
   STATUS_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS, URGENCY_IMPACT_OPTIONS,
 } from '../constants/tickets';
@@ -114,6 +119,55 @@ export default function Tickets() {
   const [sortBy, setSortBy] = useState(() => searchParams.get('sortBy') || 'createdAt');
   const [sortOrder, setSortOrder] = useState(() => searchParams.get('sortOrder') || 'desc');
 
+  // Vues sauvegardées (localStorage, par utilisateur)
+  const savedViewsKey = user ? `tickets_saved_views_${user.id}` : null;
+  const [savedViews, setSavedViews] = useState(() => {
+    try { return savedViewsKey ? JSON.parse(localStorage.getItem(savedViewsKey) || '[]') : []; } catch { return []; }
+  });
+  const [viewsOpen, setViewsOpen] = useState(false);
+  const [savingView, setSavingView] = useState(false);
+
+  function persistSavedViews(views) {
+    setSavedViews(views);
+    if (savedViewsKey) localStorage.setItem(savedViewsKey, JSON.stringify(views));
+  }
+
+  function saveCurrentView() {
+    if (!savedViewsKey) return;
+    const name = window.prompt('Nom de la vue à enregistrer :');
+    if (!name) return;
+    setSavingView(true);
+    const view = {
+      name,
+      filters: { ...filters },
+      search: searchQuery,
+      sortBy,
+      sortOrder,
+    };
+    const existing = savedViews.findIndex((v) => v.name === name);
+    const next = existing >= 0 ? savedViews.map((v, i) => (i === existing ? view : v)) : [...savedViews, view];
+    persistSavedViews(next);
+    toast.success(`Vue « ${name} » enregistrée`);
+    setSavingView(false);
+    setViewsOpen(false);
+  }
+
+  function restoreView(view) {
+    setFilters(view.filters || {});
+    setSearchQuery(view.search || '');
+    setDebouncedSearch(view.search || '');
+    setSortBy(view.sortBy || 'createdAt');
+    setSortOrder(view.sortOrder || 'desc');
+    setPage(1);
+    toast.success(`Vue « ${view.name} » appliquée`);
+    setViewsOpen(false);
+  }
+
+  function deleteSavedView(name) {
+    persistSavedViews(savedViews.filter((v) => v.name !== name));
+    toast.success('Vue supprimée');
+  }
+
   // Filtres
   const [filters, setFilters] = useState({
     status: searchParams.get('status') || '',
@@ -125,6 +179,7 @@ export default function Tickets() {
     assignedToId: searchParams.get('assignedToId') || '',
     mine: searchParams.get('mine') || '',
     aiProcessed: searchParams.get('aiProcessed') || '',
+    closeSuggested: searchParams.get('closeSuggested') || '',
   });
 
   const [showForm, setShowForm] = useState(searchParams.get('new') === '1');
@@ -132,6 +187,8 @@ export default function Tickets() {
   const [attachment, setAttachment] = useState(null);
   const [error, setError] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
+  const [templates, setTemplates] = useState([]);
+  const [selectedTemplate, setSelectedTemplate] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [creating, setCreating] = useState(false);
   const [page, setPage] = useState(() => {
@@ -180,7 +237,7 @@ export default function Tickets() {
   const filteredTeams = !searchTerm
     ? teams
     : teams.filter((t) => t.name?.toLowerCase().includes(searchTerm));
-  const showSelectionColumn = canBulkDelete;
+  const showSelectionColumn = canBulkDelete || canAssign;
 
   function updateFilter(key, value) {
     const next = { ...filters, [key]: value };
@@ -208,6 +265,8 @@ export default function Tickets() {
       assignedToId: '',
       mine: '',
       aiProcessed: '',
+      approvalStatus: '',
+      closeSuggested: '',
     });
     setSearchQuery('');
     setDebouncedSearch('');
@@ -235,6 +294,8 @@ export default function Tickets() {
     if (filters.assignedToId) params.assignedToId = filters.assignedToId;
     if (filters.mine) params.mine = filters.mine;
     if (filters.aiProcessed) params.aiProcessed = filters.aiProcessed;
+    if (filters.approvalStatus) params.approvalStatus = filters.approvalStatus;
+    if (filters.closeSuggested) params.closeSuggested = filters.closeSuggested;
     if (debouncedSearch) params.search = debouncedSearch;
 
     api.get('/tickets', { params })
@@ -263,6 +324,8 @@ export default function Tickets() {
     if (filters.assignedToId) params.assignedToId = filters.assignedToId;
     if (filters.mine) params.mine = filters.mine;
     if (filters.aiProcessed) params.aiProcessed = filters.aiProcessed;
+    if (filters.approvalStatus) params.approvalStatus = filters.approvalStatus;
+    if (filters.closeSuggested) params.closeSuggested = filters.closeSuggested;
     if (debouncedSearch) params.search = debouncedSearch;
     api.get('/tickets', { params }).then(({ data }) => { setTickets(data.items); setTotalPages(data.pages); setTotalCount(data.total); }).catch(() => {});
   }
@@ -278,6 +341,50 @@ export default function Tickets() {
   }
   function toggleSelectAll() {
     setSelectedIds((ids) => (ids.length === tickets.length ? [] : tickets.map((t) => t.id)));
+  }
+
+  // ── Actions groupées (statut / priorité / assignation) ──────────────────
+  const [bulkChanges, setBulkChanges] = useState({ status: '', priority: '', assignedToId: '' });
+  const [bulkUpdating, setBulkUpdating] = useState(false);
+
+  async function handleBulkUpdate() {
+    const payload = { ids: selectedIds };
+    if (bulkChanges.status) payload.status = bulkChanges.status;
+    if (bulkChanges.priority) payload.priority = bulkChanges.priority;
+    if (bulkChanges.assignedToId) payload.assignedToId = Number(bulkChanges.assignedToId);
+    if (Object.keys(payload).length === 1) return toast.error('Choisissez une modification à appliquer');
+
+    setBulkUpdating(true);
+    try {
+      const { data } = await api.post('/tickets/bulk-update', payload);
+      toast.success(`${data.updatedCount}/${data.total} ticket(s) mis à jour`);
+      if (data.failures?.length > 0) {
+        toast.error(`${data.failures.length} ticket(s) en échec`);
+      }
+      setBulkChanges({ status: '', priority: '', assignedToId: '' });
+      setSelectedIds([]);
+      loadTickets();
+    } catch (err) {
+      toast.error(err.response?.data?.error || "Échec de l'opération groupée");
+    } finally {
+      setBulkUpdating(false);
+    }
+  }
+
+  // ── Export serveur : tout le jeu de résultats des filtres actifs, pas seulement la page ──
+  function exportAll(fmt = 'csv') {
+    const params = {};
+    for (const key of ['status', 'priority', 'category', 'teamId', 'assignedToId', 'mine', 'approvalStatus', 'source', 'aiProcessed', 'closeSuggested']) {
+      const v = filters[key];
+      if (v !== undefined && v !== '' && v !== null) params[key] = v;
+    }
+    if (debouncedSearch) params.search = debouncedSearch;
+    params.sortBy = sortBy;
+    params.sortOrder = sortOrder;
+    params.format = fmt;
+    const url = `${api.defaults.baseURL}/tickets/export?${new URLSearchParams(params).toString()}`;
+    window.open(url, '_blank');
+    toast.success(fmt === 'csv' ? 'Export CSV complet généré' : 'Export JSON complet généré');
   }
 
   async function handleQuickStatusChange(ticketId, newStatus, e) {
@@ -406,6 +513,7 @@ export default function Tickets() {
     api.get('/glpi/locations').then(({ data }) => setLocations(data)).catch(() => {});
     api.get('/glpi/categories').then(({ data }) => setCategories(data)).catch(() => {});
     api.get('/glpi/users').then(({ data }) => setGlpiUsers(data)).catch(() => {});
+    api.get('/ticket-templates').then(({ data }) => setTemplates(data)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -450,6 +558,24 @@ export default function Tickets() {
       else next.set('new', '1');
       return next;
     });
+  }
+
+  function applyTemplate(templateId) {
+    setSelectedTemplate(templateId);
+    if (!templateId) return;
+    const t = templates.find((x) => String(x.id) === String(templateId));
+    if (!t) return;
+    setForm((prev) => ({
+      ...prev,
+      title: t.title || prev.title,
+      content: t.content || prev.content,
+      priority: t.priority || prev.priority,
+      category: t.category || prev.category,
+      type: t.type || prev.type,
+      urgency: t.urgency || prev.urgency,
+      impact: t.impact || prev.impact,
+    }));
+    toast.success(`Modèle « ${t.name} » appliqué`);
   }
 
   useEffect(() => {
@@ -497,6 +623,40 @@ export default function Tickets() {
               {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
               {showForm ? 'Fermer' : 'Nouveau Ticket'}
             </motion.button>
+            <div className="relative group">
+              <button
+                className="p-2 rounded-xl border border-outline-variant/40 bg-surface-container hover:bg-surface-container-high text-on-surface-variant transition-all cursor-pointer"
+                title="Exporter (CSV/JSON)"
+              >
+                <Download className="w-4 h-4" />
+              </button>
+              <div className="absolute right-0 top-full pt-1 z-30 hidden group-hover:block">
+                <div className="rounded-xl border border-outline-variant/30 bg-surface-container-lowest shadow-xl p-1.5 min-w-[200px]">
+                  <button
+                    onClick={() => exportAll('csv')}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-on-surface hover:bg-surface-container transition-colors cursor-pointer text-left"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" />
+                    Exporter tout (CSV)
+                  </button>
+                  <button
+                    onClick={() => exportAll('json')}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-on-surface hover:bg-surface-container transition-colors cursor-pointer text-left"
+                  >
+                    <FileCode2 className="w-3.5 h-3.5 text-blue-500" />
+                    Exporter tout (JSON)
+                  </button>
+                  <div className="my-1 border-t border-outline-variant/30" />
+                  <button
+                    onClick={exportCSV}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-on-surface hover:bg-surface-container transition-colors cursor-pointer text-left"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-slate-500" />
+                    Page actuelle (CSV)
+                  </button>
+                </div>
+              </div>
+            </div>
             <button
               onClick={() => loadTickets(true)}
               disabled={refreshing}
@@ -542,6 +702,18 @@ export default function Tickets() {
               >
                 <Sparkles className="w-3.5 h-3.5 text-purple-300" />
                 <span className="hidden sm:inline">Coverflow 3D</span>
+              </button>
+              <button
+                onClick={() => changeViewMode('kanban')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  viewMode === 'kanban'
+                    ? 'bg-emerald-600 text-white shadow-sm font-bold'
+                    : 'text-on-surface-variant hover:text-on-surface'
+                }`}
+                title="Vue Kanban (glisser-déposer entre colonnes)"
+              >
+                <KanbanSquare className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="hidden sm:inline">Kanban</span>
               </button>
             </div>
           </div>
@@ -626,6 +798,22 @@ export default function Tickets() {
                       <button type="button" onClick={() => setError('')} className="p-1 hover:bg-red-500/20 rounded-lg">
                         <X className="w-3.5 h-3.5" />
                       </button>
+                    </div>
+                  )}
+
+                  {templates.length > 0 && (
+                    <div>
+                      <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Modèle (pré-remplissage)</label>
+                      <select
+                        value={selectedTemplate}
+                        onChange={(e) => applyTemplate(e.target.value)}
+                        className="w-full px-4 py-2.5 rounded-xl border font-medium text-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-surface border-outline-variant/60 text-slate-900 dark:text-white cursor-pointer"
+                      >
+                        <option value="">— Aucun modèle —</option>
+                        {templates.map((t) => (
+                          <option key={t.id} value={t.id}>{t.name}{t.category ? ` (${t.category})` : ''}</option>
+                        ))}
+                      </select>
                     </div>
                   )}
 
@@ -906,6 +1094,19 @@ export default function Tickets() {
                 { v: '', l: 'Toutes les équipes' },
                 ...teams.map((t) => ({ v: String(t.id), l: t.name })),
               ]} />
+
+            <FilterSelect value={filters.category} onChange={(v) => updateFilter('category', v)}
+              label="Catégorie" options={[
+                { v: '', l: 'Toutes les catégories' },
+                ...categories.map((c) => ({ v: c, l: c })),
+              ]} />
+
+            <FilterSelect value={filters.assignedToId} onChange={(v) => updateFilter('assignedToId', v)}
+              label="Assigné à" options={[
+                { v: '', l: 'Tout le monde' },
+                { v: 'none', l: 'Non assigné' },
+                ...users.filter((u) => u.isActive).map((u) => ({ v: String(u.id), l: u.fullName })),
+              ]} />
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
@@ -918,18 +1119,65 @@ export default function Tickets() {
                 Réinitialiser
               </button>
             )}
-            {canBulkDelete && selectedIds.length > 0 && (
-              <motion.button
-                initial={{ opacity: 0, scale: 0.9 }}
+            {selectedIds.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.92 }}
                 animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.9 }}
-                onClick={askDeleteSelected}
-                disabled={deleting}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-error/30 text-error font-body-sm text-body-sm font-semibold hover:bg-error/5 transition-colors disabled:opacity-50"
+                exit={{ opacity: 0, scale: 0.92 }}
+                className="flex items-center gap-2 p-2 rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-lg flex-wrap"
               >
-                <Trash2 className="w-4 h-4" />
-                Supprimer ({selectedIds.length})
-              </motion.button>
+                <span className="text-xs font-bold text-on-surface-variant px-2 whitespace-nowrap">
+                  {selectedIds.length} sélectionné(s)
+                </span>
+                {canAssign && (
+                  <>
+                    <select
+                      value={bulkChanges.status}
+                      onChange={(e) => setBulkChanges((b) => ({ ...b, status: e.target.value }))}
+                      className={`text-xs font-semibold px-2 py-1.5 rounded-lg border border-outline-variant/60 bg-surface text-on-surface cursor-pointer ${bulkChanges.status ? 'text-primary' : ''}`}
+                    >
+                      <option value="">Statut…</option>
+                      {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                    <select
+                      value={bulkChanges.priority}
+                      onChange={(e) => setBulkChanges((b) => ({ ...b, priority: e.target.value }))}
+                      className={`text-xs font-semibold px-2 py-1.5 rounded-lg border border-outline-variant/60 bg-surface text-on-surface cursor-pointer ${bulkChanges.priority ? 'text-primary' : ''}`}
+                    >
+                      <option value="">Priorité…</option>
+                      {PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                    <select
+                      value={bulkChanges.assignedToId}
+                      onChange={(e) => setBulkChanges((b) => ({ ...b, assignedToId: e.target.value }))}
+                      className={`text-xs font-semibold px-2 py-1.5 rounded-lg border border-outline-variant/60 bg-surface text-on-surface cursor-pointer max-w-[140px] ${bulkChanges.assignedToId ? 'text-primary' : ''}`}
+                    >
+                      <option value="">Assigner à…</option>
+                      <option value="none">Non assigné</option>
+                      {users.filter((u) => u.isActive).map((u) => <option key={u.id} value={u.id}>{u.fullName}</option>)}
+                    </select>
+                    <motion.button
+                      whileTap={{ scale: 0.95 }}
+                      onClick={handleBulkUpdate}
+                      disabled={bulkUpdating}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-xs font-bold hover:opacity-90 transition-all disabled:opacity-50 cursor-pointer"
+                    >
+                      <CheckSquare className="w-3.5 h-3.5" />
+                      {bulkUpdating ? 'Application…' : 'Appliquer'}
+                    </motion.button>
+                  </>
+                )}
+                {canBulkDelete && (
+                  <button
+                    onClick={askDeleteSelected}
+                    disabled={deleting}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error/30 text-error text-xs font-semibold hover:bg-error/5 transition-colors disabled:opacity-50 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Supprimer
+                  </button>
+                )}
+              </motion.div>
             )}
           </div>
         </div>
@@ -944,6 +1192,24 @@ export default function Tickets() {
             label="Mes tickets"
           />
           <ChipFilter
+            active={filters.status === 'OPEN_GROUP'}
+            onClick={() => updateFilter('status', filters.status === 'OPEN_GROUP' ? '' : 'OPEN_GROUP')}
+            Icon={Radio}
+            label="Ouverts"
+          />
+          <ChipFilter
+            active={filters.status === 'CLOSED_GROUP'}
+            onClick={() => updateFilter('status', filters.status === 'CLOSED_GROUP' ? '' : 'CLOSED_GROUP')}
+            Icon={CheckCircle2}
+            label="Clôturés"
+          />
+          <ChipFilter
+            active={filters.closeSuggested === 'true'}
+            onClick={() => updateFilter('closeSuggested', filters.closeSuggested === 'true' ? '' : 'true')}
+            Icon={Flag}
+            label="Clôture suggérée"
+          />
+          <ChipFilter
             active={filters.aiProcessed === 'true'}
             onClick={() => updateFilter('aiProcessed', filters.aiProcessed === 'true' ? '' : 'true')}
             Icon={Sparkles}
@@ -955,6 +1221,55 @@ export default function Tickets() {
             Icon={Flame}
             label="Critiques P1"
           />
+
+          {/* Vues sauvegardées */}
+          <div className="relative shrink-0" style={{ zIndex: 30 }}>
+            <button
+              onClick={() => setViewsOpen((v) => !v)}
+              className="px-3 py-1 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 cursor-pointer"
+            >
+              <Bookmark className="w-3 h-3" />
+              Vues
+              <span className="text-[9px] font-black bg-primary/20 rounded-full px-1.5 py-0.5">{savedViews.length}</span>
+            </button>
+            {viewsOpen && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setViewsOpen(false)} />
+                <div className="absolute right-0 top-full mt-1.5 z-30 min-w-[240px] rounded-xl border border-outline-variant/40 bg-surface-container-lowest shadow-xl p-1.5">
+                  <button
+                    onClick={saveCurrentView}
+                    disabled={savingView}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-primary hover:bg-primary/10 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Enregistrer la vue actuelle…
+                  </button>
+                  {savedViews.length === 0 && (
+                    <p className="px-3 py-3 text-[11px] text-on-surface-variant italic text-center">Aucune vue sauvegardée</p>
+                  )}
+                  {savedViews.map((v) => (
+                    <div key={v.name} className="flex items-center gap-1 group">
+                      <button
+                        onClick={() => restoreView(v)}
+                        className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-on-surface hover:bg-surface-container transition-colors cursor-pointer text-left"
+                        title={`${Object.keys(v.filters || {}).filter((k) => v.filters[k]).length} filtre(s) actif(s)`}
+                      >
+                        <Bookmark className="w-3 h-3 text-on-surface-variant shrink-0" />
+                        <span className="truncate">{v.name}</span>
+                      </button>
+                      <button
+                        onClick={() => deleteSavedView(v.name)}
+                        className="opacity-0 group-hover:opacity-100 p-1 rounded-md text-on-surface-variant hover:text-error transition-all cursor-pointer"
+                        title="Supprimer la vue"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </motion.div>
 
@@ -981,6 +1296,14 @@ export default function Tickets() {
           <motion.div variants={itemVariants} className="w-full">
             <TicketCoverflowCarousel tickets={tickets} isDark={isDark} />
           </motion.div>
+      ) : viewMode === 'kanban' ? (
+        <motion.div variants={itemVariants} className="w-full">
+          <KanbanBoard
+            tickets={tickets}
+            canAssign={canAssign}
+            onStatusChange={(ticket, newStatus) => handleQuickStatusChange(ticket.id, newStatus)}
+          />
+        </motion.div>
       ) : viewMode === 'grid' ? (
         <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-md">
           <AnimatePresence mode="popLayout">
@@ -1038,6 +1361,7 @@ export default function Tickets() {
                       <span className="truncate">{t.glpiLocationName}</span>
                     </div>
                   )}
+                  <SlaBadge ticket={t} />
                 </div>
 
                 <div className="pt-md mt-md border-t border-outline-variant/40 flex items-center justify-between gap-2 text-body-sm">
@@ -1100,11 +1424,31 @@ export default function Tickets() {
               </div>
             )}
             <div className="w-9 shrink-0" />
-            <div className="flex-1 min-w-0">Ticket</div>
-            <div className="w-28 shrink-0 hidden md:block">Statut</div>
-            <div className="w-28 shrink-0 hidden lg:block">Priorité</div>
-            <div className="w-36 shrink-0 hidden xl:block">Assigné à</div>
-            <div className="w-24 shrink-0 hidden lg:block text-right">Date</div>
+            <button onClick={() => toggleSort('title')}
+              className={`flex-1 min-w-0 text-left flex items-center gap-1 hover:text-primary transition-colors cursor-pointer ${sortBy === 'title' ? 'text-primary' : ''}`}>
+              Ticket
+              {sortBy === 'title' ? (sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 text-outline/50" />}
+            </button>
+            <button onClick={() => toggleSort('status')}
+              className={`w-28 shrink-0 hidden md:block text-left flex items-center gap-1 hover:text-primary transition-colors cursor-pointer ${sortBy === 'status' ? 'text-primary' : ''}`}>
+              Statut
+              {sortBy === 'status' ? (sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 text-outline/50" />}
+            </button>
+            <button onClick={() => toggleSort('priority')}
+              className={`w-28 shrink-0 hidden lg:block text-left flex items-center gap-1 hover:text-primary transition-colors cursor-pointer ${sortBy === 'priority' ? 'text-primary' : ''}`}>
+              Priorité
+              {sortBy === 'priority' ? (sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 text-outline/50" />}
+            </button>
+            <button onClick={() => toggleSort('assignedTo')}
+              className={`w-36 shrink-0 hidden xl:block text-left flex items-center gap-1 hover:text-primary transition-colors cursor-pointer ${sortBy === 'assignedTo' ? 'text-primary' : ''}`}>
+              Assigné à
+              {sortBy === 'assignedTo' ? (sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 text-outline/50" />}
+            </button>
+            <button onClick={() => toggleSort('createdAt')}
+              className={`w-24 shrink-0 hidden lg:block flex items-center gap-1 justify-end hover:text-primary transition-colors cursor-pointer ${sortBy === 'createdAt' ? 'text-primary' : ''}`}>
+              Date
+              {sortBy === 'createdAt' ? (sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 text-outline/50" />}
+            </button>
             <div className="w-16 shrink-0" />
           </div>
 
@@ -1201,6 +1545,7 @@ export default function Tickets() {
                             {t.team?.name || 'Aucune équipe'}
                           </span>
                         )}
+                        <SlaBadge ticket={t} />
                       </div>
                     </div>
 

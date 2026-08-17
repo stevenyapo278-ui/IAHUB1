@@ -450,7 +450,9 @@ async function processMessage(message, account) {
 
     const { glpiTicketId, erpTicketId, ticketMessageId } = await prisma.$transaction(async (tx) => {
       const created = await createTicketFromEmail({
-        subject, body: bodyPreview, from: fromEmail, fromName, analysis, emailAccountId: account.id, locationId, lowTrustSender, tx
+        subject, body: bodyPreview, from: fromEmail, fromName, analysis, emailAccountId: account.id, locationId, lowTrustSender, tx,
+        escalateMinutes: ruleMatch?.autoEscalateMinutes || null,
+        triageRuleId: ruleMatch?.id || null,
       });
 
       // Étape 4 : stocker conversationId + aiSummary sur le ticket ERP

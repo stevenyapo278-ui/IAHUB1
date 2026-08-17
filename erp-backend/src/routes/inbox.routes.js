@@ -6,39 +6,39 @@ const { requirePermission } = require('../middleware/permissions');
 const { runEmailPipeline, processMessage } = require('../services/emailPipeline');
 const { fetchEmailsByDateRange } = require('../services/emailPoller');
 const { analyzeEmail } = require('../services/mailAnalyzer');
+const { listThreads, getThread } = require('../services/inboxThreading');
 
 const router = express.Router();
 router.use(authenticate);
 
-// Liste des emails reçus avec pagination + recherche
+// Liste des emails reçus regroupés par conversation (façon Outlook), avec pagination + recherche.
+// La recherche porte sur le fil entier : si un message d'une conversation correspond, tout le fil est renvoyé.
 router.get('/', async (req, res) => {
   const page = Math.max(1, parseInt(req.query.page) || 1);
-  const limit = Math.min(50, parseInt(req.query.limit) || 20);
+  const limit = Math.min(50, parseInt(req.query.limit) || 25);
   const status = req.query.status || undefined;
   const q = req.query.q?.trim() || undefined;
 
-  const where = {
-    ...(status ? { status } : {}),
-    ...(q ? {
-      OR: [
-        { subject: { contains: q, mode: 'insensitive' } },
-        { fromEmail: { contains: q, mode: 'insensitive' } },
-        { fromName: { contains: q, mode: 'insensitive' } },
-      ],
-    } : {}),
-  };
+  const { items, total, pages } = await listThreads({ status, q, page, limit });
 
-  const [items, total] = await Promise.all([
-    prisma.incomingEmail.findMany({
-      where,
-      orderBy: { receivedAt: 'desc' },
-      skip: (page - 1) * limit,
-      take: limit,
-    }),
-    prisma.incomingEmail.count({ where }),
-  ]);
+  // Allège la liste : on retirera les corps HTML (conservés uniquement dans le détail du fil)
+  const stripped = items.map((thread) => ({
+    ...thread,
+    messages: thread.messages.map((m) => ({ ...m, bodyHtml: undefined, body: undefined })),
+    latest: { ...thread.latest, bodyHtml: undefined, body: undefined },
+  }));
 
-  res.json({ items, total, page, pages: Math.ceil(total / limit) });
+  res.json({ items: stripped, total, page, pages });
+});
+
+// Détail complet d'un fil de conversation (corps HTML + jambes envoyées/reçues)
+// Doit être déclaré AVANT la route '/:id' pour que "thread" ne soit pas capté par celle-ci.
+router.get('/thread', async (req, res) => {
+  const key = req.query.key;
+  if (!key) return res.status(400).json({ error: 'Paramètre key requis' });
+  const thread = await getThread(key);
+  if (!thread) return res.status(404).json({ error: 'Conversation introuvable' });
+  res.json(thread);
 });
 
 // Détail d'un email reçu

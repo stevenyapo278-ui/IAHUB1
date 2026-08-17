@@ -79,6 +79,8 @@ router.patch(
     body('dailySummaryRecipients').optional().isArray(),
     body('dailySummaryRecipients.*').optional().isEmail(),
     body('notifyTechnicianOnAssignment').optional().isBoolean(),
+    body('slaHours').optional().isObject(),
+    body('slaMonitorIntervalSeconds').optional().isInt({ min: 0, max: 3600 }),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -98,6 +100,8 @@ router.patch(
     if (req.body.dailySummaryTime !== undefined) data.dailySummaryTime = req.body.dailySummaryTime;
     if (req.body.dailySummaryRecipients !== undefined) data.dailySummaryRecipients = req.body.dailySummaryRecipients;
     if (req.body.notifyTechnicianOnAssignment !== undefined) data.notifyTechnicianOnAssignment = req.body.notifyTechnicianOnAssignment;
+    if (req.body.slaHours !== undefined) data.slaHours = req.body.slaHours;
+    if (req.body.slaMonitorIntervalSeconds !== undefined) data.slaMonitorIntervalSeconds = req.body.slaMonitorIntervalSeconds;
 
     const updated = await prisma.systemSettings.update({ where: { id: 1 }, data });
 

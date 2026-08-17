@@ -17,6 +17,7 @@ import {
 } from 'recharts';
 import api from '../api/client';
 import { useTheme } from '../context/ThemeContext';
+import { useAuth } from '../context/AuthContext';
 import { LayoutDashboard, Ticket, CheckCircle2, AlertTriangle, TrendingUp, Download, RefreshCw, Sparkles, ChevronRight, Zap, Bot, Layers, ArrowUpRight } from 'lucide-react';
 
 /* ── Constantes ─────────────────────────────────────────────────────────────── */
@@ -104,6 +105,7 @@ function ConnectionDot({ connected }) {
 export default function Dashboard() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [pendingApprovals, setPendingApprovals] = useState([]);
@@ -118,6 +120,7 @@ export default function Dashboard() {
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
   const [reportLoading, setReportLoading] = useState(false);
+  const [slaAnalytics, setSlaAnalytics] = useState(null);
 
   function loadPendingAiDrafts() {
     api.get('/dashboard/pending-ai-drafts').then(({ data }) => setPendingAiDrafts(data)).catch(() => {});
@@ -144,6 +147,8 @@ export default function Dashboard() {
     api.get('/dashboard/recent-activity').then(({ data }) => setRecentActivity(data)).catch(() => {});
     api.get('/dashboard/integrations').then(({ data }) => setIntegrations(data)).catch(() => {});
     api.get(`/dashboard/technician-performance${queryParams}`).then(({ data }) => setTechPerformance(data)).catch(() => {});
+    const days = customStartDate || customEndDate ? (PERIOD_DAYS[activePeriod] || 30) : (PERIOD_DAYS[activePeriod] || 30);
+    api.get(`/dashboard/sla-analytics?days=${days}`).then(({ data }) => setSlaAnalytics(data)).catch(() => {});
     loadPendingAiDrafts();
     loadNeedsReview();
   }
@@ -154,7 +159,7 @@ export default function Dashboard() {
     setReportLoading(true);
     try {
       const days = PERIOD_DAYS[activePeriod] || 30;
-      const res = await api.get(`/dashboard/report?days=${days}`, { responseType: 'blob' });
+      const res = await api.get(`/dashboard/report?days=${days}&format=pdf`, { responseType: 'blob' });
       const blob = new Blob([res.data], { type: 'application/pdf' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a'); a.href = url; a.download = `Rapport_ITSM_${activePeriod.replace(' ', '_')}.pdf`;
@@ -388,6 +393,98 @@ export default function Dashboard() {
           </div>
         </SectionCard>
       </div>
+
+      {/* Pilotage SLA */}
+      {slaAnalytics && ['SUPERADMIN', 'ADMIN', 'TECHNICIAN', 'HOTLINE'].includes(user?.role) && (
+        <SectionCard
+          title={`Pilotage SLA (${slaAnalytics.days} jours)`}
+          icon="timer"
+          action={
+            <button
+              onClick={handleDownloadReport}
+              disabled={reportLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-[11px] font-bold hover:bg-primary/20 transition-all disabled:opacity-50 cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[14px]">picture_as_pdf</span>
+              {reportLoading ? 'Génération…' : 'Télécharger le rapport PDF'}
+            </button>
+          }
+        >
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                { label: 'Rate de violation', value: `${slaAnalytics.totals.breachRate}%`, sub: `${slaAnalytics.totals.breached} ticket(s) en retard` },
+                { label: 'CSAT moyen', value: slaAnalytics.csat.average != null ? `${slaAnalytics.csat.average}/5` : '—', sub: `${slaAnalytics.csat.rated} notation(s)` },
+                { label: 'En retard', value: slaAnalytics.overdue.length, sub: 'ouverts hors SLResol' },
+              ].map((m) => (
+                <div key={m.label} className="rounded-xl border border-outline-variant/30 bg-surface-container-low/40 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">{m.label}</p>
+                  <p className="text-2xl font-bold leading-tight mt-1 text-on-surface">{m.value}</p>
+                  <p className="text-[10px] text-on-surface-variant mt-0.5">{m.sub}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Tableau par priorité */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-outline-variant/30 text-[10px] uppercase tracking-wider text-on-surface-variant">
+                    <th className="py-2 pr-3 font-bold">Priorité</th>
+                    <th className="py-2 pr-3 font-bold">Total</th>
+                    <th className="py-2 pr-3 font-bold">Résolus</th>
+                    <th className="py-2 pr-3 font-bold">Taux violation</th>
+                    <th className="py-2 pr-3 font-bold">Résolution moy.</th>
+                    <th className="py-2 pr-3 font-bold">1re réponse moy.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {['P1', 'P2', 'P3', 'P4'].map((p) => {
+                    const s = slaAnalytics.byPriority[p];
+                    return (
+                      <tr key={p} className="border-b border-outline-variant/15">
+                        <td className={`py-2 pr-3 font-black ${p === 'P1' ? 'text-red-600 dark:text-red-400' : p === 'P2' ? 'text-orange-600 dark:text-orange-400' : 'text-on-surface'}`}>{p}</td>
+                        <td className="py-2 pr-3 font-semibold text-on-surface">{s.total}</td>
+                        <td className="py-2 pr-3 text-on-surface-variant">{s.resolved}</td>
+                        <td className="py-2 pr-3">
+                          <span className={`inline-flex items-center gap-1.5 font-bold ${s.breachRate > 20 ? 'text-red-600 dark:text-red-400' : s.breachRate > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                            <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                            {s.breachRate}%
+                          </span>
+                        </td>
+                        <td className="py-2 pr-3 text-on-surface-variant">{s.avgResolutionHours != null ? `${s.avgResolutionHours} h` : '—'}</td>
+                        <td className="py-2 pr-3 text-on-surface-variant">{s.avgFirstResponseHours != null ? `${s.avgFirstResponseHours} h` : '—'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Tickets ouverts en retard */}
+            {slaAnalytics.overdue.length > 0 && (
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant mb-1.5">
+                  Tickets ouverts échéance dépassée
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {slaAnalytics.overdue.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => navigate(`/tickets/${t.id}`)}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-red-500/30 bg-red-500/5 text-red-600 dark:text-red-400 text-[10px] font-bold hover:bg-red-500/10 transition-colors cursor-pointer"
+                    >
+                      #{t.id}
+                      <span className="max-w-[120px] truncate font-medium">{t.title}</span>
+                      <span className="text-[9px] text-on-surface-variant font-semibold">{t.priority}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </SectionCard>
+      )}
 
     </div>
   );

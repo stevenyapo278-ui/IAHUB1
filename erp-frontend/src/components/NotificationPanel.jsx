@@ -7,12 +7,16 @@ const TYPE_ICONS = {
   ticket_created: 'confirmation_number',
   ticket_assigned: 'person_pin',
   ticket_updated: 'update',
+  sla_breached: 'warning',
+  ticket_escalated: 'trending_up',
 };
 
 const TYPE_COLORS = {
   ticket_created: 'text-primary',
   ticket_assigned: 'text-indigo-500',
   ticket_updated: 'text-amber-500',
+  sla_breached: 'text-red-500',
+  ticket_escalated: 'text-orange-500',
 };
 
 function formatTimeAgo(dateString) {

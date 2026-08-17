@@ -125,9 +125,41 @@ export function NotificationProvider({ children }) {
       setUnreadCount((prev) => prev + 1);
     }
 
+    function handleSlaBreached(data) {
+      const notif = {
+        id: Date.now() + Math.random(),
+        type: 'sla_breached',
+        title: 'Dépassement SLA',
+        message: `#${data.id} — ${data.title} (délai de réponse dépassé)`,
+        link: `/tickets/${data.id}`,
+        isRead: false,
+        createdAt: new Date().toISOString(),
+        metadata: { priority: data.priority, status: data.status },
+      };
+      setNotifications((prev) => [notif, ...prev]);
+      setUnreadCount((prev) => prev + 1);
+    }
+
+    function handleTicketEscalated(data) {
+      const notif = {
+        id: Date.now() + Math.random(),
+        type: 'ticket_escalated',
+        title: `Ticket escaladé (niveau ${data.escalationLevel || 1})`,
+        message: `#${data.id} — ${data.title}${data.reason ? ` : ${data.reason}` : ''}`,
+        link: `/tickets/${data.id}`,
+        isRead: false,
+        createdAt: new Date().toISOString(),
+        metadata: { priority: data.priority, escalationLevel: data.escalationLevel },
+      };
+      setNotifications((prev) => [notif, ...prev]);
+      setUnreadCount((prev) => prev + 1);
+    }
+
     socket.on('ticket_created', handleTicketCreated);
     socket.on('ticket_assigned_to_you', handleTicketAssignedToYou);
     socket.on('ticket_updated', handleTicketUpdated);
+    socket.on('sla_breached', handleSlaBreached);
+    socket.on('ticket_escalated', handleTicketEscalated);
 
     // Rafraîchir depuis la base quand on se reconnecte
     socket.on('connect', () => {
@@ -138,6 +170,8 @@ export function NotificationProvider({ children }) {
       socket.off('ticket_created', handleTicketCreated);
       socket.off('ticket_assigned_to_you', handleTicketAssignedToYou);
       socket.off('ticket_updated', handleTicketUpdated);
+      socket.off('sla_breached', handleSlaBreached);
+      socket.off('ticket_escalated', handleTicketEscalated);
       socket.off('connect', loadNotifications);
     };
   }, [socket, loadNotifications]);

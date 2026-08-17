@@ -25,6 +25,7 @@ import ActivityLogs from './pages/ActivityLogs';
 import AuditLogs from './pages/AuditLogs';
 import AiWeeklyReports from './pages/AiWeeklyReports';
 import Locations from './pages/Locations';
+import Portal from './pages/Portal';
 
 export default function App() {
   // Les transitions de pages sont gérées dans MainLayout (Outlet uniquement).
@@ -45,6 +46,7 @@ export default function App() {
           }
         >
           <Route index element={<Dashboard />} />
+          <Route path="portal" element={<Portal />} />
           <Route path="tickets" element={<Tickets />} />
           <Route path="tickets/:id" element={<TicketDetail />} />
           <Route path="teams" element={<Teams />} />

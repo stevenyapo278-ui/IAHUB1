@@ -64,6 +64,41 @@ async function persistNotification({ userId, type, title, message, link, metadat
   }
 }
 
+// Récupère les observateurs du ticket si la relation n'a pas été incluse dans la requête
+async function getObserverIds(ticket) {
+  if (!ticket) return [];
+  if (ticket.observers && Array.isArray(ticket.observers)) {
+    return ticket.observers.map((o) => o.id || o);
+  }
+  try {
+    const row = await prisma.ticket.findUnique({
+      where: { id: ticket.id },
+      select: { observers: { select: { id: true } } },
+    });
+    return row?.observers?.map((o) => o.id) || [];
+  } catch {
+    return [];
+  }
+}
+
+// Notifie les observateurs (socket personnel + notification persistée)
+function notifyRelatedUsers(ticket, eventName, { type, title, message, metadata = {}, excludeIds = [] }) {
+  if (!io) return;
+  getObserverIds(ticket).then((observerIds) => {
+    const targets = [...new Set(observerIds.filter((uid) => uid && !excludeIds.includes(uid)))];
+    for (const userId of targets) {
+      io.to(`user:${userId}`).emit(eventName, {
+        id: ticket.id,
+        title: ticket.title,
+        status: ticket.status,
+        priority: ticket.priority,
+        changes: { status: ticket.status },
+      });
+      persistNotification({ userId, type, title, message, link: `/tickets/${ticket.id}`, metadata });
+    }
+  });
+}
+
 function emitTicketCreated(ticket) {
   if (!io) return;
   io.to('notifications').emit('ticket_created', {
@@ -88,6 +123,15 @@ function emitTicketCreated(ticket) {
       metadata: { priority: ticket.priority, status: ticket.status },
     });
   }
+
+  // Notifier aussi les observateurs du ticket (création)
+  notifyRelatedUsers(ticket, 'ticket_created', {
+    type: 'ticket_created',
+    title: 'Nouveau ticket en observation',
+    message: `#${ticket.id} — ${ticket.title}`,
+    metadata: { priority: ticket.priority, status: ticket.status },
+    excludeIds: ticket.assignedToId ? [ticket.assignedToId] : [],
+  });
 }
 
 function emitTicketUpdated(ticket, changes) {
@@ -117,6 +161,30 @@ function emitTicketUpdated(ticket, changes) {
         metadata: { changes },
       });
     }
+  }
+
+  // Notifier le demandeur à chaque changement de statut (suivi de son ticket)
+  if (ticket.requesterId && changes?.status) {
+    io.to(`user:${ticket.requesterId}`).emit('ticket_updated', payload);
+    persistNotification({
+      userId: ticket.requesterId,
+      type: 'ticket_updated',
+      title: 'Statut de votre ticket',
+      message: `#${ticket.id} — ${ticket.title} → ${changes.status}`,
+      link: `/tickets/${ticket.id}`,
+      metadata: { changes },
+    });
+  }
+
+  // Notifier les observateurs
+  if (changes?.status || changes?.assignedToId || changes?.priority) {
+    notifyRelatedUsers(ticket, 'ticket_updated', {
+      type: 'ticket_updated',
+      title: 'Ticket mis à jour (observation)',
+      message: `#${ticket.id} — ${ticket.title}${changes?.status ? ` → ${changes.status}` : ''}`,
+      metadata: { changes },
+      excludeIds: [],
+    });
   }
 }
 
@@ -148,6 +216,84 @@ function emitTicketAssigned(ticketId, title, technicianId, method) {
     link: `/tickets/${ticketId}`,
     metadata: { method, methodLabel: methodLabels[method] || method },
   });
+
+  // Informer les observateurs de la nouvelle assignation
+  prisma.ticket
+    .findUnique({ where: { id: ticketId }, select: { observers: { select: { id: true } }, title: true } })
+    .then((t) => {
+      if (!io || !t) return;
+      const targets = [...new Set((t.observers || []).map((o) => o.id).filter((uid) => uid && uid !== technicianId))];
+      for (const userId of targets) {
+        io.to(`user:${userId}`).emit('ticket_updated', { id: ticketId, title: t.title, changes: { assignedToId: technicianId } });
+        persistNotification({
+          userId,
+          type: 'ticket_updated',
+          title: 'Ticket assigné (observation)',
+          message: `#${ticketId} — ${t.title}`,
+          link: `/tickets/${ticketId}`,
+          metadata: { method, methodLabel: methodLabels[method] || method },
+        });
+      }
+    })
+    .catch(() => {});
 }
 
-module.exports = { initSocket, getIO, emitTicketCreated, emitTicketUpdated, emitTicketAssigned };
+// Dépassement SLA : alerte les admins/techniciens, l'assigné, le demandeur et les observateurs
+function emitSlaBreach(ticket) {
+  if (!io) return;
+  const payload = {
+    id: ticket.id,
+    title: ticket.title,
+    priority: ticket.priority,
+    status: ticket.status,
+    slaResponseDueAt: ticket.slaResponseDueAt,
+    slaBreachedAt: ticket.slaBreachedAt || new Date(),
+  };
+  io.to('assignments').emit('sla_breached', payload);
+
+  // Notifier personnellement l'assigné, le demandeur et chaque observateur
+  const personalTargets = [];
+  if (ticket.assignedToId) personalTargets.push(ticket.assignedToId);
+  if (ticket.requesterId) personalTargets.push(ticket.requesterId);
+  for (const obs of ticket.observers || []) personalTargets.push(obs.id);
+  const uniqueTargets = [...new Set(personalTargets)];
+  for (const userId of uniqueTargets) {
+    io.to(`user:${userId}`).emit('sla_breached', payload);
+    persistNotification({
+      userId,
+      type: 'sla_breached',
+      title: 'Dépassement SLA',
+      message: `#${ticket.id} — ${ticket.title} (délai de réponse dépassé)`,
+      link: `/tickets/${ticket.id}`,
+      metadata: { priority: ticket.priority, status: ticket.status },
+    });
+  }
+}
+
+// Escalade d'un ticket (automatique ou manuelle) : alerte l'assigné + la room des assignations
+function emitTicketEscalated(ticket, { reason, escalationLevel } = {}) {
+  if (!io) return;
+  const payload = {
+    id: ticket.id,
+    title: ticket.title,
+    priority: ticket.priority,
+    status: ticket.status,
+    escalationLevel: escalationLevel || ticket.escalationLevel || 1,
+    reason: reason || null,
+  };
+  io.to('assignments').emit('ticket_escalated', payload);
+
+  if (ticket.assignedToId) {
+    io.to(`user:${ticket.assignedToId}`).emit('ticket_escalated', payload);
+    persistNotification({
+      userId: ticket.assignedToId,
+      type: 'ticket_escalated',
+      title: 'Ticket escaladé',
+      message: `#${ticket.id} — ${ticket.title}${reason ? ` (${reason})` : ''}`,
+      link: `/tickets/${ticket.id}`,
+      metadata: { priority: ticket.priority, escalationLevel: payload.escalationLevel },
+    });
+  }
+}
+
+module.exports = { initSocket, getIO, emitTicketCreated, emitTicketUpdated, emitTicketAssigned, emitSlaBreach, emitTicketEscalated };

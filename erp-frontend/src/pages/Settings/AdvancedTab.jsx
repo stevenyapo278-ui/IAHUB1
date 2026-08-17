@@ -416,7 +416,36 @@ export default function AdvancedTab() {
             max={168}
             unit="heures"
           />
+
+          <IntervalRow
+            title="Surveillance SLA"
+            description="Fréquence de détection des dépassements de délai de réponse (0 = désactivé)."
+            value={settings.slaMonitorIntervalSeconds}
+            onChange={(v) => updateSetting('slaMonitorIntervalSeconds', v)}
+            disabled={saving}
+            max={3600}
+            unit="secondes"
+          />
         </div>
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* SECTION SLA : SEUILS PAR PRIORITE */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      <div className="space-y-md">
+        <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
+          <span className="material-symbols-outlined text-primary text-2xl">timer</span>
+          <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Moteur SLA</h4>
+        </div>
+
+        <p className="text-xs text-on-surface-variant leading-relaxed max-w-2xl">
+          Délais de première réponse et de résolution par priorité, en heures. Les échéances sont
+          calculées à la création du ticket et recalculées à chaque changement de priorité. Une
+          valeur de 0 désactive le SLA pour cette priorité. Un dépassement déclenche une alerte
+          (notification + email au technicien assigné).
+        </p>
+
+        <SlaThresholdsSection saving={saving} setSaving={setSaving} setError={setError} />
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
@@ -432,8 +461,102 @@ export default function AdvancedTab() {
   );
 }
 
-function GlpiReimportSection() {
-  const [activeTab, setActiveTab] = useState('glpi');
+const DEFAULT_SLA_HOURS = {
+  P1: { response: 1, resolution: 4 },
+  P2: { response: 2, resolution: 8 },
+  P3: { response: 4, resolution: 24 },
+  P4: { response: 8, resolution: 72 },
+};
+
+const PRIORITY_LABELS = {
+  P1: 'P1 — Critique',
+  P2: 'P2 — Haute',
+  P3: 'P3 — Moyenne',
+  P4: 'P4 — Basse',
+};
+
+function SlaThresholdsSection({ saving, setSaving, setError }) {
+  const [slaHours, setSlaHours] = useState(() => JSON.parse(JSON.stringify(DEFAULT_SLA_HOURS)));
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    api.get('/advanced-settings').then(({ data }) => {
+      const stored = data.slaHours && typeof data.slaHours === 'object' ? data.slaHours : {};
+      const merged = JSON.parse(JSON.stringify(DEFAULT_SLA_HOURS));
+      for (const p of Object.keys(DEFAULT_SLA_HOURS)) {
+        const e = stored[p];
+        if (e && typeof e === 'object') {
+          if (typeof e.response === 'number' && e.response >= 0) merged[p].response = e.response;
+          if (typeof e.resolution === 'number' && e.resolution >= 0) merged[p].resolution = e.resolution;
+        }
+      }
+      setSlaHours(merged);
+      setLoaded(true);
+    }).catch(() => {});
+  }, []);
+
+  async function save() {
+    setSaving(true);
+    setError('');
+    try {
+      await api.patch('/advanced-settings', { slaHours });
+    } catch (err) {
+      setError(err.response?.data?.error || "Erreur lors de l'enregistrement des seuils SLA");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!loaded) return null;
+
+  return (
+    <motion.div variants={itemVariants} className="bento-card p-lg">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-md">
+        {Object.keys(DEFAULT_SLA_HOURS).map((priority) => (
+          <div key={priority} className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-4">
+            <div className="font-headline-sm text-headline-sm text-on-surface font-bold mb-3">{PRIORITY_LABELS[priority]}</div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-1">Réponse (heures)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={720}
+                  value={slaHours[priority].response}
+                  onChange={(e) => setSlaHours((s) => ({ ...s, [priority]: { ...s[priority], response: Math.max(0, Number(e.target.value) || 0) } }))}
+                  disabled={saving}
+                  className={`${inputClass} w-full disabled:opacity-50`}
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-1">Résolution (heures)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={2160}
+                  value={slaHours[priority].resolution}
+                  onChange={(e) => setSlaHours((s) => ({ ...s, [priority]: { ...s[priority], resolution: Math.max(0, Number(e.target.value) || 0) } }))}
+                  disabled={saving}
+                  className={`${inputClass} w-full disabled:opacity-50`}
+                />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <motion.button
+        whileTap={{ scale: 0.97 }}
+        onClick={save}
+        disabled={saving}
+        className="mt-4 px-4 py-2 rounded-xl bg-primary text-on-primary font-bold text-body-sm hover:opacity-90 transition-all disabled:opacity-50 cursor-pointer"
+      >
+        {saving ? 'Enregistrement...' : 'Enregistrer les seuils SLA'}
+      </motion.button>
+    </motion.div>
+  );
+}
+
+function GlpiReimportSection() {  const [activeTab, setActiveTab] = useState('glpi');
   const [reimporting, setReimporting] = useState(false);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');

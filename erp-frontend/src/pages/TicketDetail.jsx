@@ -8,11 +8,13 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import { useTheme } from '../context/ThemeContext';
 import SearchableSelect from '../components/SearchableSelect';
 import SearchableMultiSelect from '../components/SearchableMultiSelect';
+import SlaBadge from '../components/SlaBadge';
 import {
   ArrowLeft, Clock, User, Tag, AlertTriangle, CheckCircle2,
   Trash2, Paperclip, MessageSquare, Sparkles, Shield, MapPin,
   RefreshCw, Mail, FileText, Check, X, Send, ChevronRight,
-  Flame, Radio, Info, ArrowDown, UserCheck, HelpCircle, Layers, History
+  Flame, Radio, Info, ArrowDown, UserCheck, HelpCircle, Layers, History,
+  TrendingUp, Lock, Link2, Merge
 } from 'lucide-react';
 import {
   STATUS_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS,
@@ -47,6 +49,21 @@ export default function TicketDetail() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [ticket, setTicket] = useState(null);    const [followup, setFollowup] = useState('');
+  const [followupPrivate, setFollowupPrivate] = useState(false);
+  const [events, setEvents] = useState([]);
+
+  // Tickets liés + fusion
+  const [linkModalOpen, setLinkModalOpen] = useState(false);
+  const [linkSearch, setLinkSearch] = useState('');
+  const [linkType, setLinkType] = useState('RELATED');
+  const [linkResults, setLinkResults] = useState([]);
+  const [linkLoading, setLinkLoading] = useState(false);
+  const [mergeModalOpen, setMergeModalOpen] = useState(false);
+  const [mergeSearch, setMergeSearch] = useState('');
+  const [mergeResults, setMergeResults] = useState([]);
+  const [mergeSelected, setMergeSelected] = useState([]);
+  const [mergeLoading, setMergeLoading] = useState(false);
+  const [merging, setMerging] = useState(false);
   const [pastedImages, setPastedImages] = useState([]);
   const [error, setError] = useState('');
   const [teams, setTeams] = useState([]);
@@ -64,6 +81,20 @@ export default function TicketDetail() {
   const [approving, setApproving] = useState(false);
   const [manualGlpiId, setManualGlpiId] = useState('');
   const [linking, setLinking] = useState(false);
+  const [escalating, setEscalating] = useState(false);
+
+  const handleEscalate = async () => {
+    setEscalating(true);
+    try {
+      const { data } = await api.post(`/tickets/${id}/escalate`, { reason: 'Escalade manuelle' });
+      toast.success(`Ticket escaladé (niveau ${data.escalationLevel})`);
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || "Échec de l'escalade");
+    } finally {
+      setEscalating(false);
+    }
+  };
 
   const handleLinkGlpi = async () => {
     if (!manualGlpiId) return;
@@ -94,7 +125,10 @@ export default function TicketDetail() {
       .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement du ticket'));
     api
       .get(`/tickets/${id}/events`)
-      .then(({ data }) => setSyncFailures(data.filter((e) => e.type === 'GLPI_SYNC_FAILED')))
+      .then(({ data }) => {
+        setEvents(data);
+        setSyncFailures(data.filter((e) => e.type === 'GLPI_SYNC_FAILED'));
+      })
       .catch(() => {});
     api
       .get(`/tickets/${id}/corrections`)
@@ -231,6 +265,7 @@ export default function TicketDetail() {
         // Envoyer en FormData avec les images
         const fd = new FormData();
         fd.append('content', followup);
+        if (followupPrivate) fd.append('isPrivate', 'true');
         pastedImages.forEach((img, idx) => {
           fd.append('images', img.file);
           content += `\n\n<!--IMAGE_${idx}-->`;
@@ -239,16 +274,95 @@ export default function TicketDetail() {
         fd.set('content', content);
         await api.post(`/tickets/${id}/followups`, fd);
       } else {
-        await api.post(`/tickets/${id}/followups`, { content });
+        await api.post(`/tickets/${id}/followups`, { content, isPrivate: followupPrivate });
       }
 
       toast.success('Commentaire ajouté');
       setFollowup('');
+      setFollowupPrivate(false);
       pastedImages.forEach((img) => URL.revokeObjectURL(img.dataUrl));
       setPastedImages([]);
       load();
     } catch (err) {
       setError(err.response?.data?.error || "Erreur lors de l'ajout du commentaire");
+    }
+  }
+
+  async function toggleFollowupVisibility(followup) {
+    try {
+      await api.patch(`/tickets/${id}/followups/${followup.id}/visibility`, { isPrivate: !followup.isPrivate });
+      toast.success(followup.isPrivate ? 'Commentaire rendu public' : 'Commentaire rendu privé');
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || "Erreur lors du changement de visibilité");
+    }
+  }
+
+  const linkedTickets = [
+    ...(ticket?.linksA || []).map((l) => ({ ...l, otherTicket: l.ticketB })),
+    ...(ticket?.linksB || []).map((l) => ({ ...l, otherTicket: l.ticketA })),
+  ];
+
+  async function searchLinkableTickets(q) {
+    if (!q.trim()) { setLinkResults([]); return; }
+    setLinkLoading(true);
+    try {
+      const { data } = await api.get('/tickets', { params: { search: q, limit: 8 } });
+      setLinkResults((data.items || []).filter((t) => t.id !== Number(id)));
+    } catch { setLinkResults([]); } finally { setLinkLoading(false); }
+  }
+
+  async function addLink(targetTicketId) {
+    try {
+      await api.post(`/tickets/${id}/links`, { targetTicketId, type: linkType });
+      toast.success('Ticket lié');
+      setLinkModalOpen(false);
+      setLinkSearch('');
+      setLinkResults([]);
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Échec de la liaison');
+    }
+  }
+
+  async function removeLink(link) {
+    try {
+      await api.delete(`/tickets/${id}/links/${link.id}`);
+      toast.success('Lien supprimé');
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Échec de la suppression du lien');
+    }
+  }
+
+  async function searchMergeableTickets(q) {
+    if (!q.trim()) { setMergeResults([]); return; }
+    setMergeLoading(true);
+    try {
+      const { data } = await api.get('/tickets', { params: { search: q, limit: 10 } });
+      setMergeResults((data.items || []).filter((t) => t.id !== Number(id)));
+    } catch { setMergeResults([]); } finally { setMergeLoading(false); }
+  }
+
+  function toggleMergeSelect(ticketId) {
+    setMergeSelected((sel) => (sel.includes(ticketId) ? sel.filter((s) => s !== ticketId) : [...sel, ticketId]));
+  }
+
+  async function confirmMerge() {
+    if (mergeSelected.length === 0) return toast.error('Sélectionnez au moins un ticket à fusionner');
+    setMerging(true);
+    try {
+      const { data } = await api.post(`/tickets/${id}/merge`, { sourceTicketIds: mergeSelected });
+      toast.success(`${data.merged} ticket(s) fusionné(s) dans #${id} (${data.movedItems} élément(s) déplacé(s))`);
+      setMergeModalOpen(false);
+      setMergeSelected([]);
+      setMergeSearch('');
+      setMergeResults([]);
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Échec de la fusion');
+    } finally {
+      setMerging(false);
     }
   }
 
@@ -401,6 +515,20 @@ export default function TicketDetail() {
 
         {/* Right Badges & Actions */}
         <div className="flex items-center gap-2 flex-wrap shrink-0">
+          {ticket.escalationLevel > 0 && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-orange-50 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400 border border-orange-500/30">
+              Niv. escalade {ticket.escalationLevel}
+            </span>
+          )}
+          <button
+            onClick={handleEscalate}
+            disabled={escalating}
+            className="px-3 py-1.5 rounded-xl border border-orange-500/30 bg-orange-500/10 text-orange-600 dark:text-orange-300 hover:bg-orange-500/20 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
+            title="Escalader ce ticket : alerte les admins et monte le niveau de prise en charge"
+          >
+            <TrendingUp className="w-3.5 h-3.5" />
+            {escalating ? 'Escalade...' : 'Escalader'}
+          </button>
           <button
             onClick={async () => {
               try {
@@ -426,6 +554,7 @@ export default function TicketDetail() {
             <PIcon className="w-3.5 h-3.5" />
             {pConfig.label}
           </span>
+          <SlaBadge ticket={ticket} />
           {canDelete && (
             <button
               onClick={() => setShowDeleteConfirm(true)}
@@ -555,6 +684,82 @@ export default function TicketDetail() {
             )}
           </div>
 
+          {/* Tickets liés */}
+          <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm">
+            <div className="flex items-center justify-between gap-3 pb-3 border-b border-outline-variant/20 mb-4">
+              <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
+                <Link2 className="w-4 h-4 text-primary" />
+                Tickets liés
+                {linkedTickets.length > 0 && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                    {linkedTickets.length}
+                  </span>
+                )}
+              </h3>
+              {canAssign && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setMergeModalOpen(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-orange-500/30 text-orange-600 dark:text-orange-400 text-[11px] font-bold hover:bg-orange-500/5 transition-colors cursor-pointer"
+                  >
+                    <Merge className="w-3.5 h-3.5" />
+                    Fusionner…
+                  </button>
+                  <button
+                    onClick={() => setLinkModalOpen(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-[11px] font-bold hover:opacity-90 transition-opacity cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Lier un ticket
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {linkedTickets.length === 0 ? (
+              <p className="text-xs text-on-surface-variant/70 italic py-2">
+                Aucun ticket lié. Liez les tickets liés (doublons, incidents liés…) pour garder la trace.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {linkedTickets.map((l) => (
+                  <div key={l.id} className="flex items-center gap-3 p-3 rounded-xl border border-outline-variant/30 bg-surface-container-low/40 hover:border-primary/40 transition-colors">
+                    <Link2 className="w-3.5 h-3.5 text-on-surface-variant shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <Link
+                        to={`/tickets/${l.otherTicket.id}`}
+                        className="text-xs font-bold text-on-surface hover:text-primary transition-colors line-clamp-1"
+                      >
+                        #{l.otherTicket.id} — {l.otherTicket.title}
+                      </Link>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-surface-container-high text-on-surface-variant uppercase tracking-wider">
+                          {l.type}
+                        </span>
+                        <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
+                          l.otherTicket.status === 'SOLVED' || l.otherTicket.status === 'CLOSED'
+                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                            : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                        }`}>
+                          {l.otherTicket.status}
+                        </span>
+                      </div>
+                    </div>
+                    {canAssign && (
+                      <button
+                        onClick={() => removeLink(l)}
+                        className="p-1.5 rounded-lg text-on-surface-variant hover:text-error hover:bg-error/5 transition-colors cursor-pointer"
+                        title="Supprimer le lien"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Follow-up / Timeline Card */}
           <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-6">
             <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface border-b border-outline-variant/20 pb-3 flex items-center gap-2">
@@ -568,6 +773,7 @@ export default function TicketDetail() {
                 const timeline = [
                   ...ticket.followups.map((f) => ({ kind: 'followup', date: f.createdAt, data: f })),
                   ...(ticket.messages || []).map((m) => ({ kind: 'email', date: m.timestamp, data: m })),
+                  ...(events || []).map((e) => ({ kind: 'event', date: e.createdAt, data: e })),
                 ].sort((a, b) => new Date(a.date) - new Date(b.date));
 
                 if (timeline.length === 0) {
@@ -593,6 +799,25 @@ export default function TicketDetail() {
                             {item.data.source === 'glpi' && (
                               <span className="text-[9px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400 font-bold border border-amber-500/25">GLPI</span>
                             )}
+                            {item.data.isPrivate && (
+                              <span className="text-[9px] px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-700 dark:text-purple-400 font-bold border border-purple-500/25" title="Visible uniquement par l'équipe">
+                                <Lock className="w-2.5 h-2.5 inline mr-0.5" />
+                                PRIVÉ
+                              </span>
+                            )}
+                            {canAssign && item.data.source !== 'glpi' && (
+                              <button
+                                onClick={() => toggleFollowupVisibility(item.data)}
+                                title={item.data.isPrivate ? 'Rendre public' : 'Rendre privé'}
+                                className={`p-1 rounded-md border transition-colors cursor-pointer ${
+                                  item.data.isPrivate
+                                    ? 'border-purple-500/30 bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20'
+                                    : 'border-outline-variant/40 bg-surface-container text-on-surface-variant hover:text-on-surface hover:border-outline'
+                                }`}
+                              >
+                                <Lock className="w-3 h-3" />
+                              </button>
+                            )}
                           </div>
                           <time className="text-[10px] font-mono text-on-surface-variant bg-surface-container border border-outline-variant/30 px-2 py-0.5 rounded-full">
                             {new Date(item.data.createdAt).toLocaleString('fr-FR')}
@@ -607,6 +832,28 @@ export default function TicketDetail() {
                           <div className="text-xs text-on-surface leading-relaxed whitespace-pre-wrap font-normal">
                             {item.data.content}
                           </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : item.kind === 'event' ? (
+                    <div key={`e-${item.data.id}`} className="flex items-center gap-3 px-4 py-2.5 rounded-xl border border-dashed border-outline-variant/40 bg-surface-container-low/20">
+                      <div className="w-7 h-7 rounded-full border border-outline-variant/40 bg-surface-container text-on-surface-variant flex items-center justify-center shrink-0">
+                        {eventIcon(item.data.type)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <span className="text-[11px] font-bold text-on-surface-variant">
+                            {eventLabel(item.data.type)}
+                            {item.data.actor && item.data.actor !== 'SYSTEM' && (
+                              <span className="text-on-surface-variant/70 font-medium"> — {item.data.actor}</span>
+                            )}
+                          </span>
+                          <time className="text-[9px] font-mono text-on-surface-variant/70">
+                            {new Date(item.data.createdAt).toLocaleString('fr-FR')}
+                          </time>
+                        </div>
+                        {eventDetail(item.data) && (
+                          <p className="text-[10px] text-on-surface-variant/80 mt-0.5 leading-snug">{eventDetail(item.data)}</p>
                         )}
                       </div>
                     </div>
@@ -642,6 +889,20 @@ export default function TicketDetail() {
 
             {/* Add Comment Form */}
             <form onSubmit={handleAddFollowup} className="pt-4 border-t border-outline-variant/30 space-y-3">
+              {canAssign && (
+                <label className="flex items-center gap-2 cursor-pointer select-none w-fit">
+                  <input
+                    type="checkbox"
+                    checked={followupPrivate}
+                    onChange={(e) => setFollowupPrivate(e.target.checked)}
+                    className="cursor-pointer accent-purple-600 w-4 h-4"
+                  />
+                  <span className="text-[11px] font-semibold text-on-surface-variant flex items-center gap-1">
+                    <Lock className="w-3 h-3 text-purple-500" />
+                    Commentaire privé (invisible pour le demandeur)
+                  </span>
+                </label>
+              )}
               <textarea
                 className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-none"
                 placeholder="Ajouter un commentaire ou suivi... (Ctrl+Entrée pour envoyer)"
@@ -1301,6 +1562,226 @@ export default function TicketDetail() {
         onConfirm={handleDelete}
         onCancel={() => setShowDeleteConfirm(false)}
       />
+
+      {/* Modal : Lier un ticket */}
+      {linkModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
+                <Link2 className="w-4 h-4 text-primary" />
+                Lier un ticket à #{id}
+              </h3>
+              <button onClick={() => setLinkModalOpen(false)} className="p-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container transition-colors cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <select
+              value={linkType}
+              onChange={(e) => setLinkType(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl border border-outline-variant/60 bg-surface text-on-surface text-xs font-semibold cursor-pointer"
+            >
+              <option value="RELATED">Lié (relation générale)</option>
+              <option value="DUPLICATE_OF">Doublon de ce ticket</option>
+              <option value="BLOCKS">Bloque ce ticket</option>
+              <option value="BLOCKED_BY">Bloqué par ce ticket</option>
+            </select>
+
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
+              <input
+                type="text"
+                value={linkSearch}
+                onChange={(e) => { setLinkSearch(e.target.value); searchLinkableTickets(e.target.value); }}
+                placeholder="Rechercher par titre, n° ticket..."
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface text-xs focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none"
+              />
+            </div>
+
+            <div className="max-h-60 overflow-y-auto space-y-1.5">
+              {linkLoading && <p className="text-xs text-on-surface-variant text-center py-3">Recherche…</p>}
+              {!linkLoading && linkResults.length === 0 && (
+                <p className="text-xs text-on-surface-variant/70 italic text-center py-3">
+                  {linkSearch ? 'Aucun résultat' : 'Tapez pour rechercher un ticket'}
+                </p>
+              )}
+              {linkResults.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => addLink(t.id)}
+                  className="w-full flex items-center gap-3 p-2.5 rounded-xl border border-outline-variant/30 hover:border-primary/50 hover:bg-surface-container transition-all cursor-pointer text-left"
+                >
+                  <span className="font-mono text-[10px] font-bold text-primary shrink-0">#{t.id}</span>
+                  <span className="flex-1 min-w-0 text-xs font-semibold text-on-surface truncate">{t.title}</span>
+                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-surface-container-high text-on-surface-variant shrink-0">{t.status}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal : Fusionner des tickets dans celui-ci */}
+      {mergeModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
+                <Merge className="w-4 h-4 text-primary" />
+                Fusionner des tickets dans #{id}
+              </h3>
+              <button onClick={() => { setMergeModalOpen(false); setMergeSelected([]); }} className="p-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container transition-colors cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-[11px] text-on-surface-variant leading-relaxed">
+              Les commentaires, emails, pièces jointes et observateurs des tickets sélectionnés seront
+              déplacés vers #{id}, puis les tickets sources seront supprimés. <b>Action irréversible.</b>
+            </p>
+
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
+              <input
+                type="text"
+                value={mergeSearch}
+                onChange={(e) => { setMergeSearch(e.target.value); searchMergeableTickets(e.target.value); }}
+                placeholder="Rechercher un ticket à fusionner..."
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface text-xs focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none"
+              />
+            </div>
+
+            <div className="max-h-56 overflow-y-auto space-y-1.5">
+              {mergeLoading && <p className="text-xs text-on-surface-variant text-center py-3">Recherche…</p>}
+              {!mergeLoading && mergeResults.length === 0 && (
+                <p className="text-xs text-on-surface-variant/70 italic text-center py-3">
+                  {mergeSearch ? 'Aucun résultat' : 'Tapez pour rechercher un ticket'}
+                </p>
+              )}
+              {mergeResults.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => toggleMergeSelect(t.id)}
+                  className={`w-full flex items-center gap-3 p-2.5 rounded-xl border transition-all cursor-pointer text-left ${
+                    mergeSelected.includes(t.id) ? 'border-primary bg-primary/10' : 'border-outline-variant/30 hover:border-primary/50 hover:bg-surface-container'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={mergeSelected.includes(t.id)}
+                    onChange={() => toggleMergeSelect(t.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="accent-primary w-4 h-4 cursor-pointer shrink-0"
+                  />
+                  <span className="font-mono text-[10px] font-bold text-primary shrink-0">#{t.id}</span>
+                  <span className="flex-1 min-w-0 text-xs font-semibold text-on-surface truncate">{t.title}</span>
+                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-surface-container-high text-on-surface-variant shrink-0">{t.status}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => { setMergeModalOpen(false); setMergeSelected([]); }}
+                className="px-4 py-2 rounded-xl text-xs font-semibold border border-outline-variant/40 hover:bg-surface-container text-on-surface transition-all cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                disabled={mergeSelected.length === 0 || merging}
+                onClick={confirmMerge}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-orange-500 to-red-600 text-white shadow-md shadow-orange-500/20 hover:brightness-110 disabled:opacity-50 transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <Merge className="w-3.5 h-3.5" />
+                {merging ? 'Fusion…' : `Fusionner (${mergeSelected.length})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+function eventIcon(type) {
+  switch (type) {
+    case 'CREATED': return <Plus className="w-3 h-3" />;
+    case 'STATUS_CHANGED': return <RefreshCw className="w-3 h-3" />;
+    case 'PRIORITY_CHANGED': return <Flame className="w-3 h-3" />;
+    case 'ASSIGNED': return <UserCheck className="w-3 h-3" />;
+    case 'EMAIL_RECEIVED': case 'EMAIL_SENT': return <Mail className="w-3 h-3" />;
+    case 'FOLLOWUP_ADDED': return <MessageSquare className="w-3 h-3" />;
+    case 'AI_ANALYZED': case 'AI_DRAFT_GENERATED': case 'AI_FOLLOWUP_DRAFT_GENERATED':
+    case 'AI_AUTO_REPLY_IGNORED': case 'AI_CONVERSATION_ESCALATED': return <Sparkles className="w-3 h-3" />;
+    case 'KNOWLEDGE_CREATED': return <FileText className="w-3 h-3" />;
+    case 'REOPENED': return <HelpCircle className="w-3 h-3" />;
+    case 'ESCALATED': case 'ESCALATION_REQUESTED': return <TrendingUp className="w-3 h-3" />;
+    case 'REMINDER_SENT': return <Clock className="w-3 h-3" />;
+    case 'CLOSED_AUTO': case 'CLOSURE_SUGGESTED': return <CheckCircle2 className="w-3 h-3" />;
+    case 'CLOSURE_VALIDATED': return <Shield className="w-3 h-3" />;
+    case 'CLOSURE_REJECTED': return <X className="w-3 h-3" />;
+    case 'APPROVED': return <Shield className="w-3 h-3" />;
+    case 'REJECTED': return <X className="w-3 h-3" />;
+    case 'SLA_BREACHED': return <AlertTriangle className="w-3 h-3 text-red-500" />;
+    case 'SLA_UPDATED': return <Clock className="w-3 h-3" />;
+    case 'MERGED_INTO': case 'MERGED_FROM': return <Layers className="w-3 h-3" />;
+    case 'LINKED': case 'UNLINKED': return <Link2 className="w-3 h-3" />;
+    case 'GLPI_SYNC_FAILED': return <AlertTriangle className="w-3 h-3 text-red-500" />;
+    default: return <History className="w-3 h-3" />;
+  }
+}
+
+function eventLabel(type) {
+  const labels = {
+    CREATED: 'Ticket créé',
+    STATUS_CHANGED: 'Statut modifié',
+    PRIORITY_CHANGED: 'Priorité modifiée',
+    ASSIGNED: 'Ticket assigné',
+    EMAIL_RECEIVED: 'Email reçu',
+    EMAIL_SENT: 'Email envoyé',
+    FOLLOWUP_ADDED: 'Commentaire ajouté',
+    AI_ANALYZED: 'Analyse IA',
+    AI_DRAFT_GENERATED: 'Brouillon IA généré',
+    AI_FOLLOWUP_DRAFT_GENERATED: 'Brouillon de réponse IA',
+    AI_AUTO_REPLY_IGNORED: 'Réponse auto IA ignorée',
+    AI_CONVERSATION_ESCALATED: 'Conversation escaladée vers un humain',
+    KNOWLEDGE_CREATED: 'Article de connaissance créé',
+    REOPENED: 'Ticket rouvert',
+    ESCALATED: 'Ticket escaladé',
+    ESCALATION_REQUESTED: 'Escalade demandée',
+    REMINDER_SENT: 'Relance envoyée',
+    CLOSED_AUTO: 'Clôture automatique',
+    CLOSURE_SUGGESTED: 'Clôture suggérée',
+    CLOSURE_VALIDATED: 'Clôture validée',
+    CLOSURE_REJECTED: 'Clôture rejetée',
+    APPROVED: 'Approuvé (Hotline)',
+    REJECTED: 'Rejeté (Hotline)',
+    SLA_BREACHED: 'SLA dépassé',
+    SLA_UPDATED: 'SLA mis à jour',
+    MERGED_INTO: 'Fusionné dans un autre ticket',
+    MERGED_FROM: 'Ticket fusionné ici',
+    LINKED: 'Ticket lié',
+    UNLINKED: 'Lien supprimé',
+    GLPI_SYNC_FAILED: 'Échec synchronisation GLPI',
+    FOLLOWUP_MADE_PRIVATE: 'Commentaire rendu privé',
+    FOLLOWUP_MADE_PUBLIC: 'Commentaire rendu public',
+  };
+  return labels[type] || type;
+}
+
+function eventDetail(event) {
+  const p = event.payload || {};
+  const parts = [];
+  if (p.oldStatus && p.newStatus) parts.push(`${p.oldStatus} → ${p.newStatus}`);
+  if (p.oldPriority && p.newPriority) parts.push(`${p.oldPriority} → ${p.newPriority}`);
+  if (p.action) parts.push(p.action);
+  if (p.reason) parts.push(p.reason);
+  if (p.error) parts.push(p.error);
+  if (p.dueAt) parts.push(`Échéance : ${new Date(p.dueAt).toLocaleString('fr-FR')}`);
+  if (p.level) parts.push(`Niveau ${p.level}`);
+  if (p.targetTicketId) parts.push(`Ticket #${p.targetTicketId}`);
+  return parts.join(' · ');
 }

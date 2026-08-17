@@ -6,7 +6,7 @@ const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { getActiveGlpiConfig, glpiInitSession, glpiKillSession } = require('../utils/glpiSync');
-const { notifyMajorIncidentResolved } = require('../services/emailSender');
+const { notifyMajorIncidentResolved, sendTicketStatusNotification } = require('../services/emailSender');
 const { createGlpiTicket, updateGlpiTicket, deleteGlpiTicket, addGlpiFollowup } = require('../services/glpiTicketCreator');
 const { autoAssignTechnician } = require('../services/ticketAutoAssign');
 const { logEvent } = require('../services/ticketEvent');
@@ -14,6 +14,10 @@ const { auditLog } = require('../services/auditLogService');
 const { uploadPendingAttachments } = require('../services/emailAttachmentProcessor');
 const { emitTicketCreated, emitTicketUpdated, emitTicketAssigned } = require('../utils/socket');
 const { recordDecision } = require('../services/senderReputation');
+const { applySla, recordFirstResponse } = require('../services/slaService');
+const { escalateTicket } = require('../services/escalationService');
+const { mergeTickets } = require('../services/ticketMergeService');
+const { normalizeLinkType, normalizeLinkEndpoints } = require('../utils/ticketLinks');
 const multer = require('multer');
 
 const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); // 20 Mo max
@@ -44,7 +48,8 @@ router.get('/', async (req, res) => {
   }
   if (priority) where.priority = priority;
   if (teamId) where.teamId = Number(teamId);
-  if (assignedToId) where.assignedToId = Number(assignedToId);
+  if (assignedToId === 'none') where.assignedToId = null;
+  else if (assignedToId) where.assignedToId = Number(assignedToId);
   if (category) where.category = category;
   if (locationId) where.glpiLocationId = Number(locationId);
   if (aiProcessed === 'true') where.aiProcessed = true;
@@ -114,6 +119,157 @@ router.get('/', async (req, res) => {
   return res.json({ items: tickets, total, page: pageNum, pages: Math.ceil(total / pageSize) });
 });
 
+// Export serveur : mêmes filtres que la liste, dataset complet (pas de pagination UI)
+router.get('/export', async (req, res) => {
+  const {
+    status, priority, teamId, assignedToId, mine, search, category, source,
+    aiProcessed, closeSuggested, approvalStatus, sortBy, sortOrder, format,
+  } = req.query;
+
+  const where = {};
+  if (status) {
+    if (status === 'OPEN_GROUP') where.status = { in: ['NEW', 'OPEN', 'PENDING'] };
+    else if (status === 'CLOSED_GROUP') where.status = { in: ['SOLVED', 'CLOSED'] };
+    else where.status = status;
+  }
+  if (priority) where.priority = priority;
+  if (teamId) where.teamId = Number(teamId);
+  if (assignedToId === 'none') where.assignedToId = null;
+  else if (assignedToId) where.assignedToId = Number(assignedToId);
+  if (category) where.category = category;
+  if (aiProcessed === 'true') where.aiProcessed = true;
+  if (mine === 'true') {
+    if (req.user.role === 'REQUESTER') where.requesterId = req.user.sub;
+    else where.assignedToId = req.user.sub;
+  }
+  if (approvalStatus) where.approvalStatus = approvalStatus;
+  if (closeSuggested === 'true') where.closeSuggested = true;
+  if (closeSuggested === 'false') where.closeSuggested = false;
+  if (source === 'glpi') where.glpiTicketId = { not: null };
+  if (source === 'erp') where.glpiTicketId = null;
+
+  if (search) {
+    const numericId = parseInt(search, 10);
+    const orConditions = [
+      { title: { contains: search, mode: 'insensitive' } },
+      { content: { contains: search, mode: 'insensitive' } },
+      { category: { contains: search, mode: 'insensitive' } },
+    ];
+    if (!isNaN(numericId)) orConditions.push({ id: numericId });
+    where.OR = orConditions;
+  }
+
+  let orderBy = { createdAt: 'desc' };
+  if (sortBy) {
+    const order = sortOrder === 'asc' ? 'asc' : 'desc';
+    orderBy = { [sortBy]: order };
+  }
+
+  const tickets = await prisma.ticket.findMany({
+    where,
+    take: 10000,
+    orderBy,
+    select: {
+      id: true, title: true, status: true, priority: true, category: true, type: true,
+      source: true, requesterId: true, assignedToId: true, teamId: true, glpiTicketId: true,
+      glpiLocationName: true, createdAt: true, solvedAt: true, closedAt: true,
+      slaResponseDueAt: true, slaResolutionDueAt: true, slaBreachedAt: true, firstResponseAt: true,
+      aiProcessed: true, approvalStatus: true, requester: { select: { email: true, fullName: true } },
+      assignedTo: { select: { email: true, fullName: true } },
+      team: { select: { name: true } },
+    },
+  });
+
+  if (format === 'csv') {
+    const header = ['id', 'titre', 'statut', 'priorite', 'categorie', 'type', 'source', 'demandeur', 'technicien', 'equipe', 'glpi_ticket_id', 'lieu', 'cree_le', 'resolu_le', 'ferme_le', 'sla_reponse_due', 'sla_resolution_due', 'sla_depasse_le', 'premiere_reponse', 'ia', 'approbation'];
+    const rows = tickets.map((t) => [
+      t.id, `"${(t.title || '').replace(/"/g, '""')}"`, t.status, t.priority, `"${(t.category || '').replace(/"/g, '""')}"`,
+      t.type, t.source || '', t.requester?.email || '', t.assignedTo?.email || '', t.team?.name || '',
+      t.glpiTicketId || '', t.glpiLocationName || '', t.createdAt?.toISOString() || '', t.solvedAt?.toISOString() || '',
+      t.closedAt?.toISOString() || '', t.slaResponseDueAt?.toISOString() || '', t.slaResolutionDueAt?.toISOString() || '',
+      t.slaBreachedAt?.toISOString() || '', t.firstResponseAt?.toISOString() || '', t.aiProcessed ? 'oui' : 'non', t.approvalStatus,
+    ]);
+    const csv = [header.join(';'), ...rows.map((r) => r.join(';'))].join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="tickets_export_${new Date().toISOString().slice(0, 10)}.csv"`);
+    return res.send('\uFEFF' + csv);
+  }
+
+  return res.json({ items: tickets, total: tickets.length });
+});
+
+// Actions groupées : changement de statut/priorité/assignation/équipe sur une sélection de tickets
+router.post(
+  '/bulk-update',
+  requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']),
+  [body('ids').isArray({ min: 1 }), body('ids.*').isInt()],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    if (req.body.ids.length > 500) return res.status(400).json({ error: 'Maximum 500 tickets par opération groupée' });
+
+    const { ids, status, priority, assignedToId, teamId } = req.body;
+    if (!status && !priority && assignedToId === undefined && teamId === undefined) {
+      return res.status(400).json({ error: 'Au moins une modification est requise (status, priority, assignedToId, teamId)' });
+    }
+
+    const data = {};
+    if (status) data.status = status;
+    if (priority) data.priority = priority;
+    if (assignedToId !== undefined) data.assignedToId = assignedToId || null;
+    if (teamId !== undefined) data.teamId = teamId || null;
+
+    let updatedCount = 0;
+    const failures = [];
+
+    for (const id of ids) {
+      try {
+        const before = await prisma.ticket.findUnique({
+          where: { id },
+          select: { status: true, priority: true, glpiTicketId: true },
+        });
+        if (!before) { failures.push({ id, error: 'Ticket introuvable' }); continue; }
+
+        const ticket = await prisma.ticket.update({
+          where: { id },
+          data: {
+            ...data,
+            ...(data.status === 'SOLVED' ? { solvedAt: new Date() } : {}),
+            ...(data.status === 'CLOSED' ? { closedAt: new Date() } : {}),
+          },
+        });
+
+        // SLA recalculé si la priorité change
+        if (data.priority) {
+          try { await applySla(ticket); } catch (err) { console.error('[ticket.routes] Recalcul SLA bulk échoué:', err.message); }
+        }
+
+        // Répercuter vers GLPI si synchronisé
+        if (before.glpiTicketId) {
+          try {
+            let assignedToGlpiId;
+            if (assignedToId !== undefined && assignedToId) {
+              const assignee = await prisma.user.findUnique({ where: { id: Number(assignedToId) }, select: { glpiId: true } });
+              assignedToGlpiId = assignee?.glpiId || undefined;
+            }
+            await updateGlpiTicket(before.glpiTicketId, { status, priority, assignedToGlpiId });
+          } catch (err) {
+            await logEvent(id, 'GLPI_SYNC_FAILED', 'SYSTEM', { action: 'bulk-update', error: err.message });
+          }
+        }
+
+        emitTicketUpdated(ticket, { status, priority, assignedToId });
+        if (data.status) notifyRequesterOnStatusChange(id, data.status);
+        updatedCount += 1;
+      } catch (err) {
+        failures.push({ id, error: err.message });
+      }
+    }
+
+    return res.json({ updatedCount, total: ids.length, failures });
+  }
+);
+
 // Get single ticket with followups
 router.get('/:id', async (req, res) => {
   const ticket = await prisma.ticket.findUnique({
@@ -128,11 +284,19 @@ router.get('/:id', async (req, res) => {
       messages: { orderBy: { timestamp: 'asc' } },
       attachments: true,
       aiSuggestions: { orderBy: { createdAt: 'desc' } },
+      linksA: { include: { ticketB: { select: { id: true, title: true, status: true, priority: true } } }, orderBy: { createdAt: 'asc' } },
+      linksB: { include: { ticketA: { select: { id: true, title: true, status: true, priority: true } } }, orderBy: { createdAt: 'asc' } },
     },
   });
 
   if (!ticket) {
     return res.status(404).json({ error: 'Ticket introuvable' });
+  }
+
+  // Les commentaires privés (isPrivate) ne sont visibles que par l'équipe (jamais par le demandeur)
+  const isStaffMember = ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'].includes(req.user.role);
+  if (!isStaffMember) {
+    ticket.followups = ticket.followups.filter((f) => !f.isPrivate);
   }
 
   return res.json(ticket);
@@ -144,6 +308,23 @@ router.get('/:id/attachments/:attachmentId/file', async (req, res) => {
     where: { id: Number(req.params.attachmentId), ticketId: Number(req.params.id) },
   });
   if (!attachment) return res.status(404).json({ error: 'Pièce jointe introuvable' });
+
+  // Priorité au fichier local (pièces jointes en attente d'approbation ou jamais synchronisées GLPI)
+  if (attachment.localFilepath) {
+    const localPath = path.isAbsolute(attachment.localFilepath)
+      ? attachment.localFilepath
+      : path.join(__dirname, '..', attachment.localFilepath);
+    if (fs.existsSync(localPath)) {
+      res.setHeader('Content-Type', attachment.mimeType || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `inline; filename="${attachment.filename}"`);
+      return res.sendFile(localPath);
+    }
+  }
+
+  // Sinon, document GLPI (sync historique)
+  if (!attachment.glpiDocumentId) {
+    return res.status(404).json({ error: 'Fichier non disponible sur ce serveur' });
+  }
 
   const config = await getActiveGlpiConfig();
   if (!config) return res.status(422).json({ error: 'GLPI non configuré' });
@@ -255,11 +436,17 @@ router.post(
     // Sauvegarder la pièce jointe localement (l'upload GLPI sera fait à l'approbation)
     if (req.file) {
       try {
+        const TICKET_ATTACHMENTS_DIR = path.join(__dirname, '..', 'uploads', 'ticket-attachments');
+        fs.mkdirSync(TICKET_ATTACHMENTS_DIR, { recursive: true });
+        const safeFilename = `${ticket.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${path.extname(req.file.originalname) || ''}`;
+        const destPath = path.join(TICKET_ATTACHMENTS_DIR, safeFilename);
+        fs.writeFileSync(destPath, req.file.buffer);
         await prisma.ticketAttachment.create({
           data: {
             ticketId: ticket.id,
             filename: req.file.originalname,
             mimeType: req.file.mimetype,
+            localFilepath: path.join('uploads', 'ticket-attachments', safeFilename),
           },
         });
       } catch (err) {
@@ -269,6 +456,16 @@ router.post(
 
     // Émettre événement temps réel pour les notifications
     const finalTicket = await prisma.ticket.findUnique({ where: { id: ticket.id } });
+
+    // Calculer les échéances SLA (priorité, seuils configurables par priorité)
+    if (finalTicket) {
+      try {
+        await applySla(finalTicket);
+      } catch (err) {
+        console.error('[ticket.routes] Calcul SLA échoué:', err.message);
+      }
+    }
+
     if (finalTicket) {
       emitTicketCreated(finalTicket);
       if (finalTicket.assignedToId) {
@@ -335,6 +532,24 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
     });
 
     const ticket = await prisma.ticket.update({ where: { id }, data });
+
+    // Recalculer les échéances SLA si la priorité change (et ticket toujours actif)
+    if (data.priority !== undefined) {
+      try {
+        await applySla(ticket);
+      } catch (err) {
+        console.error('[ticket.routes] Recalcul SLA échoué:', err.message);
+      }
+    }
+
+    // Le temps de première réponse est fixé à la première assignation
+    if (data.assignedToId !== undefined && data.assignedToId) {
+      try {
+        await recordFirstResponse(id, req.user?.sub || null);
+      } catch (err) {
+        console.error('[ticket.routes] Enregistrement première réponse échoué:', err.message);
+      }
+    }
 
     // Enregistrer les corrections de champs par la Hotline/Technicien
     const trackFields = [
@@ -406,6 +621,7 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
 
     // Émettre événement temps réel
     emitTicketUpdated(ticket, { status, priority, category, assignedToId });
+    notifyRequesterOnStatusChange(id, data.status);
 
     return res.json(ticket);
   } catch (err) {
@@ -616,6 +832,7 @@ router.post('/:id/validate-close', requirePermission('tickets.approve', ['ADMIN'
     }
 
     emitTicketUpdated(ticket, { status: 'SOLVED', closeSuggested: false });
+    notifyRequesterOnStatusChange(id, 'SOLVED');
     return res.json(ticket);
   } catch (err) {
     return res.status(500).json({ error: err.message });
@@ -659,6 +876,7 @@ router.post('/:id/reject-close', requirePermission('tickets.approve', ['ADMIN', 
     });
 
     emitTicketUpdated(ticket, { status: 'OPEN', closeSuggested: false });
+    notifyRequesterOnStatusChange(id, 'OPEN');
     return res.json(ticket);
   } catch (err) {
     return res.status(500).json({ error: err.message });
@@ -715,6 +933,47 @@ router.patch('/:id/reassign', requirePermission('tickets.assign', ['ADMIN', 'TEC
     return res.status(500).json({ error: err.message });
   }
 });
+
+// Escalade manuelle d'un ticket (prise en charge prioritaire par les admins)
+router.post('/:id/escalate', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+  const id = Number(req.params.id);
+  const { reason } = req.body || {};
+  try {
+    const escalated = await escalateTicket(id, {
+      reason: reason || 'Escalade manuelle',
+      actor: `user:${req.user.sub}`,
+      source: 'manual',
+    });
+    return res.json(escalated);
+  } catch (err) {
+    if (err.message === 'Ticket introuvable') return res.status(404).json({ error: err.message });
+    console.error('[ticket.routes] Erreur escalade ticket:', err.message);
+    return res.status(500).json({ error: 'Erreur lors de l\'escalade' });
+  }
+});
+
+// Notifie le demandeur par email quand le statut de son ticket change
+async function notifyRequesterOnStatusChange(id, status) {
+  if (!status) return;
+  try {
+    const ticket = await prisma.ticket.findUnique({
+      where: { id },
+      include: { requester: { select: { email: true, fullName: true } } },
+    });
+    if (!ticket?.requester?.email) return;
+    await sendTicketStatusNotification({
+      ticketId: ticket.id,
+      ticketTitle: ticket.title,
+      status,
+      priority: ticket.priority,
+      category: ticket.category,
+      recipientEmail: ticket.requester.email,
+      recipientName: ticket.requester.fullName,
+    });
+  } catch (err) {
+    console.error(`[ticket.routes] Échec notification statut au demandeur (ticket ${id}):`, err.message);
+  }
+}
 
 // ── Upload de suivi avec images collées ─────────────────────────────────
 const FOLLOWUP_IMAGES_DIR = path.join(__dirname, '..', 'uploads', 'followup-images');
@@ -784,9 +1043,19 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
       ticketId,
       authorId: req.user.sub,
       content,
+      isPrivate: req.body.isPrivate === 'true' || req.body.isPrivate === true,
     },
     include: { author: { select: { id: true, fullName: true } } },
   });
+
+  // Le temps de première réponse est fixé au premier suivi d'un technicien/hotline/admin
+  if (['ADMIN', 'TECHNICIAN', 'HOTLINE', 'SUPERADMIN'].includes(req.user.role)) {
+    try {
+      await recordFirstResponse(ticketId, req.user.sub);
+    } catch (err) {
+      console.error('[ticket.routes] Enregistrement première réponse échoué:', err.message);
+    }
+  }
 
   // Toute action humaine sur le ticket doit se répercuter dans GLPI, pas seulement les emails.
   if (ticket.glpiTicketId) {
@@ -799,6 +1068,133 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
   }
 
   return res.status(201).json({ followup, imageAttachments });
+});
+
+// Bascule privé/public d'un commentaire (visible uniquement par l'équipe)
+router.patch('/:id/followups/:followupId/visibility', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+  const ticketId = Number(req.params.id);
+  const followupId = Number(req.params.followupId);
+
+  const followup = await prisma.followup.findFirst({
+    where: { id: followupId, ticketId },
+    include: { author: { select: { id: true, fullName: true } } },
+  });
+  if (!followup) return res.status(404).json({ error: 'Commentaire introuvable' });
+
+  const isPrivate = req.body.isPrivate === true || req.body.isPrivate === 'true';
+  const updated = await prisma.followup.update({
+    where: { id: followupId },
+    data: { isPrivate },
+    include: { author: { select: { id: true, fullName: true } } },
+  });
+
+  try {
+    await logEvent(ticketId, isPrivate ? 'FOLLOWUP_MADE_PRIVATE' : 'FOLLOWUP_MADE_PUBLIC', req.user.sub, { followupId });
+  } catch (err) {
+    console.error('[ticket.routes] Log visibilité commentaire échoué:', err.message);
+  }
+
+  return res.json({ followup: updated });
+});
+
+// ── Tickets liés ────────────────────────────────────────────────────────
+router.post('/:id/links', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+  const ticketId = Number(req.params.id);
+  const { targetTicketId, type } = req.body;
+
+  const target = Number(targetTicketId);
+  if (!target || target === ticketId) {
+    return res.status(400).json({ error: 'Ticket cible invalide' });
+  }
+  const linkType = normalizeLinkType(type);
+
+  const [ticket, targetTicket] = await Promise.all([
+    prisma.ticket.findUnique({ where: { id: ticketId }, select: { id: true } }),
+    prisma.ticket.findUnique({ where: { id: target }, select: { id: true, title: true } }),
+  ]);
+  if (!ticket || !targetTicket) return res.status(404).json({ error: 'Ticket introuvable' });
+
+  // Liens symétriques : on mémorise toujours (idA < idB) pour éviter les doublons inversés
+  const { idA, idB } = normalizeLinkEndpoints(ticketId, target);
+
+  const link = await prisma.ticketLink.upsert({
+    where: { ticketAId_ticketBId_type: { ticketAId: idA, ticketBId: idB, type: linkType } },
+    create: { ticketAId: idA, ticketBId: idB, type: linkType, createdById: req.user.sub },
+    update: {},
+  });
+
+  await logEvent(ticketId, 'LINKED', req.user.email || 'SYSTEM', { targetTicketId: target, linkType });
+  await logEvent(target, 'LINKED', req.user.email || 'SYSTEM', { targetTicketId: ticketId, linkType });
+
+  return res.status(201).json({ link });
+});
+
+router.delete('/:id/links/:linkId', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+  const linkId = Number(req.params.linkId);
+  const link = await prisma.ticketLink.findUnique({ where: { id: linkId } });
+  if (!link) return res.status(404).json({ error: 'Lien introuvable' });
+
+  await prisma.ticketLink.delete({ where: { id: linkId } });
+  await logEvent(link.ticketAId, 'UNLINKED', req.user.email || 'SYSTEM', { targetTicketId: link.ticketBId });
+  await logEvent(link.ticketBId, 'UNLINKED', req.user.email || 'SYSTEM', { targetTicketId: link.ticketAId });
+
+  return res.json({ ok: true });
+});
+
+// ── Fusion de tickets sources dans le ticket courant ────────────────────
+router.post('/:id/merge', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+  const targetId = Number(req.params.id);
+  const sourceIds = (req.body.sourceTicketIds || []).map(Number).filter((n) => Number.isInteger(n) && n !== targetId);
+  if (sourceIds.length === 0) {
+    return res.status(400).json({ error: 'Aucun ticket source valide à fusionner' });
+  }
+
+  const target = await prisma.ticket.findUnique({ where: { id: targetId } });
+  if (!target) return res.status(404).json({ error: 'Ticket cible introuvable' });
+
+  const sources = await prisma.ticket.findMany({ where: { id: { in: sourceIds } } });
+  if (sources.length === 0) return res.status(404).json({ error: 'Tickets sources introuvables' });
+
+  const result = await prisma.$transaction((tx) =>
+    mergeTickets(targetId, sourceIds, req.user.email || 'SYSTEM', tx)
+  );
+
+  return res.json({ ok: true, ...result });
+});
+
+// ── CSAT : notation de satisfaction par le demandeur ─────────────────────
+router.post('/:id/csat', async (req, res) => {
+  const ticketId = Number(req.params.id);
+  const { score, comment } = req.body;
+
+  const rating = Number(score);
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    return res.status(400).json({ error: 'La note doit être un entier entre 1 et 5' });
+  }
+
+  const ticket = await prisma.ticket.findUnique({ where: { id: ticketId } });
+  if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
+
+  // Seul le demandeur (ou un membre de l'équipe) peut noter
+  const isStaffMember = ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'].includes(req.user.role);
+  if (!isStaffMember && ticket.requesterId !== req.user.sub) {
+    return res.status(403).json({ error: 'Seul le demandeur peut noter ce ticket' });
+  }
+
+  // Une seule notation, modifiable
+  const updated = await prisma.ticket.update({
+    where: { id: ticketId },
+    data: {
+      csatScore: rating,
+      csatComment: comment ? String(comment).slice(0, 2000) : null,
+      csatRatedAt: new Date(),
+    },
+    select: { id: true, csatScore: true, csatComment: true, csatRatedAt: true },
+  });
+
+  await logEvent(ticketId, 'FOLLOWUP_ADDED', req.user.email || 'SYSTEM', { action: 'csat', score: rating });
+
+  return res.json(updated);
 });
 
 // Delete ticket

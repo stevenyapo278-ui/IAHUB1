@@ -309,6 +309,78 @@ ${signature || DEFAULT_EMAIL_SIGNATURE}
   return sendEmail({ ticketId, to: technicianEmail, subject, bodyHtml, saveAsMessage: false });
 }
 
+// Notifie le technicien assigné qu'un ticket a dépassé son délai de réponse SLA.
+async function sendSlaBreachEmail({ ticketId, ticketTitle, priority, slaResponseDueAt, technicianEmail, technicianName }) {
+  const subject = `[SLA] Dépassement — Ticket #${ticketId} : ${ticketTitle}`;
+  const signature = await getEmailSignature();
+  const priorityLabel = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' }[priority] || priority;
+  const dueAt = slaResponseDueAt
+    ? new Date(slaResponseDueAt).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })
+    : '—';
+  const bodyHtml = `
+<p>Bonjour ${technicianName || ''},</p>
+<p>Le ticket <strong>#${ticketId} — ${ticketTitle}</strong> a dépassé son délai de réponse SLA.</p>
+<table style="border-collapse:collapse;margin:16px 0">
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Priorité</td><td><strong>${priorityLabel} (${priority})</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Délai de réponse attendu</td><td>${dueAt}</td></tr>
+</table>
+<p>Ce ticket doit être pris en charge rapidement : connectez-vous à l'application pour répondre au demandeur.</p>
+${signature || DEFAULT_EMAIL_SIGNATURE}
+`.trim();
+
+  return sendEmail({ ticketId, to: technicianEmail, subject, bodyHtml, saveAsMessage: false });
+}
+
+// Notifie le demandeur par email du changement de statut de son ticket (portail REQUESTER + suivi).
+async function sendTicketStatusNotification({ ticketId, ticketTitle, status, priority, category, recipientEmail, recipientName }) {
+  const STATUS_LABELS = {
+    NEW: 'Nouveau',
+    OPEN: 'En cours',
+    PENDING: 'En attente',
+    WAITING_FOR_USER: 'En attente de votre réponse',
+    SOLVED: 'Résolu',
+    CLOSED: 'Fermé',
+  };
+  const priorityLabel = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' }[priority] || priority;
+  const statusLabel = STATUS_LABELS[status] || status;
+  const subject = `[Ticket #${ticketId}] ${statusLabel} — ${ticketTitle}`;
+  const signature = await getEmailSignature();
+  const bodyHtml = `
+<p>Bonjour ${recipientName || ''},</p>
+<p>Le statut de votre demande a changé :</p>
+<table style="border-collapse:collapse;margin:16px 0">
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Ticket</td><td><strong>#${ticketId} — ${ticketTitle}</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Statut</td><td><strong>${statusLabel}</strong></td></tr>
+  ${category ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Catégorie</td><td>${category}</td></tr>` : ''}
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Priorité</td><td>${priorityLabel} (${priority})</td></tr>
+</table>
+<p>Vous pouvez suivre votre demande et ajouter des informations directement dans le portail.</p>
+${signature || DEFAULT_EMAIL_SIGNATURE}
+`.trim();
+
+  return sendEmail({ ticketId, to: recipientEmail, subject, bodyHtml, saveAsMessage: false });
+}
+
+// Alerte un admin qu'un ticket a été escaladé (automatiquement ou manuellement).
+async function sendEscalationEmail({ ticketId, ticketTitle, priority, reason, escalationLevel, recipientEmail, recipientName }) {
+  const subject = `[Escalade Niv.${escalationLevel || 1}] Ticket #${ticketId} : ${ticketTitle}`;
+  const signature = await getEmailSignature();
+  const priorityLabel = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' }[priority] || priority;
+  const bodyHtml = `
+<p>Bonjour ${recipientName || ''},</p>
+<p>Le ticket <strong>#${ticketId} — ${ticketTitle}</strong> a été escaladé (niveau ${escalationLevel || 1}).</p>
+<table style="border-collapse:collapse;margin:16px 0">
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Priorité</td><td><strong>${priorityLabel} (${priority})</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Niveau d'escalade</td><td><strong>${escalationLevel || 1}</strong></td></tr>
+  ${reason ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Motif</td><td>${reason}</td></tr>` : ''}
+</table>
+<p>Connectez-vous à l'application pour prendre en charge ce ticket.</p>
+${signature || DEFAULT_EMAIL_SIGNATURE}
+`.trim();
+
+  return sendEmail({ ticketId, to: recipientEmail, subject, bodyHtml, saveAsMessage: false });
+}
+
 // Relance un responsable (admin/technicien) qu'un brouillon AiEmailDraft attend toujours sa
 // validation humaine depuis trop longtemps (Paramètres > Automatisation > Relance des brouillons).
 // saveAsMessage: false car ce mail s'adresse au responsable interne, pas au demandeur d'origine
@@ -412,6 +484,9 @@ module.exports = {
   sendTemporaryPasswordEmail,
   sendAssignmentNotificationEmail,
   sendHotlineApprovalReminderEmail,
+  sendSlaBreachEmail,
+  sendEscalationEmail,
+  sendTicketStatusNotification,
   buildAcknowledgementHtml,
   buildKnownIncidentNotificationHtml,
   getEmailSignature,

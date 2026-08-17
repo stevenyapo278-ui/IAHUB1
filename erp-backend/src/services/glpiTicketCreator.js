@@ -8,6 +8,8 @@ const { fetchWithTimeout } = require('../utils/fetchWithTimeout');
 const { autoAssignTechnicianWithAI } = require('./ticketAutoAssign');
 const { sendAssignmentNotificationEmail } = require('./emailSender');
 const { getSystemSettings } = require('./systemSettings');
+const { applySla } = require('./slaService');
+const { scheduleEscalation } = require('./escalationService');
 
 const GLPI_STATUS_MAP = { NEW: 1, OPEN: 2, PENDING: 4, WAITING_FOR_USER: 4, SOLVED: 5, CLOSED: 6 };
 const ERP_PRIORITY_MAP = { P1: 6, P2: 4, P3: 3, P4: 2 };
@@ -368,7 +370,7 @@ async function deleteGlpiTicket(glpiTicketId) {
 // Crée un ticket dans GLPI depuis les données d'un email analysé par l'IA,
 // puis crée ou met à jour l'entrée correspondante dans la table Ticket de l'ERP.
 // Si GLPI n'est pas configuré, le ticket est créé uniquement dans l'ERP.
-async function createTicketFromEmail({ subject, body, from, fromName, analysis, emailAccountId, locationId, lowTrustSender = false, tx = prisma }) {
+async function createTicketFromEmail({ subject, body, from, fromName, analysis, emailAccountId, locationId, lowTrustSender = false, tx = prisma, escalateMinutes = null, triageRuleId = null }) {
   const title = analysis.suggestedTitle || subject;
   const content = `${body || ''}\n\n---\nAnalyse IA : ${analysis.summary}\nConfiance : ${Math.round((analysis.confidence || 0) * 100)}%`;
   const followupNote = from ? `Email original de ${fromName || from} &lt;${from}&gt;\nSujet : ${subject}` : null;
@@ -397,6 +399,22 @@ async function createTicketFromEmail({ subject, body, from, fromName, analysis, 
       lowTrustSender,
     },
   });
+
+  // Échéances SLA calculées dès la création (priorité analysée par l'IA)
+  try {
+    await applySla(erpTicket);
+  } catch (err) {
+    console.error('[glpiTicketCreator] Calcul SLA échoué:', err.message);
+  }
+
+  // Escalade automatique planifiée par la règle de triage (autoEscalateMinutes)
+  if (escalateMinutes && escalateMinutes > 0) {
+    try {
+      await scheduleEscalation(erpTicket.id, escalateMinutes, triageRuleId);
+    } catch (err) {
+      console.error('[glpiTicketCreator] Planification escalade échouée:', err.message);
+    }
+  }
 
   // Assigne automatiquement le meilleur technicien : d'abord par compétence (domaine d'expertise),
   // puis par équipe (fallback). L'assignation est journalisée dans ReassignmentLog pour le suivi

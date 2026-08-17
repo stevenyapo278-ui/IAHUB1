@@ -119,6 +119,7 @@ app.get('/api/system/circuit-breakers', (req, res) => res.json(allBreakerStatuse
 
 app.use('/api/auth', authRoutes);
 app.use('/api/tickets', ticketRoutes);
+app.use('/api/ticket-templates', require('./routes/ticketTemplate.routes'));
 app.use('/api/teams', teamRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/permission-groups', permissionGroupRoutes);
