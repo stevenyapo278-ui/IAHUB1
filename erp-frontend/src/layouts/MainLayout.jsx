@@ -27,6 +27,7 @@ import {
   Bot,
   Sparkles,
   MapPin,
+  Tag,
   ChevronRight,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -55,6 +56,7 @@ const orgItems = [
   { to: '/teams', label: 'Équipes', icon: Users, color: 'text-emerald-400', permission: null },
   { to: '/users', label: 'Utilisateurs', icon: User, color: 'text-emerald-400', permission: 'users.manage', fallbackRoles: ['ADMIN'] },
   { to: '/skills', label: 'Compétences', icon: BrainCircuit, color: 'text-teal-400', permission: null },
+  { to: '/categories', label: 'Catégories', icon: Tag, color: 'text-gold-400', permission: null },
   { to: '/locations', label: 'Lieux', icon: MapPin, color: 'text-amber-400', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE'] },
 ];
 
@@ -79,7 +81,8 @@ const ROUTE_SEMANTICS = {
   '/teams': { zone: 'org', idx: 0 },
   '/users': { zone: 'org', idx: 1 },
   '/skills': { zone: 'org', idx: 2 },
-  '/locations': { zone: 'org', idx: 3 },
+  '/categories': { zone: 'org', idx: 3 },
+  '/locations': { zone: 'org', idx: 4 },
   '/supervision': { zone: 'admin', idx: 0 },
   '/ai-weekly-reports': { zone: 'admin', idx: 1 },
   '/prompts': { zone: 'admin', idx: 2 },

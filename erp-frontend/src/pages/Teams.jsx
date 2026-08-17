@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
+import useSystemSettings from '../hooks/useSystemSettings';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { useTheme } from '../context/ThemeContext';
 import { Users, ShieldCheck, Ticket, Plus, RefreshCw, ChevronRight, Trash2, X, AlertTriangle, Mail, Layers, CheckCircle2, User } from 'lucide-react';
@@ -13,6 +14,7 @@ export default function Teams() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
   const { user } = useAuth();
+  const { autonomousMode } = useSystemSettings();
   const canManageTeams = hasPermission(user, 'teams.manage');
 
   const [teams, setTeams] = useState([]);
@@ -156,14 +158,16 @@ export default function Teams() {
         {/* Actions */}
         {canManageTeams && (
           <div className="flex items-center gap-2 ml-auto">
-            <motion.button
-              whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-              onClick={handleSyncGlpi} disabled={syncing}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/40 text-on-surface-variant hover:text-on-surface hover:bg-surface-container text-xs font-semibold disabled:opacity-50 transition-all"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
-              <span>{syncing ? 'Syncing...' : 'Sync GLPI'}</span>
-            </motion.button>
+            {!autonomousMode && (
+              <motion.button
+                whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                onClick={handleSyncGlpi} disabled={syncing}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/40 text-on-surface-variant hover:text-on-surface hover:bg-surface-container text-xs font-semibold disabled:opacity-50 transition-all"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
+                <span>{syncing ? 'Syncing...' : 'Sync GLPI'}</span>
+              </motion.button>
+            )}
 
             <motion.button
               whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}

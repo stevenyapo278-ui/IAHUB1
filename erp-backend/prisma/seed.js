@@ -103,6 +103,18 @@ async function main() {
     }
   }
 
+  // Catégories de tickets par défaut (mode autonome : la plateforme fonctionne sans GLPI).
+  // Upsert par nom — idempotent. Si GLPI est connecté plus tard, syncCategoriesFromGlpi lie ces
+  // catégories aux ITILCategory GLPI par nom (glpiCategoryId prend la valeur GLPI).
+  const defaultCategories = ['Logiciel', 'Matériel', 'Réseau', 'Téléphonie', 'Système'];
+  for (const name of defaultCategories) {
+    await prisma.ticketCategory.upsert({
+      where: { name },
+      update: {},
+      create: { name, isCustom: true },
+    });
+  }
+
   // Groupe de droits par défaut pour les techniciens : créé une seule fois (jamais ré-écrasé après
   // sa création, pour laisser l'admin retirer des permissions sans que le seed les remette à chaque
   // démarrage), avec TOUTES les permissions — équivalent exact de ce que le rôle TECHNICIAN donnait

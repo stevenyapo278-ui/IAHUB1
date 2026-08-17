@@ -49,6 +49,7 @@ import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { hasPermission } from '../utils/permissions';
+import useSystemSettings from '../hooks/useSystemSettings';
 import ConfirmDialog from '../components/ConfirmDialog';
 import EmptyState from '../components/EmptyState';
 import TicketCoverflowCarousel from '../components/TicketCoverflowCarousel';
@@ -91,6 +92,7 @@ const itemVariants = {
 
 export default function Tickets() {
   const { user } = useAuth();
+  const { autonomousMode } = useSystemSettings();
   const canAssign = hasPermission(user, 'tickets.assign') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN';
   const canApprove = hasPermission(user, 'tickets.approve') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN';
   const canDelete = hasPermission(user, 'tickets.delete') || user?.role === 'SUPERADMIN';
@@ -1085,7 +1087,7 @@ export default function Tickets() {
             <FilterSelect value={filters.source} onChange={(v) => updateFilter('source', v)}
               label="Source" options={[
                 { v: '', l: 'Toutes les sources' },
-                { v: 'glpi', l: '🔗 Synchronisés GLPI' },
+                ...(!autonomousMode ? [{ v: 'glpi', l: '🔗 Synchronisés GLPI' }] : []),
                 { v: 'erp', l: '💻 Internes ERP' },
               ]} />
 

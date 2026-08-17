@@ -7,10 +7,12 @@ import {
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
+import useSystemSettings from '../hooks/useSystemSettings';
 import ConfirmDialog from '../components/ConfirmDialog';
 
 export default function Locations() {
   const { user } = useAuth();
+  const { autonomousMode } = useSystemSettings();
   const [locations, setLocations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -107,10 +109,12 @@ export default function Locations() {
               <Plus className="w-4 h-4" /> Nouveau lieu
             </button>
           )}
-          <button onClick={handleSync} disabled={syncing}
-            className="px-4 py-2 rounded-xl border border-outline-variant/40 text-on-surface text-xs font-semibold hover:bg-surface-container transition-colors flex items-center gap-2 disabled:opacity-50 cursor-pointer">
-            <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} /> Sync GLPI
-          </button>
+          {!autonomousMode && (
+            <button onClick={handleSync} disabled={syncing}
+              className="px-4 py-2 rounded-xl border border-outline-variant/40 text-on-surface text-xs font-semibold hover:bg-surface-container transition-colors flex items-center gap-2 disabled:opacity-50 cursor-pointer">
+              <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} /> Sync GLPI
+            </button>
+          )}
         </div>
       </div>
 
@@ -168,7 +172,7 @@ export default function Locations() {
       ) : filtered.length === 0 ? (
         <div className="text-center py-12 text-on-surface/40">
           <MapPin className="w-12 h-12 mx-auto mb-3 opacity-30" />
-          {search ? 'Aucun lieu ne correspond à votre recherche' : 'Aucun lieu. Synchronisez depuis GLPI ou créez-en un.'}
+          {search ? 'Aucun lieu ne correspond à votre recherche' : 'Aucun lieu. Créez-en un pour associer les demandeurs à leurs sites.'}
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -204,7 +208,7 @@ export default function Locations() {
                     <Mail className="w-3 h-3" /> {loc._count.requesterLinks} demandeur(s)
                   </span>
                 )}
-                {loc.isCustom && !loc.glpiLocationId && (
+                {!autonomousMode && loc.isCustom && !loc.glpiLocationId && (
                   <span className="flex items-center gap-1 text-amber-500">
                     <AlertTriangle className="w-3 h-3" /> En attente GLPI
                   </span>
@@ -214,7 +218,7 @@ export default function Locations() {
               {/* Actions */}
               {canManage && (
                 <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  {loc.isCustom && !loc.glpiLocationId && (
+                  {!autonomousMode && loc.isCustom && !loc.glpiLocationId && (
                     <button onClick={() => handlePushToGlpi(loc.id)} disabled={pushingId === loc.id}
                       title="Pousser vers GLPI"
                       className="p-1.5 rounded-lg bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 cursor-pointer transition-colors disabled:opacity-50">

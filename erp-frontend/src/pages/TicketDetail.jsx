@@ -4,6 +4,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
+import useSystemSettings from '../hooks/useSystemSettings';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { useTheme } from '../context/ThemeContext';
 import SearchableSelect from '../components/SearchableSelect';
@@ -48,6 +49,7 @@ export default function TicketDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { autonomousMode } = useSystemSettings();
   const [ticket, setTicket] = useState(null);    const [followup, setFollowup] = useState('');
   const [followupPrivate, setFollowupPrivate] = useState(false);
   const [events, setEvents] = useState([]);
@@ -567,8 +569,8 @@ export default function TicketDetail() {
         </div>
       </div>
 
-      {/* Sync Failure Banner */}
-      {syncFailures.length > 0 && (
+      {/* Sync Failure Banner (GLPI uniquement — masqué en mode autonome) */}
+      {!autonomousMode && syncFailures.length > 0 && (
         <div className="border border-red-500/25 bg-red-500/10 rounded-xl p-4 flex items-start gap-3 text-red-700 dark:text-red-400">
           <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
           <div className="flex-1">
@@ -1045,7 +1047,7 @@ export default function TicketDetail() {
                     }"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
-                    {ticket.approvalStatus === 'APPROVED' && !ticket.glpiTicketId ? 'Réessayer synchro GLPI' : 'Approuver'}
+                    {!autonomousMode && ticket.approvalStatus === 'APPROVED' && !ticket.glpiTicketId ? 'Réessayer synchro GLPI' : 'Approuver'}
                   </button>
                   {ticket.approvalStatus === 'PENDING' && (
                     <button
@@ -1321,18 +1323,20 @@ export default function TicketDetail() {
                 )}
               </div>
 
-              <div>
-                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
-                  Ticket GLPI ID
-                </label>
-                <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-bold font-mono text-slate-800 dark:text-slate-200">
-                  {ticket.glpiTicketId ? (
-                    <span className="text-blue-600 dark:text-blue-400 font-bold">#{ticket.glpiTicketId}</span>
-                  ) : (
-                    <span className="text-slate-500 italic font-sans font-medium">Non lié GLPI</span>
-                  )}
+              {!autonomousMode && (
+                <div>
+                  <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                    Ticket GLPI ID
+                  </label>
+                  <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-bold font-mono text-slate-800 dark:text-slate-200">
+                    {ticket.glpiTicketId ? (
+                      <span className="text-blue-600 dark:text-blue-400 font-bold">#{ticket.glpiTicketId}</span>
+                    ) : (
+                      <span className="text-slate-500 italic font-sans font-medium">Non lié GLPI</span>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
 

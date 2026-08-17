@@ -121,14 +121,61 @@ router.get('/locations', async (req, res) => {
   res.json(locations);
 });
 
-// Récupère la liste des catégories synchronisées depuis GLPI (table TicketCategory)
-// pour le sélecteur de catégorie dynamique dans le formulaire de ticket.
+// Récupère la liste des catégories (table TicketCategory) pour le sélecteur de catégorie
+// dynamique dans le formulaire de ticket. Fonctionne en autonomie : les catégories peuvent être
+// créées localement (isCustom=true) sans GLPI, ou synchronisées depuis GLPI (glpiCategoryId != null).
 router.get('/categories', async (req, res) => {
   const categories = await prisma.ticketCategory.findMany({
     orderBy: { name: 'asc' },
-    select: { id: true, glpiCategoryId: true, name: true },
+    select: { id: true, glpiCategoryId: true, name: true, isCustom: true },
   });
   res.json(categories);
+});
+
+// Crée une catégorie locale (mode autonome ou complément aux catégories GLPI).
+router.post('/categories', requirePermission('glpi.manage', ['ADMIN', 'TECHNICIAN']), [body('name').notEmpty().trim()], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+  const name = req.body.name.trim();
+  try {
+    const category = await prisma.ticketCategory.create({
+      data: { name, isCustom: true }, // glpiCategoryId = null : catégorie purement locale
+    });
+    return res.status(201).json(category);
+  } catch (err) {
+    if (err.code === 'P2002') return res.status(409).json({ error: 'Une catégorie avec ce nom existe déjà' });
+    throw err;
+  }
+});
+
+// Renomme une catégorie (locale ou GLPI — la prochaine sync GLPI ré-appliquera le nom GLPI).
+router.patch('/categories/:id', requirePermission('glpi.manage', ['ADMIN', 'TECHNICIAN']), [body('name').notEmpty().trim()], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+  const id = Number(req.params.id);
+  const existing = await prisma.ticketCategory.findUnique({ where: { id } });
+  if (!existing) return res.status(404).json({ error: 'Catégorie introuvable' });
+
+  try {
+    const category = await prisma.ticketCategory.update({ where: { id }, data: { name: req.body.name.trim() } });
+    return res.json(category);
+  } catch (err) {
+    if (err.code === 'P2002') return res.status(409).json({ error: 'Une catégorie avec ce nom existe déjà' });
+    throw err;
+  }
+});
+
+// Supprime une catégorie. Les tickets existants conservent leur libellé (le champ category du
+// ticket est une chaîne, pas une clé étrangère), seule la liste des choix est mise à jour.
+router.delete('/categories/:id', requirePermission('glpi.manage', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+  const id = Number(req.params.id);
+  const existing = await prisma.ticketCategory.findUnique({ where: { id } });
+  if (!existing) return res.status(404).json({ error: 'Catégorie introuvable' });
+
+  await prisma.ticketCategory.delete({ where: { id } });
+  return res.json({ deleted: true });
 });
 
 // Récupère la liste des utilisateurs GLPI non encore importés dans l'ERP

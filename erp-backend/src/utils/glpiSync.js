@@ -114,8 +114,14 @@ async function getGlpiConfig(serviceName) {
 
 // Récupère la config GLPI active, en fonction du paramètre SystemSettings.activeGlpiInstance.
 // Si l'instance nommée n'existe pas (ex: vestige de migration), on fallback sur 'glpi'.
+// Mode autonome : quand SystemSettings.autonomousMode est actif, la plateforme fonctionne comme
+// e-ticketing sans GLPI — toutes les synchronisations et écritures GLPI sont neutralisées ici,
+// en un seul point de passage (toutes les fonctions GLPI passent par getActiveGlpiConfig).
 async function getActiveGlpiConfig() {
   const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+  if (settings?.autonomousMode === true) {
+    return null;
+  }
   const instanceName = settings?.activeGlpiInstance || 'glpi';
   const config = await getGlpiConfig(instanceName);
   if (config) return config;

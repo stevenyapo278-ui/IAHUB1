@@ -44,7 +44,9 @@ router.patch(
   [
     body('autoApproveGlpiSolutions').optional().isBoolean(),
     body('autoSendAiEmails').optional().isBoolean(),
+    body('autoApproveManualTickets').optional().isBoolean().withMessage('autoApproveManualTickets doit être un booléen'),
     body('enableGlpiTicketCreation').optional().isBoolean(),
+    body('autonomousMode').optional().isBoolean().withMessage('autonomousMode doit être un booléen'),
     body('activeGlpiInstance').optional().isString().withMessage('Instance GLPI invalide'),
     body('glpiTicketsSyncIntervalSeconds').optional().isInt({ min: 0, max: 3600 }),
     body('emailSyncIntervalSeconds').optional().isInt({ min: 0, max: 3600 }),
@@ -71,7 +73,9 @@ router.patch(
     const data = {};
     if (req.body.autoApproveGlpiSolutions !== undefined) data.autoApproveGlpiSolutions = req.body.autoApproveGlpiSolutions;
     if (req.body.autoSendAiEmails !== undefined) data.autoSendAiEmails = req.body.autoSendAiEmails;
+    if (req.body.autoApproveManualTickets !== undefined) data.autoApproveManualTickets = req.body.autoApproveManualTickets;
     if (req.body.enableGlpiTicketCreation !== undefined) data.enableGlpiTicketCreation = req.body.enableGlpiTicketCreation;
+    if (req.body.autonomousMode !== undefined) data.autonomousMode = req.body.autonomousMode;
     if (req.body.activeGlpiInstance !== undefined) data.activeGlpiInstance = req.body.activeGlpiInstance;
     if (req.body.glpiTicketsSyncIntervalSeconds !== undefined) data.glpiTicketsSyncIntervalSeconds = req.body.glpiTicketsSyncIntervalSeconds;
     if (req.body.emailSyncIntervalSeconds !== undefined) data.emailSyncIntervalSeconds = req.body.emailSyncIntervalSeconds;

@@ -7,6 +7,7 @@ import api from '../api/client';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { useAuth } from '../context/AuthContext';
 import { useFilterParam } from '../hooks/useFilterParam';
+import useSystemSettings from '../hooks/useSystemSettings';
 import {
   Users as UsersIcon, UserPlus, ShieldCheck, UserX,
   Trash2, Upload, Download, X, Search, CheckCircle2,
@@ -71,6 +72,7 @@ function ToggleSwitch({ checked, onChange, disabled = false, title }) {
 
 export default function Users() {
   const { user: currentUser } = useAuth();
+  const { autonomousMode } = useSystemSettings();
   const ROLES = assignableRoles(currentUser?.role);
   const [users, setUsers] = useState([]);
   const [teams, setTeams] = useState([]);
@@ -287,16 +289,18 @@ export default function Users() {
             <Upload className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">CSV</span>
           </button>
-          <button onClick={async () => {
-            setError(''); setImportResult(null);
-            try { const { data } = await api.get('/glpi/importable-users'); setImportableUsers(data); setSelectedImportIds([]); setShowGlpiImport(true); }
-            catch (err) { setError(err.response?.data?.error || 'Erreur GLPI'); }
-          }}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/40 text-on-surface-variant hover:bg-surface-container text-xs font-semibold transition-all"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">GLPI</span>
-          </button>
+          {!autonomousMode && (
+            <button onClick={async () => {
+              setError(''); setImportResult(null);
+              try { const { data } = await api.get('/glpi/importable-users'); setImportableUsers(data); setSelectedImportIds([]); setShowGlpiImport(true); }
+              catch (err) { setError(err.response?.data?.error || 'Erreur GLPI'); }
+            }}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/40 text-on-surface-variant hover:bg-surface-container text-xs font-semibold transition-all"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">GLPI</span>
+            </button>
+          )}
           <motion.button
             whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
             onClick={() => { setShowForm(v => !v); setError(''); }}

@@ -25,6 +25,7 @@ import ActivityLogs from './pages/ActivityLogs';
 import AuditLogs from './pages/AuditLogs';
 import AiWeeklyReports from './pages/AiWeeklyReports';
 import Locations from './pages/Locations';
+import Categories from './pages/Categories';
 import Portal from './pages/Portal';
 
 export default function App() {
@@ -126,6 +127,14 @@ export default function App() {
             element={
               <ProtectedRoute roles={['ADMIN', 'HOTLINE', 'TECHNICIAN']}>
                 <Locations />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="categories"
+            element={
+              <ProtectedRoute roles={['ADMIN', 'HOTLINE', 'TECHNICIAN']}>
+                <Categories />
               </ProtectedRoute>
             }
           />

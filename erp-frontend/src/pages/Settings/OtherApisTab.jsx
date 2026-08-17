@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { hasPermission } from '../../utils/permissions';
+import useSystemSettings from '../../hooks/useSystemSettings';
 import ConfirmDialog from '../../components/ConfirmDialog';
 
 const inputClass =
@@ -15,6 +16,7 @@ const itemVariants = {
 
 export default function OtherApisTab() {
   const { user } = useAuth();
+  const { autonomousMode } = useSystemSettings();
   const canManageGlpi = hasPermission(user, 'glpi.manage');
   const [configs, setConfigs] = useState([]);
   const [form, setForm] = useState({ serviceName: '', baseUrl: '', apiKey: '', appToken: '' });
@@ -81,7 +83,9 @@ export default function OtherApisTab() {
       .get('/api-configs')
       .then(({ data }) => {
         setConfigs(data);
-        data.filter((c) => c.isActive && REQUIRED_FIELDS[c.serviceName]).forEach((c) => handleTestConnection(c));
+        if (!autonomousMode) {
+          data.filter((c) => c.isActive && REQUIRED_FIELDS[c.serviceName]).forEach((c) => handleTestConnection(c));
+        }
       })
       .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
   }
@@ -274,6 +278,21 @@ export default function OtherApisTab() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Mode autonome : GLPI désactivé */}
+      {autonomousMode && (
+        <motion.div
+          variants={itemVariants}
+          className="bento-card p-lg flex items-start gap-md border border-amber-500/20 bg-amber-500/5"
+        >
+          <span className="material-symbols-outlined text-[22px] text-amber-500 shrink-0">auto_mode</span>
+          <div className="text-sm text-on-surface-variant leading-relaxed">
+            <strong className="text-on-surface">Mode autonome actif</strong> — la plateforme fonctionne comme e-ticketing sans GLPI.
+            La configuration GLPI est ignorée : les synchronisations et écritures GLPI sont désactivées.
+            Désactivez le mode autonome dans <strong>Paramètres → Avancé</strong> pour réactiver l'intégration GLPI.
+          </div>
+        </motion.div>
+      )}
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       {/* SECTION 1 : SERVICES & APIS */}
@@ -538,7 +557,7 @@ export default function OtherApisTab() {
                       />
                     </td>
                     <td className="p-3 text-center">
-                      {isGlpi(c.serviceName) && canManageGlpi && (
+                      {!autonomousMode && isGlpi(c.serviceName) && canManageGlpi && (
                         <div className="flex items-center justify-center gap-1.5">
                           {[
                             { type: 'tickets', icon: 'sync', tooltip: 'Synchroniser les tickets', color: '#3b82f6' },

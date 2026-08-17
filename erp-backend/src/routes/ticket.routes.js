@@ -7,11 +7,11 @@ const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { getActiveGlpiConfig, glpiInitSession, glpiKillSession } = require('../utils/glpiSync');
 const { notifyMajorIncidentResolved, sendTicketStatusNotification } = require('../services/emailSender');
-const { createGlpiTicket, updateGlpiTicket, deleteGlpiTicket, addGlpiFollowup } = require('../services/glpiTicketCreator');
+const { updateGlpiTicket, deleteGlpiTicket, addGlpiFollowup } = require('../services/glpiTicketCreator');
+const { approveTicket } = require('../services/ticketApproval');
 const { autoAssignTechnician } = require('../services/ticketAutoAssign');
 const { logEvent } = require('../services/ticketEvent');
 const { auditLog } = require('../services/auditLogService');
-const { uploadPendingAttachments } = require('../services/emailAttachmentProcessor');
 const { emitTicketCreated, emitTicketUpdated, emitTicketAssigned } = require('../utils/socket');
 const { recordDecision } = require('../services/senderReputation');
 const { applySla, recordFirstResponse } = require('../services/slaService');
@@ -455,7 +455,7 @@ router.post(
     }
 
     // Émettre événement temps réel pour les notifications
-    const finalTicket = await prisma.ticket.findUnique({ where: { id: ticket.id } });
+    let finalTicket = await prisma.ticket.findUnique({ where: { id: ticket.id } });
 
     // Calculer les échéances SLA (priorité, seuils configurables par priorité)
     if (finalTicket) {
@@ -463,6 +463,24 @@ router.post(
         await applySla(finalTicket);
       } catch (err) {
         console.error('[ticket.routes] Calcul SLA échoué:', err.message);
+      }
+    }
+
+    // Auto-approbation des tickets créés MANUELLEMENT (formulaire interne / portail) quand le
+    // réglage autoApproveManualTickets est activé. Les tickets créés par email/IA passent par
+    // createTicketFromEmail (aiProcessed=true) et restent soumis à validation Hotline.
+    const creationSettings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+    if (creationSettings?.autoApproveManualTickets === true && finalTicket) {
+      try {
+        await approveTicket(finalTicket.id, {
+          approvedById: req.user.sub,
+          approvedByEmail: req.user.email || 'HOTLINE',
+        });
+        // Recharger le ticket pour refléter l'approbation (APPROVED, glpiTicketId éventuel)
+        finalTicket = await prisma.ticket.findUnique({ where: { id: ticket.id } });
+      } catch (err) {
+        console.error('[ticket.routes] Auto-approbation échouée:', err.message);
+        await logEvent(ticket.id, 'GLPI_SYNC_FAILED', 'SYSTEM', { action: 'auto-approve', error: err.message }).catch(() => {});
       }
     }
 
@@ -646,109 +664,14 @@ router.get('/:id/corrections', async (req, res) => {
 router.post('/:id/approve', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
   const id = Number(req.params.id);
   try {
-    const existing = await prisma.ticket.findUnique({ where: { id } });
-    if (!existing) return res.status(404).json({ error: 'Ticket introuvable' });
-
-    let glpiTicketId = existing.glpiTicketId;
-
-    // Réinitialiser les IDs négatifs (dry-run fake) pour permettre un retry
-    if (glpiTicketId && glpiTicketId < 0) {
-      glpiTicketId = null;
-    }
-
-    let glpiCreationError = null;
-    let glpiSkippedReason = null;
-
-    // Vérifier en amont si la création GLPI est désactivée pour prévenir l'utilisateur
-    if (!glpiTicketId) {
-      const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
-      if (settings?.enableGlpiTicketCreation === false) {
-        glpiSkippedReason = 'Création GLPI automatique désactivée dans les paramètres';
-      } else {
-        try {
-          glpiTicketId = await createGlpiTicket({
-            title: existing.title,
-            content: existing.content,
-            priority: existing.priority,
-            category: existing.category,
-            type: existing.type,
-            urgency: existing.urgency,
-            impact: existing.impact,
-            source: existing.source,
-            locationId: existing.glpiLocationId,
-          });
-          // Si createGlpiTicket retourne null sans exception (ex: GLPI non configuré)
-          if (!glpiTicketId) {
-            glpiSkippedReason = 'GLPI non configuré — aucune synchronisation effectuée';
-          }
-        } catch (err) {
-          console.error('[ticket.routes] Création GLPI lors de l\'approbation échouée:', err.message);
-          glpiCreationError = err.message;
-        }
-      }
-    }
-
-    const ticket = await prisma.ticket.update({
-      where: { id },
-      data: {
-        approvalStatus: 'APPROVED',
-        approvedById: req.user.sub,
-        approvedAt: new Date(),
-        approvalNote: req.body.note || null,
-        ...(glpiTicketId ? { glpiTicketId, lastGlpiSyncAt: new Date() } : {}),
-      },
+    const result = await approveTicket(id, {
+      approvedById: req.user.sub,
+      approvedByEmail: req.user.email || 'HOTLINE',
+      approvalNote: req.body.note || null,
     });
-
-    if (glpiCreationError) {
-      await logEvent(id, 'GLPI_SYNC_FAILED', 'SYSTEM', { action: 'approve-create', error: glpiCreationError });
-    } else {
-      await logEvent(id, 'APPROVED', req.user.email || 'HOTLINE', { glpiTicketId, glpiSkippedReason });
-      await auditLog('TICKET_APPROVED', { actor: req.user, targetType: 'Ticket', targetId: id, targetLabel: ticket.title, metadata: { glpiTicketId, glpiSkippedReason } });
-      // Uploader les pièces jointes en attente (stockées localement en attendant GLPI)
-      if (glpiTicketId) {
-        uploadPendingAttachments(id, glpiTicketId).then((uploaded) => {
-          if (uploaded.length > 0) {
-            console.log(`[ticket.routes] ${uploaded.length} pièce(s) jointe(s) uploadée(s) vers GLPI pour le ticket #${id}`);
-          }
-        }).catch((err) => {
-          console.error(`[ticket.routes] Échec upload pièces jointes différées pour le ticket #${id}:`, err.message);
-        });
-      }
-    }
-
-    emitTicketUpdated(ticket, { approvalStatus: 'APPROVED', glpiTicketId });
-
-    // Boucle de rétroaction : l'approbation humaine renforce la réputation de l'expéditeur
-    if (ticket.sourceEmail) {
-      recordDecision({ email: ticket.sourceEmail, decision: 'APPROVED' })
-        .catch((err) => console.error('[senderReputation] Échec enregistrement approbation:', err.message));
-    }
-
-    // Associer l'expéditeur au lieu (RequesterLocation) pour les prochains emails
-    if (ticket.sourceEmail && ticket.glpiLocationId) {
-      try {
-        const glpiLoc = await prisma.glpiLocation.findFirst({
-          where: { glpiLocationId: ticket.glpiLocationId },
-          select: { id: true },
-        });
-        if (glpiLoc) {
-          await prisma.requesterLocation.upsert({
-            where: { email_glpiLocationId: { email: ticket.sourceEmail.toLowerCase().trim(), glpiLocationId: glpiLoc.id } },
-            update: { assignmentCount: { increment: 1 }, lastUsedAt: new Date(), assignedById: req.user.sub },
-            create: { email: ticket.sourceEmail.toLowerCase().trim(), glpiLocationId: glpiLoc.id, assignedById: req.user.sub },
-          });
-        }
-      } catch (err) {
-        console.error('[ticket.routes] Échec auto-association RequesterLocation:', err.message);
-      }
-    }
-
-    return res.json({
-      ...ticket,
-      ...(glpiSkippedReason ? { warning: glpiSkippedReason } : {}),
-      ...(glpiCreationError ? { glpiCreationError } : {}),
-    });
+    return res.json(result);
   } catch (err) {
+    if (err.status === 404) return res.status(404).json({ error: 'Ticket introuvable' });
     return res.status(500).json({ error: err.message });
   }
 });

@@ -9,10 +9,12 @@ import {
 } from 'lucide-react';
 import { sanitizeHtml } from '../utils/sanitize';
 import api from '../api/client';
+import useSystemSettings from '../hooks/useSystemSettings';
 
 export default function ValidationCenter({ defaultTab = 'tickets' }) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { autonomousMode } = useSystemSettings();
   const activeTab = searchParams.get('tab') || defaultTab;
 
   const [pendingTickets, setPendingTickets] = useState([]);
@@ -112,7 +114,11 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   async function handleApproveTicket(ticketId) {
     try {
       const res = await api.post(`/tickets/${ticketId}/approve`);
-      toast.success(`Ticket #${ticketId} approuvé ! GLPI #${res.data.glpiTicketId || ''}`);
+      toast.success(
+        autonomousMode
+          ? `Ticket #${ticketId} approuvé !`
+          : `Ticket #${ticketId} approuvé ! GLPI #${res.data.glpiTicketId || ''}`
+      );
       loadAllData(true);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erreur lors de l\'approbation du ticket');
@@ -217,7 +223,11 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
       // Step 2: Approuver et envoyer le brouillon de réponse
       await api.post(`/ai-email-drafts/${combinedDraft.id}/approve`);
 
-      toast.success('Ticket GLPI créé ET Réponse IA envoyée avec succès !');
+      toast.success(
+        autonomousMode
+          ? 'Ticket approuvé ET Réponse IA envoyée avec succès !'
+          : 'Ticket GLPI créé ET Réponse IA envoyée avec succès !'
+      );
       setShowCombinedModal(false);
       setCombinedDraft(null);
       loadAllData(true);
@@ -337,7 +347,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             <div>
               <h1 className="text-2xl font-black text-on-surface tracking-tight">Centre de Validation & Approbations</h1>
               <p className="text-xs text-on-surface-variant font-medium">
-                Hub unifié Hotline & Techniciens pour valider la création GLPI des tickets et l'envoi des réponses IA.
+                {autonomousMode
+                  ? "Hub unifié Hotline & Techniciens pour valider la création des tickets et l'envoi des réponses IA."
+                  : "Hub unifié Hotline & Techniciens pour valider la création GLPI des tickets et l'envoi des réponses IA."}
               </p>
             </div>
           </div>
@@ -365,7 +377,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
           }`}
         >
           <Ticket className="w-4 h-4" />
-          <span className="whitespace-nowrap">Tickets en attente GLPI</span>
+          <span className="whitespace-nowrap">{autonomousMode ? 'Tickets en attente' : 'Tickets en attente GLPI'}</span>
           <span className={`px-2 py-0.5 rounded-full text-[10px] font-black whitespace-nowrap ${
             activeTab === 'tickets' ? 'bg-white/20 text-white' : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
           }`}>
@@ -456,7 +468,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
               <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto" />
               <h3 className="text-base font-bold text-on-surface">Aucun ticket en attente d'approbation</h3>
               <p className="text-xs text-on-surface-variant max-w-md mx-auto">
-                Tous les tickets créés ont été validés et transmis à GLPI.
+                {autonomousMode
+                  ? 'Tous les tickets créés ont été validés.'
+                  : 'Tous les tickets créés ont été validés et transmis à GLPI.'}
               </p>
             </div>
           ) : (
@@ -524,7 +538,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                       className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-500/20 transition-all flex items-center gap-1.5"
                     >
                       <Check className="w-4 h-4" />
-                      <span>Approuver GLPI</span>
+                      <span>{autonomousMode ? 'Approuver' : 'Approuver GLPI'}</span>
                     </button>
                   </div>
                 </div>
@@ -592,11 +606,11 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                         ) : isTicketPending ? (
                           <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 dark:bg-amber-500/15 dark:text-amber-400 border border-amber-300 dark:border-amber-500/30 flex items-center gap-1.5">
                             <Shield className="w-3.5 h-3.5" />
-                            🛡️ Ticket non créé GLPI (En attente)
+                            {autonomousMode ? '🛡️ Ticket en attente d\'approbation' : '🛡️ Ticket non créé GLPI (En attente)'}
                           </span>
                         ) : (
                           <span className="px-3 py-1 rounded-full text-xs font-bold bg-surface-container text-on-surface-variant border border-outline-variant/30">
-                            Ticket Interne ERP
+                            {autonomousMode ? '✅ Ticket approuvé' : 'Ticket Interne ERP'}
                           </span>
                         )}
                       </div>
@@ -1210,7 +1224,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             <div className="flex items-center gap-3 text-amber-600 dark:text-amber-400">
               <Shield className="w-7 h-7 shrink-0" />
               <div>
-                <h3 className="text-base font-bold">Ticket non encore créé dans GLPI</h3>
+                <h3 className="text-base font-bold">
+                  {autonomousMode ? 'Ticket en attente d\'approbation' : 'Ticket non encore créé dans GLPI'}
+                </h3>
                 <p className="text-xs text-on-surface-variant">
                   Ce ticket est actuellement en attente d'approbation Hotline dans l'ERP.
                 </p>
@@ -1230,7 +1246,11 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             </div>
 
             <p className="text-xs text-on-surface font-medium leading-relaxed">
-              Souhaitez-vous <strong>approuver la création du ticket dans GLPI</strong> ET <strong>envoyer la réponse IA par email</strong> en une seule opération ?
+              {autonomousMode ? (
+                <>Souhaitez-vous <strong>approuver le ticket</strong> ET <strong>envoyer la réponse IA par email</strong> en une seule opération ?</>
+              ) : (
+                <>Souhaitez-vous <strong>approuver la création du ticket dans GLPI</strong> ET <strong>envoyer la réponse IA par email</strong> en une seule opération ?</>
+              )}
             </p>
 
             <div className="flex items-center justify-end gap-3 pt-2">
@@ -1251,7 +1271,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                 className="px-5 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-lg shadow-emerald-500/20 transition-all flex items-center gap-2"
               >
                 <CheckCircle2 className="w-4 h-4" />
-                <span>{approvingCombined ? 'Approbation en cours...' : 'Approuver GLPI + Envoyer Réponse'}</span>
+                <span>{approvingCombined ? 'Approbation en cours...' : (autonomousMode ? 'Approuver + Envoyer Réponse' : 'Approuver GLPI + Envoyer Réponse')}</span>
               </button>
             </div>
           </div>

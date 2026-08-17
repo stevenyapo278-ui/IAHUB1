@@ -237,6 +237,15 @@ export default function AdvancedTab() {
           Désactivées, les actions correspondantes passent par le <strong>Centre de Validation</strong>.
         </p>
 
+        {/* Mode autonome : la plateforme fonctionne comme e-ticketing sans GLPI */}
+        <SettingRow
+          title="Mode autonome (sans GLPI)"
+          description="Utilise la plateforme comme outil d'e-ticketing complet, sans dépendre de GLPI. Toutes les synchronisations et écritures GLPI sont désactivées ; les catégories se gèrent localement (page Catégories). Réactivable à tout moment."
+          checked={settings.autonomousMode === true}
+          onChange={(v) => updateSetting('autonomousMode', v)}
+          disabled={saving}
+        />
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-md">
           <SettingRow
             title="Auto-envoi des emails IA"
@@ -247,62 +256,76 @@ export default function AdvancedTab() {
           />
 
           <SettingRow
-            title="Auto-approbation GLPI"
-            description="Valide automatiquement la solution ERP quand le technicien résout le ticket dans GLPI — supprime la relecture manuelle."
-            checked={settings.autoApproveGlpiSolutions}
-            onChange={(v) => updateSetting('autoApproveGlpiSolutions', v)}
+            title="Auto-approbation des tickets manuels"
+            description="Approuve automatiquement les tickets créés manuellement (formulaire interne, portail) sans passage par le Centre de Validation. Les tickets créés par email/IA restent soumis à validation Hotline."
+            checked={settings.autoApproveManualTickets === true}
+            onChange={(v) => updateSetting('autoApproveManualTickets', v)}
             disabled={saving}
           />
 
-          <SettingRow
-            title="Création GLPI automatique"
-            description="Crée un ticket correspondant dans GLPI dès qu'un ticket est approuvé dans l'ERP."
-            checked={settings.enableGlpiTicketCreation !== false}
-            onChange={(v) => updateSetting('enableGlpiTicketCreation', v)}
-            disabled={saving}
-          />
+          {settings.autonomousMode !== true && (
+            <>
+              <SettingRow
+                title="Auto-approbation GLPI"
+                description="Valide automatiquement la solution ERP quand le technicien résout le ticket dans GLPI — supprime la relecture manuelle."
+                checked={settings.autoApproveGlpiSolutions}
+                onChange={(v) => updateSetting('autoApproveGlpiSolutions', v)}
+                disabled={saving}
+              />
 
-          <SettingRow
-            title="Dry Run Mode (simulation)"
-            description="Mode simulation : aucune action n'est réellement écrite dans GLPI (création, mise à jour, suivi). Les tickets reçoivent un ID fictif négatif. À désactiver en production."
-            checked={settings.dryRunMode === true}
-            onChange={(v) => updateSetting('dryRunMode', v)}
-            disabled={saving}
-          />
+              <SettingRow
+                title="Création GLPI automatique"
+                description="Crée un ticket correspondant dans GLPI dès qu'un ticket est approuvé dans l'ERP."
+                checked={settings.enableGlpiTicketCreation !== false}
+                onChange={(v) => updateSetting('enableGlpiTicketCreation', v)}
+                disabled={saving}
+              />
+
+              <SettingRow
+                title="Dry Run Mode (simulation)"
+                description="Mode simulation : aucune action n'est réellement écrite dans GLPI (création, mise à jour, suivi). Les tickets reçoivent un ID fictif négatif. À désactiver en production."
+                checked={settings.dryRunMode === true}
+                onChange={(v) => updateSetting('dryRunMode', v)}
+                disabled={saving}
+              />
+            </>
+          )}
         </div>
 
         {/* Instance GLPI active */}
-        <motion.div variants={itemVariants} className="bento-card flex items-center justify-between gap-lg p-lg">
-          <div>
-            <div className="font-headline-sm text-headline-sm text-on-surface font-semibold flex items-center gap-2">
-              <span className="material-symbols-outlined text-[20px] text-primary">database</span>
-              Instance GLPI active
+        {settings.autonomousMode !== true && (
+          <motion.div variants={itemVariants} className="bento-card flex items-center justify-between gap-lg p-lg">
+            <div>
+              <div className="font-headline-sm text-headline-sm text-on-surface font-semibold flex items-center gap-2">
+                <span className="material-symbols-outlined text-[20px] text-primary">database</span>
+                Instance GLPI active
+              </div>
+              <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5">
+                Instance GLPI utilisée pour créer les tickets approuvés. 
+                Les instances disponibles se configurent dans <strong>Paramètres → Autre → Services & APIs</strong>.
+              </p>
             </div>
-            <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5">
-              Instance GLPI utilisée pour créer les tickets approuvés. 
-              Les instances disponibles se configurent dans <strong>Paramètres → Autre → Services & APIs</strong>.
-            </p>
-          </div>
-          <div className="shrink-0">
-            {glpiInstances.length === 0 ? (
-              <span className="text-xs text-on-surface-variant italic">Aucune instance configurée</span>
-            ) : (
-              <select
-                value={settings.activeGlpiInstance || 'glpi'}
-                onChange={(e) => updateSetting('activeGlpiInstance', e.target.value)}
-                disabled={saving}
-                className={`${inputClass} min-w-[200px] disabled:opacity-50`}
-              >
-                {glpiInstances.map((inst) => (
-                  <option key={inst.id} value={inst.serviceName}>
-                    {inst.serviceName === 'glpi' ? 'GLPI Production' : inst.serviceName}
-                    {inst.baseUrl ? ` (${inst.baseUrl.replace(/^https?:\/\//, '').slice(0, 40)})` : ''}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-        </motion.div>
+            <div className="shrink-0">
+              {glpiInstances.length === 0 ? (
+                <span className="text-xs text-on-surface-variant italic">Aucune instance configurée</span>
+              ) : (
+                <select
+                  value={settings.activeGlpiInstance || 'glpi'}
+                  onChange={(e) => updateSetting('activeGlpiInstance', e.target.value)}
+                  disabled={saving}
+                  className={`${inputClass} min-w-[200px] disabled:opacity-50`}
+                >
+                  {glpiInstances.map((inst) => (
+                    <option key={inst.id} value={inst.serviceName}>
+                      {inst.serviceName === 'glpi' ? 'GLPI Production' : inst.serviceName}
+                      {inst.baseUrl ? ` (${inst.baseUrl.replace(/^https?:\/\//, '').slice(0, 40)})` : ''}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </motion.div>
+        )}
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
@@ -377,15 +400,17 @@ export default function AdvancedTab() {
         </p>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-md">
-          <IntervalRow
-            title="Tickets GLPI"
-            description="Import des nouveaux tickets, suivis et approbations depuis GLPI vers l'ERP."
-            value={settings.glpiTicketsSyncIntervalSeconds}
-            onChange={(v) => updateSetting('glpiTicketsSyncIntervalSeconds', v)}
-            disabled={saving}
-            max={3600}
-            unit="secondes"
-          />
+          {settings.autonomousMode !== true && (
+            <IntervalRow
+              title="Tickets GLPI"
+              description="Import des nouveaux tickets, suivis et approbations depuis GLPI vers l'ERP."
+              value={settings.glpiTicketsSyncIntervalSeconds}
+              onChange={(v) => updateSetting('glpiTicketsSyncIntervalSeconds', v)}
+              disabled={saving}
+              max={3600}
+              unit="secondes"
+            />
+          )}
 
           <IntervalRow
             title="Relevé des emails"
@@ -397,15 +422,17 @@ export default function AdvancedTab() {
             unit="secondes"
           />
 
-          <IntervalRow
-            title="Structure GLPI"
-            description="Synchronisation des groupes, catégories et utilisateurs depuis GLPI."
-            value={settings.glpiTeamsCategoriesSyncIntervalMinutes}
-            onChange={(v) => updateSetting('glpiTeamsCategoriesSyncIntervalMinutes', v)}
-            disabled={saving}
-            max={1440}
-            unit="minutes"
-          />
+          {settings.autonomousMode !== true && (
+            <IntervalRow
+              title="Structure GLPI"
+              description="Synchronisation des groupes, catégories et utilisateurs depuis GLPI."
+              value={settings.glpiTeamsCategoriesSyncIntervalMinutes}
+              onChange={(v) => updateSetting('glpiTeamsCategoriesSyncIntervalMinutes', v)}
+              disabled={saving}
+              max={1440}
+              unit="minutes"
+            />
+          )}
 
           <IntervalRow
             title="Modèles IA disponibles"
@@ -451,7 +478,7 @@ export default function AdvancedTab() {
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       {/* SECTION 4 : REIMPORT GLPI & EMAILS */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
-      <GlpiReimportSection />
+      <GlpiReimportSection autonomousMode={settings.autonomousMode === true} />
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       {/* SECTION 5 : REGLES DE TRIAGE AUTOMATIQUE */}
@@ -556,7 +583,8 @@ function SlaThresholdsSection({ saving, setSaving, setError }) {
   );
 }
 
-function GlpiReimportSection() {  const [activeTab, setActiveTab] = useState('glpi');
+function GlpiReimportSection({ autonomousMode = false }) {
+  const [activeTab, setActiveTab] = useState(autonomousMode ? 'email' : 'glpi');
   const [reimporting, setReimporting] = useState(false);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -642,7 +670,7 @@ function GlpiReimportSection() {  const [activeTab, setActiveTab] = useState('gl
     }
   }
 
-  const isGlpi = activeTab === 'glpi';
+  const isGlpi = !autonomousMode && activeTab === 'glpi';
   const fmtElapsed = `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`;
 
   return (
@@ -653,14 +681,16 @@ function GlpiReimportSection() {  const [activeTab, setActiveTab] = useState('gl
       </div>
 
       <div className="flex gap-1 p-1 rounded-xl bg-surface-container-high/50 w-fit">
-        <button
-          onClick={() => { setActiveTab('glpi'); setResult(null); setError(null); }}
-          disabled={reimporting}
-          className={`px-4 py-2 rounded-lg text-[13px] font-semibold transition-all disabled:opacity-40 ${isGlpi ? 'bg-primary text-white shadow-sm' : 'text-on-surface-variant hover:text-on-surface'}`}
-        >
-          <span className="material-symbols-outlined text-[16px] mr-1.5 align-middle">link</span>
-          GLPI
-        </button>
+        {!autonomousMode && (
+          <button
+            onClick={() => { setActiveTab('glpi'); setResult(null); setError(null); }}
+            disabled={reimporting}
+            className={`px-4 py-2 rounded-lg text-[13px] font-semibold transition-all disabled:opacity-40 ${isGlpi ? 'bg-primary text-white shadow-sm' : 'text-on-surface-variant hover:text-on-surface'}`}
+          >
+            <span className="material-symbols-outlined text-[16px] mr-1.5 align-middle">link</span>
+            GLPI
+          </button>
+        )}
         <button
           onClick={() => { setActiveTab('email'); setResult(null); setError(null); }}
           disabled={reimporting}
