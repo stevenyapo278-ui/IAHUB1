@@ -1098,7 +1098,7 @@ export default function Tickets() {
             <FilterSelect value={filters.category} onChange={(v) => updateFilter('category', v)}
               label="Catégorie" options={[
                 { v: '', l: 'Toutes les catégories' },
-                ...categories.map((c) => ({ v: c, l: c })),
+                ...categories.map((c) => ({ v: c.name, l: c.name })),
               ]} />
 
             <FilterSelect value={filters.assignedToId} onChange={(v) => updateFilter('assignedToId', v)}
