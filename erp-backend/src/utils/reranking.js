@@ -8,10 +8,10 @@ const DEFAULT_RERANK_MODEL = {
 // Lists all active providers with active keys and a configured RERANK model (or fallback default).
 async function listRerankCandidates() {
   const providers = await prisma.aiProvider.findMany({
-    where: { isActive: true },
+    where: { isActive: true, isDeleted: false },
     include: {
       keys: { where: { isActive: true }, orderBy: { isDefault: 'desc' } },
-      models: { where: { isActive: true, type: 'RERANK' }, orderBy: { isDefault: 'desc' } },
+      models: { where: { isActive: true, isDeleted: false, type: 'RERANK' }, orderBy: { isDefault: 'desc' } },
     },
     orderBy: { label: 'asc' },
   });

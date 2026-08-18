@@ -183,10 +183,10 @@ async function fetchTicketsFromInstance(instanceName, limit = 20) {
 
 async function callAI(prompt, maxTokens = 2048) {
   const providers = await prisma.aiProvider.findMany({
-    where: { isActive: true },
+    where: { isActive: true, isDeleted: false },
     include: {
       keys: { where: { isActive: true }, orderBy: { isDefault: 'desc' } },
-      models: { where: { isActive: true, type: 'CHAT' }, orderBy: [{ isDefault: 'desc' }, { id: 'asc' }], take: 1 },
+      models: { where: { isActive: true, isDeleted: false, type: 'CHAT' }, orderBy: [{ isDefault: 'desc' }, { id: 'asc' }], take: 1 },
     },
     orderBy: { label: 'asc' },
   });

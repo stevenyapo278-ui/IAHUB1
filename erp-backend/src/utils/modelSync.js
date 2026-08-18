@@ -76,12 +76,12 @@ async function syncProviderModels(providerId) {
   const provider = await prisma.aiProvider.findUnique({
     where: { id: providerId },
     include: {
-      models: { select: { name: true } },
+      models: { select: { name: true } }, // inclut les modèles actifs ET isDeleted: true pour ne pas les ré-ajouter
       keys: { where: { isActive: true }, select: { apiKey: true }, take: 1 },
     },
   });
 
-  if (!provider) return { error: 'Fournisseur introuvable' };
+  if (!provider || provider.isDeleted) return { error: 'Fournisseur introuvable' };
   if (!provider.isActive) return { error: 'Fournisseur désactivé' };
   if (provider.keys.length === 0) return { error: 'Aucune clé API active configurée pour ce fournisseur' };
 
@@ -99,16 +99,16 @@ async function syncProviderModels(providerId) {
   if (newNames.length === 0) return { added: 0 };
 
   await prisma.aiModel.createMany({
-    data: newNames.map((name) => ({ providerId, name, isActive: true, isDefault: false })),
+    data: newNames.map((name) => ({ providerId, name, isActive: true, isDefault: false, isDeleted: false })),
     skipDuplicates: true,
   });
 
   return { added: newNames.length };
 }
 
-// Synchronise tous les fournisseurs actifs disposant d'au moins une clé active.
+// Synchronise tous les fournisseurs actifs disposant d'au moins une clé active et non supprimés.
 async function syncAllProviders() {
-  const providers = await prisma.aiProvider.findMany({ where: { isActive: true }, select: { id: true } });
+  const providers = await prisma.aiProvider.findMany({ where: { isActive: true, isDeleted: false }, select: { id: true } });
   const results = {};
   for (const { id } of providers) {
     results[id] = await syncProviderModels(id);

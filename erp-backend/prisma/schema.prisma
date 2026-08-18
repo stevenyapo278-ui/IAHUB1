@@ -643,6 +643,7 @@ model AiProvider {
   label       String   // nom affiché : "OpenAI", "Anthropic (Claude)", ...
   baseUrl     String?
   isActive    Boolean  @default(true)
+  isDeleted   Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -666,6 +667,7 @@ model AiModel {
   type       AiModelType @default(CHAT) // détermine si ce modèle peut être "par défaut" pour le chat (5 prompts IA) ou pour les embeddings (base de connaissances) — un fournisseur peut avoir un défaut distinct pour chaque type
   isDefault  Boolean    @default(false)
   isActive   Boolean    @default(true)
+  isDeleted  Boolean    @default(false)
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
 

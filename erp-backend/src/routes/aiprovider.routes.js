@@ -34,8 +34,9 @@ function serializeProvider(provider) {
 // List all providers with their models and keys (masked)
 router.get('/', async (req, res) => {
   const providers = await prisma.aiProvider.findMany({
+    where: { isDeleted: false },
     include: {
-      models: { orderBy: { name: 'asc' } },
+      models: { where: { isDeleted: false }, orderBy: { name: 'asc' } },
       keys: { include: { model: { select: { id: true, name: true } } }, orderBy: { label: 'asc' } },
     },
     orderBy: { label: 'asc' },
@@ -45,10 +46,10 @@ router.get('/', async (req, res) => {
 });
 
 router.get('/:id', async (req, res) => {
-  const provider = await prisma.aiProvider.findUnique({
-    where: { id: Number(req.params.id) },
+  const provider = await prisma.aiProvider.findFirst({
+    where: { id: Number(req.params.id), isDeleted: false },
     include: {
-      models: { orderBy: { name: 'asc' } },
+      models: { where: { isDeleted: false }, orderBy: { name: 'asc' } },
       keys: { include: { model: { select: { id: true, name: true } } }, orderBy: { label: 'asc' } },
     },
   });
@@ -56,7 +57,7 @@ router.get('/:id', async (req, res) => {
   return res.json(serializeProvider(provider));
 });
 
-// Create provider
+// Create provider (ou réactiver s'il a été soft-deleted)
 router.post('/', [body('name').notEmpty(), body('label').notEmpty()], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
@@ -64,18 +65,38 @@ router.post('/', [body('name').notEmpty(), body('label').notEmpty()], async (req
   const { name, label, baseUrl, isActive } = req.body;
 
   const existing = await prisma.aiProvider.findUnique({ where: { name } });
-  if (existing) return res.status(409).json({ error: 'Ce fournisseur existe déjà' });
+  let provider;
 
-  const provider = await prisma.aiProvider.create({
-    data: { name, label, baseUrl: baseUrl || null, isActive: isActive !== undefined ? isActive : true },
-  });
+  if (existing) {
+    if (!existing.isDeleted) {
+      return res.status(409).json({ error: 'Ce fournisseur existe déjà' });
+    }
+    // Réactiver et mettre à jour le fournisseur précédemment supprimé
+    provider = await prisma.aiProvider.update({
+      where: { id: existing.id },
+      data: {
+        label,
+        baseUrl: baseUrl || null,
+        isActive: isActive !== undefined ? isActive : true,
+        isDeleted: false,
+      },
+    });
+  } else {
+    provider = await prisma.aiProvider.create({
+      data: { name, label, baseUrl: baseUrl || null, isActive: isActive !== undefined ? isActive : true },
+    });
+  }
 
   invalidateProviderCaches();
-  return res.status(201).json(provider);
   auditLog('AI_PROVIDER_CREATED', { actor: req.user, targetType: 'AiProvider', targetId: provider.id, targetLabel: provider.label, metadata: { name: provider.name } }).catch(() => {});
+  return res.status(201).json(provider);
 });
 
 router.patch('/:id', async (req, res) => {
+  const providerId = Number(req.params.id);
+  const existing = await prisma.aiProvider.findFirst({ where: { id: providerId, isDeleted: false } });
+  if (!existing) return res.status(404).json({ error: 'Fournisseur introuvable' });
+
   const { label, baseUrl, isActive } = req.body;
   const data = {};
   if (label !== undefined) data.label = label;
@@ -83,7 +104,7 @@ router.patch('/:id', async (req, res) => {
   if (isActive !== undefined) data.isActive = isActive;
 
   try {
-    const provider = await prisma.aiProvider.update({ where: { id: Number(req.params.id) }, data });
+    const provider = await prisma.aiProvider.update({ where: { id: providerId }, data });
     invalidateProviderCaches();
     return res.json(provider);
   } catch (err) {
@@ -93,8 +114,20 @@ router.patch('/:id', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
-    const provider = await prisma.aiProvider.findUnique({ where: { id: Number(req.params.id) }, select: { id: true, name: true, label: true } });
-    await prisma.aiProvider.delete({ where: { id: Number(req.params.id) } });
+    const providerId = Number(req.params.id);
+    const provider = await prisma.aiProvider.findFirst({ where: { id: providerId, isDeleted: false }, select: { id: true, name: true, label: true } });
+    if (!provider) return res.status(404).json({ error: 'Fournisseur introuvable' });
+
+    await prisma.aiProvider.update({
+      where: { id: providerId },
+      data: { isDeleted: true, isActive: false },
+    });
+    // Soft delete également ses modèles
+    await prisma.aiModel.updateMany({
+      where: { providerId },
+      data: { isDeleted: true, isActive: false },
+    });
+
     invalidateProviderCaches();
     auditLog('AI_PROVIDER_DELETED', { actor: req.user, targetType: 'AiProvider', targetId: provider.id, targetLabel: provider.label, metadata: { name: provider.name } }).catch(() => {});
     return res.status(204).send();
@@ -106,7 +139,7 @@ router.delete('/:id', async (req, res) => {
 // Synchronise les modèles disponibles depuis l'API du fournisseur (nécessite une clé active)
 router.post('/:id/sync-models', async (req, res) => {
   const providerId = Number(req.params.id);
-  const provider = await prisma.aiProvider.findUnique({ where: { id: providerId } });
+  const provider = await prisma.aiProvider.findFirst({ where: { id: providerId, isDeleted: false } });
   if (!provider) return res.status(404).json({ error: 'Fournisseur introuvable' });
 
   const result = await syncProviderModels(providerId);
@@ -126,39 +159,59 @@ router.post('/:id/models', [body('name').notEmpty()], async (req, res) => {
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
   const providerId = Number(req.params.id);
+  const provider = await prisma.aiProvider.findFirst({ where: { id: providerId, isDeleted: false } });
+  if (!provider) return res.status(404).json({ error: 'Fournisseur introuvable' });
+
   const { name, label, type, isDefault, isActive } = req.body;
   const modelType = ['CHAT', 'EMBEDDING', 'RERANK'].includes(type) ? type : 'CHAT';
 
   const existing = await prisma.aiModel.findUnique({ where: { providerId_name: { providerId, name } } });
-  if (existing) return res.status(409).json({ error: 'Ce modèle existe déjà pour ce fournisseur' });
+  let model;
 
-  // "Par défaut" est unique par TYPE (chat / embedding), pas par fournisseur entier — un fournisseur
-  // peut avoir un modèle de chat par défaut ET un modèle d'embedding par défaut simultanément.
-  if (isDefault) {
-    await prisma.aiModel.updateMany({ where: { providerId, type: modelType }, data: { isDefault: false } });
+  if (existing) {
+    if (!existing.isDeleted) {
+      return res.status(409).json({ error: 'Ce modèle existe déjà pour ce fournisseur' });
+    }
+    if (isDefault) {
+      await prisma.aiModel.updateMany({ where: { providerId, type: modelType }, data: { isDefault: false } });
+    }
+    model = await prisma.aiModel.update({
+      where: { id: existing.id },
+      data: {
+        label: label || null,
+        type: modelType,
+        isDefault: !!isDefault,
+        isActive: isActive !== undefined ? isActive : true,
+        isDeleted: false,
+      },
+    });
+  } else {
+    if (isDefault) {
+      await prisma.aiModel.updateMany({ where: { providerId, type: modelType }, data: { isDefault: false } });
+    }
+
+    model = await prisma.aiModel.create({
+      data: {
+        providerId,
+        name,
+        label: label || null,
+        type: modelType,
+        isDefault: !!isDefault,
+        isActive: isActive !== undefined ? isActive : true,
+      },
+    });
   }
 
-  const model = await prisma.aiModel.create({
-    data: {
-      providerId,
-      name,
-      label: label || null,
-      type: modelType,
-      isDefault: !!isDefault,
-      isActive: isActive !== undefined ? isActive : true,
-    },
-  });
-
   invalidateProviderCaches();
-  return res.status(201).json(model);
   auditLog('AI_MODEL_CREATED', { actor: req.user, targetType: 'AiModel', targetId: model.id, targetLabel: model.label || model.name, metadata: { providerId, name: model.name, type: model.type } }).catch(() => {});
+  return res.status(201).json(model);
 });
 
 router.patch('/models/:modelId', async (req, res) => {
   const modelId = Number(req.params.modelId);
   const { label, isDefault, isActive } = req.body;
 
-  const model = await prisma.aiModel.findUnique({ where: { id: modelId } });
+  const model = await prisma.aiModel.findFirst({ where: { id: modelId, isDeleted: false } });
   if (!model) return res.status(404).json({ error: 'Modèle introuvable' });
 
   if (isDefault) {
@@ -177,7 +230,14 @@ router.patch('/models/:modelId', async (req, res) => {
 
 router.delete('/models/:modelId', async (req, res) => {
   try {
-    await prisma.aiModel.delete({ where: { id: Number(req.params.modelId) } });
+    const modelId = Number(req.params.modelId);
+    const model = await prisma.aiModel.findFirst({ where: { id: modelId, isDeleted: false } });
+    if (!model) return res.status(404).json({ error: 'Modèle introuvable' });
+
+    await prisma.aiModel.update({
+      where: { id: modelId },
+      data: { isDeleted: true, isActive: false },
+    });
     invalidateProviderCaches();
     return res.status(204).send();
   } catch (err) {
@@ -357,7 +417,7 @@ router.post('/models/:modelId/test', async (req, res) => {
       where: { id: modelId },
       include: { provider: true },
     });
-    if (!model) return res.status(404).json({ ok: false, error: 'Modèle introuvable' });
+    if (!model || model.isDeleted || model.provider?.isDeleted) return res.status(404).json({ ok: false, error: 'Modèle introuvable' });
 
     const provider = model.provider;
 

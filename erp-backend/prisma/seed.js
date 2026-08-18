@@ -86,20 +86,30 @@ async function main() {
     },
   ];
 
+  // Les fournisseurs et modèles par défaut ne sont créés qu'une seule fois s'ils n'existent pas du tout en base.
+  // Si un admin supprime un fournisseur ou un modèle (isDeleted: true), le seed ne le recrée PAS lors des redéploiements Dokploy.
   for (const p of providers) {
-    const provider = await prisma.aiProvider.upsert({
+    let provider = await prisma.aiProvider.findUnique({
       where: { name: p.name },
-      update: { baseUrl: p.baseUrl },
-      create: { name: p.name, label: p.label, baseUrl: p.baseUrl },
     });
+
+    if (!provider) {
+      provider = await prisma.aiProvider.create({
+        data: { name: p.name, label: p.label, baseUrl: p.baseUrl },
+      });
+    }
 
     for (let i = 0; i < p.models.length; i++) {
       const modelName = p.models[i];
-      await prisma.aiModel.upsert({
+      const existingModel = await prisma.aiModel.findUnique({
         where: { providerId_name: { providerId: provider.id, name: modelName } },
-        update: {},
-        create: { providerId: provider.id, name: modelName, isDefault: i === 0 },
       });
+
+      if (!existingModel) {
+        await prisma.aiModel.create({
+          data: { providerId: provider.id, name: modelName, isDefault: i === 0 },
+        });
+      }
     }
   }
 

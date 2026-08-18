@@ -6,13 +6,18 @@ jest.mock('./emailSender', () => ({ sendEmail: jest.fn(), getEmailSignature: jes
 jest.mock('./systemSettings', () => ({ getSystemSettings: jest.fn() }));
 // Aucun fournisseur IA actif par défaut dans ces tests : generateInsight doit alors retourner null
 // sans planter (dégradation silencieuse), voir les tests dédiés ci-dessous qui le surchargent.
-jest.mock('./mailAnalyzer', () => ({ getActiveProvider: jest.fn().mockResolvedValue(null), callProvider: jest.fn() }));
+jest.mock('./mailAnalyzer', () => ({
+  getActiveProvider: jest.fn().mockResolvedValue(null),
+  getActiveProviders: jest.fn().mockResolvedValue([]),
+  callProvider: jest.fn(),
+  callProviderWithFallback: jest.fn(),
+}));
 jest.mock('./promptTemplates', () => ({ getPrompt: jest.fn() }));
 
 const prisma = require('../prismaClient');
 const { sendEmail } = require('./emailSender');
 const { getSystemSettings } = require('./systemSettings');
-const { getActiveProvider, callProvider } = require('./mailAnalyzer');
+const { getActiveProvider, getActiveProviders, callProvider, callProviderWithFallback } = require('./mailAnalyzer');
 const { getPrompt } = require('./promptTemplates');
 const { buildDailySummaryHtml, sendDailySummary, checkAndSendDailySummary } = require('./dailySummary');
 
@@ -117,16 +122,16 @@ describe('sendDailySummary', () => {
     prisma.ticket.findMany.mockResolvedValue([]);
     getSystemSettings.mockResolvedValue({ dailySummaryRecipients: ['a@test.com'] });
     await sendDailySummary();
-    expect(getActiveProvider).not.toHaveBeenCalled();
+    expect(getActiveProviders).not.toHaveBeenCalled();
   });
 
   it("inclut le résumé IA dans le mail envoyé quand un fournisseur est actif", async () => {
     const tickets = [{ id: 1, glpiTicketId: 10, title: 'Test', priority: 'P1', status: 'OPEN', createdAt: new Date(), assignedTo: null, requester: null }];
     prisma.ticket.findMany.mockResolvedValue(tickets);
     getSystemSettings.mockResolvedValue({ dailySummaryRecipients: ['a@test.com'] });
-    getActiveProvider.mockResolvedValue({ name: 'openai' });
+    getActiveProviders.mockResolvedValue([{ name: 'openai', label: 'OpenAI', keys: [{}], models: [{ name: 'gpt-4o' }] }]);
     getPrompt.mockResolvedValue('prompt');
-    callProvider.mockResolvedValue('{"insight": "Un ticket critique à traiter en priorité."}');
+    callProviderWithFallback.mockResolvedValue('{"insight": "Un ticket critique à traiter en priorité."}');
 
     await sendDailySummary();
 
@@ -138,9 +143,9 @@ describe('sendDailySummary', () => {
     const tickets = [{ id: 1, glpiTicketId: 10, title: 'Test', priority: 'P1', status: 'OPEN', createdAt: new Date(), assignedTo: null, requester: null }];
     prisma.ticket.findMany.mockResolvedValue(tickets);
     getSystemSettings.mockResolvedValue({ dailySummaryRecipients: ['a@test.com'] });
-    getActiveProvider.mockResolvedValue({ name: 'openai' });
+    getActiveProviders.mockResolvedValue([{ name: 'openai', label: 'OpenAI', keys: [{}], models: [{ name: 'gpt-4o' }] }]);
     getPrompt.mockResolvedValue('prompt');
-    callProvider.mockRejectedValue(new Error('Provider down'));
+    callProviderWithFallback.mockRejectedValue(new Error('Provider down'));
 
     const result = await sendDailySummary();
     expect(result.sent).toBe(true);

@@ -14,10 +14,10 @@ function getBreakerForProvider(providerName) {
 // Utilisé pour le fallback automatique : on essaie le premier, si ça échoue on passe au suivant.
 async function getActiveProviders() {
   const providers = await prisma.aiProvider.findMany({
-    where: { isActive: true },
+    where: { isActive: true, isDeleted: false },
     include: {
       keys: { where: { isActive: true }, orderBy: { isDefault: 'desc' } },
-      models: { where: { isActive: true, type: 'CHAT' }, orderBy: [{ isDefault: 'desc' }, { id: 'asc' }], take: 1 },
+      models: { where: { isActive: true, isDeleted: false, type: 'CHAT' }, orderBy: [{ isDefault: 'desc' }, { id: 'asc' }], take: 1 },
     },
     orderBy: { label: 'asc' },
   });

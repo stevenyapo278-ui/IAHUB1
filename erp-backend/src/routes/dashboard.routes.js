@@ -110,13 +110,14 @@ router.get('/integrations', async (req, res) => {
     prisma.apiConfig.findMany({ select: { id: true, serviceName: true, baseUrl: true, isActive: true } }),
     prisma.n8nWorkflow.findMany({ select: { id: true, name: true, isActive: true, lastRunAt: true, lastStatus: true } }),
     prisma.aiProvider.findMany({
+      where: { isDeleted: false },
       select: {
         id: true,
         name: true,
         label: true,
         isActive: true,
         keys: { select: { id: true, isActive: true, isDefault: true } },
-        models: { select: { id: true, name: true, isActive: true, isDefault: true } },
+        models: { where: { isDeleted: false }, select: { id: true, name: true, isActive: true, isDefault: true } },
       },
     }),
   ]);

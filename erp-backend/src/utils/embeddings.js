@@ -24,10 +24,10 @@ const DEFAULT_EMBEDDING_MODEL = {
 // fournisseur trouvé, même s'il s'avère incompatible (mauvaise taille de vecteur, modèle absent...).
 async function listEmbeddingCandidates() {
   const providers = await prisma.aiProvider.findMany({
-    where: { isActive: true },
+    where: { isActive: true, isDeleted: false },
     include: {
       keys: { where: { isActive: true }, orderBy: { isDefault: 'desc' } },
-      models: { where: { isActive: true, type: 'EMBEDDING' }, orderBy: { isDefault: 'desc' } },
+      models: { where: { isActive: true, isDeleted: false, type: 'EMBEDDING' }, orderBy: { isDefault: 'desc' } },
     },
     orderBy: { label: 'asc' },
   });

@@ -6,7 +6,7 @@ jest.mock('../prismaClient', () => ({
   systemSettings: { findUnique: jest.fn() },
   user: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), findMany: jest.fn() },
   team: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
-  glpiLocation: { upsert: jest.fn(), findUnique: jest.fn(), findMany: jest.fn() },
+  glpiLocation: { upsert: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn(), delete: jest.fn() },
   ticketCategory: { upsert: jest.fn(), findUnique: jest.fn() },
   $executeRawUnsafe: jest.fn(),
 }));
@@ -58,11 +58,12 @@ describe('GLPI Sync & Active Directory Resolution Tests', () => {
       });
 
       prisma.glpiLocation.upsert.mockResolvedValue({});
+      prisma.glpiLocation.create.mockResolvedValue({});
       prisma.$executeRawUnsafe.mockResolvedValue({});
 
       const result = await syncLocationsFromGlpi();
       expect(result).toBe(2);
-      expect(prisma.glpiLocation.upsert).toHaveBeenCalledTimes(2);
+      expect(prisma.glpiLocation.create.mock.calls.length + prisma.glpiLocation.upsert.mock.calls.length).toBe(2);
       expect(prisma.$executeRawUnsafe).toHaveBeenCalled();
     });
   });
