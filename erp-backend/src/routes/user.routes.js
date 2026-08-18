@@ -8,6 +8,15 @@ const { sendTemporaryPasswordEmail } = require('../services/emailSender');
 const { ADMIN_LIKE_ROLES } = require('../config/permissions');
 const { sanitizeError } = require('../utils/sanitizeError');
 const { auditLog } = require('../services/auditLogService');
+const cacheStore = require('../services/cacheStore');
+
+// Après toute écriture sur les utilisateurs, on invalide les listes mises en cache (TTL 30s,
+// voir app.js) — sinon l'UI continue d'afficher l'ancien rôle/statut/équipe jusqu'à expiration.
+function invalidateUserCaches() {
+  cacheStore.clear('GET /api/users');
+  cacheStore.clear('GET /api/permission-groups');
+  cacheStore.clear('GET /api/teams');
+}
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -166,6 +175,7 @@ router.post('/bulk-delete', async (req, res) => {
     where: { id: { in: validIdsToDelete } },
   });
 
+  invalidateUserCaches();
   return res.json({ deletedCount: deleted.count });
 });
 
@@ -281,6 +291,7 @@ router.post('/purge-smart', async (req, res) => {
       deletedCount = delRes.count;
     }
 
+    invalidateUserCaches();
     return res.json({
       mode,
       deletedCount,
@@ -301,6 +312,7 @@ router.delete('/purge-imported', async (req, res) => {
         role: { notIn: ADMIN_LIKE_ROLES },
       },
     });
+    invalidateUserCaches();
     return res.json({ purgedCount: deleted.count });
   } catch (err) {
     return res.status(500).json({ error: err.message || 'Erreur lors de la purge' });
@@ -321,6 +333,7 @@ router.post('/bulk-assign-team', async (req, res) => {
     data: { teamId: teamIdValue },
   });
 
+  invalidateUserCaches();
   return res.json({ updatedCount: updated.count });
 });
 
@@ -364,6 +377,7 @@ router.post(
       syncHotlinePermissionGroup(user.id, true);
     }
 
+    invalidateUserCaches();
     return res.status(201).json(user);
     auditLog('USER_CREATED', { actor: req.user, targetType: 'User', targetId: user.id, targetLabel: user.fullName || user.email, metadata: { email: user.email, role: user.role } }).catch(() => {});
   }
@@ -429,6 +443,7 @@ router.patch(
       if (role !== undefined && role !== target.role) {
         syncHotlinePermissionGroup(user.id, role === 'HOTLINE');
       }
+      invalidateUserCaches();
       return res.json(user);
       auditLog('USER_UPDATED', { actor: req.user, targetType: 'User', targetId: user.id, targetLabel: user.fullName || user.email, metadata: { changedFields: Object.keys(data) } }).catch(() => {});
     } catch (err) {
@@ -631,6 +646,7 @@ router.post('/import-csv', upload.single('file'), async (req, res) => {
       }
     }
 
+    invalidateUserCaches();
     return res.json({
       imported,
       updated,
@@ -651,6 +667,7 @@ router.delete('/:id', async (req, res) => {
 
   try {
     await prisma.user.delete({ where: { id: Number(req.params.id) } });
+    invalidateUserCaches();
     auditLog('USER_DELETED', { actor: req.user, targetType: 'User', targetId: target.id, targetLabel: target.fullName || target.email }).catch(() => {});
     return res.status(204).send();
   } catch (err) {

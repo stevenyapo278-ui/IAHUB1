@@ -6,6 +6,7 @@ const { requirePermission } = require('../middleware/permissions');
 const { syncGlpiTickets, fullReimportFromGlpi, getActiveGlpiConfig, glpiInitSession, glpiKillSession } = require('../utils/glpiSync');
 const { syncLocationsFromGlpi, syncUsersFromGlpi, getImportableGlpiUsers, importGlpiUsers } = require('../services/glpiTicketCreator');
 const { auditLog } = require('../services/auditLogService');
+const cacheStore = require('../services/cacheStore');
 
 const router = express.Router();
 router.use(authenticate);
@@ -60,6 +61,8 @@ router.post(
     try {
       const { dateFrom, dateTo } = req.body;
       const result = await fullReimportFromGlpi({ dateFrom, dateTo });
+      // Le réimport réécrit aussi les utilisateurs : invalide leur liste mise en cache
+      cacheStore.clear('GET /api/users');
       return res.json(result);
       auditLog('GLPI_TICKETS_SYNCED', { actor: req.user, targetType: 'Ticket', targetLabel: 'Réimport complet GLPI', metadata: { dateFrom, dateTo, ...result } }).catch(() => {});
     } catch (err) {
@@ -241,6 +244,8 @@ router.post('/import-users', requirePermission('glpi.manage', ['ADMIN', 'TECHNIC
       return res.status(400).json({ error: 'La liste userIds est requise' });
     }
     const result = await importGlpiUsers(userIds);
+    // La liste des utilisateurs est mise en cache (TTL 30s) : on l'invalide après l'import
+    cacheStore.clear('GET /api/users');
     return res.json(result);
   } catch (err) {
     return res.status(502).json({ error: err.message || "Erreur d'import des utilisateurs GLPI" });
