@@ -1,7 +1,7 @@
 const prisma = require('../prismaClient');
 const { logEvent } = require('./ticketEvent');
 const { emitTicketEscalated } = require('../utils/socket');
-const { sendEscalationEmail } = require('./emailSender');
+const { sendEscalationEmail, sendRequesterEscalationEmail } = require('./emailSender');
 
 const ACTIVE_STATUSES = ['NEW', 'OPEN', 'PENDING'];
 
@@ -24,6 +24,9 @@ async function escalateTicket(ticketId, { reason = null, actor = 'SYSTEM', sourc
       assignedTo: { select: { id: true, email: true, fullName: true } },
       requester: { select: { id: true, email: true, fullName: true } },
       team: { select: { id: true, name: true } },
+      // Fallback demandeur pour les tickets créés par email (pas d'utilisateur interne associé)
+      sourceEmail: true,
+      sourceName: true,
     },
   });
   if (!ticket) throw new Error('Ticket introuvable');
@@ -45,8 +48,9 @@ async function escalateTicket(ticketId, { reason = null, actor = 'SYSTEM', sourc
   emitTicketEscalated(updated, { reason, escalationLevel });
 
   // Alerter les admins par email (ils n'ont pas toujours l'application ouverte)
+  let admins = [];
   try {
-    const admins = await prisma.user.findMany({
+    admins = await prisma.user.findMany({
       where: { role: { in: ['ADMIN', 'SUPERADMIN'] }, isActive: true, email: { not: null } },
       select: { email: true, fullName: true },
     });
@@ -63,6 +67,43 @@ async function escalateTicket(ticketId, { reason = null, actor = 'SYSTEM', sourc
     }
   } catch (err) {
     console.error('[escalationService] Échec envoi emails escalade:', err.message);
+  }
+
+  // Notifier aussi le technicien assigné et le demandeur — un même email ne doit
+  // être envoyé qu'une seule fois au maximum (Set de déduplication par adresse).
+  try {
+    const alreadyNotified = new Set((admins || []).map((a) => a.email?.toLowerCase()).filter(Boolean));
+
+    const technician = ticket.assignedTo;
+    if (technician?.email && !alreadyNotified.has(technician.email.toLowerCase())) {
+      alreadyNotified.add(technician.email.toLowerCase());
+      sendEscalationEmail({
+        ticketId,
+        ticketTitle: ticket.title,
+        priority: ticket.priority,
+        reason,
+        escalationLevel,
+        recipientEmail: technician.email,
+        recipientName: technician.fullName,
+      }).catch((err) => console.error(`[escalationService] Échec email escalade technicien (ticket ${ticketId}):`, err.message));
+    }
+
+    // Demandeur : utilisateur interne du ticket, sinon expéditeur du mail d'origine (sourceEmail)
+    const requesterEmail = ticket.requester?.email || ticket.sourceEmail;
+    const requesterName = ticket.requester?.fullName || ticket.sourceName;
+    if (requesterEmail && !alreadyNotified.has(requesterEmail.toLowerCase())) {
+      sendRequesterEscalationEmail({
+        ticketId,
+        ticketTitle: ticket.title,
+        priority: ticket.priority,
+        reason,
+        escalationLevel,
+        recipientEmail: requesterEmail,
+        recipientName: requesterName,
+      }).catch((err) => console.error(`[escalationService] Échec email escalade demandeur (ticket ${ticketId}):`, err.message));
+    }
+  } catch (err) {
+    console.error('[escalationService] Échec envoi emails technicien/demandeur:', err.message);
   }
 
   return updated;

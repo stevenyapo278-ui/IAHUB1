@@ -4,12 +4,15 @@ jest.mock('../prismaClient', () => ({
 }));
 jest.mock('./ticketEvent', () => ({ logEvent: jest.fn() }));
 jest.mock('../utils/socket', () => ({ emitTicketEscalated: jest.fn() }));
-jest.mock('./emailSender', () => ({ sendEscalationEmail: jest.fn(() => Promise.resolve()) }));
+jest.mock('./emailSender', () => ({
+  sendEscalationEmail: jest.fn(() => Promise.resolve()),
+  sendRequesterEscalationEmail: jest.fn(() => Promise.resolve()),
+}));
 
 const prisma = require('../prismaClient');
 const { logEvent } = require('./ticketEvent');
 const { emitTicketEscalated } = require('../utils/socket');
-const { sendEscalationEmail } = require('./emailSender');
+const { sendEscalationEmail, sendRequesterEscalationEmail } = require('./emailSender');
 const { scheduleEscalation, escalateTicket, runEscalationMonitor } = require('./escalationService');
 
 function mockTicket(overrides = {}) {
@@ -77,17 +80,58 @@ describe('escalateTicket — escalade réelle', () => {
     expect(emitTicketEscalated).toHaveBeenCalledWith(expect.objectContaining({ id: 10 }), {
       reason: 'Panne totale', escalationLevel: 2,
     });
-    expect(sendEscalationEmail).toHaveBeenCalledTimes(2);
+    // 2 admins + 1 technicien assigné
+    expect(sendEscalationEmail).toHaveBeenCalledTimes(3);
     expect(sendEscalationEmail.mock.calls[0][0].recipientEmail).toBe('admin1@prosuma.ci');
+    expect(sendEscalationEmail.mock.calls[2][0].recipientEmail).toBe('tech@prosuma.ci');
+    // Le demandeur est notifié avec le template dédié
+    expect(sendRequesterEscalationEmail).toHaveBeenCalledTimes(1);
+    expect(sendRequesterEscalationEmail.mock.calls[0][0].recipientEmail).toBe('req@prosuma.ci');
   });
 
-  it('gère le niveau 0 (première escalade) et un ticket sans assigné', async () => {
+  it('notifie le demandeur même sans admin ni technicien assigné (niveau 0)', async () => {
     mockTicket({ ...ticket, escalationLevel: 0, assignedTo: null });
 
     const updated = await escalateTicket(10, {});
 
     expect(updated.escalationLevel).toBe(1);
     expect(sendEscalationEmail).not.toHaveBeenCalled();
+    expect(sendRequesterEscalationEmail).toHaveBeenCalledTimes(1);
+    expect(sendRequesterEscalationEmail.mock.calls[0][0].recipientEmail).toBe('req@prosuma.ci');
+  });
+
+  it('retombe sur sourceEmail/sourceName quand le ticket n\'a pas de demandeur interne', async () => {
+    mockTicket({
+      ...ticket,
+      requester: null,
+      assignedTo: null,
+      sourceEmail: 'ext@client.com',
+      sourceName: 'Client Externe',
+    });
+
+    await escalateTicket(10, { reason: 'Urgence client' });
+
+    expect(sendEscalationEmail).not.toHaveBeenCalled();
+    expect(sendRequesterEscalationEmail).toHaveBeenCalledTimes(1);
+    expect(sendRequesterEscalationEmail.mock.calls[0][0]).toEqual(expect.objectContaining({
+      recipientEmail: 'ext@client.com',
+      recipientName: 'Client Externe',
+    }));
+  });
+
+  it('déduplique les emails (technicien déjà admin → un seul mail)', async () => {
+    mockTicket({ ...ticket, assignedTo: { id: 5, email: 'tech@prosuma.ci', fullName: 'Tech' } });
+    prisma.user.findMany = jest.fn(async () => [
+      { email: 'tech@prosuma.ci', fullName: 'Tech' },
+      { email: 'admin2@prosuma.ci', fullName: 'Admin 2' },
+    ]);
+
+    await escalateTicket(10, {});
+
+    const emails = sendEscalationEmail.mock.calls.map((c) => c[0].recipientEmail.toLowerCase());
+    expect(emails).toEqual(expect.arrayContaining(['tech@prosuma.ci', 'admin2@prosuma.ci']));
+    expect(emails.filter((e) => e === 'tech@prosuma.ci')).toHaveLength(1);
+    expect(sendRequesterEscalationEmail).toHaveBeenCalledTimes(1);
   });
 
   it('lève une erreur si le ticket n\'existe pas', async () => {

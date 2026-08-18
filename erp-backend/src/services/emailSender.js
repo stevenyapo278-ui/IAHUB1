@@ -383,20 +383,50 @@ ${signature || DEFAULT_EMAIL_SIGNATURE}
   return sendEmail({ ticketId, to: recipientEmail, subject, bodyHtml, saveAsMessage: false });
 }
 
-// Alerte un admin qu'un ticket a été escaladé (automatiquement ou manuellement).
+// Alerte un admin OU le technicien assigné qu'un ticket a été escaladé (automatiquement ou
+// manuellement). Lien direct vers le ticket pour une prise en charge rapide.
 async function sendEscalationEmail({ ticketId, ticketTitle, priority, reason, escalationLevel, recipientEmail, recipientName }) {
   const subject = `[Escalade Niv.${escalationLevel || 1}] Ticket #${ticketId} : ${ticketTitle}`;
   const signature = await getEmailSignature();
+  const frontendUrl = resolveFrontendUrl(await getSystemSettings());
+  const ticketLink = `${frontendUrl}/tickets/${ticketId}`;
   const priorityLabel = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' }[priority] || priority;
   const bodyHtml = `
 <p>Bonjour ${recipientName || ''},</p>
-<p>Le ticket <strong>#${ticketId} — ${ticketTitle}</strong> a été escaladé (niveau ${escalationLevel || 1}).</p>
+<p>Le ticket <strong>#${ticketId} — ${ticketTitle}</strong> vient d'être <strong>escaladé au niveau ${escalationLevel || 1}</strong>. Une prise en charge prioritaire est requise.</p>
 <table style="border-collapse:collapse;margin:16px 0">
-  <tr><td style="padding:4px 12px 4px 0;color:#666">Priorité</td><td><strong>${priorityLabel} (${priority})</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Ticket</td><td><strong>#${ticketId} — ${ticketTitle}</strong></td></tr>
   <tr><td style="padding:4px 12px 4px 0;color:#666">Niveau d'escalade</td><td><strong>${escalationLevel || 1}</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Priorité</td><td><strong>${priorityLabel} (${priority})</strong></td></tr>
   ${reason ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Motif</td><td>${reason}</td></tr>` : ''}
 </table>
-<p>Connectez-vous à l'application pour prendre en charge ce ticket.</p>
+<p style="margin:20px 0 0"><a href="${ticketLink}" style="display:inline-block;padding:10px 20px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:bold">Prendre en charge le ticket</a></p>
+<p style="color:#666;font-size:12px">Connectez-vous à l'application pour consulter les détails et intervenir.</p>
+${signature || DEFAULT_EMAIL_SIGNATURE}
+`.trim();
+
+  return sendEmail({ ticketId, to: recipientEmail, subject, bodyHtml, saveAsMessage: false });
+}
+
+// Notifie le demandeur que sa demande a été escaladée (prise en charge prioritaire).
+// Lien vers le portail REQUESTER pour suivre sa demande.
+async function sendRequesterEscalationEmail({ ticketId, ticketTitle, priority, reason, escalationLevel, recipientEmail, recipientName }) {
+  const subject = `[Ticket #${ticketId}] Votre demande a été escaladée`;
+  const signature = await getEmailSignature();
+  const frontendUrl = resolveFrontendUrl(await getSystemSettings());
+  const portalLink = `${frontendUrl}/portal`;
+  const priorityLabel = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' }[priority] || priority;
+  const bodyHtml = `
+<p>Bonjour ${recipientName || ''},</p>
+<p>Votre demande <strong>#${ticketId} — ${ticketTitle}</strong> a été <strong>escaladée au niveau ${escalationLevel || 1}</strong> : elle est désormais prise en charge de façon prioritaire par nos équipes.</p>
+<table style="border-collapse:collapse;margin:16px 0">
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Votre demande</td><td><strong>#${ticketId} — ${ticketTitle}</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Niveau d'escalade</td><td><strong>${escalationLevel || 1}</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Priorité</td><td><strong>${priorityLabel} (${priority})</strong></td></tr>
+  ${reason ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Motif</td><td>${reason}</td></tr>` : ''}
+</table>
+<p style="margin:20px 0 0"><a href="${portalLink}" style="display:inline-block;padding:10px 20px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:bold">Suivre ma demande dans le portail</a></p>
+<p style="color:#666;font-size:12px">Vous pouvez consulter l'état de votre demande et ajouter des informations à tout moment.</p>
 ${signature || DEFAULT_EMAIL_SIGNATURE}
 `.trim();
 
@@ -509,6 +539,7 @@ module.exports = {
   sendSlaBreachEmail,
   sendDueDateEmail,
   sendEscalationEmail,
+  sendRequesterEscalationEmail,
   sendTicketStatusNotification,
   buildAcknowledgementHtml,
   buildKnownIncidentNotificationHtml,
