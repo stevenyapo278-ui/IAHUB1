@@ -6,6 +6,7 @@ import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import ConfirmDialog from '../components/ConfirmDialog';
+import Skeleton from '../components/Skeleton';
 import { useTheme } from '../context/ThemeContext';
 import {
   BookOpen, FileText, Search, Trash2, Upload, X,
@@ -34,6 +35,7 @@ export default function KnowledgeBase() {
   const canManage = hasPermission(user, 'knowledge.manage');
 
   const [documents, setDocuments] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -89,7 +91,8 @@ export default function KnowledgeBase() {
   function load() {
     api.get('/knowledge/documents')
       .then(({ data }) => setDocuments(data))
-      .catch(err => setError(err.response?.data?.error || 'Erreur de chargement'));
+      .catch(err => setError(err.response?.data?.error || 'Erreur de chargement'))
+      .finally(() => setLoading(false));
   }
   useEffect(load, []);
   useEffect(() => {
@@ -429,65 +432,83 @@ export default function KnowledgeBase() {
 
         {/* Documents list by Categories */}
         <div className="space-y-6">
-          {Object.entries(byCategory).map(([catName, docs]) => {
-            const cfg = CATEGORY_CONFIG[catName] || CATEGORY_CONFIG.Système;
-            const Icon = cfg.icon;
-            return (
-              <div key={catName} className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <div className={`p-1.5 rounded-lg ${cfg.bg} ${cfg.border} border`}>
-                    <Icon className={`w-4 h-4 ${cfg.color}`} />
+          {loading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {Array.from({ length: 6 }, (_, i) => (
+                <div key={i} className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Skeleton variant="avatar-sm" />
+                    <Skeleton variant="badge" />
                   </div>
-                  <h2 className="text-sm font-bold text-on-surface">{catName}</h2>
-                  <span className="text-xs text-on-surface-variant font-medium">({docs.length})</span>
+                  <Skeleton variant="text-lg" />
+                  <Skeleton variant="text" count={2} />
+                  <Skeleton variant="text-sm" className="w-2/3" />
                 </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {docs.map(doc => (
-                    <DocumentCard
-                      key={doc.id}
-                      doc={doc}
-                      canManage={canManage}
-                      onDelete={() => setConfirmDeleteId(doc.id)}
-                      onReplace={() => askReplace(doc)}
-                      replacingId={replacingId}
-                    />
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-
-          {uncategorized.length > 0 && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-surface-container border border-outline-variant/30">
-                  <Folder className="w-4 h-4 text-on-surface-variant" />
-                </div>
-                <h2 className="text-sm font-bold text-on-surface">Non classés</h2>
-                <span className="text-xs text-on-surface-variant font-medium">({uncategorized.length})</span>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {uncategorized.map(doc => (
-                  <DocumentCard
-                    key={doc.id}
-                    doc={doc}
-                    canManage={canManage}
-                    onDelete={() => setConfirmDeleteId(doc.id)}
-                    onReplace={() => askReplace(doc)}
-                    replacingId={replacingId}
-                  />
-                ))}
-              </div>
+              ))}
             </div>
-          )}
+          ) : (
+            <>
+              {Object.entries(byCategory).map(([catName, docs]) => {
+                const cfg = CATEGORY_CONFIG[catName] || CATEGORY_CONFIG.Système;
+                const Icon = cfg.icon;
+                return (
+                  <div key={catName} className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <div className={`p-1.5 rounded-lg ${cfg.bg} ${cfg.border} border`}>
+                        <Icon className={`w-4 h-4 ${cfg.color}`} />
+                      </div>
+                      <h2 className="text-sm font-bold text-on-surface">{catName}</h2>
+                      <span className="text-xs text-on-surface-variant font-medium">({docs.length})</span>
+                    </div>
 
-          {filteredDocuments.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-16 gap-3 text-on-surface-variant">
-              <BookOpen className="w-10 h-10 text-outline/30" />
-              <p className="text-sm italic">Aucun document dans la base de connaissances.</p>
-            </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {docs.map(doc => (
+                        <DocumentCard
+                          key={doc.id}
+                          doc={doc}
+                          canManage={canManage}
+                          onDelete={() => setConfirmDeleteId(doc.id)}
+                          onReplace={() => askReplace(doc)}
+                          replacingId={replacingId}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {uncategorized.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-surface-container border border-outline-variant/30">
+                      <Folder className="w-4 h-4 text-on-surface-variant" />
+                    </div>
+                    <h2 className="text-sm font-bold text-on-surface">Non classés</h2>
+                    <span className="text-xs text-on-surface-variant font-medium">({uncategorized.length})</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {uncategorized.map(doc => (
+                      <DocumentCard
+                        key={doc.id}
+                        doc={doc}
+                        canManage={canManage}
+                        onDelete={() => setConfirmDeleteId(doc.id)}
+                        onReplace={() => askReplace(doc)}
+                        replacingId={replacingId}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {filteredDocuments.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-16 gap-3 text-on-surface-variant">
+                  <BookOpen className="w-10 h-10 text-outline/30" />
+                  <p className="text-sm italic">Aucun document dans la base de connaissances.</p>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

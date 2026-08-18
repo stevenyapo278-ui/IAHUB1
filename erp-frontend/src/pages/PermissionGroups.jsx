@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import api from '../api/client';
 import ConfirmDialog from '../components/ConfirmDialog';
+import Skeleton from '../components/Skeleton';
 import { PERMISSION_DEFINITIONS } from '../config/permissions';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -26,6 +27,7 @@ export default function PermissionGroups() {
 
   const [groups, setGroups] = useState([]);
   const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
@@ -44,7 +46,8 @@ export default function PermissionGroups() {
         setGroups(groupsRes.data);
         setUsers(Array.isArray(usersRes.data) ? usersRes.data : (usersRes.data.users || []));
       })
-      .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
+      .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'))
+      .finally(() => setLoading(false));
   }
 
   useEffect(load, []);
@@ -297,7 +300,24 @@ export default function PermissionGroups() {
 
           {/* Scrollable list */}
           <div className="flex-1 overflow-y-auto">
-            {filteredGroups.length === 0 ? (
+            {loading ? (
+              <div className="p-3 space-y-2">
+                {Array.from({ length: 5 }, (_, i) => (
+                  <div key={i} className="rounded-xl border border-outline-variant/30 bg-surface p-3.5 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <Skeleton variant="text-sm" className="w-1/2" />
+                      <Skeleton variant="badge" />
+                    </div>
+                    <Skeleton variant="text" />
+                    <div className="flex gap-2">
+                      <Skeleton variant="avatar-sm" className="w-6 h-6 rounded-full" />
+                      <Skeleton variant="avatar-sm" className="w-6 h-6 rounded-full" />
+                      <Skeleton variant="avatar-sm" className="w-6 h-6 rounded-full" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : filteredGroups.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full gap-3 text-on-surface-variant py-16">
                 <div className="p-4 rounded-full bg-surface-container">
                   <Shield className="w-8 h-8 text-outline/30" />

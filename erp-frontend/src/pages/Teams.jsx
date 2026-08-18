@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import useSystemSettings from '../hooks/useSystemSettings';
 import ConfirmDialog from '../components/ConfirmDialog';
+import Skeleton from '../components/Skeleton';
 import { useTheme } from '../context/ThemeContext';
 import { Users, ShieldCheck, Ticket, Plus, RefreshCw, ChevronRight, Trash2, X, AlertTriangle, Mail, Layers, CheckCircle2, User } from 'lucide-react';
 import SearchableMultiSelect from '../components/SearchableMultiSelect';
@@ -19,6 +20,7 @@ export default function Teams() {
 
   const [teams, setTeams] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ name: '', category: '', groupEmail: '', defaultObserverIds: [] });
   const [groupEmailDraft, setGroupEmailDraft] = useState('');
   const [selectedObserverIds, setSelectedObserverIds] = useState([]);
@@ -58,7 +60,8 @@ export default function Teams() {
   function load() {
     api.get('/teams')
       .then(({ data }) => setTeams(data))
-      .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
+      .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'))
+      .finally(() => setLoading(false));
     api.get('/users')
       .then(({ data }) => setAllUsers(Array.isArray(data) ? data : (data.users || [])))
       .catch(() => {});
@@ -256,7 +259,20 @@ export default function Teams() {
 
           {/* Rows */}
           <div className="divide-y divide-outline-variant/10">
-            {teams.map((t) => {
+            {loading && (
+              Array.from({ length: 5 }, (_, i) => (
+                <div key={i} className="flex items-center gap-4 px-4 py-3.5">
+                  <div className="w-8 shrink-0" />
+                  <div className="flex-1 min-w-0 space-y-2">
+                    <Skeleton variant="text-sm" className="w-1/3" />
+                    <Skeleton variant="text-sm" className="w-1/4" />
+                  </div>
+                  <Skeleton variant="badge" className="w-24 hidden sm:block" />
+                  <Skeleton variant="badge" className="w-36 hidden md:block" />
+                </div>
+              ))
+            )}
+            {!loading && teams.map((t) => {
               const isOpen = openTeamId === t.id;
               const percent = Math.round((t._count.tickets / maxTickets) * 100);
 

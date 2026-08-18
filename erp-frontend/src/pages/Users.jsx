@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import api from '../api/client';
 import ConfirmDialog from '../components/ConfirmDialog';
+import Skeleton from '../components/Skeleton';
 import { useAuth } from '../context/AuthContext';
 import { useFilterParam } from '../hooks/useFilterParam';
 import useSystemSettings from '../hooks/useSystemSettings';
@@ -77,6 +78,7 @@ export default function Users() {
   const [users, setUsers] = useState([]);
   const [teams, setTeams] = useState([]);
   const [groups, setGroups] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
@@ -154,7 +156,8 @@ export default function Users() {
         }
         setTeams(tRes.data); setGroups(gRes.data); setSelectedIds([]);
       })
-      .catch(err => { if (reqId === loadReqIdRef.current) setError(err.response?.data?.error || 'Erreur de chargement'); });
+      .catch(err => { if (reqId === loadReqIdRef.current) setError(err.response?.data?.error || 'Erreur de chargement'); })
+      .finally(() => { if (reqId === loadReqIdRef.current) setLoading(false); });
   }
   useEffect(() => { load(); }, [page, debouncedSearch, roleFilter, teamFilter]);
 
@@ -497,7 +500,24 @@ export default function Users() {
 
           {/* Rows */}
           <div className="divide-y divide-outline-variant/10">
-            <AnimatePresence mode="popLayout">
+            {loading && users.length === 0 ? (
+              Array.from({ length: 8 }, (_, i) => (
+                <div key={i} className="flex items-center gap-4 px-4 py-3">
+                  <Skeleton variant="text-sm" className="w-3 h-3" />
+                  <Skeleton variant="avatar-sm" className="w-8 h-8 rounded-full shrink-0" />
+                  <div className="flex-1 min-w-0 space-y-1.5">
+                    <Skeleton variant="text-sm" className="w-1/3" />
+                    <Skeleton variant="text-sm" className="w-1/4" />
+                  </div>
+                  <Skeleton variant="badge" className="w-28 hidden sm:block" />
+                  <Skeleton variant="badge" className="w-32 hidden md:block" />
+                  <Skeleton variant="badge" className="w-16" />
+                  <Skeleton variant="badge" className="w-20" />
+                </div>
+              ))
+            ) : (
+              <>
+              <AnimatePresence mode="popLayout">
               {users.map((u, idx) => {
                 const roleCfg = ROLE_CONFIG[u.role] || ROLE_CONFIG.REQUESTER;
                 return (
@@ -627,13 +647,15 @@ export default function Users() {
                   </motion.div>
                 );
               })}
-            </AnimatePresence>
+              </AnimatePresence>
 
-            {users.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-16 gap-3 text-on-surface-variant">
-                <UsersIcon className="w-10 h-10 text-outline/30" />
-                <p className="text-sm italic">Aucun utilisateur trouvé.</p>
-              </div>
+              {users.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-16 gap-3 text-on-surface-variant">
+                  <UsersIcon className="w-10 h-10 text-outline/30" />
+                  <p className="text-sm italic">Aucun utilisateur trouvé.</p>
+                </div>
+              )}
+              </>
             )}
           </div>
 

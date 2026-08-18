@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../api/client';
 import ConfirmDialog from '../components/ConfirmDialog';
+import Skeleton from '../components/Skeleton';
 import { useTheme } from '../context/ThemeContext';
 import { sanitizeHtml } from '../utils/sanitize';
 import {
@@ -25,6 +26,7 @@ export default function AiEmailDrafts() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
   const [drafts, setDrafts] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState('PENDING');
   const [selected, setSelected] = useState(null);
   const [editedContent, setEditedContent] = useState('');
@@ -89,9 +91,11 @@ export default function AiEmailDrafts() {
   function removeCc(email) { setEditedCc(editedCc.filter(e => e !== email)); }
 
   function load() {
+    setLoading(true);
     api.get('/ai-email-drafts', { params: status ? { status } : {} })
       .then(({ data }) => setDrafts(data))
-      .catch(err => toast.error(err.response?.data?.error || 'Erreur de chargement'));
+      .catch(err => toast.error(err.response?.data?.error || 'Erreur de chargement'))
+      .finally(() => setLoading(false));
   }
   useEffect(load, [status]);
 
@@ -204,7 +208,23 @@ export default function AiEmailDrafts() {
 
           {/* Scrollable list */}
           <div className="flex-1 overflow-y-auto">
-            {drafts.length === 0 ? (
+            {loading ? (
+              <div className="p-3 space-y-2">
+                {Array.from({ length: 5 }, (_, i) => (
+                  <div key={i} className="flex items-start gap-3 px-4 py-3.5 border-b border-outline-variant/10">
+                    <Skeleton variant="avatar-sm" className="w-8 h-8 rounded-xl shrink-0" />
+                    <div className="flex-1 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <Skeleton variant="text-sm" className="w-2/3" />
+                        <Skeleton variant="badge" className="w-10 h-4" />
+                      </div>
+                      <Skeleton variant="text-sm" className="w-1/2" />
+                      <Skeleton variant="text-sm" className="w-1/3" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : drafts.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full gap-3 text-on-surface-variant py-16">
                 <div className="p-4 rounded-full bg-surface-container">
                   <Mail className="w-8 h-8 text-outline/30" />

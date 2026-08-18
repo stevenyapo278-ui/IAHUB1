@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import api from '../api/client';
+import Skeleton from '../components/Skeleton';
 import { useTheme } from '../context/ThemeContext';
 import { Bot, Save, RotateCcw, Sparkles, AlertTriangle, Terminal, FileCode, X } from 'lucide-react';
 
@@ -9,6 +10,7 @@ export default function Prompts() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
   const [prompts, setPrompts] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedKey, setSelectedKey] = useState(null);
   const [draft, setDraft] = useState('');
@@ -23,7 +25,8 @@ export default function Prompts() {
           setDraft(data[0].template);
         }
       })
-      .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
+      .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'))
+      .finally(() => setLoading(false));
   }
 
   useEffect(load, []);
@@ -131,10 +134,22 @@ export default function Prompts() {
           </div>
 
           <div className="flex-1 overflow-y-auto">
-            {prompts.length === 0 ? (
+            {loading ? (
+              <div className="p-3 space-y-1">
+                {Array.from({ length: 6 }, (_, i) => (
+                  <div key={i} className="flex items-start gap-3 px-4 py-3.5">
+                    <Skeleton variant="avatar-sm" className="w-7 h-7 rounded-lg shrink-0" />
+                    <div className="flex-1 space-y-2">
+                      <Skeleton variant="text-sm" className="w-2/3" />
+                      <Skeleton variant="text-sm" className="w-1/2" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : prompts.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full gap-2 text-on-surface-variant py-12">
-                <Bot className="w-8 h-8 text-outline/30 animate-pulse" />
-                <p className="text-xs italic">Chargement des modèles...</p>
+                <Bot className="w-8 h-8 text-outline/30" />
+                <p className="text-xs italic">Aucun modèle de prompt.</p>
               </div>
             ) : (
               <div className="divide-y divide-outline-variant/10">
