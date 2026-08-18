@@ -5,6 +5,14 @@ const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { syncProviderModels } = require('../utils/modelSync');
 const { auditLog } = require('../services/auditLogService');
+const cacheStore = require('../services/cacheStore');
+
+// La liste des fournisseurs est mise en cache (TTL 60s, voir app.js) : toute écriture
+// (provider, modèle, clé, sync) doit l'invalider, sinon l'UI continue d'afficher l'ancien
+// modèle par défaut / modèle supprimé jusqu'à expiration du TTL.
+function invalidateProviderCaches() {
+  cacheStore.clear('GET /api/ai-providers');
+}
 
 const router = express.Router();
 router.use(authenticate);
@@ -62,6 +70,7 @@ router.post('/', [body('name').notEmpty(), body('label').notEmpty()], async (req
     data: { name, label, baseUrl: baseUrl || null, isActive: isActive !== undefined ? isActive : true },
   });
 
+  invalidateProviderCaches();
   return res.status(201).json(provider);
   auditLog('AI_PROVIDER_CREATED', { actor: req.user, targetType: 'AiProvider', targetId: provider.id, targetLabel: provider.label, metadata: { name: provider.name } }).catch(() => {});
 });
@@ -75,6 +84,7 @@ router.patch('/:id', async (req, res) => {
 
   try {
     const provider = await prisma.aiProvider.update({ where: { id: Number(req.params.id) }, data });
+    invalidateProviderCaches();
     return res.json(provider);
   } catch (err) {
     return res.status(404).json({ error: 'Fournisseur introuvable' });
@@ -85,6 +95,7 @@ router.delete('/:id', async (req, res) => {
   try {
     const provider = await prisma.aiProvider.findUnique({ where: { id: Number(req.params.id) }, select: { id: true, name: true, label: true } });
     await prisma.aiProvider.delete({ where: { id: Number(req.params.id) } });
+    invalidateProviderCaches();
     auditLog('AI_PROVIDER_DELETED', { actor: req.user, targetType: 'AiProvider', targetId: provider.id, targetLabel: provider.label, metadata: { name: provider.name } }).catch(() => {});
     return res.status(204).send();
   } catch (err) {
@@ -104,6 +115,7 @@ router.post('/:id/sync-models', async (req, res) => {
     return res.status(422).json({ error: result.error });
   }
 
+  invalidateProviderCaches();
   return res.json({ added: result.added });
 });
 
@@ -137,6 +149,7 @@ router.post('/:id/models', [body('name').notEmpty()], async (req, res) => {
     },
   });
 
+  invalidateProviderCaches();
   return res.status(201).json(model);
   auditLog('AI_MODEL_CREATED', { actor: req.user, targetType: 'AiModel', targetId: model.id, targetLabel: model.label || model.name, metadata: { providerId, name: model.name, type: model.type } }).catch(() => {});
 });
@@ -158,12 +171,14 @@ router.patch('/models/:modelId', async (req, res) => {
   if (isActive !== undefined) data.isActive = isActive;
 
   const updated = await prisma.aiModel.update({ where: { id: modelId }, data });
+  invalidateProviderCaches();
   return res.json(updated);
 });
 
 router.delete('/models/:modelId', async (req, res) => {
   try {
     await prisma.aiModel.delete({ where: { id: Number(req.params.modelId) } });
+    invalidateProviderCaches();
     return res.status(204).send();
   } catch (err) {
     return res.status(404).json({ error: 'Modèle introuvable' });
@@ -197,6 +212,7 @@ router.post('/:id/keys', [body('label').notEmpty(), body('apiKey').notEmpty()], 
     },
   });
 
+  invalidateProviderCaches();
   return res.status(201).json({ ...key, apiKey: maskKey(key.apiKey) });
   auditLog('AI_KEY_CREATED', { actor: req.user, targetType: 'AiKey', targetId: key.id, targetLabel: key.label, metadata: { providerId } }).catch(() => {});
 });
@@ -226,12 +242,14 @@ router.patch('/keys/:keyId', async (req, res) => {
   if (isActive !== undefined) data.isActive = isActive;
 
   const updated = await prisma.aiKey.update({ where: { id: keyId }, data });
+  invalidateProviderCaches();
   return res.json({ ...updated, apiKey: maskKey(updated.apiKey) });
 });
 
 router.delete('/keys/:keyId', async (req, res) => {
   try {
     await prisma.aiKey.delete({ where: { id: Number(req.params.keyId) } });
+    invalidateProviderCaches();
     return res.status(204).send();
   } catch (err) {
     return res.status(404).json({ error: 'Clé introuvable' });

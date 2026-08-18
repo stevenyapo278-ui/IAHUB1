@@ -532,13 +532,19 @@ export default function AiProvidersTab() {
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  function load() {
+  // Rafraîchit la liste ET le fournisseur ouvert dans la modale (sans la fermer) : après une
+  // action (modèle par défaut, suppression, sync...), le contenu affiché doit refléter la base
+  // immédiatement, pas au prochain clic.
+  function refresh() {
     api.get('/ai-providers')
-      .then(({ data }) => setProviders(data))
+      .then(({ data }) => {
+        setProviders(data);
+        setSelectedProvider((current) => (current ? data.find((p) => p.id === current.id) || null : current));
+      })
       .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
   }
 
-  useEffect(() => load(), []);
+  useEffect(() => refresh(), []);
 
   async function handleCreateProvider(e) {
     e.preventDefault();
@@ -547,7 +553,7 @@ export default function AiProvidersTab() {
     try {
       await api.post('/ai-providers', providerForm);
       setProviderForm({ name: '', label: '', baseUrl: '' });
-      load();
+      refresh();
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la création');
     } finally {
@@ -558,7 +564,7 @@ export default function AiProvidersTab() {
   async function handleToggleProvider(id, isActive) {
     try {
       await api.patch(`/ai-providers/${id}`, { isActive });
-      load();
+      refresh();
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur');
     }
@@ -719,7 +725,7 @@ export default function AiProvidersTab() {
           <ProviderModal
             provider={selectedProvider}
             onClose={() => setSelectedProvider(null)}
-            onUpdate={() => { load(); setSelectedProvider(null); }}
+            onUpdate={() => refresh()}
           />
         )}
       </AnimatePresence>
@@ -736,7 +742,7 @@ export default function AiProvidersTab() {
           try {
             await api.delete(`/ai-providers/${pendingDelete}`);
             setPendingDelete(null);
-            load();
+            refresh();
           } catch (err) {
             setError(err.response?.data?.error || 'Erreur lors de la suppression');
           } finally {
