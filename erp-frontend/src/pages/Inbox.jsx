@@ -52,9 +52,11 @@ const FOLDERS = [
 ];
 
 const SORT_OPTIONS = [
-  { value: 'date',     label: 'Date' },
-  { value: 'priority', label: 'Priorité' },
-  { value: 'sender',   label: 'Expéditeur' },
+  { value: 'date',     label: 'Date : plus récentes' },
+  { value: 'date_asc', label: 'Date : plus anciennes' },
+  { value: 'priority', label: 'Priorité (P1 → P4)' },
+  { value: 'sender',   label: 'Expéditeur (A → Z)' },
+  { value: 'unread',   label: 'Non lues d\'abord' },
 ];
 
 const PERIOD_OPTIONS = [
@@ -89,20 +91,21 @@ function participantsLabel(participants) {
   return names.join(', ');
 }
 
-// Date façon Outlook : heure si aujourd'hui, "Hier", jour de la semaine, puis date courte
+// Date façon Outlook : toujours avec l'heure (ex. 14:32, Hier 14:32, 12 août 07:21)
 function formatDate(d) {
   if (!d) return '';
   const date = new Date(d);
   const now = new Date();
+  const time = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   const startOfDay = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate());
   const diffDays = Math.round((startOfDay(now) - startOfDay(date)) / 86400000);
-  if (diffDays === 0) return date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-  if (diffDays === 1) return 'Hier';
-  if (diffDays < 7) return date.toLocaleDateString('fr-FR', { weekday: 'short' });
+  if (diffDays === 0) return time;
+  if (diffDays === 1) return `Hier ${time}`;
+  if (diffDays < 7) return `${date.toLocaleDateString('fr-FR', { weekday: 'short' })} ${time}`;
   if (date.getFullYear() === now.getFullYear()) {
-    return date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
+    return `${date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })} ${time}`;
   }
-  return date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
+  return `${date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })} ${time}`;
 }
 
 function formatDateTime(d) {
@@ -209,9 +212,10 @@ export default function Inbox() {
     if (priorityFilter) params.set('priority', priorityFilter);
     if (categoryFilter) params.set('category', categoryFilter);
     if (period) params.set('days', period);
+    if (sortBy && sortBy !== 'date') params.set('sort', sortBy);
     if (searchQuery.trim()) params.set('q', searchQuery.trim());
     return params;
-  }, [folderCfg, priorityFilter, categoryFilter, period, searchQuery]);
+  }, [folderCfg, priorityFilter, categoryFilter, period, sortBy, searchQuery]);
 
   const load = useCallback((p) => {
     api.get(`/inbox?${buildParams(p).toString()}`)
@@ -343,24 +347,7 @@ export default function Inbox() {
   function toggleSelectAll() { setSelectedIds((ids) => ids.length === threads.length ? [] : threads.map((t) => t.id)); }
 
   // ── Dérivés ─────────────────────────────────────────────────────────────
-  const sortedThreads = useMemo(() => {
-    const list = [...threads];
-    if (sortBy === 'priority') {
-      const order = { P1: 0, P2: 1, P3: 2, P4: 3 };
-      list.sort((a, b) =>
-        (order[a.latest?.aiPriority] ?? 9) - (order[b.latest?.aiPriority] ?? 9) ||
-        new Date(b.latest?.date) - new Date(a.latest?.date)
-      );
-    } else if (sortBy === 'sender') {
-      list.sort((a, b) =>
-        (a.latest?.fromName || a.latest?.fromEmail || '').localeCompare(b.latest?.fromName || b.latest?.fromEmail || '')
-      );
-    } else {
-      list.sort((a, b) => new Date(b.latest?.date) - new Date(a.latest?.date));
-    }
-    return list;
-  }, [threads, sortBy]);
-
+  // Le tri est appliqué côté serveur (avant pagination) via le paramètre ?sort=
   const availableCategories = useMemo(() =>
     [...new Set(threads.map((t) => t.latest?.aiCategory).filter(Boolean))], [threads]);
 
@@ -601,7 +588,7 @@ export default function Inbox() {
                   </div>
                 ))}
               </div>
-            ) : sortedThreads.length === 0 ? (
+            ) : threads.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full gap-3 text-on-surface-variant p-6">
                 <div className="p-4 rounded-full bg-surface-container">
                   <Mail className="w-8 h-8 text-outline/30" />
@@ -615,7 +602,7 @@ export default function Inbox() {
               </div>
             ) : (
               <div className="divide-y divide-outline-variant/10">
-                {sortedThreads.map((t) => {
+                {threads.map((t) => {
                   const latest = t.latest || {};
                   const pCfg = PRIORITY_CONFIG[latest.aiPriority];
                   const sCfg = STATUS_CONFIG[latest.status];

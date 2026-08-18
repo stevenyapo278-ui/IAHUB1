@@ -23,8 +23,9 @@ router.get('/', async (req, res) => {
   const category = req.query.category || undefined;
   const read = req.query.read || undefined; // unread | read
   const days = parseInt(req.query.days) > 0 ? parseInt(req.query.days) : undefined;
+  const sort = req.query.sort || undefined; // date | date_asc | priority | sender | unread
 
-  const { items, total, pages } = await listThreads({ status, q, priority, attachments, category, read, days, page, limit });
+  const { items, total, pages } = await listThreads({ status, q, priority, attachments, category, read, days, sort, page, limit });
 
   // Allège la liste : on retirera les corps HTML (conservés uniquement dans le détail du fil)
   const stripped = items.map((thread) => ({

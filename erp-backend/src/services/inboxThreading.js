@@ -160,7 +160,35 @@ function applyThreadFilters(threads, { priority, attachments, category, read }) 
   });
 }
 
-async function listThreads({ status, q, priority, attachments, category, read, days, page = 1, limit = 25 }) {
+// Tri applicables au niveau du fil (avant pagination)
+function applyThreadSort(threads, sort) {
+  const list = [...threads];
+  if (sort === 'date_asc') {
+    list.sort((a, b) => new Date(a.latest.date) - new Date(b.latest.date));
+  } else if (sort === 'priority') {
+    const order = { P1: 0, P2: 1, P3: 2, P4: 3 };
+    list.sort((a, b) =>
+      (order[a.latest?.aiPriority] ?? 9) - (order[b.latest?.aiPriority] ?? 9) ||
+      new Date(b.latest.date) - new Date(a.latest.date)
+    );
+  } else if (sort === 'sender') {
+    list.sort((a, b) =>
+      (a.latest?.fromName || a.latest?.fromEmail || '').localeCompare(b.latest?.fromName || b.latest?.fromEmail || '')
+    );
+  } else if (sort === 'unread') {
+    // Non lues d'abord, puis par date décroissante
+    list.sort((a, b) =>
+      (b.isUnread ? 1 : 0) - (a.isUnread ? 1 : 0) ||
+      new Date(b.latest.date) - new Date(a.latest.date)
+    );
+  } else {
+    // Défaut : date décroissante (plus récent d'abord)
+    list.sort((a, b) => new Date(b.latest.date) - new Date(a.latest.date));
+  }
+  return list;
+}
+
+async function listThreads({ status, q, priority, attachments, category, read, days, sort, page = 1, limit = 25 }) {
   const emails = await prisma.incomingEmail.findMany({
     where: days ? { receivedAt: { gte: new Date(Date.now() - days * 86400000) } } : undefined,
     orderBy: { receivedAt: 'desc' },
@@ -181,6 +209,7 @@ async function listThreads({ status, q, priority, attachments, category, read, d
 
   let threads = buildThreads(emails, sentMessages, { status, q });
   threads = applyThreadFilters(threads, { priority, attachments, category, read });
+  threads = applyThreadSort(threads, sort);
   const total = threads.length;
   const start = (page - 1) * limit;
   threads = threads.slice(start, start + limit);
