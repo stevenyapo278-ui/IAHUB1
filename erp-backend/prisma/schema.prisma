@@ -198,10 +198,30 @@ model TicketCategory {
   parentId        Int?     // catégorie parente (sous-catégories, ex: Matériel > Impression)
   parent          TicketCategory? @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
   children        TicketCategory[] @relation("CategoryTree")
+  customFields    CustomFieldDefinition[]
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@index([parentId])
+}
+
+// Définition d'un champ personnalisé (équivalent du plugin GLPI Forms) : rendu dynamique
+// dans le formulaire de création de ticket selon la catégorie choisie. categoryId = null
+// signifie « applicable à toutes les catégories ».
+model CustomFieldDefinition {
+  id         Int      @id @default(autoincrement())
+  label      String
+  type       String   // TEXT | NUMBER | SELECT | DATE | TEXTAREA | CHECKBOX
+  options    Json?    // pour SELECT : liste de {value, label} (ou string[] simples)
+  required   Boolean  @default(false)
+  categoryId Int?     // null = toutes les catégories
+  category   TicketCategory? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  position   Int      @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([categoryId])
 }
 
 // Lieux synchronisés depuis les Location de GLPI ("Lieu" / "Locations" dans le formulaire
@@ -267,6 +287,7 @@ model Ticket {
   // de re-notifier à chaque cycle du moniteur une fois l'alerte envoyée (reset lors d'un changement de dueDate).
   dueDate          DateTime?
   dueDateNotifiedAt DateTime?
+  customFields     Json?    // valeurs des champs personnalisés : { [customFieldDefinitionId]: valeur }
 
   // Moteur SLA — échéances calculées à la création et à chaque changement de priorité,
   // seuils configurables par priorité dans SystemSettings.slaHours

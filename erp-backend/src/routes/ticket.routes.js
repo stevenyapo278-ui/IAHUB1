@@ -405,6 +405,32 @@ router.post(
       glpiLocationName = loc?.completename || loc?.name || null;
     }
 
+    // Champs personnalisés : validation des champs requis de la catégorie (ou globaux)
+    let customFields = null;
+    if (req.body.customFields !== undefined && req.body.customFields !== null && req.body.customFields !== '') {
+      try {
+        customFields = typeof req.body.customFields === 'string' ? JSON.parse(req.body.customFields) : req.body.customFields;
+        if (typeof customFields !== 'object' || Array.isArray(customFields)) throw new Error('format');
+      } catch {
+        return res.status(400).json({ error: 'customFields doit être un objet JSON' });
+      }
+    }
+    if (category) {
+      const cat = await prisma.ticketCategory.findUnique({ where: { name: category } });
+      if (cat) {
+        const requiredFields = await prisma.customFieldDefinition.findMany({
+          where: { isActive: true, required: true, OR: [{ categoryId: cat.id }, { categoryId: null }] },
+        });
+        const missing = requiredFields.filter((f) => {
+          const v = customFields?.[String(f.id)];
+          return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
+        });
+        if (missing.length > 0) {
+          return res.status(400).json({ error: `Champs requis manquants : ${missing.map((f) => f.label).join(', ')}` });
+        }
+      }
+    }
+
     const ticket = await prisma.ticket.create({
       data: {
         ...(locationId ? { glpiLocationId: Number(locationId), glpiLocationName } : {}),
@@ -426,6 +452,7 @@ router.post(
         ...(dueDate ? { dueDate: new Date(dueDate) } : {}),
         source: source || null,
         externalId: externalId || null,
+        ...(customFields ? { customFields } : {}),
         ...(observerIds.length > 0 ? { observers: { connect: observerIds.map((id) => ({ id: Number(id) })) } } : {}),
       },
     });

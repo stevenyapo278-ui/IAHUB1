@@ -16,7 +16,7 @@ import {
   Trash2, Paperclip, MessageSquare, Sparkles, Shield, MapPin,
   RefreshCw, Mail, FileText, Check, X, Send, ChevronRight,
   Flame, Radio, Info, ArrowDown, UserCheck, HelpCircle, Layers, History,
-  TrendingUp, Lock, Link2, Merge, Plus, GitBranch, Timer, Play, Square
+  TrendingUp, Lock, Link2, Merge, Plus, GitBranch, Timer, Play, Square, ListChecks
 } from 'lucide-react';
 import {
   STATUS_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS,
@@ -84,6 +84,8 @@ export default function TicketDetail() {
   const [users, setUsers] = useState([]);
   const [categories, setCategories] = useState([]);
   const flatCategories = useMemo(() => flattenCategoryTree(categories), [categories]);
+  // Définitions des champs personnalisés (pour résoudre libellés/valeurs dans le détail)
+  const [customFieldDefs, setCustomFieldDefs] = useState([]);
   const [locations, setLocations] = useState([]);
   const [glpiUsers, setGlpiUsers] = useState([]);
   const [syncFailures, setSyncFailures] = useState([]);
@@ -227,6 +229,7 @@ export default function TicketDetail() {
     api.get('/glpi/categories').then(({ data }) => setCategories(data)).catch(() => {});
     api.get('/glpi/locations').then(({ data }) => setLocations(data)).catch(() => {});
     api.get('/glpi/users').then(({ data }) => setGlpiUsers(data)).catch(() => {});
+    api.get('/custom-fields').then(({ data }) => setCustomFieldDefs(data || [])).catch(() => {});
     if (!canAssign) return;
     api.get('/teams').then(({ data }) => setTeams(data)).catch(() => {});
     api.get('/users').then(({ data }) => setUsers(Array.isArray(data) ? data : (data.users || []))).catch(() => {});
@@ -1746,6 +1749,34 @@ export default function TicketDetail() {
               </div>
             </div>
           </div>
+
+          {/* Champs personnalisés (lecture seule) */}
+          {ticket.customFields && Object.keys(ticket.customFields).length > 0 && (
+            <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-3">
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2 border-b border-outline-variant/20 pb-3">
+                <ListChecks className="w-4 h-4 text-primary" />
+                Informations complémentaires
+              </h3>
+              <div className="grid grid-cols-1 gap-2.5">
+                {Object.entries(ticket.customFields).map(([key, value]) => {
+                  const def = customFieldDefs.find((d) => String(d.id) === String(key));
+                  if (value === undefined || value === null || value === '') return null;
+                  const label = def?.label || `Champ #${key}`;
+                  const display = def?.type === 'CHECKBOX'
+                    ? (String(value) === 'true' ? 'Oui' : 'Non')
+                    : def?.type === 'SELECT' && Array.isArray(def.options)
+                      ? String(value)
+                      : String(value);
+                  return (
+                    <div key={key} className="flex items-start justify-between gap-3">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant shrink-0 pt-0.5">{label}</span>
+                      <span className="text-xs font-semibold text-on-surface text-right break-words">{display}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Audit Trail / Corrections History Card */}
           {corrections.length > 0 && (

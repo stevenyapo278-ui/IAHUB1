@@ -43,7 +43,8 @@ import {
   FileText,
   MessageSquare,
   KanbanSquare,
-  Bookmark
+  Bookmark,
+  ListChecks
 } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -190,6 +191,9 @@ export default function Tickets() {
   const [showForm, setShowForm] = useState(searchParams.get('new') === '1');
   const [form, setForm] = useState(EMPTY_FORM);
   const [attachment, setAttachment] = useState(null);
+  // Champs personnalisés : définitions actives pour la catégorie choisie + valeurs saisies
+  const [customFieldDefs, setCustomFieldDefs] = useState([]);
+  const [customValues, setCustomValues] = useState({});
   const [error, setError] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
   const [templates, setTemplates] = useState([]);
@@ -527,6 +531,26 @@ export default function Tickets() {
     api.get('/users').then(({ data }) => setUsers(Array.isArray(data) ? data : (data.users || []))).catch(() => {});
   }, [canAssign]);
 
+  // Charge les champs personnalisés de la catégorie sélectionnée (ou globaux si aucune)
+  useEffect(() => {
+    const cat = flatCategories.find((c) => c.name === form.category);
+    const params = cat ? { categoryId: cat.id } : {};
+    api.get('/custom-fields', { params })
+      .then(({ data }) => {
+        const active = (data || []).filter((f) => f.isActive);
+        setCustomFieldDefs(active);
+        // Purge les valeurs des champs qui ne sont plus dans la liste
+        setCustomValues((prev) => {
+          const ids = new Set(active.map((f) => String(f.id)));
+          const next = {};
+          for (const [k, v] of Object.entries(prev)) if (ids.has(k)) next[k] = v;
+          return next;
+        });
+      })
+      .catch(() => setCustomFieldDefs([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.category]);
+
   async function handleCreate(e) {
     e.preventDefault();
     setError('');
@@ -540,10 +564,12 @@ export default function Tickets() {
         }
         if (value !== '' && value !== undefined && value !== null) payload.append(key, value);
       });
+      if (Object.keys(customValues).length > 0) payload.append('customFields', JSON.stringify(customValues));
       if (attachment) payload.append('attachment', attachment);
       await api.post('/tickets', payload, { headers: { 'Content-Type': 'multipart/form-data' } });
       toast.success('Ticket créé');
       setForm(EMPTY_FORM);
+      setCustomValues({});
       setAttachment(null);
       setShowForm(false);
       setSearchParams({});
@@ -862,6 +888,63 @@ export default function Tickets() {
                       </select>
                     </div>
                   </div>
+
+                  {/* Champs personnalisés (définis par catégorie dans Paramètres) */}
+                  {customFieldDefs.length > 0 && (
+                    <div className="rounded-2xl border border-dashed border-primary/30 bg-primary/5 p-4 space-y-4">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-primary flex items-center gap-1.5">
+                        <ListChecks className="w-3.5 h-3.5" />
+                        Informations complémentaires
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {customFieldDefs.map((f) => {
+                          const key = String(f.id);
+                          const common = `w-full px-4 py-2.5 rounded-xl border font-medium text-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-surface border-outline-variant/60 text-slate-900 dark:text-white`;
+                          const set = (v) => setCustomValues((prev) => ({ ...prev, [key]: v }));
+                          return (
+                            <div key={f.id} className={f.type === 'TEXTAREA' ? 'sm:col-span-2' : ''}>
+                              <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">
+                                {f.label} {f.required && <span className="text-red-500">*</span>}
+                              </label>
+                              {f.type === 'TEXT' && (
+                                <input type="text" value={customValues[key] || ''} onChange={(e) => set(e.target.value)} className={common} />
+                              )}
+                              {f.type === 'TEXTAREA' && (
+                                <textarea rows={3} value={customValues[key] || ''} onChange={(e) => set(e.target.value)} className={`${common} resize-none`} />
+                              )}
+                              {f.type === 'NUMBER' && (
+                                <input type="number" value={customValues[key] || ''} onChange={(e) => set(e.target.value)} className={common} />
+                              )}
+                              {f.type === 'DATE' && (
+                                <input type="date" value={customValues[key] || ''} onChange={(e) => set(e.target.value)} className={common} />
+                              )}
+                              {f.type === 'CHECKBOX' && (
+                                <label className="flex items-center gap-2 cursor-pointer select-none">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!customValues[key]}
+                                    onChange={(e) => set(e.target.checked ? 'true' : '')}
+                                    className="accent-primary w-4 h-4"
+                                  />
+                                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{customValues[key] === 'true' ? 'Oui' : 'Non'}</span>
+                                </label>
+                              )}
+                              {f.type === 'SELECT' && (
+                                <select value={customValues[key] || ''} onChange={(e) => set(e.target.value)} className={`${common} cursor-pointer`}>
+                                  <option value="">— Sélectionner —</option>
+                                  {(f.options || []).map((o) => {
+                                    const v = typeof o === 'string' ? o : o.value;
+                                    const l = typeof o === 'string' ? o : o.label;
+                                    return <option key={v} value={v}>{l}</option>;
+                                  })}
+                                </select>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
