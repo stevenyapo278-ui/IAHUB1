@@ -71,6 +71,27 @@ router.get('/', async (req, res) => {
   return res.json(drafts);
 });
 
+// Modifier le contenu d'un brouillon en attente (édition inline depuis le centre de validation)
+router.patch('/:id', requirePermission('emaildrafts.manage', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+  const id = Number(req.params.id);
+  const { proposedContent } = req.body;
+
+  const draft = await prisma.aiEmailDraft.findUnique({ where: { id } });
+  if (!draft) return res.status(404).json({ error: 'Brouillon introuvable' });
+  if (draft.status !== 'PENDING') return res.status(400).json({ error: 'Seul un brouillon en attente peut être modifié' });
+
+  if (typeof proposedContent !== 'string' || !proposedContent.trim()) {
+    return res.status(400).json({ error: 'Contenu de réponse invalide' });
+  }
+
+  const updated = await prisma.aiEmailDraft.update({
+    where: { id },
+    data: { proposedContent },
+  });
+
+  return res.json(updated);
+});
+
 // Approuver un brouillon : déclenche l'envoi via n8n
 router.post('/:id/approve', requirePermission('emaildrafts.manage', ['ADMIN', 'TECHNICIAN']), [body('recipientEmail').optional().isEmail()], async (req, res) => {
   const errors = validationResult(req);

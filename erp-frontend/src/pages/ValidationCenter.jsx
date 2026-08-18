@@ -251,7 +251,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   async function handleSaveDraftEdit(draftId) {
     setSavingDraft(true);
     try {
-      await api.patch(`/ai-email-drafts/${draftId}`, { proposedBody: editBody });
+      await api.patch(`/ai-email-drafts/${draftId}`, { proposedContent: editBody });
       toast.success('Brouillon mis à jour');
       setEditingDraftId(null);
       loadAllData(true);
