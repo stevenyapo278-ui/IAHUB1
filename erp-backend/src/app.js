@@ -149,6 +149,7 @@ app.use('/api/ai-weekly-reports', aiWeeklyReportRoutes);
 app.use('/api/chat', chatbotRoutes);
 app.use('/api/logs', logsRoutes);
 app.use('/api/audit-logs', auditLogRoutes);
+app.use('/api/timesheet', require('./routes/timesheet.routes'));
 
 // Serve frontend static files in production
 const isProduction = process.env.NODE_ENV === 'production';

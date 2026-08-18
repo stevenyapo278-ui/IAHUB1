@@ -97,7 +97,7 @@ avec alerte en cas de dépassement.
 **Objectif** : suivi du temps passé par technicien sur chaque ticket (module « Plan » de GLPI).
 
 ### Backend
-- [ ] `erp-backend/prisma/schema.prisma` → nouveau modèle `TicketTimeEntry` :
+- [x] `erp-backend/prisma/schema.prisma` → nouveau modèle `TicketTimeEntry` :
   ```prisma
   model TicketTimeEntry {
     id           Int      @id @default(autoincrement())
@@ -113,23 +113,23 @@ avec alerte en cas de dépassement.
   }
   ```
   + relations `Ticket.timeEntries` / `User.timeEntries`
-- [ ] Migration + `npx prisma generate`
-- [ ] Nouveau fichier `erp-backend/src/routes/timesheet.routes.js` :
+- [x] Migration + `npx prisma generate`
+- [x] Nouveau fichier `erp-backend/src/routes/timesheet.routes.js` :
   - `POST /timesheet` (ajout manuel), `POST /timesheet/timer/start` / `/stop`
     (timer : `{ ticketId, startedAt }` → crée l'entrée à l'arrêt)
   - `GET /timesheet?ticketId=&userId=&from=&to=` (agrégats : total, par jour)
   - `DELETE /timesheet/:id`
   - permission `tickets.timesheet` (backend + frontend configs)
-- [ ] Montage dans `erp-backend/src/app.js`
+- [x] Montage dans `erp-backend/src/app.js`
 
 ### Frontend
-- [ ] `erp-frontend/src/pages/TicketDetail.jsx` : panneau « Temps passé » :
+- [x] `erp-frontend/src/pages/TicketDetail.jsx` : panneau « Temps passé » :
   - timer live (start/stop), saisie manuelle (minutes + description), liste des entrées, total
 - [ ] Widget/mini-rapport temps par technicien (optionnel : dans le Dashboard)
 
 ### Critères d'acceptation
-- [ ] Démarrer/arrêter un timer → entrée créée avec la bonne durée
-- [ ] Total par ticket affiché ; filtre par technicien/période fonctionnel
+- [x] Démarrer/arrêter un timer → entrée créée avec la bonne durée
+- [x] Total par ticket affiché ; filtre par technicien/période fonctionnel
 
 ---
 

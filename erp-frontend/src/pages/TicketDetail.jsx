@@ -15,7 +15,7 @@ import {
   Trash2, Paperclip, MessageSquare, Sparkles, Shield, MapPin,
   RefreshCw, Mail, FileText, Check, X, Send, ChevronRight,
   Flame, Radio, Info, ArrowDown, UserCheck, HelpCircle, Layers, History,
-  TrendingUp, Lock, Link2, Merge, Plus, GitBranch
+  TrendingUp, Lock, Link2, Merge, Plus, GitBranch, Timer, Play, Square
 } from 'lucide-react';
 import {
   STATUS_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS,
@@ -59,6 +59,14 @@ export default function TicketDetail() {
   const [childModalOpen, setChildModalOpen] = useState(false);
   const [childForm, setChildForm] = useState({ title: '', content: '', priority: 'P3' });
   const [creatingChild, setCreatingChild] = useState(false);
+  // Temps passé (timesheet)
+  const [timeEntries, setTimeEntries] = useState([]);
+  const [timeTotal, setTimeTotal] = useState(0);
+  const [activeTimer, setActiveTimer] = useState(null);
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const [manualMinutes, setManualMinutes] = useState('');
+  const [manualDesc, setManualDesc] = useState('');
+  const [savingTime, setSavingTime] = useState(false);
   const [linkSearch, setLinkSearch] = useState('');
   const [linkType, setLinkType] = useState('RELATED');
   const [linkResults, setLinkResults] = useState([]);
@@ -356,6 +364,102 @@ export default function TicketDetail() {
     } finally {
       setCreatingChild(false);
     }
+  }
+
+  // ── Temps passé (timesheet) ────────────────────────────────────────────
+  const canTimesheet = hasPermission(user, 'tickets.timesheet') || user?.role === 'SUPERADMIN';
+
+  async function loadTimeEntries() {
+    try {
+      const { data } = await api.get('/timesheet', { params: { ticketId: id } });
+      setTimeEntries(data.entries || []);
+      setTimeTotal(data.totalMinutes || 0);
+    } catch { /* silencieux */ }
+  }
+
+  useEffect(() => {
+    if (!canTimesheet || !id) return;
+    loadTimeEntries();
+    api.get('/timesheet/timer/active').then(({ data }) => {
+      if (data.active && Number(data.ticketId) === Number(id)) {
+        setActiveTimer({ ticketId: data.ticketId, startedAt: data.startedAt });
+        setElapsedSec(Math.floor((Date.now() - new Date(data.startedAt)) / 1000));
+      }
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, canTimesheet]);
+
+  useEffect(() => {
+    if (!activeTimer) return;
+    const t = setInterval(() => setElapsedSec(Math.floor((Date.now() - new Date(activeTimer.startedAt)) / 1000)), 1000);
+    return () => clearInterval(t);
+  }, [activeTimer]);
+
+  async function startTimer() {
+    try {
+      await api.post('/timesheet/timer/start', { ticketId: Number(id) });
+      setActiveTimer({ ticketId: Number(id), startedAt: new Date().toISOString() });
+      setElapsedSec(0);
+      toast.success('Minuteur démarré');
+    } catch (err) {
+      toast.error(err.response?.data?.error || "Impossible de démarrer le minuteur");
+    }
+  }
+
+  async function stopTimer() {
+    try {
+      await api.post('/timesheet/timer/stop', { ticketId: Number(id), description: manualDesc.trim() || null });
+      setActiveTimer(null);
+      setManualDesc('');
+      toast.success('Temps enregistré');
+      loadTimeEntries();
+    } catch (err) {
+      toast.error(err.response?.data?.error || "Impossible d'arrêter le minuteur");
+    }
+  }
+
+  async function addManualTime(e) {
+    e.preventDefault();
+    const minutes = parseInt(manualMinutes, 10);
+    if (!Number.isInteger(minutes) || minutes < 1) {
+      toast.error('Durée invalide (en minutes)');
+      return;
+    }
+    setSavingTime(true);
+    try {
+      await api.post('/timesheet', { ticketId: Number(id), minutes, description: manualDesc.trim() || null });
+      setManualMinutes('');
+      setManualDesc('');
+      toast.success('Temps ajouté');
+      loadTimeEntries();
+    } catch (err) {
+      toast.error(err.response?.data?.error || "Erreur lors de l'ajout");
+    } finally {
+      setSavingTime(false);
+    }
+  }
+
+  async function deleteTimeEntry(entryId) {
+    try {
+      await api.delete(`/timesheet/${entryId}`);
+      toast.success('Entrée supprimée');
+      loadTimeEntries();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de la suppression');
+    }
+  }
+
+  function fmtMinutes(min) {
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    return h > 0 ? `${h}h ${String(m).padStart(2, '0')}min` : `${m}min`;
+  }
+
+  function fmtElapsed(sec) {
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    return [h, m, s].map((v) => String(v).padStart(2, '0')).join(':');
   }
 
   async function removeLink(link) {
@@ -1094,6 +1198,112 @@ export default function TicketDetail() {
               </div>
             </form>
           </div>
+
+          {/* Temps passé (timesheet) */}
+          {canTimesheet && (
+            <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-4">
+              <div className="flex items-center justify-between gap-3 border-b border-outline-variant/20 pb-3">
+                <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
+                  <Timer className="w-4 h-4 text-primary" />
+                  Temps passé
+                  {timeTotal > 0 && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                      {fmtMinutes(timeTotal)}
+                    </span>
+                  )}
+                </h3>
+                {activeTimer && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/30 text-[11px] font-bold font-mono">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                    {fmtElapsed(elapsedSec)}
+                  </span>
+                )}
+              </div>
+
+              {/* Timer + saisie manuelle */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {activeTimer ? (
+                  <button
+                    onClick={stopTimer}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30 text-xs font-bold hover:bg-red-500/25 transition-colors cursor-pointer"
+                  >
+                    <Square className="w-3.5 h-3.5" />
+                    Arrêter le minuteur
+                  </button>
+                ) : (
+                  <button
+                    onClick={startTimer}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-xs font-bold hover:bg-emerald-500/25 transition-colors cursor-pointer"
+                  >
+                    <Play className="w-3.5 h-3.5" />
+                    Démarrer le minuteur
+                  </button>
+                )}
+                <form onSubmit={addManualTime} className="flex items-center gap-2 flex-1 min-w-[260px]">
+                  <input
+                    type="number"
+                    min="1"
+                    max="1440"
+                    value={manualMinutes}
+                    onChange={(e) => setManualMinutes(e.target.value)}
+                    placeholder="Minutes"
+                    className="w-20 px-2.5 py-2 rounded-xl border border-outline-variant/60 bg-surface text-on-surface text-xs font-bold focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none"
+                  />
+                  <input
+                    type="text"
+                    value={manualDesc}
+                    onChange={(e) => setManualDesc(e.target.value)}
+                    placeholder="Description (optionnel)"
+                    className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-outline-variant/60 bg-surface text-on-surface text-xs font-semibold focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none"
+                  />
+                  <button
+                    type="submit"
+                    disabled={savingTime || !manualMinutes}
+                    className="flex items-center gap-1 px-3 py-2 rounded-xl bg-primary text-on-primary text-xs font-bold hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Ajouter
+                  </button>
+                </form>
+              </div>
+
+              {/* Liste des entrées */}
+              {timeEntries.length === 0 ? (
+                <p className="text-xs text-on-surface-variant/70 italic py-2">
+                  Aucun temps saisi sur ce ticket.
+                </p>
+              ) : (
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                  {timeEntries.map((e) => (
+                    <div key={e.id} className="flex items-center gap-3 p-3 rounded-xl border border-outline-variant/30 bg-surface-container-low/40">
+                      <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[10px] font-bold border border-primary/20 shrink-0">
+                        {initials(e.user?.fullName)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-bold text-on-surface truncate">{e.user?.fullName || 'Technicien'}</span>
+                          <span className="text-[10px] font-mono text-on-surface-variant bg-surface-container border border-outline-variant/30 px-2 py-0.5 rounded-full shrink-0">
+                            {new Date(e.entryDate).toLocaleString('fr-FR')}
+                          </span>
+                        </div>
+                        {e.description && <p className="text-[11px] text-on-surface-variant truncate mt-0.5">{e.description}</p>}
+                      </div>
+                      <span className="text-xs font-black text-on-surface shrink-0">{fmtMinutes(e.minutes)}</span>
+                      {(e.userId === user?.id || user?.role === 'SUPERADMIN' || user?.role === 'ADMIN') && (
+                        <button
+                          onClick={() => deleteTimeEntry(e.id)}
+                          className="p-1.5 rounded-lg text-on-surface-variant hover:text-error hover:bg-error/5 transition-colors cursor-pointer shrink-0"
+                          title="Supprimer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Right Column: Properties Sidebar */}

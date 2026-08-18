@@ -7,6 +7,7 @@ export const PERMISSION_DEFINITIONS = [
   { key: 'tickets.bulkDelete', label: 'Supprimer des tickets en masse' },
   { key: 'tickets.assign', label: 'Assigner un ticket' },
   { key: 'tickets.approve', label: 'Approuver / rejeter un ticket' },
+  { key: 'tickets.timesheet', label: 'Saisir le temps passé sur les tickets (timesheet)' },
   { key: 'users.manage', label: 'Gérer les utilisateurs (affichage du lien uniquement)' },
   { key: 'teams.manage', label: 'Gérer les équipes' },
   { key: 'settings.ai', label: 'Paramètres : Intelligence Artificielle' },

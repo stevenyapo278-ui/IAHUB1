@@ -139,8 +139,26 @@ model User {
   weeklyPatternReportsReviewed AiWeeklyPatternReport[]
   observedTeams Team[] @relation("TeamDefaultObservers")
   requesterAssignments RequesterLocation[] @relation("RequesterAssignment")
+  timeEntries TicketTimeEntry[]
 
   @@index([teamId])
+}
+
+// Temps passé sur un ticket (module « Plan » de GLPI) : saisie manuelle ou
+// entrée générée par le timer (start/stop) d'un technicien.
+model TicketTimeEntry {
+  id          Int      @id @default(autoincrement())
+  ticketId    Int
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  userId      Int
+  user        User     @relation(fields: [userId], references: [id])
+  minutes     Int
+  description String?
+  entryDate   DateTime @default(now())
+
+  @@index([ticketId])
+  @@index([userId])
+  @@index([entryDate])
 }
 
 model PermissionGroup {
@@ -308,6 +326,7 @@ model Ticket {
   messages        TicketMessage[]
   events          TicketEvent[]
   fieldCorrections TicketFieldCorrection[]
+  timeEntries     TicketTimeEntry[]
   linksA          TicketLink[] @relation("TicketLinksA")
   linksB          TicketLink[] @relation("TicketLinksB")
 
