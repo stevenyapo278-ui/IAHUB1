@@ -238,6 +238,14 @@ export default function Inbox() {
     return () => clearInterval(id);
   }, [load, refreshCounts]);
 
+  // Recharge le fil sélectionné (après un event socket) si besoin
+  const refreshSelection = useCallback(() => {
+    if (!selectedThread) return;
+    api.get(`/inbox/thread?key=${encodeURIComponent(selectedThread.id)}`)
+      .then(({ data }) => setThreadDetail(data))
+      .catch(() => {});
+  }, [selectedThread]);
+
   // ── Socket ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!socket) return;
@@ -255,14 +263,6 @@ export default function Inbox() {
     socket.on('email_updated', onUpdated);
     return () => { socket.off('email_received', onReceived); socket.off('email_updated', onUpdated); };
   }, [socket, load, refreshCounts, selectedThread, refreshSelection]);
-
-  // Recharge le fil sélectionné (après un event socket) si besoin
-  const refreshSelection = useCallback(() => {
-    if (!selectedThread) return;
-    api.get(`/inbox/thread?key=${encodeURIComponent(selectedThread.id)}`)
-      .then(({ data }) => setThreadDetail(data))
-      .catch(() => {});
-  }, [selectedThread]);
 
   // ── Actions ─────────────────────────────────────────────────────────────
   async function handleSync() {
@@ -1120,7 +1120,8 @@ export default function Inbox() {
               </motion.div>
             </div>
           )}
-        </AnimatePresence>
+        </AnimatePresence>,
+        document.body
       )}
     </div>
   );
