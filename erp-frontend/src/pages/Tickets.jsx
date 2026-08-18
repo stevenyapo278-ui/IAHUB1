@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -51,6 +51,7 @@ import { useTheme } from '../context/ThemeContext';
 import { hasPermission } from '../utils/permissions';
 import useSystemSettings from '../hooks/useSystemSettings';
 import ConfirmDialog from '../components/ConfirmDialog';
+import { flattenCategoryTree } from '../utils/categoryTree';
 import EmptyState from '../components/EmptyState';
 import TicketCoverflowCarousel from '../components/TicketCoverflowCarousel';
 import KanbanBoard from '../components/KanbanBoard';
@@ -109,6 +110,7 @@ export default function Tickets() {
   const [categories, setCategories] = useState([]);
   const [glpiUsers, setGlpiUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const flatCategories = useMemo(() => flattenCategoryTree(categories), [categories]);
   const [refreshing, setRefreshing] = useState(false);
   const isFirstLoad = useRef(true);
 
@@ -841,8 +843,8 @@ export default function Tickets() {
                         className="w-full px-4 py-2.5 rounded-xl border font-medium text-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-surface border-outline-variant/60 text-slate-900 dark:text-white"
                       >
                         <option value="">Sélectionner une catégorie</option>
-                        {categories.map((c) => (
-                          <option key={c.id || c.name} value={c.name}>{c.name}</option>
+                        {flatCategories.map((o) => (
+                          <option key={o.id} value={o.name}>{o.label}</option>
                         ))}
                       </select>
                     </div>
@@ -1114,7 +1116,7 @@ export default function Tickets() {
             <FilterSelect value={filters.category} onChange={(v) => updateFilter('category', v)}
               label="Catégorie" options={[
                 { v: '', l: 'Toutes les catégories' },
-                ...categories.map((c) => ({ v: c.name, l: c.name })),
+                ...flatCategories.map((o) => ({ v: o.name, l: o.label })),
               ]} />
 
             <FilterSelect value={filters.assignedToId} onChange={(v) => updateFilter('assignedToId', v)}

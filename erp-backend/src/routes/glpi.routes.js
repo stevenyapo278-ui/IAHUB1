@@ -127,20 +127,27 @@ router.get('/locations', async (req, res) => {
 router.get('/categories', async (req, res) => {
   const categories = await prisma.ticketCategory.findMany({
     orderBy: { name: 'asc' },
-    select: { id: true, glpiCategoryId: true, name: true, isCustom: true },
+    select: { id: true, glpiCategoryId: true, name: true, isCustom: true, parentId: true },
   });
   res.json(categories);
 });
 
-// Crée une catégorie locale (mode autonome ou complément aux catégories GLPI).
-router.post('/categories', requirePermission('glpi.manage', ['ADMIN', 'TECHNICIAN']), [body('name').notEmpty().trim()], async (req, res) => {
+// Crée une catégorie locale (mode autonome ou complément aux catégories GLPI),
+// optionnellement en sous-catégorie d'une catégorie existante (parentId).
+router.post('/categories', requirePermission('glpi.manage', ['ADMIN', 'TECHNICIAN']), [body('name').notEmpty().trim(), body('parentId').optional().isInt()], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
   const name = req.body.name.trim();
+  const parentId = req.body.parentId ? Number(req.body.parentId) : null;
+  if (parentId) {
+    const parent = await prisma.ticketCategory.findUnique({ where: { id: parentId } });
+    if (!parent) return res.status(404).json({ error: 'Catégorie parente introuvable' });
+  }
+
   try {
     const category = await prisma.ticketCategory.create({
-      data: { name, isCustom: true }, // glpiCategoryId = null : catégorie purement locale
+      data: { name, isCustom: true, parentId }, // glpiCategoryId = null : catégorie purement locale
     });
     return res.status(201).json(category);
   } catch (err) {
@@ -149,8 +156,9 @@ router.post('/categories', requirePermission('glpi.manage', ['ADMIN', 'TECHNICIA
   }
 });
 
-// Renomme une catégorie (locale ou GLPI — la prochaine sync GLPI ré-appliquera le nom GLPI).
-router.patch('/categories/:id', requirePermission('glpi.manage', ['ADMIN', 'TECHNICIAN']), [body('name').notEmpty().trim()], async (req, res) => {
+// Renomme ou déplace une catégorie (locale ou GLPI). Empêche de créer un cycle
+// (parent = soi-même ou un de ses descendants).
+router.patch('/categories/:id', requirePermission('glpi.manage', ['ADMIN', 'TECHNICIAN']), [body('name').optional().notEmpty().trim(), body('parentId').optional({ nullable: true }).isInt()], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
@@ -158,8 +166,37 @@ router.patch('/categories/:id', requirePermission('glpi.manage', ['ADMIN', 'TECH
   const existing = await prisma.ticketCategory.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: 'Catégorie introuvable' });
 
+  const data = {};
+  if (req.body.name !== undefined) data.name = req.body.name.trim();
+  if (req.body.parentId !== undefined) {
+    const parentId = req.body.parentId ? Number(req.body.parentId) : null;
+    // Anti-cycle : le nouveau parent ne doit pas se trouver dans le sous-arbre de la catégorie
+    // déplacée (sinon 7→8 et 8→7 formeraient une boucle). On parcourt les descendants de `id`
+    // et on vérifie que parentId n'en fait pas partie.
+    if (parentId && parentId !== id) {
+      const all = await prisma.ticketCategory.findMany({ select: { id: true, parentId: true } });
+      const children = new Map();
+      for (const c of all) {
+        if (!children.has(c.parentId)) children.set(c.parentId, []);
+        children.get(c.parentId).push(c.id);
+      }
+      const stack = [...(children.get(id) || [])];
+      const descendants = new Set();
+      while (stack.length) {
+        const cur = stack.pop();
+        if (descendants.has(cur)) continue;
+        descendants.add(cur);
+        stack.push(...(children.get(cur) || []));
+      }
+      if (descendants.has(parentId)) {
+        return res.status(400).json({ error: 'Une catégorie ne peut pas être déplacée sous l\'une de ses propres sous-catégories (cycle)' });
+      }
+    }
+    data.parentId = parentId;
+  }
+
   try {
-    const category = await prisma.ticketCategory.update({ where: { id }, data: { name: req.body.name.trim() } });
+    const category = await prisma.ticketCategory.update({ where: { id }, data });
     return res.json(category);
   } catch (err) {
     if (err.code === 'P2002') return res.status(409).json({ error: 'Une catégorie avec ce nom existe déjà' });
@@ -167,12 +204,18 @@ router.patch('/categories/:id', requirePermission('glpi.manage', ['ADMIN', 'TECH
   }
 });
 
-// Supprime une catégorie. Les tickets existants conservent leur libellé (le champ category du
-// ticket est une chaîne, pas une clé étrangère), seule la liste des choix est mise à jour.
+// Supprime une catégorie. Refusée si la catégorie a des sous-catégories (les déplacer
+// ou les supprimer d'abord). Les tickets existants conservent leur libellé (le champ
+// category du ticket est une chaîne, pas une clé étrangère).
 router.delete('/categories/:id', requirePermission('glpi.manage', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const id = Number(req.params.id);
   const existing = await prisma.ticketCategory.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: 'Catégorie introuvable' });
+
+  const children = await prisma.ticketCategory.count({ where: { parentId: id } });
+  if (children > 0) {
+    return res.status(400).json({ error: `Impossible de supprimer : ${children} sous-catégorie(s) dépendent de celle-ci` });
+  }
 
   await prisma.ticketCategory.delete({ where: { id } });
   return res.json({ deleted: true });

@@ -138,22 +138,22 @@ avec alerte en cas de dépassement.
 **Objectif** : sous-catégories (`Matériel > Impression > Imprimante`).
 
 ### Backend
-- [ ] `erp-backend/prisma/schema.prisma` → `TicketCategory` : ajouter `parentId Int?` + auto-relation
-- [ ] Migration
-- [ ] `erp-backend/src/routes/glpi.routes.js` (routes catégories locales) :
+- [x] `erp-backend/prisma/schema.prisma` → `TicketCategory` : ajouter `parentId Int?` + auto-relation
+- [x] Migration
+- [x] `erp-backend/src/routes/glpi.routes.js` (routes catégories locales) :
   - CRUD gère `parentId`, empêche de supprimer une catégorie ayant des enfants
   - `GET /glpi/categories` renvoie l'arbre (ou liste plate + `parentId` pour construction côté client)
-- [ ] Sync GLPI (`erp-backend/src/utils/glpiSync.js`) : mapper `itilcategories.parent_id`
+- [x] Sync GLPI (`erp-backend/src/services/glpiTicketCreator.js`) : mapper `itilcategories.parent_id`
   lors de `syncCategoriesFromGlpi`
 
 ### Frontend
-- [ ] `erp-frontend/src/pages/Categories.jsx` : vue **arbre** (pli/dépliage, indentations)
-- [ ] Sélecteur hiérarchique dans `Tickets.jsx` (création) et `TicketDetail.jsx` (édition)
+- [x] `erp-frontend/src/pages/Categories.jsx` : vue **arbre** (pli/dépliage, indentations)
+- [x] Sélecteur hiérarchique dans `Tickets.jsx` (création) et `TicketDetail.jsx` (édition)
   (breadcrumb `Matériel › Impression › Imprimante`)
 
 ### Critères d'acceptation
-- [ ] Création de sous-catégories ; arbre visible dans la page Catégories
-- [ ] Sélecteur de création de ticket navigable par niveau ; filtre par sous-catégorie
+- [x] Création de sous-catégories ; arbre visible dans la page Catégories
+- [x] Sélecteur de création de ticket navigable par niveau ; filtre par sous-catégorie
 
 ---
 

@@ -195,8 +195,13 @@ model TicketCategory {
   name            String   @unique
   glpiCategoryId  Int?     @unique // null si catégorie créée localement (mode autonome)
   isCustom        Boolean  @default(false) // true si créée manuellement dans l'ERP
+  parentId        Int?     // catégorie parente (sous-catégories, ex: Matériel > Impression)
+  parent          TicketCategory? @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children        TicketCategory[] @relation("CategoryTree")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  @@index([parentId])
 }
 
 // Lieux synchronisés depuis les Location de GLPI ("Lieu" / "Locations" dans le formulaire

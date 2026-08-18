@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../api/client';
@@ -10,6 +10,7 @@ import { useTheme } from '../context/ThemeContext';
 import SearchableSelect from '../components/SearchableSelect';
 import SearchableMultiSelect from '../components/SearchableMultiSelect';
 import SlaBadge from '../components/SlaBadge';
+import { flattenCategoryTree } from '../utils/categoryTree';
 import {
   ArrowLeft, Clock, User, Tag, AlertTriangle, CheckCircle2,
   Trash2, Paperclip, MessageSquare, Sparkles, Shield, MapPin,
@@ -82,6 +83,7 @@ export default function TicketDetail() {
   const [teams, setTeams] = useState([]);
   const [users, setUsers] = useState([]);
   const [categories, setCategories] = useState([]);
+  const flatCategories = useMemo(() => flattenCategoryTree(categories), [categories]);
   const [locations, setLocations] = useState([]);
   const [glpiUsers, setGlpiUsers] = useState([]);
   const [syncFailures, setSyncFailures] = useState([]);
@@ -1459,8 +1461,8 @@ export default function TicketDetail() {
                     onChange={(e) => updateField('category', e.target.value)}
                   >
                     <option value="">-----</option>
-                    {categories.map((c) => (
-                      <option key={c.id} value={c.name}>{c.name}</option>
+                    {flatCategories.map((o) => (
+                      <option key={o.id} value={o.name}>{o.label}</option>
                     ))}
                   </select>
                 ) : (

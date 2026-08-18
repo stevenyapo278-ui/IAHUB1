@@ -668,6 +668,17 @@ async function syncCategoriesFromGlpi() {
       await prisma.ticketCategory.create({ data: { name: cat.name, glpiCategoryId: cat.id } });
       synced++;
     }
+
+    // Deuxième passe : mapper la hiérarchie (parent_id) après que toutes les catégories
+    // existent en base, pour gérer les parents déclarés après leurs enfants.
+    for (const cat of categories) {
+      if (!cat.id || !cat.parent_id) continue;
+      const local = await prisma.ticketCategory.findUnique({ where: { glpiCategoryId: cat.id } });
+      const parent = await prisma.ticketCategory.findUnique({ where: { glpiCategoryId: Number(cat.parent_id) } });
+      if (local && parent && local.id !== parent.id) {
+        await prisma.ticketCategory.update({ where: { id: local.id }, data: { parentId: parent.id } });
+      }
+    }
     return synced;
   });
 }
