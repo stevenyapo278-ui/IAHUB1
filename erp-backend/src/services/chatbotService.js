@@ -402,6 +402,9 @@ async function handleMessage(message, conversationHistory = [], userId = null) {
   const aiMessages = [];
   const recentHistory = conversationHistory.slice(-10);
   for (const msg of recentHistory) {
+    if (!msg || !msg.content || typeof msg.content !== 'string') continue;
+    // Ne pas inclure les anciens messages d'erreur système dans le contexte ré-injecté à l'IA
+    if (msg.content.includes('Désolé, je rencontre un problème technique') || msg.content.includes('Tous les providers IA ont échoué')) continue;
     aiMessages.push({ role: msg.role, content: msg.content });
   }
 
@@ -412,7 +415,8 @@ async function handleMessage(message, conversationHistory = [], userId = null) {
   try {
     reply = await callAI(aiMessages);
   } catch (err) {
-    reply = `Désolé, je rencontre un problème technique. Réessayez plus tard.\n\n*${err.message}*`;
+    console.error('[chatbot] Échec de la génération de réponse IA:', err.message);
+    reply = "Désolé, je rencontre une difficulté temporaire d'accès aux services IA. Veuillez réentreprendre votre demande dans quelques instants.";
   }
 
   return {

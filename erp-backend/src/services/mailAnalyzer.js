@@ -6,7 +6,7 @@ const { logger } = require('../utils/logger');
 // On ne pré-crée plus des breakers hardcodés par type : plusieurs providers peuvent
 // partager le même type (ex: deux instances OpenAI-compat distinctes).
 function getBreakerForProvider(providerName) {
-  return getBreaker(`ai-${providerName}`, { maxFailures: 3, resetTimeoutMs: 30000, halfOpenMaxRequests: 1 });
+  return getBreaker(`ai-${providerName}`, { maxFailures: 5, resetTimeoutMs: 15000, halfOpenMaxRequests: 1 });
 }
 
 // Récupère TOUS les providers actifs avec au moins une clé active.
@@ -17,7 +17,7 @@ async function getActiveProviders() {
     where: { isActive: true, isDeleted: false },
     include: {
       keys: { where: { isActive: true }, orderBy: { isDefault: 'desc' } },
-      models: { where: { isActive: true, isDeleted: false, type: 'CHAT' }, orderBy: [{ isDefault: 'desc' }, { id: 'asc' }], take: 1 },
+      models: { where: { isActive: true, isDeleted: false, type: 'CHAT' }, orderBy: [{ isDefault: 'desc' }, { id: 'asc' }] },
     },
     orderBy: { label: 'asc' },
   });
@@ -79,9 +79,10 @@ async function callGemini(provider, apiKey, prompt, modelName) {
 }
 
 // Appelle l'API Anthropic
-async function callAnthropic(provider, apiKey, prompt) {
+async function callAnthropic(provider, apiKey, prompt, modelName) {
   return getBreakerForProvider(provider.name).call(async () => {
     const baseUrl = provider.baseUrl || 'https://api.anthropic.com';
+    const model = modelName || 'claude-3-5-haiku-20241022';
     const res = await fetch(`${baseUrl}/v1/messages`, {
       method: 'POST',
       signal: AbortSignal.timeout(15000),
@@ -91,7 +92,7 @@ async function callAnthropic(provider, apiKey, prompt) {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model,
         max_tokens: 2048,
         messages: [{ role: 'user', content: prompt }],
       }),
@@ -104,30 +105,34 @@ async function callAnthropic(provider, apiKey, prompt) {
 
 async function callProvider(provider, prompt) {
   const keys = provider.keys;
-  const defaultModel = provider.models?.[0]?.name;
+  const models = provider.models || [];
+  const modelCandidates = models.length > 0 ? models.map((m) => m.name) : [undefined];
 
   let lastError;
   for (const key of keys) {
-    try {
-      let raw;
-      switch (provider.name) {
-        case 'gemini':
-          raw = await callGemini(provider, key.apiKey, prompt, defaultModel);
-          break;
-        case 'anthropic':
-          raw = await callAnthropic(provider, key.apiKey, prompt);
-          break;
-        default:
-          // openai, nvidia, mistral → format OpenAI-compatible
-          raw = await callOpenAICompat(provider, key.apiKey, defaultModel || 'meta/llama-3.1-8b-instruct', prompt);
+    for (const modelCandidate of modelCandidates) {
+      try {
+        let raw;
+        switch (provider.name) {
+          case 'gemini':
+            raw = await callGemini(provider, key.apiKey, prompt, modelCandidate);
+            break;
+          case 'anthropic':
+            raw = await callAnthropic(provider, key.apiKey, prompt, modelCandidate);
+            break;
+          default:
+            // openai, nvidia, mistral → format OpenAI-compatible
+            raw = await callOpenAICompat(provider, key.apiKey, modelCandidate || 'meta/llama-3.1-8b-instruct', prompt);
+        }
+        return raw;
+      } catch (err) {
+        lastError = err.message;
+        logger.warn(`[AI] Échec appel ${provider.label} (modèle=${modelCandidate || 'défaut'}) : ${err.message}`);
+        continue;
       }
-      return raw;
-    } catch (err) {
-      lastError = err.message;
-      continue;
     }
   }
-  throw new Error(lastError || `Toutes les clés ${provider.label} ont échoué`);
+  throw new Error(lastError || `Toutes les clés/modèles de ${provider.label} ont échoué`);
 }
 
 // Tente les providers dans l'ordre (défaut en premier, puis alphabétique).
