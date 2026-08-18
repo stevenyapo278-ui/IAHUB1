@@ -127,7 +127,7 @@ router.post('/:id/models', [body('name').notEmpty()], async (req, res) => {
 
   const providerId = Number(req.params.id);
   const { name, label, type, isDefault, isActive } = req.body;
-  const modelType = type === 'EMBEDDING' ? 'EMBEDDING' : 'CHAT';
+  const modelType = ['CHAT', 'EMBEDDING', 'RERANK'].includes(type) ? type : 'CHAT';
 
   const existing = await prisma.aiModel.findUnique({ where: { providerId_name: { providerId, name } } });
   if (existing) return res.status(409).json({ error: 'Ce modèle existe déjà pour ce fournisseur' });

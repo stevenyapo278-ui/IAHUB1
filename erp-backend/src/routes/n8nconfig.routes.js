@@ -31,7 +31,8 @@ router.get('/ai-key/:providerName', async (req, res) => {
   const key = provider.keys.find((k) => k.isDefault) || provider.keys[0];
   if (!key) return res.status(404).json({ error: 'Aucune clé API configurée pour ce fournisseur' });
 
-  const model = provider.models.find((m) => m.isDefault) || provider.models.find((m) => m.id === key.modelId);
+  const model = provider.models.find((m) => m.isDefault && m.isActive && m.type === 'CHAT')
+    || provider.models.find((m) => m.id === key.modelId && m.isActive && m.type === 'CHAT');
 
   return res.json({
     provider: provider.name,

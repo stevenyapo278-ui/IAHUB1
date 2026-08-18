@@ -186,7 +186,7 @@ async function callAI(prompt, maxTokens = 2048) {
     where: { isActive: true },
     include: {
       keys: { where: { isActive: true }, orderBy: { isDefault: 'desc' } },
-      models: { where: { isActive: true, isDefault: true, type: 'CHAT' }, take: 1 },
+      models: { where: { isActive: true, type: 'CHAT' }, orderBy: [{ isDefault: 'desc' }, { id: 'asc' }], take: 1 },
     },
     orderBy: { label: 'asc' },
   });
