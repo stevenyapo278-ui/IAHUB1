@@ -3,22 +3,20 @@ const { getActiveProviders, callProviderWithFallback } = require('./mailAnalyzer
 const { emitTicketCreated } = require('../utils/socket');
 const analyticsTools = require('./analyticsTools');
 
-const SYSTEM_PROMPT = `Tu es l'assistant IA intelligent et analyste Business Intelligence du helpdesk IT de Prosuma (IA Hub). Tu réponds en français, de manière claire, concise, précise et professionnelle.
+const SYSTEM_PROMPT = `Tu es l'Assistant IA intelligent et analyste Helpdesk IT de Prosuma (IA Hub). Tu réponds en français, de manière chaleureuse, claire, concise, précise et professionnelle.
 
-Tu peux répondre aux questions sur :
-1. Les TICKETS du système ERP et GLPI (/tickets) : recherche par sujet, numéro, statut, catégorie, priorités, demandeur, technicien ou lieu.
-2. Les STATISTIQUES & ANALYTICS : classement des magasins/lieux (ex: "quel magasin a eu le plus de soucis par rapport à asten"), récapitulatif par catégorie, temps de résolution et cause racine ("pourquoi ?").
-3. Les procédures et informations de la Base de Connaissances IT.
-4. La création de nouveaux tickets d'incident ou de demande.
-5. L'état détaillé d'un ticket par son numéro (ex: #123).
-6. L'escalade immédiate d'un incident vers un technicien.
+Tes capacités :
+1. Saluer poliment et répondre de manière amicale aux salutations simples (ex: "Bonjour ! Comment puis-je vous aider aujourd'hui ?").
+2. Fournir des informations sur les TICKETS (statut, priorité, détails par numéro #123, demandeur, technicien, lieu).
+3. Produire des STATISTIQUES & ANALYSES (top magasins générant des incidents, récapitulatifs par catégorie, causes racines).
+4. Fournir des procédures et réponses issues de la Base de Connaissances IT.
+5. Accompagner l'utilisateur pour créer de nouveaux tickets ou escalader vers un technicien.
 
-RÈGLES IMPORTANTES :
-- Quand des résultats statistiques ou des tickets pertinents sont fournis dans le contexte, utilise-les pour structurer ta réponse.
-- Si un graphique Recharts est généré en bas de message, résume les points clés (le #1, les chiffres marquants) en Markdown.
-- Pour les questions de cause racine ("Pourquoi asten a eu des pannes ?"), résume les motifs fréquents d'après la base d'incidents.
-- Si tu trouves une solution dans la base de connaissances, cite la source.
-- Réponds toujours avec un format Markdown soigné (listes à puces, gras, tableaux).`;
+RÈGLES DE FORMATAGE ET DE STYLE :
+- Sois direct et concis : réponds précisément à ce qui est demandé sans surcharger d'informations inutiles.
+- Utilise un format Markdown soigné (gras, puces, tableaux si approprié).
+- Si l'utilisateur salue simplement, réponds avec courtoisie et propose tes services.
+- Si des données statistiques ou des tickets sont fournis dans le contexte, utilise-les pour structurer ta réponse.`;
 
 const INTENT_PROMPT = `Tu es un classificateur d'intentions. Analyse le message utilisateur et réponds UNIQUEMENT avec un JSON valide (pas de texte avant ou après).
 
@@ -96,15 +94,21 @@ async function searchTickets(query, limit = 5) {
       where.priority = PRIORITY_MAP[priorityMatch[1]];
     }
 
+    const STOP_WORDS = new Set([
+      'les', 'des', 'que', 'sur', 'pour', 'avec', 'par', 'dans', 'un', 'une', 'qui', 'est',
+      'ticket', 'tickets', 'montre', 'cherche', 'donne', 'combien', 'quels', 'quelle', 'quelles',
+      'est-ce', 'base', 'propos', 'avez-vous', 'avez', 'nous', 'vous',
+      'bonjour', 'bonsoir', 'salut', 'hello', 'coucou', 'hey', 'hi', 'merci', 'svp', 'stp', 're', 'salutations'
+    ]);
+
     const words = clean.split(/\s+/).filter(
-      (w) =>
-        w.length > 2 &&
-        ![
-          'les', 'des', 'que', 'sur', 'pour', 'avec', 'par', 'dans', 'un', 'une', 'qui', 'est',
-          'ticket', 'tickets', 'montre', 'cherche', 'donne', 'combien', 'quels', 'quelle', 'quelles',
-          'est-ce', 'base', 'propos', 'avez-vous', 'avez', 'nous', 'vous'
-        ].includes(w.toLowerCase())
+      (w) => w.length > 2 && !STOP_WORDS.has(w.toLowerCase())
     );
+
+    // Si le message ne contient que des mots de salutation sans numéro ni mot-clé précis, pas de recherche
+    if (words.length === 0 && !idMatch && !statusMatch && !priorityMatch) {
+      return [];
+    }
 
     if (words.length > 0) {
       where.OR = words.flatMap((w) => [
@@ -131,18 +135,6 @@ async function searchTickets(query, limit = 5) {
       },
       orderBy: { createdAt: 'desc' },
     });
-
-    if (tickets.length === 0 && (lower.includes('ticket') || lower.includes('récent') || lower.includes('problème') || lower.includes('incident'))) {
-      tickets = await prisma.ticket.findMany({
-        take: limit,
-        include: {
-          requester: { select: { fullName: true, email: true } },
-          assignedTo: { select: { fullName: true } },
-          team: { select: { name: true } },
-        },
-        orderBy: { createdAt: 'desc' },
-      });
-    }
 
     return tickets;
   } catch (err) {

@@ -62,6 +62,9 @@ function WidgetRenderer({ widget }) {
 }
 
 function MarkdownContent({ content }) {
+  // Remplace les mentions de tickets du type #12345 par des liens cliquables [ #12345 ](/tickets/12345)
+  const formattedContent = (content || '').replace(/#(\d{2,6})\b/g, '[#$1](/tickets/$1)');
+
   return (
     <ReactMarkdown
       components={{
@@ -69,6 +72,16 @@ function MarkdownContent({ content }) {
         em: ({ children }) => <em className="italic">{children}</em>,
         ul: ({ children }) => <ul className="my-1 space-y-0.5">{children}</ul>,
         li: ({ children }) => <li className="ml-4 list-disc text-[13px]">{children}</li>,
+        a: ({ href, children }) => (
+          <a
+            href={href}
+            target={href?.startsWith('http') ? '_blank' : '_self'}
+            rel="noreferrer"
+            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-primary/10 text-primary font-bold hover:underline transition-colors text-[11px]"
+          >
+            {children}
+          </a>
+        ),
         code: ({ children, className }) => {
           if (className) return <code className={`${className} bg-surface-container-high px-1 rounded text-[12px]`}>{children}</code>;
           return <code className="bg-surface-container-high px-1 rounded text-[12px]">{children}</code>;
@@ -76,7 +89,7 @@ function MarkdownContent({ content }) {
         p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p>,
       }}
     >
-      {content}
+      {formattedContent}
     </ReactMarkdown>
   );
 }
@@ -95,7 +108,7 @@ function MessageActions({ msg, onReply, onCopy }) {
 
   return (
     <div className="flex items-center gap-1 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-      <button onClick={handleCopy} className="p-0.5 rounded hover:bg-surface-container-high transition-colors cursor-pointer" title="Copier">
+      <button onClick={handleCopy} className="p-0.5 rounded hover:bg-surface-container-high transition-colors cursor-pointer" title="Copier le texte">
         <span className="material-symbols-outlined text-[12px] text-on-surface-variant">{copied ? 'check' : 'content_copy'}</span>
       </button>
       <button onClick={() => onReply?.(msg.content)} className="p-0.5 rounded hover:bg-surface-container-high transition-colors cursor-pointer" title="Répondre">
@@ -147,6 +160,18 @@ export default function ChatWidget() {
 
   useEffect(scrollToBottom, [messages, loading, scrollToBottom]);
   useEffect(() => { if (isOpen) inputRef.current?.focus(); }, [isOpen]);
+
+  // Raccourci clavier Ctrl+I / Cmd+I pour ouvrir l'Assistant IA
+  useEffect(() => {
+    function handleKeyDown(e) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') {
+        e.preventDefault();
+        setIsOpen((prev) => !prev);
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Charger l'historique au premier ouverture
   useEffect(() => {
