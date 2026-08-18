@@ -51,6 +51,18 @@ router.get('/history', authenticate, async (req, res) => {
   }
 });
 
+// DELETE /api/chat/history — réinitialise l'historique pour démarrer une nouvelle conversation
+router.delete('/history', authenticate, async (req, res) => {
+  try {
+    await prisma.chatMessage.deleteMany({
+      where: { userId: req.user.sub },
+    });
+    res.json({ ok: true, message: 'Nouvelle conversation démarrée.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur lors de la réinitialisation de la conversation.' });
+  }
+});
+
 // POST /api/chat/feedback — enregistre le rating d'un message
 router.post('/feedback', authenticate, async (req, res) => {
   try {

@@ -121,14 +121,18 @@ async function rateMessage(messageId, rating) {
   } catch {}
 }
 
+const WELCOME_MESSAGE = {
+  role: 'assistant',
+  content: "Bonjour ! Je suis votre Assistant IA & Analyste Helpdesk IT. Posez-moi des questions sur vos tickets ou des demandes de statistiques sur vos magasins/lieux !",
+};
+
 export default function ChatWidget() {
   const { user } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
-  const [messages, setMessages] = useState([
-    { role: 'assistant', content: "Bonjour ! Je suis votre Assistant IA & Analyste Helpdesk IT. Posez-moi des questions sur vos tickets ou des demandes de statistiques sur vos magasins/lieux !" },
-  ]);
+  const [messages, setMessages] = useState([WELCOME_MESSAGE]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [replyTo, setReplyTo] = useState(null);
   const [attachment, setAttachment] = useState(null);
@@ -150,7 +154,7 @@ export default function ChatWidget() {
       api.get('/chat/history').then(({ data }) => {
         if (data.length > 0) {
           setMessages([
-            { role: 'assistant', content: "Bonjour ! Je suis votre Assistant IA & Analyste Helpdesk IT. Posez-moi des questions sur vos tickets ou des demandes de statistiques sur vos magasins/lieux !" },
+            WELCOME_MESSAGE,
             ...data.map((m) => ({ id: m.id, role: m.role, content: m.content, sources: m.sources, rating: m.rating, widget: m.widget })),
           ]);
         }
@@ -158,6 +162,20 @@ export default function ChatWidget() {
       }).catch(() => setHistoryLoaded(true));
     }
   }, [isOpen, historyLoaded, user]);
+
+  async function handleNewConversation() {
+    if (clearing || loading) return;
+    setClearing(true);
+    try {
+      await api.delete('/chat/history');
+    } catch {}
+    setMessages([WELCOME_MESSAGE]);
+    setReplyTo(null);
+    removeAttachment();
+    setInput('');
+    setClearing(false);
+    inputRef.current?.focus();
+  }
 
   function handleFileSelect(e) {
     const file = e.target.files?.[0];
@@ -262,9 +280,20 @@ export default function ChatWidget() {
                   <p className="text-[10px] opacity-80">Helpdesk IT Prosuma</p>
                 </div>
               </div>
-              <button onClick={() => setIsOpen(false)} className="p-1 rounded-lg hover:bg-white/20 transition-colors cursor-pointer" aria-label="Fermer">
-                <span className="material-symbols-outlined text-[18px]">close</span>
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={handleNewConversation}
+                  disabled={clearing}
+                  className="p-1 px-2.5 rounded-lg hover:bg-white/20 transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-semibold bg-white/10"
+                  title="Démarrer une nouvelle conversation"
+                >
+                  <span className="material-symbols-outlined text-[15px]">add_comment</span>
+                  <span>Nouveau</span>
+                </button>
+                <button onClick={() => setIsOpen(false)} className="p-1 rounded-lg hover:bg-white/20 transition-colors cursor-pointer" aria-label="Fermer">
+                  <span className="material-symbols-outlined text-[18px]">close</span>
+                </button>
+              </div>
             </div>
 
             {/* Messages */}
