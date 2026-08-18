@@ -28,7 +28,7 @@ router.use(authenticate);
 router.get('/', async (req, res) => {
   const {
     status, priority, teamId, assignedToId, mine, title, search, limit, page,
-    sortBy, sortOrder, category, locationId, aiProcessed
+    sortBy, sortOrder, category, locationId, aiProcessed, due
   } = req.query;
   const searchQuery = title || search || req.query.query;
 
@@ -63,6 +63,14 @@ router.get('/', async (req, res) => {
   }
 
   if (req.query.approvalStatus) where.approvalStatus = req.query.approvalStatus;
+
+  // due=overdue -> tickets dont l'échéance manuelle est dépassée et qui ne sont pas clôturés
+  if (due === 'overdue') {
+    where.dueDate = { not: null, lt: new Date() };
+    if (!status) where.status = { notIn: ['SOLVED', 'CLOSED'] };
+  }
+  if (due === 'due') where.dueDate = { not: null };
+  if (due === 'undue') where.dueDate = null;
 
   // Filtrer les tickets dont la clôture a été suggérée par l'IA (en attente de validation Hotline)
   if (req.query.closeSuggested === 'true') where.closeSuggested = true;
@@ -359,7 +367,7 @@ router.post(
 
     const {
       title, content, priority, category, teamId, assignedToId, requesterId, requiresApproval,
-      type, urgency, impact, source, externalId, status, openedAt, locationId,
+      type, urgency, impact, source, externalId, status, openedAt, locationId, dueDate,
     } = req.body;
 
     // observerIds peut arriver en JSON (multipart) ou en tableau (JSON direct)
@@ -415,6 +423,7 @@ router.post(
         type: type || 'INCIDENT',
         urgency: urgency || 'MEDIUM',
         impact: impact || 'MEDIUM',
+        ...(dueDate ? { dueDate: new Date(dueDate) } : {}),
         source: source || null,
         externalId: externalId || null,
         ...(observerIds.length > 0 ? { observers: { connect: observerIds.map((id) => ({ id: Number(id) })) } } : {}),
@@ -498,7 +507,7 @@ router.post(
 // Update ticket (status, priority, assignment, etc.)
 router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const id = Number(req.params.id);
-  const { title, content, status, priority, category, teamId, assignedToId, type, urgency, impact, source, externalId } = req.body;
+  const { title, content, status, priority, category, teamId, assignedToId, type, urgency, impact, source, externalId, dueDate } = req.body;
 
   const data = {};
   if (title !== undefined) data.title = title;
@@ -507,6 +516,13 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
   if (category !== undefined) data.category = category;
   if (teamId !== undefined) data.teamId = teamId;
   if (assignedToId !== undefined) data.assignedToId = assignedToId;
+
+  // Échéance manuelle : accepter une date, la vider (null) ou retirer l'échéance (""),
+  // et réarmer le drapeau de notification si la date change
+  if (dueDate !== undefined) {
+    data.dueDate = dueDate ? new Date(dueDate) : null;
+    data.dueDateNotifiedAt = null;
+  }
   if (type !== undefined) data.type = type;
   if (urgency !== undefined) data.urgency = urgency;
   if (impact !== undefined) data.impact = impact;

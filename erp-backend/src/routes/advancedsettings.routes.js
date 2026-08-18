@@ -63,6 +63,7 @@ router.patch(
     body('enableGlpiTicketClosure').optional().isBoolean(),
     body('slaHours').optional().isObject(),
     body('slaMonitorIntervalSeconds').optional().isInt({ min: 0, max: 3600 }),
+    body('dueDateMonitorIntervalSeconds').optional().isInt({ min: 0, max: 3600 }).withMessage('dueDateMonitorIntervalSeconds doit être entre 0 et 3600'),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -93,6 +94,7 @@ router.patch(
     if (req.body.enableGlpiTicketClosure !== undefined) data.enableGlpiTicketClosure = req.body.enableGlpiTicketClosure;
     if (req.body.slaHours !== undefined) data.slaHours = req.body.slaHours;
     if (req.body.slaMonitorIntervalSeconds !== undefined) data.slaMonitorIntervalSeconds = req.body.slaMonitorIntervalSeconds;
+    if (req.body.dueDateMonitorIntervalSeconds !== undefined) data.dueDateMonitorIntervalSeconds = req.body.dueDateMonitorIntervalSeconds;
 
     const updated = await prisma.systemSettings.update({ where: { id: 1 }, data });
     return res.json(updated);

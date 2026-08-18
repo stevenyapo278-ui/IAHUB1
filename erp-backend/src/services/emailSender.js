@@ -331,6 +331,28 @@ ${signature || DEFAULT_EMAIL_SIGNATURE}
   return sendEmail({ ticketId, to: technicianEmail, subject, bodyHtml, saveAsMessage: false });
 }
 
+// Notifie le technicien assigné qu'un ticket a dépassé son échéance manuelle (dueDate).
+async function sendDueDateEmail({ ticketId, ticketTitle, priority, dueDate, technicianEmail, technicianName }) {
+  const subject = `[Échéance] Dépassement — Ticket #${ticketId} : ${ticketTitle}`;
+  const signature = await getEmailSignature();
+  const priorityLabel = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' }[priority] || priority;
+  const dueAt = dueDate
+    ? new Date(dueDate).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })
+    : '—';
+  const bodyHtml = `
+<p>Bonjour ${technicianName || ''},</p>
+<p>Le ticket <strong>#${ticketId} — ${ticketTitle}</strong> a dépassé son <strong>échéance manuelle</strong>.</p>
+<table style="border-collapse:collapse;margin:16px 0">
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Priorité</td><td><strong>${priorityLabel} (${priority})</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Échéance prévue</td><td>${dueAt}</td></tr>
+</table>
+<p>Ce ticket doit être pris en charge rapidement : connectez-vous à l'application pour le traiter.</p>
+${signature || DEFAULT_EMAIL_SIGNATURE}
+`.trim();
+
+  return sendEmail({ ticketId, to: technicianEmail, subject, bodyHtml, saveAsMessage: false });
+}
+
 // Notifie le demandeur par email du changement de statut de son ticket (portail REQUESTER + suivi).
 async function sendTicketStatusNotification({ ticketId, ticketTitle, status, priority, category, recipientEmail, recipientName }) {
   const STATUS_LABELS = {
@@ -485,6 +507,7 @@ module.exports = {
   sendAssignmentNotificationEmail,
   sendHotlineApprovalReminderEmail,
   sendSlaBreachEmail,
+  sendDueDateEmail,
   sendEscalationEmail,
   sendTicketStatusNotification,
   buildAcknowledgementHtml,

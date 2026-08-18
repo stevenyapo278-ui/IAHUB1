@@ -65,6 +65,7 @@ const EMPTY_FORM = {
   title: '',
   content: '',
   openedAt: '',
+  dueDate: '',
   type: 'INCIDENT',
   category: '',
   status: 'NEW',
@@ -951,6 +952,19 @@ export default function Tickets() {
                     </div>
                   </div>
 
+                  <div>
+                    <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-amber-500" />
+                      Échéance (date limite) — optionnel
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={form.dueDate}
+                      onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
+                      className="w-full px-4 py-2.5 rounded-xl border font-medium text-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-surface border-outline-variant/60 text-slate-900 dark:text-white"
+                    />
+                  </div>
+
                   {canAssign && (
                     <div>
                       <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Demandeur (Création pour un tier)</label>
@@ -1363,6 +1377,14 @@ export default function Tickets() {
                       <span className="truncate">{t.glpiLocationName}</span>
                     </div>
                   )}
+                  {t.dueDate && (
+                    <div className="flex items-center gap-1 text-[12px] truncate">
+                      <Clock className={`w-3.5 h-3.5 shrink-0 ${isDueOverdue(t) ? 'text-red-500' : 'text-amber-500'}`} />
+                      <span className={`font-semibold ${isDueOverdue(t) ? 'text-red-600 dark:text-red-400' : 'text-amber-700 dark:text-amber-400'}`}>
+                        {isDueOverdue(t) ? 'En retard' : 'Échéance'} {new Date(t.dueDate).toLocaleString('fr-FR')}
+                      </span>
+                    </div>
+                  )}
                   <SlaBadge ticket={t} />
                 </div>
 
@@ -1547,6 +1569,19 @@ export default function Tickets() {
                             {t.team?.name || 'Aucune équipe'}
                           </span>
                         )}
+                        {t.dueDate && (
+                          <span
+                            className={`inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${
+                              isDueOverdue(t)
+                                ? 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-400 border-red-200 dark:border-red-500/30'
+                                : 'bg-amber-50 text-amber-800 dark:bg-amber-500/15 dark:text-amber-400 border-amber-300 dark:border-amber-500/30'
+                            }`}
+                            title={`Échéance : ${new Date(t.dueDate).toLocaleString('fr-FR')}`}
+                          >
+                            <Clock className="w-2.5 h-2.5 shrink-0" />
+                            {isDueOverdue(t) ? 'En retard' : new Date(t.dueDate).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
+                          </span>
+                        )}
                         <SlaBadge ticket={t} />
                       </div>
                     </div>
@@ -1592,7 +1627,15 @@ export default function Tickets() {
 
                     {/* Date */}
                     <div className="w-24 shrink-0 hidden lg:block text-right">
-                      <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">{dateStr}</span>
+                      <div className={`text-xs font-semibold ${isDueOverdue(t) ? 'text-red-600 dark:text-red-400' : 'text-slate-700 dark:text-slate-300'}`}>
+                        {dateStr}
+                      </div>
+                      {t.dueDate && (
+                        <div className={`text-[10px] font-bold flex items-center gap-0.5 justify-end ${isDueOverdue(t) ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}`} title={`Échéance : ${new Date(t.dueDate).toLocaleString('fr-FR')}`}>
+                          <Clock className="w-2.5 h-2.5" />
+                          {isDueOverdue(t) ? 'Retard' : new Date(t.dueDate).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
+                        </div>
+                      )}
                     </div>
 
                     {/* Actions */}
@@ -1693,6 +1736,13 @@ export default function Tickets() {
       />
     </motion.div>
   );
+}
+
+// Une échéance manuelle est « en retard » si elle est dépassée et que le ticket n'est pas encore résolu/clôturé
+function isDueOverdue(t) {
+  if (!t?.dueDate) return false;
+  if (t.status === 'SOLVED' || t.status === 'CLOSED') return false;
+  return new Date(t.dueDate) < new Date();
 }
 
 function TH({ children, className }) {

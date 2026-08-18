@@ -296,4 +296,4 @@ function emitTicketEscalated(ticket, { reason, escalationLevel } = {}) {
   }
 }
 
-module.exports = { initSocket, getIO, emitTicketCreated, emitTicketUpdated, emitTicketAssigned, emitSlaBreach, emitTicketEscalated };
+module.exports = { initSocket, getIO, persistNotification, emitTicketCreated, emitTicketUpdated, emitTicketAssigned, emitSlaBreach, emitTicketEscalated };

@@ -15,6 +15,7 @@ const { checkAndSendDailySummary } = require('./services/dailySummary');
 const { withHealthTracking } = require('./services/schedulerHealth');
 const { seedPermissionGroups } = require('./services/permissionGroupSeeder');
 const { runSlaMonitor } = require('./services/slaService');
+const { runDueDateMonitor } = require('./services/dueDateService');
 const { logger } = require('./utils/logger');
 
 // Validation des variables d'environnement critiques au démarrage
@@ -117,6 +118,11 @@ scheduleSync('modèles IA', syncAllProviders, (s) => s.aiModelsSyncIntervalHours
 // actifs et notifie (socket + notification persistée + email au technicien assigné).
 // Fréquence configurable dans Paramètres > Automatisation (slaMonitorIntervalSeconds, 0 = désactivé).
 scheduleSync('SLA', runSlaMonitor, (s) => s.slaMonitorIntervalSeconds);
+
+// Échéances manuelles des tickets (dueDate) : détecte les échéances dépassées et notifie
+// (socket + notification persistée + email au technicien). Fréquence configurable dans
+// Paramètres > Automatisation (dueDateMonitorIntervalSeconds, 0 = désactivé).
+scheduleSync('échéances tickets', runDueDateMonitor, (s) => s.dueDateMonitorIntervalSeconds);
 
 // Relance des brouillons AiEmailDraft en attente (Paramètres > Automatisation > Relance des
 // brouillons) — le délai d'attente avant relance est configurable, mais la vérification elle-même

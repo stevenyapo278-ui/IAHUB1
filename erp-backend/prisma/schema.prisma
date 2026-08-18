@@ -68,6 +68,8 @@ enum TicketEventType {
   MERGED_FROM
   LINKED
   UNLINKED
+  DUE_DATE_BREACHED
+  DUE_DATE_UPDATED
 }
 
 enum TicketPriority {
@@ -237,6 +239,11 @@ model Ticket {
   solvedAt      DateTime?
   closedAt      DateTime?
   lastGlpiSyncAt DateTime? // dernière synchro réussie vers GLPI (création, maj statut, followup)
+
+  // Échéance manuelle posée par l'utilisateur (indépendante du SLA) — dueDateNotifiedAt évite
+  // de re-notifier à chaque cycle du moniteur une fois l'alerte envoyée (reset lors d'un changement de dueDate).
+  dueDate          DateTime?
+  dueDateNotifiedAt DateTime?
 
   // Moteur SLA — échéances calculées à la création et à chaque changement de priorité,
   // seuils configurables par priorité dans SystemSettings.slaHours
@@ -462,6 +469,9 @@ model SystemSettings {
   // slaMonitorIntervalSeconds = fréquence de détection des dépassements (0 = désactivé)
   slaHours                  Json?   // seuils par priorité, ex: {"P1":{"response":1,"resolution":4}}
   slaMonitorIntervalSeconds Int     @default(60)
+
+  // Échéances manuelles des tickets — fréquence de détection des dépassements de dueDate (0 = désactivé)
+  dueDateMonitorIntervalSeconds Int @default(300)
 
   // Texte de l'accusé de réception automatique (Paramètres > Automatisation > Emails).
   // Placeholders disponibles : {ticketId}, {subject}, {toName}. Laisser vide = texte par défaut codé en dur.
