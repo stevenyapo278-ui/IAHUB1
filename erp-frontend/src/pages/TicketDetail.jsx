@@ -8,7 +8,7 @@ import useSystemSettings from '../hooks/useSystemSettings';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { useTheme } from '../context/ThemeContext';
 import SearchableSelect from '../components/SearchableSelect';
-import SearchableMultiSelect from '../components/SearchableMultiSelect';
+import RemoteUserSelect from '../components/RemoteUserSelect';
 import SlaBadge from '../components/SlaBadge';
 import { flattenCategoryTree } from '../utils/categoryTree';
 import {
@@ -81,7 +81,6 @@ export default function TicketDetail() {
   const [pastedImages, setPastedImages] = useState([]);
   const [error, setError] = useState('');
   const [teams, setTeams] = useState([]);
-  const [users, setUsers] = useState([]);
   const [categories, setCategories] = useState([]);
   const flatCategories = useMemo(() => flattenCategoryTree(categories), [categories]);
   // Définitions des champs personnalisés (pour résoudre libellés/valeurs dans le détail)
@@ -232,7 +231,6 @@ export default function TicketDetail() {
     api.get('/custom-fields').then(({ data }) => setCustomFieldDefs(data || [])).catch(() => {});
     if (!canAssign) return;
     api.get('/teams').then(({ data }) => setTeams(data)).catch(() => {});
-    api.get('/users').then(({ data }) => setUsers(Array.isArray(data) ? data : (data.users || []))).catch(() => {});
   }, [canAssign]);
 
   async function updateField(field, value) {
@@ -1633,17 +1631,13 @@ export default function TicketDetail() {
                   Attribué à
                 </label>
                 {canAssign ? (
-                  <SearchableSelect
-                    options={Array.isArray(users) ? users : []}
+                  <RemoteUserSelect
                     value={ticket.assignedToId || ''}
+                    valueLabel={ticket.assignedTo?.fullName}
                     disabled={savingField === 'assignedToId'}
                     onChange={(val) => updateField('assignedToId', val ? Number(val) : null)}
                     placeholder="Non assigné"
                     searchPlaceholder="Rechercher un technicien..."
-                    labelKey="fullName"
-                    valueKey="id"
-                    subLabelKey="email"
-                    icon={User}
                   />
                 ) : (
                   <div className="w-full flex items-center gap-2 bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200">

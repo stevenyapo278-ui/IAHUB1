@@ -59,6 +59,8 @@ import TicketCoverflowCarousel from '../components/TicketCoverflowCarousel';
 import KanbanBoard from '../components/KanbanBoard';
 import SearchableSelect from '../components/SearchableSelect';
 import SearchableMultiSelect from '../components/SearchableMultiSelect';
+import RemoteUserSelect from '../components/RemoteUserSelect';
+import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
 import SlaBadge from '../components/SlaBadge';
 import {
   STATUS_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS, URGENCY_IMPACT_OPTIONS,
@@ -1014,16 +1016,12 @@ export default function Tickets() {
 
                     <div>
                       <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Technicien assigné</label>
-                      <SearchableSelect
-                        options={users}
-                        value={form.assignedToId}
+                      <RemoteUserSelect
+                        value={form.assignedToId || ''}
+                        valueLabel={users.find((u) => String(u.id) === String(form.assignedToId))?.fullName}
                         onChange={(val) => setForm({ ...form, assignedToId: val })}
                         placeholder="Auto-assignation ou rechercher un technicien..."
                         searchPlaceholder="Rechercher un technicien par nom ou email..."
-                        labelKey="fullName"
-                        valueKey="id"
-                        subLabelKey="email"
-                        icon={User}
                       />
                     </div>
                   </div>
@@ -1072,34 +1070,26 @@ export default function Tickets() {
                   {canAssign && (
                     <div>
                       <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Demandeur (Création pour un tier)</label>
-                      <SearchableSelect
-                        options={users}
-                        value={form.requesterId}
+                      <RemoteUserSelect
+                        value={form.requesterId || ''}
+                        valueLabel={users.find((u) => String(u.id) === String(form.requesterId))?.fullName}
                         onChange={(val) => setForm({ ...form, requesterId: val })}
                         placeholder={`Moi-même (${user?.fullName || ''})`}
                         searchPlaceholder="Rechercher un demandeur par nom ou email..."
-                        labelKey="fullName"
-                        valueKey="id"
-                        subLabelKey="email"
-                        icon={User}
                       />
                     </div>
                   )}
 
-                  {/* Observateurs avec barre de recherche intégrée */}
+                  {/* Observateurs avec recherche côté serveur */}
                   <div>
                     <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                       <User className="w-3.5 h-3.5 text-purple-500" />
                       Observateurs du ticket ({form.observerIds?.length || 0})
                     </label>
-                    <SearchableMultiSelect
-                      options={users}
+                    <RemoteUserMultiSelect
                       selectedIds={form.observerIds || []}
                       onChange={(nextIds) => setForm({ ...form, observerIds: nextIds })}
                       placeholder="Rechercher des observateurs par nom ou email..."
-                      labelKey="fullName"
-                      valueKey="id"
-                      subLabelKey="email"
                     />
                   </div>
 

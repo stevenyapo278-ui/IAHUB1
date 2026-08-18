@@ -9,7 +9,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import Skeleton from '../components/Skeleton';
 import { useTheme } from '../context/ThemeContext';
 import { Users, ShieldCheck, Ticket, Plus, RefreshCw, ChevronRight, Trash2, X, AlertTriangle, Mail, Layers, CheckCircle2, User } from 'lucide-react';
-import SearchableMultiSelect from '../components/SearchableMultiSelect';
+import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
 
 export default function Teams() {
   const { theme } = useTheme();
@@ -19,7 +19,6 @@ export default function Teams() {
   const canManageTeams = hasPermission(user, 'teams.manage');
 
   const [teams, setTeams] = useState([]);
-  const [allUsers, setAllUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ name: '', category: '', groupEmail: '', defaultObserverIds: [] });
   const [groupEmailDraft, setGroupEmailDraft] = useState('');
@@ -62,9 +61,6 @@ export default function Teams() {
       .then(({ data }) => setTeams(data))
       .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'))
       .finally(() => setLoading(false));
-    api.get('/users')
-      .then(({ data }) => setAllUsers(Array.isArray(data) ? data : (data.users || [])))
-      .catch(() => {});
   }
   useEffect(load, []);
 
@@ -421,14 +417,10 @@ export default function Teams() {
                               <p className="text-[11px] text-on-surface-variant">
                                 Les observateurs configurés ici seront automatiquement ajoutés à tous les tickets associés à cette équipe (via l'IA ou formulaire).
                               </p>
-                              <SearchableMultiSelect
-                                options={allUsers}
+                              <RemoteUserMultiSelect
                                 selectedIds={selectedObserverIds}
                                 onChange={(nextIds) => setSelectedObserverIds(nextIds)}
                                 placeholder="Rechercher un observateur par nom ou email..."
-                                labelKey="fullName"
-                                valueKey="id"
-                                subLabelKey="email"
                               />
                             </div>
                           </div>

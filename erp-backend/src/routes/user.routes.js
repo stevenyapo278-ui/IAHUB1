@@ -90,6 +90,19 @@ router.get('/', async (req, res) => {
   }
   if (role) where.role = role;
   if (teamId) where.teamId = teamId === 'null' ? null : Number(teamId);
+  // Filtre par liste d'IDs explicite (ex: résoudre les libellés des utilisateurs déjà sélectionnés
+  // dans un composant distant sans recharger toute la liste) — prioritaire sur la pagination.
+  if (req.query.ids) {
+    const ids = String(req.query.ids).split(',').map((v) => Number(v)).filter((v) => Number.isInteger(v) && v > 0);
+    if (ids.length > 0) {
+      const users = await prisma.user.findMany({
+        where: { id: { in: ids } },
+        select: userSelect,
+        orderBy: { fullName: 'asc' },
+      });
+      return res.json(users);
+    }
+  }
 
   if (!page || all === 'true') {
     const users = await prisma.user.findMany({

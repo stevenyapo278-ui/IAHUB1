@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import api from '../api/client';
@@ -26,7 +26,6 @@ export default function PermissionGroups() {
   const canManageGroups = user?.role === 'SUPERADMIN';
 
   const [groups, setGroups] = useState([]);
-  const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -35,22 +34,54 @@ export default function PermissionGroups() {
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [openGroupId, setOpenGroupId] = useState(null);
-  const [memberSearch, setMemberSearch] = useState('');
   const [detailForm, setDetailForm] = useState({ name: '', description: '' });
   const [savingDetail, setSavingDetail] = useState(false);
   const [search, setSearch] = useState('');
+  // Recherche d'utilisateurs côté serveur (la liste complète n'est jamais chargée : 1000+ users)
+  const [memberQuery, setMemberQuery] = useState('');
+  const [memberResults, setMemberResults] = useState([]);
+  const [memberLoading, setMemberLoading] = useState(false);
+  const [togglingMember, setTogglingMember] = useState(null);
+  const memberDebounceRef = useRef(null);
+  const memberRequestSeq = useRef(0);
 
   function load() {
-    Promise.all([api.get('/permission-groups'), api.get('/users')])
-      .then(([groupsRes, usersRes]) => {
-        setGroups(groupsRes.data);
-        setUsers(Array.isArray(usersRes.data) ? usersRes.data : (usersRes.data.users || []));
-      })
+    api.get('/permission-groups')
+      .then(({ data }) => setGroups(data))
       .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'))
       .finally(() => setLoading(false));
   }
 
   useEffect(load, []);
+
+  // Recherche d'utilisateurs distante (debounce 250 ms, max 30 résultats)
+  function searchMembers(q) {
+    const seq = ++memberRequestSeq.current;
+    setMemberLoading(true);
+    const params = { limit: 30 };
+    if (q.trim()) params.search = q.trim();
+    api.get('/users', { params })
+      .then(({ data }) => {
+        if (seq !== memberRequestSeq.current) return;
+        setMemberResults(Array.isArray(data) ? data : (data.users || []));
+      })
+      .catch(() => { if (seq === memberRequestSeq.current) setMemberResults([]); })
+      .finally(() => { if (seq === memberRequestSeq.current) setMemberLoading(false); });
+  }
+
+  function handleMemberQueryChange(text) {
+    setMemberQuery(text);
+    if (memberDebounceRef.current) clearTimeout(memberDebounceRef.current);
+    memberDebounceRef.current = setTimeout(() => searchMembers(text), 250);
+  }
+
+  function openGroupDetail(group) {
+    setOpenGroupId(group.id);
+    setDetailForm({ name: group.name, description: group.description || '' });
+    setMemberQuery('');
+    setMemberResults([]);
+    searchMembers('');
+  }
 
   function togglePermission(key) {
     setForm((f) => ({
@@ -111,11 +142,14 @@ export default function PermissionGroups() {
   }
 
   async function toggleMember(group, userId, isMember) {
+    setTogglingMember(userId);
     try {
       await api.post(`/permission-groups/${group.id}/${isMember ? 'unassign' : 'assign'}`, { userIds: [userId] });
-      load();
+      await load();
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la mise à jour des membres');
+    } finally {
+      setTogglingMember(null);
     }
   }
 
@@ -140,13 +174,20 @@ export default function PermissionGroups() {
   }
 
   const openGroup = groups.find((g) => g.id === openGroupId);
-  const filteredUsers = users.filter((u) =>
-    `${u.fullName} ${u.email}`.toLowerCase().includes(memberSearch.toLowerCase())
-  );
-  const filteredGroups = groups.filter((g) =>
-    g.name.toLowerCase().includes(search.toLowerCase()) ||
-    (g.description && g.description.toLowerCase().includes(search.toLowerCase()))
-  );
+
+  const filteredGroups = useMemo(() => {
+    const term = search.toLowerCase().trim();
+    if (!term) return groups;
+    return groups.filter((g) =>
+      g.name.toLowerCase().includes(term) ||
+      (g.description && g.description.toLowerCase().includes(term))
+    );
+  }, [groups, search]);
+
+  // Utilisateurs proposés à l'ajout : résultats distants, hors membres actuels du groupe
+  const memberCandidates = openGroup
+    ? memberResults.filter((u) => !openGroup.members?.some((m) => m.id === u.id))
+    : [];
 
   const totalMembers = groups.reduce((acc, g) => acc + (g._count?.members ?? g.members?.length ?? 0), 0);
 
@@ -513,33 +554,15 @@ export default function PermissionGroups() {
                     </h3>
                   </div>
 
-                  <div className="relative">
-                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50" />
-                    <input
-                      type="text"
-                      placeholder="Rechercher un utilisateur pour l'ajouter / le retirer..."
-                      value={memberSearch}
-                      onChange={(e) => setMemberSearch(e.target.value)}
-                      className="w-full bg-surface border border-outline-variant/60 rounded-xl pl-9 pr-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-                    />
-                  </div>
-
-                  <div className="rounded-2xl border border-outline-variant/30 divide-y divide-outline-variant/15 overflow-hidden max-h-72 overflow-y-auto bg-surface-container-lowest">
-                    {filteredUsers.map((u) => {
-                      const isMember = openGroup.members?.some((m) => m.id === u.id);
-                      return (
-                        <label
-                          key={u.id}
-                          className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${
-                            isMember ? 'bg-purple-500/5' : 'hover:bg-surface-container-low/50'
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={!!isMember}
-                            onChange={() => toggleMember(openGroup, u.id, isMember)}
-                            className="w-3.5 h-3.5 accent-purple-600 rounded cursor-pointer"
-                          />
+                  {/* Membres actuels (liste courte, incluse dans les groupes) */}
+                  <div className="rounded-2xl border border-outline-variant/30 divide-y divide-outline-variant/15 overflow-hidden bg-surface-container-lowest">
+                    {openGroup.members?.length === 0 ? (
+                      <div className="p-4 text-center text-xs text-on-surface-variant italic">
+                        Aucun membre dans ce groupe pour l'instant.
+                      </div>
+                    ) : (
+                      openGroup.members.map((u) => (
+                        <div key={u.id} className="flex items-center gap-3 px-4 py-2.5">
                           <div className="w-7 h-7 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-700 dark:text-purple-400 font-bold text-[10px] flex items-center justify-center shrink-0">
                             {initials(u.fullName)}
                           </div>
@@ -547,20 +570,73 @@ export default function PermissionGroups() {
                             <p className="text-xs font-semibold text-on-surface truncate">{u.fullName}</p>
                             <p className="text-[10px] text-on-surface-variant font-mono truncate">{u.email}</p>
                           </div>
-                          {isMember && (
-                            <span className="text-[10px] font-bold text-purple-700 dark:text-purple-400 bg-purple-500/10 border border-purple-500/20 px-2 py-0.5 rounded-full">
-                              Membre
-                            </span>
+                          {canManageGroups && (
+                            <button
+                              onClick={() => toggleMember(openGroup, u.id, true)}
+                              disabled={togglingMember === u.id}
+                              className="p-1.5 rounded-lg text-on-surface-variant/40 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-500/10 transition-all"
+                              title="Retirer du groupe"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
                           )}
-                        </label>
-                      );
-                    })}
-                    {filteredUsers.length === 0 && (
-                      <div className="p-6 text-center text-xs text-on-surface-variant italic">
-                        Aucun utilisateur trouvé.
-                      </div>
+                        </div>
+                      ))
                     )}
                   </div>
+
+                  {/* Recherche distante d'utilisateurs à ajouter (jamais la liste complète) */}
+                  {canManageGroups && (
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50" />
+                        <input
+                          type="text"
+                          placeholder="Rechercher un utilisateur à ajouter (nom ou email)..."
+                          value={memberQuery}
+                          onChange={(e) => handleMemberQueryChange(e.target.value)}
+                          className="w-full bg-surface border border-outline-variant/60 rounded-xl pl-9 pr-8 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                        />
+                        {memberLoading && (
+                          <span className="material-symbols-outlined text-[16px] text-on-surface-variant/50 animate-spin absolute right-3 top-1/2 -translate-y-1/2">progress_activity</span>
+                        )}
+                      </div>
+
+                      <div className="rounded-2xl border border-outline-variant/30 divide-y divide-outline-variant/15 overflow-hidden max-h-60 overflow-y-auto bg-surface-container-lowest">
+                        {memberCandidates.length === 0 ? (
+                          <div className="p-4 text-center text-xs text-on-surface-variant italic">
+                            {memberLoading
+                              ? 'Recherche en cours...'
+                              : memberQuery
+                                ? 'Aucun utilisateur trouvé.'
+                                : 'Tapez un nom ou un email pour chercher un utilisateur.'}
+                          </div>
+                        ) : (
+                          memberCandidates.map((u) => (
+                            <div key={u.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-container-low/50 transition-colors">
+                              <div className="w-7 h-7 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-700 dark:text-purple-400 font-bold text-[10px] flex items-center justify-center shrink-0">
+                                {initials(u.fullName)}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-semibold text-on-surface truncate">{u.fullName}</p>
+                                <p className="text-[10px] text-on-surface-variant font-mono truncate">{u.email}</p>
+                              </div>
+                              {canManageGroups && (
+                                <button
+                                  onClick={() => toggleMember(openGroup, u.id, false)}
+                                  disabled={togglingMember === u.id}
+                                  className="px-3 py-1.5 rounded-lg bg-purple-600 text-white text-[11px] font-bold disabled:opacity-40 hover:bg-purple-700 transition-all shrink-0 flex items-center gap-1"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                  Ajouter
+                                </button>
+                              )}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </motion.div>
