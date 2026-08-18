@@ -9,6 +9,15 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  // Empêche le navigateur de servir des copies locales périmées pour les lectures.
+  // En combinaison avec Cache-Control: no-cache, private côté serveur, toute requête
+  // GET contacte systématiquement le backend (qui répond depuis son cache in-memory
+  // si disponible, sinon depuis la DB). Cela garantit la cohérence immédiate après
+  // une suppression/modification sans attendre l'expiration du TTL navigateur.
+  if (!config.method || config.method.toLowerCase() === 'get') {
+    config.headers['Cache-Control'] = 'no-cache';
+    config.headers['Pragma'] = 'no-cache';
+  }
   return config;
 });
 

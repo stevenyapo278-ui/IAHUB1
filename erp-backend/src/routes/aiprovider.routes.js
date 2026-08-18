@@ -7,9 +7,10 @@ const { syncProviderModels } = require('../utils/modelSync');
 const { auditLog } = require('../services/auditLogService');
 const cacheStore = require('../services/cacheStore');
 
-// La liste des fournisseurs est mise en cache (TTL 60s, voir app.js) : toute écriture
-// (provider, modèle, clé, sync) doit l'invalider, sinon l'UI continue d'afficher l'ancien
-// modèle par défaut / modèle supprimé jusqu'à expiration du TTL.
+// La liste des fournisseurs et les pages détail (/api/ai-providers/:id) sont mises en cache
+// (TTL 5s, voir app.js) : toute écriture (provider, modèle, clé, sync) doit invalider
+// l'ensemble du namespace pour éviter qu'un provider supprimé soit encore servi par le cache
+// backend, ce qui provoquerait un "Fournisseur introuvable" au second appel de suppression.
 function invalidateProviderCaches() {
   cacheStore.clear('GET /api/ai-providers');
 }

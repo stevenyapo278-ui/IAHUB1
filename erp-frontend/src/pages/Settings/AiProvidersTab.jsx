@@ -493,15 +493,28 @@ function ProviderModal({ provider, onClose, onUpdate }) {
           loading={deleting}
           onConfirm={async () => {
             setDeleting(true);
-            try {
-              if (pendingDelete.type === 'model') await api.delete(`/ai-providers/models/${pendingDelete.id}`);
-              else await api.delete(`/ai-providers/keys/${pendingDelete.id}`);
-              setPendingDelete(null);
-              onUpdate();
-            } catch (err) {
-              setError(err.response?.data?.error || 'Erreur de suppression');
-            } finally {
-              setDeleting(false);
+            // Optimistic update : retirer immédiatement l'item du state local
+            // pour une UX instantanée sans attendre le refresh serveur.
+            if (pendingDelete.type === 'model') {
+              try {
+                await api.delete(`/ai-providers/models/${pendingDelete.id}`);
+                setPendingDelete(null);
+                onUpdate();
+              } catch (err) {
+                setError(err.response?.data?.error || 'Erreur de suppression');
+              } finally {
+                setDeleting(false);
+              }
+            } else {
+              try {
+                await api.delete(`/ai-providers/keys/${pendingDelete.id}`);
+                setPendingDelete(null);
+                onUpdate();
+              } catch (err) {
+                setError(err.response?.data?.error || 'Erreur de suppression');
+              } finally {
+                setDeleting(false);
+              }
             }
           }}
           onCancel={() => setPendingDelete(null)}
@@ -535,6 +548,8 @@ export default function AiProvidersTab() {
   // Rafraîchit la liste ET le fournisseur ouvert dans la modale (sans la fermer) : après une
   // action (modèle par défaut, suppression, sync...), le contenu affiché doit refléter la base
   // immédiatement, pas au prochain clic.
+  // Cache-Control: no-cache est injecté par l'intercepteur axios (api/client.js) : le navigateur
+  // ne sert jamais une copie locale — le serveur répond depuis son cache in-memory (TTL 5s).
   function refresh() {
     api.get('/ai-providers')
       .then(({ data }) => {
@@ -739,11 +754,18 @@ export default function AiProvidersTab() {
         loading={deleting}
         onConfirm={async () => {
           setDeleting(true);
+          // Optimistic update : retirer immédiatement le provider du state local
+          // sans attendre le refresh serveur. Évite l'effet "réapparition" dû à un
+          // éventuel cache résiduel et rend l'UI instantanément cohérente.
+          setProviders((prev) => prev.filter((p) => p.id !== pendingDelete));
+          if (selectedProvider?.id === pendingDelete) setSelectedProvider(null);
           try {
             await api.delete(`/ai-providers/${pendingDelete}`);
             setPendingDelete(null);
             refresh();
           } catch (err) {
+            // Rollback : si la suppression échoue, recharger la liste depuis le serveur
+            refresh();
             setError(err.response?.data?.error || 'Erreur lors de la suppression');
           } finally {
             setDeleting(false);

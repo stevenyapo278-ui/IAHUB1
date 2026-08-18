@@ -129,7 +129,7 @@ app.use('/api/users', apiCache(30), userRoutes);
 app.use('/api/permission-groups', apiCache(30), permissionGroupRoutes);
 app.use('/api/api-configs', apiConfigRoutes);
 app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/ai-providers', apiCache(60), aiProviderRoutes);
+app.use('/api/ai-providers', apiCache(5), aiProviderRoutes);
 app.use('/api/email-accounts', emailAccountRoutes);
 app.use('/api/n8n-workflows', n8nRoutes);
 app.use('/api/glpi', apiCache(60), glpiRoutes);
