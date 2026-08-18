@@ -6,7 +6,7 @@ const { requirePermission } = require('../middleware/permissions');
 const { runEmailPipeline, processMessage } = require('../services/emailPipeline');
 const { fetchEmailsByDateRange } = require('../services/emailPoller');
 const { analyzeEmail } = require('../services/mailAnalyzer');
-const { listThreads, getThread } = require('../services/inboxThreading');
+const { listThreads, getThread, getInboxCounts } = require('../services/inboxThreading');
 
 const router = express.Router();
 router.use(authenticate);
@@ -18,8 +18,13 @@ router.get('/', async (req, res) => {
   const limit = Math.min(50, parseInt(req.query.limit) || 25);
   const status = req.query.status || undefined;
   const q = req.query.q?.trim() || undefined;
+  const priority = req.query.priority || undefined;
+  const attachments = req.query.attachments || undefined; // with | without
+  const category = req.query.category || undefined;
+  const read = req.query.read || undefined; // unread | read
+  const days = parseInt(req.query.days) > 0 ? parseInt(req.query.days) : undefined;
 
-  const { items, total, pages } = await listThreads({ status, q, page, limit });
+  const { items, total, pages } = await listThreads({ status, q, priority, attachments, category, read, days, page, limit });
 
   // Allège la liste : on retirera les corps HTML (conservés uniquement dans le détail du fil)
   const stripped = items.map((thread) => ({
@@ -29,6 +34,49 @@ router.get('/', async (req, res) => {
   }));
 
   res.json({ items: stripped, total, page, pages });
+});
+
+// Compteurs globaux (badges des dossiers façon Outlook)
+// Doit être déclaré AVANT la route '/:id' pour que "counts" ne soit pas capté par celle-ci.
+router.get('/counts', async (req, res) => {
+  try {
+    const counts = await getInboxCounts();
+    res.json(counts);
+  } catch (err) {
+    res.status(502).json({ error: err.message || 'Erreur de calcul des compteurs' });
+  }
+});
+
+// Marque les emails d'une conversation (ou plusieurs) comme lus / non lus.
+// body: { key: 'conv-123' } | { keys: [...] } | { ids: [1,2] } + { read: boolean }
+router.post('/read', async (req, res) => {
+  const { key, keys, ids, read } = req.body || {};
+  const targetRead = read === undefined ? true : !!read;
+  const orClauses = [];
+  if (key) {
+    if (String(key).startsWith('single-')) {
+      orClauses.push({ id: Number(String(key).slice('single-'.length)) });
+    } else {
+      orClauses.push({ conversationId: key });
+    }
+  }
+  if (Array.isArray(keys)) {
+    for (const k of keys) {
+      if (String(k).startsWith('single-')) orClauses.push({ id: Number(String(k).slice('single-'.length)) });
+      else orClauses.push({ conversationId: k });
+    }
+  }
+  if (Array.isArray(ids) && ids.length > 0) {
+    orClauses.push({ id: { in: ids.map(Number).filter(Boolean) } });
+  }
+  if (orClauses.length === 0) return res.status(400).json({ error: 'key, keys ou ids requis' });
+
+  try {
+    const result = await prisma.incomingEmail.updateMany({ where: { OR: orClauses }, data: { isRead: targetRead } });
+    res.json({ updated: result.count, read: targetRead });
+  } catch (err) {
+    res.status(502).json({ error: err.message || 'Erreur mise à jour statut lecture' });
+  }
 });
 
 // Détail complet d'un fil de conversation (corps HTML + jambes envoyées/reçues)

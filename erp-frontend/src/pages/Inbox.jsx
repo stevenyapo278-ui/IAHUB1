@@ -1,18 +1,20 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import api from '../api/client';
+import Skeleton from '../components/Skeleton';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import { useSocket } from '../context/SocketContext';
+import { useFilterParam } from '../hooks/useFilterParam';
 import DOMPurify from 'dompurify';
 import {
-  Mail, MailOpen, RefreshCw, Sparkles, AlertTriangle, Flame,
-  CheckCircle2, XCircle, Ban, Clock, ChevronRight, ExternalLink,
-  Search, X, FlaskConical, Bot, Inbox as InboxIcon, ArrowUpRight,
-  Reply, Paperclip, Users
+  Inbox as InboxIcon, MailOpen, RefreshCw, Clock, CheckCircle2, XCircle, Ban,
+  Paperclip, Search, X, FlaskConical, Bot, ArrowUpRight, Reply, ChevronDown,
+  ChevronRight, Flame, AlertTriangle, ArrowDownWideNarrow, Rows3, Rows4,
+  CircleDot, Mail, CheckCheck, Send, FileText, Tag, Users, Filter
 } from 'lucide-react';
 
 const STATUS_LABELS = {
@@ -38,12 +40,46 @@ const PRIORITY_CONFIG = {
   P4: { label: 'P4 Basse',   icon: ChevronRight,   color: 'text-blue-400',   bg: 'bg-blue-500',   stripe: '#3b82f6' },
 };
 
-const FILTERS = ['Tous', 'PENDING', 'DONE', 'ERROR', 'SPAM'];
+// Dossiers façon Outlook
+const FOLDERS = [
+  { id: 'all',          label: 'Boîte de réception', icon: InboxIcon },
+  { id: 'unread',       label: 'Non lus',            icon: MailOpen,      read: 'unread' },
+  { id: 'pending',      label: 'En attente',         icon: Clock,         status: 'PENDING' },
+  { id: 'done',         label: 'Traités',            icon: CheckCircle2,  status: 'DONE' },
+  { id: 'error',        label: 'Erreurs',            icon: XCircle,       status: 'ERROR' },
+  { id: 'spam',         label: 'Spam',               icon: Ban,           status: 'SPAM' },
+  { id: 'attachments',  label: 'Pièces jointes',     icon: Paperclip,     attachments: 'with' },
+];
+
+const SORT_OPTIONS = [
+  { value: 'date',     label: 'Date' },
+  { value: 'priority', label: 'Priorité' },
+  { value: 'sender',   label: 'Expéditeur' },
+];
+
+const PERIOD_OPTIONS = [
+  { value: '',   label: 'Toute période' },
+  { value: '7',  label: '7 derniers jours' },
+  { value: '30', label: '30 derniers jours' },
+];
+
+const PRIORITY_OPTIONS = [
+  { value: '', label: 'Toutes priorités' },
+  { value: 'P1', label: 'P1 Critique' },
+  { value: 'P2', label: 'P2 Haute' },
+  { value: 'P3', label: 'P3 Moyenne' },
+  { value: 'P4', label: 'P4 Basse' },
+];
 
 const AVATAR_COLORS = ['bg-sky-600', 'bg-indigo-600', 'bg-emerald-600', 'bg-violet-600', 'bg-rose-600'];
 
 function initialOf(name, email) {
   return ((name || email) || '?').charAt(0).toUpperCase();
+}
+
+function displayAddr(addr) {
+  const s = String(addr || '');
+  return s.length > 28 ? `${s.slice(0, 26)}…` : s;
 }
 
 function participantsLabel(participants) {
@@ -53,47 +89,172 @@ function participantsLabel(participants) {
   return names.join(', ');
 }
 
+// Date façon Outlook : heure si aujourd'hui, "Hier", jour de la semaine, puis date courte
 function formatDate(d) {
-  return new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
+  if (!d) return '';
+  const date = new Date(d);
+  const now = new Date();
+  const startOfDay = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate());
+  const diffDays = Math.round((startOfDay(now) - startOfDay(date)) / 86400000);
+  if (diffDays === 0) return date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  if (diffDays === 1) return 'Hier';
+  if (diffDays < 7) return date.toLocaleDateString('fr-FR', { weekday: 'short' });
+  if (date.getFullYear() === now.getFullYear()) {
+    return date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
+  }
+  return date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 function formatDateTime(d) {
   return new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+// Petit sélecteur déroulant pour la barre d'outils (façon ruban Outlook)
+function FilterSelect({ label, icon: Icon, value, options, onChange, active }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative shrink-0">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border transition-all cursor-pointer ${
+          active || (value && value !== '' && value !== 'all' && value !== 'date' && value !== 'comfortable')
+            ? 'bg-sky-500/10 text-sky-400 border-sky-500/30'
+            : 'border-outline-variant/30 text-on-surface-variant hover:bg-surface-container'
+        }`}
+      >
+        {Icon && <Icon className="w-3.5 h-3.5" />}
+        <span className="max-w-[130px] truncate">{label}</span>
+        <ChevronDown className="w-3 h-3 opacity-60" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <motion.div
+            initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
+            className="absolute z-40 top-full left-0 mt-1 w-48 rounded-xl border border-outline-variant/40 bg-surface-container-lowest shadow-xl p-1"
+          >
+            {options.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => { onChange(opt.value); setOpen(false); }}
+                className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                  value === opt.value ? 'bg-sky-500/10 text-sky-400' : 'text-on-surface hover:bg-surface-container'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </motion.div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function Inbox() {
   const { user } = useAuth();
   const canSync = hasPermission(user, 'inbox.sync');
+  const navigate = useNavigate();
+  const socket = useSocket();
+
+  // ── Filtres persistés dans l'URL ────────────────────────────────────────
+  const [folder, setFolder] = useFilterParam('folder', 'all');
+  const [sortBy, setSortBy] = useFilterParam('sort', 'date');
+  const [priorityFilter, setPriorityFilter] = useFilterParam('priority', '');
+  const [categoryFilter, setCategoryFilter] = useFilterParam('category', '');
+  const [period, setPeriod] = useFilterParam('days', '');
+  const [density, setDensity] = useFilterParam('density', 'comfortable');
+
+  const folderCfg = FOLDERS.find((f) => f.id === folder) || FOLDERS[0];
+
   const [threads, setThreads] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [filter, setFilter] = useState('Tous');
+  const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState('');
+  const [counts, setCounts] = useState(null);
   const [selectedThread, setSelectedThread] = useState(null);
   const [threadDetail, setThreadDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [bulkAction, setBulkAction] = useState(null);
+
+  // Recherche locale avec debounce
+  const [searchInput, setSearchInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const searchDebounceRef = useRef(null);
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => setSearchQuery(searchInput), 350);
+    return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
+  }, [searchInput]);
+
+  // Test IA
   const [testing, setTesting] = useState(false);
   const [testForm, setTestForm] = useState({ subject: '', body: '', from: '', fromName: '' });
   const [testResult, setTestResult] = useState(null);
   const [showTestModal, setShowTestModal] = useState(false);
   const [testError, setTestError] = useState('');
-  const [search, setSearch] = useState('');
-  const [newCount, setNewCount] = useState(0);
-  const navigate = useNavigate();
-  const socket = useSocket();
 
-  const stateRef = useRef({ page, filter, search });
-  useEffect(() => { stateRef.current = { page, filter, search }; }, [page, filter, search]);
+  const pageRef = useRef(1);
+  useEffect(() => { pageRef.current = page; }, [page]);
 
-  const load = useCallback((p, f, q) => {
+  // ── Chargement ──────────────────────────────────────────────────────────
+  const buildParams = useCallback((p) => {
     const params = new URLSearchParams({ page: p, limit: 25 });
-    if (f && f !== 'Tous') params.set('status', f);
-    if (q && q.trim()) params.set('q', q.trim());
-    api.get(`/inbox?${params}`)
-      .then(({ data }) => { setThreads(data.items); setTotal(data.total); })
-      .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
+    if (folderCfg.status) params.set('status', folderCfg.status);
+    if (folderCfg.read) params.set('read', folderCfg.read);
+    if (folderCfg.attachments) params.set('attachments', folderCfg.attachments);
+    if (priorityFilter) params.set('priority', priorityFilter);
+    if (categoryFilter) params.set('category', categoryFilter);
+    if (period) params.set('days', period);
+    if (searchQuery.trim()) params.set('q', searchQuery.trim());
+    return params;
+  }, [folderCfg, priorityFilter, categoryFilter, period, searchQuery]);
+
+  const load = useCallback((p) => {
+    api.get(`/inbox?${buildParams(p).toString()}`)
+      .then(({ data }) => { setThreads(data.items); setTotal(data.total); setSelectedIds([]); })
+      .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'))
+      .finally(() => setLoading(false));
+  }, [buildParams]);
+
+  const refreshCounts = useCallback(() => {
+    api.get('/inbox/counts')
+      .then(({ data }) => setCounts(data))
+      .catch(() => {});
   }, []);
+
+  useEffect(() => { load(1); setPage(1); }, [load]);
+  useEffect(() => { refreshCounts(); }, [refreshCounts]);
+
+  // Auto-refresh toutes les 15s (comportement existant)
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (pageRef.current === 1) load(1);
+      refreshCounts();
+    }, 15000);
+    return () => clearInterval(id);
+  }, [load, refreshCounts]);
+
+  // ── Socket ──────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!socket) return;
+    const onReceived = (email) => {
+      if (pageRef.current === 1) load(1);
+      refreshCounts();
+      toast.info('Nouveau mail reçu', { description: `Sujet : ${email.subject}` });
+      if (selectedThread && email.conversationId === selectedThread.conversationId) refreshSelection();
+    };
+    const onUpdated = (email) => {
+      if (pageRef.current === 1) load(1);
+      if (selectedThread && (keyOfEmail(email) === selectedThread.id)) refreshSelection();
+    };
+    socket.on('email_received', onReceived);
+    socket.on('email_updated', onUpdated);
+    return () => { socket.off('email_received', onReceived); socket.off('email_updated', onUpdated); };
+  }, [socket, load, refreshCounts, selectedThread, refreshSelection]);
 
   // Recharge le fil sélectionné (après un event socket) si besoin
   const refreshSelection = useCallback(() => {
@@ -103,11 +264,37 @@ export default function Inbox() {
       .catch(() => {});
   }, [selectedThread]);
 
+  // ── Actions ─────────────────────────────────────────────────────────────
+  async function handleSync() {
+    setSyncing(true); setError(''); 
+    try {
+      const { data } = await api.post('/inbox/sync');
+      load(pageRef.current);
+      refreshCounts();
+      toast.success('Synchronisation terminée', { description: `${data.processed} email(s) traité(s) par l'agent IA.` });
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur lors du sync');
+    } finally { setSyncing(false); }
+  }
+
   function openThread(thread) {
     setSelectedThread(thread);
     setDetailLoading(true);
     api.get(`/inbox/thread?key=${encodeURIComponent(thread.id)}`)
-      .then(({ data }) => setThreadDetail(data))
+      .then(({ data }) => {
+        setThreadDetail(data);
+        // Marque comme lu si le fil contient des non-lus
+        if (data.isUnread) {
+          api.post('/inbox/read', { key: data.id })
+            .then(() => {
+              setThreads((prev) => prev.map((t) =>
+                t.id === data.id ? { ...t, isUnread: false, unreadCount: 0, latest: { ...t.latest, isRead: true } } : t
+              ));
+              refreshCounts();
+            })
+            .catch(() => {});
+        }
+      })
       .catch((err) => {
         setThreadDetail(null);
         toast.error(err.response?.data?.error || 'Erreur de chargement de la conversation');
@@ -120,52 +307,18 @@ export default function Inbox() {
     setThreadDetail(null);
   }
 
-  // À quelle clé de fil appartient un email (pour rafraîchir la sélection après un event)
-  function keyOfEmail(email) {
-    return email.conversationId || `single-${email.id}`;
-  }
-
-  useEffect(() => {
-    const t = setTimeout(() => { load(1, filter, search); setPage(1); }, 350);
-    return () => clearTimeout(t);
-  }, [filter, search, load]);
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      const { page: p, filter: f, search: s } = stateRef.current;
-      if (p === 1) load(1, f, s);
-    }, 15000);
-    return () => clearInterval(id);
-  }, [load]);
-
-  useEffect(() => {
-    if (!socket) return;
-    const onReceived = (email) => {
-      const { page: p, filter: f, search: s } = stateRef.current;
-      if (p === 1) load(1, f, s);
-      setNewCount(c => c + 1);
-      toast.info('Nouveau mail reçu', { description: `Sujet : ${email.subject}` });
-      if (selectedThread && email.conversationId === selectedThread.conversationId) refreshSelection();
-    };
-    const onUpdated = (email) => {
-      const { page: p, filter: f, search: s } = stateRef.current;
-      if (p === 1) load(1, f, s);
-      if (selectedThread && (keyOfEmail(email) === selectedThread.id)) refreshSelection();
-    };
-    socket.on('email_received', onReceived);
-    socket.on('email_updated', onUpdated);
-    return () => { socket.off('email_received', onReceived); socket.off('email_updated', onUpdated); };
-  }, [socket, load, selectedThread, refreshSelection]);
-
-  async function handleSync() {
-    setSyncing(true); setError(''); setNewCount(0);
+  async function bulkMarkRead(read = true) {
+    if (selectedIds.length === 0) return;
+    setBulkAction('mark');
     try {
-      const { data } = await api.post('/inbox/sync');
-      load(1, filter, search);
-      toast.success('Synchronisation terminée', { description: `${data.processed} email(s) traité(s) par l'agent IA.` });
+      await api.post('/inbox/read', { keys: selectedIds, read });
+      toast.success(read ? `${selectedIds.length} conversation(s) marquée(s) comme lue(s)` : 'Conversations marquées comme non lues');
+      setSelectedIds([]);
+      load(pageRef.current);
+      refreshCounts();
     } catch (err) {
-      setError(err.response?.data?.error || 'Erreur lors du sync');
-    } finally { setSyncing(false); }
+      toast.error(err.response?.data?.error || "Erreur lors de l'action");
+    } finally { setBulkAction(null); }
   }
 
   async function handleTestAnalyze(e) {
@@ -182,239 +335,400 @@ export default function Inbox() {
     setTestResult(null); setTestError(''); setShowTestModal(true);
   }
 
-  // Counts per status for filter tabs
-  const pendingCount = threads.filter(t => t.latest?.status === 'PENDING').length;
+  function keyOfEmail(email) {
+    return email.conversationId || `single-${email.id}`;
+  }
+
+  function toggleSelect(id) { setSelectedIds((ids) => ids.includes(id) ? ids.filter((i) => i !== id) : [...ids, id]); }
+  function toggleSelectAll() { setSelectedIds((ids) => ids.length === threads.length ? [] : threads.map((t) => t.id)); }
+
+  // ── Dérivés ─────────────────────────────────────────────────────────────
+  const sortedThreads = useMemo(() => {
+    const list = [...threads];
+    if (sortBy === 'priority') {
+      const order = { P1: 0, P2: 1, P3: 2, P4: 3 };
+      list.sort((a, b) =>
+        (order[a.latest?.aiPriority] ?? 9) - (order[b.latest?.aiPriority] ?? 9) ||
+        new Date(b.latest?.date) - new Date(a.latest?.date)
+      );
+    } else if (sortBy === 'sender') {
+      list.sort((a, b) =>
+        (a.latest?.fromName || a.latest?.fromEmail || '').localeCompare(b.latest?.fromName || b.latest?.fromEmail || '')
+      );
+    } else {
+      list.sort((a, b) => new Date(b.latest?.date) - new Date(a.latest?.date));
+    }
+    return list;
+  }, [threads, sortBy]);
+
+  const availableCategories = useMemo(() =>
+    [...new Set(threads.map((t) => t.latest?.aiCategory).filter(Boolean))], [threads]);
+
+  const countFor = (fid) => {
+    if (!counts) return null;
+    switch (fid) {
+      case 'all': return counts.total;
+      case 'unread': return counts.unread;
+      case 'pending': return counts.pending;
+      case 'done': return counts.done;
+      case 'error': return counts.error;
+      case 'spam': return counts.spam;
+      case 'attachments': return counts.withAttachments;
+      default: return null;
+    }
+  };
+
+  const periodLabel = PERIOD_OPTIONS.find((o) => o.value === period)?.label || 'Toute période';
+  const sortLabel = SORT_OPTIONS.find((o) => o.value === sortBy)?.label || 'Date';
+
+  const pendingCount = threads.filter((t) => t.latest?.status === 'PENDING').length;
+
+  const detailAttachments = useMemo(() =>
+    (threadDetail?.messages || []).flatMap((m) => m.attachments || []), [threadDetail]);
+
+  const isCompact = density === 'compact';
 
   return (
     <div className="flex flex-col h-[calc(100vh-64px)] max-h-[calc(100vh-64px)] overflow-hidden">
-      {/* ── Top Bar ─────────────────────────────────────────────────────── */}
-      <div className="relative shrink-0 border-b border-outline-variant/30 bg-surface-container-lowest px-4 sm:px-6 py-3 flex items-center gap-4">
-        {/* Title */}
+      {/* ── Barre supérieure ──────────────────────────────────────────────── */}
+      <div className="shrink-0 border-b border-outline-variant/30 bg-surface-container-lowest px-4 sm:px-6 py-3 flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-3 min-w-0">
           <div className="p-1.5 bg-sky-500/10 rounded-lg">
             <InboxIcon className="w-5 h-5 text-sky-400" />
           </div>
           <div className="min-w-0">
             <h1 className="text-base font-bold text-on-surface truncate flex items-center gap-2">
-              Boîte mail
-              {newCount > 0 && (
-                <motion.span
-                  initial={{ scale: 0 }} animate={{ scale: 1 }}
-                  className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-sky-500 text-white text-[9px] font-black"
-                >
-                  {newCount}
-                </motion.span>
+              {folderCfg.label}
+              {folderCfg.status === 'PENDING' && pendingCount > 0 && (
+                <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-amber-500 text-white text-[10px] font-black">
+                  {pendingCount}
+                </span>
               )}
             </h1>
-            <p className="text-[11px] text-on-surface-variant">{total} conversation{total !== 1 ? 's' : ''} — triées par l'IA</p>
+            <p className="text-[11px] text-on-surface-variant">
+              {total} conversation{total !== 1 ? 's' : ''}
+              {counts?.unread > 0 && ` · ${counts.unread} non lue${counts.unread !== 1 ? 's' : ''}`}
+            </p>
           </div>
         </div>
 
-        {/* Search */}
-        <div className="relative flex-1 max-w-xs hidden sm:block">
+        {/* Recherche */}
+        <div className="relative flex-1 max-w-sm hidden sm:block">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/60" />
           <input
             type="text"
-            placeholder="Rechercher..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
+            placeholder="Rechercher par expéditeur, sujet, contenu…"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
             className="w-full bg-surface border border-outline-variant/40 rounded-xl pl-9 pr-8 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
           />
-          {search && (
-            <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant/50 hover:text-on-surface">
+          {searchInput && (
+            <button onClick={() => { setSearchInput(''); setSearchQuery(''); }} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant/50 hover:text-on-surface cursor-pointer">
               <X className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
 
-        {/* Filter pills */}
-        <div className="flex items-center gap-1 hidden md:flex">
-          {FILTERS.map(f => {
-            const cfg = STATUS_CONFIG[f];
-            const Icon = cfg?.icon;
-            const isActive = filter === f;
-            return (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold border transition-all ${
-                  isActive
-                    ? (f === 'Tous' ? 'bg-sky-500/10 text-sky-400 border-sky-500/30' : `${cfg.bg} ${cfg.color} ${cfg.border}`)
-                    : 'bg-transparent text-on-surface-variant border-outline-variant/30 hover:bg-surface-container-low'
-                }`}
-              >
-                {Icon && <Icon className="w-3 h-3" />}
-                {f === 'Tous' ? `Tous` : STATUS_LABELS[f]}
-              </button>
-            );
-          })}
-        </div>
-
         {/* Actions */}
-        {canSync && (
-          <div className="flex items-center gap-2 ml-auto shrink-0">
-            <motion.button
+        <div className="flex items-center gap-2 ml-auto shrink-0">
+          {canSync && (
+            <button
               onClick={openTestModal}
-              whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/50 bg-surface-container text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high text-xs font-semibold transition-all"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/50 bg-surface-container text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high text-xs font-semibold transition-all cursor-pointer"
             >
               <FlaskConical className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Test IA</span>
-            </motion.button>
-            <motion.button
+            </button>
+          )}
+          {canSync && (
+            <button
               onClick={handleSync}
               disabled={syncing}
-              whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-blue-500 text-white text-xs font-bold shadow-md shadow-sky-500/20 transition-all hover:brightness-110 disabled:opacity-60"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-blue-500 text-white text-xs font-bold shadow-md shadow-sky-500/20 transition-all hover:brightness-110 disabled:opacity-60 cursor-pointer"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">{syncing ? 'Syncing...' : 'Sync'}</span>
-            </motion.button>
-          </div>
-        )}
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* ── Error banner ─────────────────────────────────────────────────── */}
+      {/* ── Bannière d'erreur ─────────────────────────────────────────────── */}
       <AnimatePresence>
         {error && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
-            className="shrink-0 overflow-hidden"
-          >
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="shrink-0 overflow-hidden">
             <div className="px-4 py-2 bg-red-500/5 border-b border-red-500/20 text-red-400 text-xs flex items-center gap-2">
               <XCircle className="w-3.5 h-3.5 shrink-0" />
               {error}
-              <button onClick={() => setError('')} className="ml-auto p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"><X className="w-4 h-4" /></button>
+              <button onClick={() => setError('')} className="ml-auto p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer"><X className="w-4 h-4" /></button>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── Main Split Pane ───────────────────────────────────────────────── */}
+      {/* ── Corps : 3 volets (dossiers | liste | lecture) ─────────────────── */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
 
-        {/* Left: Conversation list */}
+        {/* ═══ Volets de dossiers (façon Outlook) ═══ */}
+        <aside className="hidden md:flex w-52 shrink-0 flex-col border-r border-outline-variant/30 bg-surface-container-lowest overflow-y-auto">
+          <div className="p-2 space-y-0.5">
+            {FOLDERS.map((f) => {
+              const Icon = f.icon;
+              const isActive = folder === f.id;
+              const c = countFor(f.id);
+              return (
+                <button
+                  key={f.id}
+                  onClick={() => { setFolder(f.id); }}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    isActive
+                      ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20'
+                      : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface border border-transparent'
+                  }`}
+                >
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span className="flex-1 text-left truncate">{f.label}</span>
+                  {c != null && c > 0 && (
+                    <span className={`shrink-0 min-w-4 px-1 py-0.5 rounded-full text-center text-[9px] font-bold ${
+                      isActive ? 'bg-sky-500/20 text-sky-300' : 'bg-surface-container-high text-on-surface-variant'
+                    }`}>
+                      {c > 999 ? '999+' : c}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-auto px-3 py-3 border-t border-outline-variant/20 text-[10px] text-on-surface-variant/70 leading-relaxed">
+            Fils de conversation triés par l'IA Gemini · rafraîchissement auto 15s
+          </div>
+        </aside>
+
+        {/* ═══ Volet liste ═══ */}
         <div className={`flex flex-col border-r border-outline-variant/30 bg-surface-container-lowest overflow-hidden transition-all duration-300 ${
-          selectedThread ? 'w-80 xl:w-96 shrink-0' : 'flex-1'
+          selectedThread ? 'w-96 xl:w-[420px] shrink-0' : 'flex-1'
         }`}>
-          {/* List header */}
-          <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-outline-variant/20 bg-surface-bright/20">
-            <span className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">
-              {total} conversation{total !== 1 ? 's' : ''}
-            </span>
-            {pendingCount > 0 && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-yellow-500/10 text-yellow-400 text-[10px] font-bold border border-yellow-500/20">
-                <Clock className="w-2.5 h-2.5" />
-                {pendingCount} en attente
-              </span>
+
+          {/* Barre d'outils de la liste */}
+          <div className="shrink-0 border-b border-outline-variant/20 bg-surface-container-low/40 px-2.5 py-1.5 flex items-center gap-1.5 flex-wrap">
+            <div className="px-1 shrink-0">
+              <input
+                type="checkbox"
+                checked={threads.length > 0 && selectedIds.length === threads.length}
+                onChange={toggleSelectAll}
+                title="Tout sélectionner"
+                className="cursor-pointer accent-sky-500 w-3.5 h-3.5 rounded"
+              />
+            </div>
+            <FilterSelect icon={ArrowDownWideNarrow} label={sortLabel} value={sortBy} options={SORT_OPTIONS} onChange={(v) => { setSortBy(v); }} />
+            <FilterSelect icon={Flame} label={priorityFilter ? PRIORITY_CONFIG[priorityFilter]?.label : 'Priorité'} value={priorityFilter} options={PRIORITY_OPTIONS} onChange={setPriorityFilter} active={!!priorityFilter} />
+            {availableCategories.length > 0 && (
+              <FilterSelect icon={Tag} label={categoryFilter || 'Catégorie IA'} value={categoryFilter} options={[{ value: '', label: 'Toutes catégories' }, ...availableCategories.map((c) => ({ value: c, label: c }))]} onChange={setCategoryFilter} active={!!categoryFilter} />
             )}
+            <FilterSelect icon={Filter} label={periodLabel} value={period} options={PERIOD_OPTIONS} onChange={setPeriod} active={!!period} />
+
+            {/* Densité */}
+            <div className="ml-auto flex items-center gap-0.5 shrink-0">
+              <button
+                title="Affichage confortable"
+                onClick={() => setDensity('comfortable')}
+                className={`p-1.5 rounded-lg transition-all cursor-pointer ${!isCompact ? 'bg-sky-500/10 text-sky-400' : 'text-on-surface-variant hover:bg-surface-container'}`}
+              >
+                <Rows3 className="w-3.5 h-3.5" />
+              </button>
+              <button
+                title="Affichage compact"
+                onClick={() => setDensity('compact')}
+                className={`p-1.5 rounded-lg transition-all cursor-pointer ${isCompact ? 'bg-sky-500/10 text-sky-400' : 'text-on-surface-variant hover:bg-surface-container'}`}
+              >
+                <Rows4 className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
 
-          {/* Scrollable list */}
+          {/* Barre d'actions groupées */}
+          <AnimatePresence>
+            {selectedIds.length > 0 && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+                className="shrink-0 overflow-hidden border-b border-sky-500/20 bg-sky-500/10"
+              >
+                <div className="px-3 py-2 flex items-center gap-2">
+                  <span className="text-[11px] font-bold text-sky-400">
+                    {selectedIds.length} sélectionnée{selectedIds.length !== 1 ? 's' : ''}
+                  </span>
+                  <div className="ml-auto flex items-center gap-1.5">
+                    <button
+                      onClick={() => bulkMarkRead(true)}
+                      disabled={bulkAction}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-sky-600 text-white text-[10px] font-bold disabled:opacity-50 hover:bg-sky-700 transition-all cursor-pointer"
+                    >
+                      <CheckCheck className="w-3 h-3" /> Lues
+                    </button>
+                    <button
+                      onClick={() => bulkMarkRead(false)}
+                      disabled={bulkAction}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-container-high text-on-surface text-[10px] font-bold disabled:opacity-50 hover:bg-surface-container transition-all cursor-pointer"
+                    >
+                      <MailOpen className="w-3 h-3" /> Non lues
+                    </button>
+                    <button
+                      onClick={() => setSelectedIds([])}
+                      disabled={bulkAction}
+                      className="p-1.5 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Liste des fils */}
           <div className="flex-1 overflow-y-auto">
-            {threads.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full gap-3 text-on-surface-variant">
-                <Mail className="w-10 h-10 text-outline/30" />
-                <p className="text-sm italic">Aucune conversation trouvée.</p>
+            {loading && threads.length === 0 ? (
+              <div className="p-3 space-y-2">
+                {Array.from({ length: 6 }, (_, i) => (
+                  <div key={i} className="flex items-center gap-3 px-4 py-3.5 border-b border-outline-variant/10">
+                    <Skeleton variant="avatar-sm" className="w-8 h-8 rounded-full shrink-0" />
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <Skeleton variant="text-sm" className="w-1/3" />
+                      <Skeleton variant="text-sm" className="w-2/3" />
+                      <Skeleton variant="text-sm" className="w-1/2" />
+                    </div>
+                    <Skeleton variant="badge" className="w-10 h-4" />
+                  </div>
+                ))}
+              </div>
+            ) : sortedThreads.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full gap-3 text-on-surface-variant p-6">
+                <div className="p-4 rounded-full bg-surface-container">
+                  <Mail className="w-8 h-8 text-outline/30" />
+                </div>
+                <p className="text-sm italic text-center">Aucune conversation trouvée.</p>
                 {canSync && (
-                  <button onClick={handleSync} className="text-xs text-sky-400 underline underline-offset-2">
+                  <button onClick={handleSync} className="text-xs text-sky-400 underline underline-offset-2 cursor-pointer">
                     Synchroniser maintenant
                   </button>
                 )}
               </div>
             ) : (
-              <AnimatePresence mode="popLayout">
-                {threads.map((thread, idx) => {
-                  const latest = thread.latest || {};
+              <div className="divide-y divide-outline-variant/10">
+                {sortedThreads.map((t) => {
+                  const latest = t.latest || {};
                   const pCfg = PRIORITY_CONFIG[latest.aiPriority];
                   const sCfg = STATUS_CONFIG[latest.status];
                   const SIcon = sCfg?.icon;
-                  const isSelected = selectedThread?.id === thread.id;
-                  const label = participantsLabel(thread.participants);
-                  const snippet = latest.aiSummary || latest.bodyPreview;
+                  const isSelected = selectedThread?.id === t.id;
+                  const isChecked = selectedIds.includes(t.id);
+                  const sender = latest.fromName || latest.fromEmail || participantsLabel(t.participants);
+                  const snippet = latest.aiSummary || latest.bodyPreview || '';
 
                   return (
                     <motion.button
-                      key={thread.id}
+                      key={t.id}
                       layout
                       initial={{ opacity: 0, y: -4 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, x: -20 }}
-                      transition={{ duration: 0.15, delay: idx * 0.008 }}
-                      onClick={() => openThread(thread)}
+                      transition={{ duration: 0.15 }}
+                      onClick={() => openThread(t)}
                       className={`w-full text-left flex items-stretch gap-0 border-b border-outline-variant/15 transition-all group ${
                         isSelected
-                          ? 'bg-sky-500/5 ring-1 ring-inset ring-sky-500/20'
-                          : 'hover:bg-surface-container-low/60'
+                          ? 'bg-sky-500/10 ring-1 ring-inset ring-sky-500/20'
+                          : t.isUnread
+                            ? 'bg-surface-container-low/40 hover:bg-surface-container'
+                            : 'hover:bg-surface-container-low/60'
                       }`}
                     >
-                      {/* Priority stripe */}
-                      <div
-                        className="w-0.5 shrink-0 rounded-r"
-                        style={{ background: pCfg ? pCfg.stripe : 'transparent' }}
-                      />
+                      {/* Bande de priorité */}
+                      <div className="w-0.5 shrink-0 rounded-r" style={{ background: pCfg ? pCfg.stripe : 'transparent' }} />
 
-                      <div className="flex items-center gap-3 px-4 py-3.5 flex-1 min-w-0">
-                        {/* Participant avatars */}
-                        <div className="flex -space-x-2 shrink-0">
-                          {(thread.participants || []).slice(0, 2).map((p, i) => (
-                            <div
-                              key={`${p.email}-${i}`}
-                              className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold text-white ring-2 ring-surface-container-lowest ${
-                                i === 0 ? (pCfg ? pCfg.bg : 'bg-zinc-600') : AVATAR_COLORS[1]
-                              }`}
-                            >
-                              {initialOf(p.name, p.email)}
-                            </div>
-                          ))}
+                      <div className={`flex items-start gap-2.5 flex-1 min-w-0 px-3 ${isCompact ? 'py-2' : 'py-3'}`}>
+                        {/* Case à cocher */}
+                        <div className="shrink-0 flex items-center pt-1.5" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => toggleSelect(t.id)}
+                            className="cursor-pointer accent-sky-500 w-3.5 h-3.5 rounded"
+                          />
                         </div>
 
-                        {/* Content */}
+                        {/* Avatar */}
+                        <div className={`shrink-0 rounded-full flex items-center justify-center text-[11px] font-bold text-white ring-2 ring-surface-container-lowest ${pCfg ? pCfg.bg : t.isUnread ? 'bg-sky-600' : 'bg-zinc-500'}`}
+                          style={{ width: isCompact ? 30 : 34, height: isCompact ? 30 : 34 }}
+                        >
+                          {initialOf(latest.fromName, latest.fromEmail)}
+                        </div>
+
+                        {/* Contenu */}
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5 mb-0.5">
-                            <span className={`text-xs font-bold truncate ${isSelected ? 'text-sky-400' : 'text-on-surface group-hover:text-primary transition-colors'}`}>
-                              {label}
+                          {/* Ligne 1 : expéditeur + heure */}
+                          <div className="flex items-center gap-1.5">
+                            <span className={`truncate ${t.isUnread ? 'text-on-surface font-bold' : 'text-on-surface font-semibold'}`}
+                              style={{ fontSize: isCompact ? 11 : 12 }}
+                            >
+                              {sender}
                             </span>
-                            {latest.aiSummary && (
-                              <Bot className="w-2.5 h-2.5 text-purple-400 shrink-0" />
-                            )}
-                            {thread.sentCount > 0 && (
-                              <Reply className="w-2.5 h-2.5 text-on-surface-variant/60 shrink-0" />
-                            )}
+                            {t.isUnread && <CircleDot className="w-2.5 h-2.5 text-sky-400 shrink-0" />}
+                            <span className="ml-auto shrink-0 text-[10px] text-on-surface-variant/70">{formatDate(latest.date)}</span>
                           </div>
-                          <p className="text-[11px] font-semibold text-on-surface truncate mb-0.5">{latest.subject}</p>
+
+                          {/* Ligne 2 : sujet + badges */}
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className={`truncate ${t.isUnread ? 'text-on-surface font-bold' : 'text-on-surface'}`} style={{ fontSize: isCompact ? 11 : 12 }}>
+                              {latest.subject || '(sans objet)'}
+                            </span>
+                            {t.count > 1 && (
+                              <span className="shrink-0 inline-flex items-center justify-center min-w-4 px-1 py-0.5 rounded-full bg-sky-500/10 text-sky-400 text-[9px] font-bold border border-sky-500/20">
+                                {t.count}
+                              </span>
+                            )}
+                            {t.hasAttachments && <Paperclip className="w-3 h-3 text-on-surface-variant/70 shrink-0" />}
+                            {pCfg && <pCfg.icon className="w-3 h-3 shrink-0" style={{ color: pCfg.stripe }} />}
+                          </div>
+
+                          {/* Ligne 3 : extrait IA */}
                           {snippet && (
-                            <p className={`text-[10px] truncate ${latest.aiSummary ? 'text-on-surface-variant italic' : 'text-on-surface-variant/70'}`}>
+                            <p className={`truncate mt-0.5 ${latest.aiSummary ? 'text-on-surface-variant italic' : 'text-on-surface-variant/70'}`} style={{ fontSize: isCompact ? 10 : 11 }}>
                               {snippet}
                             </p>
                           )}
-                        </div>
 
-                        {/* Right meta */}
-                        <div className="shrink-0 flex flex-col items-end gap-1">
-                          <span className="text-[10px] text-on-surface-variant whitespace-nowrap flex items-center gap-1">
-                            {latest.hasAttachments && <Paperclip className="w-2.5 h-2.5" />}
-                            {formatDate(latest.receivedAt || latest.date)}
-                          </span>
-                          <div className="flex items-center gap-1">
-                            {thread.count > 1 && (
-                              <span className="inline-flex items-center justify-center min-w-[1rem] px-1 py-0.5 rounded-full bg-sky-500/10 text-sky-400 text-[9px] font-bold border border-sky-500/20">
-                                {thread.count}
-                              </span>
-                            )}
-                            {sCfg && (
-                              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold border ${sCfg.bg} ${sCfg.color} ${sCfg.border}`}>
-                                <SIcon className="w-2 h-2" />
-                                {sCfg.label}
-                              </span>
-                            )}
-                          </div>
+                          {/* Ligne 4 : CC + métadonnées */}
+                          {(t.ccRecipients?.length > 0 || latest.erpTicketId || sCfg) && (
+                            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                              {t.ccRecipients?.length > 0 && (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-[9px] font-semibold text-on-surface-variant">
+                                  <Send className="w-2.5 h-2.5 shrink-0" />
+                                  Cc : {t.ccRecipients.slice(0, 2).map(displayAddr).join(', ')}
+                                  {t.ccRecipients.length > 2 ? ` +${t.ccRecipients.length - 2}` : ''}
+                                </span>
+                              )}
+                              {latest.erpTicketId && (
+                                <span
+                                  onClick={(e) => { e.stopPropagation(); navigate(`/tickets/${latest.erpTicketId}`); }}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-primary/10 text-primary border border-primary/20 text-[9px] font-bold hover:bg-primary/15 transition-all cursor-pointer"
+                                >
+                                  <ArrowUpRight className="w-2.5 h-2.5" /> Ticket #{latest.erpTicketId}
+                                </span>
+                              )}
+                              {sCfg && (
+                                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold border ${sCfg.bg} ${sCfg.color} ${sCfg.border}`}>
+                                  {SIcon && <SIcon className="w-2 h-2" />}
+                                  {sCfg.label}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </motion.button>
                   );
                 })}
-              </AnimatePresence>
+              </div>
             )}
           </div>
 
@@ -423,20 +737,20 @@ export default function Inbox() {
             <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-t border-outline-variant/20 bg-surface-bright/10">
               <button
                 disabled={page === 1}
-                onClick={() => { const p = page - 1; setPage(p); load(p, filter, search); }}
-                className="text-[11px] font-semibold text-on-surface-variant disabled:opacity-30 hover:text-on-surface transition-colors px-2 py-1 rounded-lg hover:bg-surface-container"
+                onClick={() => { const p = page - 1; setPage(p); load(p); }}
+                className="text-[11px] font-semibold text-on-surface-variant disabled:opacity-30 hover:text-on-surface transition-colors px-2 py-1 rounded-lg hover:bg-surface-container cursor-pointer"
               >← Préc.</button>
               <span className="text-[11px] text-on-surface-variant">{page} / {Math.ceil(total / 25)}</span>
               <button
                 disabled={page * 25 >= total}
-                onClick={() => { const p = page + 1; setPage(p); load(p, filter, search); }}
-                className="text-[11px] font-semibold text-on-surface-variant disabled:opacity-30 hover:text-on-surface transition-colors px-2 py-1 rounded-lg hover:bg-surface-container"
+                onClick={() => { const p = page + 1; setPage(p); load(p); }}
+                className="text-[11px] font-semibold text-on-surface-variant disabled:opacity-30 hover:text-on-surface transition-colors px-2 py-1 rounded-lg hover:bg-surface-container cursor-pointer"
               >Suiv. →</button>
             </div>
           )}
         </div>
 
-        {/* Right: Conversation thread view */}
+        {/* ═══ Volet de lecture (façon Outlook) ═══ */}
         <AnimatePresence mode="wait">
           {selectedThread ? (
             <motion.div
@@ -445,182 +759,242 @@ export default function Inbox() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
               transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-              className="flex-1 flex flex-col min-h-0 overflow-hidden bg-surface-container-lowest"
+              className="flex-1 flex flex-col min-w-0 overflow-hidden bg-surface-container-lowest"
             >
-              {/* Thread top bar */}
-              <div className="shrink-0 flex items-center gap-3 px-6 py-4 border-b border-outline-variant/20">
-                <motion.button
-                  onClick={closeThread}
-                  whileHover={{ scale: 1.1, rotate: 90 }}
-                  whileTap={{ scale: 0.9 }}
-                  className="p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"
-                >
-                  <X className="w-4 h-4" />
-                </motion.button>
-                <div className="flex-1 min-w-0">
-                  <h2 className="text-base font-bold text-on-surface truncate">{selectedThread.latest?.subject}</h2>
-                  <p className="text-[11px] text-on-surface-variant truncate">
-                    {participantsLabel(selectedThread.participants)}
-                    {' · '}
-                    {selectedThread.count} message{selectedThread.count !== 1 ? 's' : ''}
-                    {selectedThread.sentCount > 0 && ` · ${selectedThread.sentCount} envoyé${selectedThread.sentCount !== 1 ? 's' : ''}`}
-                  </p>
+              {detailLoading && !threadDetail ? (
+                <div className="h-full flex items-center justify-center text-on-surface-variant">
+                  <RefreshCw className="w-5 h-5 animate-spin" />
                 </div>
-                {selectedThread.latest?.erpTicketId && (
-                  <motion.button
-                    whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-                    onClick={() => navigate(`/tickets/${selectedThread.latest.erpTicketId}`)}
-                    className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary/10 text-primary border border-primary/20 text-xs font-bold hover:bg-primary/15 transition-all"
-                  >
-                    <ArrowUpRight className="w-3.5 h-3.5" />
-                    Ticket #{selectedThread.latest.erpTicketId}
-                  </motion.button>
-                )}
-              </div>
+              ) : threadDetail ? (
+                <>
+                  {/* En-tête du message */}
+                  <div className="shrink-0 border-b border-outline-variant/20 px-5 py-4 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <button
+                          onClick={closeThread}
+                          className="p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer shrink-0"
+                          title="Fermer"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                        <h2 className="text-lg font-bold text-on-surface truncate">
+                          {threadDetail.latest?.subject || '(sans objet)'}
+                        </h2>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                        {threadDetail.latest?.aiPriority && (
+                          <PriorityBadge p={threadDetail.latest.aiPriority} />
+                        )}
+                        {threadDetail.latest?.status && STATUS_CONFIG[threadDetail.latest.status] && (
+                          <StatusBadge status={threadDetail.latest.status} />
+                        )}
+                      </div>
+                    </div>
 
-              {/* Thread body */}
-              <div className="flex-1 overflow-y-auto">
-                {detailLoading && !threadDetail ? (
-                  <div className="h-full flex items-center justify-center text-on-surface-variant">
-                    <RefreshCw className="w-5 h-5 animate-spin" />
-                  </div>
-                ) : (
-                  <div className="max-w-3xl mx-auto px-6 py-6 space-y-6">
-                    {(threadDetail?.messages || []).map((msg) => {
-                      const isInbound = msg.kind === 'inbound';
-                      const sCfg = STATUS_CONFIG[msg.status];
-                      const pCfg = PRIORITY_CONFIG[msg.aiPriority];
-                      return (
-                        <div key={`${msg.kind}-${msg.emailId || msg.messageId}`} className="space-y-4">
-                          {/* Message header */}
-                          <div className="flex items-start gap-3">
-                            <div className={`w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-xs font-bold text-white ${isInbound ? (pCfg ? pCfg.bg : 'bg-zinc-600') : 'bg-sky-600'}`}>
-                              {initialOf(msg.fromName, msg.fromEmail)}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="text-xs font-bold text-on-surface truncate">{msg.fromName || msg.fromEmail}</span>
-                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${
-                                  isInbound ? 'bg-surface-container text-on-surface-variant border-outline-variant/40' : 'bg-sky-500/10 text-sky-400 border-sky-500/20'
-                                }`}>
-                                  {isInbound ? <MailOpen className="w-2.5 h-2.5" /> : <Reply className="w-2.5 h-2.5" />}
-                                  {isInbound ? 'Reçu' : 'Envoyé'}
-                                </span>
-                                {sCfg && isInbound && (
-                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${sCfg.bg} ${sCfg.color} ${sCfg.border}`}>
-                                    <sCfg.icon className="w-2.5 h-2.5" />
-                                    {sCfg.label}
-                                  </span>
-                                )}
-                                {pCfg && isInbound && (
-                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${pCfg.color} border-current bg-current/10`}>
-                                    <pCfg.icon className="w-2.5 h-2.5" />
-                                    {pCfg.label}
-                                  </span>
-                                )}
-                              </div>
-                              <p className="text-[10px] text-on-surface-variant mt-0.5">{formatDateTime(msg.receivedAt || msg.timestamp)}</p>
-                            </div>
-                          </div>
-
-                          {/* AI Analysis (inbound only) */}
-                          {isInbound && (msg.aiSummary || msg.aiCategory || msg.aiTeam || msg.aiConfidence != null) && (
-                            <div className="ml-12 rounded-2xl border border-purple-500/20 bg-purple-500/5 overflow-hidden">
-                              <div className="flex items-center gap-2 px-4 py-2.5 border-b border-purple-500/15">
-                                <div className="p-1.5 rounded-lg bg-purple-500/10">
-                                  <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                                </div>
-                                <span className="text-[10px] font-bold text-purple-400 uppercase tracking-wider">Analyse IA — Gemini</span>
-                                {msg.aiConfidence != null && (
-                                  <span className="ml-auto text-[10px] font-bold text-purple-300">
-                                    {Math.round(msg.aiConfidence * 100)}% confiance
-                                  </span>
-                                )}
-                              </div>
-                              <div className="p-4 space-y-3">
-                                {msg.aiSummary && (
-                                  <p className="text-sm text-on-surface leading-relaxed italic">"{msg.aiSummary}"</p>
-                                )}
-                                <div className="grid grid-cols-2 gap-3">
-                                  {msg.aiCategory && (
-                                    <div className="bg-surface-container/40 rounded-xl p-3">
-                                      <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Catégorie</p>
-                                      <p className="text-sm font-semibold text-on-surface">{msg.aiCategory}</p>
-                                    </div>
-                                  )}
-                                  {msg.aiTeam && (
-                                    <div className="bg-surface-container/40 rounded-xl p-3">
-                                      <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Équipe suggérée</p>
-                                      <p className="text-sm font-semibold text-on-surface">{msg.aiTeam}</p>
-                                    </div>
-                                  )}
-                                  {msg.glpiTicketId && (
-                                    <div className="bg-surface-container/40 rounded-xl p-3">
-                                      <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Ticket GLPI</p>
-                                      <p className="text-sm font-semibold text-on-surface">#{msg.glpiTicketId}</p>
-                                    </div>
-                                  )}
-                                  {msg.erpTicketId && (
-                                    <div className="bg-surface-container/40 rounded-xl p-3">
-                                      <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Ticket ERP</p>
-                                      <p className="text-sm font-semibold text-primary" onClick={() => navigate(`/tickets/${msg.erpTicketId}`)}>#{msg.erpTicketId}</p>
-                                    </div>
-                                  )}
-                                </div>
-                                {msg.aiConfidence != null && (
-                                  <div className="h-1.5 bg-surface-container rounded-full overflow-hidden">
-                                    <motion.div
-                                      initial={{ width: 0 }}
-                                      animate={{ width: `${Math.round(msg.aiConfidence * 100)}%` }}
-                                      transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-                                      className="h-full bg-gradient-to-r from-purple-500 to-violet-400 rounded-full"
-                                    />
-                                  </div>
-                                )}
-                              </div>
-                            </div>
+                    {/* Expéditeur / destinataires / date */}
+                    <div className="flex items-start gap-3">
+                      <div className={`shrink-0 rounded-full flex items-center justify-center text-xs font-bold text-white ${
+                        PRIORITY_CONFIG[threadDetail.latest?.aiPriority]?.bg || 'bg-sky-600'
+                      }`} style={{ width: 40, height: 40 }}>
+                        {initialOf(threadDetail.latest?.fromName, threadDetail.latest?.fromEmail)}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-sm text-on-surface">
+                          <span className="font-bold">{threadDetail.latest?.fromName || threadDetail.latest?.fromEmail || 'Expéditeur inconnu'}</span>
+                          {threadDetail.latest?.fromName && threadDetail.latest?.fromEmail && (
+                            <span className="text-on-surface-variant">&lt;{threadDetail.latest.fromEmail}&gt;</span>
                           )}
-
-                          {/* Error */}
-                          {isInbound && msg.error && (
-                            <div className="ml-12 rounded-xl border border-red-500/20 bg-red-500/5 p-4 flex items-start gap-3">
-                              <XCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                              <p className="text-sm text-red-400">{msg.error}</p>
-                            </div>
-                          )}
-
-                          {/* Message body */}
-                          <div className="ml-12 rounded-2xl border border-outline-variant/30 bg-surface-container-low/30 overflow-hidden">
-                            <div className="flex items-center gap-2 px-4 py-3 border-b border-outline-variant/20">
-                              <MailOpen className="w-4 h-4 text-on-surface-variant" />
-                              <span className="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Corps du message</span>
-                            </div>
-                            <div className="p-5">
-                              {(() => {
-                                const html = msg.bodyHtml;
-                                const plain = isInbound ? msg.bodyPreview : msg.body;
-                                return html ? (
-                                  <div className="text-sm text-on-surface leading-relaxed prose prose-sm dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />
-                                ) : plain ? (
-                                  <pre className="text-sm text-on-surface leading-relaxed whitespace-pre-wrap font-sans">{plain}</pre>
-                                ) : (
-                                  <p className="text-sm text-on-surface-variant italic">Corps du message non disponible.</p>
-                                );
-                              })()}
-                            </div>
-                          </div>
                         </div>
-                      );
-                    })}
-                    {threadDetail && threadDetail.messages.length === 0 && (
-                      <div className="flex flex-col items-center justify-center gap-3 text-on-surface-variant py-16">
-                        <Mail className="w-10 h-10 text-outline/30" />
-                        <p className="text-sm italic">Aucun message dans cette conversation.</p>
+                        {threadDetail.participants?.length > 0 && (
+                          <div className="text-[11px] text-on-surface-variant mt-0.5">
+                            Participants : {participantsLabel(threadDetail.participants)}
+                          </div>
+                        )}
+                        {threadDetail.ccRecipients?.length > 0 && (
+                          <div className="text-[11px] text-on-surface-variant mt-0.5 flex items-center gap-1">
+                            <Send className="w-2.5 h-2.5 shrink-0" />
+                            <span className="font-semibold">Cc :</span>
+                            <span className="truncate">{threadDetail.ccRecipients.map(displayAddr).join(', ')}</span>
+                          </div>
+                        )}
+                        <div className="text-[10px] text-on-surface-variant/70 mt-1">
+                          {formatDateTime(threadDetail.latest?.date)}
+                          {threadDetail.count > 1 && ` · ${threadDetail.count} message${threadDetail.count !== 1 ? 's' : ''}`}
+                          {threadDetail.sentCount > 0 && ` · ${threadDetail.sentCount} envoyé${threadDetail.sentCount !== 1 ? 's' : ''}`}
+                        </div>
+                      </div>
+                      {threadDetail.latest?.erpTicketId && (
+                        <button
+                          onClick={() => navigate(`/tickets/${threadDetail.latest.erpTicketId}`)}
+                          className="ml-auto shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary/10 text-primary border border-primary/20 text-xs font-bold hover:bg-primary/15 transition-all cursor-pointer"
+                        >
+                          <ArrowUpRight className="w-3.5 h-3.5" />
+                          Ticket #{threadDetail.latest.erpTicketId}
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Pièces jointes */}
+                    {detailAttachments.length > 0 && (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Paperclip className="w-3.5 h-3.5 text-on-surface-variant shrink-0" />
+                        {detailAttachments.map((a) => (
+                          <span key={a.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-outline-variant/40 bg-surface-container text-[11px] font-medium text-on-surface">
+                            <FileText className="w-3 h-3 text-sky-400 shrink-0" />
+                            <span className="max-w-[180px] truncate">{a.filename}</span>
+                          </span>
+                        ))}
                       </div>
                     )}
                   </div>
-                )}
-              </div>
+
+                  {/* Corps de la conversation */}
+                  <div className="flex-1 overflow-y-auto">
+                    <div className="max-w-3xl mx-auto px-5 py-6 space-y-6">
+                      {(threadDetail.messages || []).map((msg) => {
+                        const isInbound = msg.kind === 'inbound';
+                        const sCfg = STATUS_CONFIG[msg.status];
+                        const pCfg = PRIORITY_CONFIG[msg.aiPriority];
+                        return (
+                          <div key={`${msg.kind}-${msg.emailId || msg.messageId}`} className="space-y-4">
+                            {/* En-tête du message */}
+                            <div className="flex items-start gap-3">
+                              <div className={`w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-xs font-bold text-white ${isInbound ? (pCfg ? pCfg.bg : 'bg-zinc-600') : 'bg-sky-600'}`}>
+                                {initialOf(msg.fromName, msg.fromEmail)}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-xs font-bold text-on-surface truncate">{msg.fromName || msg.fromEmail}</span>
+                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${
+                                    isInbound ? 'bg-surface-container text-on-surface-variant border-outline-variant/40' : 'bg-sky-500/10 text-sky-400 border-sky-500/20'
+                                  }`}>
+                                    {isInbound ? <MailOpen className="w-2.5 h-2.5" /> : <Reply className="w-2.5 h-2.5" />}
+                                    {isInbound ? 'Reçu' : 'Envoyé'}
+                                  </span>
+                                  {!isInbound && msg.ccRecipients?.length > 0 && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold text-on-surface-variant border border-outline-variant/40 bg-surface-container">
+                                      <Send className="w-2.5 h-2.5" /> Cc : {msg.ccRecipients.map(displayAddr).join(', ')}
+                                    </span>
+                                  )}
+                                  {sCfg && isInbound && (
+                                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${sCfg.bg} ${sCfg.color} ${sCfg.border}`}>
+                                      <sCfg.icon className="w-2.5 h-2.5" />
+                                      {sCfg.label}
+                                    </span>
+                                  )}
+                                  {pCfg && isInbound && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border" style={{ color: pCfg.stripe, borderColor: pCfg.stripe + '44', backgroundColor: pCfg.stripe + '11' }}>
+                                      <pCfg.icon className="w-2.5 h-2.5" />
+                                      {pCfg.label}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-[10px] text-on-surface-variant mt-0.5">{formatDateTime(msg.receivedAt || msg.timestamp)}</p>
+                              </div>
+                            </div>
+
+                            {/* Analyse IA (entrant uniquement) */}
+                            {isInbound && (msg.aiSummary || msg.aiCategory || msg.aiTeam || msg.aiConfidence != null) && (
+                              <div className="ml-12 rounded-2xl border border-purple-500/20 bg-purple-500/5 overflow-hidden">
+                                <div className="flex items-center gap-2 px-4 py-2.5 border-b border-purple-500/15">
+                                  <div className="p-1.5 rounded-lg bg-purple-500/10">
+                                    <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                                  </div>
+                                  <span className="text-[10px] font-bold text-purple-400 uppercase tracking-wider">Analyse IA — Gemini</span>
+                                  {msg.aiConfidence != null && (
+                                    <span className="ml-auto text-[10px] font-bold text-purple-300">
+                                      {Math.round(msg.aiConfidence * 100)}% confiance
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="p-4 space-y-3">
+                                  {msg.aiSummary && (
+                                    <p className="text-sm text-on-surface leading-relaxed italic">"{msg.aiSummary}"</p>
+                                  )}
+                                  <div className="grid grid-cols-2 gap-3">
+                                    {msg.aiCategory && (
+                                      <div className="bg-surface-container/40 rounded-xl p-3">
+                                        <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Catégorie</p>
+                                        <p className="text-sm font-semibold text-on-surface">{msg.aiCategory}</p>
+                                      </div>
+                                    )}
+                                    {msg.aiTeam && (
+                                      <div className="bg-surface-container/40 rounded-xl p-3">
+                                        <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Équipe suggérée</p>
+                                        <p className="text-sm font-semibold text-on-surface">{msg.aiTeam}</p>
+                                      </div>
+                                    )}
+                                    {msg.glpiTicketId && (
+                                      <div className="bg-surface-container/40 rounded-xl p-3">
+                                        <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Ticket GLPI</p>
+                                        <p className="text-sm font-semibold text-on-surface">#{msg.glpiTicketId}</p>
+                                      </div>
+                                    )}
+                                    {msg.erpTicketId && (
+                                      <div className="bg-surface-container/40 rounded-xl p-3">
+                                        <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Ticket ERP</p>
+                                        <p className="text-sm font-semibold text-primary cursor-pointer" onClick={() => navigate(`/tickets/${msg.erpTicketId}`)}>#{msg.erpTicketId}</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                  {msg.aiConfidence != null && (
+                                    <div className="h-1.5 bg-surface-container rounded-full overflow-hidden">
+                                      <motion.div
+                                        initial={{ width: 0 }}
+                                        animate={{ width: `${Math.round(msg.aiConfidence * 100)}%` }}
+                                        transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+                                        className="h-full bg-gradient-to-r from-purple-500 to-violet-400 rounded-full"
+                                      />
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Erreur */}
+                            {isInbound && msg.error && (
+                              <div className="ml-12 rounded-xl border border-red-500/20 bg-red-500/5 p-4 flex items-start gap-3">
+                                <XCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                                <p className="text-sm text-red-400">{msg.error}</p>
+                              </div>
+                            )}
+
+                            {/* Corps du message */}
+                            <div className={`rounded-2xl border border-outline-variant/25 ${isInbound ? 'bg-surface-container-low/40' : 'bg-sky-500/[0.03]'} overflow-hidden`}>
+                              <div className="flex items-center gap-2 px-4 py-2.5 border-b border-outline-variant/15">
+                                <MailOpen className="w-3.5 h-3.5 text-on-surface-variant" />
+                                <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">
+                                  {isInbound ? 'Corps du message' : 'Réponse envoyée'}
+                                </span>
+                              </div>
+                              <div className="p-5">
+                                {(() => {
+                                  const html = msg.bodyHtml;
+                                  const plain = isInbound ? msg.bodyPreview : msg.body;
+                                  return html ? (
+                                    <div className="text-sm text-on-surface leading-relaxed prose prose-sm dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />
+                                  ) : plain ? (
+                                    <pre className="text-sm text-on-surface leading-relaxed whitespace-pre-wrap font-sans">{plain}</pre>
+                                  ) : (
+                                    <p className="text-sm text-on-surface-variant italic">Corps du message non disponible.</p>
+                                  );
+                                })()}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {threadDetail.messages.length === 0 && (
+                        <div className="flex flex-col items-center justify-center gap-3 text-on-surface-variant py-16">
+                          <Mail className="w-10 h-10 text-outline/30" />
+                          <p className="text-sm italic">Aucun message dans cette conversation.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              ) : null}
             </motion.div>
           ) : (
             <motion.div
@@ -633,14 +1007,14 @@ export default function Inbox() {
               </div>
               <div className="text-center">
                 <p className="text-sm font-semibold">Sélectionnez une conversation</p>
-                <p className="text-xs text-on-surface-variant/60 mt-1">pour voir son contenu et l'analyse IA</p>
+                <p className="text-xs text-on-surface-variant/60 mt-1">pour voir son contenu, les destinataires en copie et l'analyse IA</p>
               </div>
             </motion.div>
           )}
         </AnimatePresence>
       </div>
 
-      {/* ── Test AI Modal ───────────────────────────────────────────────── */}
+      {/* ── Modale Test IA ───────────────────────────────────────────────── */}
       {canSync && createPortal(
         <AnimatePresence>
           {showTestModal && (
@@ -657,7 +1031,6 @@ export default function Inbox() {
                 transition={{ type: 'spring', duration: 0.35, bounce: 0.15 }}
                 className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl max-w-md w-full p-6 card-shadow flex flex-col gap-5 overflow-hidden max-h-[90vh]"
               >
-                {/* Header */}
                 <div className="flex justify-between items-center pb-3 border-b border-outline-variant/30">
                   <h3 className="text-base font-bold text-on-surface flex items-center gap-2">
                     <div className="p-1.5 rounded-lg bg-purple-500/10">
@@ -665,7 +1038,7 @@ export default function Inbox() {
                     </div>
                     Test analyse IA
                   </h3>
-                  <motion.button onClick={() => setShowTestModal(false)} whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }} className="p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all">
+                  <motion.button onClick={() => setShowTestModal(false)} whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }} className="p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer">
                     <X className="w-4 h-4" />
                   </motion.button>
                 </div>
@@ -737,9 +1110,7 @@ export default function Inbox() {
                         {Object.entries(testResult).map(([k, v]) => (
                           <div key={k} className="flex justify-between gap-3 text-xs border-b border-outline-variant/15 pb-1.5 last:border-0 last:pb-0">
                             <span className="text-on-surface-variant capitalize">{k}</span>
-                            <span className="text-on-surface font-semibold text-right">
-                              {typeof v === 'boolean' ? (v ? 'Oui' : 'Non') : typeof v === 'number' ? (k === 'confidence' ? `${Math.round(v * 100)}%` : v) : String(v)}
-                            </span>
+                            <span className="text-on-surface font-medium text-right">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>
                           </div>
                         ))}
                       </motion.div>
@@ -749,9 +1120,31 @@ export default function Inbox() {
               </motion.div>
             </div>
           )}
-        </AnimatePresence>,
-        document.body
+        </AnimatePresence>
       )}
     </div>
+  );
+}
+
+// ── Petits composants d'affichage ────────────────────────────────────────────
+function PriorityBadge({ p }) {
+  const cfg = PRIORITY_CONFIG[p];
+  if (!cfg) return null;
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border" style={{ color: cfg.stripe, borderColor: `${cfg.stripe}44`, backgroundColor: `${cfg.stripe}11` }}>
+      <cfg.icon className="w-2.5 h-2.5" />
+      {cfg.label}
+    </span>
+  );
+}
+
+function StatusBadge({ status }) {
+  const cfg = STATUS_CONFIG[status];
+  if (!cfg) return null;
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${cfg.bg} ${cfg.color} ${cfg.border}`}>
+      <cfg.icon className="w-2.5 h-2.5" />
+      {cfg.label}
+    </span>
   );
 }

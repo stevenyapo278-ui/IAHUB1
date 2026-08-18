@@ -660,6 +660,7 @@ model IncomingEmail {
   isNewTicket         Boolean       @default(true)
 
   status              String        @default("PENDING")
+  isRead              Boolean       @default(false)
   error               String?
   retryCount          Int           @default(0)
   nextRetryAt         DateTime?

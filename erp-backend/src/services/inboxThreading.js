@@ -38,9 +38,16 @@ function inboundToMessage(email) {
     aiCategory: email.aiCategory,
     aiTeam: email.aiTeam,
     aiConfidence: email.aiConfidence,
+    aiIntent: email.aiIntent,
+    aiIsSpam: email.aiIsSpam,
     glpiTicketId: email.glpiTicketId,
     erpTicketId: email.erpTicketId,
     hasAttachments: email.hasAttachments,
+    ccRecipients: email.ccRecipients || [],
+    isRead: email.isRead,
+    attachments: Array.isArray(email.attachments)
+      ? email.attachments.map((a) => ({ id: a.id, filename: a.filename, mimeType: a.mimeType }))
+      : [],
     error: email.error,
     bodyPreview: email.bodyPreview,
     bodyHtml: email.bodyHtml,
@@ -57,6 +64,7 @@ function ticketMessageToMessage(tm) {
     fromEmail: tm.sender,
     sender: tm.sender,
     recipients: tm.recipients || [],
+    ccRecipients: tm.ccRecipients || [],
     subject: tm.subject || '',
     date: tm.timestamp,
     timestamp: tm.timestamp,
@@ -110,6 +118,15 @@ function buildThreads(emails, sentMessages, { status, q }) {
     const messages = [...inbound, ...sent].sort(byDateAsc);
     const latest = messages[messages.length - 1];
 
+    // Agrégats au niveau du fil (façon Outlook)
+    const unreadCount = inbound.filter((m) => !m.isRead).length;
+    const hasAttachments = messages.some((m) => m.hasAttachments || (m.attachments && m.attachments.length > 0));
+    const ccAll = inbound.flatMap((m) => m.ccRecipients || []);
+    const ccRecipients = [...new Set(ccAll.map((addr) => String(addr).toLowerCase()))].map((addr) => {
+      const original = ccAll.find((c) => String(c).toLowerCase() === addr);
+      return original;
+    });
+
     threads.push({
       id: key,
       conversationId: conversations.has(key) ? key : null,
@@ -119,14 +136,33 @@ function buildThreads(emails, sentMessages, { status, q }) {
       participants: [...participants.values()],
       latest,
       messages,
+      // Extras façon Outlook
+      unreadCount,
+      isUnread: unreadCount > 0,
+      hasAttachments,
+      ccRecipients,
     });
   }
 
   return threads.sort((a, b) => new Date(b.latest.date) - new Date(a.latest.date));
 }
 
-async function listThreads({ status, q, page = 1, limit = 25 }) {
+// Filtres applicables au niveau du fil (après regroupement)
+function applyThreadFilters(threads, { priority, attachments, category, read }) {
+  return threads.filter((t) => {
+    if (priority && t.latest.aiPriority !== priority) return false;
+    if (attachments === 'with' && !t.hasAttachments) return false;
+    if (attachments === 'without' && t.hasAttachments) return false;
+    if (category && t.latest.aiCategory !== category) return false;
+    if (read === 'unread' && !t.isUnread) return false;
+    if (read === 'read' && t.isUnread) return false;
+    return true;
+  });
+}
+
+async function listThreads({ status, q, priority, attachments, category, read, days, page = 1, limit = 25 }) {
   const emails = await prisma.incomingEmail.findMany({
+    where: days ? { receivedAt: { gte: new Date(Date.now() - days * 86400000) } } : undefined,
     orderBy: { receivedAt: 'desc' },
     take: MAX_EMAILS,
   });
@@ -144,6 +180,7 @@ async function listThreads({ status, q, page = 1, limit = 25 }) {
   }
 
   let threads = buildThreads(emails, sentMessages, { status, q });
+  threads = applyThreadFilters(threads, { priority, attachments, category, read });
   const total = threads.length;
   const start = (page - 1) * limit;
   threads = threads.slice(start, start + limit);
@@ -151,13 +188,33 @@ async function listThreads({ status, q, page = 1, limit = 25 }) {
   return { items: threads, total, page, pages: Math.ceil(total / limit) };
 }
 
+// Compteurs globaux pour les badges des dossiers (façon Outlook)
+async function getInboxCounts() {
+  const [total, pending, processing, done, error, spam, withAttachments, unread] = await Promise.all([
+    prisma.incomingEmail.count(),
+    prisma.incomingEmail.count({ where: { status: 'PENDING' } }),
+    prisma.incomingEmail.count({ where: { status: 'PROCESSING' } }),
+    prisma.incomingEmail.count({ where: { status: 'DONE' } }),
+    prisma.incomingEmail.count({ where: { status: 'ERROR' } }),
+    prisma.incomingEmail.count({ where: { status: 'SPAM' } }),
+    prisma.incomingEmail.count({ where: { hasAttachments: true } }),
+    prisma.incomingEmail.count({ where: { isRead: false } }),
+  ]);
+  return { total, pending, processing, done, error, spam, withAttachments, unread };
+}
+
 async function getThread(key) {
   let emails;
   let sentMessages = [];
 
+  const attachmentSelect = { select: { id: true, filename: true, mimeType: true } };
+
   if (typeof key === 'string' && key.startsWith('single-')) {
     const id = Number(key.slice('single-'.length));
-    const email = await prisma.incomingEmail.findUnique({ where: { id } });
+    const email = await prisma.incomingEmail.findUnique({
+      where: { id },
+      include: { attachments: attachmentSelect },
+    });
     emails = email ? [email] : [];
     if (email?.conversationId) {
       sentMessages = await prisma.ticketMessage.findMany({
@@ -165,7 +222,10 @@ async function getThread(key) {
       });
     }
   } else {
-    emails = await prisma.incomingEmail.findMany({ where: { conversationId: key } });
+    emails = await prisma.incomingEmail.findMany({
+      where: { conversationId: key },
+      include: { attachments: attachmentSelect },
+    });
     sentMessages = await prisma.ticketMessage.findMany({
       where: { direction: 'OUTBOUND', conversationId: key },
     });
@@ -185,9 +245,14 @@ async function getThread(key) {
         aiCategory: null,
         aiTeam: null,
         aiConfidence: null,
+        aiIntent: null,
+        aiIsSpam: false,
         glpiTicketId: null,
         erpTicketId: null,
         hasAttachments: false,
+        ccRecipients: [],
+        isRead: true,
+        attachments: [],
         bodyHtml: null,
         error: null,
       };
@@ -201,4 +266,4 @@ async function getThread(key) {
   return thread || null;
 }
 
-module.exports = { listThreads, getThread, buildThreads, threadKeyFor };
+module.exports = { listThreads, getThread, buildThreads, threadKeyFor, getInboxCounts };
