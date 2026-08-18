@@ -294,6 +294,7 @@ router.get('/:id', async (req, res) => {
       aiSuggestions: { orderBy: { createdAt: 'desc' } },
       linksA: { include: { ticketB: { select: { id: true, title: true, status: true, priority: true } } }, orderBy: { createdAt: 'asc' } },
       linksB: { include: { ticketA: { select: { id: true, title: true, status: true, priority: true } } }, orderBy: { createdAt: 'asc' } },
+      assets: { include: { asset: { include: { glpiLocation: { select: { name: true, completename: true } } } } }, orderBy: { assetId: 'asc' } },
     },
   });
 
@@ -380,6 +381,16 @@ router.post(
       }
     }
 
+    // assetIds (équipements liés) — même tolérance JSON/multipart
+    let assetIds = [];
+    if (req.body.assetIds) {
+      try {
+        assetIds = Array.isArray(req.body.assetIds) ? req.body.assetIds : JSON.parse(req.body.assetIds);
+      } catch {
+        assetIds = [];
+      }
+    }
+
     // Si aucune liste d'observateurs explicite n'est fournie, hériter des observateurs par défaut de l'équipe
     if (teamId && observerIds.length === 0) {
       const team = await prisma.team.findUnique({
@@ -454,6 +465,7 @@ router.post(
         externalId: externalId || null,
         ...(customFields ? { customFields } : {}),
         ...(observerIds.length > 0 ? { observers: { connect: observerIds.map((id) => ({ id: Number(id) })) } } : {}),
+        ...(assetIds.length > 0 ? { assets: { create: assetIds.map((assetId) => ({ assetId: Number(assetId) })) } } : {}),
       },
     });
 
@@ -534,7 +546,7 @@ router.post(
 // Update ticket (status, priority, assignment, etc.)
 router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const id = Number(req.params.id);
-  const { title, content, status, priority, category, teamId, assignedToId, type, urgency, impact, source, externalId, dueDate } = req.body;
+  const { title, content, status, priority, category, teamId, assignedToId, type, urgency, impact, source, externalId, dueDate, assetIds } = req.body;
 
   const data = {};
   if (title !== undefined) data.title = title;
@@ -543,6 +555,12 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
   if (category !== undefined) data.category = category;
   if (teamId !== undefined) data.teamId = teamId;
   if (assignedToId !== undefined) data.assignedToId = assignedToId;
+
+  // assetIds (équipements liés) : remplacement complet de la liste
+  if (assetIds !== undefined) {
+    const next = Array.isArray(assetIds) ? assetIds.map((a) => Number(a)) : [];
+    data.assets = { deleteMany: {}, create: next.map((assetId) => ({ assetId })) };
+  }
 
   // Échéance manuelle : accepter une date, la vider (null) ou retirer l'échéance (""),
   // et réarmer le drapeau de notification si la date change

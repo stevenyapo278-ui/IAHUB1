@@ -22,4 +22,5 @@ export const PERMISSION_DEFINITIONS = [
   { key: 'aiweeklyreports.manage', label: "Valider les rapports hebdo & patterns d'apprentissage IA (Hotline)" },
   { key: 'automation.manage', label: "Gérer l'automatisation (auto-envoi, auto-approbation, synchro GLPI)" },
   { key: 'locations.manage', label: 'Gérer les lieux (synchronisation GLPI, création)' },
+  { key: 'assets.manage', label: 'Gérer l\'inventaire (équipements et liens aux tickets)' },
 ];

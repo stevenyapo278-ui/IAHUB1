@@ -16,7 +16,7 @@ import {
   Trash2, Paperclip, MessageSquare, Sparkles, Shield, MapPin,
   RefreshCw, Mail, FileText, Check, X, Send, ChevronRight,
   Flame, Radio, Info, ArrowDown, UserCheck, HelpCircle, Layers, History,
-  TrendingUp, Lock, Link2, Merge, Plus, GitBranch, Timer, Play, Square, ListChecks
+  TrendingUp, Lock, Link2, Merge, Plus, GitBranch, Timer, Play, Square, ListChecks, Boxes
 } from 'lucide-react';
 import {
   STATUS_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS,
@@ -1774,6 +1774,52 @@ export default function TicketDetail() {
                     </div>
                   );
                 })}
+              </div>
+            </div>
+          )}
+
+          {/* Équipements liés (Inventaire) */}
+          {ticket.assets?.length > 0 && (
+            <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-3">
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2 border-b border-outline-variant/20 pb-3">
+                <Boxes className="w-4 h-4 text-primary" />
+                Équipements liés ({ticket.assets.length})
+                <Link to="/assets" className="ml-auto text-[10px] font-bold text-primary hover:underline">
+                  Voir l'inventaire →
+                </Link>
+              </h3>
+              <div className="space-y-2">
+                {ticket.assets.map(({ asset }) => (
+                  <div key={asset.id} className="flex items-center gap-3 p-2.5 rounded-xl border border-outline-variant/20 bg-surface-container-low/30">
+                    <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400 shrink-0">
+                      <Boxes className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-on-surface truncate">{asset.name}</p>
+                      {(asset.serialNumber || asset.inventoryNumber || asset.model) && (
+                        <p className="text-[11px] text-on-surface-variant truncate">
+                          {[asset.inventoryNumber, asset.serialNumber, asset.model].filter(Boolean).join(' — ')}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {asset.assetType && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400">{asset.assetType}</span>
+                      )}
+                      {asset.status && (
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          asset.status === 'BROKEN'
+                            ? 'bg-red-500/10 text-red-500'
+                            : asset.status === 'STOCK'
+                              ? 'bg-blue-500/10 text-blue-500'
+                              : asset.status === 'OUT_OF_SERVICE'
+                                ? 'bg-slate-500/10 text-slate-400'
+                                : 'bg-emerald-500/10 text-emerald-500'
+                        }`}>{asset.status.replace(/_/g, ' ')}</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}

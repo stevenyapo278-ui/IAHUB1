@@ -7,7 +7,7 @@ const { initSocket } = require('./utils/socket');
 const { syncAllProviders } = require('./utils/modelSync');
 const { syncGlpiTickets } = require('./utils/glpiSync');
 const { runEmailPipeline } = require('./services/emailPipeline');
-const { syncTeamsFromGlpi, syncCategoriesFromGlpi, syncLocationsFromGlpi, syncUsersFromGlpi } = require('./services/glpiTicketCreator');
+const { syncTeamsFromGlpi, syncCategoriesFromGlpi, syncLocationsFromGlpi, syncUsersFromGlpi, syncAssetsFromGlpi } = require('./services/glpiTicketCreator');
 const { getSystemSettings } = require('./services/systemSettings');
 const { runDraftReminderScheduler } = require('./services/draftReminderScheduler');
 const { runReminderScheduler } = require('./services/reminderScheduler');
@@ -82,6 +82,10 @@ async function syncGlpiLocationsOnly() {
   await syncLocationsFromGlpi();
 }
 
+async function syncGlpiAssetsOnly() {
+  await syncAssetsFromGlpi();
+}
+
 // Lance périodiquement `syncFn`, en relisant à chaque cycle la fréquence configurée via
 // `getIntervalSeconds(settings)` (Paramètres > Automatisation > Fréquences de synchronisation).
 // Un changement dans l'UI s'applique donc au prochain cycle, sans redémarrer le serveur.
@@ -112,6 +116,7 @@ scheduleSync('tickets GLPI', syncGlpiTickets, (s) => s.glpiTicketsSyncIntervalSe
 scheduleSync('emails entrants', runEmailPipeline, (s) => s.emailSyncIntervalSeconds);
 scheduleSync('équipes/catégories GLPI', syncGlpiTeamsAndCategories, (s) => s.glpiTeamsCategoriesSyncIntervalMinutes * 60);
 scheduleSync('lieux GLPI', syncGlpiLocationsOnly, (s) => s.glpiLocationsSyncIntervalMinutes * 60);
+scheduleSync('assets GLPI', syncGlpiAssetsOnly, () => 24 * 3600);
 scheduleSync('modèles IA', syncAllProviders, (s) => s.aiModelsSyncIntervalHours * 3600);
 
 // Moteur SLA (outil de ticketing) : détecte les dépassements de délai de réponse des tickets

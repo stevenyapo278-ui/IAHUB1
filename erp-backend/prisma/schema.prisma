@@ -140,8 +140,52 @@ model User {
   observedTeams Team[] @relation("TeamDefaultObservers")
   requesterAssignments RequesterLocation[] @relation("RequesterAssignment")
   timeEntries TicketTimeEntry[]
+  ownedAssets Asset[] @relation("AssetOwner")
 
   @@index([teamId])
+}
+
+// Équipements / actifs IT (module "Inventaire" de GLPI). Peuvent être créés localement ou
+// importés depuis GLPI (glpiAssetId unique). Un asset peut être lié à plusieurs tickets
+// via la table de liaison AssetTicket.
+model Asset {
+  id             Int      @id @default(autoincrement())
+  name           String
+  assetType      String   @default("COMPUTER") // COMPUTER | PRINTER | NETWORK | SOFTWARE | PHONE | OTHER
+  serialNumber   String?
+  inventoryNumber String? // numéro d'inventaire (otherserial GLPI)
+  status         String   @default("IN_USE") // IN_USE | STOCK | BROKEN | OUT_OF_SERVICE
+  manufacturer   String?
+  model          String?
+  glpiLocationId Int?
+  glpiLocation   GlpiLocation? @relation(fields: [glpiLocationId], references: [glpiLocationId])
+  ownerId        Int?
+  owner          User?     @relation("AssetOwner", fields: [ownerId], references: [id])
+  teamId         Int?
+  team           Team?     @relation(fields: [teamId], references: [id])
+  purchaseDate   DateTime?
+  warrantyEnd    DateTime?
+  notes          String?
+  glpiAssetId    Int?      @unique // id GLPI d'origine (si importé)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  tickets        AssetTicket[]
+
+  @@index([assetType])
+  @@index([status])
+  @@index([glpiLocationId])
+  @@index([ownerId])
+}
+
+// Table de liaison Asset ↔ Ticket (un ticket peut référencer plusieurs équipements)
+model AssetTicket {
+  assetId   Int
+  asset     Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  ticketId  Int
+  ticket    Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@id([assetId, ticketId])
+  @@index([ticketId])
 }
 
 // Temps passé sur un ticket (module « Plan » de GLPI) : saisie manuelle ou
@@ -184,6 +228,7 @@ model Team {
   members User[]
   tickets Ticket[]
   defaultObservers User[] @relation("TeamDefaultObservers")
+  assets Asset[]
 }
 
 // Catégories de tickets. La plateforme peut fonctionner en autonomie (mode autonome) : dans ce
@@ -244,6 +289,7 @@ model GlpiLocation {
   updatedAt       DateTime @updatedAt
 
   requesterLinks RequesterLocation[]
+  assets         Asset[]
 }
 
 model Ticket {
@@ -355,6 +401,7 @@ model Ticket {
   timeEntries     TicketTimeEntry[]
   linksA          TicketLink[] @relation("TicketLinksA")
   linksB          TicketLink[] @relation("TicketLinksB")
+  assets          AssetTicket[]
 
   @@index([requesterId])
   @@index([assignedToId])

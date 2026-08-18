@@ -44,7 +44,8 @@ import {
   MessageSquare,
   KanbanSquare,
   Bookmark,
-  ListChecks
+  ListChecks,
+  Boxes
 } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -81,6 +82,7 @@ const EMPTY_FORM = {
   assignedToId: '',
   requesterId: '',
   observerIds: [],
+  assetIds: [],
   requiresApproval: false,
 };
 
@@ -194,6 +196,8 @@ export default function Tickets() {
   // Champs personnalisés : définitions actives pour la catégorie choisie + valeurs saisies
   const [customFieldDefs, setCustomFieldDefs] = useState([]);
   const [customValues, setCustomValues] = useState({});
+  // Inventaire : équipements disponibles pour le sélecteur + options mappées
+  const [assetOptions, setAssetOptions] = useState([]);
   const [error, setError] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
   const [templates, setTemplates] = useState([]);
@@ -523,6 +527,17 @@ export default function Tickets() {
     api.get('/glpi/categories').then(({ data }) => setCategories(data)).catch(() => {});
     api.get('/glpi/users').then(({ data }) => setGlpiUsers(data)).catch(() => {});
     api.get('/ticket-templates').then(({ data }) => setTemplates(data)).catch(() => {});
+    // Équipements pour le sélecteur d'assets (200 max, filtrage client)
+    api.get('/assets', { params: { pageSize: 200 } })
+      .then(({ data }) => {
+        const list = Array.isArray(data) ? data : (data.assets || []);
+        setAssetOptions(list.map((a) => ({
+          id: a.id,
+          label: a.name,
+          subLabel: [a.serialNumber, a.inventoryNumber, a.model].filter(Boolean).join(' — ') || undefined,
+        })));
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -560,6 +575,10 @@ export default function Tickets() {
       Object.entries(form).forEach(([key, value]) => {
         if (key === 'observerIds') {
           if (value.length > 0) payload.append('observerIds', JSON.stringify(value));
+          return;
+        }
+        if (key === 'assetIds') {
+          if (value.length > 0) payload.append('assetIds', JSON.stringify(value));
           return;
         }
         if (value !== '' && value !== undefined && value !== null) payload.append(key, value);
@@ -1083,6 +1102,26 @@ export default function Tickets() {
                       subLabelKey="email"
                     />
                   </div>
+
+                  {/* Équipements liés (Inventaire) */}
+                  {assetOptions.length > 0 && (
+                    <div>
+                      <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <Boxes className="w-3.5 h-3.5 text-blue-500" />
+                        Équipements concernés ({form.assetIds?.length || 0})
+                      </label>
+                      <SearchableMultiSelect
+                        options={assetOptions}
+                        selectedIds={form.assetIds || []}
+                        onChange={(nextIds) => setForm({ ...form, assetIds: nextIds })}
+                        placeholder="Rechercher un équipement (nom, n° de série, inventaire)..."
+                        searchPlaceholder="Rechercher un équipement..."
+                        labelKey="label"
+                        valueKey="id"
+                        subLabelKey="subLabel"
+                      />
+                    </div>
+                  )}
 
                   <div>
                     <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Description détaillée *</label>

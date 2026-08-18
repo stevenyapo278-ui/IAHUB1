@@ -742,6 +742,72 @@ async function syncLocationsFromGlpi() {
   });
 }
 
+// Synchronise les assets (Inventaire GLPI : Computer, Printer, NetworkEquipment, Software, Phone)
+// vers la table Asset de l'ERP. Idempotent : upsert par glpiAssetId (unique).
+const ASSET_GLPI_ENDPOINTS = [
+  { endpoint: 'Computer', assetType: 'COMPUTER' },
+  { endpoint: 'Printer', assetType: 'PRINTER' },
+  { endpoint: 'NetworkEquipment', assetType: 'NETWORK' },
+  { endpoint: 'Software', assetType: 'SOFTWARE' },
+  { endpoint: 'Phone', assetType: 'PHONE' },
+];
+
+async function syncAssetsFromGlpi() {
+  const config = await getActiveGlpiConfig();
+  if (!config) return null;
+
+  return withGlpiSession(config, async (sessionToken) => {
+    let synced = 0;
+    for (const { endpoint, assetType } of ASSET_GLPI_ENDPOINTS) {
+      const items = await fetchAllGlpiItems(config, sessionToken, endpoint).catch(() => []);
+      for (const item of items) {
+        const name = item.name?.trim();
+        if (!name) continue;
+
+        // Résoudre le lieu GLPI (locations_id) → GlpiLocation locale par glpiLocationId
+        let glpiLocationId = null;
+        if (item.locations_id) {
+          const loc = await prisma.glpiLocation.findFirst({
+            where: { glpiLocationId: Number(item.locations_id) },
+            select: { glpiLocationId: true },
+          });
+          glpiLocationId = loc?.glpiLocationId ?? null;
+        }
+
+        // Résoudre le propriétaire (users_id_tech, sinon users_id) → User local par glpiId
+        let ownerId = null;
+        const glpiUserId = Number(item.users_id_tech) || Number(item.users_id);
+        if (glpiUserId) {
+          const owner = await prisma.user.findUnique({ where: { glpiId: glpiUserId }, select: { id: true } });
+          ownerId = owner?.id ?? null;
+        }
+
+        const recordData = {
+          name,
+          assetType,
+          serialNumber: item.serial || null,
+          inventoryNumber: item.otherserial || null,
+          manufacturer: item.manufacturers_id ? String(item.manufacturers_id) : null,
+          model: item.models_id ? String(item.models_id) : null,
+          glpiLocationId,
+          ownerId,
+          purchaseDate: item.date_achat ? new Date(item.date_achat) : null,
+          warrantyEnd: item.warranty_date ? new Date(item.warranty_date) : null,
+        };
+
+        const existing = await prisma.asset.findUnique({ where: { glpiAssetId: Number(item.id) } });
+        if (existing) {
+          await prisma.asset.update({ where: { id: existing.id }, data: recordData });
+        } else {
+          await prisma.asset.create({ data: { ...recordData, glpiAssetId: Number(item.id) } });
+        }
+        synced++;
+      }
+    }
+    return synced;
+  });
+}
+
 // Synchronise les utilisateurs (User) depuis GLPI / Active Directory vers la table User de l'ERP.
 async function syncUsersFromGlpi({ createMissing = true } = {}) {
   const config = await getActiveGlpiConfig();
@@ -969,5 +1035,5 @@ async function updateGlpiLocation(glpiLocationId, { name, completename, address,
   });
 }
 
-module.exports = { createTicketFromEmail, createGlpiTicket, updateGlpiTicket, deleteGlpiTicket, uploadGlpiAttachment, syncTeamsFromGlpi, syncCategoriesFromGlpi, syncLocationsFromGlpi, syncUsersFromGlpi, addGlpiFollowup, getImportableGlpiUsers, importGlpiUsers, createGlpiLocation, updateGlpiLocation };
+module.exports = { createTicketFromEmail, createGlpiTicket, updateGlpiTicket, deleteGlpiTicket, uploadGlpiAttachment, syncTeamsFromGlpi, syncCategoriesFromGlpi, syncLocationsFromGlpi, syncAssetsFromGlpi, syncUsersFromGlpi, addGlpiFollowup, getImportableGlpiUsers, importGlpiUsers, createGlpiLocation, updateGlpiLocation };
 

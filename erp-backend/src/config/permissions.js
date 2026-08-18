@@ -18,6 +18,7 @@ const PERMISSION_KEYS = [
   'emaildrafts.manage',
   'automation.manage',
   'locations.manage',
+  'assets.manage',
   'aiweeklyreports.manage',
 ];
 
@@ -45,6 +46,7 @@ const PERMISSION_LABELS = {
   'emaildrafts.manage': 'Approuver / rejeter les réponses email IA',
   'automation.manage': "Gérer l'automatisation (auto-envoi, auto-approbation, synchro GLPI)",
   'locations.manage': 'Gérer les lieux (synchronisation GLPI, création)',
+  'assets.manage': 'Gérer l\'inventaire (équipements et liens aux tickets)',
   'aiweeklyreports.manage': "Valider les rapports hebdo & patterns d'apprentissage IA (Hotline)",
 };
 
