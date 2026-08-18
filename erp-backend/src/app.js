@@ -42,6 +42,7 @@ const aiWeeklyReportRoutes = require('./routes/aiweeklyreport.routes');
 
 const { requestId } = require('./middleware/requestId');
 const { logger, childLogger } = require('./utils/logger');
+const { apiCache } = require('./middleware/apiCache');
 
 const app = express();
 
@@ -119,16 +120,19 @@ app.get('/api/system/circuit-breakers', (req, res) => res.json(allBreakerStatuse
 
 app.use('/api/auth', authRoutes);
 app.use('/api/tickets', ticketRoutes);
-app.use('/api/ticket-templates', require('./routes/ticketTemplate.routes'));
-app.use('/api/teams', teamRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/permission-groups', permissionGroupRoutes);
+// Cache TTL pour les lectures lourdes et peu changeantes : utilisateurs (listes de 1000+ entrées
+// dans le modal de création de ticket), équipes, référentiels GLPI, templates, assets, réglages.
+// Les écritures traversent le cache sans être interceptées. TTL courts = fraîcheur garantie.
+app.use('/api/ticket-templates', apiCache(60), require('./routes/ticketTemplate.routes'));
+app.use('/api/teams', apiCache(30), teamRoutes);
+app.use('/api/users', apiCache(30), userRoutes);
+app.use('/api/permission-groups', apiCache(30), permissionGroupRoutes);
 app.use('/api/api-configs', apiConfigRoutes);
 app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/ai-providers', aiProviderRoutes);
+app.use('/api/ai-providers', apiCache(60), aiProviderRoutes);
 app.use('/api/email-accounts', emailAccountRoutes);
 app.use('/api/n8n-workflows', n8nRoutes);
-app.use('/api/glpi', glpiRoutes);
+app.use('/api/glpi', apiCache(60), glpiRoutes);
 app.use('/api/ai-email-drafts', aiEmailDraftRoutes);
 app.use('/api/ai-ticket-suggestions', aiTicketSuggestionRoutes);
 app.use('/api/n8n-config', n8nConfigRoutes);
@@ -137,21 +141,22 @@ app.use('/api/draft-approval', draftApprovalRoutes); // doit être monté avant 
 app.use('/api', outlookOAuthRoutes);
 app.use('/api/inbox', inboxRoutes);
 app.use('/api', ticketIntelligenceRoutes);
-app.use('/api/system-settings', systemSettingsRoutes);
+app.use('/api/system-settings', apiCache(30), systemSettingsRoutes);
 app.use('/api/advanced-settings', advancedSettingsRoutes);
 app.use('/api/prompt-templates', promptTemplateRoutes);
-app.use('/api/skills', skillRoutes);
+app.use('/api/skills', apiCache(30), skillRoutes);
 app.use('/api/reassignments', reassignmentRoutes);
 app.use('/api/notifications', notificationRoutes);
-app.use('/api/triage-rules', triageRuleRoutes);
-app.use('/api/locations', locationRoutes);
+app.use('/api/triage-rules', apiCache(30), triageRuleRoutes);
+app.use('/api/locations', apiCache(60), locationRoutes);
 app.use('/api/ai-weekly-reports', aiWeeklyReportRoutes);
 app.use('/api/chat', chatbotRoutes);
 app.use('/api/logs', logsRoutes);
 app.use('/api/audit-logs', auditLogRoutes);
 app.use('/api/timesheet', require('./routes/timesheet.routes'));
-app.use('/api/custom-fields', require('./routes/customfields.routes'));
-app.use('/api/assets', require('./routes/asset.routes'));
+app.use('/api/custom-fields', apiCache(30), require('./routes/customfields.routes'));
+app.use('/api/assets', apiCache(30), require('./routes/asset.routes'));
+app.use('/api/cache', require('./routes/cache.routes'));
 
 // Serve frontend static files in production
 const isProduction = process.env.NODE_ENV === 'production';

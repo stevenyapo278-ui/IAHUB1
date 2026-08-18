@@ -1,5 +1,9 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { Search, X, ChevronDown, Check } from 'lucide-react';
+
+// Nombre maximum d'options rendues dans le dropdown — au-delà, l'utilisateur continue de taper
+// pour affiner la recherche. Évite le ralentissement avec de grandes listes (utilisateurs GLPI).
+const MAX_RENDERED = 80;
 
 export default function SearchableSelect({
   options = [],
@@ -18,17 +22,23 @@ export default function SearchableSelect({
   const [search, setSearch] = useState('');
   const containerRef = useRef(null);
 
-  const selectedOption = options.find(
-    (opt) => String(opt[valueKey]) === String(value)
+  const selectedOption = useMemo(
+    () => options.find((opt) => String(opt[valueKey]) === String(value)),
+    [options, value, valueKey]
   );
 
-  const filteredOptions = options.filter((opt) => {
-    if (!search.trim()) return true;
+  const filteredOptions = useMemo(() => {
+    if (!search.trim()) return options;
     const term = search.toLowerCase().trim();
-    const labelMatch = String(opt[labelKey] || '').toLowerCase().includes(term);
-    const subMatch = subLabelKey ? String(opt[subLabelKey] || '').toLowerCase().includes(term) : false;
-    return labelMatch || subMatch;
-  });
+    return options.filter((opt) => {
+      const labelMatch = String(opt[labelKey] || '').toLowerCase().includes(term);
+      const subMatch = subLabelKey ? String(opt[subLabelKey] || '').toLowerCase().includes(term) : false;
+      return labelMatch || subMatch;
+    });
+  }, [options, search, labelKey, subLabelKey]);
+
+  const visibleOptions = filteredOptions.slice(0, MAX_RENDERED);
+  const isTruncated = filteredOptions.length > MAX_RENDERED;
 
   useEffect(() => {
     function handleClickOutside(e) {
@@ -112,7 +122,7 @@ export default function SearchableSelect({
                 Aucun résultat trouvé ({options.length} au total)
               </div>
             ) : (
-              filteredOptions.map((opt) => {
+              visibleOptions.map((opt) => {
                 const optVal = String(opt[valueKey]);
                 const isSelected = String(value) === optVal;
                 return (
@@ -142,6 +152,11 @@ export default function SearchableSelect({
               })
             )}
           </div>
+          {isTruncated && (
+            <p className="shrink-0 text-center text-[10px] text-on-surface-variant italic pb-0.5">
+              {filteredOptions.length - MAX_RENDERED} autre(s) résultat(s) — continuez à taper pour affiner
+            </p>
+          )}
         </div>
       )}
     </div>

@@ -494,10 +494,121 @@ export default function AdvancedTab() {
       />
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* SECTION 4bis : GESTION DU CACHE */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      <CacheSection />
+
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
       {/* SECTION 5 : REGLES DE TRIAGE AUTOMATIQUE */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       <TriageRulesSection saving={saving} setSaving={setSaving} setError={setError} />
     </motion.div>
+  );
+}
+
+function CacheSection() {
+  const [stats, setStats] = useState(null);
+  const [clearing, setClearing] = useState(false);
+  const [message, setMessage] = useState('');
+
+  function load() {
+    api.get('/cache/stats').then(({ data }) => setStats(data)).catch(() => {});
+  }
+
+  useEffect(load, []);
+  useEffect(() => {
+    const intervalId = setInterval(load, 30000);
+    return () => clearInterval(intervalId);
+  }, []);
+
+  async function handleClear() {
+    setClearing(true);
+    setMessage('');
+    try {
+      const { data } = await api.post('/cache/clear');
+      setMessage(`Cache vidé (${data.cleared} entrée(s) supprimée(s)).`);
+      load();
+    } catch (err) {
+      setMessage(err.response?.data?.error || 'Erreur lors de la purge du cache');
+    } finally {
+      setClearing(false);
+    }
+  }
+
+  const totalHits = stats?.entries?.reduce((s, e) => s + e.hits, 0) || 0;
+
+  return (
+    <div className="space-y-md">
+      <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
+        <span className="material-symbols-outlined text-primary text-2xl">bolt</span>
+        <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Gestion du cache</h4>
+      </div>
+
+      <motion.div variants={itemVariants} className="bento-card p-lg space-y-md">
+        <div className="flex flex-wrap items-start justify-between gap-md">
+          <p className="font-body-sm text-body-sm text-on-surface-variant leading-relaxed max-w-2xl">
+            Le cache mémoire accélère le chargement des listes à forte lecture (utilisateurs,
+            équipes, référentiels GLPI, modèles, réglages). Chaque réponse est conservée quelques
+            secondes seulement (TTL court) puis rafraîchie — aucune donnée n'est obsolète. Les
+            écritures ne sont jamais mises en cache.
+          </p>
+          <motion.button
+            onClick={handleClear}
+            disabled={clearing}
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.97 }}
+            className="px-4 py-2 bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 rounded-xl font-semibold text-body-sm transition-all flex items-center gap-2 disabled:opacity-50"
+          >
+            <span className="material-symbols-outlined text-[18px]">cleaning_services</span>
+            {clearing ? 'Purge en cours...' : 'Vider le cache'}
+          </motion.button>
+        </div>
+
+        {message && (
+          <p className="text-[12px] font-medium text-on-surface-variant">{message}</p>
+        )}
+
+        {stats ? (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-md">
+            <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-4">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-1">Entrées en cache</div>
+              <div className="font-headline-md text-headline-md font-bold text-on-surface">{stats.count}</div>
+            </div>
+            <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-4">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-1">Réponses servies du cache</div>
+              <div className="font-headline-md text-headline-md font-bold text-on-surface">{totalHits}</div>
+            </div>
+            <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-4">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-1">Taille approximative</div>
+              <div className="font-headline-md text-headline-md font-bold text-on-surface">
+                {stats.approxBytes > 1024 * 1024 ? `${(stats.approxBytes / 1024 / 1024).toFixed(1)} Mo` : `${Math.round(stats.approxBytes / 1024)} Ko`}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <p className="text-[12px] text-on-surface-variant italic">Chargement des statistiques...</p>
+        )}
+
+        {stats && stats.entries.length > 0 && (
+          <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-outline-variant/40 text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+              Entrées les plus consultées
+            </div>
+            <div className="divide-y divide-outline-variant/30">
+              {stats.entries.slice(0, 5).map((e) => (
+                <div key={e.key} className="px-4 py-2 flex items-center justify-between gap-4">
+                  <code className="font-mono text-[11px] text-on-surface truncate">{e.key}</code>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className="text-[11px] text-on-surface-variant font-medium">{e.hits} hit{s.e.hits > 1 ? 's' : ''}</span>
+                    <span className="text-[11px] text-on-surface-variant font-medium">{e.remainingSeconds}s restantes</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </motion.div>
+    </div>
   );
 }
 

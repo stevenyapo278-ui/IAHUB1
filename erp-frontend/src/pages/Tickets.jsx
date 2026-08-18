@@ -815,7 +815,7 @@ export default function Tickets() {
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 16 }}
                 transition={{ type: 'spring', duration: 0.35, bounce: 0.15 }}
-                className={`relative max-w-2xl w-full rounded-3xl border p-6 sm:p-8 card-shadow overflow-hidden max-h-[90vh] flex flex-col z-10 ${
+                className={`relative max-w-4xl w-full rounded-3xl border p-6 sm:p-8 card-shadow overflow-hidden max-h-[92vh] flex flex-col z-10 ${
                   isDark ? 'bg-surface-container-lowest border-outline-variant/60 text-on-surface' : 'bg-white border-slate-200 text-slate-900'
                 }`}
               >
