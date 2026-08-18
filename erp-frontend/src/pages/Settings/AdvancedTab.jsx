@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../api/client';
+import ConfirmDialog from '../../components/ConfirmDialog';
 
 const inputClass =
   'bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300';
@@ -481,10 +482,130 @@ export default function AdvancedTab() {
       <GlpiReimportSection autonomousMode={settings.autonomousMode === true} />
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* SECTION 4bis : ZONE DE DANGER — REINITIALISATION DE LA BASE DE TICKETS */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      <TicketPurgeSection
+        autonomousMode={settings.autonomousMode === true}
+        ticketsSyncInterval={settings.glpiTicketsSyncIntervalSeconds}
+        onPurged={(result) => {
+          api.get('/advanced-settings').then(({ data }) => setSettings(data)).catch(() => {});
+        }}
+        setError={setError}
+      />
+
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
       {/* SECTION 5 : REGLES DE TRIAGE AUTOMATIQUE */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       <TriageRulesSection saving={saving} setSaving={setSaving} setError={setError} />
     </motion.div>
+  );
+}
+
+function TicketPurgeSection({ autonomousMode = false, ticketsSyncInterval = 0, onPurged, setError }) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [purging, setPurging] = useState(false);
+  const [result, setResult] = useState(null);
+
+  async function handlePurge() {
+    setPurging(true);
+    setResult(null);
+    setError('');
+    try {
+      const { data } = await api.post('/advanced-settings/purge-tickets');
+      setResult(data);
+      setConfirmOpen(false);
+      onPurged(data);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur lors de la purge des tickets');
+    } finally {
+      setPurging(false);
+    }
+  }
+
+  const reimportActive = !autonomousMode && ticketsSyncInterval > 0;
+
+  return (
+    <div className="space-y-md">
+      <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
+        <span className="material-symbols-outlined text-red-500 text-2xl">dangerous</span>
+        <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Zone de danger — Réinitialisation de la base de tickets</h4>
+      </div>
+
+      <motion.div
+        variants={itemVariants}
+        className="bento-card p-lg border border-red-500/20 bg-red-500/5 flex items-start justify-between gap-lg flex-wrap"
+      >
+        <div className="space-y-2 max-w-2xl">
+          <div className="font-headline-sm text-headline-sm text-on-surface font-semibold flex items-center gap-2">
+            <span className="material-symbols-outlined text-[20px] text-red-500">delete_sweep</span>
+            Purger tous les tickets
+          </div>
+          <p className="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
+            Supprime <strong>tous les tickets</strong> et leur contenu (followups, messages, pièces jointes,
+            temps passé, suggestions IA, liens assets…) pour repartir d'une base vierge. Les
+            référentiels importés depuis GLPI sont <strong>conservés</strong> : équipes, catégories,
+            lieux, utilisateurs, assets, base de connaissances, boîte mail.
+          </p>
+          {reimportActive && (
+            <p className="font-body-sm text-body-sm text-red-500 leading-relaxed flex items-start gap-2">
+              <span className="material-symbols-outlined text-[18px] shrink-0 mt-[1px]">warning</span>
+              La synchronisation des tickets GLPI est active : elle sera désactivée automatiquement,
+              sinon les tickets présents dans GLPI seraient ré-importés dès le prochain cycle.
+            </p>
+          )}
+        </div>
+
+        <div className="flex flex-col items-end gap-sm shrink-0">
+          <motion.button
+            onClick={() => setConfirmOpen(true)}
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.97 }}
+            className="px-5 py-2.5 bg-red-500/10 text-red-500 border border-red-500/30 hover:bg-red-500/20 rounded-xl font-semibold text-body-sm transition-all flex items-center gap-2"
+          >
+            <span className="material-symbols-outlined text-[18px]">delete_forever</span>
+            Purger tous les tickets
+          </motion.button>
+        </div>
+      </motion.div>
+
+      <AnimatePresence>
+        {result && (
+          <motion.div
+            key="purge-result"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[13px] text-emerald-600 dark:text-emerald-400 flex items-center gap-2"
+          >
+            <span className="material-symbols-outlined text-[18px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>task_alt</span>
+            <span>
+              <strong>{result.ticketsDeleted}</strong> ticket(s) supprimé(s)
+              {result.orphans && Object.keys(result.orphans).length > 0 && (
+                <> · orphelins nettoyés : {Object.entries(result.orphans).map(([m, c]) => `${m} (${c})`).join(', ')}</>
+              )}
+              {result.attachmentsFilesRemoved > 0 && <> · fichiers de pièces jointes supprimés : {result.attachmentsFilesRemoved}</>}
+              {result.glpiTicketSyncDisabled && <> · synchro tickets GLPI désactivée (évite la ré-importation)</>}
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Purger tous les tickets ?"
+        message={
+          reimportActive
+            ? "Tous les tickets et leur contenu seront définitivement supprimés (irréversible). La synchronisation des tickets GLPI sera désactivée pour éviter leur ré-importation. Les équipes, catégories, lieux, utilisateurs, assets, connaissances et la boîte mail sont conservés. Confirmer la purge ?"
+            : "Tous les tickets et leur contenu seront définitivement supprimés (irréversible). Les équipes, catégories, lieux, utilisateurs, assets, connaissances et la boîte mail sont conservés. Confirmer la purge ?"
+        }
+        confirmLabel="Oui, tout supprimer"
+        cancelLabel="Annuler"
+        danger
+        loading={purging}
+        onConfirm={handlePurge}
+        onCancel={() => setConfirmOpen(false)}
+      />
+    </div>
   );
 }
 

@@ -5,6 +5,7 @@ const { authenticate } = require('../middleware/auth');
 const { requireSuperAdmin } = require('../middleware/permissions');
 const { normalizeHost, resolveBackendUrl, resolveFrontendUrl } = require('../services/systemSettings');
 const { auditLog } = require('../services/auditLogService');
+const { purgeTickets } = require('../services/ticketPurge');
 
 // Réglages réservés au SUPERADMIN — déplacés hors de Paramètres > Automatisation (accessible à
 // tout ADMIN) car une mauvaise valeur ici peut casser la synchro GLPI/email, envoyer des emails
@@ -105,10 +106,35 @@ router.patch(
 );
 
 // État de santé de chaque tâche automatique planifiée (sync GLPI, emails, relances...) — voir
-// services/schedulerHealth.js. Permet de voir une panne avant qu'un utilisateur s'en plaigne.
+// services/schedulerHealth.js. Permet de voir une panne avant qu'un utilisateur s'en plaine.
 router.get('/scheduler-health', async (req, res) => {
   const health = await prisma.schedulerHealth.findMany({ orderBy: { name: 'asc' } });
   return res.json(health);
+});
+
+// Purge complète de la base de tickets — remise à zéro de la "session tickets" en conservant
+// les référentiels importés depuis GLPI (équipes, catégories, lieux, users, assets) et les
+// données indépendantes (connaissances, boîte mail, réglages). La synchro tickets GLPI est
+// automatiquement désactivée si elle est active, sinon les tickets encore présents dans GLPI
+// seraient ré-importés dès le cycle suivant. Réservé au SUPERADMIN (router.use(requireSuperAdmin)).
+router.post('/purge-tickets', async (req, res) => {
+  const settings = await getOrCreateSettings();
+  const syncActive = !settings.autonomousMode && settings.glpiTicketsSyncIntervalSeconds > 0;
+  if (syncActive) {
+    await prisma.systemSettings.update({ where: { id: 1 }, data: { glpiTicketsSyncIntervalSeconds: 0 } });
+  }
+
+  const result = await purgeTickets();
+
+  auditLog('TICKETS_PURGED', {
+    actor: req.user,
+    targetType: 'Ticket',
+    targetId: null,
+    targetLabel: 'Purge complète des tickets',
+    metadata: { ticketsDeleted: result.ticketsDeleted, glpiTicketSyncDisabled: syncActive },
+  }).catch(() => {});
+
+  return res.json({ ...result, glpiTicketSyncDisabled: syncActive });
 });
 
 module.exports = router;
