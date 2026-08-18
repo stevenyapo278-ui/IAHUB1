@@ -1394,11 +1394,11 @@ export default function TicketDetail() {
                 <div className="flex gap-2 pt-2">
                   <button
                     onClick={handleApprove}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold shadow-md cursor-pointer transition-all ${
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold shadow-md cursor-pointer transition-all ${
                       ticket.approvalStatus === 'APPROVED' && !ticket.glpiTicketId
                         ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 shadow-amber-500/20 hover:brightness-110'
                         : 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-emerald-500/20 hover:brightness-110'
-                    }"
+                    }`}
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
                     {!autonomousMode && ticket.approvalStatus === 'APPROVED' && !ticket.glpiTicketId ? 'Réessayer synchro GLPI' : 'Approuver'}

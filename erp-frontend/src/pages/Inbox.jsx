@@ -14,7 +14,7 @@ import {
   Inbox as InboxIcon, MailOpen, RefreshCw, Clock, CheckCircle2, XCircle, Ban,
   Paperclip, Search, X, FlaskConical, Bot, ArrowUpRight, Reply, ChevronDown,
   ChevronRight, Flame, AlertTriangle, ArrowDownWideNarrow, Rows3, Rows4,
-  CircleDot, Mail, CheckCheck, Send, FileText, Tag, Users, Filter
+  CircleDot, Mail, CheckCheck, Send, FileText, Tag, Users, Filter, Sparkles
 } from 'lucide-react';
 
 const STATUS_LABELS = {
