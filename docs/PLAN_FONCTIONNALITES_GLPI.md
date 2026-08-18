@@ -74,21 +74,21 @@ avec alerte en cas de dépassement.
 **Objectif** : relation parent/enfant explicite avec clôture en cascade.
 
 ### Backend
-- [ ] Réutiliser `TicketLink` (mécanisme existant) en ajoutant les types `PARENT`/`CHILD`
+- [x] Réutiliser `TicketLink` (mécanisme existant) en ajoutant les types `PARENT`/`CHILD`
   (vérifier l'enum des types de lien — sinon l'étendre dans `schema.prisma` + migration)
-- [ ] Règles de clôture : clôturer un parent → proposition de clôture des enfants (et inversement) ;
+- [x] Règles de clôture : clôturer un parent → clôture des enfants (et inversement) ;
   configurable via `SystemSettings` (`closeChildrenWithParent`, défaut `false`)
-- [ ] `GET /tickets/:id` : inclure les sous-tickets liés (`links` déjà présents)
-- [ ] Notification aux participants quand un sous-ticket est créé depuis un parent
+- [x] `GET /tickets/:id` : inclure les sous-tickets liés (`links` déjà présents)
+- [x] Notification aux participants quand un sous-ticket est créé depuis un parent
 
 ### Frontend
-- [ ] `erp-frontend/src/pages/TicketDetail.jsx` : onglet/section « Sous-tickets » :
+- [x] `erp-frontend/src/pages/TicketDetail.jsx` : onglet/section « Sous-tickets » :
   - arborescence visuelle (parent → enfants)
   - bouton « Créer un sous-ticket » : hérite catégorie, équipe, demandeur, priorité du parent
 
 ### Critères d'acceptation
-- [ ] Créer un enfant depuis un parent ; visible dans les deux sens
-- [ ] Clôture en cascade activable/désactivable dans Paramètres → Avancé
+- [x] Créer un enfant depuis un parent ; visible dans les deux sens
+- [x] Clôture en cascade activable/désactivable dans Paramètres → Avancé
 
 ---
 

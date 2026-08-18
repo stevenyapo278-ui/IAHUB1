@@ -17,7 +17,7 @@ const { recordDecision } = require('../services/senderReputation');
 const { applySla, recordFirstResponse } = require('../services/slaService');
 const { escalateTicket } = require('../services/escalationService');
 const { mergeTickets } = require('../services/ticketMergeService');
-const { normalizeLinkType, normalizeLinkEndpoints } = require('../utils/ticketLinks');
+const { normalizeLinkType, normalizeLinkEndpoints, normalizeParentChildType, resolveChildrenIds } = require('../utils/ticketLinks');
 const multer = require('multer');
 
 const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); // 20 Mo max
@@ -657,6 +657,28 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
     emitTicketUpdated(ticket, { status, priority, category, assignedToId });
     notifyRequesterOnStatusChange(id, data.status);
 
+    // Clôture en cascade : si un parent passe à SOLVED/CLOSED et que le réglage
+    // closeChildrenWithParent est actif, clôturer aussi ses sous-tickets ouverts
+    if (data.status && (data.status === 'SOLVED' || data.status === 'CLOSED')) {
+      try {
+        const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+        if (settings?.closeChildrenWithParent) {
+          const childIds = await resolveChildrenIds(prisma, id);
+          if (childIds.length > 0) {
+            await prisma.ticket.updateMany({
+              where: { id: { in: childIds }, status: { notIn: ['SOLVED', 'CLOSED'] } },
+              data: { status: data.status, closedAt: data.status === 'CLOSED' ? new Date() : undefined, solvedAt: data.status === 'SOLVED' ? new Date() : undefined },
+            });
+            for (const childId of childIds) {
+              await logEvent(childId, 'STATUS_CHANGED', req.user.email || 'SYSTEM', { oldStatus: before.status, newStatus: data.status, action: 'Clôture en cascade du parent' });
+            }
+          }
+        }
+      } catch (err) {
+        console.error(`[ticket.routes] Clôture en cascade échouée (parent ${id}):`, err.message);
+      }
+    }
+
     return res.json(ticket);
   } catch (err) {
     if (err.code === 'P2025') return res.status(404).json({ error: 'Ticket introuvable' });
@@ -1045,7 +1067,7 @@ router.post('/:id/links', requirePermission('tickets.assign', ['ADMIN', 'TECHNIC
   if (!target || target === ticketId) {
     return res.status(400).json({ error: 'Ticket cible invalide' });
   }
-  const linkType = normalizeLinkType(type);
+  const rawType = normalizeLinkType(type);
 
   const [ticket, targetTicket] = await Promise.all([
     prisma.ticket.findUnique({ where: { id: ticketId }, select: { id: true } }),
@@ -1055,6 +1077,10 @@ router.post('/:id/links', requirePermission('tickets.assign', ['ADMIN', 'TECHNIC
 
   // Liens symétriques : on mémorise toujours (idA < idB) pour éviter les doublons inversés
   const { idA, idB } = normalizeLinkEndpoints(ticketId, target);
+  // Pour PARENT/CHILD la direction compte : le type stocké est exprimé du point de vue de idA
+  const linkType = rawType === 'PARENT' || rawType === 'CHILD'
+    ? normalizeParentChildType(ticketId, target, rawType)
+    : rawType;
 
   const link = await prisma.ticketLink.upsert({
     where: { ticketAId_ticketBId_type: { ticketAId: idA, ticketBId: idB, type: linkType } },
@@ -1078,6 +1104,58 @@ router.delete('/:id/links/:linkId', requirePermission('tickets.assign', ['ADMIN'
   await logEvent(link.ticketBId, 'UNLINKED', req.user.email || 'SYSTEM', { targetTicketId: link.ticketAId });
 
   return res.json({ ok: true });
+});
+
+// ── Sous-tickets (parent/enfant) ─────────────────────────────────────────
+// Crée un ticket enfant depuis un parent : hérite catégorie, équipe, demandeur,
+// priorité, lieu, observateurs par défaut, puis établit le lien PARENT→CHILD.
+router.post('/:id/children', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+  const parentId = Number(req.params.id);
+  const { title, content, priority } = req.body;
+  if (!title || !title.trim()) return res.status(400).json({ error: 'Le titre est requis' });
+
+  const parent = await prisma.ticket.findUnique({
+    where: { id: parentId },
+    include: { team: { include: { defaultObservers: true } } },
+  });
+  if (!parent) return res.status(404).json({ error: 'Ticket parent introuvable' });
+
+  // Héritage : catégorie, équipe, demandeur, priorité, lieu, type du parent
+  const inheritedPriority = priority || parent.priority;
+  const observerIds = (parent.team?.defaultObservers || []).map((u) => u.id);
+
+  const child = await prisma.ticket.create({
+    data: {
+      title: title.trim(),
+      content: content || '',
+      type: parent.type,
+      category: parent.category,
+      priority: inheritedPriority,
+      urgency: parent.urgency,
+      impact: parent.impact,
+      source: 'PORTAL',
+      status: 'NEW',
+      teamId: parent.teamId,
+      assignedToId: parent.assignedToId || null,
+      requesterId: parent.requesterId || null,
+      glpiLocationId: parent.glpiLocationId,
+      glpiLocationName: parent.glpiLocationName,
+      ...(observerIds.length > 0 ? { observers: { connect: observerIds.map((userId) => ({ id: userId })) } } : {}),
+    },
+  });
+
+  // Lien hiérarchique PARENT → CHILD (direction préservée quel que soit l'ordre des ids)
+  const { idA, idB } = normalizeLinkEndpoints(parentId, child.id);
+  const linkType = normalizeParentChildType(parentId, child.id, 'PARENT');
+  await prisma.ticketLink.create({
+    data: { ticketAId: idA, ticketBId: idB, type: linkType, createdById: req.user.sub },
+  }).catch(() => {});
+
+  await logEvent(parentId, 'LINKED', req.user.email || 'SYSTEM', { targetTicketId: child.id, linkType: 'PARENT' });
+  await logEvent(child.id, 'LINKED', req.user.email || 'SYSTEM', { targetTicketId: parentId, linkType: 'CHILD' });
+
+  emitTicketCreated(child);
+  return res.status(201).json(child);
 });
 
 // ── Fusion de tickets sources dans le ticket courant ────────────────────

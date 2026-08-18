@@ -2,10 +2,11 @@ const {
   LINK_TYPES,
   normalizeLinkType,
   normalizeLinkEndpoints,
+  normalizeParentChildType,
 } = require('./ticketLinks');
 
 describe('normalizeLinkType — type de lien', () => {
-  it('garde les 4 types valides', () => {
+  it('garde les 6 types valides (dont PARENT/CHILD)', () => {
     for (const t of LINK_TYPES) {
       expect(normalizeLinkType(t)).toBe(t);
     }
@@ -43,5 +44,19 @@ describe('normalizeLinkEndpoints — ordre canonique des extrémités', () => {
     expect(idB).toBe(42);
     expect(reversed).toBe(true);
     expect(normalizeLinkEndpoints(7, 42).reversed).toBe(false);
+  });
+});
+
+describe('normalizeParentChildType — direction du lien hiérarchique', () => {
+  it('PARENT sans inversion : idA = le ticket courant est le parent', () => {
+    expect(normalizeParentChildType(3, 9, 'PARENT')).toBe('PARENT');
+    expect(normalizeParentChildType(3, 9, 'CHILD')).toBe('CHILD');
+  });
+
+  it('inverse le type quand le ticket courant a l\'id le plus grand', () => {
+    // ticket 9 est le parent du ticket 3 → stocké (3, 9, CHILD) : idA (3) est l'enfant
+    expect(normalizeParentChildType(9, 3, 'PARENT')).toBe('CHILD');
+    // ticket 9 est l'enfant du ticket 3 → stocké (3, 9, PARENT) : idA (3) est le parent
+    expect(normalizeParentChildType(9, 3, 'CHILD')).toBe('PARENT');
   });
 });

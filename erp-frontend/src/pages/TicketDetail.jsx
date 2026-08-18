@@ -15,7 +15,7 @@ import {
   Trash2, Paperclip, MessageSquare, Sparkles, Shield, MapPin,
   RefreshCw, Mail, FileText, Check, X, Send, ChevronRight,
   Flame, Radio, Info, ArrowDown, UserCheck, HelpCircle, Layers, History,
-  TrendingUp, Lock, Link2, Merge, Plus
+  TrendingUp, Lock, Link2, Merge, Plus, GitBranch
 } from 'lucide-react';
 import {
   STATUS_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS,
@@ -56,6 +56,9 @@ export default function TicketDetail() {
 
   // Tickets liés + fusion
   const [linkModalOpen, setLinkModalOpen] = useState(false);
+  const [childModalOpen, setChildModalOpen] = useState(false);
+  const [childForm, setChildForm] = useState({ title: '', content: '', priority: 'P3' });
+  const [creatingChild, setCreatingChild] = useState(false);
   const [linkSearch, setLinkSearch] = useState('');
   const [linkType, setLinkType] = useState('RELATED');
   const [linkResults, setLinkResults] = useState([]);
@@ -305,6 +308,18 @@ export default function TicketDetail() {
     ...(ticket?.linksB || []).map((l) => ({ ...l, otherTicket: l.ticketA })),
   ];
 
+  // Sous-tickets (liens PARENT/CHILD) : déduit le sens réel car le lien est stocké
+  // avec idA < idB mais le type est exprimé du point de vue de idA (voir ticketLinks.js).
+  const subTickets = linkedTickets
+    .filter((l) => l.type === 'PARENT' || l.type === 'CHILD')
+    .map((l) => {
+      const inLinksA = (ticket.linksA || []).some((la) => la.id === l.id);
+      const childIsOther = l.type === 'PARENT' ? inLinksA : !inLinksA;
+      return { ...l, isParent: !childIsOther, isChild: childIsOther };
+    });
+  const parentTicket = subTickets.find((s) => s.isParent)?.otherTicket || null;
+  const children = subTickets.filter((s) => s.isChild);
+
   async function searchLinkableTickets(q) {
     if (!q.trim()) { setLinkResults([]); return; }
     setLinkLoading(true);
@@ -324,6 +339,22 @@ export default function TicketDetail() {
       load();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Échec de la liaison');
+    }
+  }
+
+  async function createChild(e) {
+    e.preventDefault();
+    setCreatingChild(true);
+    try {
+      await api.post(`/tickets/${id}/children`, childForm);
+      toast.success('Sous-ticket créé');
+      setChildModalOpen(false);
+      setChildForm({ title: '', content: '', priority: 'P3' });
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Échec de la création du sous-ticket');
+    } finally {
+      setCreatingChild(false);
     }
   }
 
@@ -775,6 +806,99 @@ export default function TicketDetail() {
                     )}
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+
+          {/* Sous-tickets (parent/enfant) */}
+          <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm">
+            <div className="flex items-center justify-between gap-3 pb-3 border-b border-outline-variant/20 mb-4">
+              <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
+                <GitBranch className="w-4 h-4 text-primary" />
+                Sous-tickets
+                {(children.length > 0 || parentTicket) && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                    {children.length}
+                  </span>
+                )}
+              </h3>
+              {canAssign && (
+                <button
+                  onClick={() => setChildModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-[11px] font-bold hover:opacity-90 transition-opacity cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Créer un sous-ticket
+                </button>
+              )}
+            </div>
+
+            {!parentTicket && children.length === 0 ? (
+              <p className="text-xs text-on-surface-variant/70 italic py-2">
+                Aucun sous-ticket. Créez des sous-tickets pour découper un incident complexe en sous-tâches.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {parentTicket && (
+                  <div className="flex items-center gap-3 p-3 rounded-xl border border-indigo-500/25 bg-indigo-500/5">
+                    <GitBranch className="w-3.5 h-3.5 text-indigo-500 shrink-0 rotate-180" />
+                    <div className="flex-1 min-w-0">
+                      <Link
+                        to={`/tickets/${parentTicket.id}`}
+                        className="text-xs font-bold text-on-surface hover:text-primary transition-colors line-clamp-1"
+                      >
+                        #{parentTicket.id} — {parentTicket.title}
+                      </Link>
+                      <div className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mt-0.5">
+                        Ticket parent
+                      </div>
+                    </div>
+                    <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
+                      parentTicket.status === 'SOLVED' || parentTicket.status === 'CLOSED'
+                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                        : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                    }`}>
+                      {parentTicket.status}
+                    </span>
+                  </div>
+                )}
+
+                {children.length > 0 && (
+                  <div className="border-l-2 border-outline-variant/40 ml-4 pl-4 space-y-2">
+                    {children.map((c) => (
+                      <div key={c.id} className="flex items-center gap-3 p-3 rounded-xl border border-outline-variant/30 bg-surface-container-low/40 hover:border-primary/40 transition-colors">
+                        <GitBranch className="w-3.5 h-3.5 text-on-surface-variant shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <Link
+                            to={`/tickets/${c.otherTicket.id}`}
+                            className="text-xs font-bold text-on-surface hover:text-primary transition-colors line-clamp-1"
+                          >
+                            #{c.otherTicket.id} — {c.otherTicket.title}
+                          </Link>
+                          <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mt-0.5">
+                            Sous-ticket
+                          </div>
+                        </div>
+                        <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
+                          c.otherTicket.status === 'SOLVED' || c.otherTicket.status === 'CLOSED'
+                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                            : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                        }`}>
+                          {c.otherTicket.status}
+                        </span>
+                        {canAssign && (
+                          <button
+                            onClick={() => removeLink(c)}
+                            className="p-1.5 rounded-lg text-on-surface-variant hover:text-error hover:bg-error/5 transition-colors cursor-pointer"
+                            title="Retirer le lien parent/enfant"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1644,6 +1768,8 @@ export default function TicketDetail() {
               <option value="DUPLICATE_OF">Doublon de ce ticket</option>
               <option value="BLOCKS">Bloque ce ticket</option>
               <option value="BLOCKED_BY">Bloqué par ce ticket</option>
+              <option value="PARENT">Parent de ce ticket (ce ticket devient enfant)</option>
+              <option value="CHILD">Enfant de ce ticket (sous-ticket)</option>
             </select>
 
             <div className="relative">
@@ -1676,6 +1802,87 @@ export default function TicketDetail() {
                 </button>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal : Créer un sous-ticket */}
+      {childModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
+                <GitBranch className="w-4 h-4 text-primary" />
+                Créer un sous-ticket de #{id}
+              </h3>
+              <button onClick={() => setChildModalOpen(false)} className="p-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container transition-colors cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-[11px] text-on-surface-variant leading-relaxed border-b border-outline-variant/20 pb-3">
+              Le sous-ticket hérite de la <b>catégorie</b>, de l'<b>équipe</b>, du <b>demandeur</b>, de la
+              <b> priorité</b> et du <b>lieu</b> de ce ticket. {ticket.priority && <>Priorité actuelle : <b>{ticket.priority}</b>.</>}
+            </p>
+
+            <form onSubmit={createChild} className="space-y-4">
+              <div>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface-variant mb-1">
+                  Titre *
+                </label>
+                <input
+                  type="text"
+                  value={childForm.title}
+                  onChange={(e) => setChildForm({ ...childForm, title: e.target.value })}
+                  required
+                  placeholder="Ex. : Remplacer l'écran de l'utilisateur"
+                  className="w-full px-3 py-2 rounded-xl border border-outline-variant/60 bg-surface text-on-surface text-xs font-semibold focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface-variant mb-1">
+                  Description
+                </label>
+                <textarea
+                  value={childForm.content}
+                  onChange={(e) => setChildForm({ ...childForm, content: e.target.value })}
+                  rows={3}
+                  placeholder="Détails de la sous-tâche..."
+                  className="w-full px-3 py-2 rounded-xl border border-outline-variant/60 bg-surface text-on-surface text-xs font-semibold focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none resize-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface-variant mb-1">
+                  Priorité
+                </label>
+                <select
+                  value={childForm.priority}
+                  onChange={(e) => setChildForm({ ...childForm, priority: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl border border-outline-variant/60 bg-surface text-on-surface text-xs font-semibold cursor-pointer"
+                >
+                  {PRIORITY_OPTIONS.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setChildModalOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-outline-variant/60 text-on-surface-variant text-xs font-bold hover:bg-surface-container transition-colors cursor-pointer"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingChild || !childForm.title.trim()}
+                  className="px-4 py-2 rounded-xl bg-primary text-on-primary text-xs font-bold hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                >
+                  <GitBranch className="w-3.5 h-3.5" />
+                  {creatingChild ? 'Création…' : 'Créer le sous-ticket'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
