@@ -134,19 +134,19 @@ export default function TemplatesTab() {
             <label className="flex flex-col gap-1">
               <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Type</span>
               <select className={inputCls} value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-                {TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+                {TYPE_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
               </select>
             </label>
             <label className="flex flex-col gap-1">
               <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Urgence</span>
               <select className={inputCls} value={form.urgency} onChange={(e) => setForm({ ...form, urgency: e.target.value })}>
-                {URGENCY_IMPACT_OPTIONS.map((u) => <option key={u} value={u}>{u}</option>)}
+                {URGENCY_IMPACT_OPTIONS.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
               </select>
             </label>
             <label className="flex flex-col gap-1">
               <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Impact</span>
               <select className={inputCls} value={form.impact} onChange={(e) => setForm({ ...form, impact: e.target.value })}>
-                {URGENCY_IMPACT_OPTIONS.map((i) => <option key={i} value={i}>{i}</option>)}
+                {URGENCY_IMPACT_OPTIONS.map((i) => <option key={i.value} value={i.value}>{i.label}</option>)}
               </select>
             </label>
           </div>
