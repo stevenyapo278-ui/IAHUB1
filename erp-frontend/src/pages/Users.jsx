@@ -33,6 +33,15 @@ function assignableRoles(actorRole) {
 
 const emptyForm = { email: '', fullName: '', password: '', role: 'REQUESTER', teamId: '' };
 
+function HighlightText({ text, query }) {
+  if (!query || !text) return <>{text}</>;
+  const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+  const parts = String(text).split(regex);
+  return <>{parts.map((part, i) =>
+    regex.test(part) ? <mark key={i} className="bg-amber-300/40 text-on-surface rounded-sm px-0.5">{part}</mark> : part
+  )}</>;
+}
+
 function initials(name) {
   if (!name) return '?';
   return name.split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase();
@@ -118,6 +127,7 @@ export default function Users() {
 
   const [roleFilter, setRoleFilter] = useFilterParam('role');
   const [teamFilter, setTeamFilter] = useFilterParam('teamId');
+  const [statusFilter, setStatusFilter] = useFilterParam('status');
   const [page, setPage] = useState(1);
   const [limit] = useState(25);
   const [total, setTotal] = useState(0);
@@ -140,6 +150,8 @@ export default function Users() {
     if (searchQuery?.trim()) params.set('search', searchQuery.trim());
     if (roleFilter) params.set('role', roleFilter);
     if (teamFilter) params.set('teamId', teamFilter);
+    if (statusFilter === 'active') params.set('isActive', 'true');
+    else if (statusFilter === 'inactive') params.set('isActive', 'false');
     Promise.all([api.get(`/users?${params}`), api.get('/teams'), api.get('/permission-groups')])
       .then(([uRes, tRes, gRes]) => {
         if (reqId !== loadReqIdRef.current) return;
@@ -159,7 +171,7 @@ export default function Users() {
       .catch(err => { if (reqId === loadReqIdRef.current) setError(err.response?.data?.error || 'Erreur de chargement'); })
       .finally(() => { if (reqId === loadReqIdRef.current) setLoading(false); });
   }
-  useEffect(() => { load(); }, [page, debouncedSearch, roleFilter, teamFilter]);
+  useEffect(() => { load(); }, [page, debouncedSearch, roleFilter, teamFilter, statusFilter]);
 
   function toggleSelect(id) { setSelectedIds(ids => ids.includes(id) ? ids.filter(i => i !== id) : [...ids, id]); }
   function toggleSelectAll() { setSelectedIds(ids => ids.length === users.length ? [] : users.map(u => u.id)); }
@@ -386,7 +398,7 @@ export default function Users() {
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-on-surface-variant/60" />
           <input
             type="text"
-            placeholder="Rechercher par nom, email, ID GLPI..."
+            placeholder="Rechercher par nom, email, équipe, ID GLPI..."
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             className="w-full bg-surface border border-outline-variant/40 rounded-xl pl-10 pr-9 py-2 text-xs font-medium text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm"
@@ -432,8 +444,67 @@ export default function Users() {
               <option key={t.id} value={t.id}>{t.name}</option>
             ))}
           </select>
+
+          {/* Status filter pills */}
+          <div className="flex items-center gap-1 bg-surface border border-outline-variant/30 rounded-xl p-1">
+            {[{ v: '', l: 'Tous' }, { v: 'active', l: 'Actifs' }, { v: 'inactive', l: 'Inactifs' }].map(({ v, l }) => (
+              <button
+                key={v}
+                onClick={() => { setStatusFilter(v); setPage(1); }}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                  statusFilter === v
+                    ? v === 'active' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 shadow-xs'
+                      : v === 'inactive' ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/25 shadow-xs'
+                      : 'bg-blue-600 text-white shadow-xs font-bold'
+                    : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'
+                }`}
+              >
+                {l}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
+
+      {/* ── Active filter chips ──────────────────────────────────────── */}
+      {(searchQuery || roleFilter || teamFilter || statusFilter) && (
+        <div className="px-4 sm:px-6 lg:px-8 py-2 bg-surface-container-low/20 border-b border-outline-variant/10 flex items-center gap-2 flex-wrap">
+          <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider shrink-0">Filtres :</span>
+          {searchQuery && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary/10 text-primary text-[11px] font-semibold border border-primary/20">
+              🔍 « {searchQuery} »
+              <button onClick={() => { setSearchInput(''); setSearchQuery(''); setPage(1); }} className="p-0.5 rounded-full hover:bg-primary/20 transition-colors"><X className="w-3 h-3" /></button>
+            </span>
+          )}
+          {roleFilter && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 text-[11px] font-semibold border border-purple-500/20">
+              {ROLE_CONFIG[roleFilter]?.label || roleFilter}
+              <button onClick={() => { setRoleFilter(''); setPage(1); }} className="p-0.5 rounded-full hover:bg-purple-500/20 transition-colors"><X className="w-3 h-3" /></button>
+            </span>
+          )}
+          {teamFilter && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-400 text-[11px] font-semibold border border-sky-500/20">
+              {teamFilter === 'null' ? 'Sans équipe' : teams.find(t => String(t.id) === teamFilter)?.name || `Équipe #${teamFilter}`}
+              <button onClick={() => { setTeamFilter(''); setPage(1); }} className="p-0.5 rounded-full hover:bg-sky-500/20 transition-colors"><X className="w-3 h-3" /></button>
+            </span>
+          )}
+          {statusFilter && (
+            <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
+              statusFilter === 'active' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+              : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+            }`}>
+              {statusFilter === 'active' ? 'Actifs' : 'Inactifs'}
+              <button onClick={() => { setStatusFilter(''); setPage(1); }} className="p-0.5 rounded-full hover:bg-white/20 transition-colors"><X className="w-3 h-3" /></button>
+            </span>
+          )}
+          <button
+            onClick={() => { setSearchInput(''); setSearchQuery(''); setRoleFilter(''); setTeamFilter(''); setStatusFilter(''); setPage(1); }}
+            className="ml-auto text-[10px] font-bold text-on-surface-variant hover:text-red-500 transition-colors flex items-center gap-1"
+          >
+            <RotateCcw className="w-3 h-3" /> Tout effacer
+          </button>
+        </div>
+      )}
 
       {/* ── Bulk action bar ───────────────────────────────────────────────── */}
       <AnimatePresence>
@@ -564,8 +635,8 @@ export default function Users() {
                             <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-surface-container-lowest ${u.isActive ? 'bg-emerald-500' : 'bg-zinc-400'}`} />
                           </div>
                           <div className="min-w-0">
-                            <p className="text-xs font-semibold text-on-surface truncate">{u.fullName}</p>
-                            <p className="text-[10px] text-on-surface-variant truncate font-mono">{u.email}</p>
+                            <p className="text-xs font-semibold text-on-surface truncate"><HighlightText text={u.fullName} query={searchQuery} /></p>
+                            <p className="text-[10px] text-on-surface-variant truncate font-mono"><HighlightText text={u.email} query={searchQuery} /></p>
                           </div>
                         </div>
                       )}

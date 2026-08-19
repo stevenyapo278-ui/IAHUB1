@@ -83,13 +83,14 @@ const userSelect = {
 };
 
 router.get('/', async (req, res) => {
-  const { search, limit, page, role, teamId, all } = req.query;
+  const { search, limit, page, role, teamId, isActive, all } = req.query;
   const where = {};
   if (search && search.trim()) {
     const trimmed = search.trim();
     const searchConditions = [
       { fullName: { contains: trimmed, mode: 'insensitive' } },
       { email: { contains: trimmed, mode: 'insensitive' } },
+      { team: { name: { contains: trimmed, mode: 'insensitive' } } },
     ];
     const matchGlpi = trimmed.match(/#?(\d+)/);
     if (matchGlpi) {
@@ -99,6 +100,8 @@ router.get('/', async (req, res) => {
   }
   if (role) where.role = role;
   if (teamId) where.teamId = teamId === 'null' ? null : Number(teamId);
+  if (isActive === 'true') where.isActive = true;
+  else if (isActive === 'false') where.isActive = false;
   // Filtre par liste d'IDs explicite (ex: résoudre les libellés des utilisateurs déjà sélectionnés
   // dans un composant distant sans recharger toute la liste) — prioritaire sur la pagination.
   if (req.query.ids) {
