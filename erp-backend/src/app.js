@@ -80,6 +80,10 @@ app.use(helmet({
   // COOP same-origin génère des warnings dans la console sur les origines HTTP non sécurisées.
   // On le désactive pour éviter la confusion en environnement local/IP.
   crossOriginOpenerPolicy: false,
+
+  // Désactive Origin-Agent-Cluster pour éviter le warning console "site-keyed vs origin-keyed"
+  // sur les origines HTTP en accès direct IP:port.
+  originAgentCluster: false,
 }));
 const corsOrigin = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()) : '*';
 app.use(cors({ origin: corsOrigin }));
