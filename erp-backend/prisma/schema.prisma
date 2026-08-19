@@ -804,6 +804,10 @@ model TicketMessage {
   timestamp         DateTime         @default(now())
   createdAt         DateTime         @default(now())
 
+  // Résumé IA de l'email (1-2 phrases) + statut du ticket au moment de la réception
+  summary           String?          @db.Text
+  ticketStatusAtTime String?
+
   @@index([ticketId])
   @@index([conversationId])
 }

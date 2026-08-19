@@ -5,6 +5,7 @@ const prisma = require('../prismaClient');
 const { graphFetch } = require('../utils/graphClient');
 const { getSystemSettings, resolveFrontendUrl } = require('./systemSettings');
 const { logEvent } = require('./ticketEvent');
+const { generateEmailSummary } = require('./emailSummaryGenerator');
 
 const LOGO_CONTENT_ID = 'logo-signature';
 
@@ -87,6 +88,9 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
     await sendEmailViaSmtp({ to, cc, subject, bodyHtml, account });
     if (saveAsMessage && ticketId) {
       const sender = account.emailAddress || account.username;
+      // Récupérer le statut actuel du ticket pour le suivi
+      const currentTicket = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { status: true } }).catch(() => null);
+      const plainBody = bodyHtml.replace(/<[^>]+>/g, ' ');
       await prisma.ticketMessage.create({
         data: {
           ticketId,
@@ -95,11 +99,18 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
           recipients: Array.isArray(to) ? to : [to],
           ccRecipients: cc || [],
           subject,
-          body: bodyHtml.replace(/<[^>]+>/g, ' '),
+          body: plainBody,
           bodyHtml,
           timestamp: new Date(),
+          ticketStatusAtTime: currentTicket?.status || null,
         },
       });
+      // Générer le résumé IA en arrière-plan
+      generateEmailSummary({ body: plainBody, direction: 'OUTBOUND' })
+        .then((summary) => {
+          if (summary) return prisma.ticketMessage.updateMany({ where: { ticketId, direction: 'OUTBOUND', body: plainBody }, data: { summary } });
+        })
+        .catch(() => {});
       await logEvent(ticketId, 'EMAIL_SENT', 'SYSTEM', { to, cc, subject, method: 'SMTP' });
     }
     return;
@@ -141,6 +152,9 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
   await graphFetch(account, `/me/messages/${draft.id}/send`, { method: 'POST' });
 
   if (saveAsMessage && ticketId) {
+    // Récupérer le statut actuel du ticket pour le suivi
+    const currentTicket = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { status: true } }).catch(() => null);
+    const plainBody = bodyHtml.replace(/<[^>]+>/g, ' ');
     await prisma.ticketMessage.create({
       data: {
         ticketId,
@@ -149,15 +163,22 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
         recipients: Array.isArray(to) ? to : [to],
         ccRecipients: cc || [],
         subject,
-        body: bodyHtml.replace(/<[^>]+>/g, ' '),
+        body: plainBody,
         bodyHtml,
         outlookMessageId: draft.id,
         internetMessageId: draft.internetMessageId,
         inReplyTo,
         conversationId,
         timestamp: new Date(),
+        ticketStatusAtTime: currentTicket?.status || null,
       },
     });
+    // Générer le résumé IA en arrière-plan
+    generateEmailSummary({ body: plainBody, direction: 'OUTBOUND' })
+      .then((summary) => {
+        if (summary) return prisma.ticketMessage.updateMany({ where: { ticketId, direction: 'OUTBOUND', body: plainBody }, data: { summary } });
+      })
+      .catch(() => {});
 
     await logEvent(ticketId, 'EMAIL_SENT', 'SYSTEM', { to, cc, subject, method: 'OUTLOOK' });
   }

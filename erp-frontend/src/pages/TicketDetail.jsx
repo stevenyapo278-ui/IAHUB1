@@ -16,7 +16,8 @@ import {
   Trash2, Paperclip, MessageSquare, Sparkles, Shield, MapPin,
   RefreshCw, Mail, FileText, Check, X, Send, ChevronRight,
   Flame, Radio, Info, ArrowDown, UserCheck, HelpCircle, Layers, History,
-  TrendingUp, Lock, Link2, Merge, Plus, GitBranch, Timer, Play, Square, ListChecks, Boxes
+  TrendingUp, Lock, Link2, Merge, Plus, GitBranch, Timer, Play, Square, ListChecks, Boxes,
+  ChevronDown, Inbox
 } from 'lucide-react';
 import {
   STATUS_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS,
@@ -98,6 +99,7 @@ export default function TicketDetail() {
   const [manualGlpiId, setManualGlpiId] = useState('');
   const [linking, setLinking] = useState(false);
   const [escalating, setEscalating] = useState(false);
+  const [expandedEmails, setExpandedEmails] = useState(new Set());
 
   const handleEscalate = async () => {
     setEscalating(true);
@@ -1108,30 +1110,166 @@ export default function TicketDetail() {
                       </div>
                     </div>
                   ) : (
-                    <div key={`m-${item.data.id}`} className="p-4 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest flex gap-3">
-                      <div className="w-9 h-9 rounded-full border border-outline-variant/50 bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 shadow-sm">
-                        <Mail className="w-4 h-4" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
-                          <span className="text-xs font-bold text-on-surface">
-                            {item.data.direction === 'INBOUND' ? `Email de ${item.data.sender}` : `Email envoyé à ${item.data.recipients?.join(', ')}`}
-                          </span>
-                          <time className="text-[10px] font-mono text-on-surface-variant bg-surface-container border border-outline-variant/30 px-2 py-0.5 rounded-full">
-                            {new Date(item.data.timestamp).toLocaleString('fr-FR')}
-                          </time>
+                    (() => {
+                      const emailExpanded = expandedEmails.has(item.data.id);
+                      const toggleEmail = () => setExpandedEmails((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(item.data.id)) next.delete(item.data.id); else next.add(item.data.id);
+                        return next;
+                      });
+                      const ts = new Date(item.data.timestamp);
+                      const dateStr = ts.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                      const timeStr = ts.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+                      const summaryText = item.data.summary || (
+                        (item.data.body || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 120) +
+                        ((item.data.body || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().length > 120 ? '…' : '')
+                      ) || item.data.subject;
+                      return (
+                        <div
+                          key={`m-${item.data.id}`}
+                          className={`rounded-2xl border transition-all duration-200 ${
+                            emailExpanded
+                              ? 'border-outline-variant/50 bg-surface-container-lowest shadow-md'
+                              : 'border-outline-variant/30 bg-surface-container-lowest hover:border-outline-variant/50 hover:shadow-sm'
+                          }`}
+                        >
+                          {/* Header compact : toujours visible, cliquable pour déplier/replier */}
+                          <button
+                            type="button"
+                            onClick={toggleEmail}
+                            className="w-full flex items-center gap-3 p-3 text-left cursor-pointer select-none group/email"
+                          >
+                            {/* Icone direction */}
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-sm border ${
+                              item.data.direction === 'INBOUND'
+                                ? 'border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                                : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                            }`}>
+                              {item.data.direction === 'INBOUND' ? <Inbox className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+                            </div>
+
+                            {/* Titre = résumé tronqué + badge direction */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5 mb-0.5">
+                                <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                                  item.data.direction === 'INBOUND'
+                                    ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                                    : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                                }`}>
+                                  {item.data.direction === 'INBOUND' ? 'Reçu' : 'Envoyé'}
+                                </span>
+                                <span className="text-[10px] text-on-surface-variant/70 font-medium truncate">
+                                  {item.data.direction === 'INBOUND' ? item.data.sender : (item.data.recipients?.[0] || '—')}
+                                </span>
+                              </div>
+                              <p className={`text-xs font-semibold text-on-surface leading-snug ${emailExpanded ? '' : 'line-clamp-1'}`}>
+                                {summaryText}
+                              </p>
+                            </div>
+
+                            {/* Date + heure */}
+                            <div className="flex flex-col items-end shrink-0 gap-0.5">
+                              <time className="text-[10px] font-mono text-on-surface-variant bg-surface-container border border-outline-variant/30 px-2 py-0.5 rounded-full">
+                                {dateStr}
+                              </time>
+                              <span className="text-[10px] font-mono text-on-surface-variant/70">{timeStr}</span>
+                            </div>
+
+                            {/* Chevron expand/collapse */}
+                            <ChevronDown className={`w-4 h-4 text-on-surface-variant/50 transition-transform duration-200 shrink-0 ${emailExpanded ? 'rotate-180' : ''}`} />
+                          </button>
+
+                          {/* Contenu déplié */}
+                          {emailExpanded && (
+                            <div className="px-4 pb-4 pt-0 space-y-3 border-t border-outline-variant/20 mt-0">
+                              {/* Ligne De → À */}
+                              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] pt-3">
+                                <div className="flex items-center gap-1">
+                                  <span className="text-on-surface-variant/70 font-semibold">De :</span>
+                                  <span className="text-on-surface font-bold truncate max-w-[260px]" title={item.data.sender}>{item.data.sender}</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <span className="text-on-surface-variant/70 font-semibold">À :</span>
+                                  <span className="text-on-surface font-bold truncate max-w-[260px]" title={item.data.recipients?.join(', ')}>
+                                    {item.data.recipients?.join(', ') || '—'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Sujet */}
+                              <div className="text-[11px] text-on-surface-variant font-semibold italic flex items-center gap-1.5">
+                                <span className="text-on-surface-variant/50 not-italic">Objet :</span> {item.data.subject}
+                              </div>
+
+                              {/* Résumé IA (texte complet) */}
+                              {(item.data.summary || item.data.body) && (
+                                <div className="bg-blue-500/5 dark:bg-blue-500/8 border border-blue-500/15 rounded-xl px-3 py-2">
+                                  <div className="flex items-center gap-1.5 mb-1">
+                                    <Sparkles className="w-3 h-3 text-blue-500 dark:text-blue-400" />
+                                    <span className="text-[9px] font-black uppercase tracking-wider text-blue-600 dark:text-blue-400">Résumé</span>
+                                  </div>
+                                  <p className="text-[11px] text-on-surface leading-relaxed font-medium">
+                                    {item.data.summary || (
+                                      <span className="text-on-surface-variant italic font-normal">
+                                        {(item.data.body || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 200)}
+                                        {(item.data.body || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().length > 200 ? '…' : ''}
+                                      </span>
+                                    )}
+                                  </p>
+                                </div>
+                              )}
+
+                              {/* Statut du ticket au moment de l'email */}
+                              {item.data.ticketStatusAtTime && (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[9px] text-on-surface-variant/70 font-semibold">Statut du ticket :</span>
+                                  <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
+                                    item.data.ticketStatusAtTime === 'SOLVED' || item.data.ticketStatusAtTime === 'CLOSED'
+                                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                                      : item.data.ticketStatusAtTime === 'NEW'
+                                      ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20'
+                                      : 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20'
+                                  }`}>
+                                    {item.data.ticketStatusAtTime}
+                                  </span>
+                                </div>
+                              )}
+
+                              {/* Contenu HTML complet */}
+                              {(item.data.bodyHtml || item.data.body) && (
+                                <details className="group">
+                                  <summary className="flex items-center gap-1.5 text-[10px] text-on-surface-variant/70 font-semibold cursor-pointer select-none hover:text-on-surface-variant transition-colors">
+                                    <ChevronRight className="w-3 h-3 transition-transform group-open:rotate-90" />
+                                    <span>Voir le contenu complet</span>
+                                  </summary>
+                                  <div className="mt-2 pt-2 border-t border-outline-variant/20">
+                                    {item.data.bodyHtml ? (
+                                      <div
+                                        className="leading-relaxed text-xs text-on-surface [&_img]:max-w-full [&_img]:rounded-lg [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-2 [&_a]:text-blue-600 [&_a]:underline [&_p]:mb-1.5 [&_p]:last:mb-0 [&_h1]:text-sm [&_h1]:font-bold [&_h1]:mt-3 [&_h1]:mb-1.5 [&_h2]:text-xs [&_h2]:font-bold [&_h2]:mt-2.5 [&_h2]:mb-1 [&_h3]:text-xs [&_h3]:font-bold [&_h3]:mt-2 [&_h3]:mb-0.5 [&_div]:mb-1 [&_b]:font-semibold"
+                                        dangerouslySetInnerHTML={{ __html: sanitizeHtml(item.data.bodyHtml) }}
+                                      />
+                                    ) : (
+                                      <div className="text-xs text-on-surface whitespace-pre-wrap leading-relaxed">{item.data.body}</div>
+                                    )}
+                                  </div>
+                                </details>
+                              )}
+
+                              {/* Lien vers la boîte mail */}
+                              <div className="pt-1">
+                                <Link
+                                  to="/inbox"
+                                  className="inline-flex items-center gap-1.5 text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
+                                >
+                                  <Mail className="w-3 h-3" />
+                                  Voir dans la boîte mail
+                                </Link>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        <div className="text-[11px] text-on-surface-variant mb-1 font-semibold italic">{item.data.subject}</div>
-                        {item.data.bodyHtml ? (
-                          <div
-                            className="leading-relaxed text-xs text-on-surface [&_img]:max-w-full [&_img]:rounded-lg [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-2 [&_a]:text-blue-600 [&_a]:underline [&_p]:mb-1.5 [&_p]:last:mb-0 [&_h1]:text-sm [&_h1]:font-bold [&_h1]:mt-3 [&_h1]:mb-1.5 [&_h2]:text-xs [&_h2]:font-bold [&_h2]:mt-2.5 [&_h2]:mb-1 [&_h3]:text-xs [&_h3]:font-bold [&_h3]:mt-2 [&_h3]:mb-0.5 [&_div]:mb-1 [&_b]:font-semibold"
-                            dangerouslySetInnerHTML={{ __html: sanitizeHtml(item.data.bodyHtml) }}
-                          />
-                        ) : (
-                          <div className="text-xs text-on-surface whitespace-pre-wrap leading-relaxed">{item.data.body}</div>
-                        )}
-                      </div>
-                    </div>
+                      );
+                    })()
                   )
                 );
               })()}

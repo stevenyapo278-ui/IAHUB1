@@ -17,6 +17,7 @@ const { emitTicketCreated, emitTicketAssigned } = require('../utils/socket');
 const { tryHandleReminderReply } = require('./draftReplyApproval');
 const { getBreaker } = require('../utils/circuitBreaker');
 const { isLowTrustSender } = require('./senderReputation');
+const { generateEmailSummary } = require('./emailSummaryGenerator');
 
 const MAX_RETRIES = 3;
 const RETRY_DELAYS_MS = [60000, 300000, 900000]; // 1min, 5min, 15min
@@ -131,8 +132,19 @@ async function processMessage(message, account) {
           inReplyTo,
           conversationId,
           timestamp: receivedAt,
+          summary: analysis?.summary || null,
+          ticketStatusAtTime: ticket?.status || null,
         },
       });
+
+      // Générer le résumé IA en arrière-plan si pas encore disponible
+      if (!ticketMsg.summary) {
+        generateEmailSummary({ body: cleanBody, direction: 'INBOUND' })
+          .then((summary) => {
+            if (summary) return prisma.ticketMessage.update({ where: { id: ticketMsg.id }, data: { summary } });
+          })
+          .catch(() => {});
+      }
 
       const { cidMap } = await processIncomingAttachments({
         account, graphMessageId, incomingEmailId: incoming.id,
@@ -310,10 +322,10 @@ async function processMessage(message, account) {
     // Étape 2b : détecter un incident similaire déjà ouvert (même problème, autre site/magasin)
     const similarMatch = await findSimilarOpenTicket({
       subject, body: cleanBody, category: analysis.category,
-    });
-
-    if (similarMatch) {
+    });      if (similarMatch) {
       // Rattacher cet email au ticket similaire existant
+      const similarTicket = await prisma.ticket.findUnique({ where: { id: similarMatch.ticketId }, select: { status: true } });
+      const similarSummary = analysis?.summary || null;
       const ticketMsg = await prisma.ticketMessage.create({
         data: {
           ticketId: similarMatch.ticketId,
@@ -325,8 +337,19 @@ async function processMessage(message, account) {
           outlookMessageId: graphMessageId,
           internetMessageId, inReplyTo, conversationId,
           timestamp: receivedAt,
+          summary: similarSummary,
+          ticketStatusAtTime: similarTicket?.status || null,
         },
       });
+
+      // Générer le résumé IA en arrière-plan si pas encore disponible
+      if (!ticketMsg.summary) {
+        generateEmailSummary({ body: cleanBody, direction: 'INBOUND' })
+          .then((summary) => {
+            if (summary) return prisma.ticketMessage.update({ where: { id: ticketMsg.id }, data: { summary } });
+          })
+          .catch(() => {});
+      }
 
       // Enregistrer le site impacté et détecter une promotion en incident majeur
       const becamesMajor = await attachSiteToTicket(similarMatch.ticketId, fromEmail, fromName);
@@ -465,6 +488,7 @@ async function processMessage(message, account) {
       });
 
       // Étape 5 : enregistrer le message entrant
+      const initialStatus = conversationId ? 'WAITING_FOR_USER' : 'NEW';
       const ticketMsg = await tx.ticketMessage.create({
         data: {
           ticketId: created.erpTicketId,
@@ -476,6 +500,8 @@ async function processMessage(message, account) {
           outlookMessageId: graphMessageId,
           internetMessageId, inReplyTo, conversationId,
           timestamp: receivedAt,
+          summary: analysis?.summary || null,
+          ticketStatusAtTime: initialStatus,
         },
       });
 

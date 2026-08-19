@@ -159,6 +159,15 @@ Rédige un résumé en 2 à 3 phrases maximum, en français, qui met en avant ce
 Réponds UNIQUEMENT avec un objet JSON strict, au format :
 {"insight": "le résumé en 2-3 phrases"}`,
   },
+  summarizeEmail: {
+    label: "Résumé bref d'un email de support",
+    template: `Tu es un agent ITSM. Résumez cet email en 1 à 2 phrases courtes, en français, en capturant l'essentiel du contenu (problème signalé, demande, information).
+
+Email :
+{{body}}
+
+Réponds UNIQUEMENT avec le résumé, sans markdown, sans guillemets, sans objet JSON, sans explication.",
+  },
   generateFollowupReply: {
     label: "Génération d'une réponse de suivi sur un ticket (conversation IA multi-tours)",
     template: `Tu es un agent de support IT qui répond par email à un utilisateur sur un ticket déjà ouvert.
