@@ -26,7 +26,9 @@ async function generateEmailSummary({ body, direction }) {
 
     const prompt = await getPrompt('summarizeEmail', { body: cleanBody });
     const raw = await callProviderWithFallback(providers, prompt);
-    const summary = raw.trim().replace(/^["'"`]|["'"`)$/g, '');
+    const summary = raw.trim()
+      .replace(/^["'`\u201c\u201d]+/, '')
+      .replace(/["'`\u201c\u201d]+$/, '');
     if (summary && summary.length > 5) {
       return summary.substring(0, 500);
     }

@@ -17,7 +17,7 @@ import {
   RefreshCw, Mail, FileText, Check, X, Send, ChevronRight,
   Flame, Radio, Info, ArrowDown, UserCheck, HelpCircle, Layers, History,
   TrendingUp, Lock, Link2, Merge, Plus, GitBranch, Timer, Play, Square, ListChecks, Boxes,
-  ChevronDown, Inbox
+  ChevronDown, Inbox, Pencil, Save
 } from 'lucide-react';
 import {
   STATUS_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS,
@@ -100,6 +100,10 @@ export default function TicketDetail() {
   const [linking, setLinking] = useState(false);
   const [escalating, setEscalating] = useState(false);
   const [expandedEmails, setExpandedEmails] = useState(new Set());
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [editingTitleValue, setEditingTitleValue] = useState('');
+  const [showSaveLocationModal, setShowSaveLocationModal] = useState(false);
+  const [newLocationName, setNewLocationName] = useState('');
 
   const handleEscalate = async () => {
     setEscalating(true);
@@ -132,6 +136,7 @@ export default function TicketDetail() {
   const canAssign = hasPermission(user, 'tickets.assign') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN';
   const canApprove = hasPermission(user, 'tickets.approve') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN';
   const canDelete = hasPermission(user, 'tickets.delete') || user?.role === 'SUPERADMIN';
+  const canEdit = hasPermission(user, 'tickets.edit') || user?.role === 'ADMIN' || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN';
 
   const followupContainerRef = useRef(null);
   const followupBlobUrlsRef = useRef([]);
@@ -245,6 +250,76 @@ export default function TicketDetail() {
       setError(err.response?.data?.error || 'Erreur lors de la mise à jour');
     } finally {
       setSavingField(null);
+    }
+  }
+
+  // Extrait le nom du lieu (partie avant " : ") d'un titre
+  function extractLocationFromTitle(title) {
+    if (!title || !title.includes(' : ')) return null;
+    return title.split(' : ')[0].trim();
+  }
+
+  // Vérifie si un lieu correspond déjà dans la liste
+  function findMatchingLocation(locName) {
+    if (!locName) return null;
+    const lower = locName.toLowerCase();
+    return locations.find(
+      (l) => l.name?.toLowerCase() === lower || l.completename?.toLowerCase() === lower
+    );
+  }
+
+  // Sauvegarder le titre + proposer d'enregistrer le lieu si nouveau
+  async function handleTitleSave() {
+    const newTitle = editingTitleValue.trim();
+    if (!newTitle || newTitle === ticket.title) {
+      setEditingTitle(false);
+      return;
+    }
+    try {
+      setSavingField('title');
+      await api.patch(`/tickets/${id}`, { title: newTitle });
+      toast.success('Titre mis à jour');
+      setEditingTitle(false);
+
+      // Détecter si le lieu a changé
+      const newLocName = extractLocationFromTitle(newTitle);
+      const oldLocName = extractLocationFromTitle(ticket.title);
+      if (newLocName && newLocName !== oldLocName) {
+        const existing = findMatchingLocation(newLocName);
+        if (existing) {
+          // Lieu existant trouvé → l'associer automatiquement
+          if (existing.id !== ticket.glpiLocationId) {
+            await api.patch(`/tickets/${id}`, { locationId: existing.id, title: newTitle });
+            toast.success(`Lieu "${existing.name}" associé au ticket`);
+          }
+        } else {
+          // Nouveau lieu détecté → proposer de l'enregistrer
+          setNewLocationName(newLocName);
+          setShowSaveLocationModal(true);
+        }
+      }
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur lors de la mise à jour du titre');
+    } finally {
+      setSavingField(null);
+    }
+  }
+
+  // Enregistrer le nouveau lieu depuis la modale
+  async function handleSaveNewLocation() {
+    if (!newLocationName.trim()) return;
+    try {
+      const { data: location } = await api.post('/locations', { name: newLocationName.trim() });
+      toast.success(`Lieu "${location.name}" créé et associé au ticket`);
+      // Associer le lieu au ticket
+      await api.patch(`/tickets/${id}`, { locationId: location.id });
+      setShowSaveLocationModal(false);
+      setNewLocationName('');
+      load();
+    } catch (err) {
+      const msg = err.response?.data?.error || err.response?.data?.errors?.[0]?.msg || 'Erreur lors de la création du lieu';
+      toast.error(msg);
     }
   }
 
@@ -651,7 +726,49 @@ export default function TicketDetail() {
                 </span>
               )}
             </div>
-            <h1 className="text-lg font-bold text-on-surface leading-snug line-clamp-1">{ticket.title}</h1>
+            {editingTitle ? (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={editingTitleValue}
+                  onChange={(e) => setEditingTitleValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleTitleSave();
+                    if (e.key === 'Escape') setEditingTitle(false);
+                  }}
+                  autoFocus
+                  className="flex-1 text-lg font-bold text-on-surface bg-surface-container-low border border-primary/40 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+                <button
+                  onClick={handleTitleSave}
+                  disabled={savingField === 'title'}
+                  className="p-2 rounded-xl bg-primary text-on-primary hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+                  title="Enregistrer"
+                >
+                  <Save className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setEditingTitle(false)}
+                  className="p-2 rounded-xl border border-outline-variant/40 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer"
+                  title="Annuler"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 group/title">
+                <h1 className="text-lg font-bold text-on-surface leading-snug line-clamp-1">{ticket.title}</h1>
+                {canEdit && (
+                  <button
+                    onClick={() => { setEditingTitleValue(ticket.title); setEditingTitle(true); }}
+                    className="p-1.5 rounded-lg text-on-surface-variant/40 hover:text-on-surface hover:bg-surface-container transition-all opacity-0 group-hover/title:opacity-100 cursor-pointer"
+                    title="Modifier le titre"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -2383,6 +2500,57 @@ export default function TicketDetail() {
               >
                 <Merge className="w-3.5 h-3.5" />
                 {merging ? 'Fusion…' : `Fusionner (${mergeSelected.length})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modale : enregistrer le nouveau lieu détecté dans le titre */}
+      {showSaveLocationModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-primary" />
+                Nouveau lieu détecté
+              </h3>
+              <button onClick={() => { setShowSaveLocationModal(false); setNewLocationName(''); }} className="p-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container transition-colors cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-on-surface-variant leading-relaxed">
+              Le titre contient le lieu <b className="text-on-surface">« {newLocationName} »</b> qui n'existe pas encore dans la liste des lieux. Voulez-vous l'enregistrer pour l'associer automatiquement aux futurs tickets ?
+            </p>
+
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={newLocationName}
+                onChange={(e) => setNewLocationName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleSaveNewLocation(); }}
+                className="flex-1 px-3 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface text-xs font-semibold focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none"
+                placeholder="Nom du lieu"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => { setShowSaveLocationModal(false); setNewLocationName(''); }}
+                className="px-4 py-2 rounded-xl text-xs font-semibold border border-outline-variant/40 hover:bg-surface-container text-on-surface transition-all cursor-pointer"
+              >
+                Non merci
+              </button>
+              <button
+                type="button"
+                disabled={!newLocationName.trim()}
+                onClick={handleSaveNewLocation}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/20 hover:brightness-110 disabled:opacity-50 transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <MapPin className="w-3.5 h-3.5" />
+                Enregistrer le lieu
               </button>
             </div>
           </div>

@@ -166,7 +166,7 @@ Réponds UNIQUEMENT avec un objet JSON strict, au format :
 Email :
 {{body}}
 
-Réponds UNIQUEMENT avec le résumé, sans markdown, sans guillemets, sans objet JSON, sans explication.",
+Réponds UNIQUEMENT avec le résumé, sans markdown, sans guillemets, sans objet JSON, sans explication.`,
   },
   generateFollowupReply: {
     label: "Génération d'une réponse de suivi sur un ticket (conversation IA multi-tours)",
