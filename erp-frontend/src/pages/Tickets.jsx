@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -27,6 +27,7 @@ import {
   SlidersHorizontal,
   FilterX,
   User,
+  UserX,
   Users,
   MapPin,
   Tag,
@@ -88,6 +89,28 @@ const EMPTY_FORM = {
   requiresApproval: false,
 };
 
+function HighlightText({ text, query }) {
+  if (!query || !text) return <>{text}</>;
+  const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+  const parts = String(text).split(regex);
+  return <>{parts.map((part, i) =>
+    regex.test(part) ? <mark key={i} className="bg-amber-300/40 text-on-surface rounded-sm px-0.5">{part}</mark> : part
+  )}</>;
+}
+
+function timeAgo(dateStr) {
+  if (!dateStr) return '';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'à l\'instant';
+  if (mins < 60) return `il y a ${mins}min`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `il y a ${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `il y a ${days}j`;
+  return new Date(dateStr).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
+}
+
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.04 } },
@@ -109,6 +132,7 @@ export default function Tickets() {
 
   // State principal
   const [tickets, setTickets] = useState([]);
+  const [serverStats, setServerStats] = useState({ open: 0, pending: 0, resolved: 0, p1: 0, p2: 0, ai: 0, unassigned: 0 });
   const [teams, setTeams] = useState([]);
   const [users, setUsers] = useState([]);
   const [locations, setLocations] = useState([]);
@@ -212,6 +236,10 @@ export default function Tickets() {
   });
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
+  const [pageSize, setPageSize] = useState(() => {
+    const s = localStorage.getItem('tickets_page_size');
+    return s ? parseInt(s, 10) : 50;
+  });
   const [searchQuery, setSearchQuery] = useState(() => searchParams.get('search') || '');
   const [debouncedSearch, setDebouncedSearch] = useState(() => searchParams.get('search') || '');
   const debounceRef = useRef(null);
@@ -300,7 +328,7 @@ export default function Tickets() {
       // Changement de filtre/recherche : indicateur discret uniquement
       setRefreshing(true);
     }
-    const params = { page, limit: 50, sortBy, sortOrder };
+    const params = { page, limit: pageSize, sortBy, sortOrder };
     if (filters.status) params.status = filters.status;
     if (filters.priority) params.priority = filters.priority;
     if (filters.source) params.source = filters.source;
@@ -318,6 +346,7 @@ export default function Tickets() {
         setTickets(data.items);
         setTotalPages(data.pages);
         setTotalCount(data.total);
+        if (data.stats) setServerStats(data.stats);
         setSelectedIds([]);
         if (isManualRefresh) toast.success('Tickets rafraîchis');
       })
@@ -330,7 +359,7 @@ export default function Tickets() {
   }
 
   function refreshTicketsSilently() {
-    const params = { page, limit: 50, sortBy, sortOrder };
+    const params = { page, limit: pageSize, sortBy, sortOrder };
     if (filters.status) params.status = filters.status;
     if (filters.priority) params.priority = filters.priority;
     if (filters.source) params.source = filters.source;
@@ -341,15 +370,29 @@ export default function Tickets() {
     if (filters.aiProcessed) params.aiProcessed = filters.aiProcessed;
     if (filters.approvalStatus) params.approvalStatus = filters.approvalStatus;
     if (filters.closeSuggested) params.closeSuggested = filters.closeSuggested;
-    if (debouncedSearch) params.search = debouncedSearch;
-    api.get('/tickets', { params }).then(({ data }) => { setTickets(data.items); setTotalPages(data.pages); setTotalCount(data.total); }).catch(() => {});
+    if (debouncedSearch) params.search = debouncedSearch;        api.get('/tickets', { params }).then(({ data }) => { setTickets(data.items); setTotalPages(data.pages); setTotalCount(data.total); if (data.stats) setServerStats(data.stats); }).catch(() => {});
   }
 
-  useEffect(() => { loadTickets(); }, [filters, page, debouncedSearch, sortBy, sortOrder]);
+  useEffect(() => { loadTickets(); }, [filters, page, pageSize, debouncedSearch, sortBy, sortOrder]);
+  // Auto-refresh intelligent : pause quand l'onglet est caché
   useEffect(() => {
-    const intervalId = setInterval(refreshTicketsSilently, 15000);
+    const intervalId = setInterval(() => {
+      if (document.visibilityState === 'visible') refreshTicketsSilently();
+    }, 15000);
     return () => clearInterval(intervalId);
   }, [filters, debouncedSearch, sortBy, sortOrder]);
+  // Raccourci clavier Ctrl+K pour focaliser la recherche
+  const searchInputRef = useRef(null);
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   function toggleSelect(id) {
     setSelectedIds((ids) => (ids.includes(id) ? ids.filter((i) => i !== id) : [...ids, id]));
@@ -453,52 +496,17 @@ export default function Tickets() {
   }
 
   const [confirmDelete, setConfirmDelete] = useState(null);
-  const [hoveredTicket, setHoveredTicket] = useState(null);
-  const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
-  const hoverTimer = useRef(null);
-  const leaveTimer = useRef(null);
-  const mousePos = useRef({ x: 0, y: 0 });
 
-  const handleMouseMove = useCallback((e) => {
-    mousePos.current = { x: e.clientX, y: e.clientY };
-  }, []);
-
-  const handleRowEnter = useCallback((ticket) => {
-    clearTimeout(leaveTimer.current);
-    const panelW = 340;
-    const panelH = 420;
-    const gap = 14;
-    hoverTimer.current = setTimeout(() => {
-      const { x: mx, y: my } = mousePos.current;
-      setHoveredTicket(ticket);
-      let px = mx + gap;
-      let py = my - 20;
-      if (px + panelW > window.innerWidth - 16) px = mx - panelW - gap;
-      if (px < 16) px = 16;
-      if (py + panelH > window.innerHeight - 16) py = window.innerHeight - panelH - 16;
-      if (py < 16) py = 16;
-      setHoverPos({ x: px, y: py });
-    }, 250);
-  }, []);
-
-  const handleRowLeave = useCallback(() => {
-    clearTimeout(hoverTimer.current);
-    leaveTimer.current = setTimeout(() => setHoveredTicket(null), 150);
-  }, []);
-
-  const handlePreviewEnter = useCallback(() => { clearTimeout(leaveTimer.current); }, []);
-  const handlePreviewLeave = useCallback(() => { leaveTimer.current = setTimeout(() => setHoveredTicket(null), 150); }, []);
-
-  const ticketStats = (() => {
-    const total = totalCount;
-    const open = tickets.filter((t) => t.status === 'NEW' || t.status === 'OPEN').length;
-    const pending = tickets.filter((t) => t.status === 'PENDING').length;
-    const resolved = tickets.filter((t) => t.status === 'SOLVED' || t.status === 'CLOSED').length;
-    const p1 = tickets.filter((t) => t.priority === 'P1').length;
-    const p2 = tickets.filter((t) => t.priority === 'P2').length;
-    const ai = tickets.filter((t) => t.aiProcessed).length;
-    return { total, open, pending, resolved, p1, p2, ai };
-  })();
+  const ticketStats = {
+    total: totalCount,
+    open: serverStats.open,
+    pending: serverStats.pending,
+    resolved: serverStats.resolved,
+    p1: serverStats.p1,
+    p2: serverStats.p2,
+    ai: serverStats.ai,
+    unassigned: serverStats.unassigned,
+  };
 
   function askDeleteOne(id) { setConfirmDelete({ mode: 'one', id }); }
   function askDeleteSelected() { if (selectedIds.length > 0) setConfirmDelete({ mode: 'bulk' }); }
@@ -639,7 +647,8 @@ export default function Tickets() {
 
   const hasActiveFilters = Boolean(
     filters.status || filters.priority || filters.source || filters.category ||
-    filters.teamId || filters.assignedToId || filters.mine || filters.aiProcessed || searchQuery
+    filters.teamId || filters.assignedToId || filters.mine || filters.aiProcessed ||
+    filters.approvalStatus || filters.closeSuggested || searchQuery
   );
 
   return (
@@ -772,7 +781,7 @@ export default function Tickets() {
         </div>
 
         {/* Bento Stat Items — affichage uniquement */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5 mt-6">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 xl:grid-cols-8 gap-2.5 mt-6">
           {[
             { label: 'Total',      value: ticketStats.total,    Icon: Ticket,       color: 'text-blue-600 dark:text-blue-400 bg-blue-500/10'    },
             { label: 'Ouverts',    value: ticketStats.open,     Icon: Radio,        color: 'text-amber-600 dark:text-amber-400 bg-amber-500/10'  },
@@ -781,6 +790,7 @@ export default function Tickets() {
             { label: 'P1 Critique',value: ticketStats.p1,       Icon: Flame,        color: 'text-red-600 dark:text-red-400 bg-red-500/10'      },
             { label: 'P2 Haute',   value: ticketStats.p2,       Icon: AlertTriangle,color: 'text-orange-600 dark:text-orange-400 bg-orange-500/10'},
             { label: 'IA Process', value: ticketStats.ai,       Icon: Sparkles,     color: 'text-purple-600 dark:text-purple-400 bg-purple-500/10'},
+            { label: 'Orphelins',  value: ticketStats.unassigned, Icon: UserX,       color: 'text-rose-600 dark:text-rose-400 bg-rose-500/10'},
           ].map((s) => {
             const IconComponent = s.Icon;
             return (
@@ -1168,10 +1178,11 @@ export default function Tickets() {
               <div className="relative">
                 <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
                 <input
+                  ref={searchInputRef}
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Titre, n° ticket, contenu, lieu..."
+                  placeholder="Titre, n° ticket, contenu, lieu...  ⌘K"
                   className="w-full pl-9 pr-8 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface font-body-sm text-body-sm transition-all focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none"
                 />
                 {searchQuery && (
@@ -1351,6 +1362,15 @@ export default function Tickets() {
             Icon={Flame}
             label="Critiques P1"
           />
+          <ChipFilter
+            active={filters.assignedToId === 'none'}
+            onClick={() => updateFilter('assignedToId', filters.assignedToId === 'none' ? '' : 'none')}
+            Icon={UserX}
+            label="Non assignés"
+          />
+          <span className="text-[10px] text-on-surface-variant font-bold tabular-nums">
+            {serverStats.unassigned > 0 && `${serverStats.unassigned} orphelin(s)`}
+          </span>
 
           {/* Vues sauvegardées */}
           <div className="relative shrink-0" style={{ zIndex: 30 }}>
@@ -1402,6 +1422,85 @@ export default function Tickets() {
           </div>
         </div>
       </motion.div>
+
+      {/* ── Active filter chips ──────────────────────────────────────── */}
+      {hasActiveFilters && (
+        <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-2 flex-wrap px-1">
+          <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider shrink-0">Filtres :</span>
+          {debouncedSearch && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary/10 text-primary text-[11px] font-semibold border border-primary/20">
+              🔍 « {debouncedSearch} »
+              <button onClick={() => { setSearchQuery(''); setDebouncedSearch(''); setPage(1); }} className="p-0.5 rounded-full hover:bg-primary/20 transition-colors"><X className="w-3 h-3" /></button>
+            </span>
+          )}
+          {filters.status && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[11px] font-semibold border border-blue-500/20">
+              {filters.status === 'OPEN_GROUP' ? 'Ouverts' : filters.status === 'CLOSED_GROUP' ? 'Clôturés' : STATUS_OPTIONS.find(s => s === filters.status) || filters.status}
+              <button onClick={() => updateFilter('status', '')} className="p-0.5 rounded-full hover:bg-blue-500/20 transition-colors"><X className="w-3 h-3" /></button>
+            </span>
+          )}
+          {filters.priority && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 text-[11px] font-semibold border border-red-500/20">
+              {filters.priority}
+              <button onClick={() => updateFilter('priority', '')} className="p-0.5 rounded-full hover:bg-red-500/20 transition-colors"><X className="w-3 h-3" /></button>
+            </span>
+          )}
+          {filters.source && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-400 text-[11px] font-semibold border border-sky-500/20">
+              {filters.source === 'glpi' ? 'GLPI' : 'ERP interne'}
+              <button onClick={() => updateFilter('source', '')} className="p-0.5 rounded-full hover:bg-sky-500/20 transition-colors"><X className="w-3 h-3" /></button>
+            </span>
+          )}
+          {filters.teamId && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold border border-emerald-500/20">
+              {teams.find(t => String(t.id) === filters.teamId)?.name || `Équipe #${filters.teamId}`}
+              <button onClick={() => updateFilter('teamId', '')} className="p-0.5 rounded-full hover:bg-emerald-500/20 transition-colors"><X className="w-3 h-3" /></button>
+            </span>
+          )}
+          {filters.category && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-400 text-[11px] font-semibold border border-violet-500/20">
+              {filters.category}
+              <button onClick={() => updateFilter('category', '')} className="p-0.5 rounded-full hover:bg-violet-500/20 transition-colors"><X className="w-3 h-3" /></button>
+            </span>
+          )}
+          {filters.assignedToId && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[11px] font-semibold border border-amber-500/20">
+              {filters.assignedToId === 'none' ? 'Non assigné' : users.find(u => String(u.id) === filters.assignedToId)?.fullName || `#${filters.assignedToId}`}
+              <button onClick={() => updateFilter('assignedToId', '')} className="p-0.5 rounded-full hover:bg-amber-500/20 transition-colors"><X className="w-3 h-3" /></button>
+            </span>
+          )}
+          {filters.mine && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-[11px] font-semibold border border-indigo-500/20">
+              Mes tickets
+              <button onClick={() => updateFilter('mine', '')} className="p-0.5 rounded-full hover:bg-indigo-500/20 transition-colors"><X className="w-3 h-3" /></button>
+            </span>
+          )}
+          {filters.aiProcessed && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 text-[11px] font-semibold border border-purple-500/20">
+              Traité par IA
+              <button onClick={() => updateFilter('aiProcessed', '')} className="p-0.5 rounded-full hover:bg-purple-500/20 transition-colors"><X className="w-3 h-3" /></button>
+            </span>
+          )}
+          {filters.approvalStatus && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-pink-500/10 text-pink-600 dark:text-pink-400 text-[11px] font-semibold border border-pink-500/20">
+              Approbation : {filters.approvalStatus}
+              <button onClick={() => updateFilter('approvalStatus', '')} className="p-0.5 rounded-full hover:bg-pink-500/20 transition-colors"><X className="w-3 h-3" /></button>
+            </span>
+          )}
+          {filters.closeSuggested && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-orange-500/10 text-orange-600 dark:text-orange-400 text-[11px] font-semibold border border-orange-500/20">
+              Clôture suggérée
+              <button onClick={() => updateFilter('closeSuggested', '')} className="p-0.5 rounded-full hover:bg-orange-500/20 transition-colors"><X className="w-3 h-3" /></button>
+            </span>
+          )}
+          <button
+            onClick={clearFilters}
+            className="ml-auto text-[10px] font-bold text-on-surface-variant hover:text-red-500 transition-colors flex items-center gap-1"
+          >
+            <FilterX className="w-3 h-3" /> Tout effacer
+          </button>
+        </motion.div>
+      )}
 
       {/* CONTENU PRINCIPAL */}
       <div className="relative">
@@ -1476,7 +1575,7 @@ export default function Tickets() {
 
                   <div>
                     <h3 className="font-headline-sm text-headline-sm text-on-surface font-bold group-hover:text-primary transition-colors line-clamp-2">
-                      {t.title}
+                      <HighlightText text={t.title} query={debouncedSearch} />
                     </h3>
                     {t.category && (
                       <span className="inline-block mt-1 text-[11px] font-medium text-on-surface-variant bg-surface-container-high px-2.5 py-0.5 rounded-full">
@@ -1614,7 +1713,7 @@ export default function Tickets() {
 
                 const PIcon = { P1: Flame, P2: AlertTriangle, P3: Info, P4: ArrowDown }[t.priority] || Ticket;
 
-                const dateStr = new Date(t.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
+                const dateStr = timeAgo(t.createdAt);
 
                 return (
                   <motion.div
@@ -1625,9 +1724,6 @@ export default function Tickets() {
                     transition={{ duration: 0.18, delay: idx * 0.012, ease: [0.16, 1, 0.3, 1] }}
                     layout
                     onClick={() => navigate(`/tickets/${t.id}`)}
-                    onMouseMove={handleMouseMove}
-                    onMouseEnter={() => handleRowEnter(t)}
-                    onMouseLeave={handleRowLeave}
                     className="flex items-center gap-4 px-5 py-3.5 cursor-pointer group transition-colors hover:bg-slate-50/80 dark:hover:bg-white/[0.03]"
                   >
                     {/* Checkbox */}
@@ -1664,7 +1760,7 @@ export default function Tickets() {
                         )}
                       </div>
                       <p className="font-bold text-sm text-slate-900 dark:text-white truncate leading-tight group-hover:text-primary transition-colors">
-                        {t.title}
+                        <HighlightText text={t.title} query={debouncedSearch} />
                       </p>
                       <div className="flex items-center gap-2 mt-0.5">
                         {t.category && (
@@ -1792,9 +1888,18 @@ export default function Tickets() {
         <motion.div variants={itemVariants}
           className="flex items-center justify-between px-4 py-3 rounded-xl border border-outline-variant/60 bg-surface-container-lowest"
         >
-          <span className="text-[12px] text-on-surface-variant">
-            {totalCount} ticket{totalCount > 1 ? 's' : ''} — Page {page}/{totalPages}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[12px] text-on-surface-variant">
+              {totalCount} ticket{totalCount > 1 ? 's' : ''} — Page {page}/{totalPages}
+            </span>
+            <select
+              value={pageSize}
+              onChange={(e) => { const v = Number(e.target.value); setPageSize(v); localStorage.setItem('tickets_page_size', String(v)); setPage(1); }}
+              className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-outline-variant/40 bg-surface text-on-surface cursor-pointer focus:outline-none"
+            >
+              {[25, 50, 100, 200].map((n) => <option key={n} value={n}>{n} / page</option>)}
+            </select>
+          </div>
           <div className="flex items-center gap-1">
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}

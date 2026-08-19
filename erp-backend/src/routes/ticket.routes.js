@@ -109,7 +109,7 @@ router.get('/', async (req, res) => {
     else if (sortBy === 'requester') orderBy = { requester: { fullName: order } };
   }
 
-  const [tickets, total] = await Promise.all([
+  const [tickets, total, openCount, pendingCount, resolvedCount, p1Count, p2Count, aiCount, unassignedCount] = await Promise.all([
     prisma.ticket.findMany({
       where,
       skip,
@@ -122,9 +122,19 @@ router.get('/', async (req, res) => {
       orderBy,
     }),
     prisma.ticket.count({ where }),
+    prisma.ticket.count({ where: { ...where, status: { in: ['NEW', 'OPEN'] } } }),
+    prisma.ticket.count({ where: { ...where, status: 'PENDING' } }),
+    prisma.ticket.count({ where: { ...where, status: { in: ['SOLVED', 'CLOSED'] } } }),
+    prisma.ticket.count({ where: { ...where, priority: 'P1' } }),
+    prisma.ticket.count({ where: { ...where, priority: 'P2' } }),
+    prisma.ticket.count({ where: { ...where, aiProcessed: true } }),
+    prisma.ticket.count({ where: { ...where, assignedToId: null } }),
   ]);
 
-  return res.json({ items: tickets, total, page: pageNum, pages: Math.ceil(total / pageSize) });
+  return res.json({
+    items: tickets, total, page: pageNum, pages: Math.ceil(total / pageSize),
+    stats: { open: openCount, pending: pendingCount, resolved: resolvedCount, p1: p1Count, p2: p2Count, ai: aiCount, unassigned: unassignedCount },
+  });
 });
 
 // Export serveur : mêmes filtres que la liste, dataset complet (pas de pagination UI)
