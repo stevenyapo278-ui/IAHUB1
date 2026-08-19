@@ -34,12 +34,13 @@ function buildBindDn(username) {
 async function authenticateLdap(username, password) {
   const client = new Client({ url: LDAP_URL, connectTimeout: 5000, timeout: 10000 });
   const bindDn = buildBindDn(username.trim());
+  console.log(`[ldapAuth] Tentative de bind LDAP sur ${LDAP_URL} avec ${bindDn}`);
 
   try {
     await client.bind(bindDn, password);
     return { username: username.trim(), email: ldapEmailFor(username) };
   } catch (error) {
-    console.error('[ldapAuth] Échec du bind LDAP:', error.message);
+    console.error(`[ldapAuth] Échec du bind LDAP (${bindDn} sur ${LDAP_URL}):`, error.message);
     return null;
   } finally {
     try {
@@ -48,6 +49,12 @@ async function authenticateLdap(username, password) {
       // socket déjà fermée — sans importance
     }
   }
+}
+
+if (isLdapEnabled()) {
+  console.log(`[ldapAuth] LDAP ACTIVÉ — URL: ${LDAP_URL}, domaine: ${LDAP_EMAIL_DOMAIN}, format bind: ${LDAP_BIND_FORMAT}, admins: [${LDAP_ADMIN_USERNAMES.join(', ')}]`);
+} else {
+  console.log('[ldapAuth] LDAP désactivé (LDAP_ENABLED != "true") — la connexion AD est ignorée');
 }
 
 module.exports = { isLdapEnabled, isLdapAdminUsername, ldapEmailFor, authenticateLdap };
