@@ -60,6 +60,12 @@ services:
       GLPI_URL: ${GLPI_URL:-http://glpi/apirest.php}
       GLPI_APP_TOKEN: ${GLPI_APP_TOKEN:-}
       GLPI_USER_TOKEN: ${GLPI_USER_TOKEN:-}
+      AUTH_EMAIL_DOMAIN: ${AUTH_EMAIL_DOMAIN:-}
+      LDAP_ENABLED: ${LDAP_ENABLED:-false}
+      LDAP_URL: ${LDAP_URL:-ldap://10.0.70.1}
+      LDAP_EMAIL_DOMAIN: ${LDAP_EMAIL_DOMAIN:-prosuma.ci}
+      LDAP_BIND_FORMAT: ${LDAP_BIND_FORMAT:-{username}@{domain}}
+      LDAP_ADMIN_USERNAMES: ${LDAP_ADMIN_USERNAMES:-}
       FRONTEND_DIST_PATH: /app/erp-frontend/dist
       TLS_CERT_PATH: ${TLS_CERT_PATH:-/app/certs/server.crt}
       TLS_KEY_PATH: ${TLS_KEY_PATH:-/app/certs/server.key}

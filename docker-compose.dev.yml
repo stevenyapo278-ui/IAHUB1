@@ -19,6 +19,12 @@ services:
       CORS_ORIGIN: "*"
       FRONTEND_URL: http://localhost:5173
       BACKEND_URL: http://localhost:4000
+      AUTH_EMAIL_DOMAIN: ${AUTH_EMAIL_DOMAIN:-}
+      LDAP_ENABLED: ${LDAP_ENABLED:-false}
+      LDAP_URL: ${LDAP_URL:-ldap://10.0.70.1}
+      LDAP_EMAIL_DOMAIN: ${LDAP_EMAIL_DOMAIN:-prosuma.ci}
+      LDAP_BIND_FORMAT: ${LDAP_BIND_FORMAT:-{username}@{domain}}
+      LDAP_ADMIN_USERNAMES: ${LDAP_ADMIN_USERNAMES:-}
     ports:
       - "4000:4000"
     networks:

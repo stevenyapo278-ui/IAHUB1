@@ -63,7 +63,7 @@ export default function Login() {
         '/';
       navigate(target, { replace: true });
     } catch (err) {
-      setError(err.response?.data?.error || 'Email ou mot de passe incorrect.');
+      setError(err.response?.data?.error || 'Identifiant ou mot de passe incorrect.');
     } finally {
       setLoading(false);
     }
@@ -278,19 +278,19 @@ export default function Login() {
               {/* Champ Email */}
               <motion.div variants={itemVariants} className="space-y-1.5">
                 <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface-variant" htmlFor="email">
-                  Adresse email professionnel
+                  Email ou identifiant AD
                 </label>
                 <div className="relative">
                   <Mail className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-on-surface-variant/60 pointer-events-none" />
                   <input
                     id="email"
                     name="email"
-                    type="email"
-                    autoComplete="email"
+                    type="text"
+                    autoComplete="username"
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="nom@entreprise.ci"
+                    placeholder="nom@entreprise.ci ou identifiant AD"
                     className="w-full bg-surface border border-outline-variant/40 rounded-xl pl-10 pr-4 py-2.5 text-xs text-on-surface font-medium placeholder-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all shadow-sm"
                   />
                 </div>

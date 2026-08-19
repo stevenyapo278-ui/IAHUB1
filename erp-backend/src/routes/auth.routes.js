@@ -8,10 +8,21 @@ const { authenticate } = require('../middleware/auth');
 const { getUserPermissions } = require('../middleware/permissions');
 const { sendPasswordResetLinkEmail } = require('../services/emailSender');
 const { auditLog } = require('../services/auditLogService');
+const { isLdapEnabled, isLdapAdminUsername, ldapEmailFor, authenticateLdap } = require('../services/ldapAuth');
 
 const router = express.Router();
 
 const PASSWORD_RESET_TOKEN_TTL_HOURS = 1; // court délai : ce token donne accès à la définition d'un nouveau mot de passe
+
+// Domaine email optionnel : permet la connexion avec l'identifiant seul (ex. « styapo »)
+// au lieu de l'adresse complète (ex. « styapo@prosuma.ci »). Vide = désactivé.
+const AUTH_EMAIL_DOMAIN = process.env.AUTH_EMAIL_DOMAIN?.trim() || '';
+
+function resolveLoginIdentifier(input) {
+  const value = String(input).trim().toLowerCase();
+  if (value.includes('@')) return value;
+  return AUTH_EMAIL_DOMAIN ? `${value}@${AUTH_EMAIL_DOMAIN}` : value;
+}
 
 router.post(
   '/register',
@@ -64,52 +75,119 @@ router.post(
 
 router.post(
   '/login',
-  [body('email').trim().isEmail(), body('password').notEmpty()],
+  // « email » accepte aussi un simple identifiant (ex. «styapo ») quand AUTH_EMAIL_DOMAIN est défini
+  [body('email').trim().notEmpty(), body('password').notEmpty()],
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const email = req.body.email.trim().toLowerCase();
+    const normalizedEmail = resolveLoginIdentifier(req.body.email);
     const { password } = req.body;
 
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (!user || !user.isActive) {
-      return res.status(401).json({ error: 'Identifiants invalides' });
-    }
+    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    if (user && user.isActive && user.authProvider === 'local') {
+      const valid = await bcrypt.compare(password, user.passwordHash);
+      if (valid) {
+        const token = jwt.sign(
+          { sub: user.id, email: user.email, role: user.role, teamId: user.teamId },
+          process.env.JWT_SECRET,
+          { expiresIn: process.env.JWT_EXPIRES_IN || '2h' }
+        );
 
-    const valid = await bcrypt.compare(password, user.passwordHash);
-    if (!valid) {
-      return res.status(401).json({ error: 'Identifiants invalides' });
-    }
+        let permissions = null;
+        if (user.role !== 'SUPERADMIN') {
+          const groupCount = await prisma.permissionGroup.count({ where: { members: { some: { id: user.id } } } });
+          if (groupCount > 0) {
+            permissions = Array.from(await getUserPermissions(user.id));
+          }
+        }
 
-    const token = jwt.sign(
-      { sub: user.id, email: user.email, role: user.role, teamId: user.teamId },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '2h' }
-    );
-
-    let permissions = null;
-    if (user.role !== 'SUPERADMIN') {
-      const groupCount = await prisma.permissionGroup.count({ where: { members: { some: { id: user.id } } } });
-      if (groupCount > 0) {
-        permissions = Array.from(await getUserPermissions(user.id));
+        return res.json({
+          token,
+          user: {
+            id: user.id,
+            email: user.email,
+            fullName: user.fullName,
+            role: user.role,
+            teamId: user.teamId,
+            permissions,
+            mustChangePassword: user.mustChangePassword,
+          },
+        });
       }
     }
 
-    return res.json({
-      token,
-      user: {
-        id: user.id,
-        email: user.email,
-        fullName: user.fullName,
-        role: user.role,
-        teamId: user.teamId,
-        permissions,
-        mustChangePassword: user.mustChangePassword,
-      },
-    });
+    // Fallback LDAP/Active Directory (même patron que le projet GESTION_ACCESS).
+    // Si LDAP_ENABLED=true, on tente le bind AD avec « username@domaine » : si un compte local
+    // a échoué (mauvais mot de passe), le mot de passe AD prime si le bind réussit.
+    if (isLdapEnabled()) {
+      const username = normalizedEmail.split('@')[0];
+      const ldapUser = await authenticateLdap(username, password);
+      if (ldapUser) {
+        const isAdmin = isLdapAdminUsername(ldapUser.username);
+        let account = await prisma.user.findUnique({ where: { email: ldapUser.email } });
+
+        if (!account) {
+          // Auto-provisioning : tout compte AD valide obtient un compte dans l'ERP.
+          // Mot de passe aléatoire : la connexion locale est impossible pour ce compte.
+          account = await prisma.user.create({
+            data: {
+              email: ldapUser.email,
+              passwordHash: bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), 10),
+              fullName: ldapUser.username,
+              role: isAdmin ? 'ADMIN' : 'REQUESTER',
+              isActive: true,
+              mustChangePassword: false,
+              authProvider: 'ldap',
+            },
+          });
+        } else {
+          if (!account.isActive) {
+            return res.status(401).json({ error: 'Identifiants invalides' });
+          }
+          account = await prisma.user.update({
+            where: { id: account.id },
+            data: {
+              authProvider: 'ldap',
+              // Les usernames listés dans LDAP_ADMIN_USERNAMES reprennent le rôle ADMIN à
+              // chaque connexion ; les autres conservent leur rôle actuel.
+              role: isAdmin ? 'ADMIN' : account.role,
+            },
+          });
+        }
+
+        const token = jwt.sign(
+          { sub: account.id, email: account.email, role: account.role, teamId: account.teamId },
+          process.env.JWT_SECRET,
+          { expiresIn: process.env.JWT_EXPIRES_IN || '2h' }
+        );
+
+        let permissions = null;
+        if (account.role !== 'SUPERADMIN') {
+          const groupCount = await prisma.permissionGroup.count({ where: { members: { some: { id: account.id } } } });
+          if (groupCount > 0) {
+            permissions = Array.from(await getUserPermissions(account.id));
+          }
+        }
+
+        return res.json({
+          token,
+          user: {
+            id: account.id,
+            email: account.email,
+            fullName: account.fullName,
+            role: account.role,
+            teamId: account.teamId,
+            permissions,
+            mustChangePassword: account.mustChangePassword,
+          },
+        });
+      }
+    }
+
+    return res.status(401).json({ error: 'Identifiants invalides' });
     auditLog('USER_LOGIN', { actor: { sub: user.id, email: user.email, role: user.role }, targetType: 'User', targetId: user.id, targetLabel: user.fullName || user.email }).catch(() => {});
   }
 );

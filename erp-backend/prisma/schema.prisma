@@ -121,6 +121,7 @@ model User {
   glpiId        Int?     @unique // identifiant de l'utilisateur correspondant dans GLPI
   receiveDraftAlerts Boolean @default(false) // reçoit l'email de relance quand un AiEmailDraft attend trop longtemps une validation humaine (opt-in, activé par un admin)
   mustChangePassword Boolean @default(false) // force l'affichage de l'écran de changement de mot de passe à la prochaine connexion (ex: après réinitialisation par un admin)
+  authProvider     String   @default("local") // "local" ou "ldap" — les comptes LDAP se connectent via l'Active Directory, pas avec un mot de passe local
   passwordResetTokens PasswordResetToken[]
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt

@@ -334,6 +334,24 @@ Pour recevoir et analyser les vrais emails :
 4. Renseigner Client ID, Tenant ID, Client Secret
 5. Cliquer "Connecter Outlook"
 
+### LDAP / Active Directory (optionnel)
+Connexion avec les comptes AD : si l'utilisateur échoue la connexion locale, l'application tente un bind AD
+(`username@domaine`) et **auto-crée le compte** dans l'ERP au premier login réussi.
+
+Variables d'environnement (à renseigner dans Dokploy / `.env`) :
+
+| Variable | Rôle | Défaut |
+|----------|------|--------|
+| `LDAP_ENABLED` | Activer le fallback AD (`true`/`false`) | `false` |
+| `LDAP_URL` | Serveur AD (ex. `ldap://10.0.70.1`, `ldaps://ad.prosuma.ci:636`) | `ldap://10.0.70.1` |
+| `LDAP_EMAIL_DOMAIN` | Domaine : `username@<domaine>` devient l'email du compte | `prosuma.ci` |
+| `LDAP_BIND_FORMAT` | Format du bind : `{username}@{domain}` (UPN) ou `{domain}\{username}` (NTLM) | `{username}@{domain}` |
+| `LDAP_ADMIN_USERNAMES` | Usernames AD séparés par des virgules → rôle **ADMIN** (les autres → REQUESTER) | vide |
+| `AUTH_EMAIL_DOMAIN` | Permet de se connecter avec l'identifiant seul (`styapo`) au lieu de l'email complet | vide |
+
+Les comptes AD créés portent `authProvider: "ldap"` : leur mot de passe est celui de l'AD, jamais un
+mot de passe local (le champ `passwordHash` est aléatoire).
+
 ---
 
 ## Tester le pipeline sans Outlook
