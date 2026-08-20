@@ -481,20 +481,7 @@ export default function MainLayout() {
           className="flex-1 min-w-0 relative bg-inherit overflow-y-auto overflow-x-hidden"
           style={{ backgroundColor: 'var(--color-background)' }}
         >
-          <AnimatePresence mode="popLayout" initial={false} custom={transition}>
-            <motion.div
-              key={location.pathname}
-              custom={transition}
-              variants={pageVariants}
-              initial="initial"
-              animate="animate"
-              exit="exit"
-              style={{ willChange: 'auto' }}
-              className="w-full min-h-full"
-            >
-              <Outlet />
-            </motion.div>
-          </AnimatePresence>
+          <Outlet />
         </main>
       </div>
 

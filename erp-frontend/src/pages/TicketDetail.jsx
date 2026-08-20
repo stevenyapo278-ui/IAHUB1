@@ -178,16 +178,16 @@ export default function TicketDetail() {
     load();
   }, [id, load]);
 
-  // Animer le slide lors du changement de ticket
+  // Animer le slide horizontal uniquement (gauche ↔ droite) lors du changement de ticket
   useEffect(() => {
     if (!scope.current || !ticket) return;
     const dir = slideDirectionRef.current;
     prevIdRef.current = id;
-    const enterX = dir === 'next' ? '60px' : '-60px';
+    const enterX = dir === 'next' ? '120px' : '-120px';
     animate(
       scope.current,
-      { x: [enterX, '0px'], opacity: [0.3, 1] },
-      { duration: 0.28, ease: [0.16, 1, 0.3, 1] }
+      { x: [enterX, '0px'], opacity: [0.2, 1] },
+      { duration: 0.32, ease: [0.16, 1, 0.3, 1] }
     );
   }, [ticket?.id, animate, scope]);
 
