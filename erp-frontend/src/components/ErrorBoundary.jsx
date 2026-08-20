@@ -58,13 +58,13 @@ export default class ErrorBoundary extends Component {
                 Accueil
               </button>
             </div>
-            {process.env.NODE_ENV === 'development' && this.state.error && (
-              <details className="mt-6 w-full text-left">
-                <summary className="font-body-sm text-body-sm text-on-surface-variant cursor-pointer hover:text-on-surface transition-colors">
-                  Détails techniques
+            {this.state.error && (
+              <details className="mt-6 w-full text-left" open>
+                <summary className="font-body-sm text-body-sm text-on-surface-variant cursor-pointer hover:text-on-surface transition-colors font-bold">
+                  Détails techniques de l'erreur
                 </summary>
-                <pre className="mt-2 p-3 bg-surface-container border border-outline-variant/60 rounded-xl text-xs text-on-surface-variant font-mono overflow-x-auto whitespace-pre-wrap">
-                  {this.state.error.stack || this.state.error.message}
+                <pre className="mt-2 p-3 bg-surface-container border border-red-500/30 rounded-xl text-xs text-red-600 dark:text-red-400 font-mono overflow-x-auto whitespace-pre-wrap text-left">
+                  {this.state.error?.stack || this.state.error?.message || String(this.state.error)}
                 </pre>
               </details>
             )}
