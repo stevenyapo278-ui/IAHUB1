@@ -178,18 +178,13 @@ export default function TicketDetail() {
     const dir = Number(id) < Number(prevIdRef.current) ? 'prev' : 'next';
     slideDirectionRef.current = dir;
     prevIdRef.current = id;
-    const exitX = dir === 'next' ? '-100%' : '100%';
-    const enterX = dir === 'next' ? '100%' : '-100%';
-    // 1. Sortie rapide
-    animate(scope.current, { x: exitX, opacity: 0 }, { duration: 0.2, ease: [0.25, 0.46, 0.45, 0.94] })
-      .then(() => {
-        // 2. Repositionner de l'autre côté instantanément
-        animate(scope.current, { x: enterX, opacity: 0 }, { duration: 0 });
-        // 3. Entrée fluide
-        return animate(scope.current, { x: 0, opacity: 1 }, { duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] });
-      })
-      .catch(() => {});
-  }, [id]);
+    const enterX = dir === 'next' ? '80%' : '-80%';
+    animate(
+      scope.current,
+      { x: [enterX, '0%'], opacity: [0.2, 1] },
+      { duration: 0.35, ease: [0.16, 1, 0.3, 1] }
+    ).catch(() => {});
+  }, [id, animate, scope]);
 
   useEffect(() => {
     api.get(`/tickets/${id}/adjacent`)
@@ -776,7 +771,7 @@ export default function TicketDetail() {
             <button
               onClick={() => {
                 if (adjacent.first) {
-                  setSlideDirection('prev');
+                  slideDirectionRef.current = 'prev';
                   navigate(`/tickets/${adjacent.first}`);
                 }
               }}
@@ -789,7 +784,7 @@ export default function TicketDetail() {
             <button
               onClick={() => {
                 if (adjacent.prev) {
-                  setSlideDirection('prev');
+                  slideDirectionRef.current = 'prev';
                   navigate(`/tickets/${adjacent.prev}`);
                 }
               }}
@@ -802,7 +797,7 @@ export default function TicketDetail() {
             <button
               onClick={() => {
                 if (adjacent.next) {
-                  setSlideDirection('next');
+                  slideDirectionRef.current = 'next';
                   navigate(`/tickets/${adjacent.next}`);
                 }
               }}
@@ -815,7 +810,7 @@ export default function TicketDetail() {
             <button
               onClick={() => {
                 if (adjacent.last) {
-                  setSlideDirection('next');
+                  slideDirectionRef.current = 'next';
                   navigate(`/tickets/${adjacent.last}`);
                 }
               }}
