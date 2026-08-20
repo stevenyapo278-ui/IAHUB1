@@ -50,23 +50,42 @@ export function AuthProvider({ children }) {
   // Rafraîchit les permissions effectives au chargement de l'app (pas seulement au login) : si un
   // admin retire un droit à un groupe pendant qu'un utilisateur est déjà connecté, ça se reflète
   // au prochain chargement de page plutôt que de rester figé jusqu'à la prochaine reconnexion.
+  // Le rafraîchissement est aussi périodique (2 min) et au retour sur l'onglet : un changement de
+  // rôle ou de groupe appliqué par un admin est répercuté sans reconnexion (le backend, lui,
+  // relit déjà le rôle en base à chaque requête).
   useEffect(() => {
     if (!localStorage.getItem('token')) return;
-    api.get('/auth/me')
-      .then(({ data }) => {
-        const refreshed = { id: data.id, email: data.email, fullName: data.fullName, role: data.role, teamId: data.teamId, permissions: data.permissions, mustChangePassword: data.mustChangePassword };
-        localStorage.setItem('user', JSON.stringify(refreshed));
-        setUser(refreshed);
-      })
-      // Token invalide/expiré ou compte supprimé (404) : la session locale est périmée, on la
-      // purge plutôt que de laisser l'utilisateur "connecté" avec un user obsolète qui ferait
-      // échouer silencieusement tous les appels API suivants (cf. bug observé : /auth/me 404 en
-      // boucle après suppression/recréation d'un compte côté serveur).
-      .catch(() => {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        setUser(null);
-      });
+
+    let cancelled = false;
+    function refreshMe() {
+      api.get('/auth/me')
+        .then(({ data }) => {
+          if (cancelled) return;
+          const refreshed = { id: data.id, email: data.email, fullName: data.fullName, role: data.role, teamId: data.teamId, permissions: data.permissions, mustChangePassword: data.mustChangePassword };
+          localStorage.setItem('user', JSON.stringify(refreshed));
+          setUser(refreshed);
+        })
+        // Token invalide/expiré ou compte supprimé (404) : la session locale est périmée, on la
+        // purge plutôt que de laisser l'utilisateur "connecté" avec un user obsolète qui ferait
+        // échouer silencieusement tous les appels API suivants (cf. bug observé : /auth/me 404 en
+        // boucle après suppression/recréation d'un compte côté serveur).
+        .catch(() => {
+          if (cancelled) return;
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          setUser(null);
+        });
+    }
+
+    refreshMe();
+    const interval = setInterval(refreshMe, 120000);
+    const onVisible = () => { if (document.visibilityState === 'visible') refreshMe(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   return (

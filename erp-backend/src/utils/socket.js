@@ -13,19 +13,29 @@ function initSocket(server) {
     },
   });
 
-  // Authentification via JWT et jointure de room par user
+  // Authentification via JWT et jointure de room par user.
+  // Le rôle est RELU en base (comme le middleware REST) : un changement de rôle appliqué par un
+  // admin prend effet immédiatement, même pour une session déjà connectée.
   io.use((socket, next) => {
-    try {
-      const token = socket.handshake.auth?.token;
-      if (!token) return next(new Error('Token manquant'));
+    const token = socket.handshake.auth?.token;
+    if (!token) return next(new Error('Token manquant'));
 
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      socket.userId = decoded.sub;
-      socket.userRole = decoded.role;
-      next();
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
     } catch (err) {
-      next(new Error('Token invalide'));
+      return next(new Error('Token invalide'));
     }
+
+    prisma.user
+      .findUnique({ where: { id: decoded.sub }, select: { id: true, role: true, isActive: true } })
+      .then((user) => {
+        if (!user || !user.isActive) return next(new Error('Compte inactif ou supprimé'));
+        socket.userId = user.id;
+        socket.userRole = user.role;
+        next();
+      })
+      .catch(() => next(new Error('Erreur d’authentification')));
   });
 
   io.on('connection', (socket) => {

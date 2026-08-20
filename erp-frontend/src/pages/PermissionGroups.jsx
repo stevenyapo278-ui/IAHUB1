@@ -19,6 +19,25 @@ function initials(name) {
   return name.split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase();
 }
 
+// Libellés et couleurs des rôles : le rôle est INDÉPENDANT du groupe de droits (il se change
+// depuis la vue Utilisateurs) — on l'affiche pour éviter la confusion groupe ≠ rôle.
+const ROLE_STYLES = {
+  SUPERADMIN: { label: 'Super admin', cls: 'bg-purple-500/15 border-purple-500/30 text-purple-700 dark:text-purple-300' },
+  ADMIN: { label: 'Admin', cls: 'bg-purple-500/15 border-purple-500/30 text-purple-700 dark:text-purple-300' },
+  HOTLINE: { label: 'Hotline', cls: 'bg-amber-500/15 border-amber-500/30 text-amber-700 dark:text-amber-300' },
+  TECHNICIAN: { label: 'Technicien', cls: 'bg-blue-500/15 border-blue-500/30 text-blue-700 dark:text-blue-300' },
+  REQUESTER: { label: 'Demandeur', cls: 'bg-outline/10 border-outline/30 text-on-surface-variant' },
+};
+
+function RoleBadge({ role }) {
+  const style = ROLE_STYLES[role] || { label: role, cls: 'bg-outline/10 border-outline/30 text-on-surface-variant' };
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded-md border text-[10px] font-bold shrink-0 ${style.cls}`}>
+      {style.label}
+    </span>
+  );
+}
+
 export default function PermissionGroups() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
@@ -595,6 +614,10 @@ export default function PermissionGroups() {
                       <Lock className="w-3 h-3" />
                       Un utilisateur n'appartient qu'à un seul groupe : l'ajouter ici le déplace automatiquement.
                     </span>
+                    <span className="text-[10px] text-on-surface-variant/70 font-medium flex items-center gap-1">
+                      <Users className="w-3 h-3" />
+                      Le rôle (Demandeur, Technicien…) est indépendant du groupe : il se change dans la vue Utilisateurs.
+                    </span>
                   </div>
 
                   {/* Membres actuels (liste courte, incluse dans les groupes) */}
@@ -613,6 +636,7 @@ export default function PermissionGroups() {
                             <p className="text-xs font-semibold text-on-surface truncate">{u.fullName}</p>
                             <p className="text-[10px] text-on-surface-variant font-mono truncate">{u.email}</p>
                           </div>
+                          <RoleBadge role={u.role} />
                           {canManageGroups && (
                             <button
                               onClick={() => toggleMember(openGroup, u.id, true)}
@@ -672,6 +696,7 @@ export default function PermissionGroups() {
                                     </span>
                                   )}
                                 </div>
+                                <RoleBadge role={u.role} />
                                 {canManageGroups && (
                                   isMove ? (
                                     <button

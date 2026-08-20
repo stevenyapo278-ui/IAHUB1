@@ -21,7 +21,7 @@ function invalidKeys(permissions) {
 router.get('/', async (req, res) => {
   const groups = await prisma.permissionGroup.findMany({
     include: {
-      members: { select: { id: true, fullName: true, email: true } },
+      members: { select: { id: true, fullName: true, email: true, role: true } },
       _count: { select: { members: true } },
     },
     orderBy: { name: 'asc' },
@@ -32,7 +32,7 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   const group = await prisma.permissionGroup.findUnique({
     where: { id: Number(req.params.id) },
-    include: { members: { select: { id: true, fullName: true, email: true } } },
+    include: { members: { select: { id: true, fullName: true, email: true, role: true } } },
   });
   if (!group) return res.status(404).json({ error: 'Groupe introuvable' });
   return res.json(group);
@@ -120,7 +120,7 @@ router.post('/:id/assign', [body('userIds').isArray({ min: 1 })], async (req, re
 
       return tx.permissionGroup.findUnique({
         where: { id: groupId },
-        include: { members: { select: { id: true, fullName: true, email: true } } },
+        include: { members: { select: { id: true, fullName: true, email: true, role: true } } },
       });
     });
 
@@ -143,7 +143,7 @@ router.post('/:id/unassign', [body('userIds').isArray({ min: 1 })], async (req, 
     const group = await prisma.permissionGroup.update({
       where: { id: Number(req.params.id) },
       data: { members: { disconnect: userIds.map((id) => ({ id })) } },
-      include: { members: { select: { id: true, fullName: true, email: true } } },
+      include: { members: { select: { id: true, fullName: true, email: true, role: true } } },
     });
     return res.json(group);
   } catch (err) {

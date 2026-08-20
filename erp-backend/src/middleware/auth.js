@@ -1,6 +1,10 @@
 const jwt = require('jsonwebtoken');
+const prisma = require('../prismaClient');
 const { ADMIN_LIKE_ROLES } = require('../config/permissions');
 
+// Le JWT n'est qu'une preuve de connexion : à chaque requête, le rôle, l'équipe et l'état du compte
+// sont RELUS en base, afin qu'un changement de rôle (vue Utilisateurs) ou une désactivation prenne
+// effet immédiatement, sans attendre l'expiration du token (2 h) ni une reconnexion manuelle.
 function authenticate(req, res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
@@ -9,13 +13,26 @@ function authenticate(req, res, next) {
     return res.status(401).json({ error: 'Authentification requise' });
   }
 
+  let payload;
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = payload;
-    next();
+    payload = jwt.verify(token, process.env.JWT_SECRET);
   } catch (err) {
     return res.status(401).json({ error: 'Token invalide ou expiré' });
   }
+
+  prisma.user
+    .findUnique({
+      where: { id: payload.sub },
+      select: { id: true, email: true, role: true, teamId: true, isActive: true },
+    })
+    .then((user) => {
+      if (!user || !user.isActive) {
+        return res.status(401).json({ error: 'Compte inactif ou supprimé' });
+      }
+      req.user = { sub: user.id, email: user.email, role: user.role, teamId: user.teamId };
+      next();
+    })
+    .catch(() => res.status(500).json({ error: 'Erreur d’authentification' }));
 }
 
 function authorize(...roles) {
