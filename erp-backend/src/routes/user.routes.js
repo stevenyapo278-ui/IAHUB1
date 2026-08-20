@@ -46,7 +46,6 @@ function canActOnTarget(actorRole, targetRole) {
 
 const router = express.Router();
 router.use(authenticate);
-router.use(authorizeAdmin);
 
 // Génère un mot de passe temporaire lisible (évite les caractères ambigus 0/O/1/l/I) mais
 // suffisamment fort, respectant le minimum de 8 caractères imposé partout ailleurs.
@@ -142,6 +141,9 @@ router.get('/', async (req, res) => {
     totalPages: Math.ceil(total / limitNum) || 1,
   });
 });
+
+// Toutes les opérations ci-dessous (création, modification, suppression, purge) requièrent d'être Administrateur
+router.use(authorizeAdmin);
 
 // Suppression par lot d'utilisateurs sélectionnés
 router.post('/bulk-delete', async (req, res) => {

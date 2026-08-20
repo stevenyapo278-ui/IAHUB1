@@ -1681,6 +1681,11 @@ export default function Tickets() {
               Assigné à
               {sortBy === 'assignedTo' ? (sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 text-outline/50" />}
             </button>
+            <button onClick={() => toggleSort('requester')}
+              className={`w-40 shrink-0 hidden xl:block text-left flex items-center gap-1 hover:text-primary transition-colors cursor-pointer ${sortBy === 'requester' ? 'text-primary' : ''}`}>
+              Demandeur
+              {sortBy === 'requester' ? (sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 text-outline/50" />}
+            </button>
             <button onClick={() => toggleSort('createdAt')}
               className={`w-24 shrink-0 hidden lg:block flex items-center gap-1 justify-end hover:text-primary transition-colors cursor-pointer ${sortBy === 'createdAt' ? 'text-primary' : ''}`}>
               Date
@@ -1714,6 +1719,8 @@ export default function Tickets() {
                 const PIcon = { P1: Flame, P2: AlertTriangle, P3: Info, P4: ArrowDown }[t.priority] || Ticket;
 
                 const dateStr = timeAgo(t.createdAt);
+                const reqName = t.requester?.fullName || t.sourceName || t.sourceEmail;
+                const reqEmail = t.requester?.email || t.sourceEmail;
 
                 return (
                   <motion.div
@@ -1774,7 +1781,13 @@ export default function Tickets() {
                             {t.glpiLocationName}
                           </span>
                         )}
-                        {!t.category && !t.glpiLocationName && (
+                        {reqName && (
+                          <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 flex items-center gap-0.5 truncate max-w-[150px] xl:hidden" title={`Demandeur: ${reqName}`}>
+                            <User className="w-2.5 h-2.5 shrink-0 text-emerald-500" />
+                            {reqName}
+                          </span>
+                        )}
+                        {!t.category && !t.glpiLocationName && !reqName && (
                           <span className="text-[11px] font-medium text-slate-500 dark:text-slate-500">
                             {t.team?.name || 'Aucune équipe'}
                           </span>
@@ -1832,6 +1845,23 @@ export default function Tickets() {
                         </div>
                       ) : (
                         <span className="text-xs text-slate-500 dark:text-slate-400 italic font-medium">Non assigné</span>
+                      )}
+                    </div>
+
+                    {/* Demandeur */}
+                    <div className="w-40 shrink-0 hidden xl:flex items-center gap-2">
+                      {reqName ? (
+                        <div className="flex items-center gap-2 min-w-0" title={`Demandeur : ${reqName}${reqEmail ? ` (${reqEmail})` : ''}`}>
+                          <div className="w-6 h-6 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-[10px] font-bold border border-emerald-500/20 shrink-0">
+                            {reqName.charAt(0).toUpperCase()}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate block leading-tight">{reqName}</span>
+                            {reqEmail && <span className="text-[10px] text-slate-400 truncate block leading-tight">{reqEmail}</span>}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-500 dark:text-slate-400 italic font-medium">Non spécifié</span>
                       )}
                     </div>
 

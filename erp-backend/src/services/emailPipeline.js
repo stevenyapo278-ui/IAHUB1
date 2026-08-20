@@ -443,6 +443,7 @@ async function processMessage(message, account) {
 
     // Résoudre le lieu : d'abord via l'historique du demandeur (RequesterLocation), puis IA
     let locationId = null;
+    let resolvedLocationName = null; // nom du lieu finalement retenu (pour cohérence du titre)
 
     // 1. Vérifier si l'expéditeur a un lieu connu (appris des corrections Hotline)
     const knownLinks = fromEmail
@@ -458,14 +459,33 @@ async function processMessage(message, account) {
     if (analysis.location) {
       const loc = await prisma.glpiLocation.findFirst({
         where: { completename: analysis.location },
-        select: { glpiLocationId: true },
+        select: { glpiLocationId: true, name: true, completename: true },
       });
-      if (loc) locationId = loc.glpiLocationId;
+      if (loc) {
+        locationId = loc.glpiLocationId;
+        resolvedLocationName = loc.name || loc.completename;
+      }
     }
 
     // 3. Fallback : si l'IA n'a rien trouvé mais qu'on a un historique, utiliser le lieu connu
     if (!locationId && knownLinks.length > 0) {
       locationId = knownLinks[0].glpiLocation.glpiLocationId;
+      resolvedLocationName = knownLinks[0].glpiLocation.name || knownLinks[0].glpiLocation.completename;
+    }
+
+    // 4. Aligner le titre avec le lieu résolu pour éviter toute incohérence SITE ≠ LIEU
+    //    Si le titre IA contient " : " (format "SITE : ACTION"), on remplace la partie SITE
+    //    par le nom du lieu réellement assigné dès lors que les deux diffèrent.
+    if (resolvedLocationName && analysis.suggestedTitle && analysis.suggestedTitle.includes(' : ')) {
+      const colonIdx = analysis.suggestedTitle.indexOf(' : ');
+      const aiSite = analysis.suggestedTitle.substring(0, colonIdx).trim().toUpperCase();
+      const action = analysis.suggestedTitle.substring(colonIdx + 3).trim();
+      const resolvedSiteUpper = resolvedLocationName.toUpperCase();
+      if (aiSite !== resolvedSiteUpper) {
+        // Reconstruire le titre avec le lieu réel plutôt que celui deviné par l'IA
+        analysis.suggestedTitle = `${resolvedLocationName} : ${action}`.substring(0, 80);
+        console.log(`[emailPipeline] Titre aligné sur le lieu résolu : "${analysis.suggestedTitle}" (site IA "${aiSite}" → "${resolvedLocationName}")`);
+      }
     }
 
     // Étape 3 : créer ticket GLPI + ERP dans une transaction pour éviter l'incohérence

@@ -17,7 +17,8 @@ import {
   RefreshCw, Mail, FileText, Check, X, Send, ChevronRight,
   Flame, Radio, Info, ArrowDown, UserCheck, HelpCircle, Layers, History,
   TrendingUp, Lock, Link2, Merge, Plus, GitBranch, Timer, Play, Square, ListChecks, Boxes,
-  ChevronDown, Inbox, Pencil, Save
+  ChevronDown, Inbox, Pencil, Save,
+  ChevronsLeft, ChevronLeft, ChevronsRight
 } from 'lucide-react';
 import {
   STATUS_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS,
@@ -88,8 +89,14 @@ export default function TicketDetail() {
   const [customFieldDefs, setCustomFieldDefs] = useState([]);
   const [locations, setLocations] = useState([]);
   const [glpiUsers, setGlpiUsers] = useState([]);
+  const [allUsers, setAllUsers] = useState([]);
   const [syncFailures, setSyncFailures] = useState([]);
   const [savingField, setSavingField] = useState(null);
+  const [editingRequester, setEditingRequester] = useState(false);
+  const [selectedRequesterId, setSelectedRequesterId] = useState('');
+  const [customSourceName, setCustomSourceName] = useState('');
+  const [customSourceEmail, setCustomSourceEmail] = useState('');
+  const [adjacent, setAdjacent] = useState({ first: null, prev: null, next: null, last: null });
   const [corrections, setCorrections] = useState([]);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
@@ -160,6 +167,13 @@ export default function TicketDetail() {
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Charger les IDs adjacents à chaque changement de ticket
+  useEffect(() => {
+    api.get(`/tickets/${id}/adjacent`)
+      .then(({ data }) => setAdjacent(data))
+      .catch(() => setAdjacent({ first: null, prev: null, next: null, last: null }));
+  }, [id]);
 
   useEffect(() => {
     const intervalId = setInterval(load, 15000);
@@ -235,6 +249,7 @@ export default function TicketDetail() {
     api.get('/glpi/categories').then(({ data }) => setCategories(data)).catch(() => {});
     api.get('/glpi/locations').then(({ data }) => setLocations(data)).catch(() => {});
     api.get('/glpi/users').then(({ data }) => setGlpiUsers(data)).catch(() => {});
+    api.get('/users').then(({ data }) => setAllUsers(Array.isArray(data) ? data : (data?.users || []))).catch(() => {});
     api.get('/custom-fields').then(({ data }) => setCustomFieldDefs(data || [])).catch(() => {});
     if (!canAssign) return;
     api.get('/teams').then(({ data }) => setTeams(data)).catch(() => {});
@@ -252,6 +267,23 @@ export default function TicketDetail() {
       setSavingField(null);
     }
   }
+
+  const handleSaveRequester = async () => {
+    try {
+      setSavingField('requester');
+      const payload = selectedRequesterId
+        ? { requesterId: Number(selectedRequesterId) }
+        : { requesterId: null, sourceName: customSourceName, sourceEmail: customSourceEmail };
+      await api.patch(`/tickets/${id}`, payload);
+      toast.success('Demandeur mis à jour');
+      setEditingRequester(false);
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Échec de la mise à jour du demandeur');
+    } finally {
+      setSavingField(null);
+    }
+  };
 
   // Extrait le nom du lieu (partie avant " : ") d'un titre
   function extractLocationFromTitle(title) {
@@ -716,6 +748,42 @@ export default function TicketDetail() {
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
+
+          {/* Navigation entre tickets : premier ← → dernier */}
+          <div className="flex items-center gap-0.5">
+            <button
+              onClick={() => adjacent.first && navigate(`/tickets/${adjacent.first}`)}
+              disabled={!adjacent.first}
+              className="p-1.5 rounded-lg border border-outline-variant/30 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+              title={adjacent.first ? `Premier ticket (#${adjacent.first})` : 'Déjà le premier ticket'}
+            >
+              <ChevronsLeft className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => adjacent.prev && navigate(`/tickets/${adjacent.prev}`)}
+              disabled={!adjacent.prev}
+              className="p-1.5 rounded-lg border border-outline-variant/30 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+              title={adjacent.prev ? `Ticket précédent (#${adjacent.prev})` : 'Pas de ticket précédent'}
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => adjacent.next && navigate(`/tickets/${adjacent.next}`)}
+              disabled={!adjacent.next}
+              className="p-1.5 rounded-lg border border-outline-variant/30 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+              title={adjacent.next ? `Ticket suivant (#${adjacent.next})` : 'Pas de ticket suivant'}
+            >
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => adjacent.last && navigate(`/tickets/${adjacent.last}`)}
+              disabled={!adjacent.last}
+              className="p-1.5 rounded-lg border border-outline-variant/30 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+              title={adjacent.last ? `Dernier ticket (#${adjacent.last})` : 'Déjà le dernier ticket'}
+            >
+              <ChevronsRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
           <div>
             <div className="flex items-center gap-2">
               <span className="font-mono text-sm font-bold text-primary">#{ticket.id}</span>
@@ -1984,19 +2052,110 @@ export default function TicketDetail() {
 
           {/* Requester Details Card */}
           <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-3">
-            <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2 border-b border-outline-variant/20 pb-3">
-              <User className="w-4 h-4 text-primary" />
-              Demandeur
-            </h3>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl border border-outline-variant/40 bg-surface-container text-on-surface flex items-center justify-center font-bold text-sm shrink-0 shadow-sm">
-                {initials(ticket.requester?.fullName || ticket.sourceName)}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-bold text-on-surface truncate">{ticket.requester?.fullName || ticket.sourceName || ticket.sourceEmail || '-'}</p>
-                <p className="text-[11px] text-on-surface-variant font-medium truncate">{ticket.requester?.email || ticket.sourceEmail || '-'}</p>
-              </div>
+            <div className="flex items-center justify-between border-b border-outline-variant/20 pb-3">
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
+                <User className="w-4 h-4 text-primary" />
+                Demandeur
+              </h3>
+              {canEdit && !editingRequester && (
+                <button
+                  onClick={() => {
+                    setSelectedRequesterId(ticket.requesterId ? String(ticket.requesterId) : '');
+                    setCustomSourceName(ticket.sourceName || '');
+                    setCustomSourceEmail(ticket.sourceEmail || '');
+                    setEditingRequester(true);
+                  }}
+                  className="p-1.5 rounded-lg text-on-surface-variant hover:text-primary hover:bg-surface-container transition-all cursor-pointer"
+                  title="Modifier le demandeur"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
+
+            {editingRequester ? (
+              <div className="space-y-3 pt-1">
+                <div>
+                  <label className="block text-[11px] font-semibold text-on-surface-variant mb-1">
+                    Sélectionner un utilisateur :
+                  </label>
+                  <select
+                    value={selectedRequesterId}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSelectedRequesterId(val);
+                      if (val) {
+                        const found = allUsers.find(u => String(u.id) === val) || glpiUsers.find(u => String(u.id) === val);
+                        if (found) {
+                          setCustomSourceName(found.fullName || '');
+                          setCustomSourceEmail(found.email || '');
+                        }
+                      }
+                    }}
+                    className="w-full text-xs font-semibold px-3 py-2 rounded-xl border border-outline-variant/60 bg-surface text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer"
+                  >
+                    <option value="">-- Expéditeur externe (Nom / Email) --</option>
+                    {allUsers.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.fullName} ({u.email})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {!selectedRequesterId && (
+                  <div className="space-y-2 pt-1 border-t border-outline-variant/20">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-on-surface-variant mb-1">Nom de l'expéditeur :</label>
+                      <input
+                        type="text"
+                        value={customSourceName}
+                        onChange={(e) => setCustomSourceName(e.target.value)}
+                        placeholder="ex: Jean Dupont"
+                        className="w-full text-xs font-medium px-3 py-1.5 rounded-lg border border-outline-variant/60 bg-surface text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-on-surface-variant mb-1">Email de l'expéditeur :</label>
+                      <input
+                        type="email"
+                        value={customSourceEmail}
+                        onChange={(e) => setCustomSourceEmail(e.target.value)}
+                        placeholder="ex: jean.dupont@entreprise.com"
+                        className="w-full text-xs font-medium px-3 py-1.5 rounded-lg border border-outline-variant/60 bg-surface text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2 pt-2 justify-end">
+                  <button
+                    onClick={() => setEditingRequester(false)}
+                    className="px-3 py-1.5 rounded-xl border border-outline-variant/40 text-xs font-semibold text-on-surface-variant hover:bg-surface-container transition-colors cursor-pointer"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    onClick={handleSaveRequester}
+                    disabled={savingField === 'requester'}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-primary text-on-primary text-xs font-bold hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    Enregistrer
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl border border-outline-variant/40 bg-surface-container text-on-surface flex items-center justify-center font-bold text-sm shrink-0 shadow-sm">
+                  {initials(ticket.requester?.fullName || ticket.sourceName)}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold text-on-surface truncate">{ticket.requester?.fullName || ticket.sourceName || ticket.sourceEmail || '-'}</p>
+                  <p className="text-[11px] text-on-surface-variant font-medium truncate">{ticket.requester?.email || ticket.sourceEmail || '-'}</p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Champs personnalisés (lecture seule) */}

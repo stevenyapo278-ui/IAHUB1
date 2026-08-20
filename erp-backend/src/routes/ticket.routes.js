@@ -321,6 +321,56 @@ router.post(
   }
 );
 
+// Retourne les IDs des tickets adjacents (premier, précédent, suivant, dernier) pour
+// permettre la navigation clavier/bouton dans la vue détail d'un ticket.
+// L'ordre est createdAt DESC (même ordre que la liste principale), donc :
+//   - "premier"  = ticket avec la plus grande createdAt  (= plus récent)
+//   - "précédent" = ticket créé juste après  celui-ci (id plus élevé en desc)
+//   - "suivant"   = ticket créé juste avant celui-ci (id plus bas en desc)
+//   - "dernier"  = ticket avec la plus petite createdAt (= plus ancien)
+router.get('/:id/adjacent', async (req, res) => {
+  const id = Number(req.params.id);
+  const current = await prisma.ticket.findUnique({ where: { id }, select: { id: true, createdAt: true } });
+  if (!current) return res.status(404).json({ error: 'Ticket introuvable' });
+
+  // Filtre demandeur (REQUESTER ne navigue que dans ses tickets)
+  const baseWhere = isRequesterOnly(req.user) ? { requesterId: req.user.sub } : {};
+
+  const [first, prev, next, last] = await Promise.all([
+    // Premier : le plus récent (createdAt max)
+    prisma.ticket.findFirst({
+      where: baseWhere,
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    }),
+    // Précédent : créé juste après le courant (createdAt > current, le plus proche)
+    prisma.ticket.findFirst({
+      where: { ...baseWhere, createdAt: { gt: current.createdAt } },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    }),
+    // Suivant : créé juste avant le courant (createdAt < current, le plus proche)
+    prisma.ticket.findFirst({
+      where: { ...baseWhere, createdAt: { lt: current.createdAt } },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    }),
+    // Dernier : le plus ancien (createdAt min)
+    prisma.ticket.findFirst({
+      where: baseWhere,
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    }),
+  ]);
+
+  return res.json({
+    first: first?.id !== id ? first?.id ?? null : null,
+    prev:  prev?.id  !== id ? prev?.id  ?? null : null,
+    next:  next?.id  !== id ? next?.id  ?? null : null,
+    last:  last?.id  !== id ? last?.id  ?? null : null,
+  });
+});
+
 // Get single ticket with followups
 router.get('/:id', async (req, res) => {
   const ticket = await prisma.ticket.findUnique({
@@ -603,7 +653,7 @@ router.post(
 // Update ticket (status, priority, assignment, etc.)
 router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const id = Number(req.params.id);
-  const { title, content, status, priority, category, teamId, assignedToId, type, urgency, impact, source, externalId, dueDate, assetIds } = req.body;
+  const { title, content, status, priority, category, teamId, assignedToId, requesterId, sourceName, sourceEmail, type, urgency, impact, source, externalId, dueDate, assetIds } = req.body;
 
   const data = {};
   if (title !== undefined) data.title = title;
@@ -612,6 +662,20 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
   if (category !== undefined) data.category = category;
   if (teamId !== undefined) data.teamId = teamId;
   if (assignedToId !== undefined) data.assignedToId = assignedToId;
+
+  if (requesterId !== undefined) {
+    const reqId = requesterId ? Number(requesterId) : null;
+    data.requesterId = reqId;
+    if (reqId) {
+      const reqUser = await prisma.user.findUnique({ where: { id: reqId }, select: { fullName: true, email: true } });
+      if (reqUser) {
+        data.sourceName = reqUser.fullName;
+        data.sourceEmail = reqUser.email;
+      }
+    }
+  }
+  if (sourceName !== undefined) data.sourceName = sourceName;
+  if (sourceEmail !== undefined) data.sourceEmail = sourceEmail;
 
   // assetIds (équipements liés) : remplacement complet de la liste
   if (assetIds !== undefined) {
@@ -663,7 +727,7 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
         title: true, content: true, priority: true, category: true, teamId: true,
         assignedToId: true, type: true, urgency: true, impact: true, source: true,
         externalId: true, status: true, isMajorIncident: true, impactedSites: true,
-        glpiTicketId: true, glpiLocationId: true, sourceEmail: true,
+        glpiTicketId: true, glpiLocationId: true, sourceEmail: true, requesterId: true, sourceName: true,
       },
     });
 
@@ -690,7 +754,8 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
     // Enregistrer les corrections de champs par la Hotline/Technicien
     const trackFields = [
       'title', 'content', 'priority', 'category', 'teamId', 'assignedToId',
-      'type', 'urgency', 'impact', 'source', 'externalId', 'glpiLocationId'
+      'type', 'urgency', 'impact', 'source', 'externalId', 'glpiLocationId',
+      'requesterId', 'sourceName', 'sourceEmail'
     ];
     for (const field of trackFields) {
       if (data[field] !== undefined && String(before[field] ?? '') !== String(data[field] ?? '')) {
