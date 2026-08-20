@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import { motion, AnimatePresence, useAnimate } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../api/client';
@@ -27,6 +27,22 @@ import {
 } from '../constants/tickets';
 
 import { sanitizeHtml } from '../utils/sanitize';
+
+// Variants du "défilement" entre tickets (carrousel) : le ticket sorti glisse dans le sens du voyage,
+// le nouveau entre par le côté opposé — sortie rapide puis entrée longue et douce (ease-out quintique)
+const TICKET_SLIDE_VARIANTS = {
+  initial: (dir) => ({ x: dir === 'next' ? '55%' : '-55%', opacity: 0 }),
+  animate: {
+    x: 0,
+    opacity: 1,
+    transition: { duration: 0.45, ease: [0.22, 1, 0.36, 1] },
+  },
+  exit: (dir) => ({
+    x: dir === 'next' ? '-55%' : '55%',
+    opacity: 0,
+    transition: { duration: 0.2, ease: [0.4, 0, 0.2, 1] },
+  }),
+};
 
 function AttachmentThumbnail({ ticketId, attachment }) {
   const [blobUrl, setBlobUrl] = useState(null);
@@ -99,8 +115,6 @@ export default function TicketDetail() {
   const [customSourceEmail, setCustomSourceEmail] = useState('');
   const [adjacent, setAdjacent] = useState({ first: null, prev: null, next: null, last: null });
   const slideDirectionRef = useRef('next'); // 'next' = vers la droite→gauche, 'prev' = gauche→droite
-  const prevIdRef = useRef(id);
-  const [scope, animate] = useAnimate();
   const [corrections, setCorrections] = useState([]);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
@@ -171,25 +185,11 @@ export default function TicketDetail() {
       .catch(() => {});
   }, [id]);
 
+  // On conserve le ticket affiché tant que les données du suivant ne sont pas prêtes,
+  // pour que l'animation de sortie (AnimatePresence) puisse s'exécuter sur l'ancien contenu
   useEffect(() => {
-    if (prevIdRef.current !== id) {
-      setTicket(null);
-    }
     load();
   }, [id, load]);
-
-  // Animer le slide horizontal uniquement (gauche ↔ droite) lors du changement de ticket
-  useEffect(() => {
-    if (!scope.current || !ticket) return;
-    const dir = slideDirectionRef.current;
-    prevIdRef.current = id;
-    const enterX = dir === 'next' ? '120px' : '-120px';
-    animate(
-      scope.current,
-      { x: [enterX, '0px'], opacity: [0.2, 1] },
-      { duration: 0.32, ease: [0.16, 1, 0.3, 1] }
-    );
-  }, [ticket?.id, animate, scope]);
 
   useEffect(() => {
     api.get(`/tickets/${id}/adjacent`)
@@ -829,9 +829,20 @@ export default function TicketDetail() {
         </div>
       </div>
 
-      {/* Zone de contenu Ticket — animation impérative via useAnimate (compatible avec AnimatePresence du layout parent) */}
+      {/* Zone de contenu Ticket — carrousel directionnel (sortie + entrée) via AnimatePresence keyed par ticket.id */}
       <div className="overflow-hidden">
-        <div ref={scope} className="w-full space-y-6" style={{ willChange: 'transform, opacity' }}>
+        <AnimatePresence mode="wait" initial={false} custom={slideDirectionRef.current}>
+          {ticket && (
+            <motion.div
+              key={ticket.id}
+              custom={slideDirectionRef.current}
+              variants={TICKET_SLIDE_VARIANTS}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              className="w-full space-y-6"
+              style={{ willChange: 'transform, opacity' }}
+            >
             {/* Header info (Titre #ID, badges, actions) */}
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-outline-variant/30">
               <div className="flex items-center gap-3">
@@ -2309,8 +2320,10 @@ export default function TicketDetail() {
           )}
         </div>
       </div>
-    </div>
-  </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
 
       {/* Approval Modal */}
       {showApproveModal && (
