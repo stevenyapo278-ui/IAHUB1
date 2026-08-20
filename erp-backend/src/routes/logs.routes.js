@@ -7,6 +7,11 @@ router.use(authenticate);
 
 router.get('/', async (req, res) => {
   try {
+    // Le journal d'audit est réservé au staff : un demandeur n'a pas à voir les actions de tous
+    if (!['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
+
     const {
       type,
       actor,

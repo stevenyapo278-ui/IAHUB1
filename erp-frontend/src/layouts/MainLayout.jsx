@@ -56,8 +56,8 @@ const platformItems = [
 const orgItems = [
   { to: '/teams', label: 'Équipes', icon: Users, color: 'text-emerald-400', permission: null },
   { to: '/users', label: 'Utilisateurs', icon: User, color: 'text-emerald-400', permission: 'users.manage', fallbackRoles: ['ADMIN'] },
-  { to: '/skills', label: 'Compétences', icon: BrainCircuit, color: 'text-teal-400', permission: null },
-  { to: '/categories', label: 'Catégories', icon: Tag, color: 'text-gold-400', permission: null },
+  { to: '/skills', label: 'Compétences', icon: BrainCircuit, color: 'text-teal-400', permission: null, fallbackRoles: ['ADMIN', 'TECHNICIAN'] },
+  { to: '/categories', label: 'Catégories', icon: Tag, color: 'text-gold-400', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
   { to: '/locations', label: 'Lieux', icon: MapPin, color: 'text-amber-400', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE'] },
   { to: '/assets', label: 'Inventaire', icon: Boxes, color: 'text-blue-400', permission: null },
 ];
@@ -69,7 +69,7 @@ const systemItems = [
   { to: '/permission-groups', label: 'Groupes de droits', icon: ShieldCheck, color: 'text-cyan-400', permission: 'users.manage', fallbackRoles: ['ADMIN'] },
   { to: '/settings', label: 'Paramètres', icon: Settings, color: 'text-gray-400', permission: ['settings.ai', 'settings.email', 'settings.integrations', 'automation.manage'], fallbackRoles: ['ADMIN'] },
   { to: '/documentation', label: 'Documentation', icon: FileText, color: 'text-blue-400', permission: null },
-  { to: '/logs', label: 'Journal activité', icon: History, color: 'text-rose-400', permission: null },
+  { to: '/logs', label: 'Journal activité', icon: History, color: 'text-rose-400', permission: null, roles: ['ADMIN', 'SUPERADMIN', 'HOTLINE', 'TECHNICIAN'] },
   { to: '/audit', label: 'Audit système', icon: Shield, color: 'text-amber-400', permission: null, fallbackRoles: ['ADMIN'] },
 ];
 
@@ -205,6 +205,12 @@ export default function MainLayout() {
   }
 
   const filterItems = (items) => items.filter((item) => {
+    // Restriction par rôle explicite (roles) ou fallbackRoles — SUPERADMIN voit tout
+    if (item.permission === null && (item.roles || item.fallbackRoles)) {
+      if (user && user.role === 'SUPERADMIN') return true;
+      const allowed = item.roles || item.fallbackRoles;
+      return allowed.includes(user?.role);
+    }
     if (item.permission === null) return true;
     const keys = Array.isArray(item.permission) ? item.permission : [item.permission];
     return keys.some((key) => hasPermission(user, key, item.fallbackRoles));

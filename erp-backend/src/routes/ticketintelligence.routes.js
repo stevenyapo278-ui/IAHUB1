@@ -10,8 +10,21 @@ const { searchKnowledge } = require('../services/knowledgeSearch');
 const router = express.Router();
 router.use(authenticate);
 
+// Un demandeur n'accède qu'aux messages/événements/assistance de ses propres tickets (404 = masque l'existence)
+async function assertRequesterOwnsTicket(user, ticketId) {
+  if (user.role !== 'REQUESTER') return true;
+  const ticket = await prisma.ticket.findFirst({
+    where: { id: Number(ticketId), requesterId: user.sub },
+    select: { id: true },
+  });
+  return !!ticket;
+}
+
 // Historique complet des messages d'un ticket
 router.get('/tickets/:id/messages', async (req, res) => {
+  if (!(await assertRequesterOwnsTicket(req.user, req.params.id))) {
+    return res.status(404).json({ error: 'Ticket introuvable' });
+  }
   const messages = await prisma.ticketMessage.findMany({
     where: { ticketId: Number(req.params.id) },
     orderBy: { timestamp: 'asc' },
@@ -21,6 +34,9 @@ router.get('/tickets/:id/messages', async (req, res) => {
 
 // Journal d'audit d'un ticket
 router.get('/tickets/:id/events', async (req, res) => {
+  if (!(await assertRequesterOwnsTicket(req.user, req.params.id))) {
+    return res.status(404).json({ error: 'Ticket introuvable' });
+  }
   const events = await prisma.ticketEvent.findMany({
     where: { ticketId: Number(req.params.id) },
     orderBy: { createdAt: 'desc' },
@@ -30,6 +46,9 @@ router.get('/tickets/:id/events', async (req, res) => {
 
 // Assistance IA pour un ticket : analyse + incidents similaires + actions recommandées
 router.get('/tickets/:id/intelligence', async (req, res) => {
+  if (!(await assertRequesterOwnsTicket(req.user, req.params.id))) {
+    return res.status(404).json({ error: 'Ticket introuvable' });
+  }
   const ticket = await prisma.ticket.findUnique({
     where: { id: Number(req.params.id) },
     include: { messages: { orderBy: { timestamp: 'asc' }, take: 10 }, followups: true },

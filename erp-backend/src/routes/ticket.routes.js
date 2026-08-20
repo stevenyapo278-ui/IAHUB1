@@ -24,6 +24,13 @@ const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); // 20 Mo max
 const router = express.Router();
 router.use(authenticate);
 
+// Un compte REQUESTER (créé automatiquement via AD/LDAP ou manuellement) ne voit que ses propres
+// tickets : liste, détail, pièces jointes, corrections et export sont forcés sur ses tickets —
+// aucun contenu des autres demandeurs ne doit fuiter, même si le client manipule les filtres.
+function isRequesterOnly(user) {
+  return user.role === 'REQUESTER';
+}
+
 // List tickets (with optional filters + pagination + sorting)
 router.get('/', async (req, res) => {
   const {
@@ -37,6 +44,10 @@ router.get('/', async (req, res) => {
   const skip = (pageNum - 1) * pageSize;
 
   const where = {};
+  if (isRequesterOnly(req.user)) {
+    // Le demandeur ne voit que les tickets qu'il a ouverts — peu importe le filtre "mine" envoyé
+    where.requesterId = req.user.sub;
+  }
   if (status) {
     if (status === 'OPEN_GROUP') {
       where.status = { in: ['NEW', 'OPEN', 'PENDING'] };
@@ -145,6 +156,10 @@ router.get('/export', async (req, res) => {
   } = req.query;
 
   const where = {};
+  if (isRequesterOnly(req.user)) {
+    // Le demandeur n'exporte que ses propres tickets
+    where.requesterId = req.user.sub;
+  }
   if (status) {
     if (status === 'OPEN_GROUP') where.status = { in: ['NEW', 'OPEN', 'PENDING'] };
     else if (status === 'CLOSED_GROUP') where.status = { in: ['SOLVED', 'CLOSED'] };
@@ -312,6 +327,11 @@ router.get('/:id', async (req, res) => {
     return res.status(404).json({ error: 'Ticket introuvable' });
   }
 
+  // Un demandeur ne consulte que ses propres tickets (404 = ne révèle pas l'existence des autres)
+  if (isRequesterOnly(req.user) && ticket.requesterId !== req.user.sub) {
+    return res.status(404).json({ error: 'Ticket introuvable' });
+  }
+
   // Les commentaires privés (isPrivate) ne sont visibles que par l'équipe (jamais par le demandeur)
   const isStaffMember = ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'].includes(req.user.role);
   if (!isStaffMember) {
@@ -327,6 +347,15 @@ router.get('/:id/attachments/:attachmentId/file', async (req, res) => {
     where: { id: Number(req.params.attachmentId), ticketId: Number(req.params.id) },
   });
   if (!attachment) return res.status(404).json({ error: 'Pièce jointe introuvable' });
+
+  // Un demandeur ne télécharge que les pièces jointes de ses propres tickets
+  if (isRequesterOnly(req.user)) {
+    const ownerTicket = await prisma.ticket.findFirst({
+      where: { id: attachment.ticketId, requesterId: req.user.sub },
+      select: { id: true },
+    });
+    if (!ownerTicket) return res.status(404).json({ error: 'Pièce jointe introuvable' });
+  }
 
   // Priorité au fichier local (pièces jointes en attente d'approbation ou jamais synchronisées GLPI)
   if (attachment.localFilepath) {
@@ -745,6 +774,11 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
 // Get ticket field corrections (audit trail)
 router.get('/:id/corrections', async (req, res) => {
   const id = Number(req.params.id);
+  // Un demandeur ne voit les corrections que de ses propres tickets
+  if (isRequesterOnly(req.user)) {
+    const ownerTicket = await prisma.ticket.findFirst({ where: { id, requesterId: req.user.sub }, select: { id: true } });
+    if (!ownerTicket) return res.status(404).json({ error: 'Ticket introuvable' });
+  }
   const corrections = await prisma.ticketFieldCorrection.findMany({
     where: { ticketId: id },
     include: { correctedBy: { select: { id: true, fullName: true, email: true } } },
@@ -1011,6 +1045,11 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
 
   const ticket = await prisma.ticket.findUnique({ where: { id: ticketId } });
   if (!ticket) {
+    return res.status(404).json({ error: 'Ticket introuvable' });
+  }
+
+  // Un demandeur ne commente que ses propres tickets
+  if (isRequesterOnly(req.user) && ticket.requesterId !== req.user.sub) {
     return res.status(404).json({ error: 'Ticket introuvable' });
   }
 

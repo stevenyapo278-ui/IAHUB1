@@ -54,8 +54,11 @@ router.post(
 
 router.use(authenticate);
 
-// Liste des brouillons (filtrable par statut)
+// Liste des brouillons (filtrable par statut) — réservée au staff (contient des contenus internes IA)
 router.get('/', async (req, res) => {
+  if (!['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Accès refusé' });
+  }
   const where = {};
   if (req.query.status) where.status = req.query.status;
 

@@ -188,9 +188,13 @@ function applyThreadSort(threads, sort) {
   return list;
 }
 
-async function listThreads({ status, q, priority, attachments, category, read, days, sort, page = 1, limit = 25 }) {
+async function listThreads({ status, q, priority, attachments, category, read, days, sort, page = 1, limit = 25, scope = null }) {
+  const emailWhere = {
+    ...(scope || {}),
+    ...(days ? { receivedAt: { gte: new Date(Date.now() - days * 86400000) } } : {}),
+  };
   const emails = await prisma.incomingEmail.findMany({
-    where: days ? { receivedAt: { gte: new Date(Date.now() - days * 86400000) } } : undefined,
+    where: Object.keys(emailWhere).length > 0 ? emailWhere : undefined,
     orderBy: { receivedAt: 'desc' },
     take: MAX_EMAILS,
   });
@@ -218,21 +222,22 @@ async function listThreads({ status, q, priority, attachments, category, read, d
 }
 
 // Compteurs globaux pour les badges des dossiers (façon Outlook)
-async function getInboxCounts() {
+async function getInboxCounts(scope = null) {
+  const countWhere = (extra) => ({ ...(scope || {}), ...extra });
   const [total, pending, processing, done, error, spam, withAttachments, unread] = await Promise.all([
-    prisma.incomingEmail.count(),
-    prisma.incomingEmail.count({ where: { status: 'PENDING' } }),
-    prisma.incomingEmail.count({ where: { status: 'PROCESSING' } }),
-    prisma.incomingEmail.count({ where: { status: 'DONE' } }),
-    prisma.incomingEmail.count({ where: { status: 'ERROR' } }),
-    prisma.incomingEmail.count({ where: { status: 'SPAM' } }),
-    prisma.incomingEmail.count({ where: { hasAttachments: true } }),
-    prisma.incomingEmail.count({ where: { isRead: false } }),
+    prisma.incomingEmail.count({ where: Object.keys(countWhere({})).length > 0 ? countWhere({}) : undefined }),
+    prisma.incomingEmail.count({ where: countWhere({ status: 'PENDING' }) }),
+    prisma.incomingEmail.count({ where: countWhere({ status: 'PROCESSING' }) }),
+    prisma.incomingEmail.count({ where: countWhere({ status: 'DONE' }) }),
+    prisma.incomingEmail.count({ where: countWhere({ status: 'ERROR' }) }),
+    prisma.incomingEmail.count({ where: countWhere({ status: 'SPAM' }) }),
+    prisma.incomingEmail.count({ where: countWhere({ hasAttachments: true }) }),
+    prisma.incomingEmail.count({ where: countWhere({ isRead: false }) }),
   ]);
   return { total, pending, processing, done, error, spam, withAttachments, unread };
 }
 
-async function getThread(key) {
+async function getThread(key, scope = null) {
   let emails;
   let sentMessages = [];
 
@@ -240,10 +245,10 @@ async function getThread(key) {
 
   if (typeof key === 'string' && key.startsWith('single-')) {
     const id = Number(key.slice('single-'.length));
-    const email = await prisma.incomingEmail.findUnique({
-      where: { id },
-      include: { attachments: attachmentSelect },
-    });
+    // findUnique quand aucun scope, findFirst sinon (le scope restreint l'accès à l'email)
+    const email = scope
+      ? await prisma.incomingEmail.findFirst({ where: { id, ...scope }, include: { attachments: attachmentSelect } })
+      : await prisma.incomingEmail.findUnique({ where: { id }, include: { attachments: attachmentSelect } });
     emails = email ? [email] : [];
     if (email?.conversationId) {
       sentMessages = await prisma.ticketMessage.findMany({
@@ -252,7 +257,7 @@ async function getThread(key) {
     }
   } else {
     emails = await prisma.incomingEmail.findMany({
-      where: { conversationId: key },
+      where: { conversationId: key, ...(scope || {}) },
       include: { attachments: attachmentSelect },
     });
     sentMessages = await prisma.ticketMessage.findMany({

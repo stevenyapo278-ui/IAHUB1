@@ -11,6 +11,21 @@ const { listThreads, getThread, getInboxCounts } = require('../services/inboxThr
 const router = express.Router();
 router.use(authenticate);
 
+// Un demandeur (REQUESTER) ne voit que les emails qui le concernent : ceux qu'il a envoyés ou
+// ceux rattachés à ses tickets. Les autres rôles (ADMIN/HOTLINE/TECHNICIAN/SUPERADMIN) voient toute la boîte.
+async function buildEmailScope(user) {
+  if (user.role !== 'REQUESTER') return null;
+  const email = (user.email || '').toLowerCase();
+  const tickets = await prisma.ticket.findMany({ where: { requesterId: user.sub }, select: { id: true } });
+  const ticketIds = tickets.map((t) => t.id);
+  return {
+    OR: [
+      { fromEmail: { equals: email, mode: 'insensitive' } },
+      { erpTicketId: { in: ticketIds } },
+    ],
+  };
+}
+
 // Liste des emails reçus regroupés par conversation (façon Outlook), avec pagination + recherche.
 // La recherche porte sur le fil entier : si un message d'une conversation correspond, tout le fil est renvoyé.
 router.get('/', async (req, res) => {
@@ -25,7 +40,9 @@ router.get('/', async (req, res) => {
   const days = parseInt(req.query.days) > 0 ? parseInt(req.query.days) : undefined;
   const sort = req.query.sort || undefined; // date | date_asc | priority | sender | unread
 
-  const { items, total, pages } = await listThreads({ status, q, priority, attachments, category, read, days, sort, page, limit });
+  const scope = await buildEmailScope(req.user);
+
+  const { items, total, pages } = await listThreads({ status, q, priority, attachments, category, read, days, sort, page, limit, scope });
 
   // Allège la liste : on retirera les corps HTML (conservés uniquement dans le détail du fil)
   const stripped = items.map((thread) => ({
@@ -41,7 +58,8 @@ router.get('/', async (req, res) => {
 // Doit être déclaré AVANT la route '/:id' pour que "counts" ne soit pas capté par celle-ci.
 router.get('/counts', async (req, res) => {
   try {
-    const counts = await getInboxCounts();
+    const scope = await buildEmailScope(req.user);
+    const counts = await getInboxCounts(scope);
     res.json(counts);
   } catch (err) {
     res.status(502).json({ error: err.message || 'Erreur de calcul des compteurs' });
@@ -73,7 +91,10 @@ router.post('/read', async (req, res) => {
   if (orClauses.length === 0) return res.status(400).json({ error: 'key, keys ou ids requis' });
 
   try {
-    const result = await prisma.incomingEmail.updateMany({ where: { OR: orClauses }, data: { isRead: targetRead } });
+    // Un demandeur ne marque comme lu que les emails qui le concernent
+    const scope = await buildEmailScope(req.user);
+    const where = scope ? { AND: [scope, { OR: orClauses }] } : { OR: orClauses };
+    const result = await prisma.incomingEmail.updateMany({ where, data: { isRead: targetRead } });
     res.json({ updated: result.count, read: targetRead });
   } catch (err) {
     res.status(502).json({ error: err.message || 'Erreur mise à jour statut lecture' });
@@ -85,14 +106,18 @@ router.post('/read', async (req, res) => {
 router.get('/thread', async (req, res) => {
   const key = req.query.key;
   if (!key) return res.status(400).json({ error: 'Paramètre key requis' });
-  const thread = await getThread(key);
+  const scope = await buildEmailScope(req.user);
+  const thread = await getThread(key, scope);
   if (!thread) return res.status(404).json({ error: 'Conversation introuvable' });
   res.json(thread);
 });
 
 // Détail d'un email reçu
 router.get('/:id', async (req, res) => {
-  const item = await prisma.incomingEmail.findUnique({ where: { id: Number(req.params.id) } });
+  const scope = await buildEmailScope(req.user);
+  const item = await prisma.incomingEmail.findFirst({
+    where: { id: Number(req.params.id), ...(scope || {}) },
+  });
   if (!item) return res.status(404).json({ error: 'Email introuvable' });
   res.json(item);
 });
