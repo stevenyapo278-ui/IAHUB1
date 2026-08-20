@@ -40,7 +40,7 @@ const TICKET_SLIDE_VARIANTS = {
   exit: (dir) => ({
     x: dir === 'next' ? '-55%' : '55%',
     opacity: 0,
-    transition: { duration: 0.2, ease: [0.4, 0, 0.2, 1] },
+    transition: { duration: 0.28, ease: [0.4, 0, 0.2, 1] },
   }),
 };
 
@@ -831,7 +831,7 @@ export default function TicketDetail() {
 
       {/* Zone de contenu Ticket — carrousel directionnel (sortie + entrée) via AnimatePresence keyed par ticket.id */}
       <div className="overflow-hidden">
-        <AnimatePresence mode="wait" initial={false} custom={slideDirectionRef.current}>
+        <AnimatePresence mode="popLayout" initial={false} custom={slideDirectionRef.current}>
           {ticket && (
             <motion.div
               key={ticket.id}
