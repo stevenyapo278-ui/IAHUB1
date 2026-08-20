@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
@@ -68,6 +68,7 @@ function AttachmentThumbnail({ ticketId, attachment }) {
 export default function TicketDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const { autonomousMode } = useSystemSettings();
   const [ticket, setTicket] = useState(null);    const [followup, setFollowup] = useState('');
@@ -764,7 +765,7 @@ export default function TicketDetail() {
       <div className="flex items-center justify-between gap-4 pb-4 border-b border-outline-variant/30 shrink-0">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => navigate(-1)}
+            onClick={() => (location.key === 'default' ? navigate('/tickets') : navigate(-1))}
             className="p-2 rounded-xl border border-outline-variant/40 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer"
             title="Retour aux tickets"
           >
