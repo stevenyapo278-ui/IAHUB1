@@ -445,20 +445,20 @@ export default function TicketDetail() {
     }
   }
 
-  const linkedTickets = [
+  const linkedTickets = useMemo(() => [
     ...(ticket?.linksA || []).map((l) => ({ ...l, otherTicket: l.ticketB })),
     ...(ticket?.linksB || []).map((l) => ({ ...l, otherTicket: l.ticketA })),
-  ];
+  ], [ticket?.linksA, ticket?.linksB]);
 
   // Sous-tickets (liens PARENT/CHILD) : déduit le sens réel car le lien est stocké
   // avec idA < idB mais le type est exprimé du point de vue de idA (voir ticketLinks.js).
-  const subTickets = linkedTickets
+  const subTickets = useMemo(() => linkedTickets
     .filter((l) => l.type === 'PARENT' || l.type === 'CHILD')
     .map((l) => {
-      const inLinksA = (ticket.linksA || []).some((la) => la.id === l.id);
+      const inLinksA = (ticket?.linksA || []).some((la) => la.id === l.id);
       const childIsOther = l.type === 'PARENT' ? inLinksA : !inLinksA;
       return { ...l, isParent: !childIsOther, isChild: childIsOther };
-    });
+    }), [linkedTickets, ticket?.linksA]);
   const parentTicket = subTickets.find((s) => s.isParent)?.otherTicket || null;
   const children = subTickets.filter((s) => s.isChild);
 
@@ -1040,10 +1040,10 @@ export default function TicketDetail() {
               <div className="border-t border-outline-variant/30 pt-4 mt-4">
                 <h4 className="text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-3 flex items-center gap-1.5">
                   <Paperclip className="w-3.5 h-3.5 text-primary" />
-                  Pièces jointes ({ticket.attachments.length})
+                  Pièces jointes ({(ticket?.attachments || []).length})
                 </h4>
                 <div className="flex flex-wrap gap-3">
-                  {ticket.attachments.map((a) => {
+                  {(ticket?.attachments || []).map((a) => {
                     const isImage = a.mimeType?.startsWith('image/');
                     const fromEmail = a.source === 'INCOMING_EMAIL';
                     return isImage ? (
@@ -1717,7 +1717,7 @@ export default function TicketDetail() {
                 Suggestions IA
               </h3>
               <div className="space-y-2">
-                {ticket.aiSuggestions.map((s) => (
+                {(ticket?.aiSuggestions || []).map((s) => (
                   <div key={s.id} className="border border-purple-500/20 bg-surface-container-lowest rounded-xl p-3 space-y-1.5">
                     <div className="flex items-start justify-between gap-2">
                       <p className="text-xs text-on-surface font-medium leading-relaxed">{s.suggestion}</p>
@@ -2242,13 +2242,13 @@ export default function TicketDetail() {
             <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-3">
               <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2 border-b border-outline-variant/20 pb-3">
                 <Boxes className="w-4 h-4 text-primary" />
-                Équipements liés ({ticket.assets.length})
+                Équipements liés ({(ticket?.assets || []).length})
                 <Link to="/assets" className="ml-auto text-[10px] font-bold text-primary hover:underline">
                   Voir l'inventaire →
                 </Link>
               </h3>
               <div className="space-y-2">
-                {ticket.assets.map(({ asset }) => (
+                {(ticket?.assets || []).map(({ asset }) => (
                   <div key={asset.id} className="flex items-center gap-3 p-2.5 rounded-xl border border-outline-variant/20 bg-surface-container-low/30">
                     <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400 shrink-0">
                       <Boxes className="w-4 h-4" />
