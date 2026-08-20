@@ -17,6 +17,7 @@ const { seedPermissionGroups } = require('./services/permissionGroupSeeder');
 const { runSlaMonitor } = require('./services/slaService');
 const { runDueDateMonitor } = require('./services/dueDateService');
 const { logger } = require('./utils/logger');
+const prisma = require('./prismaClient');
 
 // Validation des variables d'environnement critiques au démarrage
 const REQUIRED_ENV_VARS = ['JWT_SECRET', 'DATABASE_URL'];
