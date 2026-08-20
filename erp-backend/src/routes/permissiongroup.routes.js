@@ -91,6 +91,9 @@ router.delete('/:id', requireSuperAdmin, async (req, res) => {
 });
 
 // Assigne un ou plusieurs utilisateurs au groupe — body: { userIds: number[] }
+// Règle métier : un utilisateur n'appartient qu'à UN SEUL groupe de permissions (contrainte
+// @@unique([userId]) en base). L'assignation est donc un MOUVEMENT : l'utilisateur quitte
+// automatiquement son groupe précédent, atomiquement.
 router.post('/:id/assign', [body('userIds').isArray({ min: 1 })], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
@@ -99,15 +102,32 @@ router.post('/:id/assign', [body('userIds').isArray({ min: 1 })], async (req, re
   if (userIds.length === 0) return res.status(400).json({ error: 'Aucun identifiant valide fourni' });
 
   try {
-    const group = await prisma.permissionGroup.update({
-      where: { id: Number(req.params.id) },
-      data: { members: { connect: userIds.map((id) => ({ id })) } },
-      include: { members: { select: { id: true, fullName: true, email: true } } },
+    const groupId = Number(req.params.id);
+
+    const group = await prisma.$transaction(async (tx) => {
+      const target = await tx.permissionGroup.findUnique({ where: { id: groupId }, select: { id: true, name: true } });
+      if (!target) throw Object.assign(new Error('Groupe introuvable'), { status: 404 });
+
+      // Un utilisateur n'appartient qu'à UN SEUL groupe (contrainte @@unique([userId]) en base).
+      // L'assignation est donc un MOUVEMENT atomique : `set` remplace son groupe actuel par celui-ci.
+      for (const uid of userIds) {
+        await tx.user.update({
+          where: { id: uid },
+          data: { permissionGroups: { set: [{ id: groupId }] } },
+          select: { id: true },
+        });
+      }
+
+      return tx.permissionGroup.findUnique({
+        where: { id: groupId },
+        include: { members: { select: { id: true, fullName: true, email: true } } },
+      });
     });
-    return res.json(group);
+
     auditLog('PERMISSION_GROUP_ASSIGNED', { actor: req.user, targetType: 'PermissionGroup', targetId: group.id, targetLabel: group.name, metadata: { userIds } }).catch(() => {});
+    return res.json(group);
   } catch (err) {
-    return res.status(404).json({ error: 'Groupe introuvable' });
+    return res.status(err.status || 404).json({ error: err.message || 'Groupe introuvable' });
   }
 });
 

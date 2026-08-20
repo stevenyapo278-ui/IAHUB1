@@ -79,6 +79,7 @@ const userSelect = {
   receiveDraftAlerts: true,
   glpiId: true,
   team: { select: { id: true, name: true } },
+  permissionGroups: { select: { id: true, name: true } }, // permet d'afficher le groupe actuel d'un utilisateur (groupes exclusifs)
   createdAt: true,
 };
 
