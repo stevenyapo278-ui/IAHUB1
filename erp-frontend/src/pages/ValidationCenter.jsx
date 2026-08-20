@@ -5,8 +5,11 @@ import {
   ShieldCheck, Ticket, MailCheck, Clock, CheckCircle2,
   XCircle, AlertTriangle, RefreshCw, ChevronRight, User,
   Sparkles, ExternalLink, Send, ArrowRight, Shield, Check, X,
-  Bell, BookOpen, Edit3, Tags, HelpCircle,
+  Bell, BookOpen, Edit3, Tags, HelpCircle, TrendingUp,
 } from 'lucide-react';
+import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid,
+} from 'recharts';
 import { sanitizeHtml } from '../utils/sanitize';
 import api from '../api/client';
 import useSystemSettings from '../hooks/useSystemSettings';
@@ -22,6 +25,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   const [reminderDrafts, setReminderDrafts] = useState([]);
   const [pendingKnowledgeDrafts, setPendingKnowledgeDrafts] = useState([]);
   const [pendingClosures, setPendingClosures] = useState([]);
+  const [closureStats, setClosureStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -73,8 +77,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
       api.get('/tickets?closeSuggested=true&limit=100').catch(() => ({ data: { tickets: [] } })),
       api.get('/dashboard/pending-ai-drafts').catch(() => ({ data: [] })),
       api.get('/knowledge/drafts').catch(() => ({ data: [] })),
+      api.get('/dashboard/closure-stats?days=30').catch(() => null),
     ])
-      .then(([ticketsRes, closuresRes, draftsRes, knowledgeRes]) => {
+      .then(([ticketsRes, closuresRes, draftsRes, knowledgeRes, closureStatsRes]) => {
         const ticketList = Array.isArray(ticketsRes.data)
           ? ticketsRes.data
           : ticketsRes.data?.items || [];
@@ -94,6 +99,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
 
         const knowledgeList = Array.isArray(knowledgeRes.data) ? knowledgeRes.data : [];
         setPendingKnowledgeDrafts(knowledgeList);
+
+        // Statistiques + série temporelle de l'évolution des clôtures suggérées
+        setClosureStats(closureStatsRes?.data || null);
       })
       .catch((err) => toast.error(err.response?.data?.error || 'Erreur lors du chargement des validations'))
       .finally(() => {
@@ -773,6 +781,83 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
       {/* CONTENU DE L'ONGLET CLÔTURES IA */}
       {activeTab === 'closures' && (
         <div className="space-y-4">
+          {/* Suivi de l'évolution : file actuelle + tendance 30 jours */}
+          {closureStats && (
+            <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-5">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-cyan-500" />
+                <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface">
+                  Évolution des clôtures suggérées — 30 jours
+                </h3>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <div className="p-3 rounded-2xl border border-cyan-500/25 bg-cyan-500/10">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-cyan-600 dark:text-cyan-400">En attente</p>
+                  <p className="text-2xl font-extrabold text-on-surface">{closureStats.pending}</p>
+                </div>
+                <div className="p-3 rounded-2xl border border-outline-variant/30 bg-surface-container">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Suggérées</p>
+                  <p className="text-2xl font-extrabold text-on-surface">{closureStats.suggested}</p>
+                </div>
+                <div className="p-3 rounded-2xl border border-emerald-500/25 bg-emerald-500/10">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Validées</p>
+                  <p className="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400">{closureStats.validated}</p>
+                </div>
+                <div className="p-3 rounded-2xl border border-red-500/25 bg-red-500/10">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-red-600 dark:text-red-400">Rejetées</p>
+                  <p className="text-2xl font-extrabold text-red-600 dark:text-red-400">{closureStats.rejected}</p>
+                </div>
+                <div className="p-3 rounded-2xl border border-outline-variant/30 bg-surface-container">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Acceptation</p>
+                  <p className={`text-2xl font-extrabold ${closureStats.acceptanceRate === null || closureStats.acceptanceRate >= 50 ? 'text-on-surface' : 'text-red-500'}`}>
+                    {closureStats.acceptanceRate === null ? '—' : `${closureStats.acceptanceRate}%`}
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                  Suggérées vs décisions Hotline (par jour)
+                </p>
+                <div className="w-full" style={{ height: '180px' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={closureStats.series} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--color-outline-variant)" strokeOpacity={0.4} />
+                      <XAxis
+                        dataKey="date"
+                        tickFormatter={(d) => d.slice(8, 10) + '/' + d.slice(5, 7)}
+                        tick={{ fontSize: 10, fill: 'var(--color-on-surface-variant)' }}
+                        interval="preserveStartEnd"
+                      />
+                      <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: 'var(--color-on-surface-variant)' }} />
+                      <Tooltip
+                        cursor={{ fill: 'var(--color-surface-container-high)' }}
+                        contentStyle={{
+                          backgroundColor: 'var(--color-surface-container-lowest)',
+                          border: '1px solid var(--color-outline-variant)',
+                          borderRadius: '12px',
+                          fontSize: '11px',
+                        }}
+                        labelFormatter={(d) => new Date(d).toLocaleDateString('fr-FR')}
+                      />
+                      <Legend wrapperStyle={{ fontSize: '11px' }} />
+                      <Bar dataKey="suggested" name="Suggérées" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="validated" name="Validées" fill="#10b981" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="rejected" name="Rejetées" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                {closureStats.acceptanceRate !== null && closureStats.acceptanceRate < 50 && (
+                  <p className="text-[11px] text-red-500 font-semibold flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    Taux d'acceptation sous 50 % : la classification IA dérive, vérifier le prompt analyzeIntent.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
           {loading ? (
             <div className="space-y-3">
               {[1, 2, 3].map((i) => (

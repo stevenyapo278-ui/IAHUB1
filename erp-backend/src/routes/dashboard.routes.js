@@ -473,6 +473,8 @@ router.get('/sla-analytics', async (req, res) => {
 
 // Santé des suggestions de clôture : taux d'acceptation sur une fenêtre glissante
 // (CLOSURE_VALIDATED vs CLOSURE_REJECTED par la Hotline). Permet de détecter une dérive de l'IA.
+// Sert aussi au suivi de l'évolution : série temporelle journalière (suggérées/validées/rejetées)
+// et file d'attente actuelle (tickets marqués closeSuggested=true) pour le Centre de Validation.
 router.get('/closure-stats', async (req, res) => {
   const days = Math.min(parseInt(req.query.days, 10) || 30, 90);
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
@@ -487,13 +489,43 @@ router.get('/closure-stats', async (req, res) => {
   const rejected = groups.find((g) => g.type === 'CLOSURE_REJECTED')?._count._all || 0;
   const total = validated + rejected;
 
+  // Série temporelle journalière : événements de clôture (suggérées + décisions Hotline)
+  const events = await prisma.ticketEvent.findMany({
+    where: {
+      createdAt: { gte: since },
+      type: { in: ['CLOSURE_SUGGESTED', 'CLOSURE_VALIDATED', 'CLOSURE_REJECTED'] },
+    },
+    select: { type: true, createdAt: true },
+    orderBy: { createdAt: 'asc' },
+  });
+
+  const toDayKey = (d) => d.toISOString().slice(0, 10);
+  const byDay = new Map();
+  for (let i = 0; i < days; i++) {
+    const d = new Date(since.getTime() + i * 24 * 60 * 60 * 1000);
+    byDay.set(toDayKey(d), { date: toDayKey(d), suggested: 0, validated: 0, rejected: 0 });
+  }
+  for (const e of events) {
+    const bucket = byDay.get(toDayKey(new Date(e.createdAt)));
+    if (!bucket) continue;
+    if (e.type === 'CLOSURE_SUGGESTED') bucket.suggested += 1;
+    else if (e.type === 'CLOSURE_VALIDATED') bucket.validated += 1;
+    else bucket.rejected += 1;
+  }
+
+  const pending = await prisma.ticket.count({ where: { closeSuggested: true } });
+  const suggested = events.filter((e) => e.type === 'CLOSURE_SUGGESTED').length;
+
   return res.json({
     days,
+    suggested,
     validated,
     rejected,
     total,
+    pending,
     acceptanceRate: total > 0 ? Math.round((validated / total) * 1000) / 10 : null,
     lowTrust: await prisma.senderReputation.count({ where: { closureStatus: 'LOW_TRUST_CLOSURE' } }),
+    series: [...byDay.values()],
   });
 });
 
