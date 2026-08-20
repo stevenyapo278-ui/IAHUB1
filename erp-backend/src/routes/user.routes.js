@@ -5,7 +5,7 @@ const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { authenticate, authorizeAdmin } = require('../middleware/auth');
 const { sendTemporaryPasswordEmail } = require('../services/emailSender');
-const { ADMIN_LIKE_ROLES } = require('../config/permissions');
+const { ADMIN_LIKE_ROLES, ROLE_DEFAULT_GROUP_NAME, canAssignRole } = require('../config/permissions');
 const { sanitizeError } = require('../utils/sanitizeError');
 const { auditLog } = require('../services/auditLogService');
 const { emitUserUpdated } = require('../utils/socket');
@@ -21,16 +21,19 @@ function invalidateUserCaches() {
 
 const MIN_PASSWORD_LENGTH = 8;
 
-// Matrice de rôles assignables : SUPERADMIN peut tout assigner ; ADMIN ne peut assigner que
-// TECHNICIAN/REQUESTER (jamais ADMIN ni SUPERADMIN, y compris en éditant un compte déjà à ce niveau)
-// — sinon un ADMIN pourrait se créer des pairs ou des supérieurs sans validation d'un SUPERADMIN.
-const ASSIGNABLE_ROLES_BY_ACTOR = {
-  SUPERADMIN: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN', 'REQUESTER'],
-  ADMIN: ['HOTLINE', 'TECHNICIAN', 'REQUESTER'],
-};
-
-function canAssignRole(actorRole, targetRole) {
-  return (ASSIGNABLE_ROLES_BY_ACTOR[actorRole] || []).includes(targetRole);
+// ── Synchronisation rôle ↔ groupe (RBAC) ─────────────────────────────────
+// « Le groupe suit le rôle » : quand un utilisateur reçoit un rôle associé à un groupe par défaut
+// (ROLE_DEFAULT_GROUP_NAME), il y est DÉPLACÉ (set = remplacement atomique, un seul groupe par
+// utilisateur — contrainte d'exclusivité). Best effort : si le groupe n'existe pas, on ne touche à rien.
+async function syncRolePermissionGroup(userId, role) {
+  const groupName = ROLE_DEFAULT_GROUP_NAME[role];
+  if (!groupName) return;
+  const group = await prisma.permissionGroup.findUnique({ where: { name: groupName } });
+  if (!group) return;
+  await prisma.user.update({
+    where: { id: userId },
+    data: { permissionGroups: { set: [{ id: group.id }] } },
+  }).catch(() => {});
 }
 
 // Un ADMIN ne doit pas pouvoir modifier/supprimer/réinitialiser un compte ADMIN ou SUPERADMIN
@@ -39,25 +42,6 @@ function canAssignRole(actorRole, targetRole) {
 function canActOnTarget(actorRole, targetRole) {
   if (actorRole === 'SUPERADMIN') return true;
   return !ADMIN_LIKE_ROLES.includes(targetRole);
-}
-
-async function syncHotlinePermissionGroup(userId, isHotline) {
-  const group = await prisma.permissionGroup.findFirst({ where: { name: 'Équipe Hotline' } });
-  if (!group) return;
-  if (isHotline) {
-    // Déplace l'utilisateur vers le groupe Hotline (set = remplacement atomique) : un utilisateur
-    // est dans un SEUL groupe ; un simple connect violerait la contrainte d'exclusivité si l'utilisateur
-    // est déjà ailleurs et serait silencieusement avalé.
-    await prisma.user.update({
-      where: { id: userId },
-      data: { permissionGroups: { set: [{ id: group.id }] } },
-    }).catch(() => {});
-  } else {
-    await prisma.permissionGroup.update({
-      where: { id: group.id },
-      data: { members: { disconnect: { id: userId } } },
-    }).catch(() => {});
-  }
 }
 
 const router = express.Router();
@@ -381,13 +365,12 @@ router.post(
       select: userSelect,
     });
 
-    if (targetRole === 'HOTLINE') {
-      syncHotlinePermissionGroup(user.id, true);
-    }
+    // Le groupe par défaut du rôle suit la création (HOTLINE → « Équipe Hotline », TECHNICIAN → « Techniciens »)
+    await syncRolePermissionGroup(user.id, targetRole);
 
     invalidateUserCaches();
-    return res.status(201).json(user);
     auditLog('USER_CREATED', { actor: req.user, targetType: 'User', targetId: user.id, targetLabel: user.fullName || user.email, metadata: { email: user.email, role: user.role } }).catch(() => {});
+    return res.status(201).json(user);
   }
 );
 
@@ -449,13 +432,13 @@ router.patch(
         select: userSelect,
       });
       if (role !== undefined && role !== target.role) {
-        syncHotlinePermissionGroup(user.id, role === 'HOTLINE');
-        // Rafraîchissement instantané de la session de l'utilisateur concerné (menus + permissions)
+        // « Le groupe suit le rôle » + rafraîchissement instantané de la session (menus + permissions)
+        await syncRolePermissionGroup(user.id, role);
         emitUserUpdated(user.id);
       }
       invalidateUserCaches();
-      return res.json(user);
       auditLog('USER_UPDATED', { actor: req.user, targetType: 'User', targetId: user.id, targetLabel: user.fullName || user.email, metadata: { changedFields: Object.keys(data) } }).catch(() => {});
+      return res.json(user);
     } catch (err) {
       return res.status(404).json({ error: 'Utilisateur introuvable' });
     }
@@ -486,8 +469,8 @@ router.post('/:id/reset-password', async (req, res) => {
     return res.status(502).json({ error: `Mot de passe réinitialisé mais échec de l'envoi de l'email : ${sanitizeError(err)}` });
   }
 
-  return res.json({ ok: true, message: `Nouveau mot de passe envoyé à ${user.email}` });
   auditLog('USER_PASSWORD_RESET', { actor: req.user, targetType: 'User', targetId: user.id, targetLabel: user.fullName || user.email }).catch(() => {});
+  return res.json({ ok: true, message: `Nouveau mot de passe envoyé à ${user.email}` });
 });
 
 const multer = require('multer');

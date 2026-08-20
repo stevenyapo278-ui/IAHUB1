@@ -2,6 +2,41 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../api/client';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import { Component } from 'react';
+
+// Mini ErrorBoundary pour isoler chaque section — si une section plante, les autres continuent de fonctionner
+class SectionErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, errorInfo) {
+    console.error(`[AdvancedTab] Section « ${this.props.label || 'inconnue'} » a crashé:`, error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="bento-card p-lg border border-red-500/20 bg-red-500/5">
+          <div className="flex items-center gap-2 text-red-500 font-semibold text-sm mb-2">
+            <span className="material-symbols-outlined text-[18px]">error</span>
+            Section « {this.props.label || 'inconnue'} » — erreur de rendu
+          </div>
+          <p className="text-xs text-on-surface-variant mb-3">{this.state.error?.message || 'Erreur inconnue'}</p>
+          <button
+            onClick={() => this.setState({ hasError: false, error: null })}
+            className="px-3 py-1.5 rounded-lg bg-red-500/10 text-red-500 text-xs font-semibold border border-red-500/20 hover:bg-red-500/20 transition-all"
+          >
+            Réessayer
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const inputClass =
   'bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300';
@@ -473,35 +508,45 @@ export default function AdvancedTab() {
           (notification + email au technicien assigné).
         </p>
 
-        <SlaThresholdsSection saving={saving} setSaving={setSaving} setError={setError} />
+        <SectionErrorBoundary label="Seuils SLA">
+          <SlaThresholdsSection saving={saving} setSaving={setSaving} setError={setError} />
+        </SectionErrorBoundary>
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       {/* SECTION 4 : REIMPORT GLPI & EMAILS */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
-      <GlpiReimportSection autonomousMode={settings.autonomousMode === true} />
+      <SectionErrorBoundary label="Réimport de données">
+        <GlpiReimportSection autonomousMode={settings.autonomousMode === true} />
+      </SectionErrorBoundary>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       {/* SECTION 4bis : ZONE DE DANGER — REINITIALISATION DE LA BASE DE TICKETS */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
-      <TicketPurgeSection
-        autonomousMode={settings.autonomousMode === true}
-        ticketsSyncInterval={settings.glpiTicketsSyncIntervalSeconds}
-        onPurged={(result) => {
-          api.get('/advanced-settings').then(({ data }) => setSettings(data)).catch(() => {});
-        }}
-        setError={setError}
-      />
+      <SectionErrorBoundary label="Zone de danger">
+        <TicketPurgeSection
+          autonomousMode={settings.autonomousMode === true}
+          ticketsSyncInterval={settings.glpiTicketsSyncIntervalSeconds}
+          onPurged={(result) => {
+            api.get('/advanced-settings').then(({ data }) => setSettings(data)).catch(() => {});
+          }}
+          setError={setError}
+        />
+      </SectionErrorBoundary>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       {/* SECTION 4bis : GESTION DU CACHE */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
-      <CacheSection />
+      <SectionErrorBoundary label="Gestion du cache">
+        <CacheSection />
+      </SectionErrorBoundary>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       {/* SECTION 5 : REGLES DE TRIAGE AUTOMATIQUE */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
-      <TriageRulesSection saving={saving} setSaving={setSaving} setError={setError} />
+      <SectionErrorBoundary label="Règles de triage">
+        <TriageRulesSection saving={saving} setSaving={setSaving} setError={setError} />
+      </SectionErrorBoundary>
     </motion.div>
   );
 }
@@ -589,7 +634,7 @@ function CacheSection() {
           <p className="text-[12px] text-on-surface-variant italic">Chargement des statistiques...</p>
         )}
 
-        {stats && stats.entries.length > 0 && (
+        {stats && Array.isArray(stats.entries) && stats.entries.length > 0 && (
           <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest overflow-hidden">
             <div className="px-4 py-2.5 border-b border-outline-variant/40 text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
               Entrées les plus consultées

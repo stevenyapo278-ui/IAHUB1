@@ -3,7 +3,7 @@ const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { authenticate, authorizeAdmin } = require('../middleware/auth');
 const { requireSuperAdmin } = require('../middleware/permissions');
-const { PERMISSION_KEYS } = require('../config/permissions');
+const { PERMISSION_KEYS, GROUP_NAME_TO_ROLE, canAssignRole } = require('../config/permissions');
 const { auditLog } = require('../services/auditLogService');
 const { emitUserUpdated } = require('../utils/socket');
 
@@ -95,6 +95,10 @@ router.delete('/:id', requireSuperAdmin, async (req, res) => {
 // Règle métier : un utilisateur n'appartient qu'à UN SEUL groupe de permissions (contrainte
 // @@unique([userId]) en base). L'assignation est donc un MOUVEMENT : l'utilisateur quitte
 // automatiquement son groupe précédent, atomiquement.
+// Règle RBAC « le rôle suit le groupe » : si le groupe receveur est associé à un rôle de travail
+// (GROUP_NAME_TO_ROLE), le rôle des utilisateurs est mis à jour dans le même mouvement — ainsi la
+// vue Utilisateurs et la vue Groupes de droits ne peuvent plus diverger. Un rôle réservé à un acteur
+// supérieur (ex. ADMIN assigné par un ADMIN) est ignoré : le groupe bouge, le rôle reste.
 router.post('/:id/assign', [body('userIds').isArray({ min: 1 })], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
@@ -109,12 +113,20 @@ router.post('/:id/assign', [body('userIds').isArray({ min: 1 })], async (req, re
       const target = await tx.permissionGroup.findUnique({ where: { id: groupId }, select: { id: true, name: true } });
       if (!target) throw Object.assign(new Error('Groupe introuvable'), { status: 404 });
 
+      const roleForGroup = GROUP_NAME_TO_ROLE[target.name];
+
       // Un utilisateur n'appartient qu'à UN SEUL groupe (contrainte @@unique([userId]) en base).
-      // L'assignation est donc un MOUVEMENT atomique : `set` remplace son groupe actuel par celui-ci.
+      // L'assignation est donc un MOUVEMENT atomique : `set` remplace son groupe actuel par celui-ci,
+      // et le rôle suit si le groupe est associé à un rôle de travail.
       for (const uid of userIds) {
+        const current = await tx.user.findUnique({ where: { id: uid }, select: { role: true } });
+        const syncRole = roleForGroup && current && current.role !== roleForGroup && canAssignRole(req.user.role, roleForGroup);
         await tx.user.update({
           where: { id: uid },
-          data: { permissionGroups: { set: [{ id: groupId }] } },
+          data: {
+            permissionGroups: { set: [{ id: groupId }] },
+            ...(syncRole ? { role: roleForGroup } : {}),
+          },
           select: { id: true },
         });
       }
@@ -126,7 +138,7 @@ router.post('/:id/assign', [body('userIds').isArray({ min: 1 })], async (req, re
     });
 
     auditLog('PERMISSION_GROUP_ASSIGNED', { actor: req.user, targetType: 'PermissionGroup', targetId: group.id, targetLabel: group.name, metadata: { userIds } }).catch(() => {});
-    for (const uid of userIds) emitUserUpdated(uid); // permissions instantanées côté utilisateur concerné
+    for (const uid of userIds) emitUserUpdated(uid); // permissions + rôle instantanés côté utilisateur concerné
     return res.json(group);
   } catch (err) {
     return res.status(err.status || 404).json({ error: err.message || 'Groupe introuvable' });

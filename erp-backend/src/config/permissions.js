@@ -60,4 +60,39 @@ const ADMIN_LIKE_ROLES = ['SUPERADMIN', 'ADMIN'];
 // déléguable via un PermissionGroup, c'est strictement réservé au rôle SUPERADMIN (cf. requireSuperAdmin).
 const SUPERADMIN_ONLY_KEY = 'superadmin.manage';
 
-module.exports = { PERMISSION_KEYS, PERMISSION_LABELS, ADMIN_LIKE_ROLES, SUPERADMIN_ONLY_KEY };
+// ── Synchronisation rôle ↔ groupe de permissions (RBAC) ───────────────────
+// Recommandation « assign roles to groups, not users » : le rôle de l'utilisateur et son groupe
+// de permissions doivent rester alignés (une seule source de vérité, sinon dérive => conflits).
+// Ce tableau fait foi dans les DEUX sens :
+//   - le rôle change (vue Utilisateurs)        → l'utilisateur est déplacé vers le groupe du rôle ;
+//   - le groupe change (vue Groupes de droits) → le rôle de l'utilisateur suit le groupe.
+// Un rôle sans groupe associé (null) ne touche pas à l'appartenance ; un groupe hors tableau ne
+// touche pas au rôle. Les groupes sont retrouvés par nom (best effort si absent).
+const ROLE_DEFAULT_GROUP_NAME = {
+  HOTLINE: 'Équipe Hotline',
+  TECHNICIAN: 'Techniciens',
+  ADMIN: null,
+  SUPERADMIN: null,
+  REQUESTER: null,
+};
+
+// Inverse automatique : nom de groupe → rôle de travail associé
+const GROUP_NAME_TO_ROLE = Object.fromEntries(
+  Object.entries(ROLE_DEFAULT_GROUP_NAME)
+    .filter(([, groupName]) => groupName)
+    .map(([role, groupName]) => [groupName, role])
+);
+
+// Matrice des rôles assignables (actor → cibles) — partagée entre la vue Utilisateurs et la
+// synchronisation rôle↔groupe : un ADMIN ne peut jamais créer/attribuer de pairs (ADMIN) ni de
+// hiérarchique (SUPERADMIN), même via un déplacement de groupe.
+const ASSIGNABLE_ROLES_BY_ACTOR = {
+  SUPERADMIN: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN', 'REQUESTER'],
+  ADMIN: ['HOTLINE', 'TECHNICIAN', 'REQUESTER'],
+};
+
+function canAssignRole(actorRole, targetRole) {
+  return (ASSIGNABLE_ROLES_BY_ACTOR[actorRole] || []).includes(targetRole);
+}
+
+module.exports = { PERMISSION_KEYS, PERMISSION_LABELS, ADMIN_LIKE_ROLES, SUPERADMIN_ONLY_KEY, ROLE_DEFAULT_GROUP_NAME, GROUP_NAME_TO_ROLE, ASSIGNABLE_ROLES_BY_ACTOR, canAssignRole };

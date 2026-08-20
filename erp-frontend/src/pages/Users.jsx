@@ -180,9 +180,16 @@ export default function Users() {
     try {
       await api.patch(`/users/${id}`, { [field]: value });
       load();
-      if (field === 'role') {
+if (field === 'role') {
         const target = users.find((u) => u.id === id);
-        toast.success(`Rôle de ${target?.fullName || 'l’utilisateur'} changé pour « ${ROLE_CONFIG[value]?.label || value} » — effet immédiat`);
+        // Le groupe de droits suit le rôle (RBAC) : on affiche le groupe aligné automatiquement
+        let groupNote = '';
+        try {
+          const { data: fresh } = await api.get(`/users/${id}`);
+          const g = fresh?.permissionGroups?.[0];
+          if (g) groupNote = ` — groupe « ${g.name} » aligné`;
+        } catch { /* info optionnelle */ }
+        toast.success(`Rôle de ${target?.fullName || 'l’utilisateur'} changé pour « ${ROLE_CONFIG[value]?.label || value} » — effet immédiat${groupNote}`);
       } else if (field === 'isActive') {
         const target = users.find((u) => u.id === id);
         toast.success(`${target?.fullName || 'Utilisateur'} ${value ? 'réactivé' : 'désactivé'}`);

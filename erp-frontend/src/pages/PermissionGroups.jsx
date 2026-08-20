@@ -29,6 +29,14 @@ const ROLE_STYLES = {
   REQUESTER: { label: 'Demandeur', cls: 'bg-outline/10 border-outline/30 text-on-surface-variant' },
 };
 
+// RBAC « le rôle suit le groupe » (miroir du backend) : déplacer un utilisateur vers un de ces
+// groupes met aussi à jour son rôle automatiquement — on le signale dans les messages de confirmation.
+const GROUP_ROLE_KEY = { 'Équipe Hotline': 'HOTLINE', 'Techniciens': 'TECHNICIAN' };
+function roleHintFor(groupName) {
+  const key = GROUP_ROLE_KEY[groupName];
+  return key ? ROLE_STYLES[key]?.label || key : null;
+}
+
 function RoleBadge({ role }) {
   const style = ROLE_STYLES[role] || { label: role, cls: 'bg-outline/10 border-outline/30 text-on-surface-variant' };
   return (
@@ -191,7 +199,10 @@ export default function PermissionGroups() {
     setTogglingMember(user.id);
     try {
       await api.post(`/permission-groups/${openGroup.id}/assign`, { userIds: [user.id] });
-      toast.success(`« ${user.fullName} » déplacé vers « ${openGroup.name} »`);
+      // Le rôle suit le groupe (RBAC) : on le mentionne si le groupe cible est associé à un rôle
+      const hint = roleHintFor(openGroup.name);
+      const roleChanged = hint && user.role !== GROUP_ROLE_KEY[openGroup.name];
+      toast.success(`« ${user.fullName} » déplacé vers « ${openGroup.name} »${roleChanged ? ` — rôle passé à « ${hint} »` : ''}`);
       await load();
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors du déplacement');
@@ -752,7 +763,7 @@ export default function PermissionGroups() {
         open={!!moveConfirm}
         title="Déplacer l'utilisateur"
         message={moveConfirm
-          ? `« ${moveConfirm.user.fullName} » est actuellement dans « ${moveConfirm.fromGroup} ». Il quittera ce groupe et sera placé dans « ${openGroup?.name} ».`
+          ? `« ${moveConfirm.user.fullName} » est actuellement dans « ${moveConfirm.fromGroup} ». Il quittera ce groupe et sera placé dans « ${openGroup?.name} »${roleHintFor(openGroup?.name) && moveConfirm.user.role !== GROUP_ROLE_KEY[openGroup?.name] ? ` — son rôle sera également mis à jour (${ROLE_STYLES[moveConfirm.user.role]?.label || moveConfirm.user.role} → ${roleHintFor(openGroup.name)}).` : '.'}`
           : ''}
         confirmLabel="Déplacer"
         loading={togglingMember === moveConfirm?.user?.id}
