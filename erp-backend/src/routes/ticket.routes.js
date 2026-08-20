@@ -1030,6 +1030,18 @@ router.post('/:id/reject-close', requirePermission('tickets.approve', ['ADMIN', 
     return res.status(500).json({ error: err.message });
   }
 });
+// Analyse proactive : scanne les tickets ouverts sans réponse utilisateur récente pour détecter
+// les résolutions probables et proposer des clôtures à la Hotline (bouton « Analyse des tickets »).
+router.post('/analyze-closures', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+  try {
+    const { runClosureAnalysis } = require('../services/closureScanner');
+    const max = Math.min(parseInt((req.body || {}).limit, 10) || 25, 100);
+    const summary = await runClosureAnalysis({ limit: max });
+    return res.json(summary);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
 // Met à jour l'assignation, journalise dans ReassignmentLog et émet socket event.
 router.patch('/:id/reassign', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const id = Number(req.params.id);

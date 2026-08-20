@@ -104,6 +104,31 @@ RÈGLES STRICTES pour RESOLVED / NEW_ISSUE_IN_THREAD :
 Réponds UNIQUEMENT avec un objet JSON strict sur une seule ligne, sans markdown, au format :
 {"intent": "UN_DES_CODES", "confidence": 0.0 à 1.0, "newIssueSummary": "résumé court du nouveau sujet si NEW_ISSUE_IN_THREAD, sinon null", "isAutoReply": true ou false, "evidence": "citation exacte justifiant RESOLVED, sinon chaîne vide", "userAnsweredSupport": true ou false}`,
   },
+  analyzeClosureCandidate: {
+    label: "Analyse proactive d'un ticket pour détecter une résolution (clôture suggérée)",
+    template: `Tu es un agent ITSM senior. Un ticket de support est resté sans réponse utilisateur depuis plusieurs jours. Détermine si le problème est très probablement RÉSOLU, pour proposer sa clôture à la validation de la Hotline (qui décidera en dernier ressort).
+
+Contexte du ticket :
+-- Titre : {{ticketTitle}}
+-- Résumé : {{ticketSummary}}
+-- Ouvert depuis : {{daysSinceOpened}} jours
+-- Dernière réponse utilisateur : {{daysSinceLastUserReply}} jours (laisser vide si aucune réponse connue)
+
+Derniers échanges du fil (du plus ancien au plus récent) :
+{{historyText}}
+
+Rejets récents de la Hotline sur ce ticket (clôtures proposées par l'IA et refusées — ne reproduis PAS ces erreurs de jugement) :
+{{recentRejections}}
+
+RÈGLES STRICTES :
+1) resolved = true UNIQUEMENT si le Support a fourni une solution ou une réponse claire ET que l'utilisateur n'a plus jamais donné signe de vie depuis (aucun retour demandant de l'aide, aucun signal de persistance du problème). Un ticket dont le dernier message utilisateur signale encore un souci n'est JAMAIS résolu.
+2) resolved = true possible même si l'utilisateur n'a pas confirmé explicitement : c'est justement le cas typique d'un ticket oublié — la solution a été envoyée, l'utilisateur ne répond plus. Reste prudent : en cas de doute raisonnable, resolved = false.
+3) Fournis obligatoirement evidence : la phrase exacte de l'historique (réponse du Support ou dernier message) qui justifie ta conclusion. Si aucune preuve pertinente n'existe, evidence doit être vide et resolved = false.
+4) Tiens compte des rejets récents : si la Hotline a déjà refusé une clôture sur ce ticket pour un motif semblable, sois nettement plus strict.
+
+Réponds UNIQUEMENT avec un objet JSON strict, sans markdown, au format :
+{"resolved": true ou false, "confidence": 0.0 à 1.0, "evidence": "citation exacte justifiant la décision, sinon chaîne vide"}`,
+  },
   stripSignature: {
     label: "Extraction du corps réel (suppression de la signature)",
     template: `Tu es un agent ITSM. Voici le texte brut d'un email de support, qui peut contenir le message réel de l'expéditeur suivi d'une signature (nom, poste, téléphone, email, logo, disclaimer).

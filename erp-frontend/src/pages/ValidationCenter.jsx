@@ -26,6 +26,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   const [pendingKnowledgeDrafts, setPendingKnowledgeDrafts] = useState([]);
   const [pendingClosures, setPendingClosures] = useState([]);
   const [closureStats, setClosureStats] = useState(null);
+  const [analyzingClosures, setAnalyzingClosures] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -175,6 +176,27 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     setClosureRejectTicketId(ticketId);
     setClosureRejectReason('');
     setShowClosureRejectModal(true);
+  }
+
+  // Analyse proactive : demande au backend de scanner les tickets sans réponse récente
+  // pour détecter les résolutions probables et proposer des clôtures à la Hotline.
+  async function handleAnalyzeClosures() {
+    setAnalyzingClosures(true);
+    try {
+      const { data } = await api.post('/tickets/analyze-closures');
+      if (data.suggested > 0) {
+        toast.success(`${data.suggested} clôture(s) suggérée(s) sur ${data.scanned} ticket(s) analysé(s)`);
+      } else if (data.scanned === 0) {
+        toast.info('Aucun ticket à analyser : aucun ticket ouvert sans réponse récente');
+      } else {
+        toast.info(`Analyse terminée : ${data.scanned} ticket(s) analysé(s), aucune nouvelle clôture suggérée`);
+      }
+      loadAllData(true);
+    } catch (err) {
+      toast.error(err.response?.data?.error || "Échec de l'analyse des tickets");
+    } finally {
+      setAnalyzingClosures(false);
+    }
   }
 
   async function handleConfirmClosureReject() {
@@ -781,6 +803,22 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
       {/* CONTENU DE L'ONGLET CLÔTURES IA */}
       {activeTab === 'closures' && (
         <div className="space-y-4">
+          {/* Action : analyse proactive de l'état des tickets */}
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <p className="text-xs text-on-surface-variant">
+              L'analyse scanne les tickets ouverts sans réponse utilisateur récente et détecte les résolutions probables à valider.
+            </p>
+            <button
+              onClick={handleAnalyzeClosures}
+              disabled={analyzingClosures}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-cyan-600 to-teal-600 text-white shadow-md shadow-cyan-500/20 transition-all hover:brightness-110 disabled:opacity-50 cursor-pointer shrink-0"
+              title="Analyser l'état des tickets ouverts pour détecter les clôtures à proposer"
+            >
+              <RefreshCw className={`w-4 h-4 ${analyzingClosures ? 'animate-spin' : ''}`} />
+              <span>{analyzingClosures ? 'Analyse en cours…' : 'Analyser les tickets'}</span>
+            </button>
+          </div>
+
           {/* Suivi de l'évolution : file actuelle + tendance 30 jours */}
           {closureStats && (
             <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-5">
