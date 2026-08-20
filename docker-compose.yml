@@ -60,8 +60,8 @@ services:
       GLPI_URL: ${GLPI_URL:-http://glpi/apirest.php}
       GLPI_APP_TOKEN: ${GLPI_APP_TOKEN:-}
       GLPI_USER_TOKEN: ${GLPI_USER_TOKEN:-}
-      AUTH_EMAIL_DOMAIN: ${AUTH_EMAIL_DOMAIN:-}
-      LDAP_ENABLED: ${LDAP_ENABLED:-false}
+      AUTH_EMAIL_DOMAIN: ${AUTH_EMAIL_DOMAIN:-prosuma.ci}
+      LDAP_ENABLED: ${LDAP_ENABLED:-true}
       LDAP_URL: ${LDAP_URL:-ldap://10.0.70.1}
       LDAP_EMAIL_DOMAIN: ${LDAP_EMAIL_DOMAIN:-prosuma.ci}
       LDAP_BIND_FORMAT: ${LDAP_BIND_FORMAT:-{username}@{domain}}
