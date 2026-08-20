@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../api/client';
@@ -97,6 +98,8 @@ export default function TicketDetail() {
   const [customSourceName, setCustomSourceName] = useState('');
   const [customSourceEmail, setCustomSourceEmail] = useState('');
   const [adjacent, setAdjacent] = useState({ first: null, prev: null, next: null, last: null });
+  const [slideDirection, setSlideDirection] = useState('next');
+  const prevIdRef = useRef(id);
   const [corrections, setCorrections] = useState([]);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
@@ -168,7 +171,18 @@ export default function TicketDetail() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Charger les IDs adjacents à chaque changement de ticket
+  // Charger les IDs adjacents à chaque changement de ticket et détecter la direction du slide
+  useEffect(() => {
+    if (prevIdRef.current !== id) {
+      if (Number(id) < Number(prevIdRef.current)) {
+        setSlideDirection('prev');
+      } else {
+        setSlideDirection('next');
+      }
+      prevIdRef.current = id;
+    }
+  }, [id]);
+
   useEffect(() => {
     api.get(`/tickets/${id}/adjacent`)
       .then(({ data }) => setAdjacent(data))
@@ -749,18 +763,28 @@ export default function TicketDetail() {
             <ArrowLeft className="w-4 h-4" />
           </button>
 
-          {/* Navigation entre tickets : premier ← → dernier */}
+          {/* Navigation entre tickets : premier ← → dernier par ordre de numéro */}
           <div className="flex items-center gap-0.5">
             <button
-              onClick={() => adjacent.first && navigate(`/tickets/${adjacent.first}`)}
+              onClick={() => {
+                if (adjacent.first) {
+                  setSlideDirection('prev');
+                  navigate(`/tickets/${adjacent.first}`);
+                }
+              }}
               disabled={!adjacent.first}
               className="p-1.5 rounded-lg border border-outline-variant/30 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-              title={adjacent.first ? `Premier ticket (#${adjacent.first})` : 'Déjà le premier ticket'}
+              title={adjacent.first ? `Premier ticket (#${adjacent.first})` : 'Déjà au premier ticket'}
             >
               <ChevronsLeft className="w-3.5 h-3.5" />
             </button>
             <button
-              onClick={() => adjacent.prev && navigate(`/tickets/${adjacent.prev}`)}
+              onClick={() => {
+                if (adjacent.prev) {
+                  setSlideDirection('prev');
+                  navigate(`/tickets/${adjacent.prev}`);
+                }
+              }}
               disabled={!adjacent.prev}
               className="p-1.5 rounded-lg border border-outline-variant/30 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
               title={adjacent.prev ? `Ticket précédent (#${adjacent.prev})` : 'Pas de ticket précédent'}
@@ -768,7 +792,12 @@ export default function TicketDetail() {
               <ChevronLeft className="w-3.5 h-3.5" />
             </button>
             <button
-              onClick={() => adjacent.next && navigate(`/tickets/${adjacent.next}`)}
+              onClick={() => {
+                if (adjacent.next) {
+                  setSlideDirection('next');
+                  navigate(`/tickets/${adjacent.next}`);
+                }
+              }}
               disabled={!adjacent.next}
               className="p-1.5 rounded-lg border border-outline-variant/30 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
               title={adjacent.next ? `Ticket suivant (#${adjacent.next})` : 'Pas de ticket suivant'}
@@ -776,10 +805,15 @@ export default function TicketDetail() {
               <ChevronRight className="w-3.5 h-3.5" />
             </button>
             <button
-              onClick={() => adjacent.last && navigate(`/tickets/${adjacent.last}`)}
+              onClick={() => {
+                if (adjacent.last) {
+                  setSlideDirection('next');
+                  navigate(`/tickets/${adjacent.last}`);
+                }
+              }}
               disabled={!adjacent.last}
               className="p-1.5 rounded-lg border border-outline-variant/30 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-              title={adjacent.last ? `Dernier ticket (#${adjacent.last})` : 'Déjà le dernier ticket'}
+              title={adjacent.last ? `Dernier ticket (#${adjacent.last})` : 'Déjà au dernier ticket'}
             >
               <ChevronsRight className="w-3.5 h-3.5" />
             </button>
@@ -929,9 +963,17 @@ export default function TicketDetail() {
         </div>
       )}
 
-      {/* Grid Layout */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-        {/* Left Column: Main Ticket Content & Timeline */}
+      {/* Grid Layout avec animation de défilement dynamique gauche / droite */}
+      <AnimatePresence mode="wait" custom={slideDirection}>
+        <motion.div
+          key={ticket.id}
+          custom={slideDirection}
+          initial={{ x: slideDirection === 'prev' ? -90 : 90, opacity: 0 }}
+          animate={{ x: 0, opacity: 1, transition: { x: { type: 'spring', stiffness: 320, damping: 30 }, opacity: { duration: 0.18 } } }}
+          exit={{ x: slideDirection === 'prev' ? 90 : -90, opacity: 0, transition: { x: { type: 'spring', stiffness: 320, damping: 30 }, opacity: { duration: 0.15 } } }}
+          className="grid grid-cols-1 xl:grid-cols-12 gap-6"
+        >
+          {/* Left Column: Main Ticket Content & Timeline */}
         <div className="xl:col-span-8 flex flex-col gap-6">
           {/* Main Ticket Card */}
           <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-5">
@@ -2257,7 +2299,8 @@ export default function TicketDetail() {
             </div>
           )}
         </div>
-      </div>
+      </motion.div>
+    </AnimatePresence>
 
       {/* Approval Modal */}
       {showApproveModal && (

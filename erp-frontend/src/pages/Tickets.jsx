@@ -112,12 +112,12 @@ function timeAgo(dateStr) {
 }
 
 const containerVariants = {
-  hidden: { opacity: 0 },
-  visible: { opacity: 1, transition: { staggerChildren: 0.04 } },
+  hidden: { opacity: 1 },
+  visible: { opacity: 1 },
 };
 const itemVariants = {
-  hidden: { opacity: 0, y: 12 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: [0.16, 1, 0.3, 1] } },
+  hidden: { opacity: 1 },
+  visible: { opacity: 1 },
 };
 
 export default function Tickets() {
@@ -1539,10 +1539,9 @@ export default function Tickets() {
             {tickets.map((t, idx) => (
               <motion.div
                 key={t.id}
-                initial={{ opacity: 0, scale: 0.96 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.96 }}
-                transition={{ duration: 0.2, delay: idx * 0.03 }}
+                initial={false}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
                 onClick={() => navigate(`/tickets/${t.id}`)}
                 className="bento-card p-md flex flex-col justify-between hover:border-primary/50 transition-all cursor-pointer group relative overflow-hidden"
               >
@@ -1725,10 +1724,9 @@ export default function Tickets() {
                 return (
                   <motion.div
                     key={t.id}
-                    initial={{ opacity: 0, y: -6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, x: -20 }}
-                    transition={{ duration: 0.18, delay: idx * 0.012, ease: [0.16, 1, 0.3, 1] }}
+                    initial={false}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
                     layout
                     onClick={() => navigate(`/tickets/${t.id}`)}
                     className="flex items-center gap-4 px-5 py-3.5 cursor-pointer group transition-colors hover:bg-slate-50/80 dark:hover:bg-white/[0.03]"

@@ -18,24 +18,18 @@ import {
 
 /* ── Variants d'animation ──────────────────────────────────────────────────── */
 const containerVariants = {
-  hidden: { opacity: 0 },
-  visible: {
-    opacity: 1,
-    transition: { staggerChildren: 0.08, delayChildren: 0.15 },
-  },
+  hidden: { opacity: 1 },
+  visible: { opacity: 1 },
 };
 
 const itemVariants = {
-  hidden: { opacity: 0, y: 16 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] } },
+  hidden: { opacity: 1 },
+  visible: { opacity: 1 },
 };
 
 const cardVariants = {
-  hidden: { opacity: 0, y: 24, scale: 0.97 },
-  visible: {
-    opacity: 1, y: 0, scale: 1,
-    transition: { duration: 0.55, ease: [0.16, 1, 0.3, 1], delay: 0.2 },
-  },
+  hidden: { opacity: 1 },
+  visible: { opacity: 1 },
 };
 
 export default function Login() {

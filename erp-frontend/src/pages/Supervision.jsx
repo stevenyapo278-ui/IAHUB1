@@ -429,9 +429,8 @@ export default function Supervision() {
 
       {/* ═══ KPI GRID ═══ */}
       <motion.div
-        initial="hidden"
+        initial={false}
         animate="visible"
-        variants={{ visible: { transition: { staggerChildren: 0.06 } } }}
         className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3"
       >
         <KpiCard label="Tickets" value={stats.tickets} prevValue={null} icon="confirmation_number" color="#2563EB" sparkData={sparkTrend} />
@@ -462,8 +461,7 @@ export default function Supervision() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* LIVE EVENT FEED */}
         <motion.div
-          initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: 0.2 }}
+          initial={false} animate={{ opacity: 1, x: 0 }}
           className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest p-5 shadow-sm space-y-4"
         >
           <div className="flex items-center justify-between border-b border-outline-variant/20 pb-3">
@@ -490,8 +488,7 @@ export default function Supervision() {
 
         {/* TRENDS PANEL */}
         <motion.div
-          initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: 0.3 }}
+          initial={false} animate={{ opacity: 1, x: 0 }}
           className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest p-5 shadow-sm space-y-4"
         >
           <div className="flex items-center gap-2 border-b border-outline-variant/20 pb-3">

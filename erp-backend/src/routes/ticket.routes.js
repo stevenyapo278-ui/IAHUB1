@@ -321,44 +321,42 @@ router.post(
   }
 );
 
-// Retourne les IDs des tickets adjacents (premier, précédent, suivant, dernier) pour
-// permettre la navigation clavier/bouton dans la vue détail d'un ticket.
-// L'ordre est createdAt DESC (même ordre que la liste principale), donc :
-//   - "premier"  = ticket avec la plus grande createdAt  (= plus récent)
-//   - "précédent" = ticket créé juste après  celui-ci (id plus élevé en desc)
-//   - "suivant"   = ticket créé juste avant celui-ci (id plus bas en desc)
-//   - "dernier"  = ticket avec la plus petite createdAt (= plus ancien)
+// Retourne les IDs des tickets adjacents (premier, précédent, suivant, dernier) par ordre numérique d'ID.
+//   - "first" (<<) = ticket avec le plus petit ID (ex: #1)
+//   - "prev"  (<)  = ticket avec l'ID immédiatement inférieur (ex: #128534 si courant = #128535)
+//   - "next"  (>)  = ticket avec l'ID immédiatement supérieur (ex: #128536 si courant = #128535)
+//   - "last"  (>>) = ticket avec le plus grand ID (ex: #128625)
 router.get('/:id/adjacent', async (req, res) => {
   const id = Number(req.params.id);
-  const current = await prisma.ticket.findUnique({ where: { id }, select: { id: true, createdAt: true } });
+  const current = await prisma.ticket.findUnique({ where: { id }, select: { id: true } });
   if (!current) return res.status(404).json({ error: 'Ticket introuvable' });
 
   // Filtre demandeur (REQUESTER ne navigue que dans ses tickets)
   const baseWhere = isRequesterOnly(req.user) ? { requesterId: req.user.sub } : {};
 
   const [first, prev, next, last] = await Promise.all([
-    // Premier : le plus récent (createdAt max)
+    // Premier (<<) : ID min
     prisma.ticket.findFirst({
       where: baseWhere,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { id: 'asc' },
       select: { id: true },
     }),
-    // Précédent : créé juste après le courant (createdAt > current, le plus proche)
+    // Précédent (<) : ID immédiatement inférieur (numéro inférieur)
     prisma.ticket.findFirst({
-      where: { ...baseWhere, createdAt: { gt: current.createdAt } },
-      orderBy: { createdAt: 'asc' },
+      where: { ...baseWhere, id: { lt: id } },
+      orderBy: { id: 'desc' },
       select: { id: true },
     }),
-    // Suivant : créé juste avant le courant (createdAt < current, le plus proche)
+    // Suivant (>) : ID immédiatement supérieur (numéro supérieur)
     prisma.ticket.findFirst({
-      where: { ...baseWhere, createdAt: { lt: current.createdAt } },
-      orderBy: { createdAt: 'desc' },
+      where: { ...baseWhere, id: { gt: id } },
+      orderBy: { id: 'asc' },
       select: { id: true },
     }),
-    // Dernier : le plus ancien (createdAt min)
+    // Dernier (>>) : ID max
     prisma.ticket.findFirst({
       where: baseWhere,
-      orderBy: { createdAt: 'asc' },
+      orderBy: { id: 'desc' },
       select: { id: true },
     }),
   ]);

@@ -72,9 +72,8 @@ function LoadingSkeleton() {
 function SectionCard({ title, icon, action, children, className = '' }) {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 12 }}
+      initial={false}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35 }}
       className={`rounded-2xl border border-outline-variant/30 bg-surface-container-lowest overflow-hidden shadow-sm ${className}`}
     >
       <div className="flex items-center justify-between px-4 py-3 border-b border-outline-variant/20 bg-surface-container-low/40">
