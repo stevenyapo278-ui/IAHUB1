@@ -153,6 +153,7 @@ export default function TicketDetail() {
   const followupBlobUrlsRef = useRef([]);
 
   const load = useCallback(() => {
+    setError('');
     api
       .get(`/tickets/${id}`)
       .then(({ data }) => setTicket(data))
@@ -170,21 +171,25 @@ export default function TicketDetail() {
       .catch(() => {});
   }, [id]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (prevIdRef.current !== id) {
+      setTicket(null);
+    }
+    load();
+  }, [id, load]);
 
   // Animer le slide lors du changement de ticket
   useEffect(() => {
-    if (!scope.current || prevIdRef.current === id) return;
-    const dir = Number(id) < Number(prevIdRef.current) ? 'prev' : 'next';
-    slideDirectionRef.current = dir;
+    if (!scope.current || !ticket) return;
+    const dir = slideDirectionRef.current;
     prevIdRef.current = id;
-    const enterX = dir === 'next' ? '80%' : '-80%';
+    const enterX = dir === 'next' ? '60px' : '-60px';
     animate(
       scope.current,
-      { x: [enterX, '0%'], opacity: [0.2, 1] },
-      { duration: 0.35, ease: [0.16, 1, 0.3, 1] }
+      { x: [enterX, '0px'], opacity: [0.3, 1] },
+      { duration: 0.28, ease: [0.16, 1, 0.3, 1] }
     ).catch(() => {});
-  }, [id, animate, scope]);
+  }, [ticket?.id, animate, scope]);
 
   useEffect(() => {
     api.get(`/tickets/${id}/adjacent`)
@@ -1254,8 +1259,8 @@ export default function TicketDetail() {
             <div className="space-y-4" ref={followupContainerRef}>
               {(() => {
                 const timeline = [
-                  ...ticket.followups.map((f) => ({ kind: 'followup', date: f.createdAt, data: f })),
-                  ...(ticket.messages || []).map((m) => ({ kind: 'email', date: m.timestamp, data: m })),
+                  ...(ticket?.followups || []).map((f) => ({ kind: 'followup', date: f.createdAt, data: f })),
+                  ...(ticket?.messages || []).map((m) => ({ kind: 'email', date: m.timestamp, data: m })),
                   ...(events || []).map((e) => ({ kind: 'event', date: e.createdAt, data: e })),
                 ].sort((a, b) => new Date(a.date) - new Date(b.date));
 
@@ -2030,7 +2035,7 @@ export default function TicketDetail() {
                     Observateur(s)
                   </label>
                   <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
-                    {ticket.observers.map((o) => o.fullName).join(', ')}
+                    {(ticket.observers || []).map((o) => o?.fullName || o?.email || '').filter(Boolean).join(', ')}
                   </div>
                 </div>
               )}
