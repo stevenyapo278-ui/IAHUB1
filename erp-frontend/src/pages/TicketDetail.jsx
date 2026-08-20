@@ -188,7 +188,7 @@ export default function TicketDetail() {
       scope.current,
       { x: [enterX, '0px'], opacity: [0.3, 1] },
       { duration: 0.28, ease: [0.16, 1, 0.3, 1] }
-    ).catch(() => {});
+    );
   }, [ticket?.id, animate, scope]);
 
   useEffect(() => {
