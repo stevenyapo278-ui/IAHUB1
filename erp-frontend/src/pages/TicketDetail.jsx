@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
-import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
@@ -68,7 +68,6 @@ function AttachmentThumbnail({ ticketId, attachment }) {
 export default function TicketDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const location = useLocation();
   const { user } = useAuth();
   const { autonomousMode } = useSystemSettings();
   const [ticket, setTicket] = useState(null);    const [followup, setFollowup] = useState('');
@@ -765,7 +764,7 @@ export default function TicketDetail() {
       <div className="flex items-center justify-between gap-4 pb-4 border-b border-outline-variant/30 shrink-0">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => (location.key === 'default' ? navigate('/tickets') : navigate(-1))}
+            onClick={() => ((window.history.state?.idx ?? 0) > 0 ? navigate(-1) : navigate('/tickets'))}
             className="p-2 rounded-xl border border-outline-variant/40 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer"
             title="Retour aux tickets"
           >
@@ -778,7 +777,7 @@ export default function TicketDetail() {
               onClick={() => {
                 if (adjacent.first) {
                   slideDirectionRef.current = 'prev';
-                  navigate(`/tickets/${adjacent.first}`);
+                  navigate(`/tickets/${adjacent.first}`, { replace: true });
                 }
               }}
               disabled={!adjacent.first}
@@ -791,7 +790,7 @@ export default function TicketDetail() {
               onClick={() => {
                 if (adjacent.prev) {
                   slideDirectionRef.current = 'prev';
-                  navigate(`/tickets/${adjacent.prev}`);
+                  navigate(`/tickets/${adjacent.prev}`, { replace: true });
                 }
               }}
               disabled={!adjacent.prev}
@@ -804,7 +803,7 @@ export default function TicketDetail() {
               onClick={() => {
                 if (adjacent.next) {
                   slideDirectionRef.current = 'next';
-                  navigate(`/tickets/${adjacent.next}`);
+                  navigate(`/tickets/${adjacent.next}`, { replace: true });
                 }
               }}
               disabled={!adjacent.next}
@@ -817,7 +816,7 @@ export default function TicketDetail() {
               onClick={() => {
                 if (adjacent.last) {
                   slideDirectionRef.current = 'next';
-                  navigate(`/tickets/${adjacent.last}`);
+                  navigate(`/tickets/${adjacent.last}`, { replace: true });
                 }
               }}
               disabled={!adjacent.last}
