@@ -53,6 +53,12 @@ services:
       GLPI_URL: ${GLPI_URL:-}
       GLPI_APP_TOKEN: ${GLPI_APP_TOKEN:-}
       GLPI_USER_TOKEN: ${GLPI_USER_TOKEN:-}
+      AUTH_EMAIL_DOMAIN: ${AUTH_EMAIL_DOMAIN:-prosuma.ci}
+      LDAP_ENABLED: ${LDAP_ENABLED:-true}
+      LDAP_URL: ${LDAP_URL:-ldap://10.0.70.1}
+      LDAP_EMAIL_DOMAIN: ${LDAP_EMAIL_DOMAIN:-prosuma.ci}
+      LDAP_BIND_FORMAT: ${LDAP_BIND_FORMAT:-{username}@{domain}}
+      LDAP_ADMIN_USERNAMES: ${LDAP_ADMIN_USERNAMES:-}
       FRONTEND_DIST_PATH: /app/erp-frontend/dist
     volumes:
       - app_uploads:/app/erp-backend/uploads
