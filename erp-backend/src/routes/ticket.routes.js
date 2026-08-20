@@ -142,6 +142,24 @@ router.get('/', async (req, res) => {
     prisma.ticket.count({ where: { ...where, assignedToId: null } }),
   ]);
 
+  // Badge « clôtures souvent injustifiées » : quand on liste les clôtures suggérées, on attache
+  // à chaque ticket si son expéditeur est dégradé sur les clôtures (feedback de la Hotline).
+  if (req.query.closeSuggested === 'true' && tickets.length > 0) {
+    const emails = [...new Set(tickets.map((t) => t.sourceEmail).filter((e) => e && e.includes('@')))];
+    if (emails.length > 0) {
+      const reputations = await prisma.senderReputation.findMany({
+        where: { email: { in: emails } },
+        select: { email: true, closureStatus: true },
+      });
+      const byEmail = Object.fromEntries(reputations.map((r) => [r.email.toLowerCase().trim(), r.closureStatus]));
+      for (const t of tickets) {
+        if (t.sourceEmail && byEmail[t.sourceEmail.toLowerCase().trim()] === 'LOW_TRUST_CLOSURE') {
+          t.lowTrustClosureSender = true;
+        }
+      }
+    }
+  }
+
   return res.json({
     items: tickets, total, page: pageNum, pages: Math.ceil(total / pageSize),
     stats: { open: openCount, pending: pendingCount, resolved: resolvedCount, p1: p1Count, p2: p2Count, ai: aiCount, unassigned: unassignedCount },
@@ -858,6 +876,7 @@ router.post('/:id/validate-close', requirePermission('tickets.approve', ['ADMIN'
         closeSuggested: false,
         closeSuggestedAt: null,
         closeSuggestionConfidence: null,
+        closeSuggestionCount: 0, // nouveau cycle autorisé sur un futur fil de ce ticket
         aiExchangeCount: 0, // conversation résolue : repart à zéro pour un futur fil sur ce ticket
       },
     });
@@ -872,12 +891,23 @@ router.post('/:id/validate-close', requirePermission('tickets.approve', ['ADMIN'
       metadata: { confidence: existing.closeSuggestionConfidence, note: req.body.note || null },
     });
 
+    // Boucle de feedback : une clôture validée renforce la réputation de l'expéditeur
+    const { recordClosureDecision } = require('../services/senderReputation');
+    await recordClosureDecision({ email: existing.sourceEmail, decision: 'APPROVED' }).catch(() => {});
+
     if (ticket.glpiTicketId) {
       try {
         await updateGlpiTicket(ticket.glpiTicketId, { status: 'SOLVED' });
       } catch (err) {
-        console.error('[ticket.routes] Synchro GLPI clôture validée échouée:', err.message);
-        await logEvent(id, 'GLPI_SYNC_FAILED', 'SYSTEM', { action: 'validate-close', error: err.message });
+        console.error('[ticket.routes] Synchro GLPI clôture validée échouée — mise en file de retry:', err.message);
+        await logEvent(id, 'GLPI_SYNC_FAILED', 'SYSTEM', { action: 'validate-close', error: err.message, queuedRetry: true });
+        const { enqueueGlpiSyncRetry } = require('../services/glpiSyncRetry');
+        await enqueueGlpiSyncRetry({
+          entityType: 'Ticket',
+          entityId: ticket.glpiTicketId,
+          action: 'status:SOLVED',
+          lastError: err.message,
+        }).catch(() => {});
       }
     }
 
@@ -924,6 +954,11 @@ router.post('/:id/reject-close', requirePermission('tickets.approve', ['ADMIN', 
       targetLabel: ticket.title,
       metadata: { confidence: existing.closeSuggestionConfidence, reason: note.trim() },
     });
+
+    // Boucle de feedback : une clôture rejetée dégrade la réputation clôture de l'expéditeur
+    // et alimente le contexte « rejets récents » du prompt pour éviter de reproduire l'erreur.
+    const { recordClosureDecision } = require('../services/senderReputation');
+    await recordClosureDecision({ email: existing.sourceEmail, decision: 'REJECTED' }).catch(() => {});
 
     emitTicketUpdated(ticket, { status: 'OPEN', closeSuggested: false });
     notifyRequesterOnStatusChange(id, 'OPEN');

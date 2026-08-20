@@ -1,10 +1,14 @@
 const {
   computeReputation,
+  computeClosureReputation,
   extractDomain,
   MIN_REJECTIONS,
   REJECTION_RATE_THRESHOLD,
+  MIN_CLOSURE_REJECTIONS,
+  CLOSURE_REJECTION_RATE_THRESHOLD,
   STATUS_NORMAL,
   STATUS_LOW_TRUST,
+  STATUS_LOW_TRUST_CLOSURE,
 } = require('./senderReputation');
 
 describe('senderReputation', () => {
@@ -40,6 +44,35 @@ describe('senderReputation', () => {
     it(`seuil de rejets en adéquation avec la constante exportée (${MIN_REJECTIONS})`, () => {
       expect(MIN_REJECTIONS).toBe(3);
       expect(REJECTION_RATE_THRESHOLD).toBe(0.5);
+    });
+  });
+
+  describe('computeClosureReputation', () => {
+    it('reste NORMAL sans aucune décision de clôture', () => {
+      expect(computeClosureReputation({ closureTotal: 0, closureRejected: 0 })).toBe(STATUS_NORMAL);
+    });
+
+    it('reste NORMAL quand toutes les clôtures sont validées', () => {
+      expect(computeClosureReputation({ closureTotal: 10, closureRejected: 0 })).toBe(STATUS_NORMAL);
+    });
+
+    it('reste NORMAL sous le seuil minimal de rejets (1 rejet seul ne dégrade pas)', () => {
+      expect(computeClosureReputation({ closureTotal: 1, closureRejected: 1 })).toBe(STATUS_NORMAL);
+    });
+
+    it('passe LOW_TRUST_CLOSURE dès 2 rejets avec un taux >= 60%', () => {
+      // 2 rejets sur 3 = 66% : dégradé (une clôture à tort coûte plus cher qu'un ticket créé)
+      expect(computeClosureReputation({ closureTotal: 3, closureRejected: 2 })).toBe(STATUS_LOW_TRUST_CLOSURE);
+    });
+
+    it('reste NORMAL avec 2 rejets mais un taux trop faible', () => {
+      // 2 rejets sur 6 = 33% < 60%
+      expect(computeClosureReputation({ closureTotal: 6, closureRejected: 2 })).toBe(STATUS_NORMAL);
+    });
+
+    it(`seuils en adéquation avec les constantes exportées (${MIN_CLOSURE_REJECTIONS} / ${CLOSURE_REJECTION_RATE_THRESHOLD})`, () => {
+      expect(MIN_CLOSURE_REJECTIONS).toBe(2);
+      expect(CLOSURE_REJECTION_RATE_THRESHOLD).toBe(0.6);
     });
   });
 

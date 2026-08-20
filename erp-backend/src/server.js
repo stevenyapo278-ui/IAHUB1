@@ -119,6 +119,32 @@ scheduleSync('lieux GLPI', syncGlpiLocationsOnly, (s) => s.glpiLocationsSyncInte
 scheduleSync('assets GLPI', syncGlpiAssetsOnly, () => 24 * 3600);
 scheduleSync('modèles IA', syncAllProviders, (s) => s.aiModelsSyncIntervalHours * 3600);
 
+// File de retry GLPI : rejoue les actions différées qui ont échoué (ex. clôture validée par la
+// Hotline pendant une indisponibilité GLPI) — toutes les 5 minutes, backoff exponentiel interne.
+const { processGlpiSyncRetries } = require('./services/glpiSyncRetry');
+scheduleSync('retry GLPI', processGlpiSyncRetries, () => 300);
+
+// Santé des suggestions de clôture : si le taux d'acceptation par la Hotline passe sous 50 %
+// sur la fenêtre de 30 jours (3 contrôles consécutifs), alerte email aux admins — la détection
+// de résolution IA dérive et chaque faux positif coûte du temps humain.
+async function checkClosureSuggestionHealth() {
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const groups = await prisma.ticketEvent.groupBy({
+    by: ['type'],
+    where: { createdAt: { gte: since }, type: { in: ['CLOSURE_VALIDATED', 'CLOSURE_REJECTED'] } },
+    _count: { _all: true },
+  });
+  const validated = groups.find((g) => g.type === 'CLOSURE_VALIDATED')?._count._all || 0;
+  const rejected = groups.find((g) => g.type === 'CLOSURE_REJECTED')?._count._all || 0;
+  const total = validated + rejected;
+  if (total >= 5 && validated / total < 0.5) {
+    throw new Error(
+      `Taux d'acceptation des clôtures suggérées sous 50 % sur 30 j (${validated}/${total} acceptées). Vérifier la classification IA (prompt analyzeIntent, fournisseur IA).`
+    );
+  }
+}
+scheduleSync('santé suggestions de clôture', checkClosureSuggestionHealth, () => 6 * 3600);
+
 // Moteur SLA (outil de ticketing) : détecte les dépassements de délai de réponse des tickets
 // actifs et notifie (socket + notification persistée + email au technicien assigné).
 // Fréquence configurable dans Paramètres > Automatisation (slaMonitorIntervalSeconds, 0 = désactivé).

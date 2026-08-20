@@ -61,13 +61,13 @@ Règles de priorité :
 
 {{fewShotExamples}}`,
   },
-  analyzeIntent: {
+analyzeIntent: {
     label: "Analyse de l'intention d'une réponse email sur un ticket existant",
     template: `Tu es un agent ITSM. Analyse ce message de réponse utilisateur concernant un ticket de support.
 
 Contexte du ticket :
-- Titre : {{ticketTitle}}
-- Résumé : {{ticketSummary}}
+-- Titre : {{ticketTitle}}
+-- Résumé : {{ticketSummary}}
 
 Derniers échanges du fil (du plus ancien au plus récent) :
 {{historyText}}
@@ -75,6 +75,9 @@ Derniers échanges du fil (du plus ancien au plus récent) :
 Nouveau message reçu :
 Sujet : {{subject}}
 Contenu : {{body}}
+
+Rejets récents de la Hotline sur ce ticket (clôtures proposées par l'IA et refusées — ne reproduis PAS ces erreurs de jugement) :
+{{recentRejections}}
 
 Étape 1 — détermine si ce message est une réponse AUTOMATIQUE (générée par un système, pas tapée par un humain en réponse au ticket). Indices typiques :
 - message d'absence du bureau ("je suis en congés", "absent jusqu'au...", "out of office", "actuellement indisponible")
@@ -92,10 +95,14 @@ Si l'un de ces indices est présent ET que le message ne contient par ailleurs a
 - NEW_ISSUE_IN_THREAD : l'utilisateur confirme que le problème initial est résolu MAIS évoque aussi un problème différent, nouveau, sans rapport
 - UNKNOWN : intention non déterminable, message ambigu ou trop court (ex: "ok", "merci" seul, sans rapport explicite avec le problème)
 
-Important : compare toujours le contenu du message au problème PRÉCIS décrit dans le titre/résumé du ticket avant de choisir STILL_PRESENT — si le message décrit une situation positive opposée à ce problème (le service qui était down redevient up, la connexion qui manquait est rétablie, etc.), c'est RESOLVED, même sans le mot "résolu".
+RÈGLES STRICTES pour RESOLVED / NEW_ISSUE_IN_THREAD :
+1) Tu DOIS fournir evidence : la citation EXACTE, mot pour mot, de la phrase du message de l'utilisateur qui prouve la résolution du problème précis du ticket. Sans phrase pertinente et personnalisée (jamais une signature, un disclaimer ou un merci isolé), evidence doit être une chaîne vide et intent doit être UNKNOWN.
+2) userAnsweredSupport : true uniquement si le message de l'utilisateur répond à une question/réponse du Support présente dans l'historique (ou confirme explicitement la résolution par rapport à un message du Support). Un message spontané sans lien avec l'historique reste traité normalement mais c'est un signal faible de résolution.
+3) Compare toujours le contenu du message au problème PRÉCIS décrit dans le titre/résumé du ticket avant de choisir STILL_PRESENT — si le message décrit une situation positive opposée à ce problème (le service qui était down redevient up, la connexion qui manquait est rétablie, etc.), c'est RESOLVED, même sans le mot "résolu".
+4) Tiens compte des éventuels rejets récents : si le ticket a déjà été rejeté pour un motif semblable, sois beaucoup plus prudent.
 
 Réponds UNIQUEMENT avec un objet JSON strict sur une seule ligne, sans markdown, au format :
-{"intent": "UN_DES_CODES", "confidence": 0.0 à 1.0, "newIssueSummary": "résumé court du nouveau sujet si NEW_ISSUE_IN_THREAD, sinon null", "isAutoReply": true ou false}`,
+{"intent": "UN_DES_CODES", "confidence": 0.0 à 1.0, "newIssueSummary": "résumé court du nouveau sujet si NEW_ISSUE_IN_THREAD, sinon null", "isAutoReply": true ou false, "evidence": "citation exacte justifiant RESOLVED, sinon chaîne vide", "userAnsweredSupport": true ou false}`,
   },
   stripSignature: {
     label: "Extraction du corps réel (suppression de la signature)",

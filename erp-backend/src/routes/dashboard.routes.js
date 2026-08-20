@@ -471,4 +471,30 @@ router.get('/sla-analytics', async (req, res) => {
   }
 });
 
+// Santé des suggestions de clôture : taux d'acceptation sur une fenêtre glissante
+// (CLOSURE_VALIDATED vs CLOSURE_REJECTED par la Hotline). Permet de détecter une dérive de l'IA.
+router.get('/closure-stats', async (req, res) => {
+  const days = Math.min(parseInt(req.query.days, 10) || 30, 90);
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+  const groups = await prisma.ticketEvent.groupBy({
+    by: ['type'],
+    where: { createdAt: { gte: since }, type: { in: ['CLOSURE_VALIDATED', 'CLOSURE_REJECTED'] } },
+    _count: { _all: true },
+  });
+
+  const validated = groups.find((g) => g.type === 'CLOSURE_VALIDATED')?._count._all || 0;
+  const rejected = groups.find((g) => g.type === 'CLOSURE_REJECTED')?._count._all || 0;
+  const total = validated + rejected;
+
+  return res.json({
+    days,
+    validated,
+    rejected,
+    total,
+    acceptanceRate: total > 0 ? Math.round((validated / total) * 1000) / 10 : null,
+    lowTrust: await prisma.senderReputation.count({ where: { closureStatus: 'LOW_TRUST_CLOSURE' } }),
+  });
+});
+
 module.exports = router;

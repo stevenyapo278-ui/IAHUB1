@@ -5,8 +5,14 @@ const VALID_INTENTS = ['RESOLVED', 'STILL_PRESENT', 'NEW_INFO', 'QUESTION', 'REO
 
 // Seuils en dessous desquels on ne fait jamais confiance à l'IA pour modifier le statut automatiquement.
 // Fermer/rouvrir un ticket à tort coûte plus cher qu'une fermeture ratée, donc seuil plus haut pour RESOLVED.
+// Depuis la robustification : le seuil de clôture est désormais APPLIQUÉ à la suggestion elle-même
+// (une détection RESOLVED trop peu confiante ne propose AUCUNE clôture à la Hotline).
 const CONFIDENCE_THRESHOLD_FOR_CLOSE = 0.7;
 const CONFIDENCE_THRESHOLD_FOR_REOPEN = 0.6;
+
+// Nombre max de suggestions de clôture émises sur un même ticket (anti-boucle : après 2 rejets
+// de la Hotline, on ne re-suggère plus jamais sur ce ticket — le compteur est remis à 0 à la validation).
+const MAX_CLOSE_SUGGESTIONS = 2;
 
 // Garde-fous anti-boucle/anti-dérive
 const MAX_SPLITS_PER_TICKET = 3; // au-delà, on suppose un problème de classification plutôt que de vrais nouveaux sujets
@@ -14,16 +20,40 @@ const MAX_TICKET_LIFETIME_DAYS = 60; // au-delà, on ne réinitialise plus le co
 
 // Analyse l'intention d'un email de réponse utilisateur sur un ticket existant.
 // conversationHistory (optionnel) = derniers messages du fil, pour donner du contexte réel à l'IA.
-// Retourne { intent, confidence, newIssueSummary, isAutoReply }.
-async function analyzeIntent({ subject, body, ticketTitle, ticketSummary, conversationHistory = [], fromEmail }) {
+// Retourne { intent, confidence, newIssueSummary, isAutoReply, evidence, userAnsweredSupport }.
+async function analyzeIntent({ subject, body, ticketTitle, ticketSummary, conversationHistory = [], fromEmail, ticketId }) {
   const providers = await getActiveProviders();
-  if (providers.length === 0) return { intent: 'UNKNOWN', confidence: 0, newIssueSummary: null, isAutoReply: false };
+  if (providers.length === 0) {
+    return { intent: 'UNKNOWN', confidence: 0, newIssueSummary: null, isAutoReply: false, evidence: null, userAnsweredSupport: false };
+  }
 
   const historyText = conversationHistory.length > 0
     ? conversationHistory
       .map((m) => `[${m.direction === 'INBOUND' ? 'Utilisateur' : 'Support'}] ${(m.body || '').substring(0, 300)}`)
       .join('\n---\n')
     : 'Aucun historique disponible.';
+
+  // Boucle de retour d'apprentissage : les dernières clôtures suggérées par l'IA et REJETÉES par la
+  // Hotline (avec leur motif) sont injectées dans le prompt pour éviter de reproduire les mêmes erreurs
+  // de classification sur le même ticket.
+  let recentRejections = 'Aucun rejet récent sur ce ticket.';
+  if (ticketId) {
+    try {
+      const rejects = await prisma.ticketEvent.findMany({
+        where: { ticketId, type: 'CLOSURE_REJECTED' },
+        orderBy: { createdAt: 'desc' },
+        take: 3,
+        select: { payload: true, createdAt: true },
+      });
+      if (rejects.length > 0) {
+        recentRejections = rejects.map((r) =>
+          `- ${new Date(r.createdAt).toLocaleDateString('fr-FR')} : motif « ${r.payload?.reason || 'non précisé'} » (confiance IA ${r.payload?.confidence ?? '?'})`
+        ).join('\n');
+      }
+    } catch {
+      // en cas d'échec de lecture, on analyse sans le contexte supplémentaire
+    }
+  }
 
   const { getPrompt } = require('./promptTemplates');
   const prompt = await getPrompt('analyzeIntent', {
@@ -32,13 +62,14 @@ async function analyzeIntent({ subject, body, ticketTitle, ticketSummary, conver
     historyText,
     subject,
     body: body?.substring(0, 1000) || '',
+    recentRejections,
   });
 
   let raw;
   try {
     raw = (await callProviderWithFallback(providers, prompt)).trim();
   } catch {
-    return { intent: 'UNKNOWN', confidence: 0, newIssueSummary: null, isAutoReply: false };
+    return { intent: 'UNKNOWN', confidence: 0, newIssueSummary: null, isAutoReply: false, evidence: null, userAnsweredSupport: false };
   }
 
   try {
@@ -47,9 +78,23 @@ async function analyzeIntent({ subject, body, ticketTitle, ticketSummary, conver
     const isAutoReply = parsed.isAutoReply === true;
     const intent = isAutoReply ? 'UNKNOWN' : (VALID_INTENTS.includes(parsed.intent) ? parsed.intent : 'UNKNOWN');
     const confidence = typeof parsed.confidence === 'number' ? Math.max(0, Math.min(1, parsed.confidence)) : 0;
-    return { intent, confidence: isAutoReply ? 0 : confidence, newIssueSummary: parsed.newIssueSummary || null, isAutoReply };
+    // Une détection de résolution sans citation d'évidence personnalisée est ramenée à UNKNOWN :
+    // un simple "merci" ou une signature ne suffit pas à proposer une clôture.
+    const evidence = typeof parsed.evidence === 'string' ? parsed.evidence.trim() : '';
+    let resolvedIntent = intent;
+    if ((intent === 'RESOLVED' || intent === 'NEW_ISSUE_IN_THREAD') && evidence.length === 0) {
+      resolvedIntent = 'UNKNOWN';
+    }
+    return {
+      intent: resolvedIntent,
+      confidence: isAutoReply ? 0 : confidence,
+      newIssueSummary: parsed.newIssueSummary || null,
+      isAutoReply,
+      evidence: evidence || null,
+      userAnsweredSupport: parsed.userAnsweredSupport === true,
+    };
   } catch {
-    return { intent: 'UNKNOWN', confidence: 0, newIssueSummary: null, isAutoReply: false };
+    return { intent: 'UNKNOWN', confidence: 0, newIssueSummary: null, isAutoReply: false, evidence: null, userAnsweredSupport: false };
   }
 }
 
@@ -82,12 +127,30 @@ async function applyIntentActions(ticketId, { intent, confidence, newIssueSummar
     // Toute détection de résolution est soumise à validation humaine : plus aucune
     // clôture automatique. Le ticket est marqué "clôture suggérée" et apparaît dans
     // le Centre de Validation jusqu'à la décision de la Hotline.
-    updates.closeSuggested = true;
-    updates.closeSuggestedAt = new Date();
-    updates.closeSuggestionConfidence = confidence;
-    updates.status = 'WAITING_FOR_USER';
-    updates.lastUserReplyAt = new Date();
-    await logEvent(ticketId, 'CLOSURE_SUGGESTED', actor, { intent, confidence });
+    // Garde-fous : confiance < 0.7 -> aucune suggestion (juste WAITING_FOR_USER), et
+    // maximum 2 suggestions par ticket (anti-boucle après rejets répétés).
+    const canSuggestClose = confidence >= CONFIDENCE_THRESHOLD_FOR_CLOSE
+      && (ticket?.closeSuggestionCount || 0) < MAX_CLOSE_SUGGESTIONS;
+    if (canSuggestClose) {
+      updates.closeSuggested = true;
+      updates.closeSuggestedAt = new Date();
+      updates.closeSuggestionConfidence = confidence;
+      updates.closeSuggestionCount = (ticket?.closeSuggestionCount || 0) + 1;
+      updates.status = 'WAITING_FOR_USER';
+      updates.lastUserReplyAt = new Date();
+      await logEvent(ticketId, 'CLOSURE_SUGGESTED', actor, { intent, confidence });
+    } else {
+      // Confiance insuffisante OU plafond de suggestions atteint : le ticket reste en attente
+      // humaine, sans encombrer le Centre de Validation.
+      updates.status = 'WAITING_FOR_USER';
+      updates.lastUserReplyAt = new Date();
+      if (!lifetimeExceeded) {
+        updates.reminderCount = 0;
+        updates.reminderSentAt = null;
+      }
+      const reason = (ticket?.closeSuggestionCount || 0) >= MAX_CLOSE_SUGGESTIONS ? 'limit_reached' : 'low_confidence';
+      await logEvent(ticketId, 'CLOSURE_NOT_SUGGESTED', actor, { intent, confidence, reason });
+    }
   } else if (intent === 'STILL_PRESENT' || intent === 'NEW_INFO') {
     updates.status = 'OPEN';
     updates.lastUserReplyAt = new Date();
@@ -115,14 +178,22 @@ async function applyIntentActions(ticketId, { intent, confidence, newIssueSummar
     }
   } else if (intent === 'NEW_ISSUE_IN_THREAD') {
     // Le problème initial est (probablement) résolu : la clôture est suggérée à la Hotline
-    // (validation humaine obligatoire), et on ouvre un ticket séparé pour le nouveau sujet
-    // évoqué dans le même mail, plutôt que de tout mélanger.
-    updates.closeSuggested = true;
-    updates.closeSuggestedAt = new Date();
-    updates.closeSuggestionConfidence = confidence;
+    // (validation humaine obligatoire, mêmes garde-fous que RESOLVED), et on ouvre un ticket
+    // séparé pour le nouveau sujet évoqué dans le même mail, plutôt que de tout mélanger.
+    const canSuggestClose = confidence >= CONFIDENCE_THRESHOLD_FOR_CLOSE
+      && (ticket?.closeSuggestionCount || 0) < MAX_CLOSE_SUGGESTIONS;
     updates.status = 'WAITING_FOR_USER';
     updates.lastUserReplyAt = new Date();
-    await logEvent(ticketId, 'CLOSURE_SUGGESTED', actor, { intent, confidence, newIssueSummary });
+    if (canSuggestClose) {
+      updates.closeSuggested = true;
+      updates.closeSuggestedAt = new Date();
+      updates.closeSuggestionConfidence = confidence;
+      updates.closeSuggestionCount = (ticket?.closeSuggestionCount || 0) + 1;
+      await logEvent(ticketId, 'CLOSURE_SUGGESTED', actor, { intent, confidence, newIssueSummary });
+    } else {
+      const reason = (ticket?.closeSuggestionCount || 0) >= MAX_CLOSE_SUGGESTIONS ? 'limit_reached' : 'low_confidence';
+      await logEvent(ticketId, 'CLOSURE_NOT_SUGGESTED', actor, { intent, confidence, newIssueSummary, reason });
+    }
 
     const splitCount = ticket?.splitCount || 0;
     if (newIssueSummary && fromEmail && splitCount < MAX_SPLITS_PER_TICKET) {

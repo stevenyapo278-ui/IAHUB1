@@ -57,6 +57,7 @@ enum TicketEventType {
   AI_FOLLOWUP_DRAFT_GENERATED
   AI_LOW_TRUST_SENDER
   CLOSURE_SUGGESTED
+  CLOSURE_NOT_SUGGESTED
   CLOSURE_VALIDATED
   CLOSURE_REJECTED
   APPROVED
@@ -382,6 +383,9 @@ model Ticket {
   closeSuggested             Boolean   @default(false)
   closeSuggestedAt           DateTime?
   closeSuggestionConfidence  Float?
+  // Nombre de suggestions de clôture déjà émises sur ce ticket : plafonné (2) pour empêcher
+  // les boucles de re-suggestion après rejet de la Hotline ; remis à 0 à la validation.
+  closeSuggestionCount       Int       @default(0)
 
   // Champs alignés sur le formulaire de ticket GLPI
   type        TicketType   @default(INCIDENT)
@@ -433,6 +437,11 @@ model SenderReputation {
   ticketsApproved Int       @default(0)
   ticketsRejected Int       @default(0)
   status          String    @default("NORMAL") // NORMAL | LOW_TRUST
+  // Réputation sur les SUGGESTIONS DE CLÔTURE du même expéditeur (validation Hotline)
+  closureTotal     Int       @default(0)
+  closureApproved  Int       @default(0)
+  closureRejected  Int       @default(0)
+  closureStatus    String    @default("NORMAL") // NORMAL | LOW_TRUST_CLOSURE
   degradedAt      DateTime?
   lastDecisionAt  DateTime?
   createdAt       DateTime  @default(now())
@@ -440,6 +449,24 @@ model SenderReputation {
 
   @@index([domain])
   @@index([status])
+}
+
+// File de retry pour les actions de synchro GLPI différées qui ont échoué au moment où elles
+// devaient être exécutées (ex. clôture validée mais GLPI indisponible). Rejouées à intervalle
+// régulier avec backoff exponentiel, jusqu'à maxAttempts.
+model GlpiSyncRetry {
+  id          Int      @id @default(autoincrement())
+  entityType  String // "Ticket", "Location", ...
+  entityId    Int
+  action      String // ex. "status:SOLVED"
+  attempts    Int      @default(0)
+  maxAttempts Int      @default(5)
+  lastError   String?
+  nextRetryAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([nextRetryAt, attempts])
 }
 
 // Pièce jointe d'un ticket, importée depuis GLPI (Document_Item) lors de la synchronisation

@@ -190,6 +190,7 @@ async function processMessage(message, account) {
         ticketSummary: ticket?.aiSummary,
         conversationHistory: recentMessages.reverse(),
         fromEmail,
+        ticketId: match.ticketId, // pour injecter les rejets récents dans le prompt
       });
 
       await applyIntentActions(match.ticketId, intentResult, fromEmail, {

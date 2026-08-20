@@ -805,6 +805,14 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                           Confiance : {Math.round(t.closeSuggestionConfidence * 100)}%
                         </span>
                       )}
+                      {t.lowTrustClosureSender && (
+                        <span
+                          className="px-2.5 py-0.5 rounded-md bg-red-500/15 text-red-600 dark:text-red-400 text-[10px] font-extrabold border border-red-500/40 uppercase tracking-wider"
+                          title="Les suggestions de clôture de cet expéditeur ont déjà été rejetées plusieurs fois par la Hotline : cliquez « Détails » et vérifiez avant de valider."
+                        >
+                          ⚠️ Clôtures souvent injustifiées
+                        </span>
+                      )}
                       {t.category && (
                         <span className="px-2.5 py-0.5 rounded-md bg-surface-container text-on-surface-variant text-[10px] font-bold border border-outline-variant/30">
                           {t.category}
