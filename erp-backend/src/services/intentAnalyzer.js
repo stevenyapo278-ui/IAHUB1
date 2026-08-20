@@ -22,6 +22,21 @@ const MAX_TICKET_LIFETIME_DAYS = 60; // au-delà, on ne réinitialise plus le co
 // conversationHistory (optionnel) = derniers messages du fil, pour donner du contexte réel à l'IA.
 // Retourne { intent, confidence, newIssueSummary, isAutoReply, evidence, userAnsweredSupport }.
 async function analyzeIntent({ subject, body, ticketTitle, ticketSummary, conversationHistory = [], fromEmail, ticketId }) {
+  // Pré-filtre heuristique zéro-coût : les messages triviaux ou purement automatiques sont
+  // traités sans appel LLM (comportement UNKNOWN / isAutoReply, identique aux branches existantes).
+  const { prefilterReply } = require('./intentPrefilter');
+  const pre = prefilterReply({ body, subject });
+  if (pre.skip) {
+    return {
+      intent: pre.intent || 'UNKNOWN',
+      confidence: 0,
+      newIssueSummary: null,
+      isAutoReply: !!pre.isAutoReply,
+      evidence: null,
+      userAnsweredSupport: false,
+    };
+  }
+
   const providers = await getActiveProviders();
   if (providers.length === 0) {
     return { intent: 'UNKNOWN', confidence: 0, newIssueSummary: null, isAutoReply: false, evidence: null, userAnsweredSupport: false };
