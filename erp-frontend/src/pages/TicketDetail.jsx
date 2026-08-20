@@ -2325,8 +2325,10 @@ export default function TicketDetail() {
             </div>
           )}
         </div>
-      </motion.div>
-    </AnimatePresence>
+      </div>
+    </motion.div>
+  </AnimatePresence>
+</div>
 
       {/* Approval Modal */}
       {showApproveModal && (
