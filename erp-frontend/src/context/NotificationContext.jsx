@@ -161,6 +161,11 @@ export function NotificationProvider({ children }) {
     socket.on('sla_breached', handleSlaBreached);
     socket.on('ticket_escalated', handleTicketEscalated);
 
+    // Rôle ou groupe de l'utilisateur modifié par un admin : on prévient le contexte d'auth
+    // (window event) pour que ce dernier rappelle /auth/me IMMÉDIATEMENT (menus à jour sans attendre)
+    const handleUserUpdated = () => window.dispatchEvent(new CustomEvent('app:user-updated'));
+    socket.on('user_updated', handleUserUpdated);
+
     // Rafraîchir depuis la base quand on se reconnecte
     socket.on('connect', () => {
       loadNotifications();
@@ -172,6 +177,7 @@ export function NotificationProvider({ children }) {
       socket.off('ticket_updated', handleTicketUpdated);
       socket.off('sla_breached', handleSlaBreached);
       socket.off('ticket_escalated', handleTicketEscalated);
+      socket.off('user_updated', handleUserUpdated);
       socket.off('connect', loadNotifications);
     };
   }, [socket, loadNotifications]);

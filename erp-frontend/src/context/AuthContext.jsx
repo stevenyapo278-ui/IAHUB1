@@ -80,11 +80,15 @@ export function AuthProvider({ children }) {
     refreshMe();
     const interval = setInterval(refreshMe, 120000);
     const onVisible = () => { if (document.visibilityState === 'visible') refreshMe(); };
+    // Le serveur prévient via socket quand le rôle/groupe vient de changer (cf. NotificationContext)
+    const onUserUpdated = () => refreshMe();
     document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('app:user-updated', onUserUpdated);
     return () => {
       cancelled = true;
       clearInterval(interval);
       document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('app:user-updated', onUserUpdated);
     };
   }, []);
 

@@ -8,6 +8,7 @@ const { sendTemporaryPasswordEmail } = require('../services/emailSender');
 const { ADMIN_LIKE_ROLES } = require('../config/permissions');
 const { sanitizeError } = require('../utils/sanitizeError');
 const { auditLog } = require('../services/auditLogService');
+const { emitUserUpdated } = require('../utils/socket');
 const cacheStore = require('../services/cacheStore');
 
 // Après toute écriture sur les utilisateurs, on invalide les listes mises en cache (TTL 30s,
@@ -44,9 +45,12 @@ async function syncHotlinePermissionGroup(userId, isHotline) {
   const group = await prisma.permissionGroup.findFirst({ where: { name: 'Équipe Hotline' } });
   if (!group) return;
   if (isHotline) {
-    await prisma.permissionGroup.update({
-      where: { id: group.id },
-      data: { members: { connect: { id: userId } } },
+    // Déplace l'utilisateur vers le groupe Hotline (set = remplacement atomique) : un utilisateur
+    // est dans un SEUL groupe ; un simple connect violerait la contrainte d'exclusivité si l'utilisateur
+    // est déjà ailleurs et serait silencieusement avalé.
+    await prisma.user.update({
+      where: { id: userId },
+      data: { permissionGroups: { set: [{ id: group.id }] } },
     }).catch(() => {});
   } else {
     await prisma.permissionGroup.update({
@@ -446,6 +450,8 @@ router.patch(
       });
       if (role !== undefined && role !== target.role) {
         syncHotlinePermissionGroup(user.id, role === 'HOTLINE');
+        // Rafraîchissement instantané de la session de l'utilisateur concerné (menus + permissions)
+        emitUserUpdated(user.id);
       }
       invalidateUserCaches();
       return res.json(user);

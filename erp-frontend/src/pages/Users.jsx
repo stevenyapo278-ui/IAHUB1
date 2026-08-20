@@ -177,8 +177,17 @@ export default function Users() {
   function toggleSelectAll() { setSelectedIds(ids => ids.length === users.length ? [] : users.map(u => u.id)); }
 
   async function updateField(id, field, value) {
-    try { await api.patch(`/users/${id}`, { [field]: value }); load(); }
-    catch (err) { setError(err.response?.data?.error || 'Erreur'); }
+    try {
+      await api.patch(`/users/${id}`, { [field]: value });
+      load();
+      if (field === 'role') {
+        const target = users.find((u) => u.id === id);
+        toast.success(`Rôle de ${target?.fullName || 'l’utilisateur'} changé pour « ${ROLE_CONFIG[value]?.label || value} » — effet immédiat`);
+      } else if (field === 'isActive') {
+        const target = users.find((u) => u.id === id);
+        toast.success(`${target?.fullName || 'Utilisateur'} ${value ? 'réactivé' : 'désactivé'}`);
+      }
+    } catch (err) { setError(err.response?.data?.error || 'Erreur'); }
   }
 
   function startEdit(u) { setEditingId(u.id); setEditForm({ fullName: u.fullName, email: u.email }); }

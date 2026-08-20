@@ -5,6 +5,7 @@ const { authenticate, authorizeAdmin } = require('../middleware/auth');
 const { requireSuperAdmin } = require('../middleware/permissions');
 const { PERMISSION_KEYS } = require('../config/permissions');
 const { auditLog } = require('../services/auditLogService');
+const { emitUserUpdated } = require('../utils/socket');
 
 const router = express.Router();
 router.use(authenticate);
@@ -125,6 +126,7 @@ router.post('/:id/assign', [body('userIds').isArray({ min: 1 })], async (req, re
     });
 
     auditLog('PERMISSION_GROUP_ASSIGNED', { actor: req.user, targetType: 'PermissionGroup', targetId: group.id, targetLabel: group.name, metadata: { userIds } }).catch(() => {});
+    for (const uid of userIds) emitUserUpdated(uid); // permissions instantanées côté utilisateur concerné
     return res.json(group);
   } catch (err) {
     return res.status(err.status || 404).json({ error: err.message || 'Groupe introuvable' });
@@ -145,6 +147,7 @@ router.post('/:id/unassign', [body('userIds').isArray({ min: 1 })], async (req, 
       data: { members: { disconnect: userIds.map((id) => ({ id })) } },
       include: { members: { select: { id: true, fullName: true, email: true, role: true } } },
     });
+    for (const uid of userIds) emitUserUpdated(uid); // permissions instantanées côté utilisateur concerné
     return res.json(group);
   } catch (err) {
     return res.status(404).json({ error: 'Groupe introuvable' });

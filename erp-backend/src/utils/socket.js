@@ -62,6 +62,14 @@ function getIO() {
   return io;
 }
 
+// Invalide la session d'un utilisateur en temps réel : le client rappelle /auth/me immédiatement.
+// Utilisé quand un admin change le rôle d'un utilisateur ou son groupe de droits — l'effet (menus,
+// permissions, restrictions) est ainsi INSTANTANÉ, sans attendre le rafraîchissement périodique.
+function emitUserUpdated(userId) {
+  if (!io) return;
+  io.to(`user:${userId}`).emit('user_updated', { ts: Date.now() });
+}
+
 // ── Helpers d'émission ───────────────────────────────────────────────────
 
 async function persistNotification({ userId, type, title, message, link, metadata }) {
@@ -306,4 +314,4 @@ function emitTicketEscalated(ticket, { reason, escalationLevel } = {}) {
   }
 }
 
-module.exports = { initSocket, getIO, persistNotification, emitTicketCreated, emitTicketUpdated, emitTicketAssigned, emitSlaBreach, emitTicketEscalated };
+module.exports = { initSocket, getIO, emitUserUpdated, persistNotification, emitTicketCreated, emitTicketUpdated, emitTicketAssigned, emitSlaBreach, emitTicketEscalated };
