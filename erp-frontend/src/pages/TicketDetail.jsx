@@ -751,9 +751,9 @@ export default function TicketDetail() {
   const SIcon = sConfig.Icon;
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 flex flex-col gap-6 max-w-7xl mx-auto">
-      {/* Top Header Bar */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-outline-variant/30">
+    <div className="p-4 sm:p-6 lg:p-8 flex flex-col gap-6 max-w-7xl mx-auto overflow-x-hidden">
+      {/* Top Header Bar (Fixe) */}
+      <div className="flex items-center justify-between gap-4 pb-4 border-b border-outline-variant/30 shrink-0">
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate(-1)}
@@ -818,115 +818,149 @@ export default function TicketDetail() {
               <ChevronsRight className="w-3.5 h-3.5" />
             </button>
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-sm font-bold text-primary">#{ticket.id}</span>
-              {ticket.glpiTicketId && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 dark:bg-surface-container-high dark:text-on-surface-variant border border-slate-200 dark:border-outline-variant/40 flex items-center gap-1">
-                  <RefreshCw className="w-2.5 h-2.5" />
-                  GLPI #{ticket.glpiTicketId}
-                </span>
-              )}
-            </div>
-            {editingTitle ? (
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={editingTitleValue}
-                  onChange={(e) => setEditingTitleValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleTitleSave();
-                    if (e.key === 'Escape') setEditingTitle(false);
-                  }}
-                  autoFocus
-                  className="flex-1 text-lg font-bold text-on-surface bg-surface-container-low border border-primary/40 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary/30"
-                />
-                <button
-                  onClick={handleTitleSave}
-                  disabled={savingField === 'title'}
-                  className="p-2 rounded-xl bg-primary text-on-primary hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
-                  title="Enregistrer"
-                >
-                  <Save className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => setEditingTitle(false)}
-                  className="p-2 rounded-xl border border-outline-variant/40 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer"
-                  title="Annuler"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+        </div>
+      </div>
+
+      {/* Zone de contenu Ticket glissante ultra-fluide */}
+      <div className="relative overflow-hidden w-full min-h-[600px]">
+        <AnimatePresence mode="popLayout" custom={slideDirection} initial={false}>
+          <motion.div
+            key={ticket.id}
+            custom={slideDirection}
+            initial={(dir) => ({
+              x: dir === 'next' ? '100%' : '-100%',
+              opacity: 0.9,
+            })}
+            animate={{
+              x: '0%',
+              opacity: 1,
+              transition: {
+                x: { duration: 0.32, ease: [0.16, 1, 0.3, 1] },
+                opacity: { duration: 0.2 },
+              },
+            }}
+            exit={(dir) => ({
+              x: dir === 'next' ? '-100%' : '100%',
+              opacity: 0,
+              transition: {
+                x: { duration: 0.32, ease: [0.16, 1, 0.3, 1] },
+                opacity: { duration: 0.2 },
+              },
+            })}
+            className="w-full space-y-6"
+          >
+            {/* Header info (Titre #ID, badges, actions) */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-outline-variant/30">
+              <div className="flex items-center gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-sm font-bold text-primary">#{ticket.id}</span>
+                    {ticket.glpiTicketId && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 dark:bg-surface-container-high dark:text-on-surface-variant border border-slate-200 dark:border-outline-variant/40 flex items-center gap-1">
+                        <RefreshCw className="w-2.5 h-2.5" />
+                        GLPI #{ticket.glpiTicketId}
+                      </span>
+                    )}
+                  </div>
+                  {editingTitle ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={editingTitleValue}
+                        onChange={(e) => setEditingTitleValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleTitleSave();
+                          if (e.key === 'Escape') setEditingTitle(false);
+                        }}
+                        autoFocus
+                        className="flex-1 text-lg font-bold text-on-surface bg-surface-container-low border border-primary/40 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      />
+                      <button
+                        onClick={handleTitleSave}
+                        disabled={savingField === 'title'}
+                        className="p-2 rounded-xl bg-primary text-on-primary hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+                        title="Enregistrer"
+                      >
+                        <Save className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => setEditingTitle(false)}
+                        className="p-2 rounded-xl border border-outline-variant/40 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer"
+                        title="Annuler"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 group/title">
+                      <h1 className="text-lg font-bold text-on-surface leading-snug line-clamp-1">{ticket.title}</h1>
+                      {canEdit && (
+                        <button
+                          onClick={() => { setEditingTitleValue(ticket.title); setEditingTitle(true); }}
+                          className="p-1.5 rounded-lg text-on-surface-variant/40 hover:text-on-surface hover:bg-surface-container transition-all opacity-0 group-hover/title:opacity-100 cursor-pointer"
+                          title="Modifier le titre"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
-            ) : (
-              <div className="flex items-center gap-2 group/title">
-                <h1 className="text-lg font-bold text-on-surface leading-snug line-clamp-1">{ticket.title}</h1>
-                {canEdit && (
+
+              {/* Right Badges & Actions */}
+              <div className="flex items-center gap-2 flex-wrap shrink-0">
+                {ticket.escalationLevel > 0 && (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-orange-50 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400 border border-orange-500/30">
+                    Niv. escalade {ticket.escalationLevel}
+                  </span>
+                )}
+                <button
+                  onClick={handleEscalate}
+                  disabled={escalating}
+                  className="px-3 py-1.5 rounded-xl border border-orange-500/30 bg-orange-500/10 text-orange-600 dark:text-orange-300 hover:bg-orange-500/20 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
+                  title="Escalader ce ticket : alerte les admins et monte le niveau de prise en charge"
+                >
+                  <TrendingUp className="w-3.5 h-3.5" />
+                  {escalating ? 'Escalade...' : 'Escalader'}
+                </button>
+                <button
+                  onClick={async () => {
+                    try {
+                      toast.loading('Génération de la fiche KB...', { id: 'kb-gen' });
+                      await api.post(`/tickets/${id}/generate-knowledge`);
+                      toast.success('Fiche capturée avec succès dans la Base de Connaissances !', { id: 'kb-gen' });
+                    } catch (err) {
+                      toast.error(err.response?.data?.error || 'Erreur lors de la capture KB', { id: 'kb-gen' });
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-xl border border-purple-500/30 bg-purple-500/10 text-purple-600 dark:text-purple-300 hover:bg-purple-500/20 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  title="Créer automatiquement un article dans la Base de Connaissances d'après la résolution de ce ticket"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Capturer dans la KB</span>
+                </button>
+
+                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${sConfig.bg}`}>
+                  <SIcon className="w-3.5 h-3.5" />
+                  {sConfig.label}
+                </span>
+                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${pConfig.bg}`}>
+                  <PIcon className="w-3.5 h-3.5" />
+                  {pConfig.label}
+                </span>
+                <SlaBadge ticket={ticket} />
+                {canDelete && (
                   <button
-                    onClick={() => { setEditingTitleValue(ticket.title); setEditingTitle(true); }}
-                    className="p-1.5 rounded-lg text-on-surface-variant/40 hover:text-on-surface hover:bg-surface-container transition-all opacity-0 group-hover/title:opacity-100 cursor-pointer"
-                    title="Modifier le titre"
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="p-2 rounded-xl border border-red-500/20 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer ml-2"
+                    title="Supprimer le ticket"
                   >
-                    <Pencil className="w-3.5 h-3.5" />
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 )}
               </div>
-            )}
-          </div>
-        </div>
-
-        {/* Right Badges & Actions */}
-        <div className="flex items-center gap-2 flex-wrap shrink-0">
-          {ticket.escalationLevel > 0 && (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-orange-50 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400 border border-orange-500/30">
-              Niv. escalade {ticket.escalationLevel}
-            </span>
-          )}
-          <button
-            onClick={handleEscalate}
-            disabled={escalating}
-            className="px-3 py-1.5 rounded-xl border border-orange-500/30 bg-orange-500/10 text-orange-600 dark:text-orange-300 hover:bg-orange-500/20 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
-            title="Escalader ce ticket : alerte les admins et monte le niveau de prise en charge"
-          >
-            <TrendingUp className="w-3.5 h-3.5" />
-            {escalating ? 'Escalade...' : 'Escalader'}
-          </button>
-          <button
-            onClick={async () => {
-              try {
-                toast.loading('Génération de la fiche KB...', { id: 'kb-gen' });
-                await api.post(`/tickets/${id}/generate-knowledge`);
-                toast.success('Fiche capturée avec succès dans la Base de Connaissances !', { id: 'kb-gen' });
-              } catch (err) {
-                toast.error(err.response?.data?.error || 'Erreur lors de la capture KB', { id: 'kb-gen' });
-              }
-            }}
-            className="px-3 py-1.5 rounded-xl border border-purple-500/30 bg-purple-500/10 text-purple-600 dark:text-purple-300 hover:bg-purple-500/20 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
-            title="Créer automatiquement un article dans la Base de Connaissances d'après la résolution de ce ticket"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Capturer dans la KB</span>
-          </button>
-
-          <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${sConfig.bg}`}>
-            <SIcon className="w-3.5 h-3.5" />
-            {sConfig.label}
-          </span>
-          <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${pConfig.bg}`}>
-            <PIcon className="w-3.5 h-3.5" />
-            {pConfig.label}
-          </span>
-          <SlaBadge ticket={ticket} />
-          {canDelete && (
-            <button
-              onClick={() => setShowDeleteConfirm(true)}
-              className="p-2 rounded-xl border border-red-500/20 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer ml-2"
-              title="Supprimer le ticket"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-          )}
-        </div>
-      </div>
+            </div>
 
       {/* Sync Failure Banner (GLPI uniquement — masqué en mode autonome) */}
       {!autonomousMode && syncFailures.length > 0 && (
@@ -963,16 +997,8 @@ export default function TicketDetail() {
         </div>
       )}
 
-      {/* Grid Layout avec animation de défilement dynamique gauche / droite */}
-      <AnimatePresence mode="wait" custom={slideDirection}>
-        <motion.div
-          key={ticket.id}
-          custom={slideDirection}
-          initial={{ x: slideDirection === 'prev' ? -90 : 90, opacity: 0 }}
-          animate={{ x: 0, opacity: 1, transition: { x: { type: 'spring', stiffness: 320, damping: 30 }, opacity: { duration: 0.18 } } }}
-          exit={{ x: slideDirection === 'prev' ? 90 : -90, opacity: 0, transition: { x: { type: 'spring', stiffness: 320, damping: 30 }, opacity: { duration: 0.15 } } }}
-          className="grid grid-cols-1 xl:grid-cols-12 gap-6"
-        >
+      {/* Grid Layout */}
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
           {/* Left Column: Main Ticket Content & Timeline */}
         <div className="xl:col-span-8 flex flex-col gap-6">
           {/* Main Ticket Card */}
