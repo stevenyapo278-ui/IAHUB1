@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useAnimate } from 'framer-motion';
 import { toast } from 'sonner';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../api/client';
@@ -98,8 +98,9 @@ export default function TicketDetail() {
   const [customSourceName, setCustomSourceName] = useState('');
   const [customSourceEmail, setCustomSourceEmail] = useState('');
   const [adjacent, setAdjacent] = useState({ first: null, prev: null, next: null, last: null });
-  const [slideDirection, setSlideDirection] = useState('next');
+  const slideDirectionRef = useRef('next'); // 'next' = vers la droite→gauche, 'prev' = gauche→droite
   const prevIdRef = useRef(id);
+  const [scope, animate] = useAnimate();
   const [corrections, setCorrections] = useState([]);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
@@ -171,16 +172,23 @@ export default function TicketDetail() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Charger les IDs adjacents à chaque changement de ticket et détecter la direction du slide
+  // Animer le slide lors du changement de ticket
   useEffect(() => {
-    if (prevIdRef.current !== id) {
-      if (Number(id) < Number(prevIdRef.current)) {
-        setSlideDirection('prev');
-      } else {
-        setSlideDirection('next');
-      }
-      prevIdRef.current = id;
-    }
+    if (!scope.current || prevIdRef.current === id) return;
+    const dir = Number(id) < Number(prevIdRef.current) ? 'prev' : 'next';
+    slideDirectionRef.current = dir;
+    prevIdRef.current = id;
+    const exitX = dir === 'next' ? '-100%' : '100%';
+    const enterX = dir === 'next' ? '100%' : '-100%';
+    // 1. Sortie rapide
+    animate(scope.current, { x: exitX, opacity: 0 }, { duration: 0.2, ease: [0.25, 0.46, 0.45, 0.94] })
+      .then(() => {
+        // 2. Repositionner de l'autre côté instantanément
+        animate(scope.current, { x: enterX, opacity: 0 }, { duration: 0 });
+        // 3. Entrée fluide
+        return animate(scope.current, { x: 0, opacity: 1 }, { duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] });
+      })
+      .catch(() => {});
   }, [id]);
 
   useEffect(() => {
@@ -821,34 +829,9 @@ export default function TicketDetail() {
         </div>
       </div>
 
-      {/* Zone de contenu Ticket glissante ultra-fluide */}
-      <div className="relative overflow-hidden w-full min-h-[600px]">
-        <AnimatePresence mode="popLayout" custom={slideDirection} initial={false}>
-          <motion.div
-            key={ticket.id}
-            custom={slideDirection}
-            initial={(dir) => ({
-              x: dir === 'next' ? '100%' : '-100%',
-              opacity: 0.9,
-            })}
-            animate={{
-              x: '0%',
-              opacity: 1,
-              transition: {
-                x: { duration: 0.32, ease: [0.16, 1, 0.3, 1] },
-                opacity: { duration: 0.2 },
-              },
-            }}
-            exit={(dir) => ({
-              x: dir === 'next' ? '-100%' : '100%',
-              opacity: 0,
-              transition: {
-                x: { duration: 0.32, ease: [0.16, 1, 0.3, 1] },
-                opacity: { duration: 0.2 },
-              },
-            })}
-            className="w-full space-y-6"
-          >
+      {/* Zone de contenu Ticket — animation impérative via useAnimate (compatible avec AnimatePresence du layout parent) */}
+      <div className="overflow-hidden">
+        <div ref={scope} className="w-full space-y-6" style={{ willChange: 'transform, opacity' }}>
             {/* Header info (Titre #ID, badges, actions) */}
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-outline-variant/30">
               <div className="flex items-center gap-3">
@@ -2326,9 +2309,8 @@ export default function TicketDetail() {
           )}
         </div>
       </div>
-    </motion.div>
-  </AnimatePresence>
-</div>
+    </div>
+  </div>
 
       {/* Approval Modal */}
       {showApproveModal && (
