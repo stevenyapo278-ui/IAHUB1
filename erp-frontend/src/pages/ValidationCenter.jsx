@@ -5,7 +5,7 @@ import {
   ShieldCheck, Ticket, MailCheck, Clock, CheckCircle2,
   XCircle, AlertTriangle, RefreshCw, ChevronRight, User,
   Sparkles, ExternalLink, Send, ArrowRight, Shield, Check, X,
-  Bell, BookOpen, Edit3, Tags, HelpCircle, TrendingUp,
+  Bell, BookOpen, Edit3, Tags, HelpCircle, TrendingUp, Search,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid,
@@ -13,6 +13,28 @@ import {
 import { sanitizeHtml } from '../utils/sanitize';
 import api from '../api/client';
 import useSystemSettings from '../hooks/useSystemSettings';
+
+function matchesSearch(item, tab, q) {
+  let fields = [];
+  if (tab === 'tickets' || tab === 'closures') {
+    fields = [
+      item.title, item.content, item.category,
+      item.requester?.fullName, item.sourceName, item.sourceEmail,
+      String(item.id || ''),
+    ];
+  } else if (tab === 'drafts' || tab === 'reminders') {
+    fields = [
+      item.ticket?.title, item.recipientName, item.recipientEmail,
+      item.proposedContent, String(item.ticketId || ''),
+    ];
+  } else if (tab === 'knowledge') {
+    fields = [
+      item.title, item.problem, item.cause, item.solution, item.category,
+      ...(item.tags || []), ...(item.keywords || []),
+    ];
+  }
+  return fields.some((v) => v && String(v).toLowerCase().includes(q));
+}
 
 export default function ValidationCenter({ defaultTab = 'tickets' }) {
   const navigate = useNavigate();
@@ -69,6 +91,11 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   const [editingKbFields, setEditingKbFields] = useState({ title: '', problem: '', cause: '', solution: '' });
   const [savingKbDraft, setSavingKbDraft] = useState(false);
 
+  // Recherche + pagination
+  const [searchQuery, setSearchQuery] = useState('');
+  const [pageSize, setPageSize] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
+
   function loadAllData(silent = false) {
     if (!silent) setLoading(true);
     else setRefreshing(true);
@@ -117,7 +144,34 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
 
   function handleTabChange(tab) {
     setSearchParams({ tab });
+    setCurrentPage(1);
   }
+
+  const activeList = {
+    tickets: pendingTickets,
+    drafts: pendingDrafts,
+    reminders: reminderDrafts,
+    closures: pendingClosures,
+    knowledge: pendingKnowledgeDrafts,
+  }[activeTab] || [];
+
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const filteredList = normalizedQuery
+    ? activeList.filter((item) => matchesSearch(item, activeTab, normalizedQuery))
+    : activeList;
+
+  const totalPages = Math.max(1, Math.ceil(filteredList.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedList = filteredList.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const rangeStart = filteredList.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const rangeEnd = Math.min(safePage * pageSize, filteredList.length);
+  const searchPlaceholder = {
+    tickets: 'Rechercher un ticket (titre, demandeur, #id)...',
+    drafts: 'Rechercher une réponse IA (ticket, destinataire, contenu)...',
+    reminders: 'Rechercher une relance (ticket, destinataire)...',
+    closures: 'Rechercher un ticket à clôturer (titre, demandeur)...',
+    knowledge: 'Rechercher un article (titre, problème, solution, tags)...',
+  }[activeTab] || 'Rechercher...';
 
   // --- ACTIONS TICKET PENDING ---
   async function handleApproveTicket(ticketId) {
@@ -365,6 +419,16 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     }
   }
 
+  const noResultsBlock = (
+    <div className="p-12 text-center rounded-3xl border border-dashed border-outline-variant/40 bg-surface-container-lowest space-y-3">
+      <Search className="w-12 h-12 text-on-surface-variant/40 mx-auto" />
+      <h3 className="text-base font-bold text-on-surface">Aucun résultat pour cette recherche</h3>
+      <p className="text-xs text-on-surface-variant max-w-md mx-auto">
+        Aucun élément ne correspond à « {searchQuery.trim()} ». Essayez avec d'autres mots-clés.
+      </p>
+    </div>
+  );
+
   return (
     <div className="p-6 sm:p-8 max-w-7xl mx-auto space-y-8 animate-fadeIn">
       {/* En-tête de la page */}
@@ -484,6 +548,45 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
         </button>
       </div>
 
+      {/* Barre de recherche + nombre d'affichage par page */}
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="relative flex-1">
+          <Search className="w-4 h-4 text-on-surface-variant absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
+            placeholder={searchPlaceholder}
+            className="w-full pl-10 pr-9 py-2.5 rounded-2xl bg-surface-container-lowest border border-outline-variant/40 text-xs text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => { setSearchQuery(''); setCurrentPage(1); }}
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded-full hover:bg-surface-container-high text-on-surface-variant transition-all"
+              title="Effacer la recherche"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <label htmlFor="vc-page-size" className="text-xs font-semibold text-on-surface-variant whitespace-nowrap">
+            Afficher par page :
+          </label>
+          <select
+            id="vc-page-size"
+            value={pageSize}
+            onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+            className="py-2.5 px-3 rounded-2xl bg-surface-container-lowest border border-outline-variant/40 text-xs font-bold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+          >
+            {[5, 10, 25, 50].map((n) => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
       {/* CONTENU DE L'ONGLET 1 : TICKETS EN ATTENTE GLPI */}
       {activeTab === 'tickets' && (
         <div className="space-y-4">
@@ -493,19 +596,21 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                 <div key={i} className="h-32 rounded-3xl bg-surface-container-low animate-pulse border border-outline-variant/20" />
               ))}
             </div>
-          ) : pendingTickets.length === 0 ? (
-            <div className="p-12 text-center rounded-3xl border border-dashed border-outline-variant/40 bg-surface-container-lowest space-y-3">
-              <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto" />
-              <h3 className="text-base font-bold text-on-surface">Aucun ticket en attente d'approbation</h3>
-              <p className="text-xs text-on-surface-variant max-w-md mx-auto">
-                {autonomousMode
-                  ? 'Tous les tickets créés ont été validés.'
-                  : 'Tous les tickets créés ont été validés et transmis à GLPI.'}
-              </p>
-            </div>
+          ) : filteredList.length === 0 ? (
+            activeList.length === 0 ? (
+              <div className="p-12 text-center rounded-3xl border border-dashed border-outline-variant/40 bg-surface-container-lowest space-y-3">
+                <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto" />
+                <h3 className="text-base font-bold text-on-surface">Aucun ticket en attente d'approbation</h3>
+                <p className="text-xs text-on-surface-variant max-w-md mx-auto">
+                  {autonomousMode
+                    ? 'Tous les tickets créés ont été validés.'
+                    : 'Tous les tickets créés ont été validés et transmis à GLPI.'}
+                </p>
+              </div>
+            ) : noResultsBlock
           ) : (
             <div className="space-y-4">
-              {pendingTickets.map((t) => (
+              {paginatedList.map((t) => (
                 <div
                   key={t.id}
                   className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6 hover:border-outline-variant/60 transition-all"
@@ -587,17 +692,19 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                 <div key={i} className="h-40 rounded-3xl bg-surface-container-low animate-pulse border border-outline-variant/20" />
               ))}
             </div>
-          ) : pendingDrafts.length === 0 ? (
-            <div className="p-12 text-center rounded-3xl border border-dashed border-outline-variant/40 bg-surface-container-lowest space-y-3">
-              <MailCheck className="w-12 h-12 text-purple-500 mx-auto" />
-              <h3 className="text-base font-bold text-on-surface">Aucune réponse IA en attente de validation</h3>
-              <p className="text-xs text-on-surface-variant max-w-md mx-auto">
-                Toutes les réponses automatiques suggérées par l'IA ont été examinées et envoyées.
-              </p>
-            </div>
+          ) : filteredList.length === 0 ? (
+            activeList.length === 0 ? (
+              <div className="p-12 text-center rounded-3xl border border-dashed border-outline-variant/40 bg-surface-container-lowest space-y-3">
+                <MailCheck className="w-12 h-12 text-purple-500 mx-auto" />
+                <h3 className="text-base font-bold text-on-surface">Aucune réponse IA en attente de validation</h3>
+                <p className="text-xs text-on-surface-variant max-w-md mx-auto">
+                  Toutes les réponses automatiques suggérées par l'IA ont été examinées et envoyées.
+                </p>
+              </div>
+            ) : noResultsBlock
           ) : (
             <div className="space-y-6">
-              {pendingDrafts.map((draft) => {
+              {paginatedList.map((draft) => {
                 const ticketObj = draft.ticket;
                 const glpiId = ticketObj?.glpiTicketId;
                 const isTicketPending = ticketObj && (!glpiId || ticketObj.approvalStatus === 'PENDING');
@@ -732,17 +839,19 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                 <div key={i} className="h-32 rounded-3xl bg-surface-container-low animate-pulse border border-outline-variant/20" />
               ))}
             </div>
-          ) : reminderDrafts.length === 0 ? (
-            <div className="p-12 text-center rounded-3xl border border-dashed border-outline-variant/40 bg-surface-container-lowest space-y-3">
-              <Bell className="w-12 h-12 text-amber-500 mx-auto" />
-              <h3 className="text-base font-bold text-on-surface">Aucune relance automatique en attente</h3>
-              <p className="text-xs text-on-surface-variant max-w-md mx-auto">
-                Les prochaines relances de tickets en attente apparaîtront ici pour approbation.
-              </p>
-            </div>
+          ) : filteredList.length === 0 ? (
+            activeList.length === 0 ? (
+              <div className="p-12 text-center rounded-3xl border border-dashed border-outline-variant/40 bg-surface-container-lowest space-y-3">
+                <Bell className="w-12 h-12 text-amber-500 mx-auto" />
+                <h3 className="text-base font-bold text-on-surface">Aucune relance automatique en attente</h3>
+                <p className="text-xs text-on-surface-variant max-w-md mx-auto">
+                  Les prochaines relances de tickets en attente apparaîtront ici pour approbation.
+                </p>
+              </div>
+            ) : noResultsBlock
           ) : (
             <div className="space-y-6">
-              {reminderDrafts.map((draft) => {
+              {paginatedList.map((draft) => {
                 const ticketObj = draft.ticket;
                 return (
                   <div
@@ -902,18 +1011,20 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                 <div key={i} className="h-32 rounded-3xl bg-surface-container-low animate-pulse border border-outline-variant/20" />
               ))}
             </div>
-          ) : pendingClosures.length === 0 ? (
-            <div className="p-12 text-center rounded-3xl border border-dashed border-outline-variant/40 bg-surface-container-lowest space-y-3">
-              <CheckCircle2 className="w-12 h-12 text-cyan-500 mx-auto" />
-              <h3 className="text-base font-bold text-on-surface">Aucune clôture suggérée en attente</h3>
-              <p className="text-xs text-on-surface-variant max-w-md mx-auto">
-                L'IA ne clôt plus les tickets automatiquement : lorsqu'elle détecte un problème résolu,
-                elle propose la clôture ici pour validation par la Hotline.
-              </p>
-            </div>
+          ) : filteredList.length === 0 ? (
+            activeList.length === 0 ? (
+              <div className="p-12 text-center rounded-3xl border border-dashed border-outline-variant/40 bg-surface-container-lowest space-y-3">
+                <CheckCircle2 className="w-12 h-12 text-cyan-500 mx-auto" />
+                <h3 className="text-base font-bold text-on-surface">Aucune clôture suggérée en attente</h3>
+                <p className="text-xs text-on-surface-variant max-w-md mx-auto">
+                  L'IA ne clôt plus les tickets automatiquement : lorsqu'elle détecte un problème résolu,
+                  elle propose la clôture ici pour validation par la Hotline.
+                </p>
+              </div>
+            ) : noResultsBlock
           ) : (
             <div className="space-y-4">
-              {pendingClosures.map((t) => (
+              {paginatedList.map((t) => (
                 <div
                   key={t.id}
                   className="rounded-3xl border border-cyan-200 dark:border-cyan-500/20 bg-surface-container-lowest p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6 hover:border-cyan-300 dark:hover:border-cyan-500/30 transition-all"
@@ -1001,17 +1112,19 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                 <div key={i} className="h-36 rounded-3xl bg-surface-container-low animate-pulse border border-outline-variant/20" />
               ))}
             </div>
-          ) : pendingKnowledgeDrafts.length === 0 ? (
-            <div className="p-12 text-center rounded-3xl border border-dashed border-outline-variant/40 bg-surface-container-lowest space-y-3">
-              <BookOpen className="w-12 h-12 text-emerald-500 mx-auto" />
-              <h3 className="text-base font-bold text-on-surface">Aucun brouillon de connaissance en attente</h3>
-              <p className="text-xs text-on-surface-variant max-w-md mx-auto">
-                Utilisez le bouton "Capturer dans la KB" depuis un ticket résolu pour générer un article de base de connaissances.
-              </p>
-            </div>
+          ) : filteredList.length === 0 ? (
+            activeList.length === 0 ? (
+              <div className="p-12 text-center rounded-3xl border border-dashed border-outline-variant/40 bg-surface-container-lowest space-y-3">
+                <BookOpen className="w-12 h-12 text-emerald-500 mx-auto" />
+                <h3 className="text-base font-bold text-on-surface">Aucun brouillon de connaissance en attente</h3>
+                <p className="text-xs text-on-surface-variant max-w-md mx-auto">
+                  Utilisez le bouton "Capturer dans la KB" depuis un ticket résolu pour générer un article de base de connaissances.
+                </p>
+              </div>
+            ) : noResultsBlock
           ) : (
             <div className="space-y-6">
-              {pendingKnowledgeDrafts.map((draft) => {
+              {paginatedList.map((draft) => {
                 const isEditing = editingKbDraftId === draft.id;
                 return (
                   <div
@@ -1176,6 +1289,34 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* PAGINATION (onglet actif) */}
+      {!loading && filteredList.length > 0 && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
+          <p className="text-xs text-on-surface-variant">
+            {rangeStart}–{rangeEnd} sur {filteredList.length} élément{filteredList.length > 1 ? 's' : ''}
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={safePage <= 1}
+              className="px-3.5 py-2 rounded-xl text-xs font-bold border border-outline-variant/40 bg-surface-container-lowest hover:bg-surface-container text-on-surface transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Précédent
+            </button>
+            <span className="text-xs font-bold text-on-surface px-2 whitespace-nowrap">
+              Page {safePage} / {totalPages}
+            </span>
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={safePage >= totalPages}
+              className="px-3.5 py-2 rounded-xl text-xs font-bold border border-outline-variant/40 bg-surface-container-lowest hover:bg-surface-container text-on-surface transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Suivant
+            </button>
+          </div>
         </div>
       )}
 

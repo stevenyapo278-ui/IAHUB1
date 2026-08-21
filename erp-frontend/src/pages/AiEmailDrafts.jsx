@@ -9,8 +9,8 @@ import { useTheme } from '../context/ThemeContext';
 import { sanitizeHtml } from '../utils/sanitize';
 import {
   Sparkles, Mail, CheckCircle2, XCircle, Send, Edit3, Trash2,
-  RotateCcw, X, ChevronRight, Info, ArrowUpRight, Clock,
-  MessageSquare, RefreshCw, AlertTriangle, Bot
+  RotateCcw, X, ChevronLeft, ChevronRight, Info, ArrowUpRight, Clock,
+  MessageSquare, RefreshCw, AlertTriangle, Bot, Search
 } from 'lucide-react';
 
 const STATUS_OPTIONS = ['PENDING', 'APPROVED', 'REJECTED'];
@@ -42,6 +42,13 @@ export default function AiEmailDrafts() {
     bold: false, italic: false, underline: false,
     h2: false, h3: false, ul: false, ol: false,
   });
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [pageSize, setPageSize] = useState(() => {
+    const saved = localStorage.getItem('email_drafts_page_size');
+    return saved ? Number(saved) : 10;
+  });
+  const [currentPage, setCurrentPage] = useState(1);
 
   const updateToolbarState = useCallback(() => {
     try {
