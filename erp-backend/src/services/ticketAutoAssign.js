@@ -2,7 +2,7 @@ const prisma = require('../prismaClient');
 
 // Statuts considérés comme "charge active" d'un technicien pour le calcul du moins chargé —
 // un ticket déjà résolu/clos ne doit plus compter dans son équilibrage de charge.
-const ACTIVE_STATUSES = ['NEW', 'OPEN', 'PENDING', 'WAITING_FOR_USER'];
+const ACTIVE_STATUSES = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER'];
 
 // Trouve les techniciens compétents pour un domaine donné, triés par niveau de compétence
 // puis par charge de travail. Retourne le meilleur candidat.

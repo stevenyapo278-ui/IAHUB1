@@ -46,7 +46,8 @@ import {
   KanbanSquare,
   Bookmark,
   ListChecks,
-  Boxes
+  Boxes,
+  Calendar
 } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -1548,6 +1549,7 @@ export default function Tickets() {
                 <div className={`absolute top-0 left-0 right-0 h-1 ${
                   t.status === 'NEW' ? 'bg-amber-500' :
                   t.status === 'OPEN' ? 'bg-blue-500' :
+                  t.status === 'PLANNED' ? 'bg-purple-500' :
                   t.status === 'PENDING' ? 'bg-yellow-500' :
                   t.status === 'SOLVED' ? 'bg-emerald-500' : 'bg-slate-400'
                 }`} />
@@ -2056,7 +2058,8 @@ function ChipFilter({ active, onClick, Icon, label }) {
 
 const STATUS_CONFIG = {
   NEW: { label: 'Nouveau', bg: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20', Icon: Sparkles },
-  OPEN: { label: 'Ouvert', bg: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20', Icon: Radio },
+  OPEN: { label: 'En cours (Attribué)', bg: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20', Icon: Radio },
+  PLANNED: { label: 'En cours (Planifié)', bg: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20', Icon: Calendar },
   PENDING: { label: 'En attente', bg: 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border border-yellow-500/20', Icon: Clock },
   SOLVED: { label: 'Résolu', bg: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20', Icon: CheckCircle2 },
   CLOSED: { label: 'Fermé', bg: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20', Icon: Lock },

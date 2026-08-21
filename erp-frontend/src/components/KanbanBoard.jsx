@@ -5,7 +5,7 @@ import { ScrollText, GripVertical, User } from 'lucide-react';
 import SlaBadge from './SlaBadge';
 import { STATUS_CONFIG } from '../constants/tickets';
 
-const KANBAN_STATUSES = ['NEW', 'OPEN', 'PENDING', 'SOLVED'];
+const KANBAN_STATUSES = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'SOLVED'];
 
 export default function KanbanBoard({ tickets, canAssign, onStatusChange }) {
   const navigate = useNavigate();
@@ -32,6 +32,7 @@ export default function KanbanBoard({ tickets, canAssign, onStatusChange }) {
   const COLORS = {
     NEW: { dot: 'bg-amber-500', head: 'text-amber-600 dark:text-amber-400', count: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/25' },
     OPEN: { dot: 'bg-blue-500', head: 'text-blue-600 dark:text-blue-400', count: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/25' },
+    PLANNED: { dot: 'bg-purple-500', head: 'text-purple-600 dark:text-purple-400', count: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/25' },
     PENDING: { dot: 'bg-yellow-500', head: 'text-yellow-600 dark:text-yellow-400', count: 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border border-yellow-500/25' },
     SOLVED: { dot: 'bg-emerald-500', head: 'text-emerald-600 dark:text-emerald-400', count: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25' },
   };

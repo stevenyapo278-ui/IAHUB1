@@ -4,7 +4,7 @@ const { getSystemSettings } = require('./systemSettings');
 const { getActiveProviders, callProviderWithFallback } = require('./mailAnalyzer');
 const { getPrompt } = require('./promptTemplates');
 
-const OPEN_STATUSES = ['NEW', 'OPEN', 'PENDING', 'WAITING_FOR_USER'];
+const OPEN_STATUSES = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER'];
 const PRIORITY_ORDER = ['P1', 'P2', 'P3', 'P4'];
 const PRIORITY_LABEL = { P1: 'P1 - Critique', P2: 'P2 - Haute', P3: 'P3 - Moyenne', P4: 'P4 - Basse' };
 

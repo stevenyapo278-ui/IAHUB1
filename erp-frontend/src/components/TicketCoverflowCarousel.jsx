@@ -39,7 +39,8 @@ const PRIORITY_THEMES = {
 
 const STATUS_THEMES = {
   NEW:     { bg: 'bg-blue-500/10 text-blue-400 border-blue-500/20',       label: 'Nouveau'    },
-  OPEN:    { bg: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20', label: 'En cours'   },
+  OPEN:    { bg: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20', label: 'En cours (Attribué)' },
+  PLANNED: { bg: 'bg-purple-500/10 text-purple-400 border-purple-500/20', label: 'En cours (Planifié)' },
   PENDING: { bg: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20', label: 'En attente' },
   SOLVED:  { bg: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20', label: 'Résolu'  },
   CLOSED:  { bg: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20',       label: 'Fermé'      },

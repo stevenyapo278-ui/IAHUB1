@@ -12,6 +12,7 @@ const { getSystemSettings } = require('./services/systemSettings');
 const { runDraftReminderScheduler } = require('./services/draftReminderScheduler');
 const { runReminderScheduler } = require('./services/reminderScheduler');
 const { checkAndSendDailySummary } = require('./services/dailySummary');
+const { runSolvedAutoCloseScheduler } = require('./services/solvedAutoCloseScheduler');
 const { withHealthTracking } = require('./services/schedulerHealth');
 const { seedPermissionGroups } = require('./services/permissionGroupSeeder');
 const { runSlaMonitor } = require('./services/slaService');
@@ -41,6 +42,7 @@ const FALLBACK_CHECK_DELAY_MS = 60 * 1000; // si l'intervalle configuré est 0 (
 const DRAFT_REMINDER_CHECK_INTERVAL_MS = 5 * 60 * 1000; // vérifie toutes les 5 min quels brouillons dépassent le délai configuré (draftReminderDelayMinutes)
 const TICKET_REMINDER_CHECK_INTERVAL_MS = 60 * 60 * 1000; // vérifie toutes les heures quels tickets WAITING_FOR_USER dépassent les délais de ReminderConfig (en jours, donc pas besoin d'une fréquence plus fine)
 const DAILY_SUMMARY_CHECK_INTERVAL_MS = 60 * 1000; // vérifie chaque minute si l'heure configurée (dailySummaryTime, ex "18:00") est atteinte
+const SOLVED_AUTO_CLOSE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // vérifie chaque heure quels tickets SOLVED dépassent le délai de 3 jours
 
 // TLS optionnel : si TLS_CERT_PATH et TLS_KEY_PATH pointent vers des fichiers existants,
 // le serveur écoute en HTTPS, sinon il retombe en HTTP (développement local).
@@ -183,3 +185,10 @@ const trackedDailySummary = withHealthTracking('récapitulatif quotidien', check
 setInterval(() => {
   trackedDailySummary().catch((err) => logger.error('Erreur récapitulatif quotidien:', { error: err.message, stack: err.stack }));
 }, DAILY_SUMMARY_CHECK_INTERVAL_MS);
+
+// Fermeture automatique des tickets SOLVED depuis 3 jours → CLOSED
+const trackedSolvedAutoClose = withHealthTracking('fermeture auto tickets résolus', runSolvedAutoCloseScheduler);
+trackedSolvedAutoClose().catch((err) => logger.error('Erreur fermeture auto tickets résolus:', { error: err.message, stack: err.stack }));
+setInterval(() => {
+  trackedSolvedAutoClose().catch((err) => logger.error('Erreur fermeture auto tickets résolus:', { error: err.message, stack: err.stack }));
+}, SOLVED_AUTO_CLOSE_CHECK_INTERVAL_MS);

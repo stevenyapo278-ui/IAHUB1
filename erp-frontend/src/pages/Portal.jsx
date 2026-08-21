@@ -76,7 +76,7 @@ export default function Portal() {
 
   const filtered = filter === 'ALL'
     ? tickets
-    : tickets.filter((t) => (filter === 'OPEN' ? ['NEW', 'OPEN', 'PENDING'].includes(t.status) : t.status === filter));
+    : tickets.filter((t) => (filter === 'OPEN' ? ['NEW', 'OPEN', 'PLANNED', 'PENDING'].includes(t.status) : t.status === filter));
 
   async function openDetail(ticketId) {
     const next = expandedId === ticketId ? null : ticketId;

@@ -50,7 +50,7 @@ router.get('/', async (req, res) => {
   }
   if (status) {
     if (status === 'OPEN_GROUP') {
-      where.status = { in: ['NEW', 'OPEN', 'PENDING'] };
+      where.status = { in: ['NEW', 'OPEN', 'PLANNED', 'PENDING'] };
     } else if (status === 'CLOSED_GROUP') {
       where.status = { in: ['SOLVED', 'CLOSED'] };
     } else {
@@ -133,7 +133,7 @@ router.get('/', async (req, res) => {
       orderBy,
     }),
     prisma.ticket.count({ where }),
-    prisma.ticket.count({ where: { ...where, status: { in: ['NEW', 'OPEN'] } } }),
+    prisma.ticket.count({ where: { ...where, status: { in: ['NEW', 'OPEN', 'PLANNED'] } } }),
     prisma.ticket.count({ where: { ...where, status: 'PENDING' } }),
     prisma.ticket.count({ where: { ...where, status: { in: ['SOLVED', 'CLOSED'] } } }),
     prisma.ticket.count({ where: { ...where, priority: 'P1' } }),
@@ -179,7 +179,7 @@ router.get('/export', async (req, res) => {
     where.requesterId = req.user.sub;
   }
   if (status) {
-    if (status === 'OPEN_GROUP') where.status = { in: ['NEW', 'OPEN', 'PENDING'] };
+    if (status === 'OPEN_GROUP') where.status = { in: ['NEW', 'OPEN', 'PLANNED', 'PENDING'] };
     else if (status === 'CLOSED_GROUP') where.status = { in: ['SOLVED', 'CLOSED'] };
     else where.status = status;
   }

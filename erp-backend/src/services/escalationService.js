@@ -3,7 +3,7 @@ const { logEvent } = require('./ticketEvent');
 const { emitTicketEscalated } = require('../utils/socket');
 const { sendEscalationEmail, sendRequesterEscalationEmail } = require('./emailSender');
 
-const ACTIVE_STATUSES = ['NEW', 'OPEN', 'PENDING'];
+const ACTIVE_STATUSES = ['NEW', 'OPEN', 'PLANNED', 'PENDING'];
 
 // Planifie une escalade automatique sur le ticket (règle de triage avec autoEscalateMinutes).
 // Appelé à la création du ticket (pipeline email) — le moniteur déclenche l'escalade à l'échéance.

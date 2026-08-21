@@ -378,7 +378,8 @@ ${signature || DEFAULT_EMAIL_SIGNATURE}
 async function sendTicketStatusNotification({ ticketId, ticketTitle, status, priority, category, recipientEmail, recipientName }) {
   const STATUS_LABELS = {
     NEW: 'Nouveau',
-    OPEN: 'En cours',
+    OPEN: 'En cours (Attribué)',
+    PLANNED: 'En cours (Planifié)',
     PENDING: 'En attente',
     WAITING_FOR_USER: 'En attente de votre réponse',
     SOLVED: 'Résolu',

@@ -33,7 +33,7 @@ router.get('/', async (req, res) => {
 
 // Statuts comptant comme "charge active" — alignés sur ticketAutoAssign.js, pour que ce qui
 // s'affiche ici corresponde exactement à ce que l'auto-assignation utilise pour choisir le moins chargé.
-const ACTIVE_STATUSES = ['NEW', 'OPEN', 'PENDING', 'WAITING_FOR_USER'];
+const ACTIVE_STATUSES = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER'];
 
 router.get('/:id', async (req, res) => {
   const team = await prisma.team.findUnique({

@@ -14,7 +14,7 @@ const DEFAULT_SLA_HOURS = {
   P4: { response: 8, resolution: 72 },
 };
 
-const ACTIVE_STATUSES = ['NEW', 'OPEN', 'PENDING'];
+const ACTIVE_STATUSES = ['NEW', 'OPEN', 'PLANNED', 'PENDING'];
 const CLOSED_STATUSES = ['SOLVED', 'CLOSED'];
 
 // Fusionne la config stockée (JSON) avec les valeurs par défaut : un champ absent d'une priorité

@@ -11,7 +11,7 @@ const { getSystemSettings } = require('./systemSettings');
 const { applySla } = require('./slaService');
 const { scheduleEscalation } = require('./escalationService');
 
-const GLPI_STATUS_MAP = { NEW: 1, OPEN: 2, PENDING: 4, WAITING_FOR_USER: 4, SOLVED: 5, CLOSED: 6 };
+const GLPI_STATUS_MAP = { NEW: 1, OPEN: 2, PLANNED: 4, PENDING: 4, WAITING_FOR_USER: 4, SOLVED: 5, CLOSED: 6 };
 const ERP_PRIORITY_MAP = { P1: 6, P2: 4, P3: 3, P4: 2 };
 const GLPI_TYPE_MAP = { INCIDENT: 1, REQUEST: 2 };
 const GLPI_URGENCY_IMPACT_MAP = { VERY_LOW: 1, LOW: 2, MEDIUM: 3, HIGH: 4, VERY_HIGH: 5, MAJOR: 6 };
