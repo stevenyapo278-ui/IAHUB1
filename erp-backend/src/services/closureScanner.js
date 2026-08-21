@@ -22,8 +22,40 @@ function historyToText(history) {
 }
 
 // Analyse un ticket candidat et le marque closeSuggested si l'IA conclut à une résolution probable.
+// Retourne un objet détaillé avec ticketId, action, confiance, preuve, et infos contextuelles.
 async function analyzeCandidate(ticket, cutoff) {
   const { logEvent } = require('./ticketEvent');
+
+  // Infos contextuelles du ticket pour l'affichage détaillé
+  const ticketDetails = await prisma.ticket.findUnique({
+    where: { id: ticket.id },
+    select: {
+      id: true, title: true, content: true, status: true, priority: true, category: true,
+      aiSummary: true, closeSuggestionCount: true, firstOpenedAt: true, createdAt: true,
+      updatedAt: true, lastUserReplyAt: true, assignedTo: { select: { fullName: true } },
+      requester: { select: { fullName: true, email: true } },
+      slaResponseDueAt: true, slaResolutionDueAt: true, slaBreachedAt: true,
+      dueDate: true,
+    },
+  });
+
+  const context = {
+    ticketId: ticket.id,
+    title: ticketDetails?.title || ticket.title,
+    content: ticketDetails?.content?.substring(0, 200) || '',
+    status: ticketDetails?.status || ticket.status,
+    priority: ticketDetails?.priority || 'P3',
+    category: ticketDetails?.category || null,
+    aiSummary: ticketDetails?.aiSummary || ticket.aiSummary || null,
+    assignedTo: ticketDetails?.assignedTo?.fullName || null,
+    requester: ticketDetails?.requester?.fullName || null,
+    daysOpen: daysSince(ticket.firstOpenedAt || ticket.createdAt),
+    daysSilent: ticket.lastUserReplyAt ? daysSince(ticket.lastUserReplyAt) : null,
+    slaBreached: !!ticketDetails?.slaBreachedAt,
+    slaResolutionOverdue: ticketDetails?.slaResolutionDueAt && new Date(ticketDetails.slaResolutionDueAt) < new Date(),
+    dueDateOverdue: ticketDetails?.dueDate && new Date(ticketDetails.dueDate) < new Date(),
+    previousSuggestions: ticket.closeSuggestionCount || 0,
+  };
 
   // Récupère les derniers échanges pour le contexte réel
   const recentMessages = await prisma.ticketMessage.findMany({
@@ -34,18 +66,18 @@ async function analyzeCandidate(ticket, cutoff) {
   });
   const history = recentMessages.reverse();
   if (history.length < MIN_HISTORY_LENGTH) {
-    return { action: 'SKIP_NO_HISTORY' };
+    return { ...context, action: 'SKIP_NO_HISTORY', confidence: null, evidence: '', reasoning: 'Pas assez d\'échanges dans l\'historique' };
   }
 
   const lastDate = new Date(history[history.length - 1].timestamp);
   // L'utilisateur vient de répondre : le flux réactif s'en charge, on n'interfère pas
   if (history[history.length - 1].direction === 'INBOUND' && Date.now() - lastDate.getTime() < 24 * 3600 * 1000) {
-    return { action: 'SKIP_RECENT_USER_REPLY' };
+    return { ...context, action: 'SKIP_RECENT_USER_REPLY', confidence: null, evidence: '', reasoning: 'L\'utilisateur a répondu récemment (< 24h)' };
   }
 
   const providers = await getActiveProviders();
   if (providers.length === 0) {
-    return { action: 'SKIP_NO_PROVIDER' };
+    return { ...context, action: 'SKIP_NO_PROVIDER', confidence: null, evidence: '', reasoning: 'Aucun fournisseur IA configuré' };
   }
 
   // Boucle de rétroaction : injecte les clôtures rejetées récemment sur ce ticket pour éviter
@@ -80,8 +112,8 @@ async function analyzeCandidate(ticket, cutoff) {
   let raw;
   try {
     raw = (await callProviderWithFallback(providers, prompt)).trim();
-  } catch {
-    return { action: 'SKIP_PROVIDER_ERROR' };
+  } catch (err) {
+    return { ...context, action: 'SKIP_PROVIDER_ERROR', confidence: null, evidence: '', reasoning: `Erreur provider IA: ${err.message}` };
   }
 
   let parsed;
@@ -89,16 +121,16 @@ async function analyzeCandidate(ticket, cutoff) {
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
   } catch {
-    return { action: 'SKIP_UNPARSEABLE' };
+    return { ...context, action: 'SKIP_UNPARSEABLE', confidence: null, evidence: '', reasoning: 'Réponse IA non parsable' };
   }
 
   const resolved = parsed.resolved === true;
   const confidence = typeof parsed.confidence === 'number' ? Math.max(0, Math.min(1, parsed.confidence)) : 0;
   const evidence = typeof parsed.evidence === 'string' ? parsed.evidence.trim() : '';
 
-  if (!resolved) return { action: 'SKIP_NOT_RESOLVED', confidence };
-  if (confidence < CONFIDENCE_THRESHOLD_FOR_CLOSE) return { action: 'SKIP_LOW_CONFIDENCE', confidence };
-  if (!evidence) return { action: 'SKIP_NO_EVIDENCE', confidence };
+  if (!resolved) return { ...context, action: 'SKIP_NOT_RESOLVED', confidence, evidence, reasoning: 'L\'IA estime que le problème n\'est pas résolu' };
+  if (confidence < CONFIDENCE_THRESHOLD_FOR_CLOSE) return { ...context, action: 'SKIP_LOW_CONFIDENCE', confidence, evidence, reasoning: `Confiance ${(confidence * 100).toFixed(0)}% < seuil ${(CONFIDENCE_THRESHOLD_FOR_CLOSE * 100).toFixed(0)}%` };
+  if (!evidence) return { ...context, action: 'SKIP_NO_EVIDENCE', confidence, evidence, reasoning: 'Aucune preuve fournie par l\'IA' };
 
   // Propose la clôture à la Hotline (aucun changement de statut : le ticket reste actif tant
   // que la validation humaine n'a pas eu lieu)
@@ -115,10 +147,11 @@ async function analyzeCandidate(ticket, cutoff) {
     intent: 'RESOLVED', confidence, evidence, reason: 'proactive_scan', daysSilent: daysSince(ticket.lastUserReplyAt),
   });
 
-  return { action: 'SUGGESTED', confidence, evidence };
+  return { ...context, action: 'SUGGESTED', confidence, evidence, reasoning: 'L\'IA estime que le problème est résolu avec confiance élevée' };
 }
 
-// Scanne les tickets ouverts sans réponse utilisateur récente et retourne un résumé des actions.
+// Scanne les tickets ouverts sans réponse utilisateur récente et retourne un résumé détaillé des actions.
+// Chaque résultat inclut les infos contextuelles du ticket pour un affichage riche côté frontend.
 async function runClosureAnalysis({ minDaysWithoutReply = 4, limit = 25 } = {}) {
   const cutoff = new Date(Date.now() - minDaysWithoutReply * 24 * 60 * 60 * 1000);
   const candidates = await prisma.ticket.findMany({
@@ -142,11 +175,18 @@ async function runClosureAnalysis({ minDaysWithoutReply = 4, limit = 25 } = {}) 
   const results = [];
   for (const ticket of candidates) {
     const r = await analyzeCandidate(ticket, cutoff);
-    results.push({ ticketId: ticket.id, ...r });
+    results.push(r);
   }
 
   const counts = {};
   for (const r of results) counts[r.action] = (counts[r.action] || 0) + 1;
+
+  // Grouper les résultats par catégorie pour un affichage structuré
+  const suggested = results.filter((r) => r.action === 'SUGGESTED');
+  const needsReview = results.filter((r) =>
+    ['SKIP_LOW_CONFIDENCE', 'SKIP_NOT_RESOLVED'].includes(r.action)
+  );
+  const skipped = results.filter((r) => !['SUGGESTED', 'SKIP_LOW_CONFIDENCE', 'SKIP_NOT_RESOLVED'].includes(r.action));
 
   return {
     scanned: candidates.length,
@@ -161,6 +201,11 @@ async function runClosureAnalysis({ minDaysWithoutReply = 4, limit = 25 } = {}) 
       providerError: counts.SKIP_PROVIDER_ERROR || 0,
       unparseable: counts.SKIP_UNPARSEABLE || 0,
     },
+    // Résultats groupés pour l'affichage détaillé
+    suggestedResults: suggested,
+    needsReviewResults: needsReview,
+    skippedResults: skipped,
+    // Tous les résultats bruts pour référence
     results,
   };
 }

@@ -49,6 +49,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   const [pendingClosures, setPendingClosures] = useState([]);
   const [closureStats, setClosureStats] = useState(null);
   const [analyzingClosures, setAnalyzingClosures] = useState(false);
+  const [closureAnalysisResults, setClosureAnalysisResults] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -236,8 +237,10 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   // pour détecter les résolutions probables et proposer des clôtures à la Hotline.
   async function handleAnalyzeClosures() {
     setAnalyzingClosures(true);
+    setClosureAnalysisResults(null);
     try {
       const { data } = await api.post('/tickets/analyze-closures');
+      setClosureAnalysisResults(data);
       if (data.suggested > 0) {
         toast.success(`${data.suggested} clôture(s) suggérée(s) sur ${data.scanned} ticket(s) analysé(s)`);
       } else if (data.scanned === 0) {
@@ -927,6 +930,170 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
               <span>{analyzingClosures ? 'Analyse en cours…' : 'Analyser les tickets'}</span>
             </button>
           </div>
+
+          {/* Résultats détaillés de la dernière analyse IA */}
+          {closureAnalysisResults && (
+            <div className="space-y-4">
+              {/* Résumé rapide */}
+              <div className="rounded-3xl border border-cyan-200 dark:border-cyan-500/20 bg-surface-container-lowest p-6 shadow-sm space-y-4">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-cyan-500" />
+                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface">
+                    Résultats de l'analyse — {closureAnalysisResults.scanned} ticket(s) analysé(s)
+                  </h3>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="p-3 rounded-2xl border border-emerald-500/25 bg-emerald-500/10">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Suggérés</p>
+                    <p className="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400">{closureAnalysisResults.suggested}</p>
+                  </div>
+                  <div className="p-3 rounded-2xl border border-amber-500/25 bg-amber-500/10">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">À vérifier</p>
+                    <p className="text-2xl font-extrabold text-amber-600 dark:text-amber-400">{closureAnalysisResults.needsReviewResults?.length || 0}</p>
+                  </div>
+                  <div className="p-3 rounded-2xl border border-outline-variant/30 bg-surface-container">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Ignorés</p>
+                    <p className="text-2xl font-extrabold text-on-surface">{closureAnalysisResults.skippedResults?.length || 0}</p>
+                  </div>
+                  <div className="p-3 rounded-2xl border border-outline-variant/30 bg-surface-container">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Non résolus</p>
+                    <p className="text-2xl font-extrabold text-on-surface">{closureAnalysisResults.results?.filter(r => r.action === 'SKIP_NOT_RESOLVED').length || 0}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tickets suggérés pour clôture */}
+              {closureAnalysisResults.suggestedResults?.length > 0 && (
+                <div className="space-y-3">
+                  <h4 className="text-xs font-extrabold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4" />
+                    Probablement résolus — clôture suggérée ({closureAnalysisResults.suggestedResults.length})
+                  </h4>
+                  {closureAnalysisResults.suggestedResults.map((r) => (
+                    <div key={r.ticketId} className="rounded-2xl border border-emerald-200 dark:border-emerald-500/20 bg-surface-container-lowest p-4 shadow-sm space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1 flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono text-[11px] font-bold text-primary">#{r.ticketId}</span>
+                            <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[10px] font-extrabold border border-emerald-500/30">
+                              ✅ Résolu ({Math.round((r.confidence || 0) * 100)}%)
+                            </span>
+                            <span className="px-2 py-0.5 rounded-md bg-surface-container text-on-surface-variant text-[10px] font-bold border border-outline-variant/30">
+                              {r.priority} — {r.category || 'Sans catégorie'}
+                            </span>
+                            {r.slaBreached && (
+                              <span className="px-2 py-0.5 rounded-md bg-red-500/15 text-red-600 dark:text-red-400 text-[10px] font-extrabold border border-red-500/30">
+                                ⚠️ SLA dépassé
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm font-bold text-on-surface truncate">{r.title}</p>
+                          <p className="text-xs text-on-surface-variant line-clamp-2">{r.content || r.aiSummary || 'Pas de résumé'}</p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={() => navigate(`/tickets/${r.ticketId}`)}
+                            className="px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-outline-variant/40 hover:bg-surface-container text-on-surface transition-all"
+                          >
+                            Voir
+                          </button>
+                          <button
+                            onClick={() => handleValidateClosure(r.ticketId)}
+                            disabled={validatingClosureId === r.ticketId}
+                            className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-all flex items-center gap-1 disabled:opacity-50"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            {validatingClosureId === r.ticketId ? '...' : 'Valider'}
+                          </button>
+                        </div>
+                      </div>
+                      {/* Preuve IA */}
+                      {r.evidence && (
+                        <div className="p-2.5 rounded-xl bg-emerald-500/5 border border-emerald-500/15">
+                          <p className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 mb-1">Preuve IA :</p>
+                          <p className="text-[11px] text-on-surface-variant italic">"{r.evidence}"</p>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-3 text-[10px] text-on-surface-variant">
+                        <span>Ouvert {r.daysOpen}j</span>
+                        {r.daysSilent != null && <span>Silence {r.daysSilent}j</span>}
+                        {r.assignedTo && <span>Assigné à {r.assignedTo}</span>}
+                        {r.previousSuggestions > 0 && <span className="text-amber-500">{r.previousSuggestions} suggestion(s) précédente(s)</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Tickets à vérifier (faible confiance ou non résolu) */}
+              {closureAnalysisResults.needsReviewResults?.length > 0 && (
+                <div className="space-y-3">
+                  <h4 className="text-xs font-extrabold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4" />
+                    À vérifier — confiance faible ou incertain ({closureAnalysisResults.needsReviewResults.length})
+                  </h4>
+                  {closureAnalysisResults.needsReviewResults.map((r) => (
+                    <div key={r.ticketId} className="rounded-2xl border border-amber-200 dark:border-amber-500/20 bg-surface-container-lowest p-4 shadow-sm space-y-2">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1 flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono text-[11px] font-bold text-primary">#{r.ticketId}</span>
+                            <span className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-400 text-[10px] font-extrabold border border-amber-500/30">
+                              ⚠️ {r.action === 'SKIP_LOW_CONFIDENCE' ? 'Faible confiance' : 'Incertain'} ({Math.round((r.confidence || 0) * 100)}%)
+                            </span>
+                            <span className="px-2 py-0.5 rounded-md bg-surface-container text-on-surface-variant text-[10px] font-bold border border-outline-variant/30">
+                              {r.priority} — {r.category || 'Sans catégorie'}
+                            </span>
+                          </div>
+                          <p className="text-sm font-bold text-on-surface truncate">{r.title}</p>
+                        </div>
+                        <button
+                          onClick={() => navigate(`/tickets/${r.ticketId}`)}
+                          className="px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-outline-variant/40 hover:bg-surface-container text-on-surface transition-all shrink-0"
+                        >
+                          Voir le ticket
+                        </button>
+                      </div>
+                      {r.evidence && (
+                        <div className="p-2 rounded-xl bg-amber-500/5 border border-amber-500/15">
+                          <p className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mb-0.5">Preuve :</p>
+                          <p className="text-[11px] text-on-surface-variant italic">"{r.evidence}"</p>
+                        </div>
+                      )}
+                      <p className="text-[11px] text-on-surface-variant">{r.reasoning}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Tickets ignorés (pas d'historique, réponse récente, etc.) */}
+              {closureAnalysisResults.skippedResults?.length > 0 && (
+                <details className="group">
+                  <summary className="text-xs font-extrabold uppercase tracking-wider text-on-surface-variant cursor-pointer flex items-center gap-2 hover:text-on-surface transition-colors">
+                    <ChevronRight className="w-3.5 h-3.5 transition-transform group-open:rotate-90" />
+                    Ignorés — pas d'action requise ({closureAnalysisResults.skippedResults.length})
+                  </summary>
+                  <div className="mt-2 space-y-2">
+                    {closureAnalysisResults.skippedResults.map((r) => (
+                      <div key={r.ticketId} className="rounded-xl border border-outline-variant/20 bg-surface-container-low/30 p-3 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="font-mono text-[10px] font-bold text-primary">#{r.ticketId}</span>
+                          <span className="text-[11px] text-on-surface truncate">{r.title}</span>
+                          <span className="text-[10px] text-on-surface-variant shrink-0">— {r.reasoning}</span>
+                        </div>
+                        <button
+                          onClick={() => navigate(`/tickets/${r.ticketId}`)}
+                          className="text-[10px] text-primary font-bold hover:underline shrink-0"
+                        >
+                          Voir
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </div>
+          )}
 
           {/* Suivi de l'évolution : file actuelle + tendance 30 jours */}
           {closureStats && (
