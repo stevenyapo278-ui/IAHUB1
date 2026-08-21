@@ -161,7 +161,10 @@ async function runClosureAnalysis({ minDaysWithoutReply = 4, limit = 25 } = {}) 
       closeSuggestionCount: { lt: MAX_CLOSE_SUGGESTIONS },
       OR: [
         { lastUserReplyAt: { lt: cutoff } },
-        { lastUserReplyAt: null, updatedAt: { lt: cutoff } },
+        // Pour les tickets sans réponse utilisateur, on se base sur la date de création
+        // (firstOpenedAt ou createdAt) plutôt que updatedAt qui est refresh par le sync GLPI.
+        { lastUserReplyAt: null, firstOpenedAt: { lt: cutoff } },
+        { lastUserReplyAt: null, firstOpenedAt: null, createdAt: { lt: cutoff } },
       ],
     },
     orderBy: { updatedAt: 'asc' },

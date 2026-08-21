@@ -1,4 +1,5 @@
 const mockTicketFindMany = jest.fn();
+const mockTicketFindUnique = jest.fn();
 const mockTicketMessageFindMany = jest.fn();
 const mockTicketUpdate = jest.fn();
 const mockTicketEventFindMany = jest.fn();
@@ -6,6 +7,7 @@ const mockTicketEventFindMany = jest.fn();
 jest.mock('../prismaClient', () => ({
   ticket: {
     findMany: (...args) => mockTicketFindMany(...args),
+    findUnique: (...args) => mockTicketFindUnique(...args),
     update: (...args) => mockTicketUpdate(...args),
   },
   ticketMessage: {
@@ -51,10 +53,20 @@ describe('runClosureAnalysis — scanne les tickets pour proposer des clôtures'
   beforeEach(() => {
     jest.clearAllMocks();
     mockTicketFindMany.mockReset();
+    mockTicketFindUnique.mockReset();
     mockTicketMessageFindMany.mockReset();
     mockTicketUpdate.mockReset();
     mockTicketEventFindMany.mockReset();
     mockTicketFindMany.mockResolvedValue([baseTicket()]);
+    mockTicketFindUnique.mockResolvedValue({
+      id: 1, title: 'Ticket de test', content: 'Contenu', status: 'OPEN',
+      priority: 'P3', category: null, aiSummary: 'Résumé',
+      closeSuggestionCount: 0, firstOpenedAt: new Date(Date.now() - 10 * 86400000),
+      createdAt: new Date(Date.now() - 10 * 86400000), updatedAt: new Date(Date.now() - 5 * 86400000),
+      lastUserReplyAt: new Date(Date.now() - 6 * 86400000),
+      assignedTo: null, requester: null,
+      slaResponseDueAt: null, slaResolutionDueAt: null, slaBreachedAt: null, dueDate: null,
+    });
     mockTicketMessageFindMany.mockResolvedValue(baseHistory());
     mockTicketEventFindMany.mockResolvedValue([]);
     mockTicketUpdate.mockImplementation(async (args) => ({ ...args.data, id: 1 }));
