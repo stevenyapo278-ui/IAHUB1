@@ -162,8 +162,8 @@ async function callProviderWithFallback(providers, prompt) {
 }
 
 async function getFewShotExamples(subject, body) {
-  const textQuery = `${subject || ''} ${body?.substring(0, 300) || ''}`.trim();
-  if (!textQuery) return '';
+  const cleanQuery = (subject || '').replace(/[^\w\sÀ-ÿ]/gi, ' ').trim();
+  if (!cleanQuery) return '';
 
   try {
     const similarTickets = await prisma.$queryRawUnsafe(`
@@ -173,19 +173,20 @@ async function getFewShotExamples(subject, body) {
       WHERE t.status IN ('SOLVED', 'CLOSED') 
         AND t.category IS NOT NULL 
         AND t.priority IS NOT NULL
-      ORDER BY ts_rank(to_tsvector('french', COALESCE(t.title, '') || ' ' || COALESCE(t.content, '')), plainto_tsquery('french', $1)) DESC
+      ORDER BY ts_rank(to_tsvector('french', COALESCE(t.title, '') || ' ' || COALESCE(t.content, '')), websearch_to_tsquery('french', $1)) DESC
       LIMIT 5
-    `, textQuery);
+    `, cleanQuery);
 
     if (similarTickets.length === 0) return '';
 
     let examplesText = "\nVoici des exemples de tickets réels déjà résolus et validés par nos techniciens :\n";
     for (const ticket of similarTickets) {
+      const cleanContent = (ticket.content || '').replace(/<[^>]*>/g, '').replace(/[\r\n]+/g, ' ').substring(0, 250);
       examplesText += `
 ---
 Email reçu :
 Sujet : ${ticket.title}
-Corps : ${ticket.content?.substring(0, 300) || ''}
+Corps : ${cleanContent}
 
 Classification attendue :
 {
@@ -238,9 +239,15 @@ function formatLocationsForPrompt(locations) {
   return locations.map((l) => `- ${l.completename}`).join('\n');
 }
 
+// Liste de mots génériques à ignorer pour éviter les faux positifs lors du devinement de compétence
+const GENERIC_SKILL_STOPWORDS = new Set([
+  'magasin', 'service', 'support', 'probleme', 'ticket', 'demande', 'utilisateur',
+  'site', 'plus', 'pour', 'avec', 'dans', 'chez', 'tout', 'tous', 'faire', 'bien',
+  'reseau', 'logiciel', 'materiel', 'erreur', 'bloque', 'panne', 'aide', 'merci'
+]);
+
 // Fallback : si le LLM n'a pas retourné suggestedSkill, tente une correspondance
-// par mots-clés entre le texte de l'email et les noms de compétences en base.
-// Score = nombre de mots de la compétence présents dans le texte (insensible à la casse, sans accents).
+// par mots-clés spécifiques entre le texte de l'email et les noms de compétences en base.
 function guessSkillFromText(subject, body, skills) {
   if (!skills.length) return null;
   const normalize = (s) =>
@@ -254,15 +261,26 @@ function guessSkillFromText(subject, body, skills) {
   let bestScore = 0;
 
   for (const skill of skills) {
-    const words = normalize(skill.name).split(/[\s\-_/]+/).filter((w) => w.length >= 3);
+    const normSkillName = normalize(skill.name);
+    // Correspondance exacte sur le nom complet de la compétence
+    if (normSkillName.length >= 4 && text.includes(normSkillName)) {
+      return skill.name;
+    }
+
+    const words = normSkillName
+      .split(/[\s\-_/]+/)
+      .filter((w) => w.length >= 3 && !GENERIC_SKILL_STOPWORDS.has(w));
+    
+    if (words.length === 0) continue;
+
     const score = words.filter((w) => text.includes(w)).length;
-    if (score > bestScore) {
+    if (score > bestScore && score === words.length) {
       bestScore = score;
       best = skill.name;
     }
   }
 
-  return bestScore > 0 ? best : null;
+  return best;
 }
 
 // Analyse un email brut via les providers IA configurés (avec fallback automatique)
@@ -289,7 +307,7 @@ async function analyzeEmail({ subject, body, from, fromName }) {
     fromName: fromName || '',
     from,
     subject,
-    body: body?.substring(0, 2000) || '',
+    body: body?.substring(0, 8000) || '',
     fewShotExamples,
     availableSkills,
     availableLocations,
@@ -300,7 +318,11 @@ async function analyzeEmail({ subject, body, from, fromName }) {
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error(`Le provider IA n'a pas retourné de JSON valide : ${raw.substring(0, 200)}`);
 
-  const result = JSON.parse(jsonMatch[0]);
+  const rawResult = JSON.parse(jsonMatch[0]);
+
+  // Validation, nettoyage, matrice déterministe et vérification d'existence en BDD
+  const { validateAndCleanAnalysis } = require('./emailAnalysisValidator');
+  const result = validateAndCleanAnalysis(rawResult, skills, locations, { body: body || '' });
 
   // Fallback : si le LLM n'a pas retourné suggestedSkill (ou a retourné null),
   // on tente une correspondance par mot-clé sur le texte brut de l'email.

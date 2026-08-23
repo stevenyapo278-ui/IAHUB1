@@ -201,7 +201,7 @@ describe('runSlaMonitor — détection des dépassements', () => {
     const result = await runSlaMonitor();
 
     expect(prisma.ticket.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { status: { in: ['NEW', 'OPEN', 'PENDING'] }, slaResponseDueAt: { not: null, lt: expect.any(Date) }, slaBreachedAt: null },
+      where: { status: { in: ['NEW', 'OPEN', 'PLANNED', 'PENDING'] }, slaResponseDueAt: { not: null, lt: expect.any(Date) }, slaBreachedAt: null },
     }));
     expect(result.breachedCount).toBe(0);
     expect(DEFAULT_SLA_HOURS.P1).toEqual({ response: 1, resolution: 4 });

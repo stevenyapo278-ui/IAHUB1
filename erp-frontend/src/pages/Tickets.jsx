@@ -36,18 +36,12 @@ import {
   ChevronRight,
   ArrowUpDown,
   ArrowUp,
-  Settings,
-  Paperclip,
-  CheckSquare,
-  Building2,
-  Bot,
-  FileText,
-  MessageSquare,
   KanbanSquare,
   Bookmark,
   ListChecks,
   Boxes,
-  Calendar
+  Calendar,
+  CheckSquare,
 } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -104,22 +98,292 @@ function timeAgo(dateStr) {
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return 'à l\'instant';
-  if (mins < 60) return `il y a ${mins}min`;
+  if (mins < 60) return `${mins}min`;
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `il y a ${hours}h`;
+  if (hours < 24) return `${hours}h`;
   const days = Math.floor(hours / 24);
-  if (days < 7) return `il y a ${days}j`;
+  if (days < 7) return `${days}j`;
   return new Date(dateStr).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
 }
 
-const containerVariants = {
-  hidden: { opacity: 1 },
-  visible: { opacity: 1 },
+// ── Priority dot config ──────────────────────────────────────────────────────
+const PRIORITY_DOT = {
+  P1: { color: 'bg-red-500',    label: 'P1', text: 'text-red-500'    },
+  P2: { color: 'bg-orange-400', label: 'P2', text: 'text-orange-400' },
+  P3: { color: 'bg-amber-400',  label: 'P3', text: 'text-amber-400'  },
+  P4: { color: 'bg-emerald-500',label: 'P4', text: 'text-emerald-500'},
 };
-const itemVariants = {
-  hidden: { opacity: 1 },
-  visible: { opacity: 1 },
+
+const STATUS_CONFIG = {
+  NEW:     { label: 'Nouveau',   bg: 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20',         Icon: Sparkles    },
+  OPEN:    { label: 'En cours',  bg: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20',     Icon: Radio       },
+  PLANNED: { label: 'Planifié',  bg: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20', Icon: Calendar },
+  PENDING: { label: 'En attente',bg: 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20', Icon: Clock       },
+  SOLVED:  { label: 'Résolu',    bg: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20', Icon: CheckCircle2 },
+  CLOSED:  { label: 'Fermé',     bg: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20', Icon: Lock        },
 };
+
+function PriorityDot({ priority, showLabel = false }) {
+  const conf = PRIORITY_DOT[priority] || PRIORITY_DOT.P4;
+  return (
+    <span className="inline-flex items-center gap-1.5 shrink-0" title={`Priorité ${conf.label}`}>
+      <span className={`w-2 h-2 rounded-full shrink-0 ${conf.color}`} />
+      {showLabel && <span className={`text-[11px] font-bold tabular-nums ${conf.text}`}>{conf.label}</span>}
+    </span>
+  );
+}
+
+function StatusPill({ status }) {
+  const conf = STATUS_CONFIG[status] || STATUS_CONFIG.NEW;
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold whitespace-nowrap ${conf.bg}`}>
+      <conf.Icon className="w-3 h-3 shrink-0" />
+      {conf.label}
+    </span>
+  );
+}
+
+function Avatar({ name, colorClass = 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20' }) {
+  if (!name) return null;
+  return (
+    <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full border text-[10px] font-bold shrink-0 ${colorClass}`}>
+      {name.charAt(0).toUpperCase()}
+    </span>
+  );
+}
+
+// ── FilterPanel slide-over ───────────────────────────────────────────────────
+function FilterPanel({ open, onClose, filters, onUpdate, onClear, teams, users, flatCategories, autonomousMode, savedViews, onSaveView, onRestoreView, onDeleteSavedView, searchQuery, setSearchQuery, setDebouncedSearch, setPage }) {
+  if (!open) return null;
+  return createPortal(
+    <div className="fixed inset-0 z-[9000] flex">
+      {/* Backdrop */}
+      <div className="flex-1 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      {/* Panel */}
+      <motion.div
+        initial={{ x: 360 }}
+        animate={{ x: 0 }}
+        exit={{ x: 360 }}
+        transition={{ type: 'spring', stiffness: 380, damping: 40 }}
+        className="w-80 h-full bg-surface-container-lowest border-l border-outline-variant/30 flex flex-col shadow-2xl overflow-hidden"
+      >
+        {/* Panel header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-outline-variant/20 shrink-0">
+          <div className="flex items-center gap-2">
+            <SlidersHorizontal className="w-4 h-4 text-primary" />
+            <span className="font-bold text-sm text-on-surface">Filtres</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onClear}
+              className="text-[11px] font-semibold text-on-surface-variant hover:text-red-500 transition-colors"
+            >
+              Réinitialiser
+            </button>
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg hover:bg-surface-container transition-colors text-on-surface-variant hover:text-on-surface"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Panel body */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+          {/* Quick chips */}
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-2">Raccourcis rapides</p>
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                { key: 'mine', val: 'true', label: 'Mes tickets', Icon: User },
+                { key: 'status', val: 'OPEN_GROUP', label: 'Ouverts', Icon: Radio },
+                { key: 'status', val: 'CLOSED_GROUP', label: 'Clôturés', Icon: CheckCircle2 },
+                { key: 'closeSuggested', val: 'true', label: 'Clôture suggérée', Icon: Flag },
+                { key: 'aiProcessed', val: 'true', label: 'Traité IA', Icon: Sparkles },
+                { key: 'priority', val: 'P1', label: 'P1 Critiques', Icon: Flame },
+                { key: 'assignedToId', val: 'none', label: 'Non assignés', Icon: UserX },
+              ].map(({ key, val, label, Icon }) => {
+                const active = filters[key] === val;
+                return (
+                  <button
+                    key={`${key}-${val}`}
+                    onClick={() => onUpdate(key, active ? '' : val)}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-all ${
+                      active
+                        ? 'bg-primary text-white border-primary shadow-sm'
+                        : 'bg-surface border-outline-variant/50 text-on-surface-variant hover:border-primary/40 hover:text-on-surface'
+                    }`}
+                  >
+                    <Icon className="w-3 h-3" />
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="border-t border-outline-variant/20" />
+
+          {/* Statut */}
+          <PanelSelect
+            label="Statut"
+            value={filters.status}
+            onChange={(v) => onUpdate('status', v)}
+            options={[
+              { v: '', l: 'Tous les statuts' },
+              { v: 'NEW', l: 'Nouveau' },
+              { v: 'OPEN', l: 'En cours' },
+              { v: 'PENDING', l: 'En attente' },
+              { v: 'SOLVED', l: 'Résolu' },
+              { v: 'CLOSED', l: 'Fermé' },
+            ]}
+          />
+
+          {/* Approbation */}
+          <PanelSelect
+            label="Approbation"
+            value={filters.approvalStatus}
+            onChange={(v) => onUpdate('approvalStatus', v)}
+            options={[
+              { v: '', l: 'Toutes' },
+              { v: 'PENDING', l: 'En attente Hotline' },
+              { v: 'APPROVED', l: 'Approuvés' },
+              { v: 'REJECTED', l: 'Rejetés' },
+            ]}
+          />
+
+          {/* Priorité */}
+          <PanelSelect
+            label="Priorité"
+            value={filters.priority}
+            onChange={(v) => onUpdate('priority', v)}
+            options={[
+              { v: '', l: 'Toutes' },
+              { v: 'P1', l: 'P1 — Critique' },
+              { v: 'P2', l: 'P2 — Haute' },
+              { v: 'P3', l: 'P3 — Moyenne' },
+              { v: 'P4', l: 'P4 — Basse' },
+            ]}
+          />
+
+          {/* Source */}
+          <PanelSelect
+            label="Source"
+            value={filters.source}
+            onChange={(v) => onUpdate('source', v)}
+            options={[
+              { v: '', l: 'Toutes les sources' },
+              ...(!autonomousMode ? [{ v: 'glpi', l: 'Synchronisés GLPI' }] : []),
+              { v: 'erp', l: 'Internes ERP' },
+            ]}
+          />
+
+          {/* Équipe */}
+          <PanelSelect
+            label="Équipe"
+            value={filters.teamId}
+            onChange={(v) => onUpdate('teamId', v)}
+            options={[
+              { v: '', l: 'Toutes les équipes' },
+              ...teams.map((t) => ({ v: String(t.id), l: t.name })),
+            ]}
+          />
+
+          {/* Catégorie */}
+          <PanelSelect
+            label="Catégorie"
+            value={filters.category}
+            onChange={(v) => onUpdate('category', v)}
+            options={[
+              { v: '', l: 'Toutes les catégories' },
+              ...flatCategories.map((o) => ({ v: o.name, l: o.label })),
+            ]}
+          />
+
+          {/* Assigné à */}
+          <PanelSelect
+            label="Assigné à"
+            value={filters.assignedToId}
+            onChange={(v) => onUpdate('assignedToId', v)}
+            options={[
+              { v: '', l: 'Tout le monde' },
+              { v: 'none', l: 'Non assigné' },
+              ...users.filter((u) => u.isActive).map((u) => ({ v: String(u.id), l: u.fullName })),
+            ]}
+          />
+
+          <div className="border-t border-outline-variant/20" />
+
+          {/* Vues sauvegardées */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Vues sauvegardées</p>
+              <button
+                onClick={onSaveView}
+                className="flex items-center gap-1 text-[11px] font-semibold text-primary hover:text-primary/80 transition-colors"
+              >
+                <Plus className="w-3 h-3" />
+                Enregistrer
+              </button>
+            </div>
+            {savedViews.length === 0 ? (
+              <p className="text-[11px] text-on-surface-variant italic text-center py-2">Aucune vue sauvegardée</p>
+            ) : (
+              <div className="space-y-1">
+                {savedViews.map((v) => (
+                  <div key={v.name} className="flex items-center gap-1 group rounded-lg hover:bg-surface-container px-2 py-1.5 transition-colors">
+                    <button
+                      onClick={() => { onRestoreView(v); onClose(); }}
+                      className="flex-1 min-w-0 flex items-center gap-2 text-xs font-medium text-on-surface text-left"
+                    >
+                      <Bookmark className="w-3 h-3 text-on-surface-variant shrink-0" />
+                      <span className="truncate">{v.name}</span>
+                    </button>
+                    <button
+                      onClick={() => onDeleteSavedView(v.name)}
+                      className="opacity-0 group-hover:opacity-100 p-1 rounded-md text-on-surface-variant hover:text-red-500 transition-all"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Panel footer */}
+        <div className="px-5 py-4 border-t border-outline-variant/20 shrink-0">
+          <button
+            onClick={onClose}
+            className="w-full py-2.5 rounded-xl bg-primary text-white text-sm font-bold hover:opacity-90 transition-opacity"
+          >
+            Appliquer
+          </button>
+        </div>
+      </motion.div>
+    </div>,
+    document.body
+  );
+}
+
+function PanelSelect({ label, value, onChange, options }) {
+  return (
+    <div>
+      <label className="block text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-1.5">{label}</label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full px-3 py-2 rounded-lg border border-outline-variant/40 bg-surface text-on-surface text-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary cursor-pointer"
+      >
+        {options.map((o) => (
+          <option key={o.v} value={o.v}>{o.l}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
 
 export default function Tickets() {
   const { user } = useAuth();
@@ -131,7 +395,6 @@ export default function Tickets() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  // State principal
   const [tickets, setTickets] = useState([]);
   const [serverStats, setServerStats] = useState({ open: 0, pending: 0, resolved: 0, p1: 0, p2: 0, ai: 0, unassigned: 0 });
   const [teams, setTeams] = useState([]);
@@ -147,20 +410,16 @@ export default function Tickets() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
 
-  // Vue (Tableau vs Grille)
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('tickets_view_mode') || 'table');
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
 
-  // Tri
   const [sortBy, setSortBy] = useState(() => searchParams.get('sortBy') || 'createdAt');
   const [sortOrder, setSortOrder] = useState(() => searchParams.get('sortOrder') || 'desc');
 
-  // Vues sauvegardées (localStorage, par utilisateur)
   const savedViewsKey = user ? `tickets_saved_views_${user.id}` : null;
   const [savedViews, setSavedViews] = useState(() => {
     try { return savedViewsKey ? JSON.parse(localStorage.getItem(savedViewsKey) || '[]') : []; } catch { return []; }
   });
-  const [viewsOpen, setViewsOpen] = useState(false);
-  const [savingView, setSavingView] = useState(false);
 
   function persistSavedViews(views) {
     setSavedViews(views);
@@ -171,20 +430,11 @@ export default function Tickets() {
     if (!savedViewsKey) return;
     const name = window.prompt('Nom de la vue à enregistrer :');
     if (!name) return;
-    setSavingView(true);
-    const view = {
-      name,
-      filters: { ...filters },
-      search: searchQuery,
-      sortBy,
-      sortOrder,
-    };
+    const view = { name, filters: { ...filters }, search: searchQuery, sortBy, sortOrder };
     const existing = savedViews.findIndex((v) => v.name === name);
     const next = existing >= 0 ? savedViews.map((v, i) => (i === existing ? view : v)) : [...savedViews, view];
     persistSavedViews(next);
     toast.success(`Vue « ${name} » enregistrée`);
-    setSavingView(false);
-    setViewsOpen(false);
   }
 
   function restoreView(view) {
@@ -195,7 +445,6 @@ export default function Tickets() {
     setSortOrder(view.sortOrder || 'desc');
     setPage(1);
     toast.success(`Vue « ${view.name} » appliquée`);
-    setViewsOpen(false);
   }
 
   function deleteSavedView(name) {
@@ -203,7 +452,6 @@ export default function Tickets() {
     toast.success('Vue supprimée');
   }
 
-  // Filtres
   const [filters, setFilters] = useState({
     status: searchParams.get('status') || '',
     approvalStatus: searchParams.get('approvalStatus') || '',
@@ -220,10 +468,8 @@ export default function Tickets() {
   const [showForm, setShowForm] = useState(searchParams.get('new') === '1');
   const [form, setForm] = useState(EMPTY_FORM);
   const [attachment, setAttachment] = useState(null);
-  // Champs personnalisés : définitions actives pour la catégorie choisie + valeurs saisies
   const [customFieldDefs, setCustomFieldDefs] = useState([]);
   const [customValues, setCustomValues] = useState({});
-  // Inventaire : équipements disponibles pour le sélecteur + options mappées
   const [assetOptions, setAssetOptions] = useState([]);
   const [error, setError] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
@@ -245,13 +491,11 @@ export default function Tickets() {
   const [debouncedSearch, setDebouncedSearch] = useState(() => searchParams.get('search') || '');
   const debounceRef = useRef(null);
 
-  // Mémorisation de la vue
   function changeViewMode(mode) {
     setViewMode(mode);
     localStorage.setItem('tickets_view_mode', mode);
   }
 
-  // Synchronisation URL des filtres et du tri
   useEffect(() => {
     const params = new URLSearchParams(searchParams);
     if (debouncedSearch) params.set('search', debouncedSearch); else params.delete('search');
@@ -273,14 +517,6 @@ export default function Tickets() {
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [searchQuery]);
 
-  const [actorSearch, setActorSearch] = useState('');
-  const searchTerm = actorSearch.toLowerCase().trim();
-  const filteredUsers = !searchTerm
-    ? users
-    : users.filter((u) => u.fullName?.toLowerCase().includes(searchTerm) || u.email?.toLowerCase().includes(searchTerm));
-  const filteredTeams = !searchTerm
-    ? teams
-    : teams.filter((t) => t.name?.toLowerCase().includes(searchTerm));
   const showSelectionColumn = canBulkDelete || canAssign;
 
   function updateFilter(key, value) {
@@ -300,18 +536,7 @@ export default function Tickets() {
   }
 
   function clearFilters() {
-    setFilters({
-      status: '',
-      priority: '',
-      source: '',
-      category: '',
-      teamId: '',
-      assignedToId: '',
-      mine: '',
-      aiProcessed: '',
-      approvalStatus: '',
-      closeSuggested: '',
-    });
+    setFilters({ status: '', priority: '', source: '', category: '', teamId: '', assignedToId: '', mine: '', aiProcessed: '', approvalStatus: '', closeSuggested: '' });
     setSearchQuery('');
     setDebouncedSearch('');
     setSortBy('createdAt');
@@ -323,10 +548,8 @@ export default function Tickets() {
     if (isManualRefresh) {
       setRefreshing(true);
     } else if (isFirstLoad.current) {
-      // Premier chargement : spinner complet
       setLoading(true);
     } else {
-      // Changement de filtre/recherche : indicateur discret uniquement
       setRefreshing(true);
     }
     const params = { page, limit: pageSize, sortBy, sortOrder };
@@ -341,7 +564,6 @@ export default function Tickets() {
     if (filters.approvalStatus) params.approvalStatus = filters.approvalStatus;
     if (filters.closeSuggested) params.closeSuggested = filters.closeSuggested;
     if (debouncedSearch) params.search = debouncedSearch;
-
     api.get('/tickets', { params })
       .then(({ data }) => {
         setTickets(data.items);
@@ -371,25 +593,22 @@ export default function Tickets() {
     if (filters.aiProcessed) params.aiProcessed = filters.aiProcessed;
     if (filters.approvalStatus) params.approvalStatus = filters.approvalStatus;
     if (filters.closeSuggested) params.closeSuggested = filters.closeSuggested;
-    if (debouncedSearch) params.search = debouncedSearch;        api.get('/tickets', { params }).then(({ data }) => { setTickets(data.items); setTotalPages(data.pages); setTotalCount(data.total); if (data.stats) setServerStats(data.stats); }).catch(() => {});
+    if (debouncedSearch) params.search = debouncedSearch;
+    api.get('/tickets', { params }).then(({ data }) => { setTickets(data.items); setTotalPages(data.pages); setTotalCount(data.total); if (data.stats) setServerStats(data.stats); }).catch(() => {});
   }
 
   useEffect(() => { loadTickets(); }, [filters, page, pageSize, debouncedSearch, sortBy, sortOrder]);
-  // Auto-refresh intelligent : pause quand l'onglet est caché
   useEffect(() => {
     const intervalId = setInterval(() => {
       if (document.visibilityState === 'visible') refreshTicketsSilently();
     }, 15000);
     return () => clearInterval(intervalId);
   }, [filters, debouncedSearch, sortBy, sortOrder]);
-  // Raccourci clavier Ctrl+K pour focaliser la recherche
+
   const searchInputRef = useRef(null);
   useEffect(() => {
     const onKey = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-        e.preventDefault();
-        searchInputRef.current?.focus();
-      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); searchInputRef.current?.focus(); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -402,7 +621,6 @@ export default function Tickets() {
     setSelectedIds((ids) => (ids.length === tickets.length ? [] : tickets.map((t) => t.id)));
   }
 
-  // ── Actions groupées (statut / priorité / assignation) ──────────────────
   const [bulkChanges, setBulkChanges] = useState({ status: '', priority: '', assignedToId: '' });
   const [bulkUpdating, setBulkUpdating] = useState(false);
 
@@ -412,14 +630,11 @@ export default function Tickets() {
     if (bulkChanges.priority) payload.priority = bulkChanges.priority;
     if (bulkChanges.assignedToId) payload.assignedToId = Number(bulkChanges.assignedToId);
     if (Object.keys(payload).length === 1) return toast.error('Choisissez une modification à appliquer');
-
     setBulkUpdating(true);
     try {
       const { data } = await api.post('/tickets/bulk-update', payload);
       toast.success(`${data.updatedCount}/${data.total} ticket(s) mis à jour`);
-      if (data.failures?.length > 0) {
-        toast.error(`${data.failures.length} ticket(s) en échec`);
-      }
+      if (data.failures?.length > 0) toast.error(`${data.failures.length} ticket(s) en échec`);
       setBulkChanges({ status: '', priority: '', assignedToId: '' });
       setSelectedIds([]);
       loadTickets();
@@ -430,7 +645,6 @@ export default function Tickets() {
     }
   }
 
-  // ── Export serveur : tout le jeu de résultats des filtres actifs, pas seulement la page ──
   function exportAll(fmt = 'csv') {
     const params = {};
     for (const key of ['status', 'priority', 'category', 'teamId', 'assignedToId', 'mine', 'approvalStatus', 'source', 'aiProcessed', 'closeSuggested']) {
@@ -438,84 +652,30 @@ export default function Tickets() {
       if (v !== undefined && v !== '' && v !== null) params[key] = v;
     }
     if (debouncedSearch) params.search = debouncedSearch;
-    params.sortBy = sortBy;
-    params.sortOrder = sortOrder;
-    params.format = fmt;
+    params.sortBy = sortBy; params.sortOrder = sortOrder; params.format = fmt;
     const url = `${api.defaults.baseURL}/tickets/export?${new URLSearchParams(params).toString()}`;
     window.open(url, '_blank');
-    toast.success(fmt === 'csv' ? 'Export CSV complet généré' : 'Export JSON complet généré');
+    toast.success(fmt === 'csv' ? 'Export CSV généré' : 'Export JSON généré');
   }
 
   async function handleQuickStatusChange(ticketId, newStatus, e) {
     if (e) e.stopPropagation();
     try {
       await api.patch(`/tickets/${ticketId}`, { status: newStatus });
-      toast.success(`Statut mis à jour : ${newStatus}`);
+      toast.success(`Statut : ${newStatus}`);
       refreshTicketsSilently();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Échec mise à jour statut');
     }
   }
 
-  function exportCSV() {
-    if (tickets.length === 0) return toast.error('Aucun ticket à exporter');
-    const headers = ['ID', 'Titre', 'Statut', 'Priorité', 'Catégorie', 'Équipe', 'Assigné à', 'Demandeur', 'Lieu', 'GLPI ID', 'Date de création'];
-    const rows = tickets.map((t) => [
-      t.id,
-      `"${(t.title || '').replace(/"/g, '""')}"`,
-      t.status,
-      t.priority,
-      `"${(t.category || '').replace(/"/g, '""')}"`,
-      `"${(t.team?.name || '').replace(/"/g, '""')}"`,
-      `"${(t.assignedTo?.fullName || 'Non assigné').replace(/"/g, '""')}"`,
-      `"${(t.requester?.fullName || '').replace(/"/g, '""')}"`,
-      `"${(t.glpiLocationName || '').replace(/"/g, '""')}"`,
-      t.glpiTicketId || '',
-      new Date(t.createdAt).toLocaleString('fr-FR'),
-    ]);
-    const csvContent = 'data:text/csv;charset=utf-8,﻿' + [headers.join(';'), ...rows.map((r) => r.join(';'))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `export_tickets_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    toast.success(`${tickets.length} ticket(s) exporté(s) en CSV`);
-  }
-
-  function exportJSON() {
-    if (tickets.length === 0) return toast.error('Aucun ticket à exporter');
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(tickets, null, 2));
-    const link = document.createElement('a');
-    link.setAttribute('href', dataStr);
-    link.setAttribute('download', `export_tickets_${new Date().toISOString().slice(0, 10)}.json`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    toast.success(`${tickets.length} ticket(s) exporté(s) en JSON`);
-  }
-
   const [confirmDelete, setConfirmDelete] = useState(null);
-
-  const ticketStats = {
-    total: totalCount,
-    open: serverStats.open,
-    pending: serverStats.pending,
-    resolved: serverStats.resolved,
-    p1: serverStats.p1,
-    p2: serverStats.p2,
-    ai: serverStats.ai,
-    unassigned: serverStats.unassigned,
-  };
-
   function askDeleteOne(id) { setConfirmDelete({ mode: 'one', id }); }
   function askDeleteSelected() { if (selectedIds.length > 0) setConfirmDelete({ mode: 'bulk' }); }
 
   async function confirmDeleteAction() {
     if (!confirmDelete) return;
-    setDeleting(true);
-    setError('');
+    setDeleting(true); setError('');
     try {
       if (confirmDelete.mode === 'one') {
         await api.delete(`/tickets/${confirmDelete.id}`);
@@ -524,8 +684,7 @@ export default function Tickets() {
         await api.post('/tickets/bulk-delete', { ids: selectedIds });
         toast.success(`${selectedIds.length} ticket(s) supprimé(s)`);
       }
-      loadTickets();
-      setConfirmDelete(null);
+      loadTickets(); setConfirmDelete(null);
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la suppression');
     } finally {
@@ -538,17 +697,11 @@ export default function Tickets() {
     api.get('/glpi/categories').then(({ data }) => setCategories(data)).catch(() => {});
     api.get('/glpi/users').then(({ data }) => setGlpiUsers(data)).catch(() => {});
     api.get('/ticket-templates').then(({ data }) => setTemplates(data)).catch(() => {});
-    // Équipements pour le sélecteur d'assets (200 max, filtrage client)
     api.get('/assets', { params: { pageSize: 200 } })
       .then(({ data }) => {
         const list = Array.isArray(data) ? data : (data.assets || []);
-        setAssetOptions(list.map((a) => ({
-          id: a.id,
-          label: a.name,
-          subLabel: [a.serialNumber, a.inventoryNumber, a.model].filter(Boolean).join(' — ') || undefined,
-        })));
-      })
-      .catch(() => {});
+        setAssetOptions(list.map((a) => ({ id: a.id, label: a.name, subLabel: [a.serialNumber, a.inventoryNumber, a.model].filter(Boolean).join(' — ') || undefined })));
+      }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -557,7 +710,6 @@ export default function Tickets() {
     api.get('/users').then(({ data }) => setUsers(Array.isArray(data) ? data : (data.users || []))).catch(() => {});
   }, [canAssign]);
 
-  // Charge les champs personnalisés de la catégorie sélectionnée (ou globaux si aucune)
   useEffect(() => {
     const cat = flatCategories.find((c) => c.name === form.category);
     const params = cat ? { categoryId: cat.id } : {};
@@ -565,44 +717,30 @@ export default function Tickets() {
       .then(({ data }) => {
         const active = (data || []).filter((f) => f.isActive);
         setCustomFieldDefs(active);
-        // Purge les valeurs des champs qui ne sont plus dans la liste
         setCustomValues((prev) => {
           const ids = new Set(active.map((f) => String(f.id)));
           const next = {};
           for (const [k, v] of Object.entries(prev)) if (ids.has(k)) next[k] = v;
           return next;
         });
-      })
-      .catch(() => setCustomFieldDefs([]));
+      }).catch(() => setCustomFieldDefs([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.category]);
 
   async function handleCreate(e) {
-    e.preventDefault();
-    setError('');
-    setCreating(true);
+    e.preventDefault(); setError(''); setCreating(true);
     try {
       const payload = new FormData();
       Object.entries(form).forEach(([key, value]) => {
-        if (key === 'observerIds') {
-          if (value.length > 0) payload.append('observerIds', JSON.stringify(value));
-          return;
-        }
-        if (key === 'assetIds') {
-          if (value.length > 0) payload.append('assetIds', JSON.stringify(value));
-          return;
-        }
+        if (key === 'observerIds') { if (value.length > 0) payload.append('observerIds', JSON.stringify(value)); return; }
+        if (key === 'assetIds') { if (value.length > 0) payload.append('assetIds', JSON.stringify(value)); return; }
         if (value !== '' && value !== undefined && value !== null) payload.append(key, value);
       });
       if (Object.keys(customValues).length > 0) payload.append('customFields', JSON.stringify(customValues));
       if (attachment) payload.append('attachment', attachment);
       await api.post('/tickets', payload, { headers: { 'Content-Type': 'multipart/form-data' } });
       toast.success('Ticket créé');
-      setForm(EMPTY_FORM);
-      setCustomValues({});
-      setAttachment(null);
-      setShowForm(false);
-      setSearchParams({});
+      setForm(EMPTY_FORM); setCustomValues({}); setAttachment(null); setShowForm(false); setSearchParams({});
       loadTickets();
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la création');
@@ -615,8 +753,7 @@ export default function Tickets() {
     setShowForm((v) => !v);
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
-      if (next.get('new') === '1') next.delete('new');
-      else next.set('new', '1');
+      if (next.get('new') === '1') next.delete('new'); else next.set('new', '1');
       return next;
     });
   }
@@ -626,16 +763,7 @@ export default function Tickets() {
     if (!templateId) return;
     const t = templates.find((x) => String(x.id) === String(templateId));
     if (!t) return;
-    setForm((prev) => ({
-      ...prev,
-      title: t.title || prev.title,
-      content: t.content || prev.content,
-      priority: t.priority || prev.priority,
-      category: t.category || prev.category,
-      type: t.type || prev.type,
-      urgency: t.urgency || prev.urgency,
-      impact: t.impact || prev.impact,
-    }));
+    setForm((prev) => ({ ...prev, title: t.title || prev.title, content: t.content || prev.content, priority: t.priority || prev.priority, category: t.category || prev.category, type: t.type || prev.type, urgency: t.urgency || prev.urgency, impact: t.impact || prev.impact }));
     toast.success(`Modèle « ${t.name} » appliqué`);
   }
 
@@ -652,1291 +780,554 @@ export default function Tickets() {
     filters.approvalStatus || filters.closeSuggested || searchQuery
   );
 
+  const activeFilterCount = [
+    filters.status, filters.priority, filters.source, filters.category,
+    filters.teamId, filters.assignedToId, filters.mine, filters.aiProcessed,
+    filters.approvalStatus, filters.closeSuggested,
+  ].filter(Boolean).length;
+
+  // ── Render ──────────────────────────────────────────────────────────────────
   return (
-    <motion.div
-      className="max-w-full mx-auto w-full space-y-6 px-4 sm:px-6 lg:px-8 min-w-0 pt-4 sm:pt-6 pb-8"
-      variants={containerVariants}
-      initial="hidden"
-      animate="visible"
-    >
-      {/* Hero Header SEVEN-T */}
-      <div className="p-6 sm:p-8 rounded-2xl sm:rounded-3xl border border-outline-variant/30 bg-surface-container-lowest shadow-sm mb-6">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-          <div className="min-w-0">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="p-2 bg-blue-500/10 rounded-xl">
-                <Ticket className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-              </div>
-              <h1 className="text-2xl sm:text-3xl font-display font-bold truncate text-on-surface">Tickets</h1>
-              <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold uppercase tracking-wider animate-pulse border border-emerald-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                Live
-              </span>
-            </div>
-            <p className="text-sm sm:text-base text-on-surface-variant font-medium">Gérez, filtrez et suivez en temps réel l'ensemble des tickets d'assistance IT.</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={toggleForm}
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold text-xs flex items-center gap-2 transition-all shadow-md shadow-blue-500/20 hover:brightness-110 cursor-pointer"
-            >
-              {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-              {showForm ? 'Fermer' : 'Nouveau Ticket'}
-            </motion.button>
-            <div className="relative group">
-              <button
-                className="p-2 rounded-xl border border-outline-variant/40 bg-surface-container hover:bg-surface-container-high text-on-surface-variant transition-all cursor-pointer"
-                title="Exporter (CSV/JSON)"
-              >
-                <Download className="w-4 h-4" />
-              </button>
-              <div className="absolute right-0 top-full pt-1 z-30 hidden group-hover:block">
-                <div className="rounded-xl border border-outline-variant/30 bg-surface-container-lowest shadow-xl p-1.5 min-w-[200px]">
-                  <button
-                    onClick={() => exportAll('csv')}
-                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-on-surface hover:bg-surface-container transition-colors cursor-pointer text-left"
-                  >
-                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" />
-                    Exporter tout (CSV)
-                  </button>
-                  <button
-                    onClick={() => exportAll('json')}
-                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-on-surface hover:bg-surface-container transition-colors cursor-pointer text-left"
-                  >
-                    <FileCode2 className="w-3.5 h-3.5 text-blue-500" />
-                    Exporter tout (JSON)
-                  </button>
-                  <div className="my-1 border-t border-outline-variant/30" />
-                  <button
-                    onClick={exportCSV}
-                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-on-surface hover:bg-surface-container transition-colors cursor-pointer text-left"
-                  >
-                    <FileSpreadsheet className="w-3.5 h-3.5 text-slate-500" />
-                    Page actuelle (CSV)
-                  </button>
-                </div>
-              </div>
-            </div>
-            <button
-              onClick={() => loadTickets(true)}
-              disabled={refreshing}
-              className="p-2 rounded-xl border border-outline-variant/40 bg-surface-container hover:bg-surface-container-high text-on-surface-variant transition-all disabled:opacity-50"
-              title="Rafraîchir les tickets"
-            >
-              <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-            </button>
-            {/* 3-way View Mode Toggle: Tableau, Grille, Coverflow 3D */}
-            <div className="p-1 rounded-xl border border-outline-variant/30 bg-surface-container flex items-center gap-1">
-              <button
-                onClick={() => changeViewMode('table')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-                  viewMode === 'table'
-                    ? 'bg-blue-600 text-white shadow-sm font-bold'
-                    : 'text-on-surface-variant hover:text-on-surface'
-                }`}
-                title="Vue Tableau"
-              >
-                <Table className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Tableau</span>
-              </button>
-              <button
-                onClick={() => changeViewMode('grid')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-                  viewMode === 'grid'
-                    ? 'bg-blue-600 text-white shadow-sm font-bold'
-                    : 'text-on-surface-variant hover:text-on-surface'
-                }`}
-                title="Vue Grille"
-              >
-                <LayoutGrid className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Grille</span>
-              </button>
-              <button
-                onClick={() => changeViewMode('carousel')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-                  viewMode === 'carousel'
-                    ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-sm font-bold'
-                    : 'text-on-surface-variant hover:text-on-surface'
-                }`}
-                title="Vue Coverflow 3D Carousel"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-purple-300" />
-                <span className="hidden sm:inline">Coverflow 3D</span>
-              </button>
-              <button
-                onClick={() => changeViewMode('kanban')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-                  viewMode === 'kanban'
-                    ? 'bg-emerald-600 text-white shadow-sm font-bold'
-                    : 'text-on-surface-variant hover:text-on-surface'
-                }`}
-                title="Vue Kanban (glisser-déposer entre colonnes)"
-              >
-                <KanbanSquare className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="hidden sm:inline">Kanban</span>
-              </button>
-            </div>
-          </div>
+    <div className="flex flex-col h-full w-full min-w-0 gap-0">
+
+      {/* ── COMPACT HEADER ──────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-3 px-4 sm:px-6 py-3 border-b border-outline-variant/20 bg-surface-container-lowest shrink-0">
+        {/* Title */}
+        <div className="flex items-center gap-2 min-w-0">
+          <Ticket className="w-4 h-4 text-primary shrink-0" />
+          <h1 className="text-sm font-bold text-on-surface whitespace-nowrap">Tickets</h1>
+          <span className="text-[11px] text-on-surface-variant font-medium tabular-nums">
+            {totalCount > 0 && `${totalCount}`}
+          </span>
         </div>
 
-        {/* Bento Stat Items — affichage uniquement */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 xl:grid-cols-8 gap-2.5 mt-6">
-          {[
-            { label: 'Total',      value: ticketStats.total,    Icon: Ticket,       color: 'text-blue-600 dark:text-blue-400 bg-blue-500/10'    },
-            { label: 'Ouverts',    value: ticketStats.open,     Icon: Radio,        color: 'text-amber-600 dark:text-amber-400 bg-amber-500/10'  },
-            { label: 'En attente', value: ticketStats.pending,  Icon: Clock,        color: 'text-yellow-600 dark:text-yellow-400 bg-yellow-500/10'},
-            { label: 'Résolus',    value: ticketStats.resolved, Icon: CheckCircle2, color: 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10'},
-            { label: 'P1 Critique',value: ticketStats.p1,       Icon: Flame,        color: 'text-red-600 dark:text-red-400 bg-red-500/10'      },
-            { label: 'P2 Haute',   value: ticketStats.p2,       Icon: AlertTriangle,color: 'text-orange-600 dark:text-orange-400 bg-orange-500/10'},
-            { label: 'IA Process', value: ticketStats.ai,       Icon: Sparkles,     color: 'text-purple-600 dark:text-purple-400 bg-purple-500/10'},
-            { label: 'Orphelins',  value: ticketStats.unassigned, Icon: UserX,       color: 'text-rose-600 dark:text-rose-400 bg-rose-500/10'},
-          ].map((s) => {
-            const IconComponent = s.Icon;
-            return (
-              <div
-                key={s.label}
-                className="p-3 rounded-2xl border border-outline-variant/30 bg-surface-container-low/40 flex flex-col items-start"
-              >
-                <div className={`p-2 rounded-xl mb-2 ${s.color}`}>
-                  <IconComponent className="w-4 h-4" />
-                </div>
-                <p className="text-xl font-bold leading-none mb-1 text-on-surface">{s.value}</p>
-                <p className="text-[10px] uppercase font-black tracking-wider truncate w-full text-on-surface-variant">{s.label}</p>
+        {/* Live badge */}
+        <span className="hidden sm:flex items-center gap-1 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+          Live
+        </span>
+
+        {/* Stats pills */}
+        <div className="hidden lg:flex items-center gap-2 flex-1 min-w-0 overflow-hidden">
+          <div className="w-px h-3.5 bg-outline-variant/40 mx-1 shrink-0" />
+          {serverStats.open > 0 && <StatPill color="bg-blue-500" count={serverStats.open} label="ouverts" onClick={() => updateFilter('status', 'OPEN_GROUP')} />}
+          {serverStats.pending > 0 && <StatPill color="bg-amber-400" count={serverStats.pending} label="en attente" onClick={() => updateFilter('status', 'PENDING')} />}
+          {serverStats.p1 > 0 && <StatPill color="bg-red-500" count={serverStats.p1} label="P1" onClick={() => updateFilter('priority', 'P1')} />}
+          {serverStats.p2 > 0 && <StatPill color="bg-orange-400" count={serverStats.p2} label="P2" onClick={() => updateFilter('priority', 'P2')} />}
+          {serverStats.ai > 0 && <StatPill color="bg-purple-500" count={serverStats.ai} label="IA" onClick={() => updateFilter('aiProcessed', 'true')} />}
+          {serverStats.unassigned > 0 && <StatPill color="bg-rose-500" count={serverStats.unassigned} label="orphelins" onClick={() => updateFilter('assignedToId', 'none')} />}
+        </div>
+
+        {/* Spacer */}
+        <div className="flex-1 lg:hidden" />
+
+        {/* Actions */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Export */}
+          <div className="relative group">
+            <button
+              className="p-2 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"
+              title="Exporter"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+            </button>
+            <div className="absolute right-0 top-full pt-1 z-30 hidden group-hover:block">
+              <div className="rounded-xl border border-outline-variant/30 bg-surface-container-lowest shadow-xl p-1.5 min-w-[180px]">
+                <button onClick={() => exportAll('csv')} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-on-surface hover:bg-surface-container transition-colors cursor-pointer text-left">
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" /> Exporter tout (CSV)
+                </button>
+                <button onClick={() => exportAll('json')} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-on-surface hover:bg-surface-container transition-colors cursor-pointer text-left">
+                  <FileCode2 className="w-3.5 h-3.5 text-blue-500" /> Exporter tout (JSON)
+                </button>
               </div>
-            );
-          })}
+            </div>
+          </div>
+
+          {/* Refresh */}
+          <button
+            onClick={() => loadTickets(true)}
+            disabled={refreshing}
+            className="p-2 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all disabled:opacity-40"
+            title="Rafraîchir"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+          </button>
+
+          {/* View mode */}
+          <div className="flex items-center p-0.5 rounded-lg border border-outline-variant/30 bg-surface-container gap-0.5">
+            {[
+              { mode: 'table', Icon: Table, label: 'Tableau' },
+              { mode: 'grid', Icon: LayoutGrid, label: 'Grille' },
+              { mode: 'carousel', Icon: Sparkles, label: 'Coverflow' },
+              { mode: 'kanban', Icon: KanbanSquare, label: 'Kanban' },
+            ].map(({ mode, Icon, label }) => (
+              <button
+                key={mode}
+                onClick={() => changeViewMode(mode)}
+                title={label}
+                className={`p-1.5 rounded-md transition-all ${viewMode === mode ? 'bg-primary text-white shadow-sm' : 'text-on-surface-variant hover:text-on-surface'}`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+              </button>
+            ))}
+          </div>
+
+          {/* Filter button */}
+          <button
+            onClick={() => setFilterPanelOpen(true)}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold transition-all ${
+              activeFilterCount > 0
+                ? 'bg-primary/10 text-primary border-primary/30 hover:bg-primary/20'
+                : 'border-outline-variant/40 text-on-surface-variant hover:bg-surface-container hover:text-on-surface'
+            }`}
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Filtres</span>
+            {activeFilterCount > 0 && (
+              <span className="w-4 h-4 flex items-center justify-center rounded-full bg-primary text-white text-[9px] font-black">
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
+
+          {/* New ticket */}
+          <button
+            onClick={toggleForm}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-white text-xs font-bold hover:opacity-90 transition-opacity shadow-sm"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Nouveau</span>
+          </button>
         </div>
       </div>
 
-      {/* MODALE DE CRÉATION DE TICKET SEVEN-T */}
-      {createPortal(
-        <AnimatePresence>
-          {showForm && (
-            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={toggleForm}
-                className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer"
-              />
-
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: 16 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 16 }}
-                transition={{ type: 'spring', duration: 0.35, bounce: 0.15 }}
-                className={`relative max-w-4xl w-full rounded-3xl border p-6 sm:p-8 card-shadow overflow-hidden max-h-[92vh] flex flex-col z-10 ${
-                  isDark ? 'bg-surface-container-lowest border-outline-variant/60 text-on-surface' : 'bg-white border-slate-200 text-slate-900'
-                }`}
-              >
-                <div className="flex items-center justify-between pb-4 border-b border-outline-variant/30 mb-6 shrink-0">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-blue-500/10 rounded-xl border border-blue-500/20">
-                      <Plus className="size-6 text-blue-600 dark:text-blue-400" />
-                    </div>
-                    <div>
-                      <h3 className="text-xl font-bold font-display text-on-surface">Nouveau Ticket d'Assistance</h3>
-                      <p className="text-xs text-slate-600 dark:text-slate-400 font-medium">Remplissez les informations ci-dessous pour ouvrir une demande.</p>
-                    </div>
-                  </div>
-                  <motion.button
-                    type="button"
-                    onClick={toggleForm}
-                    whileHover={{ scale: 1.1, rotate: 90 }}
-                    whileTap={{ scale: 0.9 }}
-                    className="p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer"
-                  >
-                    <X className="w-4 h-4" />
-                  </motion.button>
-                </div>
-
-                <form onSubmit={handleCreate} className="flex-1 overflow-y-auto space-y-5 pr-1">
-                  {error && (
-                    <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-700 dark:text-red-400 text-xs font-bold flex items-center gap-2">
-                      <AlertTriangle className="w-4 h-4 shrink-0" />
-                      <span className="flex-1">{error}</span>
-                      <button type="button" onClick={() => setError('')} className="p-1 hover:bg-red-500/20 rounded-lg">
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  )}
-
-                  {templates.length > 0 && (
-                    <div>
-                      <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Modèle (pré-remplissage)</label>
-                      <select
-                        value={selectedTemplate}
-                        onChange={(e) => applyTemplate(e.target.value)}
-                        className="w-full px-4 py-2.5 rounded-xl border font-medium text-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-surface border-outline-variant/60 text-slate-900 dark:text-white cursor-pointer"
-                      >
-                        <option value="">— Aucun modèle —</option>
-                        {templates.map((t) => (
-                          <option key={t.id} value={t.id}>{t.name}{t.category ? ` (${t.category})` : ''}</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  <div>
-                    <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Titre de la demande *</label>
-                    <input
-                      type="text"
-                      required
-                      value={form.title}
-                      onChange={(e) => setForm({ ...form, title: e.target.value })}
-                      placeholder="ex: Problème d'impression ou d'accès réseau..."
-                      className="w-full px-4 py-2.5 rounded-xl border font-medium text-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-surface border-outline-variant/60 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Catégorie</label>
-                      <select
-                        value={form.category}
-                        onChange={(e) => setForm({ ...form, category: e.target.value })}
-                        className="w-full px-4 py-2.5 rounded-xl border font-medium text-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-surface border-outline-variant/60 text-slate-900 dark:text-white"
-                      >
-                        <option value="">Sélectionner une catégorie</option>
-                        {flatCategories.map((o) => (
-                          <option key={o.id} value={o.name}>{o.label}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Priorité</label>
-                      <select
-                        value={form.priority}
-                        onChange={(e) => setForm({ ...form, priority: e.target.value })}
-                        className="w-full px-4 py-2.5 rounded-xl border font-medium text-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-surface border-outline-variant/60 text-slate-900 dark:text-white"
-                      >
-                        {PRIORITY_OPTIONS.map((p) => (
-                          <option key={p} value={p}>{p} - {p === 'P1' ? 'Critique' : p === 'P2' ? 'Haute' : p === 'P3' ? 'Moyenne' : 'Basse'}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  {/* Champs personnalisés (définis par catégorie dans Paramètres) */}
-                  {customFieldDefs.length > 0 && (
-                    <div className="rounded-2xl border border-dashed border-primary/30 bg-primary/5 p-4 space-y-4">
-                      <p className="text-[10px] font-black uppercase tracking-widest text-primary flex items-center gap-1.5">
-                        <ListChecks className="w-3.5 h-3.5" />
-                        Informations complémentaires
-                      </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {customFieldDefs.map((f) => {
-                          const key = String(f.id);
-                          const common = `w-full px-4 py-2.5 rounded-xl border font-medium text-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-surface border-outline-variant/60 text-slate-900 dark:text-white`;
-                          const set = (v) => setCustomValues((prev) => ({ ...prev, [key]: v }));
-                          return (
-                            <div key={f.id} className={f.type === 'TEXTAREA' ? 'sm:col-span-2' : ''}>
-                              <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">
-                                {f.label} {f.required && <span className="text-red-500">*</span>}
-                              </label>
-                              {f.type === 'TEXT' && (
-                                <input type="text" value={customValues[key] || ''} onChange={(e) => set(e.target.value)} className={common} />
-                              )}
-                              {f.type === 'TEXTAREA' && (
-                                <textarea rows={3} value={customValues[key] || ''} onChange={(e) => set(e.target.value)} className={`${common} resize-none`} />
-                              )}
-                              {f.type === 'NUMBER' && (
-                                <input type="number" value={customValues[key] || ''} onChange={(e) => set(e.target.value)} className={common} />
-                              )}
-                              {f.type === 'DATE' && (
-                                <input type="date" value={customValues[key] || ''} onChange={(e) => set(e.target.value)} className={common} />
-                              )}
-                              {f.type === 'CHECKBOX' && (
-                                <label className="flex items-center gap-2 cursor-pointer select-none">
-                                  <input
-                                    type="checkbox"
-                                    checked={!!customValues[key]}
-                                    onChange={(e) => set(e.target.checked ? 'true' : '')}
-                                    className="accent-primary w-4 h-4"
-                                  />
-                                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{customValues[key] === 'true' ? 'Oui' : 'Non'}</span>
-                                </label>
-                              )}
-                              {f.type === 'SELECT' && (
-                                <select value={customValues[key] || ''} onChange={(e) => set(e.target.value)} className={`${common} cursor-pointer`}>
-                                  <option value="">— Sélectionner —</option>
-                                  {(f.options || []).map((o) => {
-                                    const v = typeof o === 'string' ? o : o.value;
-                                    const l = typeof o === 'string' ? o : o.label;
-                                    return <option key={v} value={v}>{l}</option>;
-                                  })}
-                                </select>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Type de demande</label>
-                      <select
-                        value={form.type}
-                        onChange={(e) => setForm({ ...form, type: e.target.value })}
-                        className="w-full px-4 py-2.5 rounded-xl border font-medium text-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-surface border-outline-variant/60 text-slate-900 dark:text-white"
-                      >
-                        {TYPE_OPTIONS.map((t) => (
-                          <option key={t.value} value={t.value}>{t.label}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {locations.length > 0 && (
-                      <div>
-                        <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Lieu / Emplacement</label>
-                        <SearchableSelect
-                          options={locations}
-                          value={form.locationId}
-                          onChange={(val) => setForm({ ...form, locationId: val })}
-                          placeholder="Rechercher un lieu GLPI..."
-                          searchPlaceholder="Rechercher un lieu par nom..."
-                          labelKey="name"
-                          valueKey="id"
-                          subLabelKey="completename"
-                          icon={MapPin}
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Équipe assignée</label>
-                      <select
-                        value={form.teamId}
-                        onChange={(e) => setForm({ ...form, teamId: e.target.value })}
-                        className="w-full px-4 py-2.5 rounded-xl border font-medium text-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-surface border-outline-variant/60 text-slate-900 dark:text-white"
-                      >
-                        <option value="">Sélectionner une équipe</option>
-                        {teams.map((t) => (
-                          <option key={t.id} value={t.id}>{t.name}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Technicien assigné</label>
-                      <RemoteUserSelect
-                        value={form.assignedToId || ''}
-                        valueLabel={users.find((u) => String(u.id) === String(form.assignedToId))?.fullName}
-                        onChange={(val) => setForm({ ...form, assignedToId: val })}
-                        placeholder="Auto-assignation ou rechercher un technicien..."
-                        searchPlaceholder="Rechercher un technicien par nom ou email..."
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Urgence</label>
-                      <select
-                        value={form.urgency}
-                        onChange={(e) => setForm({ ...form, urgency: e.target.value })}
-                        className="w-full px-4 py-2.5 rounded-xl border font-medium text-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-surface border-outline-variant/60 text-slate-900 dark:text-white"
-                      >
-                        {URGENCY_IMPACT_OPTIONS.map((o) => (
-                          <option key={o.value} value={o.value}>{o.label}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Impact</label>
-                      <select
-                        value={form.impact}
-                        onChange={(e) => setForm({ ...form, impact: e.target.value })}
-                        className="w-full px-4 py-2.5 rounded-xl border font-medium text-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-surface border-outline-variant/60 text-slate-900 dark:text-white"
-                      >
-                        {URGENCY_IMPACT_OPTIONS.map((o) => (
-                          <option key={o.value} value={o.value}>{o.label}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5 text-amber-500" />
-                      Échéance (date limite) — optionnel
-                    </label>
-                    <input
-                      type="datetime-local"
-                      value={form.dueDate}
-                      onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
-                      className="w-full px-4 py-2.5 rounded-xl border font-medium text-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-surface border-outline-variant/60 text-slate-900 dark:text-white"
-                    />
-                  </div>
-
-                  {canAssign && (
-                    <div>
-                      <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Demandeur (Création pour un tier)</label>
-                      <RemoteUserSelect
-                        value={form.requesterId || ''}
-                        valueLabel={users.find((u) => String(u.id) === String(form.requesterId))?.fullName}
-                        onChange={(val) => setForm({ ...form, requesterId: val })}
-                        placeholder={`Moi-même (${user?.fullName || ''})`}
-                        searchPlaceholder="Rechercher un demandeur par nom ou email..."
-                      />
-                    </div>
-                  )}
-
-                  {/* Observateurs avec recherche côté serveur */}
-                  <div>
-                    <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                      <User className="w-3.5 h-3.5 text-purple-500" />
-                      Observateurs du ticket ({form.observerIds?.length || 0})
-                    </label>
-                    <RemoteUserMultiSelect
-                      selectedIds={form.observerIds || []}
-                      onChange={(nextIds) => setForm({ ...form, observerIds: nextIds })}
-                      placeholder="Rechercher des observateurs par nom ou email..."
-                    />
-                  </div>
-
-                  {/* Équipements liés (Inventaire) */}
-                  {assetOptions.length > 0 && (
-                    <div>
-                      <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                        <Boxes className="w-3.5 h-3.5 text-blue-500" />
-                        Équipements concernés ({form.assetIds?.length || 0})
-                      </label>
-                      <SearchableMultiSelect
-                        options={assetOptions}
-                        selectedIds={form.assetIds || []}
-                        onChange={(nextIds) => setForm({ ...form, assetIds: nextIds })}
-                        placeholder="Rechercher un équipement (nom, n° de série, inventaire)..."
-                        searchPlaceholder="Rechercher un équipement..."
-                        labelKey="label"
-                        valueKey="id"
-                        subLabelKey="subLabel"
-                      />
-                    </div>
-                  )}
-
-                  <div>
-                    <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Description détaillée *</label>
-                    <textarea
-                      rows={4}
-                      required
-                      value={form.content}
-                      onChange={(e) => setForm({ ...form, content: e.target.value })}
-                      placeholder="Décrivez votre problème ou besoin en détails..."
-                      className="w-full px-4 py-2.5 rounded-xl border font-medium text-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary resize-none bg-surface border-outline-variant/60 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-extrabold uppercase tracking-wider mb-2 text-slate-700 dark:text-slate-300">Pièce jointe (optionnel)</label>
-                    <input
-                      type="file"
-                      onChange={(e) => setAttachment(e.target.files[0])}
-                      className="block w-full text-xs text-slate-600 dark:text-slate-400 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border file:border-blue-500/20 file:text-xs file:font-bold file:bg-blue-500/10 file:text-blue-600 dark:file:text-blue-400 hover:file:bg-blue-500/20 cursor-pointer"
-                    />
-                  </div>
-
-                  <div className="pt-4 border-t border-outline-variant/30 flex justify-end gap-3 shrink-0">
-                    <button
-                      type="button"
-                      onClick={toggleForm}
-                      className="px-4 py-2.5 rounded-xl border border-outline-variant/40 font-semibold text-sm transition-all cursor-pointer bg-surface text-on-surface hover:bg-surface-container"
-                    >
-                      Annuler
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={creating}
-                      className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold text-sm transition-all shadow-md shadow-blue-500/20 disabled:opacity-50 hover:brightness-110 cursor-pointer"
-                    >
-                      {creating ? 'Création...' : 'Créer le ticket'}
-                    </button>
-                  </div>
-                </form>
-              </motion.div>
-            </div>
-          )}
-        </AnimatePresence>,
-        document.body
-      )}
-
-      {/* BARRE DE FILTRES BENTO */}
-      <motion.div variants={itemVariants} className="bento-card p-lg space-y-md">
-        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-end gap-md">
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 w-full lg:w-auto">
-            {/* Recherche */}
-            <div className="col-span-2 flex flex-col gap-1">
-              <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Recherche</span>
-              <div className="relative">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
-                <input
-                  ref={searchInputRef}
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Titre, n° ticket, contenu, lieu...  ⌘K"
-                  className="w-full pl-9 pr-8 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface font-body-sm text-body-sm transition-all focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none"
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => { setSearchQuery(''); setDebouncedSearch(''); setPage(1); }}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-outline hover:text-on-surface transition-colors"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <FilterSelect value={filters.status} onChange={(v) => updateFilter('status', v)}
-              label="Statut" options={[
-                { v: '', l: 'Tous les statuts' },
-                { v: 'NEW', l: 'Nouveau' },
-                { v: 'OPEN', l: 'Ouvert' },
-                { v: 'PENDING', l: 'En attente' },
-                { v: 'SOLVED', l: 'Résolu' },
-                { v: 'CLOSED', l: 'Fermé' },
-              ]} />
-
-            <FilterSelect value={filters.approvalStatus} onChange={(v) => updateFilter('approvalStatus', v)}
-              label="Approbation" options={[
-                { v: '', l: 'Toutes' },
-                { v: 'PENDING', l: '🛡️ En attente Hotline' },
-                { v: 'APPROVED', l: '✅ Approuvés' },
-                { v: 'REJECTED', l: '❌ Rejetés' },
-              ]} />
-
-            <FilterSelect value={filters.priority} onChange={(v) => updateFilter('priority', v)}
-              label="Priorité" options={[
-                { v: '', l: 'Toutes' },
-                { v: 'P1', l: '🚨 P1 - Critique' },
-                { v: 'P2', l: '⚠️ P2 - Haute' },
-                { v: 'P3', l: '🔹 P3 - Moyenne' },
-                { v: 'P4', l: '🌱 P4 - Basse' },
-              ]} />
-
-            <FilterSelect value={filters.source} onChange={(v) => updateFilter('source', v)}
-              label="Source" options={[
-                { v: '', l: 'Toutes les sources' },
-                ...(!autonomousMode ? [{ v: 'glpi', l: '🔗 Synchronisés GLPI' }] : []),
-                { v: 'erp', l: '💻 Internes ERP' },
-              ]} />
-
-            <FilterSelect value={filters.teamId} onChange={(v) => updateFilter('teamId', v)}
-              label="Équipe" options={[
-                { v: '', l: 'Toutes les équipes' },
-                ...teams.map((t) => ({ v: String(t.id), l: t.name })),
-              ]} />
-
-            <FilterSelect value={filters.category} onChange={(v) => updateFilter('category', v)}
-              label="Catégorie" options={[
-                { v: '', l: 'Toutes les catégories' },
-                ...flatCategories.map((o) => ({ v: o.name, l: o.label })),
-              ]} />
-
-            <FilterSelect value={filters.assignedToId} onChange={(v) => updateFilter('assignedToId', v)}
-              label="Assigné à" options={[
-                { v: '', l: 'Tout le monde' },
-                { v: 'none', l: 'Non assigné' },
-                ...users.filter((u) => u.isActive).map((u) => ({ v: String(u.id), l: u.fullName })),
-              ]} />
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            {hasActiveFilters && (
-              <button
-                onClick={clearFilters}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-primary/10 text-primary text-body-sm font-semibold hover:bg-primary/20 transition-colors"
-              >
-                <FilterX className="w-4 h-4" />
-                Réinitialiser
-              </button>
-            )}
-            {selectedIds.length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.92 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.92 }}
-                className="flex items-center gap-2 p-2 rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-lg flex-wrap"
-              >
-                <span className="text-xs font-bold text-on-surface-variant px-2 whitespace-nowrap">
-                  {selectedIds.length} sélectionné(s)
-                </span>
-                {canAssign && (
-                  <>
-                    <select
-                      value={bulkChanges.status}
-                      onChange={(e) => setBulkChanges((b) => ({ ...b, status: e.target.value }))}
-                      className={`text-xs font-semibold px-2 py-1.5 rounded-lg border border-outline-variant/60 bg-surface text-on-surface cursor-pointer ${bulkChanges.status ? 'text-primary' : ''}`}
-                    >
-                      <option value="">Statut…</option>
-                      {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                    <select
-                      value={bulkChanges.priority}
-                      onChange={(e) => setBulkChanges((b) => ({ ...b, priority: e.target.value }))}
-                      className={`text-xs font-semibold px-2 py-1.5 rounded-lg border border-outline-variant/60 bg-surface text-on-surface cursor-pointer ${bulkChanges.priority ? 'text-primary' : ''}`}
-                    >
-                      <option value="">Priorité…</option>
-                      {PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                    <select
-                      value={bulkChanges.assignedToId}
-                      onChange={(e) => setBulkChanges((b) => ({ ...b, assignedToId: e.target.value }))}
-                      className={`text-xs font-semibold px-2 py-1.5 rounded-lg border border-outline-variant/60 bg-surface text-on-surface cursor-pointer max-w-[140px] ${bulkChanges.assignedToId ? 'text-primary' : ''}`}
-                    >
-                      <option value="">Assigner à…</option>
-                      <option value="none">Non assigné</option>
-                      {users.filter((u) => u.isActive).map((u) => <option key={u.id} value={u.id}>{u.fullName}</option>)}
-                    </select>
-                    <motion.button
-                      whileTap={{ scale: 0.95 }}
-                      onClick={handleBulkUpdate}
-                      disabled={bulkUpdating}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-xs font-bold hover:opacity-90 transition-all disabled:opacity-50 cursor-pointer"
-                    >
-                      <CheckSquare className="w-3.5 h-3.5" />
-                      {bulkUpdating ? 'Application…' : 'Appliquer'}
-                    </motion.button>
-                  </>
-                )}
-                {canBulkDelete && (
-                  <button
-                    onClick={askDeleteSelected}
-                    disabled={deleting}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error/30 text-error text-xs font-semibold hover:bg-error/5 transition-colors disabled:opacity-50 cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    Supprimer
-                  </button>
-                )}
-              </motion.div>
-            )}
-          </div>
-        </div>
-
-        {/* Jetons de filtres rapides */}
-        <div className="flex items-center gap-2 pt-xs overflow-x-auto pb-1">
-          <span className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider mr-1">Raccourcis:</span>
-          <ChipFilter
-            active={filters.mine === 'true'}
-            onClick={() => updateFilter('mine', filters.mine === 'true' ? '' : 'true')}
-            Icon={User}
-            label="Mes tickets"
+      {/* ── SEARCH BAR ──────────────────────────────────────────────────────── */}
+      <div className="px-4 sm:px-6 py-2.5 border-b border-outline-variant/20 bg-surface-container-lowest shrink-0">
+        <div className="relative">
+          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/60" />
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Rechercher un ticket... ⌘K"
+            className="w-full pl-9 pr-8 py-2 text-sm bg-surface border border-outline-variant/30 rounded-lg text-on-surface placeholder-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
           />
-          <ChipFilter
-            active={filters.status === 'OPEN_GROUP'}
-            onClick={() => updateFilter('status', filters.status === 'OPEN_GROUP' ? '' : 'OPEN_GROUP')}
-            Icon={Radio}
-            label="Ouverts"
-          />
-          <ChipFilter
-            active={filters.status === 'CLOSED_GROUP'}
-            onClick={() => updateFilter('status', filters.status === 'CLOSED_GROUP' ? '' : 'CLOSED_GROUP')}
-            Icon={CheckCircle2}
-            label="Clôturés"
-          />
-          <ChipFilter
-            active={filters.closeSuggested === 'true'}
-            onClick={() => updateFilter('closeSuggested', filters.closeSuggested === 'true' ? '' : 'true')}
-            Icon={Flag}
-            label="Clôture suggérée"
-          />
-          <ChipFilter
-            active={filters.aiProcessed === 'true'}
-            onClick={() => updateFilter('aiProcessed', filters.aiProcessed === 'true' ? '' : 'true')}
-            Icon={Sparkles}
-            label="Traité par IA"
-          />
-          <ChipFilter
-            active={filters.priority === 'P1'}
-            onClick={() => updateFilter('priority', filters.priority === 'P1' ? '' : 'P1')}
-            Icon={Flame}
-            label="Critiques P1"
-          />
-          <ChipFilter
-            active={filters.assignedToId === 'none'}
-            onClick={() => updateFilter('assignedToId', filters.assignedToId === 'none' ? '' : 'none')}
-            Icon={UserX}
-            label="Non assignés"
-          />
-          <span className="text-[10px] text-on-surface-variant font-bold tabular-nums">
-            {serverStats.unassigned > 0 && `${serverStats.unassigned} orphelin(s)`}
-          </span>
-
-          {/* Vues sauvegardées */}
-          <div className="relative shrink-0" style={{ zIndex: 30 }}>
+          {searchQuery && (
             <button
-              onClick={() => setViewsOpen((v) => !v)}
-              className="px-3 py-1 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 cursor-pointer"
+              onClick={() => { setSearchQuery(''); setDebouncedSearch(''); setPage(1); }}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface transition-colors"
             >
-              <Bookmark className="w-3 h-3" />
-              Vues
-              <span className="text-[9px] font-black bg-primary/20 rounded-full px-1.5 py-0.5">{savedViews.length}</span>
+              <X className="w-3.5 h-3.5" />
             </button>
-            {viewsOpen && (
-              <>
-                <div className="fixed inset-0 z-20" onClick={() => setViewsOpen(false)} />
-                <div className="absolute right-0 top-full mt-1.5 z-30 min-w-[240px] rounded-xl border border-outline-variant/40 bg-surface-container-lowest shadow-xl p-1.5">
-                  <button
-                    onClick={saveCurrentView}
-                    disabled={savingView}
-                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-primary hover:bg-primary/10 transition-colors cursor-pointer disabled:opacity-50"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Enregistrer la vue actuelle…
-                  </button>
-                  {savedViews.length === 0 && (
-                    <p className="px-3 py-3 text-[11px] text-on-surface-variant italic text-center">Aucune vue sauvegardée</p>
-                  )}
-                  {savedViews.map((v) => (
-                    <div key={v.name} className="flex items-center gap-1 group">
-                      <button
-                        onClick={() => restoreView(v)}
-                        className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-on-surface hover:bg-surface-container transition-colors cursor-pointer text-left"
-                        title={`${Object.keys(v.filters || {}).filter((k) => v.filters[k]).length} filtre(s) actif(s)`}
-                      >
-                        <Bookmark className="w-3 h-3 text-on-surface-variant shrink-0" />
-                        <span className="truncate">{v.name}</span>
-                      </button>
-                      <button
-                        onClick={() => deleteSavedView(v.name)}
-                        className="opacity-0 group-hover:opacity-100 p-1 rounded-md text-on-surface-variant hover:text-error transition-all cursor-pointer"
-                        title="Supprimer la vue"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
+          )}
         </div>
-      </motion.div>
+      </div>
 
-      {/* ── Active filter chips ──────────────────────────────────────── */}
-      {hasActiveFilters && (
-        <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-2 flex-wrap px-1">
-          <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider shrink-0">Filtres :</span>
-          {debouncedSearch && (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary/10 text-primary text-[11px] font-semibold border border-primary/20">
-              🔍 « {debouncedSearch} »
-              <button onClick={() => { setSearchQuery(''); setDebouncedSearch(''); setPage(1); }} className="p-0.5 rounded-full hover:bg-primary/20 transition-colors"><X className="w-3 h-3" /></button>
-            </span>
-          )}
-          {filters.status && (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[11px] font-semibold border border-blue-500/20">
-              {filters.status === 'OPEN_GROUP' ? 'Ouverts' : filters.status === 'CLOSED_GROUP' ? 'Clôturés' : STATUS_OPTIONS.find(s => s === filters.status) || filters.status}
-              <button onClick={() => updateFilter('status', '')} className="p-0.5 rounded-full hover:bg-blue-500/20 transition-colors"><X className="w-3 h-3" /></button>
-            </span>
-          )}
-          {filters.priority && (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 text-[11px] font-semibold border border-red-500/20">
-              {filters.priority}
-              <button onClick={() => updateFilter('priority', '')} className="p-0.5 rounded-full hover:bg-red-500/20 transition-colors"><X className="w-3 h-3" /></button>
-            </span>
-          )}
-          {filters.source && (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-400 text-[11px] font-semibold border border-sky-500/20">
-              {filters.source === 'glpi' ? 'GLPI' : 'ERP interne'}
-              <button onClick={() => updateFilter('source', '')} className="p-0.5 rounded-full hover:bg-sky-500/20 transition-colors"><X className="w-3 h-3" /></button>
-            </span>
-          )}
-          {filters.teamId && (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold border border-emerald-500/20">
-              {teams.find(t => String(t.id) === filters.teamId)?.name || `Équipe #${filters.teamId}`}
-              <button onClick={() => updateFilter('teamId', '')} className="p-0.5 rounded-full hover:bg-emerald-500/20 transition-colors"><X className="w-3 h-3" /></button>
-            </span>
-          )}
-          {filters.category && (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-400 text-[11px] font-semibold border border-violet-500/20">
-              {filters.category}
-              <button onClick={() => updateFilter('category', '')} className="p-0.5 rounded-full hover:bg-violet-500/20 transition-colors"><X className="w-3 h-3" /></button>
-            </span>
-          )}
-          {filters.assignedToId && (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[11px] font-semibold border border-amber-500/20">
-              {filters.assignedToId === 'none' ? 'Non assigné' : users.find(u => String(u.id) === filters.assignedToId)?.fullName || `#${filters.assignedToId}`}
-              <button onClick={() => updateFilter('assignedToId', '')} className="p-0.5 rounded-full hover:bg-amber-500/20 transition-colors"><X className="w-3 h-3" /></button>
-            </span>
-          )}
-          {filters.mine && (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-[11px] font-semibold border border-indigo-500/20">
-              Mes tickets
-              <button onClick={() => updateFilter('mine', '')} className="p-0.5 rounded-full hover:bg-indigo-500/20 transition-colors"><X className="w-3 h-3" /></button>
-            </span>
-          )}
-          {filters.aiProcessed && (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 text-[11px] font-semibold border border-purple-500/20">
-              Traité par IA
-              <button onClick={() => updateFilter('aiProcessed', '')} className="p-0.5 rounded-full hover:bg-purple-500/20 transition-colors"><X className="w-3 h-3" /></button>
-            </span>
-          )}
-          {filters.approvalStatus && (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-pink-500/10 text-pink-600 dark:text-pink-400 text-[11px] font-semibold border border-pink-500/20">
-              Approbation : {filters.approvalStatus}
-              <button onClick={() => updateFilter('approvalStatus', '')} className="p-0.5 rounded-full hover:bg-pink-500/20 transition-colors"><X className="w-3 h-3" /></button>
-            </span>
-          )}
-          {filters.closeSuggested && (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-orange-500/10 text-orange-600 dark:text-orange-400 text-[11px] font-semibold border border-orange-500/20">
-              Clôture suggérée
-              <button onClick={() => updateFilter('closeSuggested', '')} className="p-0.5 rounded-full hover:bg-orange-500/20 transition-colors"><X className="w-3 h-3" /></button>
-            </span>
-          )}
-          <button
-            onClick={clearFilters}
-            className="ml-auto text-[10px] font-bold text-on-surface-variant hover:text-red-500 transition-colors flex items-center gap-1"
+      {/* ── ACTIVE FILTER CHIPS ─────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {hasActiveFilters && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="border-b border-outline-variant/20 bg-surface-container-lowest shrink-0 overflow-hidden"
           >
-            <FilterX className="w-3 h-3" /> Tout effacer
-          </button>
-        </motion.div>
-      )}
+            <div className="flex items-center gap-1.5 px-4 sm:px-6 py-2 overflow-x-auto">
+              <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest shrink-0 mr-1">Filtres :</span>
+              {debouncedSearch && <ActiveChip label={`"${debouncedSearch}"`} onRemove={() => { setSearchQuery(''); setDebouncedSearch(''); setPage(1); }} />}
+              {filters.status && <ActiveChip label={filters.status === 'OPEN_GROUP' ? 'Ouverts' : filters.status === 'CLOSED_GROUP' ? 'Clôturés' : filters.status} onRemove={() => updateFilter('status', '')} />}
+              {filters.priority && <ActiveChip label={filters.priority} onRemove={() => updateFilter('priority', '')} />}
+              {filters.source && <ActiveChip label={filters.source === 'glpi' ? 'GLPI' : 'ERP'} onRemove={() => updateFilter('source', '')} />}
+              {filters.teamId && <ActiveChip label={teams.find(t => String(t.id) === filters.teamId)?.name || `Équipe #${filters.teamId}`} onRemove={() => updateFilter('teamId', '')} />}
+              {filters.category && <ActiveChip label={filters.category} onRemove={() => updateFilter('category', '')} />}
+              {filters.assignedToId && <ActiveChip label={filters.assignedToId === 'none' ? 'Non assigné' : users.find(u => String(u.id) === filters.assignedToId)?.fullName || `#${filters.assignedToId}`} onRemove={() => updateFilter('assignedToId', '')} />}
+              {filters.mine && <ActiveChip label="Mes tickets" onRemove={() => updateFilter('mine', '')} />}
+              {filters.aiProcessed && <ActiveChip label="Traité IA" onRemove={() => updateFilter('aiProcessed', '')} />}
+              {filters.approvalStatus && <ActiveChip label={`Approbation: ${filters.approvalStatus}`} onRemove={() => updateFilter('approvalStatus', '')} />}
+              {filters.closeSuggested && <ActiveChip label="Clôture suggérée" onRemove={() => updateFilter('closeSuggested', '')} />}
+              <button onClick={clearFilters} className="shrink-0 ml-1 text-[10px] font-bold text-on-surface-variant hover:text-red-500 transition-colors flex items-center gap-0.5 whitespace-nowrap">
+                <X className="w-2.5 h-2.5" /> Tout effacer
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* CONTENU PRINCIPAL */}
-      <div className="relative">
-        {/* Overlay de chargement discret (filtre/recherche) */}
+      {/* ── MAIN CONTENT ────────────────────────────────────────────────────── */}
+      <div className="flex-1 min-h-0 relative overflow-auto">
+        {/* Overlay discret pendant rafraîchissement */}
         {refreshing && !loading && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none rounded-2xl">
-            <div className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-semibold shadow-lg ${
-              isDark ? 'bg-space-800/90 text-zinc-300 border border-space-700' : 'bg-white/90 text-gray-600 border border-gray-200'
-            }`}>
-              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              Mise à jour...
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold bg-surface-container-lowest border border-outline-variant/30 shadow-md text-on-surface-variant">
+              <RefreshCw className="w-3 h-3 animate-spin" /> Mise à jour...
             </div>
           </div>
         )}
 
         {loading ? (
-          <div className="bento-card p-xl flex flex-col items-center justify-center gap-3">
-            <RefreshCw className="w-8 h-8 animate-spin text-primary" />
-            <p className="font-body-md text-body-md text-on-surface-variant">Chargement des tickets...</p>
+          <div className="flex flex-col items-center justify-center h-48 gap-3">
+            <RefreshCw className="w-6 h-6 animate-spin text-primary" />
+            <p className="text-sm text-on-surface-variant">Chargement...</p>
           </div>
         ) : viewMode === 'carousel' ? (
-          <motion.div variants={itemVariants} className="w-full">
-            <TicketCoverflowCarousel tickets={tickets} isDark={isDark} />
-          </motion.div>
-      ) : viewMode === 'kanban' ? (
-        <motion.div variants={itemVariants} className="w-full">
+          <TicketCoverflowCarousel tickets={tickets} isDark={isDark} />
+        ) : viewMode === 'kanban' ? (
           <KanbanBoard
             tickets={tickets}
             canAssign={canAssign}
             onStatusChange={(ticket, newStatus) => handleQuickStatusChange(ticket.id, newStatus)}
           />
-        </motion.div>
-      ) : viewMode === 'grid' ? (
-        <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-md">
-          <AnimatePresence mode="popLayout">
-            {tickets.map((t, idx) => (
-              <motion.div
-                key={t.id}
-                initial={false}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={() => navigate(`/tickets/${t.id}`)}
-                className="bento-card p-md flex flex-col justify-between hover:border-primary/50 transition-all cursor-pointer group relative overflow-hidden"
-              >
-                <div className={`absolute top-0 left-0 right-0 h-1 ${
-                  t.status === 'NEW' ? 'bg-amber-500' :
-                  t.status === 'OPEN' ? 'bg-blue-500' :
-                  t.status === 'PLANNED' ? 'bg-purple-500' :
-                  t.status === 'PENDING' ? 'bg-yellow-500' :
-                  t.status === 'SOLVED' ? 'bg-emerald-500' : 'bg-slate-400'
-                }`} />
+        ) : viewMode === 'grid' ? (
+          /* ── GRID VIEW ── */
+          <div className="p-4 sm:p-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            <AnimatePresence mode="popLayout">
+              {tickets.map((t) => (
+                <motion.div
+                  key={t.id}
+                  initial={false}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => navigate(`/tickets/${t.id}`)}
+                  className="rounded-xl border border-outline-variant/25 bg-surface-container-lowest hover:border-primary/30 hover:shadow-sm transition-all cursor-pointer group relative overflow-hidden p-4 flex flex-col gap-3"
+                >
+                  {/* Priority stripe */}
+                  <div className={`absolute top-0 left-0 right-0 h-0.5 ${
+                    t.priority === 'P1' ? 'bg-red-500' : t.priority === 'P2' ? 'bg-orange-400' :
+                    t.priority === 'P3' ? 'bg-amber-400' : 'bg-emerald-500'
+                  }`} />
 
-                <div className="space-y-sm pt-1">
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-start justify-between gap-2 pt-1">
                     <div className="flex items-center gap-1.5">
-                      <span className="font-mono text-xs text-primary font-bold">#{t.id}</span>
-                      {t.glpiTicketId && (
-                        <span className="px-2 py-0.5 rounded-full border border-outline-variant/60 bg-surface-container-low text-[10px] text-on-surface-variant font-medium flex items-center gap-1">
-                          <RefreshCw className="w-3 h-3" />
-                          #{t.glpiTicketId}
-                        </span>
-                      )}
-                      {t.aiProcessed && (
-                        <span className="px-2 py-0.5 rounded-full border border-primary/20 bg-primary/5 text-primary text-[10px] font-medium flex items-center gap-1">
-                          <Sparkles className="w-3 h-3" />
-                          IA
-                        </span>
-                      )}
+                      <PriorityDot priority={t.priority} />
+                      <span className="text-[11px] font-mono text-on-surface-variant">#{t.id}</span>
+                      {t.aiProcessed && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-500/10 text-purple-600 dark:text-purple-400">IA</span>}
+                      {t.glpiTicketId && <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-surface-container text-on-surface-variant">GLPI</span>}
                     </div>
-                    <PriorityBadge priority={t.priority} />
+                    <StatusPill status={t.status} />
                   </div>
 
                   <div>
-                    <h3 className="font-headline-sm text-headline-sm text-on-surface font-bold group-hover:text-primary transition-colors line-clamp-2">
+                    <p className="text-sm font-semibold text-on-surface group-hover:text-primary transition-colors leading-snug line-clamp-2">
                       <HighlightText text={t.title} query={debouncedSearch} />
-                    </h3>
+                    </p>
                     {t.category && (
-                      <span className="inline-block mt-1 text-[11px] font-medium text-on-surface-variant bg-surface-container-high px-2.5 py-0.5 rounded-full">
+                      <span className="mt-1 inline-block text-[10px] font-medium text-on-surface-variant bg-surface-container px-2 py-0.5 rounded-full">
                         {t.category}
                       </span>
                     )}
                   </div>
 
-                  {t.glpiLocationName && (
-                    <div className="flex items-center gap-1 text-[12px] text-on-surface-variant truncate">
-                      <MapPin className="w-3.5 h-3.5 text-primary shrink-0" />
-                      <span className="truncate">{t.glpiLocationName}</span>
+                  <div className="flex items-center justify-between gap-2 mt-auto">
+                    <div className="flex items-center gap-1.5 text-[11px] text-on-surface-variant">
+                      {t.glpiLocationName && <><MapPin className="w-3 h-3 shrink-0" /><span className="truncate max-w-[100px]">{t.glpiLocationName}</span></>}
                     </div>
-                  )}
-                  {t.dueDate && (
-                    <div className="flex items-center gap-1 text-[12px] truncate">
-                      <Clock className={`w-3.5 h-3.5 shrink-0 ${isDueOverdue(t) ? 'text-red-500' : 'text-amber-500'}`} />
-                      <span className={`font-semibold ${isDueOverdue(t) ? 'text-red-600 dark:text-red-400' : 'text-amber-700 dark:text-amber-400'}`}>
-                        {isDueOverdue(t) ? 'En retard' : 'Échéance'} {new Date(t.dueDate).toLocaleString('fr-FR')}
-                      </span>
-                    </div>
-                  )}
-                  <SlaBadge ticket={t} />
-                </div>
-
-                <div className="pt-md mt-md border-t border-outline-variant/40 flex items-center justify-between gap-2 text-body-sm">
-                  {canAssign ? (
-                    <div onClick={(e) => e.stopPropagation()}>
-                      <select
-                        value={t.status}
-                        onChange={(e) => handleQuickStatusChange(t.id, e.target.value, e)}
-                        className="text-xs font-semibold px-2 py-1 rounded-lg border border-outline-variant/60 bg-surface text-on-surface hover:border-primary transition-all cursor-pointer"
-                      >
-                        {STATUS_OPTIONS.map((s) => (
-                          <option key={s} value={s}>{s}</option>
-                        ))}
-                      </select>
-                    </div>
-                  ) : (
-                    <StatusBadge status={t.status} />
-                  )}
-
-                  <div className="flex items-center gap-2">
                     {t.assignedTo ? (
-                      <div className="flex items-center gap-1.5" title={`Assigné à : ${t.assignedTo.fullName}`}>
-                        <div className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[10px] font-bold border border-primary/20">
-                          {t.assignedTo.fullName?.charAt(0)?.toUpperCase()}
-                        </div>
-                        <span className="text-xs font-medium text-on-surface truncate max-w-[90px]">{t.assignedTo.fullName}</span>
+                      <div className="flex items-center gap-1.5">
+                        <Avatar name={t.assignedTo.fullName} />
+                        <span className="text-[11px] font-medium text-on-surface truncate max-w-[80px]">{t.assignedTo.fullName}</span>
                       </div>
                     ) : (
-                      <span className="text-[11px] text-outline italic">Non assigné</span>
+                      <span className="text-[10px] text-outline italic">Non assigné</span>
                     )}
                   </div>
-                </div>
-              </motion.div>
-            ))}
-          </AnimatePresence>
 
-          {tickets.length === 0 && (
-            <div className="col-span-full py-12">
-              <EmptyState
-                icon="tickets"
-                title="Aucun ticket trouvé"
-                description="Modifie les filtres ou crée un nouveau ticket."
-              />
-            </div>
-          )}
-        </motion.div>
-      ) : (
-        <motion.div variants={itemVariants} className="rounded-2xl border border-outline-variant/30 overflow-hidden bg-surface-container-lowest shadow-sm">
-          {/* Table Header */}
-          <div className={`flex items-center gap-4 px-5 py-3 border-b text-[11px] font-black uppercase tracking-widest select-none ${
-            isDark ? 'border-outline-variant/30 text-slate-400 bg-surface-container-low/40' : 'border-slate-200/80 text-slate-600 bg-slate-100/70'
-          }`}>
-            {showSelectionColumn && (
-              <div className="w-5 shrink-0">
-                <input type="checkbox"
-                  checked={tickets.length > 0 && selectedIds.length === tickets.length}
-                  onChange={toggleSelectAll}
-                  className="cursor-pointer accent-primary w-4 h-4 rounded"
-                />
-              </div>
-            )}
-            <div className="w-9 shrink-0" />
-            <button onClick={() => toggleSort('title')}
-              className={`flex-1 min-w-0 text-left flex items-center gap-1 hover:text-primary transition-colors cursor-pointer ${sortBy === 'title' ? 'text-primary' : ''}`}>
-              Ticket
-              {sortBy === 'title' ? (sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 text-outline/50" />}
-            </button>
-            <button onClick={() => toggleSort('status')}
-              className={`w-28 shrink-0 hidden md:block text-left flex items-center gap-1 hover:text-primary transition-colors cursor-pointer ${sortBy === 'status' ? 'text-primary' : ''}`}>
-              Statut
-              {sortBy === 'status' ? (sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 text-outline/50" />}
-            </button>
-            <button onClick={() => toggleSort('priority')}
-              className={`w-28 shrink-0 hidden lg:block text-left flex items-center gap-1 hover:text-primary transition-colors cursor-pointer ${sortBy === 'priority' ? 'text-primary' : ''}`}>
-              Priorité
-              {sortBy === 'priority' ? (sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 text-outline/50" />}
-            </button>
-            <button onClick={() => toggleSort('assignedTo')}
-              className={`w-36 shrink-0 hidden xl:block text-left flex items-center gap-1 hover:text-primary transition-colors cursor-pointer ${sortBy === 'assignedTo' ? 'text-primary' : ''}`}>
-              Assigné à
-              {sortBy === 'assignedTo' ? (sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 text-outline/50" />}
-            </button>
-            <button onClick={() => toggleSort('requester')}
-              className={`w-40 shrink-0 hidden xl:block text-left flex items-center gap-1 hover:text-primary transition-colors cursor-pointer ${sortBy === 'requester' ? 'text-primary' : ''}`}>
-              Demandeur
-              {sortBy === 'requester' ? (sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 text-outline/50" />}
-            </button>
-            <button onClick={() => toggleSort('createdAt')}
-              className={`w-24 shrink-0 hidden lg:block flex items-center gap-1 justify-end hover:text-primary transition-colors cursor-pointer ${sortBy === 'createdAt' ? 'text-primary' : ''}`}>
-              Date
-              {sortBy === 'createdAt' ? (sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 text-outline/50" />}
-            </button>
-            <div className="w-16 shrink-0" />
-          </div>
-
-          {/* Rows */}
-          <div className="divide-y divide-outline-variant/20">
-            <AnimatePresence mode="popLayout">
-              {tickets.map((t, idx) => {
-                const PCOLOR = {
-                  P1: { bg: 'bg-red-500',    ring: 'ring-red-500/30',    text: 'text-red-600 dark:text-red-400 font-bold',    badge: 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-400 border border-red-200 dark:border-red-500/25 font-bold'    },
-                  P2: { bg: 'bg-orange-500', ring: 'ring-orange-500/30', text: 'text-orange-600 dark:text-orange-400 font-bold', badge: 'bg-orange-50 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400 border border-orange-200 dark:border-orange-500/25 font-bold' },
-                  P3: { bg: 'bg-amber-500',  ring: 'ring-amber-500/30',  text: 'text-amber-700 dark:text-amber-400 font-bold',  badge: 'bg-amber-50 text-amber-800 dark:bg-amber-500/15 dark:text-amber-400 border border-amber-300 dark:border-amber-500/25 font-bold'  },
-                  P4: { bg: 'bg-blue-500',   ring: 'ring-blue-500/30',   text: 'text-blue-600 dark:text-blue-400 font-bold',   badge: 'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400 border border-blue-200 dark:border-blue-500/25 font-bold'   },
-                }[t.priority] || { bg: 'bg-slate-500', ring: 'ring-slate-500/30', text: 'text-slate-600 dark:text-slate-400', badge: 'bg-slate-50 text-slate-700 dark:bg-slate-500/15 dark:text-slate-300 border border-slate-200 dark:border-slate-500/25 font-bold' };
-
-                const SCOLOR = {
-                  NEW:     'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400 border border-blue-200 dark:border-blue-500/25 font-bold',
-                  OPEN:    'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/25 font-bold',
-                  PENDING: 'bg-amber-50 text-amber-800 dark:bg-yellow-500/15 dark:text-yellow-400 border border-amber-300 dark:border-yellow-500/25 font-bold',
-                  SOLVED:  'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/25 font-bold',
-                  CLOSED:  'bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-400 border border-slate-300 dark:border-slate-500/25 font-bold',
-                }[t.status] || 'bg-slate-50 text-slate-700 border border-slate-200 font-bold';
-
-                const SLABEL = { NEW: 'Nouveau', OPEN: 'En cours', PENDING: 'En attente', SOLVED: 'Résolu', CLOSED: 'Fermé' }[t.status] || t.status;
-                const PLABEL = { P1: 'P1 Critique', P2: 'P2 Haute', P3: 'P3 Moyenne', P4: 'P4 Basse' }[t.priority] || t.priority;
-
-                const PIcon = { P1: Flame, P2: AlertTriangle, P3: Info, P4: ArrowDown }[t.priority] || Ticket;
-
-                const dateStr = timeAgo(t.createdAt);
-                const reqName = t.requester?.fullName || t.sourceName || t.sourceEmail;
-                const reqEmail = t.requester?.email || t.sourceEmail;
-
-                return (
-                  <motion.div
-                    key={t.id}
-                    initial={false}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    layout
-                    onClick={() => navigate(`/tickets/${t.id}`)}
-                    className="flex items-center gap-4 px-5 py-3.5 cursor-pointer group transition-colors hover:bg-slate-50/80 dark:hover:bg-white/[0.03]"
-                  >
-                    {/* Checkbox */}
-                    {showSelectionColumn && (
-                      <div className="w-5 shrink-0" onClick={e => e.stopPropagation()}>
-                        <input type="checkbox"
-                          checked={selectedIds.includes(t.id)}
-                          onChange={() => toggleSelect(t.id)}
-                          className="cursor-pointer accent-primary w-4 h-4 rounded"
-                        />
-                      </div>
-                    )}
-
-                    {/* Priority Icon */}
-                    <div className={`w-9 h-9 shrink-0 rounded-xl flex items-center justify-center ring-1 ${PCOLOR.ring}`}>
-                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${PCOLOR.badge}`}>
-                        <PIcon className="w-4 h-4" />
-                      </div>
-                    </div>
-
-                    {/* Main content */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-0.5">
-                        <span className={`font-mono text-[10px] font-bold ${PCOLOR.text}`}>#{t.id}</span>
-                        {t.aiProcessed && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-400 text-[9px] font-bold border border-purple-200 dark:border-purple-500/20">
-                            <Sparkles className="w-2.5 h-2.5" />IA
-                          </span>
-                        )}
-                        {t.glpiTicketId && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 dark:bg-surface-container-high dark:text-on-surface-variant text-[9px] font-semibold border border-slate-200 dark:border-outline-variant/50">
-                            <RefreshCw className="w-2.5 h-2.5" />GLPI
-                          </span>
-                        )}
-                      </div>
-                      <p className="font-bold text-sm text-slate-900 dark:text-white truncate leading-tight group-hover:text-primary transition-colors">
-                        <HighlightText text={t.title} query={debouncedSearch} />
-                      </p>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        {t.category && (
-                          <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 truncate">
-                            {t.category}
-                          </span>
-                        )}
-                        {t.glpiLocationName && (
-                          <span className="text-[11px] font-medium text-slate-600 dark:text-slate-400 flex items-center gap-0.5 truncate max-w-[140px]">
-                            <MapPin className="w-2.5 h-2.5 shrink-0 text-primary" />
-                            {t.glpiLocationName}
-                          </span>
-                        )}
-                        {reqName && (
-                          <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 flex items-center gap-0.5 truncate max-w-[150px] xl:hidden" title={`Demandeur: ${reqName}`}>
-                            <User className="w-2.5 h-2.5 shrink-0 text-emerald-500" />
-                            {reqName}
-                          </span>
-                        )}
-                        {!t.category && !t.glpiLocationName && !reqName && (
-                          <span className="text-[11px] font-medium text-slate-500 dark:text-slate-500">
-                            {t.team?.name || 'Aucune équipe'}
-                          </span>
-                        )}
-                        {t.dueDate && (
-                          <span
-                            className={`inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${
-                              isDueOverdue(t)
-                                ? 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-400 border-red-200 dark:border-red-500/30'
-                                : 'bg-amber-50 text-amber-800 dark:bg-amber-500/15 dark:text-amber-400 border-amber-300 dark:border-amber-500/30'
-                            }`}
-                            title={`Échéance : ${new Date(t.dueDate).toLocaleString('fr-FR')}`}
-                          >
-                            <Clock className="w-2.5 h-2.5 shrink-0" />
-                            {isDueOverdue(t) ? 'En retard' : new Date(t.dueDate).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
-                          </span>
-                        )}
-                        <SlaBadge ticket={t} />
-                      </div>
-                    </div>
-
-                    {/* Status badge / Select */}
-                    <div className="w-28 shrink-0 hidden md:block" onClick={e => { if (canAssign) e.stopPropagation(); }}>
-                      {canAssign ? (
-                        <select
-                          value={t.status}
-                          onChange={(e) => handleQuickStatusChange(t.id, e.target.value, e)}
-                          className={`text-[10px] font-bold px-2.5 py-1 rounded-full border cursor-pointer transition-all w-full focus:outline-none focus:ring-2 focus:ring-primary/20 ${SCOLOR}`}
-                        >
-                          {STATUS_OPTIONS.map(s => <option key={s} value={s} className="bg-surface text-on-surface">{s}</option>)}
-                        </select>
-                      ) : (
-                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold border ${SCOLOR}`}>
-                          {SLABEL}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Priority badge */}
-                    <div className="w-28 shrink-0 hidden lg:block">
-                      <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold border ${PCOLOR.badge}`}>
-                        <PIcon className="w-3 h-3" />
-                        {PLABEL}
-                      </span>
-                    </div>
-
-                    {/* Assigned to */}
-                    <div className="w-36 shrink-0 hidden xl:flex items-center gap-2">
-                      {t.assignedTo ? (
-                        <div className="flex items-center gap-2 min-w-0" title={`Assigné à : ${t.assignedTo.fullName}`}>
-                          <div className="w-6 h-6 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center text-[10px] font-bold border border-blue-500/20 shrink-0">
-                            {t.assignedTo.fullName?.charAt(0)?.toUpperCase()}
-                          </div>
-                          <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">{t.assignedTo.fullName}</span>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-slate-500 dark:text-slate-400 italic font-medium">Non assigné</span>
-                      )}
-                    </div>
-
-                    {/* Demandeur */}
-                    <div className="w-40 shrink-0 hidden xl:flex items-center gap-2">
-                      {reqName ? (
-                        <div className="flex items-center gap-2 min-w-0" title={`Demandeur : ${reqName}${reqEmail ? ` (${reqEmail})` : ''}`}>
-                          <div className="w-6 h-6 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-[10px] font-bold border border-emerald-500/20 shrink-0">
-                            {reqName.charAt(0).toUpperCase()}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate block leading-tight">{reqName}</span>
-                            {reqEmail && <span className="text-[10px] text-slate-400 truncate block leading-tight">{reqEmail}</span>}
-                          </div>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-slate-500 dark:text-slate-400 italic font-medium">Non spécifié</span>
-                      )}
-                    </div>
-
-                    {/* Date */}
-                    <div className="w-24 shrink-0 hidden lg:block text-right">
-                      <div className={`text-xs font-semibold ${isDueOverdue(t) ? 'text-red-600 dark:text-red-400' : 'text-slate-700 dark:text-slate-300'}`}>
-                        {dateStr}
-                      </div>
-                      {t.dueDate && (
-                        <div className={`text-[10px] font-bold flex items-center gap-0.5 justify-end ${isDueOverdue(t) ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}`} title={`Échéance : ${new Date(t.dueDate).toLocaleString('fr-FR')}`}>
-                          <Clock className="w-2.5 h-2.5" />
-                          {isDueOverdue(t) ? 'Retard' : new Date(t.dueDate).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Actions */}
-                    <div className="w-16 shrink-0 flex items-center justify-end gap-1">
-                      {canDelete && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); askDeleteOne(t.id); }}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100"
-                          title="Supprimer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      <div className="p-1.5 rounded-lg text-slate-400 group-hover:text-primary group-hover:bg-primary/10 transition-all">
-                        <ChevronRight className="w-4 h-4" />
-                      </div>
-                    </div>
-                  </motion.div>
-                );
-              })}
+                  <SlaBadge ticket={t} />
+                </motion.div>
+              ))}
             </AnimatePresence>
 
             {tickets.length === 0 && (
-              <div className="py-16 flex flex-col items-center justify-center">
-                <EmptyState
-                  icon="tickets"
-                  title="Aucun ticket trouvé"
-                  description="Modifie les filtres ou crée un nouveau ticket."
-                />
+              <div className="col-span-full py-16">
+                <EmptyState icon="tickets" title="Aucun ticket trouvé" description="Modifie les filtres ou crée un nouveau ticket." />
               </div>
             )}
           </div>
-        </motion.div>
-      )}
+        ) : (
+          /* ── TABLE VIEW ─────────────────────────────────────────────────── */
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className={`text-[10px] font-bold uppercase tracking-widest select-none border-b ${
+                isDark ? 'border-outline-variant/20 text-slate-500 bg-surface-container-low/30' : 'border-slate-200/60 text-slate-400 bg-slate-50/70'
+              }`}>
+                {showSelectionColumn && (
+                  <th className="w-10 px-4 py-2.5 text-left">
+                    <input
+                      type="checkbox"
+                      checked={tickets.length > 0 && selectedIds.length === tickets.length}
+                      onChange={toggleSelectAll}
+                      className="cursor-pointer accent-primary w-3.5 h-3.5 rounded"
+                    />
+                  </th>
+                )}
+                <th className="w-6 px-2 py-2.5" /> {/* Priority dot col */}
+                <SortTH field="title" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left min-w-0 flex-1">
+                  Ticket
+                </SortTH>
+                <SortTH field="status" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left w-28 hidden md:table-cell">
+                  Statut
+                </SortTH>
+                <SortTH field="assignedTo" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left w-36 hidden xl:table-cell">
+                  Assigné
+                </SortTH>
+                <SortTH field="requester" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left w-36 hidden xl:table-cell">
+                  Demandeur
+                </SortTH>
+                <SortTH field="createdAt" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-right w-20 hidden lg:table-cell">
+                  Date
+                </SortTH>
+                <th className="w-12 px-3 py-2.5" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-outline-variant/10">
+              <AnimatePresence mode="popLayout">
+                {tickets.map((t) => {
+                  const dateStr = timeAgo(t.createdAt);
+                  const reqName = t.requester?.fullName || t.sourceName || t.sourceEmail;
+                  const overdue = isDueOverdue(t);
 
+                  return (
+                    <motion.tr
+                      key={t.id}
+                      initial={false}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      layout
+                      onClick={() => navigate(`/tickets/${t.id}`)}
+                      className={`cursor-pointer group transition-colors ${
+                        isDark ? 'hover:bg-white/[0.025]' : 'hover:bg-slate-50'
+                      }`}
+                    >
+                      {/* Checkbox */}
+                      {showSelectionColumn && (
+                        <td className="w-10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.includes(t.id)}
+                            onChange={() => toggleSelect(t.id)}
+                            className="cursor-pointer accent-primary w-3.5 h-3.5 rounded"
+                          />
+                        </td>
+                      )}
+
+                      {/* Priority dot */}
+                      <td className="w-6 px-2 py-3">
+                        <PriorityDot priority={t.priority} />
+                      </td>
+
+                      {/* Main cell: ID + Title + meta */}
+                      <td className="px-3 py-3 min-w-0">
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          <span className={`font-mono text-[10px] font-bold tabular-nums ${PRIORITY_DOT[t.priority]?.text || 'text-on-surface-variant'}`}>
+                            #{t.id}
+                          </span>
+                          {t.aiProcessed && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-500/10 text-purple-500 dark:text-purple-400">IA</span>
+                          )}
+                          {t.glpiTicketId && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-surface-container text-on-surface-variant">GLPI</span>
+                          )}
+                          {overdue && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/10 text-red-500 dark:text-red-400">Retard</span>
+                          )}
+                          <SlaBadge ticket={t} compact />
+                        </div>
+                        <p className="text-sm font-semibold text-on-surface group-hover:text-primary transition-colors truncate max-w-[340px] leading-tight">
+                          <HighlightText text={t.title} query={debouncedSearch} />
+                        </p>
+                        {/* Sub-line */}
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {t.category && (
+                            <span className="text-[10px] text-on-surface-variant truncate max-w-[120px]">{t.category}</span>
+                          )}
+                          {t.glpiLocationName && (
+                            <span className="text-[10px] text-on-surface-variant/70 flex items-center gap-0.5 truncate max-w-[120px]">
+                              <MapPin className="w-2.5 h-2.5 shrink-0 text-primary/60" />
+                              {t.glpiLocationName}
+                            </span>
+                          )}
+                          {/* Demandeur visible sur petits écrans */}
+                          {reqName && (
+                            <span className="xl:hidden text-[10px] text-on-surface-variant/70 flex items-center gap-0.5 truncate max-w-[120px]">
+                              <User className="w-2.5 h-2.5 shrink-0" />
+                              {reqName}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Status */}
+                      <td className="px-3 py-3 w-28 hidden md:table-cell" onClick={(e) => { if (canAssign) e.stopPropagation(); }}>
+                        {canAssign ? (
+                          <select
+                            value={t.status}
+                            onChange={(e) => handleQuickStatusChange(t.id, e.target.value, e)}
+                            className="text-[10px] font-semibold px-2 py-1 rounded-md border border-outline-variant/40 bg-surface text-on-surface cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary/30 transition-all w-full"
+                          >
+                            {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        ) : (
+                          <StatusPill status={t.status} />
+                        )}
+                      </td>
+
+                      {/* Assignee */}
+                      <td className="px-3 py-3 w-36 hidden xl:table-cell">
+                        {t.assignedTo ? (
+                          <div className="flex items-center gap-1.5 min-w-0" title={t.assignedTo.fullName}>
+                            <Avatar name={t.assignedTo.fullName} />
+                            <span className="text-xs font-medium text-on-surface truncate">{t.assignedTo.fullName}</span>
+                          </div>
+                        ) : (
+                          <span className="text-[11px] text-on-surface-variant/60 italic">Non assigné</span>
+                        )}
+                      </td>
+
+                      {/* Requester */}
+                      <td className="px-3 py-3 w-36 hidden xl:table-cell">
+                        {reqName ? (
+                          <div className="flex items-center gap-1.5 min-w-0" title={reqName}>
+                            <Avatar name={reqName} colorClass="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20" />
+                            <span className="text-xs font-medium text-on-surface truncate">{reqName}</span>
+                          </div>
+                        ) : (
+                          <span className="text-[11px] text-on-surface-variant/60 italic">—</span>
+                        )}
+                      </td>
+
+                      {/* Date */}
+                      <td className="px-3 py-3 w-20 hidden lg:table-cell text-right">
+                        <span className={`text-[11px] font-medium tabular-nums ${overdue ? 'text-red-500' : 'text-on-surface-variant'}`}>
+                          {dateStr}
+                        </span>
+                      </td>
+
+                      {/* Actions */}
+                      <td className="px-3 py-3 w-12">
+                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {canDelete && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); askDeleteOne(t.id); }}
+                              className="p-1.5 rounded-md text-on-surface-variant hover:text-red-500 hover:bg-red-500/10 transition-all"
+                              title="Supprimer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          <div className="p-1.5 rounded-md text-on-surface-variant group-hover:text-primary transition-colors">
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </div>
+                        </div>
+                      </td>
+                    </motion.tr>
+                  );
+                })}
+              </AnimatePresence>
+
+              {tickets.length === 0 && (
+                <tr>
+                  <td colSpan={99} className="py-16">
+                    <EmptyState icon="tickets" title="Aucun ticket trouvé" description="Modifie les filtres ou crée un nouveau ticket." />
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
 
-      {/* Pagination */}
+      {/* ── BULK ACTIONS BAR (floating, bottom) ─────────────────────────────── */}
+      <AnimatePresence>
+        {selectedIds.length > 0 && (
+          <motion.div
+            initial={{ y: 80, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 80, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 40 }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest shadow-2xl shadow-black/20"
+          >
+            <span className="text-xs font-bold text-on-surface-variant pr-2 border-r border-outline-variant/30 mr-1">
+              {selectedIds.length} sélectionné{selectedIds.length > 1 ? 's' : ''}
+            </span>
+            {canAssign && (
+              <>
+                <select
+                  value={bulkChanges.status}
+                  onChange={(e) => setBulkChanges((b) => ({ ...b, status: e.target.value }))}
+                  className="text-xs font-semibold px-2 py-1.5 rounded-lg border border-outline-variant/40 bg-surface text-on-surface cursor-pointer focus:outline-none"
+                >
+                  <option value="">Statut…</option>
+                  {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+                <select
+                  value={bulkChanges.priority}
+                  onChange={(e) => setBulkChanges((b) => ({ ...b, priority: e.target.value }))}
+                  className="text-xs font-semibold px-2 py-1.5 rounded-lg border border-outline-variant/40 bg-surface text-on-surface cursor-pointer focus:outline-none"
+                >
+                  <option value="">Priorité…</option>
+                  {PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+                <select
+                  value={bulkChanges.assignedToId}
+                  onChange={(e) => setBulkChanges((b) => ({ ...b, assignedToId: e.target.value }))}
+                  className="text-xs font-semibold px-2 py-1.5 rounded-lg border border-outline-variant/40 bg-surface text-on-surface cursor-pointer focus:outline-none max-w-[120px]"
+                >
+                  <option value="">Assigner…</option>
+                  <option value="none">Non assigné</option>
+                  {users.filter((u) => u.isActive).map((u) => <option key={u.id} value={u.id}>{u.fullName}</option>)}
+                </select>
+                <button
+                  onClick={handleBulkUpdate}
+                  disabled={bulkUpdating}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-bold hover:opacity-90 transition-opacity disabled:opacity-50"
+                >
+                  <CheckSquare className="w-3.5 h-3.5" />
+                  {bulkUpdating ? 'Application…' : 'Appliquer'}
+                </button>
+              </>
+            )}
+            {canBulkDelete && (
+              <button
+                onClick={askDeleteSelected}
+                disabled={deleting}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/30 text-red-500 text-xs font-semibold hover:bg-red-500/10 transition-colors disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Supprimer
+              </button>
+            )}
+            <button
+              onClick={() => { setSelectedIds([]); setBulkChanges({ status: '', priority: '', assignedToId: '' }); }}
+              className="p-1.5 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── PAGINATION ───────────────────────────────────────────────────────── */}
       {totalPages > 1 && (
-        <motion.div variants={itemVariants}
-          className="flex items-center justify-between px-4 py-3 rounded-xl border border-outline-variant/60 bg-surface-container-lowest"
-        >
+        <div className="flex items-center justify-between px-4 sm:px-6 py-2.5 border-t border-outline-variant/20 bg-surface-container-lowest shrink-0">
           <div className="flex items-center gap-2">
-            <span className="text-[12px] text-on-surface-variant">
-              {totalCount} ticket{totalCount > 1 ? 's' : ''} — Page {page}/{totalPages}
+            <span className="text-[11px] text-on-surface-variant tabular-nums">
+              {totalCount} ticket{totalCount > 1 ? 's' : ''} — p.{page}/{totalPages}
             </span>
             <select
               value={pageSize}
               onChange={(e) => { const v = Number(e.target.value); setPageSize(v); localStorage.setItem('tickets_page_size', String(v)); setPage(1); }}
               className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-outline-variant/40 bg-surface text-on-surface cursor-pointer focus:outline-none"
             >
-              {[25, 50, 100, 200].map((n) => <option key={n} value={n}>{n} / page</option>)}
+              {[25, 50, 100, 200].map((n) => <option key={n} value={n}>{n}/p</option>)}
             </select>
           </div>
           <div className="flex items-center gap-1">
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page <= 1}
-              className="w-8 h-8 flex items-center justify-center rounded-lg border border-outline-variant/60 hover:bg-surface-container-low transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              className="w-7 h-7 flex items-center justify-center rounded-lg border border-outline-variant/40 hover:bg-surface-container transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             >
-              <ChevronLeft className="w-4 h-4 text-on-surface-variant" />
+              <ChevronLeft className="w-3.5 h-3.5 text-on-surface-variant" />
             </button>
             {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
               let pageNum;
@@ -1948,10 +1339,8 @@ export default function Tickets() {
                 <button
                   key={pageNum}
                   onClick={() => setPage(pageNum)}
-                  className={`w-8 h-8 rounded-lg text-[12px] font-semibold transition-colors ${
-                    pageNum === page
-                      ? 'bg-primary text-white shadow-sm'
-                      : 'text-on-surface-variant hover:bg-surface-container-low'
+                  className={`w-7 h-7 rounded-lg text-[11px] font-semibold transition-colors ${
+                    pageNum === page ? 'bg-primary text-white' : 'text-on-surface-variant hover:bg-surface-container'
                   }`}
                 >
                   {pageNum}
@@ -1961,12 +1350,284 @@ export default function Tickets() {
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={page >= totalPages}
-              className="w-8 h-8 flex items-center justify-center rounded-lg border border-outline-variant/60 hover:bg-surface-container-low transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              className="w-7 h-7 flex items-center justify-center rounded-lg border border-outline-variant/40 hover:bg-surface-container transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             >
-              <ChevronRight className="w-4 h-4 text-on-surface-variant" />
+              <ChevronRight className="w-3.5 h-3.5 text-on-surface-variant" />
             </button>
           </div>
-        </motion.div>
+        </div>
+      )}
+
+      {/* ── FILTER SLIDE-OVER ────────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {filterPanelOpen && (
+          <FilterPanel
+            open={filterPanelOpen}
+            onClose={() => setFilterPanelOpen(false)}
+            filters={filters}
+            onUpdate={updateFilter}
+            onClear={clearFilters}
+            teams={teams}
+            users={users}
+            flatCategories={flatCategories}
+            autonomousMode={autonomousMode}
+            savedViews={savedViews}
+            onSaveView={saveCurrentView}
+            onRestoreView={restoreView}
+            onDeleteSavedView={deleteSavedView}
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            setDebouncedSearch={setDebouncedSearch}
+            setPage={setPage}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── CREATE TICKET MODAL ──────────────────────────────────────────────── */}
+      {createPortal(
+        <AnimatePresence>
+          {showForm && (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={toggleForm}
+                className="fixed inset-0 bg-black/60 backdrop-blur-sm cursor-pointer"
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.97, y: 12 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.97, y: 12 }}
+                transition={{ type: 'spring', duration: 0.3, bounce: 0.1 }}
+                className={`relative max-w-3xl w-full rounded-2xl border p-6 sm:p-7 shadow-2xl overflow-hidden max-h-[92vh] flex flex-col z-10 ${
+                  isDark ? 'bg-surface-container-lowest border-outline-variant/40 text-on-surface' : 'bg-white border-slate-200 text-slate-900'
+                }`}
+              >
+                {/* Modal header */}
+                <div className="flex items-center justify-between pb-4 border-b border-outline-variant/20 mb-5 shrink-0">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-1.5 bg-primary/10 rounded-lg">
+                      <Plus className="w-4 h-4 text-primary" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold text-on-surface">Nouveau ticket d'assistance</h3>
+                      <p className="text-[11px] text-on-surface-variant">Remplissez les informations ci-dessous.</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={toggleForm}
+                    className="p-1.5 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleCreate} className="flex-1 overflow-y-auto space-y-4 pr-1">
+                  {error && (
+                    <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-700 dark:text-red-400 text-xs font-semibold flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      <span className="flex-1">{error}</span>
+                      <button type="button" onClick={() => setError('')} className="p-0.5 hover:bg-red-500/20 rounded"><X className="w-3 h-3" /></button>
+                    </div>
+                  )}
+
+                  {templates.length > 0 && (
+                    <FormField label="Modèle (pré-remplissage)">
+                      <select value={selectedTemplate} onChange={(e) => applyTemplate(e.target.value)} className={FIELD_CLS}>
+                        <option value="">— Aucun modèle —</option>
+                        {templates.map((t) => <option key={t.id} value={t.id}>{t.name}{t.category ? ` (${t.category})` : ''}</option>)}
+                      </select>
+                    </FormField>
+                  )}
+
+                  <FormField label="Titre *">
+                    <input
+                      type="text" required value={form.title}
+                      onChange={(e) => setForm({ ...form, title: e.target.value })}
+                      placeholder="ex: Problème d'impression ou accès réseau..."
+                      className={FIELD_CLS}
+                    />
+                  </FormField>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <FormField label="Catégorie">
+                      <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className={FIELD_CLS}>
+                        <option value="">Sélectionner une catégorie</option>
+                        {flatCategories.map((o) => <option key={o.id} value={o.name}>{o.label}</option>)}
+                      </select>
+                    </FormField>
+                    <FormField label="Priorité">
+                      <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })} className={FIELD_CLS}>
+                        {PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{p} — {p === 'P1' ? 'Critique' : p === 'P2' ? 'Haute' : p === 'P3' ? 'Moyenne' : 'Basse'}</option>)}
+                      </select>
+                    </FormField>
+                  </div>
+
+                  {/* Champs personnalisés */}
+                  {customFieldDefs.length > 0 && (
+                    <div className="rounded-xl border border-dashed border-primary/25 bg-primary/5 p-4 space-y-3">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-primary flex items-center gap-1.5">
+                        <ListChecks className="w-3.5 h-3.5" /> Informations complémentaires
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {customFieldDefs.map((f) => {
+                          const key = String(f.id);
+                          const set = (v) => setCustomValues((prev) => ({ ...prev, [key]: v }));
+                          return (
+                            <div key={f.id} className={f.type === 'TEXTAREA' ? 'sm:col-span-2' : ''}>
+                              <FormField label={<>{f.label} {f.required && <span className="text-red-500">*</span>}</>}>
+                                {f.type === 'TEXT' && <input type="text" value={customValues[key] || ''} onChange={(e) => set(e.target.value)} className={FIELD_CLS} />}
+                                {f.type === 'TEXTAREA' && <textarea rows={3} value={customValues[key] || ''} onChange={(e) => set(e.target.value)} className={`${FIELD_CLS} resize-none`} />}
+                                {f.type === 'NUMBER' && <input type="number" value={customValues[key] || ''} onChange={(e) => set(e.target.value)} className={FIELD_CLS} />}
+                                {f.type === 'DATE' && <input type="date" value={customValues[key] || ''} onChange={(e) => set(e.target.value)} className={FIELD_CLS} />}
+                                {f.type === 'CHECKBOX' && (
+                                  <label className="flex items-center gap-2 cursor-pointer">
+                                    <input type="checkbox" checked={!!customValues[key]} onChange={(e) => set(e.target.checked ? 'true' : '')} className="accent-primary w-4 h-4" />
+                                    <span className="text-sm text-on-surface">{customValues[key] === 'true' ? 'Oui' : 'Non'}</span>
+                                  </label>
+                                )}
+                                {f.type === 'SELECT' && (
+                                  <select value={customValues[key] || ''} onChange={(e) => set(e.target.value)} className={`${FIELD_CLS} cursor-pointer`}>
+                                    <option value="">— Sélectionner —</option>
+                                    {(f.options || []).map((o) => {
+                                      const v = typeof o === 'string' ? o : o.value;
+                                      const l = typeof o === 'string' ? o : o.label;
+                                      return <option key={v} value={v}>{l}</option>;
+                                    })}
+                                  </select>
+                                )}
+                              </FormField>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <FormField label="Type de demande">
+                      <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className={FIELD_CLS}>
+                        {TYPE_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                      </select>
+                    </FormField>
+                    {locations.length > 0 && (
+                      <FormField label="Lieu / Emplacement">
+                        <SearchableSelect
+                          options={locations} value={form.locationId}
+                          onChange={(val) => setForm({ ...form, locationId: val })}
+                          placeholder="Rechercher un lieu GLPI..."
+                          searchPlaceholder="Rechercher un lieu..."
+                          labelKey="name" valueKey="id" subLabelKey="completename" icon={MapPin}
+                        />
+                      </FormField>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <FormField label="Équipe assignée">
+                      <select value={form.teamId} onChange={(e) => setForm({ ...form, teamId: e.target.value })} className={FIELD_CLS}>
+                        <option value="">Sélectionner une équipe</option>
+                        {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                    </FormField>
+                    <FormField label="Technicien assigné">
+                      <RemoteUserSelect
+                        value={form.assignedToId || ''} valueLabel={users.find((u) => String(u.id) === String(form.assignedToId))?.fullName}
+                        onChange={(val) => setForm({ ...form, assignedToId: val })}
+                        placeholder="Auto-assignation ou technicien..."
+                        searchPlaceholder="Rechercher un technicien..."
+                      />
+                    </FormField>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <FormField label="Urgence">
+                      <select value={form.urgency} onChange={(e) => setForm({ ...form, urgency: e.target.value })} className={FIELD_CLS}>
+                        {URGENCY_IMPACT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                    </FormField>
+                    <FormField label="Impact">
+                      <select value={form.impact} onChange={(e) => setForm({ ...form, impact: e.target.value })} className={FIELD_CLS}>
+                        {URGENCY_IMPACT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                    </FormField>
+                  </div>
+
+                  <FormField label="Échéance (optionnel)">
+                    <input
+                      type="datetime-local" value={form.dueDate}
+                      onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
+                      className={FIELD_CLS}
+                    />
+                  </FormField>
+
+                  {canAssign && (
+                    <FormField label={`Demandeur (pour tiers)`}>
+                      <RemoteUserSelect
+                        value={form.requesterId || ''} valueLabel={users.find((u) => String(u.id) === String(form.requesterId))?.fullName}
+                        onChange={(val) => setForm({ ...form, requesterId: val })}
+                        placeholder={`Moi-même (${user?.fullName || ''})`}
+                        searchPlaceholder="Rechercher un demandeur..."
+                      />
+                    </FormField>
+                  )}
+
+                  <FormField label={`Observateurs (${form.observerIds?.length || 0})`}>
+                    <RemoteUserMultiSelect
+                      selectedIds={form.observerIds || []}
+                      onChange={(nextIds) => setForm({ ...form, observerIds: nextIds })}
+                      placeholder="Rechercher des observateurs..."
+                    />
+                  </FormField>
+
+                  {assetOptions.length > 0 && (
+                    <FormField label={`Équipements concernés (${form.assetIds?.length || 0})`}>
+                      <SearchableMultiSelect
+                        options={assetOptions} selectedIds={form.assetIds || []}
+                        onChange={(nextIds) => setForm({ ...form, assetIds: nextIds })}
+                        placeholder="Rechercher un équipement..."
+                        searchPlaceholder="Nom, n° série, inventaire..."
+                        labelKey="label" valueKey="id" subLabelKey="subLabel"
+                      />
+                    </FormField>
+                  )}
+
+                  <FormField label="Description *">
+                    <textarea
+                      rows={4} required value={form.content}
+                      onChange={(e) => setForm({ ...form, content: e.target.value })}
+                      placeholder="Décrivez le problème ou le besoin en détails..."
+                      className={`${FIELD_CLS} resize-none`}
+                    />
+                  </FormField>
+
+                  <FormField label="Pièce jointe (optionnel)">
+                    <input
+                      type="file"
+                      onChange={(e) => setAttachment(e.target.files[0])}
+                      className="block w-full text-xs text-on-surface-variant file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border file:border-primary/20 file:text-xs file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer"
+                    />
+                  </FormField>
+
+                  <div className="pt-4 border-t border-outline-variant/20 flex justify-end gap-2.5 shrink-0">
+                    <button type="button" onClick={toggleForm} className="px-4 py-2 rounded-xl border border-outline-variant/40 font-semibold text-sm transition-all bg-surface text-on-surface hover:bg-surface-container">
+                      Annuler
+                    </button>
+                    <button
+                      type="submit" disabled={creating}
+                      className="px-5 py-2 rounded-xl bg-primary text-white font-bold text-sm transition-all disabled:opacity-50 hover:opacity-90 shadow-sm"
+                    >
+                      {creating ? 'Création...' : 'Créer le ticket'}
+                    </button>
+                  </div>
+                </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
       )}
 
       <ConfirmDialog
@@ -1983,113 +1644,68 @@ export default function Tickets() {
         onConfirm={confirmDeleteAction}
         onCancel={() => setConfirmDelete(null)}
       />
-    </motion.div>
+    </div>
   );
 }
 
-// Une échéance manuelle est « en retard » si elle est dépassée et que le ticket n'est pas encore résolu/clôturé
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
 function isDueOverdue(t) {
   if (!t?.dueDate) return false;
   if (t.status === 'SOLVED' || t.status === 'CLOSED') return false;
   return new Date(t.dueDate) < new Date();
 }
 
-function TH({ children, className }) {
+const FIELD_CLS = 'w-full px-3 py-2 rounded-lg border border-outline-variant/40 bg-surface text-on-surface text-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary placeholder-on-surface-variant/50';
+
+function FormField({ label, children }) {
   return (
-    <th className={`px-md py-3.5 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider whitespace-nowrap ${className || ''}`}>
+    <div>
+      <label className="block text-[11px] font-semibold text-on-surface-variant mb-1.5 uppercase tracking-wide">{label}</label>
       {children}
-    </th>
+    </div>
   );
 }
 
-function SortableTH({ children, field, current, order, onSort, className }) {
-  const isActive = current === field;
-  return (
-    <th
-      onClick={() => onSort(field)}
-      className={`px-md py-3.5 font-label-md text-label-md uppercase tracking-wider whitespace-nowrap cursor-pointer transition-colors hover:text-primary ${
-        isActive ? 'text-primary font-bold' : 'text-on-surface-variant'
-      } ${className || ''}`}
-    >
-      <div className="flex items-center gap-1">
-        <span>{children}</span>
-        {isActive ? (
-          order === 'asc' ? <ArrowUp className="w-3.5 h-3.5" /> : <ArrowDown className="w-3.5 h-3.5" />
-        ) : (
-          <ArrowUpDown className="w-3.5 h-3.5 text-outline/50" />
-        )}
-      </div>
-    </th>
-  );
-}
-
-function FilterSelect({ value, onChange, label, options }) {
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">{label}</span>
-      <select
-        className="px-3 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface font-body-sm text-body-sm hover:bg-surface-container-low transition-all focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary cursor-pointer"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        {options.map((o) => (
-          <option key={o.v} value={o.v} disabled={o.disabled}>{o.l}</option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function ChipFilter({ active, onClick, Icon, label }) {
+function StatPill({ color, count, label, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`px-3 py-1 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap border ${
-        active
-          ? 'bg-primary text-white border-primary shadow-sm'
-          : 'bg-surface border-outline-variant/60 text-on-surface-variant hover:bg-surface-container-high'
-      }`}
+      className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all whitespace-nowrap"
     >
-      <Icon className="w-3.5 h-3.5" />
-      {label}
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${color}`} />
+      <span className="tabular-nums font-bold text-on-surface">{count}</span>
+      <span>{label}</span>
     </button>
   );
 }
 
-const STATUS_CONFIG = {
-  NEW: { label: 'Nouveau', bg: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20', Icon: Sparkles },
-  OPEN: { label: 'En cours (Attribué)', bg: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20', Icon: Radio },
-  PLANNED: { label: 'En cours (Planifié)', bg: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20', Icon: Calendar },
-  PENDING: { label: 'En attente', bg: 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border border-yellow-500/20', Icon: Clock },
-  SOLVED: { label: 'Résolu', bg: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20', Icon: CheckCircle2 },
-  CLOSED: { label: 'Fermé', bg: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20', Icon: Lock },
-};
-
-const PRIORITY_CONFIG = {
-  P1: { label: 'P1 - Critique', bg: 'bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30', Icon: Flame },
-  P2: { label: 'P2 - Haute', bg: 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20', Icon: AlertTriangle },
-  P3: { label: 'P3 - Moyenne', bg: 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20', Icon: Info },
-  P4: { label: 'P4 - Basse', bg: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20', Icon: ArrowDown },
-};
-
-function StatusBadge({ status }) {
-  const conf = STATUS_CONFIG[status] || STATUS_CONFIG.NEW;
-  const Icon = conf.Icon;
+function ActiveChip({ label, onRemove }) {
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${conf.bg}`}>
-      <Icon className="w-3.5 h-3.5" />
-      {conf.label}
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-container border border-outline-variant/40 text-[11px] font-medium text-on-surface whitespace-nowrap shrink-0">
+      {label}
+      <button onClick={onRemove} className="p-0.5 rounded-full hover:bg-outline-variant/30 transition-colors">
+        <X className="w-2.5 h-2.5" />
+      </button>
     </span>
   );
 }
 
-function PriorityBadge({ priority }) {
-  const conf = PRIORITY_CONFIG[priority] || PRIORITY_CONFIG.P3;
-  const Icon = conf.Icon;
+function SortTH({ field, current, order, onSort, className, children }) {
+  const active = current === field;
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${conf.bg}`}>
-      <Icon className="w-3.5 h-3.5" />
-      {conf.label}
-    </span>
+    <th
+      onClick={() => onSort(field)}
+      className={`cursor-pointer select-none transition-colors hover:text-primary ${active ? 'text-primary' : ''} ${className || ''}`}
+    >
+      <div className="flex items-center gap-1">
+        {children}
+        {active ? (
+          order === 'asc' ? <ArrowUp className="w-2.5 h-2.5" /> : <ArrowDown className="w-2.5 h-2.5" />
+        ) : (
+          <ArrowUpDown className="w-2.5 h-2.5 opacity-30" />
+        )}
+      </div>
+    </th>
   );
 }

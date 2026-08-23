@@ -94,6 +94,8 @@ async function processMessage(message, account) {
   // biaisées par le texte de signature répété à chaque message du fil.
   const cleanBody = await stripSignature(bodyPreview);
 
+  let analysis = null;
+
   const incoming = await prisma.incomingEmail.create({
     data: {
       graphMessageId, internetMessageId, conversationId, inReplyTo, references,
@@ -191,6 +193,7 @@ async function processMessage(message, account) {
         conversationHistory: recentMessages.reverse(),
         fromEmail,
         ticketId: match.ticketId, // pour injecter les rejets récents dans le prompt
+        headers,
       });
 
       await applyIntentActions(match.ticketId, intentResult, fromEmail, {
@@ -268,14 +271,15 @@ async function processMessage(message, account) {
       return updated;
     }
 
-    // Couche 1 : Pré-filtre spam déterministe (sans appel LLM)
+    // Couche 1 : Pré-filtre spam et mails d'information déterministe (sans appel LLM)
     const { checkEmailSpam } = require('./emailSpamFilter');
     const spamCheck = checkEmailSpam(headers, subject, bodyPreview, fromEmail);
     if (spamCheck.isSpam) {
-      console.log(`[emailPipeline] Spam détecté par filtre déterministe: ${spamCheck.reason}`);
+      const targetStatus = spamCheck.isInformational ? 'INFORMATIONAL' : 'SPAM';
+      console.log(`[emailPipeline] Email filtré (${targetStatus}) par filtre déterministe: ${spamCheck.reason}`);
       const updated = await prisma.incomingEmail.update({
         where: { id: incoming.id },
-        data: { status: 'SPAM', aiSummary: `Spam filtré : ${spamCheck.reason}`, aiIsSpam: true, aiConfidence: 1.0 },
+        data: { status: targetStatus, aiSummary: `Filtré (${targetStatus}) : ${spamCheck.reason}`, aiIsSpam: true, aiConfidence: 1.0, aiIntent: 'INFORMATIONAL' },
       });
       if (io) io.emit('email_updated', updated);
       return updated;
@@ -285,7 +289,6 @@ async function processMessage(message, account) {
     const { evaluateRules } = require('./emailRuleEngine');
     const ruleMatch = await evaluateRules(subject, bodyPreview, fromEmail);
 
-    let analysis;
     if (ruleMatch) {
       console.log(`[emailPipeline] Correspondance avec la règle de triage: "${ruleMatch.label}"`);
       if (ruleMatch.isSpam) {
@@ -297,24 +300,64 @@ async function processMessage(message, account) {
         return updated;
       }
 
-      analysis = {
+      const rawRuleAnalysis = {
         summary: `Règle de triage appliquée : "${ruleMatch.label}"`,
         category: ruleMatch.category,
-        priority: ruleMatch.ticketPriority || 'P3',
+        impact: ruleMatch.impact || 'MEDIUM',
+        urgency: ruleMatch.urgency || 'MEDIUM',
         suggestedTitle: subject.substring(0, 80),
         suggestedSkill: ruleMatch.skillName,
         confidence: 1.0,
-        isSpam: false
+        ticketDecision: 'CREATE',
+        emailType: 'HUMAN_REQUEST',
+        requestType: 'INCIDENT',
+        isSpam: false,
+        isInformational: false,
+        requiresAction: true,
       };
+
+      const { validateAndCleanAnalysis } = require('./emailAnalysisValidator');
+      analysis = validateAndCleanAnalysis(rawRuleAnalysis, [], [], { body: cleanBody });
+      if (ruleMatch.ticketPriority) analysis.priority = ruleMatch.ticketPriority;
     } else {
       // Couche 3 : Fallback analyse IA pour nouveau ticket
       analysis = await analyzeEmail({ subject, body: cleanBody, from: fromEmail, fromName });
     }
 
-    if (analysis.isSpam) {
+    // Bloquer la création de ticket si l'IA ou le filtre détecte un email d'information, un spam ou DO_NOT_CREATE
+    if (analysis.isSpam || analysis.isInformational === true || analysis.requiresAction === false || analysis.ticketDecision === 'DO_NOT_CREATE') {
+      const targetStatus = (analysis.isSpam || analysis.emailType === 'SPAM') ? 'SPAM' : 'INFORMATIONAL';
+      console.log(`[emailPipeline] Email d'information ou hors périmètre support filtré (${targetStatus}) par l'IA (motif: ${analysis.decisionReason || 'INFO'}, résumé: "${analysis.summary}")`);
       const updated = await prisma.incomingEmail.update({
         where: { id: incoming.id },
-        data: { status: 'SPAM', aiSummary: analysis.summary, aiIsSpam: true, aiConfidence: analysis.confidence },
+        data: {
+          status: targetStatus,
+          aiSummary: analysis.summary || 'Email d\'information filtré par l\'IA',
+          aiCategory: analysis.category || null,
+          aiPriority: 'P4',
+          aiConfidence: analysis.confidence || 1.0,
+          aiIsSpam: true,
+          aiIntent: analysis.decisionReason || 'INFORMATIONAL',
+        },
+      });
+      if (io) io.emit('email_updated', updated);
+      return updated;
+    }
+
+    // Traitement des e-mails ambigus ou à faible confiance (NEEDS_REVIEW)
+    if (analysis.ticketDecision === 'NEEDS_REVIEW') {
+      console.log(`[emailPipeline] Email ambigu ou confiance faible (confiance: ${analysis.confidence}), marqué pour révision Hotline`);
+      const updated = await prisma.incomingEmail.update({
+        where: { id: incoming.id },
+        data: {
+          status: 'NEEDS_REVIEW',
+          aiSummary: analysis.summary || 'Email nécessitant une révision Hotline',
+          aiCategory: analysis.category || null,
+          aiPriority: analysis.priority || 'P3',
+          aiConfidence: analysis.confidence || 0.5,
+          aiIsSpam: false,
+          aiIntent: 'NEEDS_REVIEW',
+        },
       });
       if (io) io.emit('email_updated', updated);
       return updated;

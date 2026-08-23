@@ -21,7 +21,7 @@ const MAX_TICKET_LIFETIME_DAYS = 60; // au-delà, on ne réinitialise plus le co
 // Analyse l'intention d'un email de réponse utilisateur sur un ticket existant.
 // conversationHistory (optionnel) = derniers messages du fil, pour donner du contexte réel à l'IA.
 // Retourne { intent, confidence, newIssueSummary, isAutoReply, evidence, userAnsweredSupport }.
-async function analyzeIntent({ subject, body, ticketTitle, ticketSummary, conversationHistory = [], fromEmail, ticketId }) {
+async function analyzeIntent({ subject, body, ticketTitle, ticketSummary, conversationHistory = [], fromEmail, ticketId, headers = {} }) {
   // Pré-filtre heuristique zéro-coût : les messages triviaux ou purement automatiques sont
   // traités sans appel LLM (comportement UNKNOWN / isAutoReply, identique aux branches existantes).
   const { prefilterReply } = require('./intentPrefilter');
@@ -76,7 +76,7 @@ async function analyzeIntent({ subject, body, ticketTitle, ticketSummary, conver
     ticketSummary: ticketSummary || 'Non disponible',
     historyText,
     subject,
-    body: body?.substring(0, 1000) || '',
+    body: body?.substring(0, 4000) || '',
     recentRejections,
   });
 
@@ -90,23 +90,17 @@ async function analyzeIntent({ subject, body, ticketTitle, ticketSummary, conver
   try {
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
-    const isAutoReply = parsed.isAutoReply === true;
-    const intent = isAutoReply ? 'UNKNOWN' : (VALID_INTENTS.includes(parsed.intent) ? parsed.intent : 'UNKNOWN');
-    const confidence = typeof parsed.confidence === 'number' ? Math.max(0, Math.min(1, parsed.confidence)) : 0;
-    // Une détection de résolution sans citation d'évidence personnalisée est ramenée à UNKNOWN :
-    // un simple "merci" ou une signature ne suffit pas à proposer une clôture.
-    const evidence = typeof parsed.evidence === 'string' ? parsed.evidence.trim() : '';
-    let resolvedIntent = intent;
-    if ((intent === 'RESOLVED' || intent === 'NEW_ISSUE_IN_THREAD') && evidence.length === 0) {
-      resolvedIntent = 'UNKNOWN';
-    }
+
+    const { validateAndCleanIntent } = require('./emailAnalysisValidator');
+    const validated = validateAndCleanIntent(parsed, headers, body);
+
     return {
-      intent: resolvedIntent,
-      confidence: isAutoReply ? 0 : confidence,
-      newIssueSummary: parsed.newIssueSummary || null,
-      isAutoReply,
-      evidence: evidence || null,
-      userAnsweredSupport: parsed.userAnsweredSupport === true,
+      intent: validated.intent,
+      confidence: validated.isAutoReply ? 0 : (typeof validated.confidence === 'number' ? Math.max(0, Math.min(1, validated.confidence)) : 0),
+      newIssueSummary: validated.newIssueSummary || null,
+      isAutoReply: validated.isAutoReply === true,
+      evidence: validated.evidence || null,
+      userAnsweredSupport: validated.userAnsweredSupport === true,
     };
   } catch {
     return { intent: 'UNKNOWN', confidence: 0, newIssueSummary: null, isAutoReply: false, evidence: null, userAnsweredSupport: false };
