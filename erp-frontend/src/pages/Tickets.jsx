@@ -226,91 +226,105 @@ function FilterPanel({ open, onClose, filters, onUpdate, onClear, teams, users, 
           <div className="border-t border-outline-variant/20" />
 
           {/* Statut */}
-          <PanelSelect
+          <SearchableSelect
             label="Statut"
             value={filters.status}
             onChange={(v) => onUpdate('status', v)}
             options={[
-              { v: '', l: 'Tous les statuts' },
-              { v: 'NEW', l: 'Nouveau' },
-              { v: 'OPEN', l: 'En cours' },
-              { v: 'PENDING', l: 'En attente' },
-              { v: 'SOLVED', l: 'Résolu' },
-              { v: 'CLOSED', l: 'Fermé' },
+              { label: 'Tous les statuts', value: '' },
+              { label: 'Nouveau', value: 'NEW' },
+              { label: 'En cours', value: 'OPEN' },
+              { label: 'En attente', value: 'PENDING' },
+              { label: 'Résolu', value: 'SOLVED' },
+              { label: 'Fermé', value: 'CLOSED' },
             ]}
+            placeholder="Sélectionner un statut"
+            searchPlaceholder="Rechercher un statut..."
           />
 
           {/* Approbation */}
-          <PanelSelect
+          <SearchableSelect
             label="Approbation"
             value={filters.approvalStatus}
             onChange={(v) => onUpdate('approvalStatus', v)}
             options={[
-              { v: '', l: 'Toutes' },
-              { v: 'PENDING', l: 'En attente Hotline' },
-              { v: 'APPROVED', l: 'Approuvés' },
-              { v: 'REJECTED', l: 'Rejetés' },
+              { label: 'Toutes', value: '' },
+              { label: 'En attente Hotline', value: 'PENDING' },
+              { label: 'Approuvés', value: 'APPROVED' },
+              { label: 'Rejetés', value: 'REJECTED' },
             ]}
+            placeholder="Sélectionner un statut"
+            searchPlaceholder="Rechercher..."
           />
 
           {/* Priorité */}
-          <PanelSelect
+          <SearchableSelect
             label="Priorité"
             value={filters.priority}
             onChange={(v) => onUpdate('priority', v)}
             options={[
-              { v: '', l: 'Toutes' },
-              { v: 'P1', l: 'P1 — Critique' },
-              { v: 'P2', l: 'P2 — Haute' },
-              { v: 'P3', l: 'P3 — Moyenne' },
-              { v: 'P4', l: 'P4 — Basse' },
+              { label: 'Toutes', value: '' },
+              { label: 'P1 — Critique', value: 'P1' },
+              { label: 'P2 — Haute', value: 'P2' },
+              { label: 'P3 — Moyenne', value: 'P3' },
+              { label: 'P4 — Basse', value: 'P4' },
             ]}
+            placeholder="Sélectionner une priorité"
+            searchPlaceholder="Rechercher..."
           />
 
           {/* Source */}
-          <PanelSelect
+          <SearchableSelect
             label="Source"
             value={filters.source}
             onChange={(v) => onUpdate('source', v)}
             options={[
-              { v: '', l: 'Toutes les sources' },
-              ...(!autonomousMode ? [{ v: 'glpi', l: 'Synchronisés GLPI' }] : []),
-              { v: 'erp', l: 'Internes ERP' },
+              { label: 'Toutes les sources', value: '' },
+              ...(!autonomousMode ? [{ label: 'Synchronisés GLPI', value: 'glpi' }] : []),
+              { label: 'Internes ERP', value: 'erp' },
             ]}
+            placeholder="Sélectionner une source"
+            searchPlaceholder="Rechercher..."
           />
 
           {/* Équipe */}
-          <PanelSelect
+          <SearchableSelect
             label="Équipe"
             value={filters.teamId}
             onChange={(v) => onUpdate('teamId', v)}
             options={[
-              { v: '', l: 'Toutes les équipes' },
-              ...teams.map((t) => ({ v: String(t.id), l: t.name })),
+              { label: 'Toutes les équipes', value: '' },
+              ...teams.map((t) => ({ label: t.name, value: String(t.id) })),
             ]}
+            placeholder="Sélectionner une équipe"
+            searchPlaceholder="Rechercher une équipe..."
           />
 
           {/* Catégorie */}
-          <PanelSelect
+          <SearchableSelect
             label="Catégorie"
             value={filters.category}
             onChange={(v) => onUpdate('category', v)}
             options={[
-              { v: '', l: 'Toutes les catégories' },
-              ...flatCategories.map((o) => ({ v: o.name, l: o.label })),
+              { label: 'Toutes les catégories', value: '' },
+              ...flatCategories.map((o) => ({ label: o.label, value: o.name })),
             ]}
+            placeholder="Sélectionner une catégorie"
+            searchPlaceholder="Rechercher une catégorie..."
           />
 
           {/* Assigné à */}
-          <PanelSelect
+          <SearchableSelect
             label="Assigné à"
             value={filters.assignedToId}
             onChange={(v) => onUpdate('assignedToId', v)}
             options={[
-              { v: '', l: 'Tout le monde' },
-              { v: 'none', l: 'Non assigné' },
-              ...users.filter((u) => u.isActive).map((u) => ({ v: String(u.id), l: u.fullName })),
+              { label: 'Tout le monde', value: '' },
+              { label: 'Non assigné', value: 'none' },
+              ...users.filter((u) => u.isActive).map((u) => ({ label: u.fullName, value: String(u.id) })),
             ]}
+            placeholder="Sélectionner un technicien"
+            searchPlaceholder="Rechercher un technicien..."
           />
 
           <div className="border-t border-outline-variant/20" />
@@ -365,23 +379,6 @@ function FilterPanel({ open, onClose, filters, onUpdate, onClear, teams, users, 
       </motion.div>
     </div>,
     document.body
-  );
-}
-
-function PanelSelect({ label, value, onChange, options }) {
-  return (
-    <div>
-      <label className="block text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-1.5">{label}</label>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full px-3 py-2 rounded-lg border border-outline-variant/40 bg-surface text-on-surface text-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary cursor-pointer"
-      >
-        {options.map((o) => (
-          <option key={o.v} value={o.v}>{o.l}</option>
-        ))}
-      </select>
-    </div>
   );
 }
 
