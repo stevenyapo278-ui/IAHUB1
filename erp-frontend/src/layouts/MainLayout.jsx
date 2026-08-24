@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -40,9 +40,12 @@ import { useVoiceAlerts } from '../hooks/useVoiceAlerts';
 import ConfirmDialog from '../components/ConfirmDialog';
 import GlobalSearch from '../components/GlobalSearch';
 import NotificationPanel from '../components/NotificationPanel';
-import ChatWidget from '../components/ChatWidget';
 import { useNotifications } from '../context/NotificationContext';
 import { saveSessionLocation } from '../utils/sessionLocation';
+
+// ChatWidget est chargé à la demande : il tire Recharts (~390 Ko) via son graphique,
+// on ne l'inclut donc pas dans le bundle initial de l'application.
+const ChatWidget = lazy(() => import('../components/ChatWidget'));
 
 const platformItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, color: 'text-amber-400', end: true, permission: null },
@@ -500,7 +503,9 @@ export default function MainLayout() {
         onCancel={() => setShowLogoutConfirm(false)}
       />
 
-      <ChatWidget />
+      <Suspense fallback={null}>
+        <ChatWidget />
+      </Suspense>
     </div>
   );
 }

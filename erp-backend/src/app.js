@@ -1,5 +1,6 @@
 require('express-async-errors');
 const express = require('express');
+const compression = require('compression');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
@@ -52,6 +53,12 @@ const app = express();
 if (process.env.TRUST_PROXY === '1') {
   app.set('trust proxy', 1);
 }
+
+// Compression gzip de toutes les réponses (JSON d'API + assets du frontend).
+// Le bundle JS passe de ~1,2 Mo à ~290 Ko transférés, les grosses listes JSON
+// (utilisateurs, tickets) sont divisées par 5 à 10. Sans effet si l'en-tête
+// Accept-Encoding du client n'accepte pas gzip (toujours le cas des navigateurs).
+app.use(compression());
 
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
@@ -166,15 +173,28 @@ app.use('/api/cache', require('./routes/cache.routes'));
 const isProduction = process.env.NODE_ENV === 'production';
 if (isProduction) {
     const distPath = process.env.FRONTEND_DIST_PATH || path.join(__dirname, '..', '..', 'erp-frontend', 'dist');
-    
+
     if (fs.existsSync(distPath)) {
-        app.use(express.static(distPath));
-        
+        // Les assets Vite (/assets/*.js|css) ont un hash dans leur nom → cache long
+        // "immutable" : le navigateur ne les re-télécharge plus jamais. index.html et
+        // les autres fichiers restent en no-cache pour toujours servir la dernière version.
+        app.use(express.static(distPath, {
+            index: false,
+            setHeaders(res, filePath) {
+                if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+                    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+                } else {
+                    res.setHeader('Cache-Control', 'no-cache');
+                }
+            },
+        }));
+
         // Support React Router (SPA) by serving index.html for unknown routes
         app.get('*', (req, res, next) => {
             if (req.url.startsWith('/api') || req.url.includes('.')) {
                 return next();
             }
+            res.setHeader('Cache-Control', 'no-cache');
             res.sendFile(path.join(distPath, 'index.html'));
         });
         logger.info(`Frontend servis depuis : ${distPath}`);

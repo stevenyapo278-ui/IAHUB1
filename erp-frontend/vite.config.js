@@ -19,7 +19,6 @@ export default defineConfig({
         manualChunks: {
           'react-vendor': ['react', 'react-dom', 'react-router-dom'],
           'ui-vendor': ['framer-motion', 'canvas-confetti'],
-          'three-vendor': ['three'],
           'chart-vendor': ['recharts']
         }
       }

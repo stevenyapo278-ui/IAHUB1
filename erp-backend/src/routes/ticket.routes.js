@@ -120,7 +120,10 @@ router.get('/', async (req, res) => {
     else if (sortBy === 'requester') orderBy = { requester: { fullName: order } };
   }
 
-  const [tickets, total, openCount, pendingCount, resolvedCount, p1Count, p2Count, aiCount, unassignedCount] = await Promise.all([
+  // Stats calculées en une seule passe GROUP BY (status × priorité) au lieu de
+  // 6 COUNT séparés — chaque COUNT re-scançait l'ensemble filtré (recherche
+  // textuelle comprise) à chaque appel, et cet endpoint est pollé toutes les 15 s.
+  const [tickets, total, breakdown, aiCount, unassignedCount] = await Promise.all([
     prisma.ticket.findMany({
       where,
       skip,
@@ -133,14 +136,22 @@ router.get('/', async (req, res) => {
       orderBy,
     }),
     prisma.ticket.count({ where }),
-    prisma.ticket.count({ where: { ...where, status: { in: ['NEW', 'OPEN', 'PLANNED'] } } }),
-    prisma.ticket.count({ where: { ...where, status: 'PENDING' } }),
-    prisma.ticket.count({ where: { ...where, status: { in: ['SOLVED', 'CLOSED'] } } }),
-    prisma.ticket.count({ where: { ...where, priority: 'P1' } }),
-    prisma.ticket.count({ where: { ...where, priority: 'P2' } }),
+    prisma.ticket.groupBy({ where, by: ['status', 'priority'], _count: { _all: true } }),
     prisma.ticket.count({ where: { ...where, aiProcessed: true } }),
     prisma.ticket.count({ where: { ...where, assignedToId: null } }),
   ]);
+
+  // Agrégation des compteurs de statut/priorité côté serveur (coût négligeable :
+  // au plus ~6 statuts × 4 priorités lignes retournées par le GROUP BY).
+  let openCount = 0, pendingCount = 0, resolvedCount = 0, p1Count = 0, p2Count = 0;
+  for (const row of breakdown) {
+    const n = row._count._all;
+    if (['NEW', 'OPEN', 'PLANNED'].includes(row.status)) openCount += n;
+    else if (row.status === 'PENDING') pendingCount += n;
+    else if (row.status === 'SOLVED' || row.status === 'CLOSED') resolvedCount += n;
+    if (row.priority === 'P1') p1Count += n;
+    else if (row.priority === 'P2') p2Count += n;
+  }
 
   // Badge « clôtures souvent injustifiées » : quand on liste les clôtures suggérées, on attache
   // à chaque ticket si son expéditeur est dégradé sur les clôtures (feedback de la Hotline).
