@@ -67,6 +67,10 @@ async function syncLdapDirectory() {
       scope: 'sub',
       filter: LDAP_USER_FILTER,
       attributes: ['sAMAccountName', 'displayName', 'cn', 'mail', 'userAccountControl'],
+      // Pagination obligatoire : AD plafonne chaque réponse (~1000 entrées,
+      // erreur 0x4 sizeLimitExceeded au-delà). ldapts v9 gère le contrôle
+      // PagedResults automatiquement via cette option.
+      paged: { pageSize: 500 },
     });
     logger.info(`[ldapDirectory] ${searchEntries.length} entrée(s) brute(s) reçue(s) de l'AD (${LDAP_BASE_DN})`);
 
