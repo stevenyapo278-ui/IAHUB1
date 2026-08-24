@@ -25,6 +25,11 @@ services:
       LDAP_EMAIL_DOMAIN: ${LDAP_EMAIL_DOMAIN:-prosuma.ci}
       LDAP_BIND_FORMAT: ${LDAP_BIND_FORMAT:-{username}@{domain}}
       LDAP_ADMIN_USERNAMES: ${LDAP_ADMIN_USERNAMES:-}
+      LDAP_DIRECTORY_URL: ${LDAP_DIRECTORY_URL:-ldap://prosuma.lan:389}
+      LDAP_BIND_DN: ${LDAP_BIND_DN:-CN=glpi,OU=informatique,OU=centrale,OU=prosuma,DC=prosuma,DC=lan}
+      LDAP_BIND_PASSWORD: ${LDAP_BIND_PASSWORD:-}
+      LDAP_BASE_DN: ${LDAP_BASE_DN:-OU=prosuma,DC=prosuma,DC=lan}
+      LDAP_USER_FILTER: ${LDAP_USER_FILTER:-(&(objectClass=user)(objectCategory=person))}
     ports:
       - "4000:4000"
     networks:
