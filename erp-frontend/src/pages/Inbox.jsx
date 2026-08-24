@@ -9,7 +9,7 @@ import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import { useSocket } from '../context/SocketContext';
 import { useFilterParam } from '../hooks/useFilterParam';
-import DOMPurify from 'dompurify';
+import { sanitizeHtml } from '../utils/sanitize';
 import {
   Inbox as InboxIcon, MailOpen, RefreshCw, Clock, CheckCircle2, XCircle, Ban,
   Paperclip, Search, X, FlaskConical, Bot, ArrowUpRight, Reply, ChevronDown,
@@ -960,7 +960,7 @@ export default function Inbox() {
                                   const html = msg.bodyHtml;
                                   const plain = isInbound ? msg.bodyPreview : msg.body;
                                   return html ? (
-                                    <div className="text-sm text-on-surface leading-relaxed prose prose-sm dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />
+                                    <div className="text-sm text-on-surface leading-relaxed prose prose-sm dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} />
                                   ) : plain ? (
                                     <pre className="text-sm text-on-surface leading-relaxed whitespace-pre-wrap font-sans">{plain}</pre>
                                   ) : (
