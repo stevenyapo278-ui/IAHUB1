@@ -118,6 +118,8 @@ router.get('/', async (req, res) => {
     else if (sortBy === 'status') orderBy = { status: order };
     else if (sortBy === 'assignedTo') orderBy = { assignedTo: { fullName: order } };
     else if (sortBy === 'requester') orderBy = { requester: { fullName: order } };
+    else if (sortBy === 'location') orderBy = { glpiLocationName: order };
+    else if (sortBy === 'updatedAt') orderBy = { updatedAt: order };
   }
 
   // Stats calculées en une seule passe GROUP BY (status × priorité) au lieu de

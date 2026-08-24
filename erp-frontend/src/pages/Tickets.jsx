@@ -62,8 +62,13 @@ import {
   STATUS_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS, URGENCY_IMPACT_OPTIONS,
 } from '../constants/tickets';
 
-const EMPTY_FORM = {
-  title: '',
+// Vue par défaut « à la GLPI » : seuls les tickets actifs sont visibles à l'arrivée
+// sur la liste (les clôturés/résolus restent accessibles via filtre explicite).
+// Un statut présent dans l'URL (?status=SOLVED…) prime toujours sur ce défaut,
+// et « Tous les statuts » dans le panneau restaure la vue complète.
+const DEFAULT_STATUS_FILTER = 'OPEN_GROUP';
+
+const EMPTY_FORM = {  title: '',
   content: '',
   openedAt: '',
   dueDate: '',
@@ -315,8 +320,11 @@ function FilterPanel({ onClose, activeFilterCount, filters, onUpdate, onClear, t
             onChange={(v) => onUpdate('status', v)}
             options={[
               { label: 'Tous les statuts', value: '' },
+              { label: 'Ouverts (actifs)', value: 'OPEN_GROUP' },
+              { label: 'Clôturés / résolus', value: 'CLOSED_GROUP' },
               { label: 'Nouveau', value: 'NEW' },
               { label: 'En cours', value: 'OPEN' },
+              { label: 'Planifié', value: 'PLANNED' },
               { label: 'En attente', value: 'PENDING' },
               { label: 'Résolu', value: 'SOLVED' },
               { label: 'Fermé', value: 'CLOSED' },
@@ -540,7 +548,7 @@ export default function Tickets() {
   }
 
   const [filters, setFilters] = useState({
-    status: searchParams.get('status') || '',
+    status: searchParams.get('status') || DEFAULT_STATUS_FILTER,
     approvalStatus: searchParams.get('approvalStatus') || '',
     priority: searchParams.get('priority') || '',
     source: searchParams.get('source') || '',
@@ -590,7 +598,8 @@ export default function Tickets() {
     if (sortOrder && sortOrder !== 'desc') params.set('sortOrder', sortOrder); else params.delete('sortOrder');
     if (page && page !== 1) params.set('page', String(page)); else params.delete('page');
     Object.entries(filters).forEach(([k, v]) => {
-      if (v) params.set(k, v); else params.delete(k);
+      // Le statut par défaut reste implicite : /tickets ne s'alourdit pas de ?status=OPEN_GROUP
+      if (v && !(k === 'status' && v === DEFAULT_STATUS_FILTER)) params.set(k, v); else params.delete(k);
     });
     setSearchParams(params, { replace: true });
   }, [debouncedSearch, sortBy, sortOrder, filters, page]);
@@ -623,7 +632,7 @@ export default function Tickets() {
   }
 
   function clearFilters() {
-    setFilters({ status: '', priority: '', source: '', category: '', teamId: '', assignedToId: '', mine: '', aiProcessed: '', approvalStatus: '', closeSuggested: '' });
+    setFilters({ status: DEFAULT_STATUS_FILTER, priority: '', source: '', category: '', teamId: '', assignedToId: '', mine: '', aiProcessed: '', approvalStatus: '', closeSuggested: '' });
     setSearchQuery('');
     setDebouncedSearch('');
     setSortBy('createdAt');
@@ -1160,8 +1169,14 @@ export default function Tickets() {
                 <SortTH field="requester" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left w-36 hidden xl:table-cell">
                   Demandeur
                 </SortTH>
+                <SortTH field="location" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left w-36 hidden lg:table-cell">
+                  Lieu
+                </SortTH>
                 <SortTH field="createdAt" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-right w-20 hidden lg:table-cell">
-                  Date
+                  Ouvert
+                </SortTH>
+                <SortTH field="updatedAt" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-right w-20 hidden xl:table-cell">
+                  Modifié
                 </SortTH>
                 <th className="w-12 px-3 py-2.5" />
               </tr>
@@ -1228,7 +1243,7 @@ export default function Tickets() {
                             <span className="text-[10px] text-on-surface-variant truncate max-w-[120px]">{t.category}</span>
                           )}
                           {t.glpiLocationName && (
-                            <span className="text-[10px] text-on-surface-variant/70 flex items-center gap-0.5 truncate max-w-[120px]">
+                            <span className="lg:hidden text-[10px] text-on-surface-variant/70 flex items-center gap-0.5 truncate max-w-[120px]">
                               <MapPin className="w-2.5 h-2.5 shrink-0 text-primary/60" />
                               {t.glpiLocationName}
                             </span>
@@ -1282,10 +1297,35 @@ export default function Tickets() {
                         )}
                       </td>
 
-                      {/* Date */}
-                      <td className="px-3 py-3 w-20 hidden lg:table-cell text-right">
-                        <span className={`text-[11px] font-medium tabular-nums ${overdue ? 'text-red-500' : 'text-on-surface-variant'}`}>
+                      {/* Lieu */}
+                      <td className="px-3 py-3 w-36 hidden lg:table-cell">
+                        {t.glpiLocationName ? (
+                          <div className="flex items-center gap-1.5 min-w-0" title={t.glpiLocationName}>
+                            <MapPin className="w-3 h-3 shrink-0 text-primary/60" />
+                            <span className="text-xs font-medium text-on-surface truncate">{t.glpiLocationName}</span>
+                          </div>
+                        ) : (
+                          <span className="text-[11px] text-on-surface-variant/60 italic">—</span>
+                        )}
+                      </td>
+
+                      {/* Ouvert le */}
+                      <td
+                        className="px-3 py-3 w-20 hidden lg:table-cell text-right"
+                        title={`Ouvert le ${new Date(t.createdAt).toLocaleString('fr-FR')}`}
+                      >
+                        <span className="text-[11px] font-medium tabular-nums text-on-surface-variant">
                           {dateStr}
+                        </span>
+                      </td>
+
+                      {/* Modifié le */}
+                      <td
+                        className="px-3 py-3 w-20 hidden xl:table-cell text-right"
+                        title={`Modifié le ${t.updatedAt ? new Date(t.updatedAt).toLocaleString('fr-FR') : '—'}`}
+                      >
+                        <span className="text-[11px] font-medium tabular-nums text-on-surface-variant">
+                          {timeAgo(t.updatedAt)}
                         </span>
                       </td>
 
