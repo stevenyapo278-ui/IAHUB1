@@ -67,22 +67,31 @@ async function syncLdapDirectory() {
       scope: 'sub',
       filter: LDAP_USER_FILTER,
       attributes: ['sAMAccountName', 'displayName', 'cn', 'mail', 'userAccountControl'],
-      paged: { pageSize: 500 },
     });
+    logger.info(`[ldapDirectory] ${searchEntries.length} entrée(s) brute(s) reçue(s) de l'AD (${LDAP_BASE_DN})`);
+
+    // ldapts retourne les attributs avec des clés en minuscules selon le serveur
+    // (AD : casse variable) — accès insensible à la casse obligatoire.
+    function attr(entry, name) {
+      const lower = name.toLowerCase();
+      const key = Object.keys(entry).find((k) => k.toLowerCase() === lower);
+      return key ? entry[key] : undefined;
+    }
 
     // Map de l'AD : email normalisé → { fullName, enabled }
     const directory = new Map();
     for (const entry of searchEntries) {
-      const username = entry.sAMAccountName;
+      const username = attr(entry, 'sAMAccountName');
       if (!username || isServiceAccount(username)) continue;
-      const rawMail = typeof entry.mail === 'string' ? entry.mail.trim() : '';
+      const rawMail = typeof attr(entry, 'mail') === 'string' ? attr(entry, 'mail').trim() : '';
       const email = (rawMail.includes('@') ? rawMail.toLowerCase() : `${username.toLowerCase()}@${LDAP_EMAIL_DOMAIN}`);
       directory.set(email, {
-        fullName: (entry.displayName || entry.cn || username).trim(),
-        enabled: !isAdAccountDisabled(entry.userAccountControl),
+        fullName: (attr(entry, 'displayName') || attr(entry, 'cn') || username).toString().trim(),
+        enabled: !isAdAccountDisabled(attr(entry, 'userAccountControl')),
       });
     }
     stats.adTotal = directory.size;
+    logger.info(`[ldapDirectory] ${stats.adTotal} compte(s) utilisateur exploitable(s) après filtrage`);
 
     // Tous les comptes locaux, quel que soit leur provider : des comptes créés à la main
     // ou via l'ancien import GLPI (authProvider='local') peuvent porter le même email qu'un
