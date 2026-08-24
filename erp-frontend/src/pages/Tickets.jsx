@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { toast } from 'sonner';
 import {
   Ticket,
@@ -153,17 +153,30 @@ function Avatar({ name, colorClass = 'bg-blue-500/15 text-blue-600 dark:text-blu
 }
 
 // ── FilterPanel slide-over ───────────────────────────────────────────────────
-function FilterPanel({ open, onClose, filters, onUpdate, onClear, teams, users, flatCategories, autonomousMode, savedViews, onSaveView, onRestoreView, onDeleteSavedView, searchQuery, setSearchQuery, setDebouncedSearch, setPage }) {
-  if (!open) return null;
+// Backdrop et panneau sont animés ENSEMBLE : le fondu du flou accompagne le
+// slide du panneau (avant, le backdrop apparaissait instantanément pendant que
+// le panneau arrivait encore → effet de dysfonctionnement visuel).
+// Pas de early-return « if (!open) » ici : AnimatePresence doit garder le
+// composant monté pendant la fermeture pour que les animations exit jouent.
+function FilterPanel({ onClose, filters, onUpdate, onClear, teams, users, flatCategories, autonomousMode, savedViews, onSaveView, onRestoreView, onDeleteSavedView, searchQuery, setSearchQuery, setDebouncedSearch, setPage }) {
+  const reduceMotion = useReducedMotion();
+  const offscreen = reduceMotion ? { opacity: 0 } : { x: '100%' };
   return createPortal(
     <div className="fixed inset-0 z-[9000] flex">
       {/* Backdrop */}
-      <div className="flex-1 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.22, ease: 'easeOut' }}
+        className="flex-1 bg-black/40 backdrop-blur-sm"
+        onClick={onClose}
+      />
       {/* Panel */}
       <motion.div
-        initial={{ x: 360 }}
-        animate={{ x: 0 }}
-        exit={{ x: 360 }}
+        initial={offscreen}
+        animate={reduceMotion ? { opacity: 1 } : { x: 0 }}
+        exit={reduceMotion ? { opacity: 0 } : offscreen}
         transition={{ type: 'spring', stiffness: 380, damping: 40 }}
         className="w-80 h-full bg-surface-container-lowest border-l border-outline-variant/30 flex flex-col shadow-2xl overflow-hidden"
       >
@@ -1359,7 +1372,7 @@ export default function Tickets() {
       <AnimatePresence>
         {filterPanelOpen && (
           <FilterPanel
-            open={filterPanelOpen}
+            key="tickets-filter-panel"
             onClose={() => setFilterPanelOpen(false)}
             filters={filters}
             onUpdate={updateFilter}
