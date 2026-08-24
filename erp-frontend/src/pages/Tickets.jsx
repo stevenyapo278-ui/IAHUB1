@@ -158,9 +158,59 @@ function Avatar({ name, colorClass = 'bg-blue-500/15 text-blue-600 dark:text-blu
 // le panneau arrivait encore → effet de dysfonctionnement visuel).
 // Pas de early-return « if (!open) » ici : AnimatePresence doit garder le
 // composant monté pendant la fermeture pour que les animations exit jouent.
-function FilterPanel({ onClose, filters, onUpdate, onClear, teams, users, flatCategories, autonomousMode, savedViews, onSaveView, onRestoreView, onDeleteSavedView, searchQuery, setSearchQuery, setDebouncedSearch, setPage }) {
+//
+// Accessibilité dialog : Échap ferme, Tab reste piégé dans le panneau, le focus
+// est restauré sur le bouton déclencheur à la fermeture.
+function FilterPanel({ onClose, activeFilterCount, filters, onUpdate, onClear, teams, users, flatCategories, autonomousMode, savedViews, onSaveView, onRestoreView, onDeleteSavedView, searchQuery, setSearchQuery, setDebouncedSearch, setPage }) {
   const reduceMotion = useReducedMotion();
   const offscreen = reduceMotion ? { opacity: 0 } : { x: '100%' };
+  const panelRef = useRef(null);
+
+  // Échap + piège de focus + restauration du focus au démontage
+  useEffect(() => {
+    const previouslyFocused = document.activeElement;
+    panelRef.current?.focus?.();
+
+    function onKeyDown(e) {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+      if (e.key === 'Tab' && panelRef.current) {
+        const focusables = panelRef.current.querySelectorAll(
+          'button:not([disabled]), select:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown, true);
+      // Rend le focus au bouton « Filtres » après la fermeture
+      if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
+    };
+  }, [onClose]);
+
+  // Apparition en cascade des sections (désactivée si mouvement réduit)
+  const stackVariants = {
+    hidden: {},
+    show: { transition: { staggerChildren: reduceMotion ? 0 : 0.045, delayChildren: reduceMotion ? 0 : 0.1 } },
+  };
+  const sectionVariants = {
+    hidden: reduceMotion ? { opacity: 0 } : { opacity: 0, y: 12 },
+    show: { opacity: 1, y: 0, transition: { duration: 0.28, ease: [0.16, 1, 0.3, 1] } },
+  };
+
   return createPortal(
     <div className="fixed inset-0 z-[9000] flex">
       {/* Backdrop */}
@@ -171,20 +221,36 @@ function FilterPanel({ onClose, filters, onUpdate, onClear, teams, users, flatCa
         transition={{ duration: 0.22, ease: 'easeOut' }}
         className="flex-1 bg-black/40 backdrop-blur-sm"
         onClick={onClose}
+        aria-hidden="true"
       />
       {/* Panel */}
       <motion.div
+        ref={panelRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Filtres des tickets"
         initial={offscreen}
         animate={reduceMotion ? { opacity: 1 } : { x: 0 }}
         exit={reduceMotion ? { opacity: 0 } : offscreen}
-        transition={{ type: 'spring', stiffness: 380, damping: 40 }}
-        className="w-80 h-full bg-surface-container-lowest border-l border-outline-variant/30 flex flex-col shadow-2xl overflow-hidden"
+        transition={{ type: 'spring', stiffness: 420, damping: 36 }}
+        className="w-80 h-full bg-surface-container-lowest border-l border-outline-variant/30 flex flex-col shadow-2xl overflow-hidden outline-none"
       >
         {/* Panel header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-outline-variant/20 shrink-0">
+        <motion.div
+          initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+          className="flex items-center justify-between px-5 py-4 border-b border-outline-variant/20 shrink-0"
+        >
           <div className="flex items-center gap-2">
             <SlidersHorizontal className="w-4 h-4 text-primary" />
             <span className="font-bold text-sm text-on-surface">Filtres</span>
+            {activeFilterCount > 0 && (
+              <span className="min-w-4 h-4 px-1 flex items-center justify-center rounded-full bg-primary text-white text-[9px] font-black tabular-nums">
+                {activeFilterCount}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -195,17 +261,19 @@ function FilterPanel({ onClose, filters, onUpdate, onClear, teams, users, flatCa
             </button>
             <button
               onClick={onClose}
+              aria-label="Fermer les filtres"
               className="p-1.5 rounded-lg hover:bg-surface-container transition-colors text-on-surface-variant hover:text-on-surface"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
-        </div>
+        </motion.div>
 
-        {/* Panel body */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+        {/* Panel body — sections en cascade */}
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          <motion.div initial="hidden" animate="show" variants={stackVariants} className="space-y-5">
           {/* Quick chips */}
-          <div>
+          <motion.div variants={sectionVariants}>
             <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-2">Raccourcis rapides</p>
             <div className="flex flex-wrap gap-1.5">
               {[
@@ -234,10 +302,12 @@ function FilterPanel({ onClose, filters, onUpdate, onClear, teams, users, flatCa
                 );
               })}
             </div>
-          </div>
+          </motion.div>
 
           <div className="border-t border-outline-variant/20" />
 
+          {/* Critères de filtrage */}
+          <motion.div variants={sectionVariants} className="space-y-5">
           {/* Statut */}
           <SearchableSelect
             label="Statut"
@@ -339,11 +409,12 @@ function FilterPanel({ onClose, filters, onUpdate, onClear, teams, users, flatCa
             placeholder="Sélectionner un technicien"
             searchPlaceholder="Rechercher un technicien..."
           />
+          </motion.div>
 
           <div className="border-t border-outline-variant/20" />
 
           {/* Vues sauvegardées */}
-          <div>
+          <motion.div variants={sectionVariants}>
             <div className="flex items-center justify-between mb-2">
               <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Vues sauvegardées</p>
               <button
@@ -377,18 +448,24 @@ function FilterPanel({ onClose, filters, onUpdate, onClear, teams, users, flatCa
                 ))}
               </div>
             )}
-          </div>
+          </motion.div>
+          </motion.div>
         </div>
 
         {/* Panel footer */}
-        <div className="px-5 py-4 border-t border-outline-variant/20 shrink-0">
+        <motion.div
+          initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1], delay: reduceMotion ? 0 : 0.12 }}
+          className="px-5 py-4 border-t border-outline-variant/20 shrink-0"
+        >
           <button
             onClick={onClose}
-            className="w-full py-2.5 rounded-xl bg-primary text-white text-sm font-bold hover:opacity-90 transition-opacity"
+            className="w-full py-2.5 rounded-xl bg-primary text-white text-sm font-bold hover:opacity-90 active:scale-[0.98] transition-all"
           >
             Appliquer
           </button>
-        </div>
+        </motion.div>
       </motion.div>
     </div>,
     document.body
@@ -1374,6 +1451,7 @@ export default function Tickets() {
           <FilterPanel
             key="tickets-filter-panel"
             onClose={() => setFilterPanelOpen(false)}
+            activeFilterCount={activeFilterCount}
             filters={filters}
             onUpdate={updateFilter}
             onClear={clearFilters}
