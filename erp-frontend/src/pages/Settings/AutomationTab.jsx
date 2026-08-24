@@ -16,33 +16,10 @@ import {
   requestBrowserNotifPermission,
 } from '../../utils/browserNotification';
 import { sanitizeHtml } from '../../utils/sanitize';
+import Toggle from '../../components/Toggle';
 
 const inputClass =
   'bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300';
-
-function Toggle({ checked, onChange, disabled }) {
-  return (
-    <motion.button
-      type="button"
-      onClick={() => onChange(!checked)}
-      disabled={disabled}
-      whileTap={{ scale: 0.92 }}
-      className={`relative w-12 h-6 rounded-full border transition-all duration-300 outline-none ${
-        checked
-          ? 'bg-primary border-primary/60 shadow-sm shadow-primary/20'
-          : 'bg-surface-container-high border-outline-variant/60'
-      } disabled:opacity-50 disabled:cursor-not-allowed`}
-    >
-      <motion.span
-        animate={{ x: checked ? 24 : 0 }}
-        transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-        className={`absolute top-[2px] left-[2px] w-[18px] h-[18px] rounded-full shadow-sm ${
-          checked ? 'bg-white' : 'bg-on-surface-variant/80'
-        }`}
-      />
-    </motion.button>
-  );
-}
 
 function SettingRow({ title, description, checked, onChange, disabled }) {
   return (
@@ -51,9 +28,9 @@ function SettingRow({ title, description, checked, onChange, disabled }) {
       whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
       className="bento-card flex items-center justify-between gap-lg p-lg"
     >
-      <div>
+      <div className="min-w-0 flex-1">
         <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">{title}</div>
-        <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5">{description}</p>
+        <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 break-words">{description}</p>
       </div>
       <div className="shrink-0">
         <Toggle checked={checked} onChange={onChange} disabled={disabled} />
@@ -69,9 +46,9 @@ function IntervalRow({ title, description, value, onChange, disabled, max, unit 
       whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
       className="bento-card flex items-center justify-between gap-lg p-lg"
     >
-      <div>
+      <div className="min-w-0 flex-1">
         <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">{title}</div>
-        <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5">{description}</p>
+        <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 break-words">{description}</p>
       </div>
       <div className="flex items-center gap-sm shrink-0">
         <input
@@ -587,9 +564,9 @@ export default function AutomationTab() {
               whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
               className="bento-card flex items-center justify-between gap-lg p-lg"
             >
-              <div>
+              <div className="min-w-0 flex-1">
                 <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">Heure d'envoi</div>
-                <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 font-medium">Heure locale du serveur.</p>
+                <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 font-medium break-words">Heure locale du serveur.</p>
               </div>
               <input
                 type="time"
@@ -761,9 +738,9 @@ export default function AutomationTab() {
               whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
               className="bento-card flex items-center justify-between gap-lg p-lg"
             >
-              <div>
+              <div className="min-w-0 flex-1">
                 <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">Langue vocale</div>
-                <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 font-medium">
+                <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 font-medium break-words">
                   Langue de synthèse pour les annonces.
                 </p>
               </div>

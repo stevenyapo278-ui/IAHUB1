@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../api/client';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import Toggle from '../../components/Toggle';
 
 const inputClass =
   'bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300';
@@ -10,30 +11,6 @@ const itemVariants = {
   hidden: { opacity: 0, y: 12 },
   visible: { opacity: 1, y: 0 },
 };
-
-function Toggle({ checked, onChange, disabled = false }) {
-  return (
-    <motion.button
-      type="button"
-      onClick={() => onChange(!checked)}
-      disabled={disabled}
-      whileTap={{ scale: 0.92 }}
-      className={`relative w-12 h-6 rounded-full border transition-all duration-300 outline-none ${
-        checked
-          ? 'bg-primary border-primary/60 shadow-sm shadow-primary/20'
-          : 'bg-surface-container-high border-outline-variant/60'
-      } disabled:opacity-50 disabled:cursor-not-allowed`}
-    >
-      <motion.span
-        animate={{ x: checked ? 24 : 0 }}
-        transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-        className={`absolute top-[2px] left-[2px] w-[18px] h-[18px] rounded-full shadow-sm ${
-          checked ? 'bg-white' : 'bg-on-surface-variant/80'
-        }`}
-      />
-    </motion.button>
-  );
-}
 
 const PROVIDER_ICONS = {
   openai: 'smart_toy',
