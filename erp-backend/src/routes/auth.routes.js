@@ -87,7 +87,11 @@ router.post(
     const { password } = req.body;
 
     const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
-    if (user && user.isActive && user.authProvider === 'local') {
+    // Pas de filtre sur authProvider ici : un compte « local » adopté par la synchro
+    // annuaire (authProvider passé à 'ldap') conserve son mot de passe d'origine et
+    // doit toujours pouvoir s'en servir. Les comptes créés par JIT/synchro ont un
+    // hash aléatoire inviolable — le bcrypt échouera naturellement pour eux.
+    if (user && user.isActive) {
       const valid = await bcrypt.compare(password, user.passwordHash);
       if (valid) {
         const token = jwt.sign(
