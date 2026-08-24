@@ -43,6 +43,9 @@ services:
     environment:
       NODE_ENV: production
       PORT: 4000
+      # Derrière Traefik/Dokploy : req.ip = vraie IP client (indispensable pour les
+      # limiteurs de connexion par réseau)
+      TRUST_PROXY: ${TRUST_PROXY:-1}
       DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD:-erp_password}@postgres:5432/${POSTGRES_DB:-erp_itsm}?schema=public
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-2h}

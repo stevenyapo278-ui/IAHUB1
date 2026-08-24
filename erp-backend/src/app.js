@@ -99,8 +99,36 @@ app.use(express.json({ limit: '10mb' }));
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, standardHeaders: true, legacyHeaders: false });
 app.use('/api', limiter);
 
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 15, standardHeaders: true, legacyHeaders: false, message: { error: 'Trop de tentatives. Réessayez dans 15 minutes.' } });
-app.use('/api/auth/login', authLimiter);
+// ── Limiteurs de connexion à deux niveaux ────────────────────────────────────
+// Derrière un reverse proxy (Dokploy/Traefik), toutes les requêtes partagent la
+// même IP interne : compter par IP seul verrouillait toute l'entreprise après
+// quelques échecs d'UN utilisateur. D'où :
+//  - Par COMPTE  : 8 échecs / 15 min sur l'email tenté — seules les tentatives
+//    ÉCHOUÉES comptent, les connexions normales ne consomment jamais le quota.
+//  - Par RÉSEAU  : 60 échecs / 15 min par IP réelle (nécessite TRUST_PROXY=1
+//    derrière le proxy) — ralentit un balayage massif sans gêner un bureau.
+const loginAccountLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 8,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Trop de tentatives pour ce compte. Réessayez dans 15 minutes.' },
+  keyGenerator: (req) => {
+    const id = String(req.body?.email || req.body?.username || '').toLowerCase().trim();
+    return id ? `acct:${id}` : `ip:${req.ip}`;
+  },
+});
+
+const loginNetworkLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Trop de tentatives depuis votre réseau. Réessayez dans 15 minutes.' },
+});
+app.use('/api/auth/login', loginNetworkLimiter, loginAccountLimiter);
 
 app.use(requestId);
 
