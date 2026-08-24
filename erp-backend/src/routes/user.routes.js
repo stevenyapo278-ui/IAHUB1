@@ -10,6 +10,8 @@ const { sanitizeError } = require('../utils/sanitizeError');
 const { auditLog } = require('../services/auditLogService');
 const { emitUserUpdated } = require('../utils/socket');
 const cacheStore = require('../services/cacheStore');
+const { logger } = require('../utils/logger');
+const { isLdapSyncConfigured, syncLdapDirectory } = require('../services/ldapDirectory');
 
 // Après toute écriture sur les utilisateurs, on invalide les listes mises en cache (TTL 30s,
 // voir app.js) — sinon l'UI continue d'afficher l'ancien rôle/statut/équipe jusqu'à expiration.
@@ -144,6 +146,25 @@ router.get('/', async (req, res) => {
 
 // Toutes les opérations ci-dessous (création, modification, suppression, purge) requièrent d'être Administrateur
 router.use(authorizeAdmin);
+
+// Synchro manuelle de l'annuaire AD — équivalent de la « vue LDAP » de GLPI.
+// Crée/met à jour/désactive les comptes authProvider='ldap' depuis l'Active Directory.
+router.post('/sync-ldap', async (req, res) => {
+  if (!isLdapSyncConfigured()) {
+    return res.status(503).json({ error: 'Synchro LDAP non configurée (LDAP_BIND_PASSWORD / LDAP_BASE_DN requis)' });
+  }
+  try {
+    const stats = await syncLdapDirectory();
+    invalidateUserCaches();
+    return res.json({
+      message: 'Annuaire synchronisé',
+      stats,
+    });
+  } catch (err) {
+    logger.error('[users] Échec synchro annuaire LDAP:', { error: err.message });
+    return res.status(502).json({ error: `Échec de la synchronisation LDAP : ${err.message}` });
+  }
+});
 
 // Suppression par lot d'utilisateurs sélectionnés
 router.post('/bulk-delete', async (req, res) => {

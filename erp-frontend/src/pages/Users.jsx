@@ -12,7 +12,7 @@ import useSystemSettings from '../hooks/useSystemSettings';
 import {
   Users as UsersIcon, UserPlus, ShieldCheck, UserX,
   Trash2, Upload, Download, X, Search, CheckCircle2,
-  RotateCcw, KeyRound, Edit2, AlertTriangle, Zap
+  RotateCcw, KeyRound, Edit2, AlertTriangle, Zap, Database
 } from 'lucide-react';
 
 const ROLE_LABELS = {
@@ -110,6 +110,7 @@ export default function Users() {
   const [showCsvImport, setShowCsvImport] = useState(false);
   const [csvFile, setCsvFile] = useState(null);
   const [csvImporting, setCsvImporting] = useState(false);
+  const [ldapSyncing, setLdapSyncing] = useState(false);
   const [csvResult, setCsvResult] = useState(null);
   const [searchQuery, setSearchQuery] = useFilterParam('search');
   const [searchInput, setSearchInput] = useState('');
@@ -290,6 +291,22 @@ if (field === 'role') {
     catch (err) { setError(err.response?.data?.error || 'Erreur CSV'); } finally { setCsvImporting(false); }
   }
 
+  // Synchro annuaire AD — équivalent 1 clic de la « vue LDAP » GLPI :
+  // crée les nouveaux, met à jour les noms, désactive les comptes disparus.
+  async function handleLdapSync() {
+    setLdapSyncing(true);
+    try {
+      const { data } = await api.post('/users/sync-ldap');
+      const s = data.stats || {};
+      toast.success(`Annuaire synchronisé : ${s.created || 0} créé(s), ${s.updated || 0} mis à jour, ${s.deactivated || 0} désactivé(s), ${s.reactivated || 0} réactivé(s)`);
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Échec de la synchronisation annuaire');
+    } finally {
+      setLdapSyncing(false);
+    }
+  }
+
   return (
     <div className="flex flex-col min-h-screen">
       {/* ── Top Bar ─────────────────────────────────────────────────────── */}
@@ -307,6 +324,13 @@ if (field === 'role') {
 
         {/* Actions */}
         <div className="flex items-center gap-2 ml-auto shrink-0">
+          <button onClick={handleLdapSync} disabled={ldapSyncing}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-indigo-500/40 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/10 text-xs font-semibold transition-all disabled:opacity-50"
+            title="Synchroniser les comptes depuis l'Active Directory (créations, mises à jour, désactivations)"
+          >
+            <Database className={`w-3.5 h-3.5 ${ldapSyncing ? 'animate-pulse' : ''}`} />
+            <span className="hidden sm:inline">{ldapSyncing ? 'Synchronisation…' : 'Annuaire AD'}</span>
+          </button>
           <button onClick={openPurgeModal}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 text-xs font-semibold transition-all cursor-pointer"
             title="Purger & nettoyer intelligemment les comptes"

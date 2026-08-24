@@ -122,6 +122,16 @@ scheduleSync('lieux GLPI', syncGlpiLocationsOnly, (s) => s.glpiLocationsSyncInte
 scheduleSync('assets GLPI', syncGlpiAssetsOnly, () => 24 * 3600);
 scheduleSync('modèles IA', syncAllProviders, (s) => s.aiModelsSyncIntervalHours * 3600);
 
+// Annuaire Active Directory : reflète les utilisateurs AD dans IA Hub toutes les
+// 10 minutes (création des nouveaux, maj nom complet, désactivation des partants).
+// Ne démarre que si le compte de service LDAP est configuré (.env).
+const { isLdapSyncConfigured, syncLdapDirectory } = require('./services/ldapDirectory');
+if (isLdapSyncConfigured()) {
+  scheduleSync('annuaire LDAP', syncLdapDirectory, () => 10 * 60);
+} else {
+  logger.info('[server] Synchro annuaire LDAP inactive (LDAP_BIND_PASSWORD/LDAP_BASE_DN non configurés)');
+}
+
 // File de retry GLPI : rejoue les actions différées qui ont échoué (ex. clôture validée par la
 // Hotline pendant une indisponibilité GLPI) — toutes les 5 minutes, backoff exponentiel interne.
 const { processGlpiSyncRetries } = require('./services/glpiSyncRetry');
