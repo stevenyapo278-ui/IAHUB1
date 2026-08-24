@@ -83,53 +83,60 @@ async function syncLdapDirectory() {
     }
     stats.adTotal = directory.size;
 
-    // Comptes IA Hub issus de l'AD (les comptes locaux ne sont jamais touchés)
-    const localLdapUsers = await prisma.user.findMany({
-      where: { authProvider: 'ldap' },
-      select: { id: true, email: true, fullName: true, isActive: true },
+    // Tous les comptes locaux, quel que soit leur provider : des comptes créés à la main
+    // ou via l'ancien import GLPI (authProvider='local') peuvent porter le même email qu'un
+    // compte AD — il faut les ADOPTER plutôt que de créer un doublon (contrainte unique email).
+    const localUsers = await prisma.user.findMany({
+      select: { id: true, email: true, fullName: true, isActive: true, authProvider: true },
     });
+    const localsByEmail = new Map(localUsers.map((u) => [u.email.toLowerCase(), u]));
 
-    for (const user of localLdapUsers) {
-      const adEntry = directory.get(user.email.toLowerCase());
-      if (!adEntry) {
-        // Compte disparu de l'AD → désactivé (les tickets et l'historique sont conservés)
-        if (user.isActive) {
-          await prisma.user.update({ where: { id: user.id }, data: { isActive: false } });
-          stats.deactivated += 1;
-          logger.info(`[ldapDirectory] ${user.email} absent de l'AD → désactivé`);
-        }
+    // Passe 1 : chaque entrée AD → création ou mise à jour du compte correspondant
+    for (const [email, adEntry] of directory) {
+      const existing = localsByEmail.get(email);
+
+      if (!existing) {
+        await prisma.user.create({
+          data: {
+            email,
+            // Mot de passe aléatoire : connexion locale impossible, l'utilisateur
+            // passe par son mot de passe AD (fallback LDAP du login).
+            passwordHash: bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), 10),
+            fullName: adEntry.fullName,
+            role: 'REQUESTER',
+            isActive: adEntry.enabled,
+            mustChangePassword: false,
+            authProvider: 'ldap',
+          },
+        });
+        stats.created += 1;
+        logger.info(`[ldapDirectory] ${email} créé depuis l'AD (${adEntry.fullName})`);
         continue;
       }
 
+      // Compte existant (local ou déjà ldap) → rattaché au cycle de vie de l'AD
       const changes = {};
-      if (user.fullName !== adEntry.fullName && adEntry.fullName) changes.fullName = adEntry.fullName;
-      if (!user.isActive && adEntry.enabled) changes.isActive = true;
+      if (adEntry.fullName && existing.fullName !== adEntry.fullName) changes.fullName = adEntry.fullName;
+      const shouldBeActive = adEntry.enabled;
+      if (existing.isActive !== shouldBeActive) changes.isActive = shouldBeActive;
+      if (existing.authProvider !== 'ldap') changes.authProvider = 'ldap';
 
       if (Object.keys(changes).length > 0) {
-        await prisma.user.update({ where: { id: user.id }, data: changes });
+        await prisma.user.update({ where: { id: existing.id }, data: changes });
         if (changes.isActive === true) stats.reactivated += 1;
+        else if (changes.isActive === false) stats.deactivated += 1;
         else stats.updated += 1;
       }
-      directory.delete(user.email.toLowerCase());
     }
 
-    // Ce qui reste = nouveaux arrivants encore inconnus d'IA Hub
-    for (const [email, adEntry] of directory) {
-      await prisma.user.create({
-        data: {
-          email,
-          // Mot de passe aléatoire : connexion locale impossible, l'utilisateur
-          // passe par son mot de passe AD (fallback LDAP du login).
-          passwordHash: bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), 10),
-          fullName: adEntry.fullName,
-          role: 'REQUESTER',
-          isActive: adEntry.enabled,
-          mustChangePassword: false,
-          authProvider: 'ldap',
-        },
-      });
-      stats.created += 1;
-      logger.info(`[ldapDirectory] ${email} créé depuis l'AD (${adEntry.fullName})`);
+    // Passe 2 : comptes gérés par l'AD mais absents de l'annuaire → désactivés
+    // (tickets et historique conservés). Les comptes locaux ne sont jamais touchés.
+    for (const user of localLdapOnlyUsers(localUsers, directory)) {
+      if (user.isActive) {
+        await prisma.user.update({ where: { id: user.id }, data: { isActive: false } });
+        stats.deactivated += 1;
+        logger.info(`[ldapDirectory] ${user.email} absent de l'AD → désactivé`);
+      }
     }
 
     logger.info(`[ldapDirectory] Synchro terminée : ${stats.adTotal} entrées AD, ${stats.created} créées, ${stats.updated} mises à jour, ${stats.reactivated} réactivées, ${stats.deactivated} désactivées`);
@@ -137,6 +144,13 @@ async function syncLdapDirectory() {
   } finally {
     try { await client.unbind(); } catch { /* socket déjà fermée */ }
   }
+}
+
+// Comptes dont authProvider='ldap' et dont l'email ne figure plus dans l'annuaire
+function localLdapOnlyUsers(localUsers, directory) {
+  return localUsers.filter(
+    (u) => u.authProvider === 'ldap' && !directory.has(u.email.toLowerCase())
+  );
 }
 
 module.exports = { isLdapSyncConfigured, syncLdapDirectory };
