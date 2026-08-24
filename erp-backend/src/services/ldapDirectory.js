@@ -21,6 +21,7 @@
 const { Client } = require('ldapts');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
+const { Prisma } = require('@prisma/client');
 const prisma = require('../prismaClient');
 const { logger } = require('../utils/logger');
 
@@ -58,7 +59,7 @@ async function syncLdapDirectory() {
   }
 
   const client = new Client({ url: LDAP_DIRECTORY_URL, connectTimeout: 5000, timeout: 30000 });
-  const stats = { adTotal: 0, created: 0, updated: 0, reactivated: 0, deactivated: 0 };
+  const stats = { adTotal: 0, created: 0, updated: 0, reactivated: 0, deactivated: 0, skipped: 0 };
 
   try {
     await client.bind(LDAP_BIND_DN, LDAP_BIND_PASSWORD);
@@ -96,21 +97,32 @@ async function syncLdapDirectory() {
       const existing = localsByEmail.get(email);
 
       if (!existing) {
-        await prisma.user.create({
-          data: {
-            email,
-            // Mot de passe aléatoire : connexion locale impossible, l'utilisateur
-            // passe par son mot de passe AD (fallback LDAP du login).
-            passwordHash: bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), 10),
-            fullName: adEntry.fullName,
-            role: 'REQUESTER',
-            isActive: adEntry.enabled,
-            mustChangePassword: false,
-            authProvider: 'ldap',
-          },
-        });
-        stats.created += 1;
-        logger.info(`[ldapDirectory] ${email} créé depuis l'AD (${adEntry.fullName})`);
+        try {
+          await prisma.user.create({
+            data: {
+              email,
+              // Mot de passe aléatoire : connexion locale impossible, l'utilisateur
+              // passe par son mot de passe AD (fallback LDAP du login).
+              passwordHash: bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), 10),
+              fullName: adEntry.fullName,
+              role: 'REQUESTER',
+              isActive: adEntry.enabled,
+              mustChangePassword: false,
+              authProvider: 'ldap',
+            },
+          });
+          stats.created += 1;
+          logger.info(`[ldapDirectory] ${email} créé depuis l'AD (${adEntry.fullName})`);
+        } catch (err) {
+          // Course ou doublon insensible à la casse côté base : on ignore la ligne
+          // au lieu d'échouer — l'entrée sera réconciliée à la synchro suivante.
+          if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+            stats.skipped += 1;
+            logger.warn(`[ldapDirectory] ${email} ignoré : email déjà pris (doublon/casse)`);
+          } else {
+            throw err;
+          }
+        }
         continue;
       }
 
@@ -122,10 +134,19 @@ async function syncLdapDirectory() {
       if (existing.authProvider !== 'ldap') changes.authProvider = 'ldap';
 
       if (Object.keys(changes).length > 0) {
-        await prisma.user.update({ where: { id: existing.id }, data: changes });
-        if (changes.isActive === true) stats.reactivated += 1;
-        else if (changes.isActive === false) stats.deactivated += 1;
-        else stats.updated += 1;
+        try {
+          await prisma.user.update({ where: { id: existing.id }, data: changes });
+          if (changes.isActive === true) stats.reactivated += 1;
+          else if (changes.isActive === false) stats.deactivated += 1;
+          else stats.updated += 1;
+        } catch (err) {
+          if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+            stats.skipped += 1;
+            logger.warn(`[ldapDirectory] mise à jour ignorée pour ${email} (conflit unique)`);
+          } else {
+            throw err;
+          }
+        }
       }
     }
 

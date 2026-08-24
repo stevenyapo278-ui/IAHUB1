@@ -298,7 +298,8 @@ if (field === 'role') {
     try {
       const { data } = await api.post('/users/sync-ldap');
       const s = data.stats || {};
-      toast.success(`Annuaire synchronisé : ${s.created || 0} créé(s), ${s.updated || 0} mis à jour, ${s.deactivated || 0} désactivé(s), ${s.reactivated || 0} réactivé(s)`);
+      const skipped = s.skipped ? `, ${s.skipped} ignoré(s)` : '';
+      toast.success(`Annuaire synchronisé : ${s.created || 0} créé(s), ${s.updated || 0} mis à jour, ${s.deactivated || 0} désactivé(s), ${s.reactivated || 0} réactivé(s)${skipped}`);
       load();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Échec de la synchronisation annuaire');
