@@ -462,17 +462,19 @@ export default function MainLayout() {
               <NotificationPanel open={showNotifications} onClose={() => setShowNotifications(false)} />
             </div>
 
-            {/* Theme toggle */}
+            {/* Theme toggle — Soleil ↔ Lune avec rotation premium */}
             <button
               onClick={toggleTheme}
-              className="w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:bg-surface-container-high hover:border-indigo-500/40 border border-outline-variant/60 group"
+              className="theme-toggle-btn w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:bg-surface-container-high hover:border-indigo-500/40 border border-outline-variant/60 active:scale-90"
               title={theme === 'dark' ? 'Basculer en Mode clair' : 'Basculer en Mode sombre'}
+              aria-label={theme === 'dark' ? 'Basculer en Mode clair' : 'Basculer en Mode sombre'}
             >
-              {theme === 'dark' ? (
-                <Sun className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
-              ) : (
-                <Moon className="w-4 h-4 text-indigo-600 group-hover:scale-110 transition-transform" />
-              )}
+              <span className={`theme-toggle-icon ${theme === 'dark' ? 'active' : ''}`} aria-hidden="true">
+                <Sun className="w-4 h-4 text-amber-400" />
+              </span>
+              <span className={`theme-toggle-icon ${theme !== 'dark' ? 'active' : ''}`} aria-hidden="true">
+                <Moon className="w-4 h-4 text-indigo-600 dark:text-indigo-300" />
+              </span>
             </button>
           </div>
         </header>

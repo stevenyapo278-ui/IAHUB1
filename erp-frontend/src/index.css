@@ -201,13 +201,24 @@
 /* ─── Transition fluide entre les thèmes ─────────────────────────────────────── */
 /* Uniquement les propriétés visuelles de thème — PAS transform/opacity : celles-ci
    provoquent des flashs au chargement de la page (les éléments partent de la valeur
-   initiale du navigateur vers leur style final avec un délai de 250ms visible).
+   initiale du navigateur vers leur style final avec un délai visible).
    Les composants qui ont besoin d'animer transform/opacity le font via Framer Motion
-   ou des classes Tailwind ciblées (transition-transform, animate-*). */
+   ou des classes Tailwind ciblées (transition-transform, animate-*).
+   Cette transition sert aussi de fallback élégant quand l'API View Transitions
+   n'est pas disponible (la vague circulaire prend le relais ailleurs). */
 *, *::before, *::after {
   transition-property: background-color, border-color, color, fill, stroke, box-shadow;
-  transition-duration: 250ms;
-  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  transition-duration: 400ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ─── Vague circulaire Dark ↔ Light (View Transitions API) ──────────────────── */
+/* On désactive le crossfade par défaut : ::view-transition-new(root) est révélé
+   via un clip-path circulaire animé en JS depuis ThemeContext (origine = clic). */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -216,6 +227,12 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+  /* Aucune vague ni crossfade si l'utilisateur refuse les animations */
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
   }
 }
 
@@ -528,6 +545,64 @@
 
   .dark .badge-priority-p4 {
     @apply bg-emerald-500/15 text-emerald-400 border-emerald-500/30;
+  }
+
+  /* ─── Bouton toggle thème — Soleil ↔ Lune premium ──────────────────────── */
+  /* Les deux icônes sont superposées en position absolue ; celle qui est active
+     est visible et droite, l'autre s'évapore en rotation + scale + fade.
+     Sens de rotation constant → sensation physique de molette à chaque bascule. */
+  .theme-toggle-btn {
+    position: relative;
+    isolation: isolate;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Halo glow subtil au survol — ambré côté Soleil (dark), indigo côté Lune (light) */
+  .theme-toggle-btn::after {
+    content: '';
+    position: absolute;
+    inset: -3px;
+    border-radius: inherit;
+    opacity: 0;
+    pointer-events: none;
+    z-index: -1;
+    transition: box-shadow 0.45s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.35s ease;
+  }
+  .theme-toggle-btn:hover::after,
+  .theme-toggle-btn:focus-visible::after {
+    opacity: 1;
+    box-shadow:
+      0 0 16px rgba(99, 102, 241, 0.22),
+      inset 0 0 8px rgba(99, 102, 241, 0.07);
+  }
+  .dark .theme-toggle-btn:hover::after,
+  .dark .theme-toggle-btn:focus-visible::after {
+    box-shadow:
+      0 0 16px rgba(251, 191, 36, 0.22),
+      inset 0 0 8px rgba(251, 191, 36, 0.08);
+  }
+
+  .theme-toggle-icon {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transform: rotate(100deg) scale(0.4);
+    pointer-events: none;
+    will-change: transform, opacity;
+    transition:
+      transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1),
+      opacity 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .theme-toggle-icon.active {
+    opacity: 1;
+    transform: rotate(0deg) scale(1);
+  }
+  /* Léger zoom de l'icône active au survol du bouton */
+  .theme-toggle-btn:hover .theme-toggle-icon.active {
+    transform: rotate(0deg) scale(1.12);
   }
 }
 

@@ -74,19 +74,19 @@ export default function Login() {
           whileTap={{ scale: 0.92 }}
           onClick={toggleTheme}
           title={theme === 'dark' ? 'Passer en mode clair' : 'Passer en mode sombre'}
-          className="p-2.5 rounded-2xl bg-surface-container-lowest/90 border border-outline-variant/40 text-on-surface shadow-md backdrop-blur-md hover:bg-surface-container transition-all flex items-center gap-2 text-xs font-bold"
+          className="theme-toggle-btn p-2.5 rounded-2xl bg-surface-container-lowest/90 border border-outline-variant/40 text-on-surface shadow-md backdrop-blur-md hover:bg-surface-container transition-all flex items-center gap-2 text-xs font-bold"
         >
-          {theme === 'dark' ? (
-            <>
+          <span className="relative w-4 h-4 shrink-0" aria-hidden="true">
+            <span className={`theme-toggle-icon ${theme === 'dark' ? 'active' : ''}`}>
               <Sun className="w-4 h-4 text-amber-400" />
-              <span className="hidden sm:inline">Mode Clair</span>
-            </>
-          ) : (
-            <>
+            </span>
+            <span className={`theme-toggle-icon ${theme !== 'dark' ? 'active' : ''}`}>
               <Moon className="w-4 h-4 text-indigo-600" />
-              <span className="hidden sm:inline">Mode Sombre</span>
-            </>
-          )}
+            </span>
+          </span>
+          <span className="hidden sm:inline">
+            {theme === 'dark' ? 'Mode Clair' : 'Mode Sombre'}
+          </span>
         </motion.button>
       </div>
 
