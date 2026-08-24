@@ -53,6 +53,10 @@ router.get('/', async (req, res) => {
       where.status = { in: ['NEW', 'OPEN', 'PLANNED', 'PENDING'] };
     } else if (status === 'CLOSED_GROUP') {
       where.status = { in: ['SOLVED', 'CLOSED'] };
+    } else if (status === 'NOT_CLOSED') {
+      // Vue par défaut « à la GLPI » : tout sauf les clôturés — les résolus
+      // restent visibles tant qu'ils n'ont pas été fermés (auto-clôture 3 j).
+      where.status = { notIn: ['CLOSED'] };
     } else {
       where.status = status;
     }
@@ -194,6 +198,7 @@ router.get('/export', async (req, res) => {
   if (status) {
     if (status === 'OPEN_GROUP') where.status = { in: ['NEW', 'OPEN', 'PLANNED', 'PENDING'] };
     else if (status === 'CLOSED_GROUP') where.status = { in: ['SOLVED', 'CLOSED'] };
+    else if (status === 'NOT_CLOSED') where.status = { notIn: ['CLOSED'] };
     else where.status = status;
   }
   if (priority) where.priority = priority;

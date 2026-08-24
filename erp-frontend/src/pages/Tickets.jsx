@@ -62,11 +62,11 @@ import {
   STATUS_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS, URGENCY_IMPACT_OPTIONS,
 } from '../constants/tickets';
 
-// Vue par défaut « à la GLPI » : seuls les tickets actifs sont visibles à l'arrivée
-// sur la liste (les clôturés/résolus restent accessibles via filtre explicite).
-// Un statut présent dans l'URL (?status=SOLVED…) prime toujours sur ce défaut,
-// et « Tous les statuts » dans le panneau restaure la vue complète.
-const DEFAULT_STATUS_FILTER = 'OPEN_GROUP';
+// Vue par défaut « à la GLPI » : tous les statuts sont visibles (NEW, OPEN,
+// PLANNED, PENDING, SOLVED…) sauf les tickets CLOSE — notamment ceux fermés
+// automatiquement après 3 jours. Un statut présent dans l'URL (?status=SOLVED…)
+// prime toujours, et « Tous les statuts » dans le panneau restaure la vue complète.
+const DEFAULT_STATUS_FILTER = 'NOT_CLOSED';
 
 const EMPTY_FORM = {  title: '',
   content: '',
@@ -320,6 +320,7 @@ function FilterPanel({ onClose, activeFilterCount, filters, onUpdate, onClear, t
             onChange={(v) => onUpdate('status', v)}
             options={[
               { label: 'Tous les statuts', value: '' },
+              { label: 'Tous sauf clôturés (défaut)', value: 'NOT_CLOSED' },
               { label: 'Ouverts (actifs)', value: 'OPEN_GROUP' },
               { label: 'Clôturés / résolus', value: 'CLOSED_GROUP' },
               { label: 'Nouveau', value: 'NEW' },
@@ -1032,7 +1033,7 @@ export default function Tickets() {
             <div className="flex items-center gap-1.5 px-4 sm:px-6 py-2 overflow-x-auto">
               <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest shrink-0 mr-1">Filtres :</span>
               {debouncedSearch && <ActiveChip label={`"${debouncedSearch}"`} onRemove={() => { setSearchQuery(''); setDebouncedSearch(''); setPage(1); }} />}
-              {filters.status && <ActiveChip label={filters.status === 'OPEN_GROUP' ? 'Ouverts' : filters.status === 'CLOSED_GROUP' ? 'Clôturés' : filters.status} onRemove={() => updateFilter('status', '')} />}
+              {filters.status && <ActiveChip label={filters.status === 'NOT_CLOSED' ? 'Non clôturés' : filters.status === 'OPEN_GROUP' ? 'Ouverts' : filters.status === 'CLOSED_GROUP' ? 'Clôturés' : filters.status} onRemove={() => updateFilter('status', '')} />}
               {filters.priority && <ActiveChip label={filters.priority} onRemove={() => updateFilter('priority', '')} />}
               {filters.source && <ActiveChip label={filters.source === 'glpi' ? 'GLPI' : 'ERP'} onRemove={() => updateFilter('source', '')} />}
               {filters.teamId && <ActiveChip label={teams.find(t => String(t.id) === filters.teamId)?.name || `Équipe #${filters.teamId}`} onRemove={() => updateFilter('teamId', '')} />}
