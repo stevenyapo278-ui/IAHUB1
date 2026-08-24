@@ -26,15 +26,32 @@ const MIN_PASSWORD_LENGTH = 8;
 // ── Synchronisation rôle ↔ groupe (RBAC) ─────────────────────────────────
 // « Le groupe suit le rôle » : quand un utilisateur reçoit un rôle associé à un groupe par défaut
 // (ROLE_DEFAULT_GROUP_NAME), il y est DÉPLACÉ (set = remplacement atomique, un seul groupe par
-// utilisateur — contrainte d'exclusivité). Best effort : si le groupe n'existe pas, on ne touche à rien.
+// utilisateur — contrainte d'exclusivité).
+// Inversement, une rétrogradation vers un rôle SANS groupe par défaut (REQUESTER, ADMIN) détache
+// les groupes « à rôle » devenus incompatibles — sinon l'utilisateur conserverait les permissions
+// de son ancien rôle (privilèges résiduels). Les groupes personnalisés créés manuellement ne sont
+// jamais touchés. Best effort : erreur silencieuse, le changement de rôle reste prioritaire.
 async function syncRolePermissionGroup(userId, role) {
   const groupName = ROLE_DEFAULT_GROUP_NAME[role];
-  if (!groupName) return;
-  const group = await prisma.permissionGroup.findUnique({ where: { name: groupName } });
-  if (!group) return;
+  if (groupName) {
+    const group = await prisma.permissionGroup.findUnique({ where: { name: groupName } });
+    if (group) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { permissionGroups: { set: [{ id: group.id }] } },
+      }).catch(() => {});
+      return;
+    }
+  }
+
+  // Rôle sans groupe par défaut (ou groupe introuvable) : détache les autres groupes « à rôle »
+  const staleNames = Object.values(ROLE_DEFAULT_GROUP_NAME).filter(Boolean).filter((n) => n !== groupName);
+  if (staleNames.length === 0) return;
+  const staleGroups = await prisma.permissionGroup.findMany({ where: { name: { in: staleNames } }, select: { id: true } });
+  if (staleGroups.length === 0) return;
   await prisma.user.update({
     where: { id: userId },
-    data: { permissionGroups: { set: [{ id: group.id }] } },
+    data: { permissionGroups: { disconnect: staleGroups.map((g) => ({ id: g.id })) } },
   }).catch(() => {});
 }
 
