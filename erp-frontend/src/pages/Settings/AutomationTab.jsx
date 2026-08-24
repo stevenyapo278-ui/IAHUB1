@@ -26,10 +26,10 @@ function SettingRow({ title, description, checked, onChange, disabled }) {
     <motion.div
       variants={itemVariants}
       whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
-      className="bento-card flex items-center justify-between gap-lg p-lg"
+      className="bento-card flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-lg p-lg"
     >
       <div className="min-w-0 flex-1">
-        <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">{title}</div>
+        <div className="font-headline-sm text-headline-sm text-on-surface font-semibold break-words">{title}</div>
         <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 break-words">{description}</p>
       </div>
       <div className="shrink-0">
@@ -44,10 +44,10 @@ function IntervalRow({ title, description, value, onChange, disabled, max, unit 
     <motion.div
       variants={itemVariants}
       whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
-      className="bento-card flex items-center justify-between gap-lg p-lg"
+      className="bento-card flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-lg p-lg"
     >
       <div className="min-w-0 flex-1">
-        <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">{title}</div>
+        <div className="font-headline-sm text-headline-sm text-on-surface font-semibold break-words">{title}</div>
         <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 break-words">{description}</p>
       </div>
       <div className="flex items-center gap-sm shrink-0">
@@ -562,7 +562,7 @@ export default function AutomationTab() {
             <motion.div
               variants={itemVariants}
               whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
-              className="bento-card flex items-center justify-between gap-lg p-lg"
+              className="bento-card flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-lg p-lg"
             >
               <div className="min-w-0 flex-1">
                 <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">Heure d'envoi</div>
@@ -736,7 +736,7 @@ export default function AutomationTab() {
             <motion.div
               variants={itemVariants}
               whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
-              className="bento-card flex items-center justify-between gap-lg p-lg"
+              className="bento-card flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-lg p-lg"
             >
               <div className="min-w-0 flex-1">
                 <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">Langue vocale</div>

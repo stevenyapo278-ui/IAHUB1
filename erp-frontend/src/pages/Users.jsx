@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import api from '../api/client';
 import ConfirmDialog from '../components/ConfirmDialog';
+import Toggle from '../components/Toggle';
 import Skeleton from '../components/Skeleton';
 import { useAuth } from '../context/AuthContext';
 import { useFilterParam } from '../hooks/useFilterParam';
@@ -56,27 +57,14 @@ const ROLE_CONFIG = {
 };
 
 function ToggleSwitch({ checked, onChange, disabled = false, title }) {
+  // Délègue au toggle moderne partagé (design identique au reste de l'app)
   return (
-    <motion.button
-      type="button"
-      onClick={() => onChange(!checked)}
+    <Toggle
+      checked={checked}
+      onChange={onChange}
       disabled={disabled}
-      title={title}
-      whileTap={{ scale: 0.92 }}
-      className={`relative w-12 h-6 rounded-full border transition-all duration-300 outline-none ${
-        checked
-          ? 'bg-primary border-primary/60 shadow-sm shadow-primary/20'
-          : 'bg-surface-container-high border-outline-variant/60'
-      } disabled:opacity-50 disabled:cursor-not-allowed`}
-    >
-      <motion.span
-        animate={{ x: checked ? 24 : 0 }}
-        transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-        className={`absolute top-[2px] left-[2px] w-[18px] h-[18px] rounded-full shadow-sm ${
-          checked ? 'bg-white' : 'bg-on-surface-variant/80'
-        }`}
-      />
-    </motion.button>
+      label={title}
+    />
   );
 }
 
