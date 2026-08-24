@@ -62,6 +62,14 @@ async function syncLdapDirectory() {
   const stats = { adTotal: 0, created: 0, updated: 0, reactivated: 0, deactivated: 0, skipped: 0 };
 
   try {
+    // Les DC durcis (Microsoft 2022+, erreur 0x8 « requires binds to turn on
+    // integrity checking ») refusent les binds en clair : on monte en TLS sur la
+    // connexion 389 via StartTLS. Inutile si l'URL est déjà ldaps://.
+    // LDAP_STARTTLS=false pour désactiver, LDAP_TLS_STRICT=true pour exiger un
+    // certificat signé par une CA de confiance (défaut : tolérant, CA interne AD).
+    if (!/^ldaps:/i.test(LDAP_DIRECTORY_URL) && process.env.LDAP_STARTTLS !== 'false') {
+      await client.startTLS({ rejectUnauthorized: process.env.LDAP_TLS_STRICT === 'true' });
+    }
     await client.bind(LDAP_BIND_DN, LDAP_BIND_PASSWORD);
     const { searchEntries } = await client.search(LDAP_BASE_DN, {
       scope: 'sub',
