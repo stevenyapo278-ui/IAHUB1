@@ -1,13 +1,13 @@
 jest.mock('ldapts', () => {
   const calls = { startTLS: 0 };
+  // mail réel servant de cible à la recherche annuaire, par sAMAccountName
+  const __mails = { ok: 'ok@prosuma.ci' };
   class Client {
     constructor() {
       this.bound = false;
     }
     async startTLS() {
-      // Déclenche une erreur si la montée TLS est explicitement désactivée, pour
-      // imiter un client qui ne l'exécute pas — sert de garde-fou au test « sans TLS ».
-      if (process.env.LDAP_STARTTLS === 'false') throw new Error('StartTLS désactivé');
+      if (process.env.LDAP_STARTTLS === 'false') throw new Error('StartTLS desactive');
       calls.startTLS += 1;
       return;
     }
@@ -19,15 +19,26 @@ jest.mock('ldapts', () => {
       }
       throw new Error('InvalidCredentials');
     }
+    async search(base, options) {
+      const m = String(options?.filter || '').match(/sAMAccountName=([^)]+)/);
+      const sam = m ? m[1].trim() : null;
+      if (!sam) return { searchEntries: [] };
+      const mail = __mails[sam];
+      return {
+        searchEntries: mail
+          ? [{ sAMAccountName: sam, mail, displayName: 'Ok Utilisateur' }]
+          : [],
+      };
+    }
     async unbind() {
       this.bound = false;
     }
   }
-  return { Client, __calls: calls };
+  return { Client, __calls: calls, __mails };
 });
 
 const ldapAuth = require('./ldapAuth');
-const { __calls } = require('ldapts');
+const { __calls, __mails } = require('ldapts');
 
 describe('ldapAuth', () => {
   describe('ldapEmailFor', () => {
@@ -39,11 +50,12 @@ describe('ldapAuth', () => {
   describe('authenticateLdap', () => {
     beforeEach(() => {
       __calls.startTLS = 0;
+      __mails.ok = 'ok@prosuma.ci';
     });
 
     it('retourne username+email quand le bind AD réussit', async () => {
       const result = await ldapAuth.authenticateLdap('ok', 'bon-mot-de-passe');
-      expect(result).toEqual({ username: 'ok', email: 'ok@prosuma.ci' });
+      expect(result).toEqual({ username: 'ok', email: 'ok@prosuma.ci', fullName: 'Ok Utilisateur' });
     });
 
     it('monte en StartTLS avant le bind (URL ldap://, DC durci)', async () => {
@@ -55,7 +67,7 @@ describe('ldapAuth', () => {
       process.env.LDAP_STARTTLS = 'false';
       try {
         const result = await ldapAuth.authenticateLdap('ok', 'bon-mot-de-passe');
-        expect(result).toEqual({ username: 'ok', email: 'ok@prosuma.ci' });
+        expect(result.email).toBe('ok@prosuma.ci');
         expect(__calls.startTLS).toBe(0);
       } finally {
         delete process.env.LDAP_STARTTLS;
@@ -72,22 +84,35 @@ describe('ldapAuth', () => {
       expect(result).toBeNull();
     });
 
-    it('utilise LDAP_BIND_DOMAIN pour le bind tout en gardant LDAP_EMAIL_DOMAIN pour l\'email', async () => {
+    it('utilise LDAP_BIND_DOMAIN pour le bind mais garde LDAP_EMAIL_DOMAIN pour l\'email', async () => {
       process.env.LDAP_BIND_DOMAIN = 'prosuma.lan';
       try {
         const result = await ldapAuth.authenticateLdap('ok', 'bon-mot-de-passe');
-        expect(result).toEqual({ username: 'ok', email: 'ok@prosuma.ci' });
+        expect(result.email).toBe('ok@prosuma.ci');
       } finally {
         delete process.env.LDAP_BIND_DOMAIN;
       }
     });
 
+    it('résout le vrai « mail » AD au lieu de construire username@domaine (bug doublon)', async () => {
+      // Le login « styapo » doit retrouver le compte réel steven.yapo@…, pas créer un doublon.
+      __mails.ok = 'steven.yapo@prosuma.ci';
+      const result = await ldapAuth.authenticateLdap('ok', 'bon-mot-de-passe');
+      expect(result.email).toBe('steven.yapo@prosuma.ci');
+      expect(result.username).toBe('ok');
+    });
+
+    it('repli sur LDAP_EMAIL_DOMAIN quand l\'AD n\'a pas de champ mail', async () => {
+      __mails.ok = '';
+      const result = await ldapAuth.authenticateLdap('ok', 'bon-mot-de-passe');
+      expect(result.email).toBe('ok@prosuma.ci');
+    });
+
     it('retombe sur LDAP_EMAIL_DOMAIN quand le premier suffixe UPN est refusé', async () => {
       process.env.LDAP_BIND_DOMAIN = 'invalide.lan';
       try {
-        // ok@invalide.lan est refusé par le mock ; ok@prosuma.ci (email domain) est accepté.
         const result = await ldapAuth.authenticateLdap('ok', 'bon-mot-de-passe');
-        expect(result).toEqual({ username: 'ok', email: 'ok@prosuma.ci' });
+        expect(result.email).toBe('ok@prosuma.ci');
       } finally {
         delete process.env.LDAP_BIND_DOMAIN;
       }
