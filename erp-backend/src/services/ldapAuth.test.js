@@ -1,7 +1,15 @@
 jest.mock('ldapts', () => {
+  const calls = { startTLS: 0 };
   class Client {
     constructor() {
       this.bound = false;
+    }
+    async startTLS() {
+      // Déclenche une erreur si la montée TLS est explicitement désactivée, pour
+      // imiter un client qui ne l'exécute pas — sert de garde-fou au test « sans TLS ».
+      if (process.env.LDAP_STARTTLS === 'false') throw new Error('StartTLS désactivé');
+      calls.startTLS += 1;
+      return;
     }
     async bind(dn, password) {
       if (dn === 'ok@prosuma.ci' && password === 'bon-mot-de-passe') {
@@ -14,10 +22,11 @@ jest.mock('ldapts', () => {
       this.bound = false;
     }
   }
-  return { Client };
+  return { Client, __calls: calls };
 });
 
 const ldapAuth = require('./ldapAuth');
+const { __calls } = require('ldapts');
 
 describe('ldapAuth', () => {
   describe('ldapEmailFor', () => {
@@ -27,9 +36,29 @@ describe('ldapAuth', () => {
   });
 
   describe('authenticateLdap', () => {
+    beforeEach(() => {
+      __calls.startTLS = 0;
+    });
+
     it('retourne username+email quand le bind AD réussit', async () => {
       const result = await ldapAuth.authenticateLdap('ok', 'bon-mot-de-passe');
       expect(result).toEqual({ username: 'ok', email: 'ok@prosuma.ci' });
+    });
+
+    it('monte en StartTLS avant le bind (URL ldap://, DC durci)', async () => {
+      await ldapAuth.authenticateLdap('ok', 'bon-mot-de-passe');
+      expect(__calls.startTLS).toBe(1);
+    });
+
+    it('n\'utilise pas StartTLS quand LDAP_STARTTLS=false', async () => {
+      process.env.LDAP_STARTTLS = 'false';
+      try {
+        const result = await ldapAuth.authenticateLdap('ok', 'bon-mot-de-passe');
+        expect(result).toEqual({ username: 'ok', email: 'ok@prosuma.ci' });
+        expect(__calls.startTLS).toBe(0);
+      } finally {
+        delete process.env.LDAP_STARTTLS;
+      }
     });
 
     it('retourne null quand le bind AD échoue (mauvais mot de passe)', async () => {

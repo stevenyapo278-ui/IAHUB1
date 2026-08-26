@@ -34,9 +34,19 @@ function buildBindDn(username) {
 async function authenticateLdap(username, password) {
   const client = new Client({ url: LDAP_URL, connectTimeout: 5000, timeout: 10000 });
   const bindDn = buildBindDn(username.trim());
-  console.log(`[ldapAuth] Tentative de bind LDAP sur ${LDAP_URL} avec ${bindDn}`);
+  console.log(`[ldapAuth] Tentative de connexion LDAP sur ${LDAP_URL} avec ${bindDn}`);
 
   try {
+    // Les DC durcis (Microsoft 2022+, erreur 0x8 « requires binds to turn on
+    // integrity checking ») refusent les binds en clair : on monte en TLS sur la
+    // connexion 389 via StartTLS, comme dans ldapDirectory.js (synchro annuaire).
+    // Inutile si l'URL est déjà ldaps://. LDAP_STARTTLS=false pour désactiver,
+    // LDAP_TLS_STRICT=true pour exiger un certificat signé par une CA de confiance
+    // (défaut : tolérant, CA interne AD).
+    if (!/^ldaps:/i.test(LDAP_URL) && process.env.LDAP_STARTTLS !== 'false') {
+      console.log(`[ldapAuth] Montée en StartTLS sur ${LDAP_URL} (LDAP_STARTTLS != false)`);
+      await client.startTLS({ rejectUnauthorized: process.env.LDAP_TLS_STRICT === 'true' });
+    }
     await client.bind(bindDn, password);
     return { username: username.trim(), email: ldapEmailFor(username) };
   } catch (error) {
