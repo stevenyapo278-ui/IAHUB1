@@ -12,7 +12,8 @@ jest.mock('ldapts', () => {
       return;
     }
     async bind(dn, password) {
-      if (dn === 'ok@prosuma.ci' && password === 'bon-mot-de-passe') {
+      const validDns = ['ok@prosuma.ci', 'ok@prosuma.lan'];
+      if (validDns.includes(dn) && password === 'bon-mot-de-passe') {
         this.bound = true;
         return;
       }
@@ -69,6 +70,16 @@ describe('ldapAuth', () => {
     it('retourne null sur utilisateur inconnu', async () => {
       const result = await ldapAuth.authenticateLdap('inexistant', 'x');
       expect(result).toBeNull();
+    });
+
+    it('utilise LDAP_BIND_DOMAIN pour le bind tout en gardant LDAP_EMAIL_DOMAIN pour l\'email', async () => {
+      process.env.LDAP_BIND_DOMAIN = 'prosuma.lan';
+      try {
+        const result = await ldapAuth.authenticateLdap('ok', 'bon-mot-de-passe');
+        expect(result).toEqual({ username: 'ok', email: 'ok@prosuma.ci' });
+      } finally {
+        delete process.env.LDAP_BIND_DOMAIN;
+      }
     });
   });
 });

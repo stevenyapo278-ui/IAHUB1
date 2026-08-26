@@ -345,6 +345,7 @@ Variables d'environnement (à renseigner dans Dokploy / `.env`) :
 | `LDAP_ENABLED` | Activer le fallback AD (`true`/`false`) | `false` |
 | `LDAP_URL` | Serveur AD (ex. `ldap://10.0.70.1`, `ldaps://ad.prosuma.ci:636`) | `ldap://10.0.70.1` |
 | `LDAP_EMAIL_DOMAIN` | Domaine : `username@<domaine>` devient l'email du compte | `prosuma.ci` |
+| `LDAP_BIND_DOMAIN` | Suffixe UPN du bind (ex. `prosuma.lan`), distinct du domaine mail ; vide = LDAP_EMAIL_DOMAIN | `prosuma.lan` |
 | `LDAP_BIND_FORMAT` | Format du bind : `{username}@{domain}` (UPN) ou `{domain}\{username}` (NTLM) | `{username}@{domain}` |
 | `LDAP_ADMIN_USERNAMES` | Usernames AD séparés par des virgules → rôle **ADMIN** (les autres → REQUESTER) | vide |
 | `AUTH_EMAIL_DOMAIN` | Permet de se connecter avec l'identifiant seul (`styapo`) au lieu de l'email complet | vide |
