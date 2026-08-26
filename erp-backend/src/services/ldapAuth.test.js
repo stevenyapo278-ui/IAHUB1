@@ -81,5 +81,16 @@ describe('ldapAuth', () => {
         delete process.env.LDAP_BIND_DOMAIN;
       }
     });
+
+    it('retombe sur LDAP_EMAIL_DOMAIN quand le premier suffixe UPN est refusé', async () => {
+      process.env.LDAP_BIND_DOMAIN = 'invalide.lan';
+      try {
+        // ok@invalide.lan est refusé par le mock ; ok@prosuma.ci (email domain) est accepté.
+        const result = await ldapAuth.authenticateLdap('ok', 'bon-mot-de-passe');
+        expect(result).toEqual({ username: 'ok', email: 'ok@prosuma.ci' });
+      } finally {
+        delete process.env.LDAP_BIND_DOMAIN;
+      }
+    });
   });
 });

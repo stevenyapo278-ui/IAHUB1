@@ -2,14 +2,13 @@
 // bind en userPrincipalName (UPN) « username@domaine » (ou style NTLM « domaine\\username » via
 // LDAP_BIND_FORMAT). Utilisé comme fallback après l'authentification locale.
 //
-// Distinction obligatoire entre deux « domaines » :
-//   - LDAP_EMAIL_DOMAIN  : suffixe email des comptes (ex. prosuma.ci) — sert à fabriquer
-//                          l'email du compte IA Hub (ldapEmailFor).
-//   - LDAP_BIND_DOMAIN   : suffixe UPN utilisé au moment du bind (ex. prosuma.lan). Valeur par
-//                          défaut = LDAP_EMAIL_DOMAIN si non précisé, mais sur de nombreuses AD
-//                          le suffixe UPN diffère du domaine mail — si le bind échoue avec une
-//                          erreur « utilisateur introuvable » (invalidCredentials 0x31),
-//                          vérifier LDAP_BIND_DOMAIN.
+// Le suffixe UPN d'un compte AD est souvent DIFFÉRENT du domaine mail (ex. email
+// styapo@prosuma.ci mais UPN styapo@prosuma.lan). On ne devine donc jamais un seul
+// suffixe : on essaie, dans l'ordre, tous les « domaines » candidats :
+//   - LDAP_BIND_DOMAIN  (suffixe UPN du bind, défaut : prosuma.lan)
+//   - LDAP_EMAIL_DOMAIN (suffixe email, défaut : prosuma.ci)
+// Le premier bind qui aboutit valide la connexion. En cas d'échec, on journalise le
+// code AD exact (0x31 invalidCredentials = mauvais mot de passe OU mauvais suffixe UPN).
 const { Client } = require('ldapts');
 const { logger } = require('../utils/logger');
 
@@ -31,44 +30,64 @@ function isLdapAdminUsername(username) {
   return LDAP_ADMIN_USERNAMES.includes(username.trim().toLowerCase());
 }
 
-// Email « prosuma.ci » d'un compte : toujours basé sur LDAP_EMAIL_DOMAIN (suffixe mail),
-// indépendant du suffixe UPN utilisé pour le bind (LDAP_BIND_DOMAIN).
+// Email « prosuma.ci » d'un compte : toujours basé sur LDAP_EMAIL_DOMAIN.
 function ldapEmailFor(username) {
   return `${username.trim().toLowerCase()}@${LDAP_EMAIL_DOMAIN}`;
 }
 
-function buildBindDn(username) {
-  return LDAP_BIND_FORMAT
-    .replace('{username}', username)
-    .replace('{domain}', LDAP_BIND_DOMAIN);
+// Liste (sans doublon) des suffixes UPN à essayer au moment du bind.
+function candidateBindDns(username) {
+  const u = username.trim();
+  const domains = [];
+  const add = (d) => { if (d && !domains.includes(d)) domains.push(d); };
+  add(LDAP_BIND_DOMAIN);
+  add(LDAP_EMAIL_DOMAIN);
+  // Format NTLM (domaine\utilisateur) : le domaine est placé avant le username.
+  return domains.map((domain) =>
+    LDAP_BIND_FORMAT
+      .replace('{username}', u)
+      .replace('{domain}', domain),
+  );
 }
 
-// Tente l'authentification LDAP/Active Directory. Retourne null si refusée.
+// Tente l'authentification LDAP/Active Directory sur chaque domaine candidat.
+// Retourne null si toutes les tentatives échouent.
 async function authenticateLdap(username, password) {
   const client = new Client({ url: LDAP_URL, connectTimeout: 5000, timeout: 10000 });
-  const bindDn = buildBindDn(username.trim());
-  logger.info(`[ldapAuth] Tentative de connexion AD sur ${LDAP_URL} avec ${bindDn}`);
+  const candidates = candidateBindDns(username);
+  let lastError = null;
+
+  logger.info(`[ldapAuth] Tentative de connexion AD sur ${LDAP_URL} — ${candidates.length} suffixe(s) à tester`);
 
   try {
-    // Les DC durcis (Microsoft 2022+, erreur 0x8 « requires binds to turn on
-    // integrity checking ») refusent les binds en clair : on monte en TLS sur la
-    // connexion 389 via StartTLS, comme dans ldapDirectory.js (synchro annuaire).
-    // Inutile si l'URL est déjà ldaps://. LDAP_STARTTLS=false pour désactiver,
-    // LDAP_TLS_STRICT=true pour exiger un certificat signé par une CA de confiance
-    // (défaut : tolérant, CA interne AD).
+    // DC durcis (Microsoft 2022+, erreur 0x8) : bind via StartTLS, comme ldapDirectory.js.
+    // LDAP_STARTTLS=false pour désactiver ; LDAP_TLS_STRICT=true = certificat CA exigé.
     if (!/^ldaps:/i.test(LDAP_URL) && process.env.LDAP_STARTTLS !== 'false') {
       logger.info(`[ldapAuth] Montée en StartTLS sur ${LDAP_URL} (LDAP_STARTTLS != false)`);
       await client.startTLS({ rejectUnauthorized: process.env.LDAP_TLS_STRICT === 'true' });
     }
-    await client.bind(bindDn, password);
-    return { username: username.trim(), email: ldapEmailFor(username) };
-  } catch (error) {
-    // Journalisé via le logger winston (stdout + error.log) pour que le code/name LDAP
-    // soient visibles : 0x31 invalidCredentials = mot de passe ou UPN invalides (vérifier
-    // LDAP_BIND_DOMAIN) ; erreur TLS/certificat ; timeout = réseau/port.
+
+    for (const bindDn of candidates) {
+      try {
+        await client.bind(bindDn, password);
+        logger.info(`[ldapAuth] Bind AD réussi avec ${bindDn}`);
+        return { username: username.trim(), email: ldapEmailFor(username) };
+      } catch (error) {
+        lastError = error;
+        logger.warn(
+          `[ldapAuth] Bind refusé pour ${bindDn}: code=${error?.code ?? error?.name ?? '?'} ` +
+            `message=${error?.message}`,
+        );
+      }
+    }
+
+    // Toutes les tentatives ont échoué : remonte le dernier code AD pour le diagnostic.
+    // 0x31/invalidCredentials = mauvais mot de passe OU UPN inconnue — à creuser si
+    // plusieurs suffixes UPN coexistent dans l'AD.
     logger.error(
-      `[ldapAuth] Échec de connexion AD (${bindDn} sur ${LDAP_URL}): ` +
-        `code=${error?.code ?? error?.name ?? '?'} message=${error?.message}`,
+      `[ldapAuth] Aucun bind AD n'a abouti sur ${LDAP_URL} pour ${username.trim()} — ` +
+        `dernier code=${lastError?.code ?? lastError?.name ?? '?'} ` +
+        `message=${lastError?.message}`,
     );
     return null;
   } finally {
