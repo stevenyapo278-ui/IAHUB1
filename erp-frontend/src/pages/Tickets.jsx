@@ -742,7 +742,7 @@ export default function Tickets() {
     }
   }
 
-  function exportAll(fmt = 'csv') {
+  async function exportAll(fmt = 'csv') {
     const params = {};
     for (const key of ['status', 'priority', 'category', 'teamId', 'assignedToId', 'mine', 'approvalStatus', 'source', 'aiProcessed', 'closeSuggested']) {
       const v = filters[key];
@@ -750,9 +750,19 @@ export default function Tickets() {
     }
     if (debouncedSearch) params.search = debouncedSearch;
     params.sortBy = sortBy; params.sortOrder = sortOrder; params.format = fmt;
-    const url = `${api.defaults.baseURL}/tickets/export?${new URLSearchParams(params).toString()}`;
-    window.open(url, '_blank');
-    toast.success(fmt === 'csv' ? 'Export CSV généré' : 'Export JSON généré');
+    try {
+      // Téléchargement via axios pour envoyer le header Authorization
+      const res = await api.get('/tickets/export', { params, responseType: 'blob' });
+      const url = window.URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `tickets_export_${new Date().toISOString().slice(0, 10)}.${fmt}`;
+      document.body.appendChild(a); a.click(); a.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success(`Export ${fmt.toUpperCase()} généré`);
+    } catch {
+      toast.error("Échec de l'export");
+    }
   }
 
   async function handleQuickStatusChange(ticketId, newStatus, e) {
@@ -930,6 +940,9 @@ export default function Tickets() {
             </button>
             <div className="absolute right-0 top-full pt-1 z-30 hidden group-hover:block">
               <div className="rounded-xl border border-outline-variant/30 bg-surface-container-lowest shadow-xl p-1.5 min-w-[180px]">
+                <button onClick={() => exportAll('xlsx')} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-on-surface hover:bg-surface-container transition-colors cursor-pointer text-left">
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-green-600" /> Exporter tout (XLSX)
+                </button>
                 <button onClick={() => exportAll('csv')} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-on-surface hover:bg-surface-container transition-colors cursor-pointer text-left">
                   <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" /> Exporter tout (CSV)
                 </button>

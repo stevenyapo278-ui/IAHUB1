@@ -19,6 +19,7 @@ const { escalateTicket } = require('../services/escalationService');
 const { mergeTickets } = require('../services/ticketMergeService');
 const { normalizeLinkType, normalizeLinkEndpoints, normalizeParentChildType, resolveChildrenIds } = require('../utils/ticketLinks');
 const multer = require('multer');
+const ExcelJS = require('exceljs');
 
 const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); // 20 Mo max
 const router = express.Router();
@@ -248,6 +249,72 @@ router.get('/export', async (req, res) => {
       team: { select: { name: true } },
     },
   });
+
+  if (format === 'xlsx') {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Tickets');
+    sheet.columns = [
+      { header: 'ID', key: 'id', width: 8 },
+      { header: 'Titre', key: 'title', width: 45 },
+      { header: 'Statut', key: 'status', width: 16 },
+      { header: 'Priorité', key: 'priority', width: 10 },
+      { header: 'Catégorie', key: 'category', width: 22 },
+      { header: 'Type', key: 'type', width: 12 },
+      { header: 'Source', key: 'source', width: 12 },
+      { header: 'Demandeur', key: 'requester', width: 28 },
+      { header: 'Technicien', key: 'technician', width: 28 },
+      { header: 'Équipe', key: 'team', width: 20 },
+      { header: 'GLPI ticket ID', key: 'glpiTicketId', width: 14 },
+      { header: 'Lieu', key: 'location', width: 18 },
+      { header: 'Créé le', key: 'createdAt', width: 18 },
+      { header: 'Résolu le', key: 'solvedAt', width: 18 },
+      { header: 'Fermé le', key: 'closedAt', width: 18 },
+      { header: 'SLA réponse due', key: 'slaResponseDueAt', width: 18 },
+      { header: 'SLA résolution due', key: 'slaResolutionDueAt', width: 18 },
+      { header: 'SLA dépassé le', key: 'slaBreachedAt', width: 18 },
+      { header: 'Première réponse', key: 'firstResponseAt', width: 18 },
+      { header: 'IA', key: 'aiProcessed', width: 6 },
+      { header: 'Approbation', key: 'approvalStatus', width: 14 },
+    ];
+    // Colonnes de dates : format français + en-tête en gras, figée et filtrable
+    for (const col of ['createdAt', 'solvedAt', 'closedAt', 'slaResponseDueAt', 'slaResolutionDueAt', 'slaBreachedAt', 'firstResponseAt']) {
+      sheet.getColumn(col).numFmt = 'dd/mm/yyyy hh:mm';
+    }
+    const headerRow = sheet.getRow(1);
+    headerRow.font = { bold: true };
+    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F0FE' } };
+    sheet.views = [{ state: 'frozen', ySplit: 1 }];
+    sheet.autoFilter = { from: 'A1', to: 'U1' };
+
+    for (const t of tickets) {
+      sheet.addRow({
+        id: t.id,
+        title: t.title,
+        status: t.status,
+        priority: t.priority,
+        category: t.category || '',
+        type: t.type,
+        source: t.source || '',
+        requester: t.requester?.email || '',
+        technician: t.assignedTo?.email || '',
+        team: t.team?.name || '',
+        glpiTicketId: t.glpiTicketId || '',
+        location: t.glpiLocationName || '',
+        createdAt: t.createdAt,
+        solvedAt: t.solvedAt,
+        closedAt: t.closedAt,
+        slaResponseDueAt: t.slaResponseDueAt,
+        slaResolutionDueAt: t.slaResolutionDueAt,
+        slaBreachedAt: t.slaBreachedAt,
+        firstResponseAt: t.firstResponseAt,
+        aiProcessed: t.aiProcessed ? 'oui' : 'non',
+        approvalStatus: t.approvalStatus,
+      });
+    }
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="tickets_export_${new Date().toISOString().slice(0, 10)}.xlsx"`);
+    return workbook.xlsx.write(res);
+  }
 
   if (format === 'csv') {
     const header = ['id', 'titre', 'statut', 'priorite', 'categorie', 'type', 'source', 'demandeur', 'technicien', 'equipe', 'glpi_ticket_id', 'lieu', 'cree_le', 'resolu_le', 'ferme_le', 'sla_reponse_due', 'sla_resolution_due', 'sla_depasse_le', 'premiere_reponse', 'ia', 'approbation'];
