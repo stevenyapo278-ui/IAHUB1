@@ -26,6 +26,7 @@ const ApprovalPage = lazy(() => import('./pages/ApprovalPage'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const Supervision = lazy(() => import('./pages/Supervision'));
+const TechnicianStats = lazy(() => import('./pages/TechnicianStats'));
 const Documentation = lazy(() => import('./pages/Documentation'));
 const SkillsManagement = lazy(() => import('./pages/SkillsManagement'));
 const ActivityLogs = lazy(() => import('./pages/ActivityLogs'));
@@ -78,6 +79,14 @@ export default function App() {
               element={
                 <ProtectedRoute roles={['ADMIN', 'TECHNICIAN']}>
                   <Supervision />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="technician-stats"
+              element={
+                <ProtectedRoute roles={['ADMIN', 'TECHNICIAN', 'HOTLINE']}>
+                  <TechnicianStats />
                 </ProtectedRoute>
               }
             />

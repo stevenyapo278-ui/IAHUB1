@@ -30,6 +30,7 @@ import {
   Tag,
   Boxes,
   ChevronRight,
+  Gauge,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
@@ -59,6 +60,7 @@ const platformItems = [
 const orgItems = [
   { to: '/teams', label: 'Équipes', icon: Users, color: 'text-emerald-400', permission: null },
   { to: '/users', label: 'Utilisateurs', icon: User, color: 'text-emerald-400', permission: 'users.manage', fallbackRoles: ['ADMIN'] },
+  { to: '/technician-stats', label: 'Perf. techniciens', icon: Gauge, color: 'text-orange-400', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
   { to: '/skills', label: 'Compétences', icon: BrainCircuit, color: 'text-teal-400', permission: null, fallbackRoles: ['ADMIN', 'TECHNICIAN'] },
   { to: '/categories', label: 'Catégories', icon: Tag, color: 'text-gold-400', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
   { to: '/locations', label: 'Lieux', icon: MapPin, color: 'text-amber-400', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE'] },
@@ -85,10 +87,11 @@ const ROUTE_SEMANTICS = {
   '/knowledge-base': { zone: 'main', idx: 4 },
   '/teams': { zone: 'org', idx: 0 },
   '/users': { zone: 'org', idx: 1 },
-  '/skills': { zone: 'org', idx: 2 },
-  '/categories': { zone: 'org', idx: 3 },
-  '/locations': { zone: 'org', idx: 4 },
-  '/assets': { zone: 'org', idx: 5 },
+  '/technician-stats': { zone: 'org', idx: 2 },
+  '/skills': { zone: 'org', idx: 3 },
+  '/categories': { zone: 'org', idx: 4 },
+  '/locations': { zone: 'org', idx: 5 },
+  '/assets': { zone: 'org', idx: 6 },
   '/supervision': { zone: 'admin', idx: 0 },
   '/ai-weekly-reports': { zone: 'admin', idx: 1 },
   '/prompts': { zone: 'admin', idx: 2 },

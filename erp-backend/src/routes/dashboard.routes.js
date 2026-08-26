@@ -179,6 +179,153 @@ router.get('/technician-performance', async (req, res) => {
   return res.json(results.filter((r) => r.assigned > 0).sort((a, b) => b.assigned - a.assigned));
 });
 
+// ── Performance détaillée des techniciens : délais de résolution, SLA, CSAT, temps loggé ──
+router.get('/technician-stats', async (req, res) => {
+  if (!['SUPERADMIN', 'ADMIN', 'TECHNICIAN', 'HOTLINE'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Accès réservé à l\'équipe' });
+  }
+  try {
+    const { startDate, endDate, teamId } = req.query;
+    let since, until, days;
+    if (startDate && endDate) {
+      since = new Date(startDate);
+      since.setHours(0, 0, 0, 0);
+      until = new Date(endDate);
+      until.setHours(23, 59, 59, 999);
+      days = Math.min(Math.ceil((until - since) / (1000 * 60 * 60 * 24)), 365);
+    } else {
+      days = Math.min(parseInt(req.query.days) || 30, 365);
+      until = new Date();
+      since = new Date();
+      since.setDate(since.getDate() - days);
+      since.setHours(0, 0, 0, 0);
+    }
+    const range = { gte: since, lte: until };
+
+    const technicians = await prisma.user.findMany({
+      where: {
+        role: { in: ['TECHNICIAN', 'ADMIN'] },
+        isActive: true,
+        ...(teamId ? { teamId: Number(teamId) } : {}),
+      },
+      select: { id: true, fullName: true, email: true, teamId: true },
+    });
+    const techIds = technicians.map((t) => t.id);
+
+    const teams = await prisma.team.findMany({ select: { id: true, name: true } });
+    const teamNames = Object.fromEntries(teams.map((t) => [t.id, t.name]));
+
+    // Tickets liés aux techniciens sur la période : créés OU résolus dans la plage
+    const tickets = await prisma.ticket.findMany({
+      where: {
+        assignedToId: { in: techIds },
+        OR: [{ createdAt: range }, { solvedAt: range }, { closedAt: range }],
+      },
+      select: {
+        id: true, assignedToId: true, status: true, createdAt: true,
+        solvedAt: true, closedAt: true, firstResponseAt: true,
+        slaResolutionDueAt: true, slaBreachedAt: true, csatScore: true,
+      },
+    });
+
+    const loggedRows = await prisma.ticketTimeEntry.groupBy({
+      by: ['userId'],
+      where: { userId: { in: techIds }, entryDate: range },
+      _sum: { minutes: true },
+    });
+    const loggedMinutes = Object.fromEntries(loggedRows.map((r) => [r.userId, r._sum.minutes || 0]));
+
+    const RESOLVED = ['SOLVED', 'CLOSED'];
+    const HOUR_MS = 1000 * 60 * 60;
+    const round1 = (n) => (n == null ? null : Math.round(n * 10) / 10);
+
+    const stats = technicians.map((tech) => {
+      const mine = tickets.filter((t) => t.assignedToId === tech.id);
+      const createdInPeriod = mine.filter((t) => t.createdAt >= since && t.createdAt <= until);
+      const resolvedInPeriod = mine.filter(
+        (t) => RESOLVED.includes(t.status) && (t.solvedAt || t.closedAt) >= since && (t.solvedAt || t.closedAt) <= until
+      );
+      const resolvedDates = resolvedInPeriod.map((t) => t.solvedAt || t.closedAt);
+      const withResponse = createdInPeriod.filter((t) => t.firstResponseAt);
+      const withSlaResolved = resolvedInPeriod.filter((t) => t.slaResolutionDueAt);
+      const slaRespected = resolvedInPeriod.filter((t) => {
+        if (!t.slaResolutionDueAt) return false;
+        const end = t.solvedAt || t.closedAt;
+        return !t.slaBreachedAt && end <= t.slaResolutionDueAt;
+      });
+      const csatPool = resolvedInPeriod.filter((t) => t.csatScore != null);
+
+      const avgResolutionH = resolvedDates.length
+        ? round1(resolvedDates.reduce((s, d, i) => s + (d - resolvedInPeriod[i].createdAt), 0) / resolvedDates.length / HOUR_MS)
+        : null;
+      const avgFirstResponseH = withResponse.length
+        ? round1(withResponse.reduce((s, t) => s + (new Date(t.firstResponseAt) - t.createdAt), 0) / withResponse.length / HOUR_MS)
+        : null;
+
+      return {
+        id: tech.id,
+        fullName: tech.fullName,
+        email: tech.email,
+        teamName: teamNames[tech.teamId] || null,
+        assigned: createdInPeriod.length,
+        open: createdInPeriod.filter((t) => !RESOLVED.includes(t.status)).length,
+        resolved: resolvedInPeriod.length,
+        avgResolutionHours: avgResolutionH,
+        avgFirstResponseHours: avgFirstResponseH,
+        slaTotal: withSlaResolved.length,
+        slaRespected: slaRespected.length,
+        slaCompliancePct: withSlaResolved.length ? Math.round((slaRespected.length / withSlaResolved.length) * 100) : null,
+        breaches: resolvedInPeriod.filter((t) => t.slaBreachedAt).length,
+        csatAvg: csatPool.length ? round1(csatPool.reduce((s, t) => s + t.csatScore, 0) / csatPool.length) : null,
+        csatCount: csatPool.length,
+        loggedMinutes: loggedMinutes[tech.id] || 0,
+      };
+    });
+
+    // Totaux globaux pondérés
+    const totalResolved = stats.reduce((s, x) => s + x.resolved, 0);
+    const weightedResolution = stats.reduce((s, x) => s + (x.avgResolutionHours ?? 0) * x.resolved, 0);
+    const totals = {
+      technicians: stats.filter((x) => x.assigned > 0 || x.resolved > 0).length,
+      assigned: stats.reduce((s, x) => s + x.assigned, 0),
+      open: stats.reduce((s, x) => s + x.open, 0),
+      resolved: totalResolved,
+      avgResolutionHours: totalResolved ? round1(weightedResolution / totalResolved) : null,
+      slaTotal: stats.reduce((s, x) => s + x.slaTotal, 0),
+      slaRespected: stats.reduce((s, x) => s + x.slaRespected, 0),
+      csatAvg: (() => {
+        const n = stats.reduce((s, x) => s + x.csatCount, 0);
+        return n ? round1(stats.reduce((s, x) => s + (x.csatAvg ?? 0) * x.csatCount, 0) / n) : null;
+      })(),
+      loggedMinutes: stats.reduce((s, x) => s + x.loggedMinutes, 0),
+    };
+    totals.slaCompliancePct = totals.slaTotal ? Math.round((totals.slaRespected / totals.slaTotal) * 100) : null;
+
+    // Série journalière créés vs résolus (tous techniciens confondus)
+    const trend = {};
+    for (let i = 0; i <= days; i++) {
+      const d = new Date(since);
+      d.setDate(d.getDate() + i);
+      trend[d.toISOString().slice(0, 10)] = { date: d.toISOString().slice(0, 10), created: 0, resolved: 0 };
+    }
+    for (const t of tickets) {
+      if (!RESOLVED.includes(t.status)) continue;
+      const end = t.solvedAt || t.closedAt;
+      if (end >= since && end <= until && trend[end.toISOString().slice(0, 10)]) trend[end.toISOString().slice(0, 10)].resolved += 1;
+      if (t.createdAt >= since && t.createdAt <= until && trend[t.createdAt.toISOString().slice(0, 10)]) trend[t.createdAt.toISOString().slice(0, 10)].created += 1;
+    }
+
+    return res.json({
+      items: stats.sort((a, b) => b.resolved - a.resolved || b.assigned - a.assigned),
+      totals,
+      trend: Object.values(trend),
+      period: { since: since.toISOString(), until: until.toISOString() },
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // Tendance d'activité des tickets sur N jours (données réelles)
 router.get('/activity-trend', async (req, res) => {
   try {
