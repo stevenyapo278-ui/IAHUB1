@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useSyncExternalStore } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
@@ -13,6 +13,12 @@ import {
 import { sanitizeHtml } from '../utils/sanitize';
 import api from '../api/client';
 import useSystemSettings from '../hooks/useSystemSettings';
+import {
+  clearClosureAnalysis,
+  getClosureAnalysisState,
+  startClosureAnalysis,
+  subscribeClosureAnalysis,
+} from '../stores/closureAnalysisStore';
 
 function matchesSearch(item, tab, q) {
   let fields = [];
@@ -48,8 +54,8 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   const [pendingKnowledgeDrafts, setPendingKnowledgeDrafts] = useState([]);
   const [pendingClosures, setPendingClosures] = useState([]);
   const [closureStats, setClosureStats] = useState(null);
-  const [analyzingClosures, setAnalyzingClosures] = useState(false);
-  const [closureAnalysisResults, setClosureAnalysisResults] = useState(null);
+  // Analyse des clôtures portée par le store module (survit à la navigation et au reload)
+  const analysis = useSyncExternalStore(subscribeClosureAnalysis, getClosureAnalysisState);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -233,26 +239,35 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     setShowClosureRejectModal(true);
   }
 
-  // Analyse proactive : demande au backend de scanner les tickets sans réponse récente
-  // pour détecter les résolutions probables et proposer des clôtures à la Hotline.
-  async function handleAnalyzeClosures() {
-    setAnalyzingClosures(true);
-    setClosureAnalysisResults(null);
-    try {
-      const { data } = await api.post('/tickets/analyze-closures');
-      setClosureAnalysisResults(data);
-      if (data.suggested > 0) {
-        toast.success(`${data.suggested} clôture(s) suggérée(s) sur ${data.scanned} ticket(s) analysé(s)`);
-      } else if (data.scanned === 0) {
+  // Analyse proactive : portée par closureAnalysisStore — naviguer vers une autre
+  // vue pendant le scan ne l'interrompt pas, et le rapport reste affiché au retour
+  // (mémoire + sessionStorage, 2 h max).
+  const lastFinishedAtRef = useRef(null);
+  useEffect(() => {
+    const finishedAt = analysis.results?.finishedAt;
+    if (!analysis.running && finishedAt && lastFinishedAtRef.current !== finishedAt) {
+      lastFinishedAtRef.current = finishedAt;
+      const r = analysis.results;
+      if (r.suggested > 0) {
+        toast.success(`${r.suggested} clôture(s) suggérée(s) sur ${r.scanned} ticket(s) analysé(s)`);
+      } else if (r.scanned === 0) {
         toast.info('Aucun ticket à analyser : aucun ticket ouvert sans réponse récente');
       } else {
-        toast.info(`Analyse terminée : ${data.scanned} ticket(s) analysé(s), aucune nouvelle clôture suggérée`);
+        toast.info(`Analyse terminée : ${r.scanned} ticket(s) analysé(s), aucune nouvelle clôture suggérée`);
       }
       loadAllData(true);
-    } catch (err) {
-      toast.error(err.response?.data?.error || "Échec de l'analyse des tickets");
-    } finally {
-      setAnalyzingClosures(false);
+    }
+  }, [analysis]);
+
+  async function handleAnalyzeClosures() {
+    // Un nouveau scan repart d'un panneau vierge (comportement historique)
+    clearClosureAnalysis();
+    lastFinishedAtRef.current = null;
+    await startClosureAnalysis();
+    if (getClosureAnalysisState().error) {
+      toast.error(getClosureAnalysisState().error);
+    } else if (!analysis.running && !analysis.results) {
+      toast.error("Échec de l'analyse des tickets");
     }
   }
 
@@ -922,54 +937,54 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             </p>
             <button
               onClick={handleAnalyzeClosures}
-              disabled={analyzingClosures}
+              disabled={analysis.running}
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-cyan-600 to-teal-600 text-white shadow-md shadow-cyan-500/20 transition-all hover:brightness-110 disabled:opacity-50 cursor-pointer shrink-0"
               title="Analyser l'état des tickets ouverts pour détecter les clôtures à proposer"
             >
-              <RefreshCw className={`w-4 h-4 ${analyzingClosures ? 'animate-spin' : ''}`} />
-              <span>{analyzingClosures ? 'Analyse en cours…' : 'Analyser les tickets'}</span>
+              <RefreshCw className={`w-4 h-4 ${analysis.running ? 'animate-spin' : ''}`} />
+              <span>{analysis.running ? 'Analyse en cours…' : 'Analyser les tickets'}</span>
             </button>
           </div>
 
           {/* Résultats détaillés de la dernière analyse IA */}
-          {closureAnalysisResults && (
+          {analysis.results && (
             <div className="space-y-4">
               {/* Résumé rapide */}
               <div className="rounded-3xl border border-cyan-200 dark:border-cyan-500/20 bg-surface-container-lowest p-6 shadow-sm space-y-4">
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-cyan-500" />
                   <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface">
-                    Résultats de l'analyse — {closureAnalysisResults.scanned} ticket(s) analysé(s)
+                    Résultats de l'analyse — {analysis.results.scanned} ticket(s) analysé(s)
                   </h3>
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <div className="p-3 rounded-2xl border border-emerald-500/25 bg-emerald-500/10">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Suggérés</p>
-                    <p className="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400">{closureAnalysisResults.suggested}</p>
+                    <p className="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400">{analysis.results.suggested}</p>
                   </div>
                   <div className="p-3 rounded-2xl border border-amber-500/25 bg-amber-500/10">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">À vérifier</p>
-                    <p className="text-2xl font-extrabold text-amber-600 dark:text-amber-400">{closureAnalysisResults.needsReviewResults?.length || 0}</p>
+                    <p className="text-2xl font-extrabold text-amber-600 dark:text-amber-400">{analysis.results.needsReviewResults?.length || 0}</p>
                   </div>
                   <div className="p-3 rounded-2xl border border-outline-variant/30 bg-surface-container">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Ignorés</p>
-                    <p className="text-2xl font-extrabold text-on-surface">{closureAnalysisResults.skippedResults?.length || 0}</p>
+                    <p className="text-2xl font-extrabold text-on-surface">{analysis.results.skippedResults?.length || 0}</p>
                   </div>
                   <div className="p-3 rounded-2xl border border-outline-variant/30 bg-surface-container">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Non résolus</p>
-                    <p className="text-2xl font-extrabold text-on-surface">{closureAnalysisResults.results?.filter(r => r.action === 'SKIP_NOT_RESOLVED').length || 0}</p>
+                    <p className="text-2xl font-extrabold text-on-surface">{analysis.results.results?.filter(r => r.action === 'SKIP_NOT_RESOLVED').length || 0}</p>
                   </div>
                 </div>
               </div>
 
               {/* Tickets suggérés pour clôture */}
-              {closureAnalysisResults.suggestedResults?.length > 0 && (
+              {analysis.results.suggestedResults?.length > 0 && (
                 <div className="space-y-3">
                   <h4 className="text-xs font-extrabold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4" />
-                    Probablement résolus — clôture suggérée ({closureAnalysisResults.suggestedResults.length})
+                    Probablement résolus — clôture suggérée ({analysis.results.suggestedResults.length})
                   </h4>
-                  {closureAnalysisResults.suggestedResults.map((r) => (
+                  {analysis.results.suggestedResults.map((r) => (
                     <div key={r.ticketId} className="rounded-2xl border border-emerald-200 dark:border-emerald-500/20 bg-surface-container-lowest p-4 shadow-sm space-y-3">
                       <div className="flex items-start justify-between gap-3">
                         <div className="space-y-1 flex-1 min-w-0">
@@ -1026,13 +1041,13 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
               )}
 
               {/* Tickets à vérifier (faible confiance ou non résolu) */}
-              {closureAnalysisResults.needsReviewResults?.length > 0 && (
+              {analysis.results.needsReviewResults?.length > 0 && (
                 <div className="space-y-3">
                   <h4 className="text-xs font-extrabold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-2">
                     <AlertTriangle className="w-4 h-4" />
-                    À vérifier — confiance faible ou incertain ({closureAnalysisResults.needsReviewResults.length})
+                    À vérifier — confiance faible ou incertain ({analysis.results.needsReviewResults.length})
                   </h4>
-                  {closureAnalysisResults.needsReviewResults.map((r) => (
+                  {analysis.results.needsReviewResults.map((r) => (
                     <div key={r.ticketId} className="rounded-2xl border border-amber-200 dark:border-amber-500/20 bg-surface-container-lowest p-4 shadow-sm space-y-2">
                       <div className="flex items-start justify-between gap-3">
                         <div className="space-y-1 flex-1 min-w-0">
@@ -1067,14 +1082,14 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
               )}
 
               {/* Tickets ignorés (pas d'historique, réponse récente, etc.) */}
-              {closureAnalysisResults.skippedResults?.length > 0 && (
+              {analysis.results.skippedResults?.length > 0 && (
                 <details className="group">
                   <summary className="text-xs font-extrabold uppercase tracking-wider text-on-surface-variant cursor-pointer flex items-center gap-2 hover:text-on-surface transition-colors">
                     <ChevronRight className="w-3.5 h-3.5 transition-transform group-open:rotate-90" />
-                    Ignorés — pas d'action requise ({closureAnalysisResults.skippedResults.length})
+                    Ignorés — pas d'action requise ({analysis.results.skippedResults.length})
                   </summary>
                   <div className="mt-2 space-y-2">
-                    {closureAnalysisResults.skippedResults.map((r) => (
+                    {analysis.results.skippedResults.map((r) => (
                       <div key={r.ticketId} className="rounded-xl border border-outline-variant/20 bg-surface-container-low/30 p-3 flex items-center justify-between gap-3">
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="font-mono text-[10px] font-bold text-primary">#{r.ticketId}</span>

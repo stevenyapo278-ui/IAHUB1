@@ -6,7 +6,7 @@ export const TYPE_OPTIONS = [
   { value: 'INCIDENT', label: 'Incident' },
   { value: 'REQUEST', label: 'Demande' },
 ];
-export const SOURCE_OPTIONS = ['Helpdesk', 'Email', 'Téléphone'];
+export const SOURCE_OPTIONS = ['Direct', 'Formcreator', 'Helpdesk', 'Other'];
 export const URGENCY_IMPACT_OPTIONS = [
   { value: 'VERY_LOW', label: 'Très basse' },
   { value: 'LOW', label: 'Basse' },

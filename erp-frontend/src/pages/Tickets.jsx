@@ -1,16 +1,14 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import {
   Ticket,
   Radio,
   Clock,
   CheckCircle2,
-  Flag,
   Lock,
-  Flame,
   AlertTriangle,
   Info,
   ArrowDown,
@@ -25,9 +23,7 @@ import {
   X,
   Search,
   SlidersHorizontal,
-  FilterX,
   User,
-  UserX,
   Users,
   MapPin,
   Tag,
@@ -37,7 +33,6 @@ import {
   ArrowUpDown,
   ArrowUp,
   KanbanSquare,
-  Bookmark,
   ListChecks,
   Boxes,
   Calendar,
@@ -54,6 +49,7 @@ import EmptyState from '../components/EmptyState';
 import TicketCoverflowCarousel from '../components/TicketCoverflowCarousel';
 import KanbanBoard from '../components/KanbanBoard';
 import SearchableSelect from '../components/SearchableSelect';
+import TicketFilterDrawer from '../components/TicketFilterDrawer';
 import SearchableMultiSelect from '../components/SearchableMultiSelect';
 import RemoteUserSelect from '../components/RemoteUserSelect';
 import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
@@ -75,7 +71,7 @@ const EMPTY_FORM = {  title: '',
   type: 'INCIDENT',
   category: '',
   status: 'NEW',
-  source: 'Helpdesk',
+  source: 'Direct',
   urgency: 'MEDIUM',
   impact: 'MEDIUM',
   priority: 'P3',
@@ -154,330 +150,6 @@ function Avatar({ name, colorClass = 'bg-blue-500/15 text-blue-600 dark:text-blu
     <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full border text-[10px] font-bold shrink-0 ${colorClass}`}>
       {name.charAt(0).toUpperCase()}
     </span>
-  );
-}
-
-// ── FilterPanel slide-over ───────────────────────────────────────────────────
-// Backdrop et panneau sont animés ENSEMBLE : le fondu du flou accompagne le
-// slide du panneau (avant, le backdrop apparaissait instantanément pendant que
-// le panneau arrivait encore → effet de dysfonctionnement visuel).
-// Pas de early-return « if (!open) » ici : AnimatePresence doit garder le
-// composant monté pendant la fermeture pour que les animations exit jouent.
-//
-// Accessibilité dialog : Échap ferme, Tab reste piégé dans le panneau, le focus
-// est restauré sur le bouton déclencheur à la fermeture.
-function FilterPanel({ onClose, activeFilterCount, filters, onUpdate, onClear, teams, users, flatCategories, autonomousMode, savedViews, onSaveView, onRestoreView, onDeleteSavedView, searchQuery, setSearchQuery, setDebouncedSearch, setPage }) {
-  const reduceMotion = useReducedMotion();
-  const offscreen = reduceMotion ? { opacity: 0 } : { x: '100%' };
-  const panelRef = useRef(null);
-
-  // Échap + piège de focus + restauration du focus au démontage
-  useEffect(() => {
-    const previouslyFocused = document.activeElement;
-    panelRef.current?.focus?.();
-
-    function onKeyDown(e) {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-        return;
-      }
-      if (e.key === 'Tab' && panelRef.current) {
-        const focusables = panelRef.current.querySelectorAll(
-          'button:not([disabled]), select:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
-        );
-        if (focusables.length === 0) return;
-        const first = focusables[0];
-        const last = focusables[focusables.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    }
-    document.addEventListener('keydown', onKeyDown, true);
-    return () => {
-      document.removeEventListener('keydown', onKeyDown, true);
-      // Rend le focus au bouton « Filtres » après la fermeture
-      if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
-    };
-  }, [onClose]);
-
-  // Apparition en cascade des sections (désactivée si mouvement réduit)
-  const stackVariants = {
-    hidden: {},
-    show: { transition: { staggerChildren: reduceMotion ? 0 : 0.045, delayChildren: reduceMotion ? 0 : 0.1 } },
-  };
-  const sectionVariants = {
-    hidden: reduceMotion ? { opacity: 0 } : { opacity: 0, y: 12 },
-    show: { opacity: 1, y: 0, transition: { duration: 0.28, ease: [0.16, 1, 0.3, 1] } },
-  };
-
-  return createPortal(
-    <div className="fixed inset-0 z-[9000] flex">
-      {/* Backdrop */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.22, ease: 'easeOut' }}
-        className="flex-1 bg-black/40 backdrop-blur-sm"
-        onClick={onClose}
-        aria-hidden="true"
-      />
-      {/* Panel */}
-      <motion.div
-        ref={panelRef}
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Filtres des tickets"
-        initial={offscreen}
-        animate={reduceMotion ? { opacity: 1 } : { x: 0 }}
-        exit={reduceMotion ? { opacity: 0 } : offscreen}
-        transition={{ type: 'spring', stiffness: 420, damping: 36 }}
-        className="w-80 h-full bg-surface-container-lowest border-l border-outline-variant/30 flex flex-col shadow-2xl overflow-hidden outline-none"
-      >
-        {/* Panel header */}
-        <motion.div
-          initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-          className="flex items-center justify-between px-5 py-4 border-b border-outline-variant/20 shrink-0"
-        >
-          <div className="flex items-center gap-2">
-            <SlidersHorizontal className="w-4 h-4 text-primary" />
-            <span className="font-bold text-sm text-on-surface">Filtres</span>
-            {activeFilterCount > 0 && (
-              <span className="min-w-4 h-4 px-1 flex items-center justify-center rounded-full bg-primary text-white text-[9px] font-black tabular-nums">
-                {activeFilterCount}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onClear}
-              className="text-[11px] font-semibold text-on-surface-variant hover:text-red-500 transition-colors"
-            >
-              Réinitialiser
-            </button>
-            <button
-              onClick={onClose}
-              aria-label="Fermer les filtres"
-              className="p-1.5 rounded-lg hover:bg-surface-container transition-colors text-on-surface-variant hover:text-on-surface"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </motion.div>
-
-        {/* Panel body — sections en cascade */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">
-          <motion.div initial="hidden" animate="show" variants={stackVariants} className="space-y-5">
-          {/* Quick chips */}
-          <motion.div variants={sectionVariants}>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-2">Raccourcis rapides</p>
-            <div className="flex flex-wrap gap-1.5">
-              {[
-                { key: 'mine', val: 'true', label: 'Mes tickets', Icon: User },
-                { key: 'status', val: 'OPEN_GROUP', label: 'Ouverts', Icon: Radio },
-                { key: 'status', val: 'CLOSED_GROUP', label: 'Clôturés', Icon: CheckCircle2 },
-                { key: 'closeSuggested', val: 'true', label: 'Clôture suggérée', Icon: Flag },
-                { key: 'aiProcessed', val: 'true', label: 'Traité IA', Icon: Sparkles },
-                { key: 'priority', val: 'P1', label: 'P1 Critiques', Icon: Flame },
-                { key: 'assignedToId', val: 'none', label: 'Non assignés', Icon: UserX },
-              ].map(({ key, val, label, Icon }) => {
-                const active = filters[key] === val;
-                return (
-                  <button
-                    key={`${key}-${val}`}
-                    onClick={() => onUpdate(key, active ? '' : val)}
-                    className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-all ${
-                      active
-                        ? 'bg-primary text-white border-primary shadow-sm'
-                        : 'bg-surface border-outline-variant/50 text-on-surface-variant hover:border-primary/40 hover:text-on-surface'
-                    }`}
-                  >
-                    <Icon className="w-3 h-3" />
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-          </motion.div>
-
-          <div className="border-t border-outline-variant/20" />
-
-          {/* Critères de filtrage */}
-          <motion.div variants={sectionVariants} className="space-y-5">
-          {/* Statut */}
-          <SearchableSelect
-            label="Statut"
-            value={filters.status}
-            onChange={(v) => onUpdate('status', v)}
-            options={[
-              { label: 'Tous les statuts', value: '' },
-              { label: 'Tous sauf clôturés (défaut)', value: 'NOT_CLOSED' },
-              { label: 'Ouverts (actifs)', value: 'OPEN_GROUP' },
-              { label: 'Clôturés / résolus', value: 'CLOSED_GROUP' },
-              { label: 'Nouveau', value: 'NEW' },
-              { label: 'En cours', value: 'OPEN' },
-              { label: 'Planifié', value: 'PLANNED' },
-              { label: 'En attente', value: 'PENDING' },
-              { label: 'Résolu', value: 'SOLVED' },
-              { label: 'Fermé', value: 'CLOSED' },
-            ]}
-            placeholder="Sélectionner un statut"
-            searchPlaceholder="Rechercher un statut..."
-          />
-
-          {/* Approbation */}
-          <SearchableSelect
-            label="Approbation"
-            value={filters.approvalStatus}
-            onChange={(v) => onUpdate('approvalStatus', v)}
-            options={[
-              { label: 'Toutes', value: '' },
-              { label: 'En attente Hotline', value: 'PENDING' },
-              { label: 'Approuvés', value: 'APPROVED' },
-              { label: 'Rejetés', value: 'REJECTED' },
-            ]}
-            placeholder="Sélectionner un statut"
-            searchPlaceholder="Rechercher..."
-          />
-
-          {/* Priorité */}
-          <SearchableSelect
-            label="Priorité"
-            value={filters.priority}
-            onChange={(v) => onUpdate('priority', v)}
-            options={[
-              { label: 'Toutes', value: '' },
-              { label: 'P1 — Critique', value: 'P1' },
-              { label: 'P2 — Haute', value: 'P2' },
-              { label: 'P3 — Moyenne', value: 'P3' },
-              { label: 'P4 — Basse', value: 'P4' },
-            ]}
-            placeholder="Sélectionner une priorité"
-            searchPlaceholder="Rechercher..."
-          />
-
-          {/* Source */}
-          <SearchableSelect
-            label="Source"
-            value={filters.source}
-            onChange={(v) => onUpdate('source', v)}
-            options={[
-              { label: 'Toutes les sources', value: '' },
-              ...(!autonomousMode ? [{ label: 'Synchronisés GLPI', value: 'glpi' }] : []),
-              { label: 'Internes ERP', value: 'erp' },
-            ]}
-            placeholder="Sélectionner une source"
-            searchPlaceholder="Rechercher..."
-          />
-
-          {/* Équipe */}
-          <SearchableSelect
-            label="Équipe"
-            value={filters.teamId}
-            onChange={(v) => onUpdate('teamId', v)}
-            options={[
-              { label: 'Toutes les équipes', value: '' },
-              ...teams.map((t) => ({ label: t.name, value: String(t.id) })),
-            ]}
-            placeholder="Sélectionner une équipe"
-            searchPlaceholder="Rechercher une équipe..."
-          />
-
-          {/* Catégorie */}
-          <SearchableSelect
-            label="Catégorie"
-            value={filters.category}
-            onChange={(v) => onUpdate('category', v)}
-            options={[
-              { label: 'Toutes les catégories', value: '' },
-              ...flatCategories.map((o) => ({ label: o.label, value: o.name })),
-            ]}
-            placeholder="Sélectionner une catégorie"
-            searchPlaceholder="Rechercher une catégorie..."
-          />
-
-          {/* Assigné à */}
-          <SearchableSelect
-            label="Assigné à"
-            value={filters.assignedToId}
-            onChange={(v) => onUpdate('assignedToId', v)}
-            options={[
-              { label: 'Tout le monde', value: '' },
-              { label: 'Non assigné', value: 'none' },
-              ...users.filter((u) => u.isActive).map((u) => ({ label: u.fullName, value: String(u.id) })),
-            ]}
-            placeholder="Sélectionner un technicien"
-            searchPlaceholder="Rechercher un technicien..."
-          />
-          </motion.div>
-
-          <div className="border-t border-outline-variant/20" />
-
-          {/* Vues sauvegardées */}
-          <motion.div variants={sectionVariants}>
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Vues sauvegardées</p>
-              <button
-                onClick={onSaveView}
-                className="flex items-center gap-1 text-[11px] font-semibold text-primary hover:text-primary/80 transition-colors"
-              >
-                <Plus className="w-3 h-3" />
-                Enregistrer
-              </button>
-            </div>
-            {savedViews.length === 0 ? (
-              <p className="text-[11px] text-on-surface-variant italic text-center py-2">Aucune vue sauvegardée</p>
-            ) : (
-              <div className="space-y-1">
-                {savedViews.map((v) => (
-                  <div key={v.name} className="flex items-center gap-1 group rounded-lg hover:bg-surface-container px-2 py-1.5 transition-colors">
-                    <button
-                      onClick={() => { onRestoreView(v); onClose(); }}
-                      className="flex-1 min-w-0 flex items-center gap-2 text-xs font-medium text-on-surface text-left"
-                    >
-                      <Bookmark className="w-3 h-3 text-on-surface-variant shrink-0" />
-                      <span className="truncate">{v.name}</span>
-                    </button>
-                    <button
-                      onClick={() => onDeleteSavedView(v.name)}
-                      className="opacity-0 group-hover:opacity-100 p-1 rounded-md text-on-surface-variant hover:text-red-500 transition-all"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </motion.div>
-          </motion.div>
-        </div>
-
-        {/* Panel footer */}
-        <motion.div
-          initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1], delay: reduceMotion ? 0 : 0.12 }}
-          className="px-5 py-4 border-t border-outline-variant/20 shrink-0"
-        >
-          <button
-            onClick={onClose}
-            className="w-full py-2.5 rounded-xl bg-primary text-white text-sm font-bold hover:opacity-90 active:scale-[0.98] transition-all"
-          >
-            Appliquer
-          </button>
-        </motion.div>
-      </motion.div>
-    </div>,
-    document.body
   );
 }
 
@@ -1499,11 +1171,11 @@ export default function Tickets() {
         </div>
       )}
 
-      {/* ── FILTER SLIDE-OVER ────────────────────────────────────────────────── */}
+      {/* ── DRAWER DE FILTRES ────────────────────────────────────────────────── */}
       <AnimatePresence>
         {filterPanelOpen && (
-          <FilterPanel
-            key="tickets-filter-panel"
+          <TicketFilterDrawer
+            key="tickets-filter-drawer"
             onClose={() => setFilterPanelOpen(false)}
             activeFilterCount={activeFilterCount}
             filters={filters}
@@ -1652,6 +1324,11 @@ export default function Tickets() {
                     <FormField label="Type de demande">
                       <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className={FIELD_CLS}>
                         {TYPE_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                      </select>
+                    </FormField>
+                    <FormField label="Source de la demande">
+                      <select value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })} className={FIELD_CLS}>
+                        {SOURCE_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
                       </select>
                     </FormField>
                     {locations.length > 0 && (

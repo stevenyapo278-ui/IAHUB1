@@ -15,8 +15,49 @@ const GLPI_STATUS_MAP = { NEW: 1, OPEN: 2, PLANNED: 4, PENDING: 4, WAITING_FOR_U
 const ERP_PRIORITY_MAP = { P1: 6, P2: 4, P3: 3, P4: 2 };
 const GLPI_TYPE_MAP = { INCIDENT: 1, REQUEST: 2 };
 const GLPI_URGENCY_IMPACT_MAP = { VERY_LOW: 1, LOW: 2, MEDIUM: 3, HIGH: 4, VERY_HIGH: 5, MAJOR: 6 };
-const GLPI_SOURCE_MAP = { Helpdesk: 1, Email: 4, Téléphone: 2 };
+// Fallback historique si la liste des sources GLPI est indisponible (IDs GLPI standard)
+const GLPI_SOURCE_MAP = { Helpdesk: 1, Email: 3, 'E-mail': 3, Téléphone: 2, Phone: 2, Direct: 4, Other: 6 };
 const GLPI_PROBE_MAX = 10000;
+
+// Cache des "sources de demande" GLPI (RequestType) : leurs IDs varient selon l'instance
+// (ex: Formcreator ajouté par le plugin), on résout donc par nom plutôt qu'en dur.
+let requestTypesCache = { data: null, ts: 0 };
+const REQUEST_TYPES_TTL_MS = 10 * 60 * 1000;
+
+function normalizeLabel(s) {
+  return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+}
+
+async function fetchGlpiRequestTypes(config, sessionToken) {
+  const now = Date.now();
+  if (requestTypesCache.data && now - requestTypesCache.ts < REQUEST_TYPES_TTL_MS) return requestTypesCache.data;
+  const res = await fetchWithTimeout(`${config.baseUrl}/RequestType?range=0-99`, {
+    headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken },
+  }).catch(() => null);
+  let list = [];
+  if (res && res.ok) {
+    const body = await res.json().catch(() => []);
+    list = Array.isArray(body) ? body : (body.data || []);
+  }
+  if (list.length > 0) {
+    requestTypesCache = { data: list, ts: now };
+    return list;
+  }
+  return requestTypesCache.data || [];
+}
+
+// Résout l'ID GLPI d'une source de demande par nom (insensible à la casse/accents),
+// avec repli sur la carte historique puis sur Helpdesk (1).
+async function resolveRequestTypeId(config, sessionToken, source) {
+  const wanted = normalizeLabel(source);
+  if (!wanted) return undefined;
+  const types = await fetchGlpiRequestTypes(config, sessionToken).catch(() => []);
+  const labelOf = (t) => normalizeLabel(t.name || t.completename);
+  const match = types.find((t) => labelOf(t) === wanted)
+    || types.find((t) => wanted.length >= 4 && labelOf(t).includes(wanted));
+  if (match) return match.id;
+  return GLPI_SOURCE_MAP[source] || 1;
+}
 
 async function withGlpiSession(config, fn) {
   const sessionRes = await fetchWithTimeout(`${config.baseUrl}/initSession`, {
@@ -78,7 +119,7 @@ async function createGlpiTicket({ title, content, priority, category, type, urge
     } catch (e) {}
     if (urgency) inputFields.urgency = GLPI_URGENCY_IMPACT_MAP[urgency] || 3;
     if (impact) inputFields.impact = GLPI_URGENCY_IMPACT_MAP[impact] || 3;
-    if (source) inputFields.requesttypes_id = GLPI_SOURCE_MAP[source] || 1;
+    if (source) inputFields.requesttypes_id = await resolveRequestTypeId(config, sessionToken, source);
     if (GLPI_AI_REQUESTER_ID) inputFields.users_id_recipient = GLPI_AI_REQUESTER_ID;
     if (locationId) inputFields.locations_id = Number(locationId);
 
