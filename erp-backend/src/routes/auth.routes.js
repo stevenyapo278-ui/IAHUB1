@@ -131,7 +131,12 @@ router.post(
       const ldapUser = await authenticateLdap(username, password);
       if (ldapUser) {
         const isAdmin = isLdapAdminUsername(ldapUser.username);
+        // Cherche l'email exact (ex. styapo@prosuma.ci) ; à défaut, tout compte dont l'email
+        // démarre par l'identifiant AD (le même login peut exister sous un autre suffixe email).
         let account = await prisma.user.findUnique({ where: { email: ldapUser.email } });
+        if (!account) {
+          account = await prisma.user.findFirst({ where: { email: { startsWith: `${ldapUser.username}@` } } });
+        }
 
         if (!account) {
           // Auto-provisioning : tout compte AD valide obtient un compte dans l'ERP.
@@ -148,8 +153,12 @@ router.post(
             },
           });
         } else {
+          // Un bind AD réussi prouve que le compte est valide et actif (un compte désactivé
+          // dans l'AD ne peut pas s'authentifier). Un drapeau isActive=false local peut donc être
+          // obsolète (décalage d'email entre synchro annuaire et login) : on le réactive plutôt
+          // que de rejeter la connexion.
           if (!account.isActive) {
-            return res.status(401).json({ error: 'Identifiants invalides' });
+            account = await prisma.user.update({ where: { id: account.id }, data: { isActive: true } });
           }
           account = await prisma.user.update({
             where: { id: account.id },
