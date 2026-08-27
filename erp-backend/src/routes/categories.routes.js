@@ -4,6 +4,12 @@ const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { auditLog } = require('../services/auditLogService');
+const cacheStore = require('../services/cacheStore');
+
+// Invalider le cache des catégories après chaque mutation
+function invalidateCategoriesCache() {
+  cacheStore.clear('GET /api/categories');
+}
 
 const router = express.Router();
 router.use(authenticate);
@@ -45,6 +51,7 @@ router.post(
     });
 
     await auditLog('CATEGORY_CREATED', { actor: req.user, targetType: 'TicketCategory', targetId: category.id, targetLabel: name });
+    invalidateCategoriesCache();
     res.status(201).json(category);
   }
 );
@@ -66,6 +73,7 @@ router.patch(
 
     const category = await prisma.ticketCategory.update({ where: { id }, data });
     await auditLog('CATEGORY_UPDATED', { actor: req.user, targetType: 'TicketCategory', targetId: id, targetLabel: existing.name });
+    invalidateCategoriesCache();
     res.json(category);
   }
 );
@@ -81,6 +89,7 @@ router.delete(
 
     await prisma.ticketCategory.delete({ where: { id } });
     await auditLog('CATEGORY_DELETED', { actor: req.user, targetType: 'TicketCategory', targetId: id, targetLabel: existing.name });
+    invalidateCategoriesCache();
     res.status(204).send();
   }
 );
