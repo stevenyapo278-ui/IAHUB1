@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import api from '../api/client';
 import ConfirmDialog from '../components/ConfirmDialog';
+import Pagination from '../components/Pagination';
 import { useTheme } from '../context/ThemeContext';
 import {
   Award, Plus, Trash2, X, Check,
@@ -33,6 +34,8 @@ export default function SkillsManagement() {
   const [savingCreate, setSavingCreate] = useState(false);
   const [catFilter, setCatFilter] = useState('');
   const [assignModal, setAssignModal] = useState({ open: false, skill: null, tech: null });
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 12;
 
   function load() {
     setLoading(true);
@@ -94,15 +97,19 @@ export default function SkillsManagement() {
     return matchQ && matchCat;
   });
 
+  const totalPages = Math.max(1, Math.ceil(filteredSkills.length / PAGE_SIZE));
+  const paginatedSkills = filteredSkills.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  useEffect(() => { setPage(1); }, [search, catFilter]);
+
   // Group by category
   const skillGroups = (() => {
     const groups = [];
-    const cats = [...new Set(filteredSkills.map(s => s.category).filter(Boolean))];
+    const cats = [...new Set(paginatedSkills.map(s => s.category).filter(Boolean))];
     cats.forEach(cat => {
-      const catSkills = filteredSkills.filter(s => s.category === cat);
+      const catSkills = paginatedSkills.filter(s => s.category === cat);
       if (catSkills.length > 0) groups.push({ category: cat, skills: catSkills });
     });
-    const uncat = filteredSkills.filter(s => !s.category);
+    const uncat = paginatedSkills.filter(s => !s.category);
     if (uncat.length > 0) groups.push({ category: null, skills: uncat });
     return groups;
   })();
@@ -187,6 +194,7 @@ export default function SkillsManagement() {
             <p className="text-sm italic">{search ? 'Aucune compétence trouvée.' : 'Aucune compétence définie. Créez-en une !'}</p>
           </div>
         ) : (
+          <>
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
             <AnimatePresence initial={false}>
               {skillGroups.map((group, gi) => (
@@ -266,6 +274,12 @@ export default function SkillsManagement() {
               ))}
             </AnimatePresence>
           </div>
+          {filteredSkills.length > PAGE_SIZE && (
+            <div className="mt-4">
+              <Pagination page={page} totalPages={totalPages} total={filteredSkills.length} label="compétences" onPageChange={setPage} />
+            </div>
+          )}
+          </>
         )}
       </div>
 

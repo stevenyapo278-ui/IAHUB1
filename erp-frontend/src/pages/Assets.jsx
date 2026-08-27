@@ -11,6 +11,7 @@ import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import useSystemSettings from '../hooks/useSystemSettings';
 import ConfirmDialog from '../components/ConfirmDialog';
+import Pagination from '../components/Pagination';
 
 const TYPE_META = {
   COMPUTER: { label: 'Ordinateur', icon: Monitor, color: 'text-blue-400', bg: 'bg-blue-500/10' },
@@ -62,6 +63,8 @@ export default function Assets() {
   const [saving, setSaving] = useState(false);
   const [sortBy, setSortBy] = useState('name');
   const [sortDir, setSortDir] = useState('asc');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 25;
 
   const canManage = hasPermission(user, 'assets.manage');
 
@@ -218,6 +221,10 @@ export default function Assets() {
     return list;
   }, [assets, sortBy, sortDir]);
 
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  useEffect(() => { setPage(1); }, [search, typeFilter, statusFilter]);
+
   function SortHeader({ col, children }) {
     const active = sortBy === col;
     return (
@@ -350,7 +357,7 @@ export default function Assets() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((asset) => {
+                {paginated.map((asset) => {
                   const tm = typeMeta(asset.assetType);
                   const sm = statusMeta(asset.status);
                   const Icon = tm.icon;
@@ -429,11 +436,12 @@ export default function Assets() {
                     </tr>
                   );
                 })}
-              </tbody>
-            </table>
+              </tbody>            </table>
+            <Pagination page={page} totalPages={totalPages} total={filtered.length} label="équipements" onPageChange={setPage} />
           </div>
         )}
       </div>
+
 
       {/* ── Modal Création / Édition ────────────────────────────────────── */}
       <AnimatePresence>

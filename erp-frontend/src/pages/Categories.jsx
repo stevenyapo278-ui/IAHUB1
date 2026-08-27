@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import { flattenCategoryTree } from '../utils/categoryTree';
 import ConfirmDialog from '../components/ConfirmDialog';
+import Pagination from '../components/Pagination';
 
 function formatDate(d) {
   if (!d) return '—';
@@ -25,6 +26,8 @@ export default function Categories() {
   const [pendingDelete, setPendingDelete] = useState(null);
   const [sortBy, setSortBy] = useState('createdAt');
   const [sortDir, setSortDir] = useState('desc');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 25;
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -153,6 +156,12 @@ export default function Categories() {
     return rows;
   }, [categories, tree, filtered, sortBy, sortDir]);
 
+  const totalPages = Math.max(1, Math.ceil(tableRows.length / PAGE_SIZE));
+  const paginatedRows = tableRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  // Reset page when filters change
+  useEffect(() => { setPage(1); }, [search, sortBy, sortDir]);
+
   function SortHeader({ col, children }) {
     const active = sortBy === col;
     return (
@@ -235,7 +244,7 @@ export default function Categories() {
                 </tr>
               </thead>
               <tbody>
-                {tableRows.map((cat) => (
+                {paginatedRows.map((cat) => (
                   <tr
                     key={cat.id}
                     className="group border-b border-outline-variant/10 hover:bg-amber-500/5 transition-colors cursor-pointer"
@@ -297,6 +306,7 @@ export default function Categories() {
                 ))}
               </tbody>
             </table>
+            <Pagination page={page} totalPages={totalPages} total={tableRows.length} label="catégories" onPageChange={setPage} />
           </div>
         )}
       </div>

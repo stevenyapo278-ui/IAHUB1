@@ -10,6 +10,7 @@ import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import useSystemSettings from '../hooks/useSystemSettings';
 import ConfirmDialog from '../components/ConfirmDialog';
+import Pagination from '../components/Pagination';
 
 const emptyForm = { name: '', completename: '', address: '', postcode: '', town: '', country: '', building: '', room: '' };
 
@@ -85,6 +86,8 @@ export default function Locations() {
   const [deleting, setDeleting] = useState(false);
   const [sortBy, setSortBy] = useState('name');
   const [sortDir, setSortDir] = useState('asc');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 25;
 
   function loadLocations() {
     setLoading(true);
@@ -187,6 +190,10 @@ export default function Locations() {
     return list;
   }, [locations, search, sortBy, sortDir]);
 
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  useEffect(() => { setPage(1); }, [search]);
+
   function SortHeader({ col, children }) {
     const active = sortBy === col;
     return (
@@ -266,7 +273,7 @@ export default function Locations() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((loc) => (
+                {paginated.map((loc) => (
                   <tr
                     key={loc.id}
                     className="group border-b border-outline-variant/10 hover:bg-amber-500/5 transition-colors cursor-pointer"
@@ -331,6 +338,7 @@ export default function Locations() {
                 ))}
               </tbody>
             </table>
+            <Pagination page={page} totalPages={totalPages} total={filtered.length} label="lieux" onPageChange={setPage} />
           </div>
         )}
       </div>

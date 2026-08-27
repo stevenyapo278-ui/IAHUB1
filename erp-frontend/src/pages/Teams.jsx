@@ -6,6 +6,7 @@ import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import ConfirmDialog from '../components/ConfirmDialog';
+import Pagination from '../components/Pagination';
 import { useTheme } from '../context/ThemeContext';
 import { Users, ShieldCheck, Ticket, Plus, RefreshCw, Trash2, X, AlertTriangle, Mail, Check, Layers, Save, ChevronDown } from 'lucide-react';
 import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
@@ -158,11 +159,18 @@ export default function Teams() {
   const totalMembers = teams.reduce((sum, t) => sum + t.members.length, 0);
   const totalTickets = teams.reduce((sum, t) => sum + t._count.tickets, 0);
 
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 12;
+
   const filtered = teams.filter((t) => {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     return [t.name, t.category].some((f) => f?.toLowerCase().includes(q));
   });
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  useEffect(() => { setPage(1); }, [search]);
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -251,8 +259,9 @@ export default function Teams() {
             {search ? 'Aucune équipe ne correspond à votre recherche' : 'Aucune équipe. Créez-en une !'}
           </div>
         ) : (
+          <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {filtered.map((t) => (
+            {paginated.map((t) => (
               <motion.div
                 key={t.id}
                 whileHover={{ scale: 1.01, y: -2 }}
@@ -313,6 +322,12 @@ export default function Teams() {
               </motion.div>
             ))}
           </div>
+          {filtered.length > 0 && (
+            <div className="mt-4">
+              <Pagination page={page} totalPages={totalPages} total={filtered.length} label="équipes" onPageChange={setPage} />
+            </div>
+          )}
+          </>
         )}
       </div>
 
