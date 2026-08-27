@@ -131,7 +131,16 @@ function validateAndCleanAnalysis(rawAnalysis = {}, availableSkills = [], availa
   if (analysis.location && availableLocations.length > 0) {
     const normLoc = String(analysis.location).trim().toLowerCase();
     const matchLoc = availableLocations.find((l) => (l.completename || l.name || '').toLowerCase().trim() === normLoc);
-    analysis.location = matchLoc ? matchLoc.completename || matchLoc.name : null;
+    if (matchLoc) {
+      analysis.location = matchLoc.completename || matchLoc.name;
+    } else {
+      // Lieu inventé par l'IA inexistant dans la base → marquer NON DÉTERMINÉ
+      analysis.location = null;
+      if (analysis.suggestedTitle && analysis.suggestedTitle.includes(' : ')) {
+        const action = analysis.suggestedTitle.substring(analysis.suggestedTitle.indexOf(' : ') + 3).trim();
+        analysis.suggestedTitle = `NON DÉTERMINÉ : ${action}`.substring(0, 80);
+      }
+    }
   } else if (!analysis.location) {
     analysis.location = null;
   }
