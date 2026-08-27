@@ -36,6 +36,7 @@ const Locations = lazy(() => import('./pages/Locations'));
 const Categories = lazy(() => import('./pages/Categories'));
 const Assets = lazy(() => import('./pages/Assets'));
 const Portal = lazy(() => import('./pages/Portal'));
+const TicketEvolution = lazy(() => import('./pages/TicketEvolution'));
 
 // Fallback léger pendant le chargement d'un chunk (réseau ou navigation rapide)
 function PageLoader() {
@@ -69,6 +70,14 @@ export default function App() {
             <Route index element={<Dashboard />} />
             <Route path="portal" element={<Portal />} />
             <Route path="tickets" element={<Tickets />} />
+            <Route
+              path="ticket-evolution"
+              element={
+                <ProtectedRoute roles={['ADMIN', 'TECHNICIAN', 'HOTLINE']}>
+                  <TicketEvolution />
+                </ProtectedRoute>
+              }
+            />
             <Route path="tickets/:id" element={<TicketDetail />} />
             <Route path="teams" element={<Teams />} />
             <Route path="knowledge-base" element={<KnowledgeBase />} />

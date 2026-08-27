@@ -676,4 +676,162 @@ router.get('/closure-stats', async (req, res) => {
   });
 });
 
+// ── Évolution des tickets dans le temps ────────────────────────────────────
+// Série temporelle avec groupement par jour/semaine/mois, filtres multiples.
+router.get('/ticket-evolution', async (req, res) => {
+  try {
+    const {
+      startDate, endDate, days: daysParam,
+      status, priority, teamId, category, assignedToId, source,
+      groupBy: groupByParam,
+    } = req.query;
+
+    let since, until, totalDays;
+    if (startDate && endDate) {
+      since = new Date(startDate);
+      since.setHours(0, 0, 0, 0);
+      until = new Date(endDate);
+      until.setHours(23, 59, 59, 999);
+      totalDays = Math.ceil((until - since) / (1000 * 60 * 60 * 24));
+    } else {
+      totalDays = Math.min(parseInt(daysParam) || 30, 365);
+      since = new Date();
+      since.setDate(since.getDate() - totalDays);
+      since.setHours(0, 0, 0, 0);
+      until = new Date();
+    }
+    if (totalDays > 365) totalDays = 365;
+
+    // Déterminer le groupement (jour/semaine/mois)
+    const groupBy = groupByParam || (totalDays > 90 ? 'month' : totalDays > 30 ? 'week' : 'day');
+
+    // Construire le filtre de tickets
+    const ticketWhere = { createdAt: { gte: since, lte: until } };
+    if (status) ticketWhere.status = status;
+    if (priority) ticketWhere.priority = priority;
+    if (teamId) ticketWhere.teamId = Number(teamId);
+    if (category) ticketWhere.category = category;
+    if (assignedToId) ticketWhere.assignedToId = Number(assignedToId);
+    if (source) ticketWhere.source = source;
+
+    // Récupérer tous les tickets de la période
+    const tickets = await prisma.ticket.findMany({
+      where: ticketWhere,
+      select: {
+        id: true, status: true, priority: true, category: true, source: true,
+        createdAt: true, solvedAt: true, closedAt: true, teamId: true, assignedToId: true,
+        slaBreachedAt: true, firstResponseAt: true,
+      },
+    });
+
+    // Fonction de groupement temporel
+    function getDateKey(date) {
+      const d = new Date(date);
+      if (groupBy === 'month') return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      if (groupBy === 'week') {
+        const startOfYear = new Date(d.getFullYear(), 0, 1);
+        const weekNum = Math.ceil(((d - startOfYear) / 86400000 + startOfYear.getDay() + 1) / 7);
+        return `${d.getFullYear()}-W${String(weekNum).padStart(2, '0')}`;
+      }
+      return d.toISOString().slice(0, 10);
+    }
+
+    function getLabel(key) {
+      if (groupBy === 'month') {
+        const [y, m] = key.split('-');
+        const monthNames = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
+        return `${monthNames[parseInt(m) - 1]} ${y}`;
+      }
+      if (groupBy === 'week') return key;
+      const d = new Date(key + 'T00:00:00');
+      return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
+    }
+
+    // Construire toutes les clés temporelles
+    const allKeys = new Map();
+    const cursor = new Date(since);
+    while (cursor <= until) {
+      const key = getDateKey(cursor);
+      if (!allKeys.has(key)) allKeys.set(key, { date: key, label: getLabel(key) });
+      if (groupBy === 'day') cursor.setDate(cursor.getDate() + 1);
+      else if (groupBy === 'week') cursor.setDate(cursor.getDate() + 7);
+      else cursor.setMonth(cursor.getMonth() + 1);
+    }
+
+    // Remplir les séries
+    const series = {};
+    for (const [key, val] of allKeys) {
+      series[key] = { ...val, created: 0, resolved: 0, p1: 0, p2: 0, p3: 0, p4: 0, slaBreached: 0 };
+    }
+
+    for (const t of tickets) {
+      const key = getDateKey(t.createdAt);
+      if (series[key]) {
+        series[key].created += 1;
+        if (t.priority === 'P1') series[key].p1 += 1;
+        else if (t.priority === 'P2') series[key].p2 += 1;
+        else if (t.priority === 'P3') series[key].p3 += 1;
+        else if (t.priority === 'P4') series[key].p4 += 1;
+        if (t.slaBreachedAt) series[key].slaBreached += 1;
+      }
+      // Les résolutions
+      const resolvedAt = t.solvedAt || t.closedAt;
+      if (resolvedAt && ['SOLVED', 'CLOSED'].includes(t.status)) {
+        const rKey = getDateKey(resolvedAt);
+        if (series[rKey]) series[rKey].resolved += 1;
+      }
+    }
+
+    // Calculer les stats globales
+    const totalCreated = tickets.length;
+    const totalResolved = tickets.filter((t) => ['SOLVED', 'CLOSED'].includes(t.status)).length;
+    const totalP1 = tickets.filter((t) => t.priority === 'P1').length;
+    const totalBreached = tickets.filter((t) => t.slaBreachedAt).length;
+    const totalWithFirstResponse = tickets.filter((t) => t.firstResponseAt).length;
+    const avgResolutionDays = totalResolved > 0
+      ? Math.round(
+          tickets
+            .filter((t) => t.solvedAt || t.closedAt)
+            .reduce((sum, t) => sum + ((t.solvedAt || t.closedAt) - t.createdAt) / (1000 * 60 * 60 * 24), 0)
+          / totalResolved * 10
+        ) / 10
+      : 0;
+
+    // Répartition par statut (global)
+    const statusBreakdown = {};
+    for (const t of tickets) {
+      statusBreakdown[t.status] = (statusBreakdown[t.status] || 0) + 1;
+    }
+
+    // Répartition par priorité (global)
+    const priorityBreakdown = {};
+    for (const t of tickets) {
+      priorityBreakdown[t.priority] = (priorityBreakdown[t.priority] || 0) + 1;
+    }
+
+    return res.json({
+      series: Object.values(series),
+      meta: {
+        totalDays,
+        groupBy,
+        period: { since: since.toISOString(), until: until.toISOString() },
+      },
+      totals: {
+        created: totalCreated,
+        resolved: totalResolved,
+        p1: totalP1,
+        slaBreached: totalBreached,
+        avgResolutionDays,
+        responseRate: totalCreated > 0 ? Math.round((totalWithFirstResponse / totalCreated) * 100) : 0,
+      },
+      breakdown: {
+        status: Object.entries(statusBreakdown).map(([status, count]) => ({ status, count })),
+        priority: Object.entries(priorityBreakdown).map(([priority, count]) => ({ priority, count })),
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
