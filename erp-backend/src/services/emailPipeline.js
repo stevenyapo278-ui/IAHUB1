@@ -13,14 +13,64 @@ const { processIncomingAttachments } = require('./emailAttachmentProcessor');
 const { stripSignature } = require('./signatureStripper');
 const { logEvent } = require('./ticketEvent');
 const { getSystemSettings } = require('./systemSettings');
-const { emitTicketCreated, emitTicketAssigned } = require('../utils/socket');
+const { emitTicketCreated, emitTicketAssigned, persistNotification } = require('../utils/socket');
 const { tryHandleReminderReply } = require('./draftReplyApproval');
 const { getBreaker } = require('../utils/circuitBreaker');
 const { isLowTrustSender } = require('./senderReputation');
 const { generateEmailSummary } = require('./emailSummaryGenerator');
 
-const MAX_RETRIES = 3;
-const RETRY_DELAYS_MS = [60000, 300000, 900000]; // 1min, 5min, 15min
+const MAX_RETRIES = 3;const RETRY_DELAYS_MS = [180000, 600000, 1800000]; // 3min, 10min, 30min
+
+// ── Notification admin en cas d'échec d'analyse email ─────────────────
+async function notifyAdminsEmailFailed({ incomingId, subject, fromEmail, error, retryCount, maxRetries, nextRetryAt, phase }) {
+  try {
+    // Trouver tous les ADMIN/SUPERADMIN actifs
+    const admins = await prisma.user.findMany({
+      where: { role: { in: ['ADMIN', 'SUPERADMIN'] }, isActive: true },
+      select: { id: true, fullName: true },
+    });
+    if (!admins.length) return;
+
+    const isDeadLetter = phase === 'dead_letter';
+    const title = isDeadLetter
+      ? `❌ Analyse email échouée — email en attente manuelle`
+      : `⚠️ Analyse email en retry (${retryCount}/${maxRetries})`;
+    const retryInfo = nextRetryAt
+      ? `Prochain essai dans ${Math.round((new Date(nextRetryAt).getTime() - Date.now()) / 60000)} min. `
+      : '';
+    const message = `${retryInfo}Email de « ${fromEmail || 'inconnu' }` +
+      ` » — Objet : « ${subject} `.trim() + `»\nErreur : ${error}`;
+
+    // Notification persistée pour chaque admin
+    for (const admin of admins) {
+      await persistNotification({
+        userId: admin.id,
+        type: isDeadLetter ? 'EMAIL_FAILED' : 'EMAIL_RETRY',
+        title,
+        message,
+        link: '/inbox',
+        metadata: { incomingId, subject, fromEmail, error, retryCount, phase },
+      });
+    }
+
+    // Événement socket pour alerte temps réel
+    if (io) {
+      io.to('notifications').emit('email_analysis_failed', {
+        incomingId,
+        subject,
+        fromEmail,
+        error,
+        retryCount,
+        maxRetries,
+        phase,
+        nextRetryAt,
+      });
+    }
+  } catch (err) {
+    console.error('[emailPipeline] Erreur notification admin:', err.message);
+  }
+}
+
 
 function isTransientError(err) {
   const msg = (err?.message || '').toLowerCase();
@@ -632,6 +682,17 @@ async function processMessage(message, account) {
         },
       });
       if (io) io.emit('email_updated', updated);
+      // Notification admin pour chaque retry
+      await notifyAdminsEmailFailed({
+        incomingId: incoming.id,
+        subject: subject || 'Objet inconnu',
+        fromEmail,
+        error: err.message,
+        retryCount: currentRetryCount + 1,
+        maxRetries: MAX_RETRIES,
+        nextRetryAt: updated.nextRetryAt,
+        phase: 'retry',
+      });
       logger?.warn?.('[emailPipeline] Erreur transitoire, mise en file d\'attente de réessai', {
         incomingId: incoming.id, retryCount: currentRetryCount + 1, nextRetryAt: updated.nextRetryAt, error: err.message,
       }) || console.warn(`[emailPipeline] Retry ${currentRetryCount + 1}/${MAX_RETRIES} pour incoming #${incoming.id} dans ${nextDelay / 1000}s`);
@@ -648,6 +709,17 @@ async function processMessage(message, account) {
       });
       if (io) io.emit('email_updated', updated);
       console.error(`[emailPipeline] ${deadLetter ? 'DEAD_LETTER' : 'ERROR'} incoming #${incoming.id}:`, err.message);
+      // Notification admin pour échec définitif
+      await notifyAdminsEmailFailed({
+        incomingId: incoming.id,
+        subject: subject || 'Objet inconnu',
+        fromEmail,
+        error: err.message,
+        retryCount: currentRetryCount + (deadLetter ? 0 : 1),
+        maxRetries: MAX_RETRIES,
+        nextRetryAt: null,
+        phase: deadLetter ? 'dead_letter' : 'error',
+      });
     }
   }
 
