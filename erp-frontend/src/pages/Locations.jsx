@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   MapPin, Plus, X, Search, RefreshCw, Trash2, Globe,
-  Building2, Mail, Check, AlertTriangle, Pencil
+  Building2, Mail, Check, ChevronDown, ChevronRight, Pencil
 } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -77,12 +77,14 @@ export default function Locations() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalMode, setModalMode] = useState('create'); // 'create' | 'edit'
+  const [modalMode, setModalMode] = useState('create');
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [sortBy, setSortBy] = useState('name');
+  const [sortDir, setSortDir] = useState('asc');
 
   function loadLocations() {
     setLoading(true);
@@ -154,6 +156,7 @@ export default function Locations() {
   async function handleToggleActive(id, isActive) {
     try {
       await api.patch(`/locations/${id}`, { isActive: !isActive });
+      toast.success(isActive ? 'Lieu désactivé' : 'Lieu activé');
       loadLocations();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erreur mise à jour');
@@ -162,107 +165,175 @@ export default function Locations() {
 
   const canManage = hasPermission(user, 'locations.manage') || ['ADMIN', 'HOTLINE'].includes(user?.role);
 
-  const filtered = locations.filter((l) => {
-    if (!search.trim()) return true;
-    const q = search.toLowerCase();
-    return [l.name, l.completename, l.town, l.building].some((f) => f?.toLowerCase().includes(q));
-  });
+  function toggleSort(col) {
+    if (sortBy === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortBy(col); setSortDir('asc'); }
+  }
+
+  const filtered = useMemo(() => {
+    let list = locations;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter((l) => [l.name, l.completename, l.town, l.building, l.country].some((f) => f?.toLowerCase().includes(q)));
+    }
+    list = [...list].sort((a, b) => {
+      let va = a[sortBy] || '', vb = b[sortBy] || '';
+      if (sortBy === '_count') { va = a._count?.requesterLinks || 0; vb = b._count?.requesterLinks || 0; }
+      if (typeof va === 'string') { va = va.toLowerCase(); vb = vb.toLowerCase(); }
+      if (va < vb) return sortDir === 'asc' ? -1 : 1;
+      if (va > vb) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+    return list;
+  }, [locations, search, sortBy, sortDir]);
+
+  function SortHeader({ col, children }) {
+    const active = sortBy === col;
+    return (
+      <th
+        onClick={() => toggleSort(col)}
+        className={`px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider cursor-pointer select-none transition-colors ${active ? 'text-amber-600' : 'text-on-surface-variant hover:text-on-surface'}`}
+      >
+        <span className="inline-flex items-center gap-1">
+          {children}
+          {active && (sortDir === 'asc' ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />)}
+        </span>
+      </th>
+    );
+  }
 
   return (
-    <div className="p-4 sm:p-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-on-surface flex items-center gap-2">
-            <MapPin className="w-6 h-6 text-amber-400" /> Lieux
-          </h1>
-          <p className="text-sm text-on-surface/60 mt-1">
-            {locations.length} lieu(x) — les associations expéditeur↔lieu sont créées automatiquement
-          </p>
+    <div className="flex flex-col min-h-screen">
+      {/* ── Top Bar ─────────────────────────────────────────────────────── */}
+      <div className="sticky top-0 z-20 shrink-0 border-b border-outline-variant/30 bg-surface-container-lowest/95 backdrop-blur-sm px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="p-1.5 bg-amber-500/10 rounded-lg">
+            <MapPin className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+          </div>
+          <div>
+            <h1 className="text-base font-bold text-on-surface">Lieux</h1>
+            <p className="text-[11px] text-on-surface-variant font-medium">{locations.length} lieu(x) — associations expéditeur↔lieu automatiques</p>
+          </div>
         </div>
         {canManage && (
           <button onClick={openCreate}
-            className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs font-bold shadow-md hover:shadow-lg flex items-center gap-2 cursor-pointer transition-all">
-            <Plus className="w-4 h-4" /> Nouveau lieu
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs font-bold shadow-md hover:shadow-lg transition-all">
+            <Plus className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Nouveau lieu</span>
           </button>
         )}
       </div>
 
-      <div className="relative mb-4">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface/40" />
-        <input
-          value={search} onChange={(e) => setSearch(e.target.value)}
-          placeholder="Rechercher un lieu..."
-          className="w-full pl-9 pr-4 py-2 rounded-xl border border-outline-variant/60 bg-surface text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-        />
+      {/* ── Search ───────────────────────────────────────────────────────── */}
+      <div className="px-4 sm:px-6 lg:px-8 py-3">
+        <div className="relative max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface/40" />
+          <input
+            value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Rechercher un lieu..."
+            className="w-full pl-9 pr-4 py-2 rounded-xl border border-outline-variant/60 bg-surface text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+          />
+        </div>
       </div>
 
-      {loading ? (
-        <div className="text-center py-12 text-on-surface/40">
-          <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-2" />
-          Chargement...
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="text-center py-12 text-on-surface/40">
-          <MapPin className="w-12 h-12 mx-auto mb-3 opacity-30" />
-          {search ? 'Aucun lieu ne correspond à votre recherche' : 'Aucun lieu. Créez-en un pour associer les demandeurs à leurs sites.'}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {filtered.map((loc) => (
-            <div key={loc.id}
-              className="relative group p-4 rounded-2xl border border-outline-variant/20 bg-surface-container-lowest hover:border-amber-500/30 hover:shadow-md transition-all">
-              <div className="flex items-start justify-between mb-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className={`p-1.5 rounded-lg ${loc.isCustom ? 'bg-purple-500/10 text-purple-500' : 'bg-amber-500/10 text-amber-500'}`}>
-                    {loc.isCustom ? <Building2 className="w-4 h-4" /> : <Globe className="w-4 h-4" />}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-on-surface truncate">{loc.name}</p>
-                    {loc.completename && loc.completename !== loc.name && (
-                      <p className="text-xs text-on-surface/50 truncate">{loc.completename}</p>
+      {/* ── Tableau ─────────────────────────────────────────────────────── */}
+      <div className="flex-1 px-4 sm:px-6 lg:px-8 pb-6">
+        {loading ? (
+          <div className="text-center py-12 text-on-surface/40">
+            <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-2" />
+            Chargement...
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-12 text-on-surface/40">
+            <MapPin className="w-12 h-12 mx-auto mb-3 opacity-30" />
+            {search ? 'Aucun lieu ne correspond à votre recherche' : 'Aucun lieu. Créez-en un !'}
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest overflow-hidden">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b border-outline-variant/20 bg-surface-container-low/50">
+                  <SortHeader col="name">Nom</SortHeader>
+                  <SortHeader col="completename">Nom complet</SortHeader>
+                  <SortHeader col="building">Bâtiment</SortHeader>
+                  <SortHeader col="town">Ville</SortHeader>
+                  <SortHeader col="country">Pays</SortHeader>
+                  <SortHeader col="_count">Demandeurs</SortHeader>
+                  <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                    Statut
+                  </th>
+                  {canManage && <th className="px-3 py-2.5 text-right text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Actions</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((loc) => (
+                  <tr
+                    key={loc.id}
+                    className="group border-b border-outline-variant/10 hover:bg-amber-500/5 transition-colors cursor-pointer"
+                    onClick={() => canManage && openEdit(loc)}
+                  >
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <div className={`p-1 rounded-md shrink-0 ${loc.isCustom ? 'bg-purple-500/10 text-purple-500' : 'bg-amber-500/10 text-amber-500'}`}>
+                          {loc.isCustom ? <Building2 className="w-3.5 h-3.5" /> : <Globe className="w-3.5 h-3.5" />}
+                        </div>
+                        <span className="text-sm font-semibold text-on-surface truncate">{loc.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span className="text-xs text-on-surface-variant">{loc.completename || '—'}</span>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span className="text-xs text-on-surface-variant">{loc.building || '—'}</span>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span className="text-xs text-on-surface-variant">{loc.town || '—'}</span>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span className="text-xs text-on-surface-variant">{loc.country || '—'}</span>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span className="text-xs text-on-surface-variant font-medium">
+                        {loc._count?.requesterLinks > 0 ? (
+                          <span className="flex items-center gap-1">
+                            <Mail className="w-3 h-3 text-on-surface/40" /> {loc._count.requesterLinks}
+                          </span>
+                        ) : '—'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      {loc.isActive ? (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 font-bold">Actif</span>
+                      ) : (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-500 border border-red-500/20 font-bold">Inactif</span>
+                      )}
+                    </td>
+                    {canManage && (
+                      <td className="px-3 py-2.5">
+                        <div className="flex gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                          <button onClick={() => openEdit(loc)} title="Modifier"
+                            className="p-1.5 rounded-lg text-on-surface/60 hover:text-amber-500 hover:bg-amber-500/10 cursor-pointer transition-colors">
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button onClick={() => handleToggleActive(loc.id, loc.isActive)}
+                            title={loc.isActive ? 'Désactiver' : 'Activer'}
+                            className="p-1.5 rounded-lg text-on-surface/60 hover:bg-surface-container-high cursor-pointer transition-colors">
+                            {loc.isActive ? <X className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
+                          </button>
+                          <button onClick={() => setPendingDelete(loc.id)} title="Supprimer"
+                            className="p-1.5 rounded-lg text-on-surface/60 hover:text-red-500 hover:bg-red-500/10 cursor-pointer transition-colors">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
                     )}
-                  </div>
-                </div>
-                {!loc.isActive && (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-500 border border-red-500/20">Inactif</span>
-                )}
-              </div>
-
-              {(loc.town || loc.building) && (
-                <p className="text-xs text-on-surface/40 mb-2">
-                  {[loc.building, loc.town, loc.country].filter(Boolean).join(' — ')}
-                </p>
-              )}
-
-              <div className="flex items-center gap-3 text-xs text-on-surface/40">
-                {loc._count?.requesterLinks > 0 && (
-                  <span className="flex items-center gap-1">
-                    <Mail className="w-3 h-3" /> {loc._count.requesterLinks} demandeur(s)
-                  </span>
-                )}
-              </div>
-
-              {canManage && (
-                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button onClick={() => openEdit(loc)} title="Modifier"
-                    className="p-1.5 rounded-lg bg-surface-container text-on-surface/60 hover:text-amber-500 hover:bg-amber-500/10 cursor-pointer transition-colors">
-                    <Pencil className="w-3.5 h-3.5" />
-                  </button>
-                  <button onClick={() => handleToggleActive(loc.id, loc.isActive)}
-                    title={loc.isActive ? 'Désactiver' : 'Activer'}
-                    className="p-1.5 rounded-lg bg-surface-container text-on-surface/60 hover:bg-surface-container-high cursor-pointer transition-colors">
-                    {loc.isActive ? <X className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
-                  </button>
-                  <button onClick={() => setPendingDelete(loc.id)} title="Supprimer"
-                    className="p-1.5 rounded-lg bg-surface-container text-on-surface/60 hover:text-red-500 hover:bg-red-500/10 cursor-pointer transition-colors">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       <LocationModal
         open={modalOpen}

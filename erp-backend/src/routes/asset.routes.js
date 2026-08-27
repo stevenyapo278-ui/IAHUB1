@@ -156,6 +156,16 @@ router.patch('/:id', requirePermission('assets.manage'), async (req, res) => {
   return res.json(asset);
 });
 
+// Supprimer plusieurs assets en masse
+router.post('/bulk-delete', requirePermission('assets.manage'), async (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ error: 'Liste d\'IDs requise' });
+  }
+  const result = await prisma.asset.deleteMany({ where: { id: { in: ids.map(Number) } } });
+  return res.json({ deletedCount: result.count });
+});
+
 // Supprimer un asset
 router.delete('/:id', requirePermission('assets.manage'), async (req, res) => {
   const id = Number(req.params.id);
