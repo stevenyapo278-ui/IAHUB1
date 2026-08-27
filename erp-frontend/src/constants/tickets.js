@@ -14,7 +14,17 @@ export const TYPE_OPTIONS = [
   { value: 'INCIDENT', label: 'Incident' },
   { value: 'REQUEST', label: 'Demande' },
 ];
-export const SOURCE_OPTIONS = ['Direct', 'Email', 'Formcreator', 'Helpdesk', 'Other'];
+export const SOURCE_OPTIONS = ['Direct', 'Email', 'INCOMING_EMAIL', 'manual', 'Formcreator', 'Helpdesk', 'API', 'Other'];
+export const SOURCE_LABELS = {
+  Direct: 'Direct',
+  Email: 'Email',
+  INCOMING_EMAIL: 'Email entrant',
+  manual: 'Manuel',
+  Formcreator: 'Formcreator',
+  Helpdesk: 'Helpdesk',
+  API: 'API',
+  Other: 'Autre',
+};
 export const URGENCY_IMPACT_OPTIONS = [
   { value: 'VERY_LOW', label: 'Très basse' },
   { value: 'LOW', label: 'Basse' },

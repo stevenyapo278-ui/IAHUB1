@@ -56,6 +56,7 @@ import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
 import SlaBadge from '../components/SlaBadge';
 import {
   STATUS_OPTIONS, STATUS_LABELS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS, URGENCY_IMPACT_OPTIONS,
+  STATUS_CONFIG,
 } from '../constants/tickets';
 
 // Vue par défaut « à la GLPI » : tous les statuts sont visibles (NEW, OPEN,
@@ -122,14 +123,7 @@ const PRIORITY_DOT = {
   P4: { color: 'bg-emerald-500',label: 'P4', text: 'text-emerald-500'},
 };
 
-const STATUS_CONFIG = {
-  NEW:     { label: 'Nouveau',   bg: 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20',         Icon: Sparkles    },
-  OPEN:    { label: 'En cours',  bg: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20',     Icon: Radio       },
-  PLANNED: { label: 'Planifié',  bg: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20', Icon: Calendar },
-  PENDING: { label: 'En attente',bg: 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20', Icon: Clock       },
-  SOLVED:  { label: 'Résolu',    bg: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20', Icon: CheckCircle2 },
-  CLOSED:  { label: 'Fermé',     bg: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20', Icon: Lock        },
-};
+// STATUS_CONFIG importé depuis constants/tickets.js — pas de doublon local
 
 function PriorityDot({ priority, showLabel = false }) {
   const conf = PRIORITY_DOT[priority] || PRIORITY_DOT.P4;

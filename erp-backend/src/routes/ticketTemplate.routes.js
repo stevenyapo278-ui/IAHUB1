@@ -3,9 +3,17 @@ const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
+const cacheStore = require('../services/cacheStore');
 
 const router = express.Router();
 router.use(authenticate);
+// Invalider le cache templates après toute mutation
+router.use((req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.on('finish', () => { if (res.statusCode < 400) cacheStore.clear('GET /api/ticket-templates'); });
+  }
+  next();
+});
 
 const templateSelect = {
   id: true, name: true, description: true, title: true, content: true,

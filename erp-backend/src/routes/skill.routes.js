@@ -1,4 +1,5 @@
 const express = require('express');
+const cacheStore = require('../services/cacheStore');
 const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
@@ -7,6 +8,13 @@ const { requirePermission } = require('../middleware/permissions');
 const router = express.Router();
 router.use(authenticate);
 router.use(requirePermission('settings.ai', ['ADMIN', 'SUPERADMIN']));
+// Invalider le cache compétences après toute mutation
+router.use((req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.on('finish', () => { if (res.statusCode < 400) cacheStore.clear('GET /api/skills'); });
+  }
+  next();
+});
 
 // ── Lister toutes les compétences ────────────────────────────────────────
 router.get('/', async (req, res) => {

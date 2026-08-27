@@ -1,4 +1,5 @@
 const express = require('express');
+const cacheStore = require('../services/cacheStore');
 const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
@@ -80,6 +81,7 @@ router.post('/', requirePermission('teams.manage', ['ADMIN', 'HOTLINE']), [body(
       defaultObservers: { select: { id: true, fullName: true, email: true, role: true } },
     },
   });
+  cacheStore.clear('GET /api/teams');
   return res.status(201).json(team);
   auditLog('TEAM_CREATED', { actor: req.user, targetType: 'Team', targetId: team.id, targetLabel: team.name }).catch(() => {});
 });
@@ -104,6 +106,7 @@ router.patch('/:id', requirePermission('teams.manage', ['ADMIN', 'HOTLINE']), as
         defaultObservers: { select: { id: true, fullName: true, email: true, role: true } },
       },
     });
+    cacheStore.clear('GET /api/teams');
     return res.json(team);
     auditLog('TEAM_UPDATED', { actor: req.user, targetType: 'Team', targetId: team.id, targetLabel: team.name, metadata: { changedFields: Object.keys(data) } }).catch(() => {});
   } catch (err) {
@@ -117,6 +120,7 @@ router.delete('/:id', requirePermission('teams.manage', ['ADMIN']), async (req, 
   try {
     const team = await prisma.team.findUnique({ where: { id: Number(req.params.id) }, select: { id: true, name: true } });
     await prisma.team.delete({ where: { id: Number(req.params.id) } });
+    cacheStore.clear('GET /api/teams');
     auditLog('TEAM_DELETED', { actor: req.user, targetType: 'Team', targetId: team.id, targetLabel: team.name }).catch(() => {});
     return res.status(204).send();
   } catch (err) {

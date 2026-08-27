@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
-import { STATUS_CONFIG, PRIORITY_CONFIG } from '../constants/tickets';
+import { STATUS_CONFIG, PRIORITY_CONFIG, SOURCE_LABELS } from '../constants/tickets';
 
 const inputCls = 'px-3 py-1.5 rounded-xl border border-outline-variant/60 bg-surface text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all';
 const selectCls = `${inputCls} appearance-none cursor-pointer`;
@@ -201,9 +201,7 @@ export default function TicketEvolution() {
               <label className="block text-[10px] font-semibold text-on-surface/40 uppercase mb-1">Source</label>
               <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className={selectCls}>
                 <option value="">Toutes</option>
-                <option value="Email">Email</option>
-                <option value="Manual">Manuel</option>
-                <option value="API">API</option>
+                {Object.entries(SOURCE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </div>
           </div>

@@ -340,6 +340,16 @@ router.post(
       return res.status(400).json({ error: 'Au moins une modification est requise (status, priority, assignedToId, teamId)' });
     }
 
+    // Valider les valeurs de statut et priorité
+    const VALID_STATUSES = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'SOLVED', 'CLOSED', 'WAITING_FOR_USER'];
+    const VALID_PRIORITIES = ['P1', 'P2', 'P3', 'P4'];
+    if (status && !VALID_STATUSES.includes(status)) {
+      return res.status(400).json({ error: `Statut invalide : ${status}. Valeurs acceptées : ${VALID_STATUSES.join(', ')}` });
+    }
+    if (priority && !VALID_PRIORITIES.includes(priority)) {
+      return res.status(400).json({ error: `Priorité invalide : ${priority}. Valeurs acceptées : ${VALID_PRIORITIES.join(', ')}` });
+    }
+
     const data = {};
     if (status) data.status = status;
     if (priority) data.priority = priority;

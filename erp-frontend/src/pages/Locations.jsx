@@ -266,7 +266,7 @@ export default function Locations() {
 
       <LocationModal
         open={modalOpen}
-        onClose={() => { setModalOpen(false); setEditingId(null); }}
+        onClose={() => { setModalOpen(false); setEditingId(null); setForm(emptyForm); }}
         onSave={handleSave}
         form={form} setForm={setForm}
         title={modalMode === 'edit' ? 'Modifier le lieu' : 'Nouveau lieu'}

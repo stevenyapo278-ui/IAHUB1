@@ -1,4 +1,5 @@
 const express = require('express');
+const cacheStore = require('../services/cacheStore');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { body, validationResult } = require('express-validator');
@@ -9,7 +10,6 @@ const { ADMIN_LIKE_ROLES, ROLE_DEFAULT_GROUP_NAME, canAssignRole } = require('..
 const { sanitizeError } = require('../utils/sanitizeError');
 const { auditLog } = require('../services/auditLogService');
 const { emitUserUpdated } = require('../utils/socket');
-const cacheStore = require('../services/cacheStore');
 const { logger } = require('../utils/logger');
 const { isLdapSyncConfigured, syncLdapDirectory } = require('../services/ldapDirectory');
 
@@ -65,6 +65,13 @@ function canActOnTarget(actorRole, targetRole) {
 
 const router = express.Router();
 router.use(authenticate);
+// Invalider le cache utilisateurs après toute mutation
+router.use((req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.on('finish', () => { if (res.statusCode < 400) cacheStore.clear('GET /api/users'); });
+  }
+  next();
+});
 
 // Génère un mot de passe temporaire lisible (évite les caractères ambigus 0/O/1/l/I) mais
 // suffisamment fort, respectant le minimum de 8 caractères imposé partout ailleurs.
