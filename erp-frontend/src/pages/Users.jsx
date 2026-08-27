@@ -298,6 +298,40 @@ if (field === 'role') {
 
   return (
     <div className="flex flex-col min-h-screen">
+      {/* ── AD Sync Loading Overlay ────────────────────────────────────── */}
+      <AnimatePresence>
+        {ldapSyncing && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.8, opacity: 0 }}
+              transition={{ type: 'spring', bounce: 0.25 }}
+              className="bg-surface-container-lowest border border-indigo-500/30 rounded-2xl shadow-2xl p-8 flex flex-col items-center gap-4 max-w-sm"
+            >
+              <div className="relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-30" />
+                <span className="relative flex items-center justify-center w-16 h-16 rounded-full bg-indigo-500/15">
+                  <Database className="w-8 h-8 text-indigo-500 animate-pulse" />
+                </span>
+              </div>
+              <div className="text-center">
+                <p className="text-sm font-bold text-on-surface">Synchronisation Active Directory</p>
+                <p className="text-xs text-on-surface-variant mt-1">Lecture de l'annuaire, création et mise à jour des comptes…</p>
+              </div>
+              <div className="w-full bg-indigo-500/10 rounded-full h-1.5 overflow-hidden">
+                <motion.div
+                  className="h-full bg-gradient-to-r from-indigo-500 to-blue-500 rounded-full"
+                  initial={{ width: '0%' }}
+                  animate={{ width: '90%' }}
+                  transition={{ duration: 8, ease: 'easeInOut' }}
+                />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {/* ── Top Bar ─────────────────────────────────────────────────────── */}
       <div className="sticky top-0 z-20 shrink-0 border-b border-outline-variant/30 bg-surface-container-lowest/95 backdrop-blur-sm px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between gap-3 flex-wrap">
         {/* Title */}
@@ -314,11 +348,23 @@ if (field === 'role') {
         {/* Actions */}
         <div className="flex items-center gap-2 ml-auto shrink-0">
           <button onClick={handleLdapSync} disabled={ldapSyncing}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-indigo-500/40 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/10 text-xs font-semibold transition-all disabled:opacity-50"
-            title="Synchroniser les comptes depuis l'Active Directory (créations, mises à jour, désactivations)"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-indigo-500/40 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/10 text-xs font-semibold transition-all disabled:opacity-70"
+            title="Synchroniser les comptes depuis l'Active Directory"
           >
-            <Database className={`w-3.5 h-3.5 ${ldapSyncing ? 'animate-pulse' : ''}`} />
-            <span className="hidden sm:inline">{ldapSyncing ? 'Synchronisation…' : 'Annuaire AD'}</span>
+            {ldapSyncing ? (
+              <>
+                <span className="relative flex h-3.5 w-3.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-indigo-500" />
+                </span>
+                <span className="hidden sm:inline animate-pulse">Synchronisation AD…</span>
+              </>
+            ) : (
+              <>
+                <Database className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Annuaire AD</span>
+              </>
+            )}
           </button>
           <button onClick={openPurgeModal}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 text-xs font-semibold transition-all cursor-pointer"
@@ -726,16 +772,6 @@ if (field === 'role') {
                     <div className="w-20 shrink-0 flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                       {(currentUser?.role === 'SUPERADMIN' || !ADMIN_LIKE_ROLES.includes(u.role)) && (
                         <>
-                          <motion.button whileHover={{ scale: 1.15 }} whileTap={{ scale: 0.9 }}
-                            onClick={() => startEdit(u)} title="Éditer"
-                            className="p-1.5 rounded-lg text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-all">
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </motion.button>
-                          <motion.button whileHover={{ scale: 1.15 }} whileTap={{ scale: 0.9 }}
-                            onClick={() => setConfirmResetId(u.id)} title="Réinitialiser mot de passe"
-                            className="p-1.5 rounded-lg text-on-surface-variant hover:text-amber-500 hover:bg-amber-500/10 transition-all">
-                            <KeyRound className="w-3.5 h-3.5" />
-                          </motion.button>
                           <motion.button whileHover={{ scale: 1.15 }} whileTap={{ scale: 0.9 }}
                             onClick={() => setConfirmDeleteId(u.id)} title="Supprimer"
                             className="p-1.5 rounded-lg text-on-surface-variant hover:text-red-500 hover:bg-red-500/10 transition-all">
