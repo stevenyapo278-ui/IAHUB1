@@ -7,7 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { useTheme } from '../context/ThemeContext';
-import { Users, ShieldCheck, Ticket, Plus, RefreshCw, Trash2, X, AlertTriangle, Mail, Check, Layers, Save } from 'lucide-react';
+import { Users, ShieldCheck, Ticket, Plus, RefreshCw, Trash2, X, AlertTriangle, Mail, Check, Layers, Save, ChevronDown } from 'lucide-react';
 import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
 
 export default function Teams() {
@@ -21,6 +21,7 @@ export default function Teams() {
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [search, setSearch] = useState('');
+  const [categories, setCategories] = useState([]);
 
   // ── Modal création ────────────────────────────────────────────────
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -41,7 +42,24 @@ export default function Teams() {
       .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'))
       .finally(() => setLoading(false));
   }
-  useEffect(load, []);
+  useEffect(() => {
+    load();
+    api.get('/categories')
+      .then(({ data }) => {
+        // Aplatir l'arbre : enfants reçoivent le chemin complet "Parent > Enfant"
+        const flat = [];
+        function walk(nodes, prefix) {
+          for (const n of nodes) {
+            const label = prefix ? `${prefix} > ${n.name}` : n.name;
+            flat.push({ name: label });
+            if (n.children?.length) walk(n.children, label);
+          }
+        }
+        walk(data, '');
+        setCategories(flat);
+      })
+      .catch(() => {});
+  }, []);
 
   // ── Ouvrir le modal détail ────────────────────────────────────────
   async function openDetail(teamId) {
@@ -353,9 +371,14 @@ export default function Teams() {
                         </label>
                         <label className="flex flex-col gap-1">
                           <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Catégorie</span>
-                          <input value={detailDraft.category} onChange={e => setDetailDraft({ ...detailDraft, category: e.target.value })}
-                            placeholder="ex: Réseau, Infrastructure"
-                            className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all" />
+                          <div className="relative">
+                            <select value={detailDraft.category} onChange={e => setDetailDraft({ ...detailDraft, category: e.target.value })}
+                              className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 pr-8 text-xs text-on-surface appearance-none focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer">
+                              <option value="">— Aucune catégorie —</option>
+                              {categories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                            </select>
+                            <ChevronDown className="w-3.5 h-3.5 text-on-surface-variant absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          </div>
                         </label>
                         <label className="flex flex-col gap-1">
                           <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider flex items-center gap-1.5">
@@ -484,9 +507,14 @@ export default function Teams() {
                   </label>
                   <label className="flex flex-col gap-1">
                     <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Catégorie</span>
-                    <input value={createForm.category} onChange={e => setCreateForm({ ...createForm, category: e.target.value })}
-                      placeholder="ex: Réseau, Infrastructure"
-                      className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all" />
+                    <div className="relative">
+                      <select value={createForm.category} onChange={e => setCreateForm({ ...createForm, category: e.target.value })}
+                        className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 pr-8 text-xs text-on-surface appearance-none focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer">
+                        <option value="">— Aucune catégorie —</option>
+                        {categories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                      </select>
+                      <ChevronDown className="w-3.5 h-3.5 text-on-surface-variant absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    </div>
                   </label>
                   <label className="flex flex-col gap-1">
                     <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Email de groupe</span>
