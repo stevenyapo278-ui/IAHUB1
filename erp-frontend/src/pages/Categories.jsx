@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
-import { Tag, Plus, Search, RefreshCw, Trash2, Pencil, Globe, FolderTree, ChevronRight, ChevronDown } from 'lucide-react';
+import { Tag, Plus, Search, RefreshCw, Trash2, Pencil, Globe, FolderTree, ChevronRight, ChevronDown, X } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
@@ -21,13 +22,16 @@ export default function Categories() {
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: '', parentId: '' });
-  const [editing, setEditing] = useState(null);
-  const [expanded, setExpanded] = useState(new Set());
   const [pendingDelete, setPendingDelete] = useState(null);
   const [sortBy, setSortBy] = useState('createdAt');
   const [sortDir, setSortDir] = useState('desc');
+
+  // Modal state
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState('create'); // 'create' | 'edit'
+  const [editingCat, setEditingCat] = useState(null);
+  const [form, setForm] = useState({ name: '', parentId: '' });
+  const [saving, setSaving] = useState(false);
 
   const canManage = hasPermission(user, 'tickets.manage');
 
@@ -41,7 +45,6 @@ export default function Categories() {
 
   useEffect(() => { loadCategories(); }, []);
 
-  // Arbre : catégories sans parent = racines ; enfants groupés par parentId
   const tree = useMemo(() => {
     const byParent = new Map();
     for (const c of categories) {
@@ -61,44 +64,50 @@ export default function Categories() {
     return categories.filter((c) => c.name?.toLowerCase().includes(search.toLowerCase()));
   }, [categories, search]);
 
-  function toggleExpand(id) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }
-
   function toggleSort(col) {
     if (sortBy === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortBy(col); setSortDir('asc'); }
   }
 
-  async function handleCreate(e) {
-    e.preventDefault();
-    if (!form.name.trim()) return;
-    try {
-      await api.post('/categories', { name: form.name.trim(), parentId: form.parentId ? Number(form.parentId) : null });
-      toast.success(`Catégorie "${form.name.trim()}" créée`);
-      setShowForm(false);
-      setForm({ name: '', parentId: '' });
-      loadCategories();
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'Erreur création catégorie');
-    }
+  function openCreate() {
+    setModalMode('create');
+    setEditingCat(null);
+    setForm({ name: '', parentId: '' });
+    setModalOpen(true);
   }
 
-  async function handleRename(e) {
+  function openEdit(cat) {
+    setModalMode('edit');
+    setEditingCat(cat);
+    setForm({ name: cat.name, parentId: cat.parentId != null ? String(cat.parentId) : '' });
+    setModalOpen(true);
+  }
+
+  function closeModal() {
+    setModalOpen(false);
+    setEditingCat(null);
+    setForm({ name: '', parentId: '' });
+  }
+
+  async function handleSubmit(e) {
     e.preventDefault();
-    if (!form.name.trim() || !editing) return;
+    if (!form.name.trim()) return;
+    setSaving(true);
     try {
-      await api.patch(`/categories/${editing.id}`, { name: form.name.trim(), parentId: form.parentId ? Number(form.parentId) : null });
-      toast.success('Catégorie mise à jour');
-      setEditing(null);
-      setForm({ name: '', parentId: '' });
+      const payload = { name: form.name.trim(), parentId: form.parentId ? Number(form.parentId) : null };
+      if (modalMode === 'edit' && editingCat) {
+        await api.patch(`/categories/${editingCat.id}`, payload);
+        toast.success('Catégorie mise à jour');
+      } else {
+        await api.post('/categories', payload);
+        toast.success(`Catégorie « ${form.name.trim()} » créée`);
+      }
+      closeModal();
       loadCategories();
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Erreur mise à jour catégorie');
+      toast.error(err.response?.data?.error || 'Erreur enregistrement catégorie');
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -106,7 +115,7 @@ export default function Categories() {
     if (!pendingDelete) return;
     try {
       await api.delete(`/categories/${pendingDelete.id}`);
-      toast.success(`Catégorie "${pendingDelete.name}" supprimée`);
+      toast.success(`Catégorie « ${pendingDelete.name } » supprimée`);
       setPendingDelete(null);
       loadCategories();
     } catch (err) {
@@ -119,7 +128,6 @@ export default function Categories() {
     return categories.filter((c) => c.parentId != null && Number(c.parentId) === id).length;
   }
 
-  // Construire la liste plate pour le tableau (arbre aplati)
   const tableRows = useMemo(() => {
     const rows = [];
     function walk(nodes, depth, parentName) {
@@ -176,7 +184,7 @@ export default function Categories() {
         {canManage && (
           <div className="flex items-center gap-2 ml-auto">
             <button
-              onClick={() => { setShowForm(true); setEditing(null); setForm({ name: '', parentId: '' }); }}
+              onClick={openCreate}
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs font-bold shadow-md hover:shadow-lg transition-all"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -186,8 +194,8 @@ export default function Categories() {
         )}
       </div>
 
-      {/* ── Search + Form ───────────────────────────────────────────────── */}
-      <div className="px-4 sm:px-6 lg:px-8 py-3 space-y-3">
+      {/* ── Search ───────────────────────────────────────────────────────── */}
+      <div className="px-4 sm:px-6 lg:px-8 py-3">
         <div className="relative max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface/40" />
           <input
@@ -196,47 +204,6 @@ export default function Categories() {
             className="w-full pl-9 pr-4 py-2 rounded-xl border border-outline-variant/60 bg-surface text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
           />
         </div>
-
-        {(showForm || editing) && (
-          <form onSubmit={editing ? handleRename : handleCreate}
-            className="p-4 rounded-2xl border border-outline-variant/30 bg-surface-container-low/40 space-y-3">
-            <div className="flex items-center gap-2">
-              <input
-                value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-                required autoFocus placeholder="Nom de la catégorie *"
-                className="flex-1 px-3.5 py-2 rounded-xl border border-outline-variant/60 bg-surface text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-on-surface/60 mb-1 flex items-center gap-1.5">
-                <FolderTree className="w-3.5 h-3.5" />
-                Catégorie parente {editing ? '(déplacer)' : '(optionnel)'}
-              </label>
-              <select
-                value={form.parentId}
-                onChange={(e) => setForm({ ...form, parentId: e.target.value })}
-                className="w-full px-3.5 py-2 rounded-xl border border-outline-variant/60 bg-surface text-sm text-on-surface cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-              >
-                <option value="">— Aucune (catégorie racine) —</option>
-                {flatOptions
-                  .filter((o) => !editing || o.id !== editing.id)
-                  .map((o) => (
-                    <option key={o.id} value={o.id}>{o.label}</option>
-                  ))}
-              </select>
-            </div>
-            <div className="flex justify-end gap-2 pt-1">
-              <button type="button" onClick={() => { setShowForm(false); setEditing(null); setForm({ name: '', parentId: '' }); }}
-                className="px-4 py-2 rounded-xl border border-outline-variant/40 text-on-surface text-xs font-semibold hover:bg-surface-container cursor-pointer transition-colors">
-                Annuler
-              </button>
-              <button type="submit"
-                className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs font-bold shadow-md hover:shadow-lg flex items-center gap-2 cursor-pointer transition-all">
-                <Plus className="w-4 h-4" /> {editing ? 'Enregistrer' : 'Créer'}
-              </button>
-            </div>
-          </form>
-        )}
       </div>
 
       {/* ── Tableau ─────────────────────────────────────────────────────── */}
@@ -271,9 +238,9 @@ export default function Categories() {
                 {tableRows.map((cat) => (
                   <tr
                     key={cat.id}
-                    className="group border-b border-outline-variant/10 hover:bg-amber-500/5 transition-colors"
+                    className="group border-b border-outline-variant/10 hover:bg-amber-500/5 transition-colors cursor-pointer"
+                    onClick={() => canManage && openEdit(cat)}
                   >
-                    {/* Nom */}
                     <td className="px-3 py-2.5">
                       <div className="flex items-center gap-2" style={{ paddingLeft: cat.depth * 20 }}>
                         {cat.depth > 0 && <ChevronRight className="w-3 h-3 text-on-surface/30 shrink-0" />}
@@ -283,13 +250,11 @@ export default function Categories() {
                         <span className="text-sm font-semibold text-on-surface truncate">{cat.name}</span>
                       </div>
                     </td>
-                    {/* Parent */}
                     <td className="px-3 py-2.5">
                       <span className="text-xs text-on-surface-variant">
                         {cat.parentName || <span className="italic text-on-surface/30">—</span>}
                       </span>
                     </td>
-                    {/* Source */}
                     <td className="px-3 py-2.5">
                       <span className={`text-[10px] px-2 py-0.5 rounded-full border font-bold ${cat.isCustom
                         ? 'bg-purple-500/10 text-purple-500 border-purple-500/20'
@@ -297,26 +262,22 @@ export default function Categories() {
                         {cat.isCustom ? 'Locale' : 'Sync'}
                       </span>
                     </td>
-                    {/* Sous-catégories */}
                     <td className="px-3 py-2.5">
                       <span className="text-xs text-on-surface-variant font-medium">
                         {childCount(cat.id) > 0 ? `${childCount(cat.id)} sous-cat.` : '—'}
                       </span>
                     </td>
-                    {/* Date création */}
                     <td className="px-3 py-2.5">
                       <span className="text-xs text-on-surface-variant font-mono">{formatDate(cat.createdAt)}</span>
                     </td>
-                    {/* Créé par */}
                     <td className="px-3 py-2.5">
                       <span className="text-xs text-on-surface-variant">{creatorName(cat)}</span>
                     </td>
-                    {/* Actions */}
                     {canManage && (
                       <td className="px-3 py-2.5">
-                        <div className="flex gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
                           <button
-                            onClick={() => { setEditing(cat); setShowForm(false); setForm({ name: cat.name, parentId: cat.parentId != null ? String(cat.parentId) : '' }); }}
+                            onClick={() => openEdit(cat)}
                             title="Modifier"
                             className="p-1.5 rounded-lg text-on-surface/60 hover:text-amber-500 hover:bg-amber-500/10 cursor-pointer transition-colors"
                           >
@@ -340,10 +301,111 @@ export default function Categories() {
         )}
       </div>
 
+      {/* ── Modal Création / Édition ────────────────────────────────────── */}
+      <AnimatePresence>
+        {modalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={closeModal}
+              className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="relative w-full max-w-md rounded-2xl border border-outline-variant/30 bg-surface shadow-2xl overflow-hidden"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b border-outline-variant/20">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-xl bg-amber-500/10">
+                    {modalMode === 'edit' ? <Pencil className="w-4 h-4 text-amber-600 dark:text-amber-400" /> : <Plus className="w-4 h-4 text-amber-600 dark:text-amber-400" />}
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-bold text-on-surface">
+                      {modalMode === 'edit' ? 'Modifier la catégorie' : 'Nouvelle catégorie'}
+                    </h2>
+                    {modalMode === 'edit' && editingCat && (
+                      <p className="text-[11px] text-on-surface-variant">{editingCat.name}</p>
+                    )}
+                  </div>
+                </div>
+                <motion.button
+                  onClick={closeModal}
+                  whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }}
+                  className="p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"
+                >
+                  <X className="w-4 h-4" />
+                </motion.button>
+              </div>
+
+              {/* Body */}
+              <form onSubmit={handleSubmit} className="px-5 py-5 space-y-4">
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Nom de la catégorie *</span>
+                  <input
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    required autoFocus placeholder="ex: Réseau, Sécurité, Infrastructure"
+                    className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider flex items-center gap-1.5">
+                    <FolderTree className="w-3.5 h-3.5" />
+                    Catégorie parente {modalMode === 'edit' ? '(déplacer)' : '(optionnel)'}
+                  </span>
+                  <select
+                    value={form.parentId}
+                    onChange={(e) => setForm({ ...form, parentId: e.target.value })}
+                    className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                  >
+                    <option value="">— Aucune (catégorie racine) —</option>
+                    {flatOptions
+                      .filter((o) => modalMode !== 'edit' || !editingCat || o.id !== editingCat.id)
+                      .map((o) => (
+                        <option key={o.id} value={o.id}>{o.label}</option>
+                      ))}
+                  </select>
+                </label>
+              </form>
+
+              {/* Footer */}
+              <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-outline-variant/20 bg-surface-container-low/40">
+                <button
+                  type="button" onClick={closeModal}
+                  className="px-4 py-2 rounded-xl border border-outline-variant/40 text-on-surface text-xs font-semibold hover:bg-surface-container cursor-pointer transition-colors"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={handleSubmit}
+                  disabled={saving || !form.name.trim()}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs font-bold shadow-md hover:shadow-lg flex items-center gap-2 cursor-pointer transition-all disabled:opacity-50"
+                >
+                  {saving ? (
+                    <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    modalMode === 'edit' ? <Pencil className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />
+                  )}
+                  {saving ? 'Enregistrement...' : modalMode === 'edit' ? 'Enregistrer' : 'Créer'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Confirm Delete ──────────────────────────────────────────────── */}
       <ConfirmDialog
         open={!!pendingDelete}
         title="Supprimer la catégorie"
-        message={`Supprimer la catégorie "${pendingDelete?.name}" ? Les tickets existants conserveront leur libellé.${pendingDelete && childCount(pendingDelete.id) > 0 ? ` ⚠️ Cette catégorie a ${childCount(pendingDelete.id)} sous-catégorie(s) : déplacez-les ou supprimez-les d'abord.` : ''}`}
+        message={`Supprimer la catégorie « ${pendingDelete?.name} » ? Les tickets existants conserveront leur libellé.${pendingDelete && childCount(pendingDelete.id) > 0 ? ` ⚠️ Cette catégorie a ${childCount(pendingDelete.id)} sous-catégorie(s) : déplacez-les ou supprimez-les d'abord.` : ''}`}
         confirmLabel="Supprimer"
         onConfirm={handleDelete}
         onCancel={() => setPendingDelete(null)}

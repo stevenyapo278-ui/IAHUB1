@@ -85,9 +85,10 @@ export default function Users() {
   const [selectedIds, setSelectedIds] = useState([]);
   const [assignGroupId, setAssignGroupId] = useState('');
   const [assigning, setAssigning] = useState(false);
-  const [editingId, setEditingId] = useState(null);
+  const [editModal, setEditModal] = useState({ open: false, user: null });
   const [editForm, setEditForm] = useState({ fullName: '', email: '' });
   const [savingEdit, setSavingEdit] = useState(false);
+  const [createModal, setCreateModal] = useState(false);
   const [confirmResetId, setConfirmResetId] = useState(null);
   const [resetting, setResetting] = useState(false);
   const [showGlpiImport, setShowGlpiImport] = useState(false);
@@ -186,10 +187,12 @@ if (field === 'role') {
     } catch (err) { setError(err.response?.data?.error || 'Erreur'); }
   }
 
-  function startEdit(u) { setEditingId(u.id); setEditForm({ fullName: u.fullName, email: u.email }); }
-  async function saveEdit(id) {
+  function startEdit(u) { setEditModal({ open: true, user: u }); setEditForm({ fullName: u.fullName, email: u.email }); }
+  function closeEditModal() { setEditModal({ open: false, user: null }); setEditForm({ fullName: '', email: '' }); }
+  async function saveEdit() {
+    if (!editModal.user) return;
     setSavingEdit(true);
-    try { await api.patch(`/users/${id}`, editForm); toast.success('Mis à jour'); setEditingId(null); load(); }
+    try { await api.patch(`/users/${editModal.user.id}`, editForm); toast.success(`${editModal.user.fullName} mis à jour`); closeEditModal(); load(); }
     catch (err) { setError(err.response?.data?.error || 'Erreur'); }
     finally { setSavingEdit(false); }
   }
@@ -212,7 +215,7 @@ if (field === 'role') {
     e.preventDefault(); setError(''); setSubmitting(true);
     try {
       await api.post('/users', { ...form, teamId: form.teamId ? Number(form.teamId) : null });
-      toast.success('Utilisateur créé'); setForm(emptyForm); setShowForm(false); load();
+      toast.success('Utilisateur créé'); setForm(emptyForm); setCreateModal(false); load();
     } catch (err) { setError(err.response?.data?.error || 'Erreur lors de la création'); }
     finally { setSubmitting(false); }
   }
@@ -393,49 +396,16 @@ if (field === 'role') {
           )}
           <motion.button
             whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-            onClick={() => { setShowForm(v => !v); setError(''); }}
+            onClick={() => { setCreateModal(true); setError(''); setForm(emptyForm); }}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-bold shadow-md shadow-blue-500/20"
           >
-            {showForm ? <X className="w-3.5 h-3.5" /> : <UserPlus className="w-3.5 h-3.5" />}
-            <span className="hidden sm:inline">{showForm ? 'Fermer' : 'Nouveau compte'}</span>
+            <UserPlus className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Nouveau compte</span>
           </motion.button>
         </div>
       </div>
 
-      {/* ── Create user panel ─────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {showForm && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.22 }}
-            className="overflow-hidden border-b border-outline-variant/20 bg-surface-container-low/40"
-          >
-            <form onSubmit={handleCreate} className="px-4 sm:px-6 lg:px-8 py-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 items-end">
-              {[
-                { label: 'Nom *', key: 'fullName', type: 'text',     placeholder: 'Nom complet', required: true },
-                { label: 'Email *', key: 'email',  type: 'email',    placeholder: 'email@exemple.ci', required: true },
-                { label: 'Mot de passe *', key: 'password', type: 'password', placeholder: '••••••••', required: true },
-              ].map(f => (
-                <label key={f.key} className="flex flex-col gap-1">
-                  <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">{f.label}</span>
-                  <input type={f.type} required={f.required} placeholder={f.placeholder}
-                    value={form[f.key]} onChange={e => setForm({ ...form, [f.key]: e.target.value })}
-                    className="w-full bg-surface border border-outline-variant/40 rounded-xl px-3.5 py-2 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
-                  />
-                </label>
-              ))}
-              <label className="flex flex-col gap-1">
-                <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Rôle</span>
-                <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}
-                  className="bg-surface border border-outline-variant/40 rounded-xl px-3.5 py-2 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer">
-                  {ROLES.map(r => <option key={r} value={r}>{ROLE_CONFIG[r]?.label || r}</option>)}
-                </select>
-              </label>
-              <button type="submit" disabled={submitting}
-                className="py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-bold disabled:opacity-50 shadow-sm hover:brightness-110 transition-all"
-              >{submitting ? 'Création...' : 'Créer'}</button>
-            </form>
-          </motion.div>
-        )}
-      </AnimatePresence>
+
 
       {/* ── Error banner ─────────────────────────────────────────────────── */}
       <AnimatePresence>
@@ -681,39 +651,20 @@ if (field === 'role') {
                     </div>
 
                     {/* User */}
-                    <div className="flex-1 min-w-0">
-                      {editingId === u.id ? (
-                        <div className="flex items-center gap-2">
-                          <input value={editForm.fullName} onChange={e => setEditForm({ ...editForm, fullName: e.target.value })}
-                            placeholder="Nom complet"
-                            className="bg-surface border border-outline-variant/40 rounded-xl px-2.5 py-1 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 w-32" />
-                          <input type="email" value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })}
-                            placeholder="Email"
-                            className="bg-surface border border-outline-variant/40 rounded-xl px-2.5 py-1 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 w-36" />
-                          <button onClick={() => saveEdit(u.id)} disabled={savingEdit}
-                            className="px-2.5 py-1 rounded-lg bg-primary text-white text-[10px] font-bold disabled:opacity-50">
-                            {savingEdit ? '...' : 'OK'}
-                          </button>
-                          <button onClick={() => setEditingId(null)}
-                            className="p-1 rounded-lg text-on-surface-variant hover:text-on-surface transition-colors">
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2.5">
-                          {/* Avatar */}
-                          <div className="relative shrink-0">
-                            <div className={`w-8 h-8 rounded-full border flex items-center justify-center text-[11px] font-bold ${roleCfg.bg} ${roleCfg.color} ${roleCfg.border}`}>
-                              {initials(u.fullName)}
-                            </div>
-                            <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-surface-container-lowest ${u.isActive ? 'bg-emerald-500' : 'bg-zinc-400'}`} />
+                    <div className="flex-1 min-w-0 cursor-pointer" onClick={() => canManage && startEdit(u)}>
+                      <div className="flex items-center gap-2.5">
+                        {/* Avatar */}
+                        <div className="relative shrink-0">
+                          <div className={`w-8 h-8 rounded-full border flex items-center justify-center text-[11px] font-bold ${roleCfg.bg} ${roleCfg.color} ${roleCfg.border}`}>
+                            {initials(u.fullName)}
                           </div>
-                          <div className="min-w-0">
-                            <p className="text-xs font-semibold text-on-surface truncate"><HighlightText text={u.fullName} query={searchQuery} /></p>
-                            <p className="text-[10px] text-on-surface-variant truncate font-mono"><HighlightText text={u.email} query={searchQuery} /></p>
-                          </div>
+                          <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-surface-container-lowest ${u.isActive ? 'bg-emerald-500' : 'bg-zinc-400'}`} />
                         </div>
-                      )}
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-on-surface truncate"><HighlightText text={u.fullName} query={searchQuery} /></p>
+                          <p className="text-[10px] text-on-surface-variant truncate font-mono"><HighlightText text={u.email} query={searchQuery} /></p>
+                        </div>
+                      </div>
                     </div>
 
                     {/* Role */}
@@ -952,6 +903,130 @@ if (field === 'role') {
                     </>
                   )}
                 </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
+
+      {/* ── Modal Édition utilisateur ──────────────────────────────────── */}
+      {createPortal(
+        <AnimatePresence>
+          {editModal.open && editModal.user && (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={closeEditModal} className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer" />
+              <motion.div initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 10 }} transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+                className="relative w-full max-w-md bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl overflow-hidden"
+              >
+                <div className="flex items-center gap-3 px-5 py-4 border-b border-outline-variant/30">
+                  <div className="p-1.5 rounded-lg bg-blue-500/10"><Edit2 className="w-4 h-4 text-blue-600 dark:text-blue-400" /></div>
+                  <div>
+                    <h3 className="text-sm font-bold text-on-surface">Modifier l'utilisateur</h3>
+                    <p className="text-[11px] text-on-surface-variant">{editModal.user.fullName}</p>
+                  </div>
+                  <motion.button onClick={closeEditModal} whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }} className="ml-auto p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all">
+                    <X className="w-4 h-4" />
+                  </motion.button>
+                </div>
+                <div className="px-5 py-5 space-y-4">
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Nom complet</span>
+                    <input value={editForm.fullName} onChange={e => setEditForm({ ...editForm, fullName: e.target.value })}
+                      placeholder="Nom complet"
+                      className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Email</span>
+                    <input type="email" value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })}
+                      placeholder="email@exemple.ci"
+                      className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                    />
+                  </label>
+                </div>
+                <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-outline-variant/30 bg-surface-container-low/40">
+                  <button onClick={closeEditModal} className="px-4 py-2 rounded-xl border border-outline-variant/40 text-on-surface text-xs font-semibold hover:bg-surface-container transition-colors">Annuler</button>
+                  <button onClick={saveEdit} disabled={savingEdit || !editForm.fullName.trim() || !editForm.email.trim()}
+                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-bold shadow-md disabled:opacity-50 flex items-center gap-2 transition-all">
+                    {savingEdit ? <RotateCcw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                    {savingEdit ? 'Enregistrement...' : 'Enregistrer'}
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
+
+      {/* ── Modal Création utilisateur ──────────────────────────────────── */}
+      {createPortal(
+        <AnimatePresence>
+          {createModal && (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { if (!submitting) setCreateModal(false); }} className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer" />
+              <motion.div initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 10 }} transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+                className="relative w-full max-w-md bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl overflow-hidden"
+              >
+                <div className="flex items-center gap-3 px-5 py-4 border-b border-outline-variant/30">
+                  <div className="p-1.5 rounded-lg bg-blue-500/10"><UserPlus className="w-4 h-4 text-blue-600 dark:text-blue-400" /></div>
+                  <h3 className="text-sm font-bold text-on-surface">Nouveau compte</h3>
+                  <motion.button onClick={() => { if (!submitting) setCreateModal(false); }} whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }} className="ml-auto p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all">
+                    <X className="w-4 h-4" />
+                  </motion.button>
+                </div>
+                <form onSubmit={(e) => { handleCreate(e); }} className="px-5 py-5 space-y-4">
+                  <div className="grid grid-cols-1 gap-4">
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Nom complet *</span>
+                      <input required value={form.fullName} onChange={e => setForm({ ...form, fullName: e.target.value })}
+                        placeholder="Nom complet"
+                        className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Email *</span>
+                      <input type="email" required value={form.email} onChange={e => setForm({ ...form, email: e.target.value })}
+                        placeholder="email@exemple.ci"
+                        className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Mot de passe *</span>
+                      <input type="password" required value={form.password} onChange={e => setForm({ ...form, password: e.target.value })}
+                        placeholder="••••••••"
+                        className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                      />
+                    </label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="flex flex-col gap-1.5">
+                        <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Rôle</span>
+                        <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}
+                          className="bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer">
+                          {ROLES.map(r => <option key={r} value={r}>{ROLE_CONFIG[r]?.label || r}</option>)}
+                        </select>
+                      </label>
+                      <label className="flex flex-col gap-1.5">
+                        <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Équipe</span>
+                        <select value={form.teamId} onChange={e => setForm({ ...form, teamId: e.target.value })}
+                          className="bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer">
+                          <option value="">Sans équipe</option>
+                          {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button type="button" onClick={() => setCreateModal(false)} disabled={submitting}
+                      className="px-4 py-2 rounded-xl border border-outline-variant/40 text-on-surface text-xs font-semibold hover:bg-surface-container transition-colors disabled:opacity-50">Annuler</button>
+                    <button type="submit" disabled={submitting}
+                      className="px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-bold shadow-md disabled:opacity-50 flex items-center gap-2 transition-all">
+                      {submitting ? <RotateCcw className="w-3.5 h-3.5 animate-spin" /> : <UserPlus className="w-3.5 h-3.5" />}
+                      {submitting ? 'Création...' : 'Créer le compte'}
+                    </button>
+                  </div>
+                </form>
               </motion.div>
             </div>
           )}

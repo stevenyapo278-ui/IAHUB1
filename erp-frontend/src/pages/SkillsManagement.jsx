@@ -30,6 +30,7 @@ export default function SkillsManagement() {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [savingCreate, setSavingCreate] = useState(false);
   const [catFilter, setCatFilter] = useState('');
   const [assignModal, setAssignModal] = useState({ open: false, skill: null, tech: null });
 
@@ -50,12 +51,14 @@ export default function SkillsManagement() {
     e.preventDefault();
     const name = newSkillName.trim();
     if (!name) return;
+    setSavingCreate(true);
     try {
       await api.post('/skills', { name, category: newSkillCategory.trim() || null });
       setNewSkillName(''); setNewSkillCategory(''); setShowCreateForm(false);
       toast.success(`Compétence « ${name} » créée`);
       load();
     } catch (err) { toast.error(err.response?.data?.error || 'Erreur lors de la création'); }
+    finally { setSavingCreate(false); }
   }
 
   async function handleAssignSkill(skillId) {
@@ -156,44 +159,7 @@ export default function SkillsManagement() {
         </div>
       </div>
 
-      {/* ── Create form panel ─────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {showCreateForm && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.22 }}
-            className="overflow-hidden border-b border-outline-variant/20 bg-surface-container-low/40"
-          >
-            <form onSubmit={handleCreateSkill} className="px-4 sm:px-6 lg:px-8 py-4 flex flex-wrap items-end gap-3">
-              <label className="flex flex-col gap-1.5 flex-1 min-w-[160px]">
-                <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Nom *</span>
-                <input required value={newSkillName} onChange={e => setNewSkillName(e.target.value)}
-                  placeholder="ex: VPN, Active Directory, Kubernetes"
-                  autoFocus
-                  className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-                />
-              </label>
-              <label className="flex flex-col gap-1.5 flex-1 min-w-[140px]">
-                <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Catégorie</span>
-                <input value={newSkillCategory} onChange={e => setNewSkillCategory(e.target.value)}
-                  placeholder="ex: Infrastructure, Sécurité"
-                  className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-                />
-              </label>
-              <div className="flex gap-2 shrink-0">
-                <button type="submit"
-                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 text-sm font-bold shadow-md"
-                >Créer</button>
-                <motion.button type="button" onClick={() => setShowCreateForm(false)}
-                  whileHover={{ scale: 1.1, rotate: 90 }}
-                  whileTap={{ scale: 0.9 }}
-                  className="p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"
-                ><X className="w-4 h-4" /></motion.button>
-              </div>
-            </form>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* ── Create form panel → modal ─────────────────────────────────────── */}
 
       {/* ── Legend ────────────────────────────────────────────────────────── */}
       <div className="px-4 sm:px-6 lg:px-8 py-2.5 border-b border-outline-variant/10 flex items-center gap-4 overflow-x-auto">
@@ -409,6 +375,76 @@ export default function SkillsManagement() {
                 >
                   <Check className="w-3.5 h-3.5 inline-block mr-1.5 -mt-0.5" />
                   Assigner
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Modal Création compétence ──────────────────────────────────── */}
+      <AnimatePresence>
+        {showCreateForm && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => { if (!savingCreate) setShowCreateForm(false); }}
+              className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="relative w-full max-w-md bg-surface rounded-2xl border border-outline-variant/30 shadow-2xl overflow-hidden"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b border-outline-variant/20">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-xl bg-amber-500/10">
+                    <Award className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  </div>
+                  <h2 className="text-sm font-bold text-on-surface">Nouvelle compétence</h2>
+                </div>
+                <motion.button
+                  onClick={() => setShowCreateForm(false)}
+                  whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }}
+                  className="p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"
+                ><X className="w-4 h-4" /></motion.button>
+              </div>
+
+              {/* Body */}
+              <form onSubmit={handleCreateSkill} className="px-5 py-5 space-y-4">
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Nom *</span>
+                  <input required value={newSkillName} onChange={e => setNewSkillName(e.target.value)}
+                    placeholder="ex: VPN, Active Directory, Kubernetes"
+                    autoFocus
+                    className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Catégorie</span>
+                  <input value={newSkillCategory} onChange={e => setNewSkillCategory(e.target.value)}
+                    placeholder="ex: Infrastructure, Sécurité"
+                    className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                  />
+                </label>
+              </form>
+
+              {/* Footer */}
+              <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-outline-variant/20 bg-surface-container-low/40">
+                <button type="button" onClick={() => setShowCreateForm(false)} disabled={savingCreate}
+                  className="px-4 py-2 rounded-xl border border-outline-variant/40 text-on-surface text-xs font-semibold hover:bg-surface-container transition-colors disabled:opacity-50">
+                  Annuler
+                </button>
+                <button type="button" onClick={handleCreateSkill} disabled={savingCreate || !newSkillName.trim()}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 text-xs font-bold shadow-md disabled:opacity-50 flex items-center gap-2 transition-all">
+                  {savingCreate ? <span className="w-3.5 h-3.5 border-2 border-slate-950/30 border-t-slate-950 rounded-full animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                  {savingCreate ? 'Création...' : 'Créer'}
                 </button>
               </div>
             </motion.div>
