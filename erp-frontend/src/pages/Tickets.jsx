@@ -94,17 +94,16 @@ function HighlightText({ text, query }) {
   )}</>;
 }
 
-function timeAgo(dateStr) {
+function formatDateShort(dateStr) {
   if (!dateStr) return '';
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'à l\'instant';
-  if (mins < 60) return `${mins}min`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}j`;
-  return new Date(dateStr).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
+  const d = new Date(dateStr);
+  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function formatDateTimeShort(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 }
 
 // ── Priority dot config ──────────────────────────────────────────────────────
@@ -870,7 +869,7 @@ export default function Tickets() {
             <tbody className="divide-y divide-outline-variant/10">
               <AnimatePresence mode="popLayout">
                 {tickets.map((t) => {
-                  const dateStr = timeAgo(t.createdAt);
+                  const dateStr = formatDateShort(t.createdAt);
                   const reqName = t.requester?.fullName || t.sourceName || t.sourceEmail;
                   const overdue = isDueOverdue(t);
 
@@ -1011,7 +1010,7 @@ export default function Tickets() {
                         title={`Modifié le ${t.updatedAt ? new Date(t.updatedAt).toLocaleString('fr-FR') : '—'}`}
                       >
                         <span className="text-[11px] font-medium tabular-nums text-on-surface-variant">
-                          {timeAgo(t.updatedAt)}
+                          {formatDateTimeShort(t.updatedAt)}
                         </span>
                       </td>
 
