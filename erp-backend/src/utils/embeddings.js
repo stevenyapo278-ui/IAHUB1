@@ -12,7 +12,7 @@ const PROVIDERS_WITHOUT_EMBEDDINGS = new Set(['anthropic']);
 // Modèle d'embedding par défaut si aucun modèle de type EMBEDDING n'est explicitement configuré
 // pour ce fournisseur (l'utilisateur peut en configurer un dédié depuis Paramètres > IA).
 const DEFAULT_EMBEDDING_MODEL = {
-  gemini: 'text-embedding-004',
+  gemini: 'gemini-embedding-001',
   openai: 'text-embedding-3-small',
   nvidia: 'nvidia/nv-embedqa-e5-v5',
   mistral: 'mistral-embed',
@@ -62,7 +62,7 @@ async function embedWithGemini(config, text) {
   const res = await fetch(`${baseUrl}/models/${config.model}:embedContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.apiKey },
-    body: JSON.stringify({ model: `models/${config.model}`, content: { parts: [{ text }] } }),
+    body: JSON.stringify({ model: `models/${config.model}`, content: { parts: [{ text }] }, outputDimensionality: EMBEDDING_DIMENSIONS }),
   });
   if (!res.ok) {
     let detail = '';
