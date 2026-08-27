@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import PdfStructuredPreview from '../components/PdfStructuredPreview';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
@@ -12,7 +13,7 @@ import {
   BookOpen, FileText, Search, Trash2, Upload, X,
   Sparkles, Layers, MessageSquare, AlertTriangle, RefreshCw,
   CheckCircle2, SlidersHorizontal, User, Network, Shield,
-  Monitor, HardDrive, Phone, Cpu, Tag, Plus, FileUp, Folder
+  Monitor, HardDrive, Phone, Cpu, Tag, Plus, FileUp, Folder, Eye
 } from 'lucide-react';
 
 const STATUS_LABELS = { PROCESSING: 'Traitement...', READY: 'Prêt', ERROR: 'Erreur' };
@@ -53,6 +54,9 @@ export default function KnowledgeBase() {
   const [deleting, setDeleting] = useState(false);
   const [replacingId, setReplacingId] = useState(null);
   const [showUploadPanel, setShowUploadPanel] = useState(false);
+  const [previewDoc, setPreviewDoc] = useState(null);
+  const [previewStructured, setPreviewStructured] = useState(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
   const replaceInputRef = useRef(null);
   const replaceTargetRef = useRef(null);
 
@@ -181,6 +185,21 @@ export default function KnowledgeBase() {
       setResults(data);
     } catch (err) { setError(err.response?.data?.error || 'Erreur recherche'); }
     finally { setSearching(false); }
+  }
+
+  async function handlePreviewStructured(doc) {
+    setPreviewDoc(doc);
+    setPreviewStructured(null);
+    setLoadingPreview(true);
+    try {
+      const { data } = await api.get(`/knowledge/documents/${doc.id}/structured`);
+      setPreviewStructured(data);
+    } catch (err) {
+      // Si l'endpoint n'existe pas encore, fallback sur le parsing côté client
+      setPreviewStructured({ blocks: [{ type: 'paragraph', content: 'Aperçu non disponible pour ce document.' }], blockCount: 1, pageCount: 0, headingCount: 0, tableCount: 0, paragraphCount: 1 });
+    } finally {
+      setLoadingPreview(false);
+    }
   }
 
   const filteredDocuments = documents.filter(doc => {
@@ -469,6 +488,7 @@ export default function KnowledgeBase() {
                           canManage={canManage}
                           onDelete={() => setConfirmDeleteId(doc.id)}
                           onReplace={() => askReplace(doc)}
+                          onPreview={handlePreviewStructured}
                           replacingId={replacingId}
                         />
                       ))}
@@ -715,6 +735,52 @@ export default function KnowledgeBase() {
         document.body
       )}
 
+      {/* ── Structured PDF Preview Modal ──────────────────────────────── */}
+      {createPortal(
+        <AnimatePresence>
+          {previewDoc && (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                onClick={() => { setPreviewDoc(null); setPreviewStructured(null); }}
+                className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer"
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 16 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 16 }}
+                transition={{ type: 'spring', duration: 0.35, bounce: 0.12 }}
+                className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden"
+              >
+                <div className="flex items-center gap-3 px-5 py-4 border-b border-outline-variant/30">
+                  <div className="p-1.5 rounded-lg bg-blue-500/10"><Eye className="w-4 h-4 text-blue-600" /></div>
+                  <div>
+                    <h3 className="text-sm font-bold text-on-surface">{previewDoc.title}</h3>
+                    <p className="text-[10px] text-on-surface-variant">{previewDoc.filename}</p>
+                  </div>
+                  <motion.button
+                    onClick={() => { setPreviewDoc(null); setPreviewStructured(null); }}
+                    whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }}
+                    className="ml-auto p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"
+                  ><X className="w-4 h-4" /></motion.button>
+                </div>
+                <div className="p-5 overflow-y-auto flex-1">
+                  {loadingPreview ? (
+                    <div className="flex items-center justify-center py-12 gap-2 text-on-surface-variant">
+                      <RefreshCw className="w-5 h-5 animate-spin text-blue-600" />
+                      <span className="text-sm">Analyse du PDF en cours...</span>
+                    </div>
+                  ) : (
+                    <PdfStructuredPreview structured={previewStructured} />
+                  )}
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
+
       {/* Confirm Delete Dialog */}
       <ConfirmDialog
         open={!!confirmDeleteId}
@@ -730,7 +796,7 @@ export default function KnowledgeBase() {
   );
 }
 
-function DocumentCard({ doc, canManage, onDelete, onReplace, replacingId }) {
+function DocumentCard({ doc, canManage, onDelete, onReplace, replacingId, onPreview }) {
   const catCfg = CATEGORY_CONFIG[doc.category] || CATEGORY_CONFIG.Système;
 
   return (
@@ -768,6 +834,15 @@ function DocumentCard({ doc, canManage, onDelete, onReplace, replacingId }) {
 
         {canManage && (
           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            {doc.sourceType === 'pdf' && (
+              <button
+                onClick={() => onPreview?.(doc)}
+                className="p-1 rounded-lg text-on-surface-variant hover:text-blue-600 hover:bg-blue-500/10 transition-all"
+                title="Voir le contenu structuré"
+              >
+                <Eye className="w-3.5 h-3.5" />
+              </button>
+            )}
             <button
               onClick={onReplace}
               disabled={replacingId === doc.id}

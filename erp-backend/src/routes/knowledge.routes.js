@@ -457,4 +457,95 @@ router.post('/drafts/:id/reject', requirePermission('knowledge.manage', ['ADMIN'
   return res.json(updated);
 });
 
+// ── Parse PDF structuré (OpenDataLoader-style) ─────────────────────
+const { extractStructuredContent } = require('../utils/structuredExtract');
+
+// Récupère le contenu structuré d'un document PDF existant (re-parse depuis les chunks)
+router.get('/documents/:id/structured', async (req, res) => {
+  const doc = await prisma.knowledgeDocument.findUnique({ where: { id: Number(req.params.id) }, include: { chunks: { orderBy: { chunkIndex: 'asc' } } } });
+  if (!doc) return res.status(404).json({ error: 'Document introuvable' });
+
+  // Reconstruire le contenu structuré depuis les chunks existants
+  const fullText = doc.chunks.map(c => c.content).join('\n\n');
+  const blocks = [];
+  const lines = fullText.split('\n');
+  let currentParagraph = [];
+
+  function flushParagraph() {
+    if (currentParagraph.length > 0) {
+      const content = currentParagraph.join(' ').trim();
+      if (content) blocks.push({ type: 'paragraph', content });
+      currentParagraph = [];
+    }
+  }
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) { flushParagraph(); continue; }
+
+    // Heading detection
+    const mdMatch = trimmed.match(/^(#{1,6})\s+(.+)/);
+    if (mdMatch) { flushParagraph(); blocks.push({ type: 'heading', level: mdMatch[1].length, content: mdMatch[2].trim() }); continue; }
+    if (trimmed.length > 3 && trimmed.length < 100 && trimmed === trimmed.toUpperCase() && /^[A-ZÀÂÉÈÊËÏÎÔÙÛÜÇ\s\d\.\-:()]+$/.test(trimmed)) {
+      flushParagraph(); blocks.push({ type: 'heading', level: 2, content: trimmed }); continue;
+    }
+
+    // Table detection
+    if (trimmed.includes('|') && trimmed.split('|').length >= 3) {
+      flushParagraph();
+      const lastBlock = blocks[blocks.length - 1];
+      if (lastBlock && lastBlock.type === 'table') {
+        const cells = trimmed.split('|').map(c => c.trim()).filter(c => c);
+        if (!cells.every(c => /^[-=]+$/.test(c))) lastBlock.rows.push(cells);
+      } else {
+        const cells = trimmed.split('|').map(c => c.trim()).filter(c => c);
+        blocks.push({ type: 'table', headers: cells, rows: [], content: trimmed });
+      }
+      continue;
+    }
+
+    // List detection
+    const bulletMatch = trimmed.match(/^[\-\*•]\s+(.+)/);
+    if (bulletMatch) {
+      flushParagraph();
+      const lastBlock = blocks[blocks.length - 1];
+      if (lastBlock && lastBlock.type === 'list') {
+        lastBlock.items.push(bulletMatch[1].trim());
+      } else {
+        blocks.push({ type: 'list', items: [bulletMatch[1].trim()], ordered: false, content: bulletMatch[1].trim() });
+      }
+      continue;
+    }
+
+    currentParagraph.push(trimmed);
+  }
+  flushParagraph();
+
+  return res.json({
+    blocks,
+    pageCount: doc.chunks.length,
+    blockCount: blocks.length,
+    headingCount: blocks.filter(b => b.type === 'heading').length,
+    tableCount: blocks.filter(b => b.type === 'table').length,
+    paragraphCount: blocks.filter(b => b.type === 'paragraph').length,
+  });
+});
+
+// Parse un PDF uploadé et retourne le contenu structuré (preview avant indexation)
+router.post('/parse-pdf', requirePermission('knowledge.manage', ['ADMIN', 'TECHNICIAN']), upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Fichier PDF requis' });
+
+  const ext = (req.file.originalname.split('.').pop() || '').toLowerCase();
+  if (ext !== 'pdf' && !req.file.mimetype?.includes('pdf')) {
+    return res.status(400).json({ error: 'Seuls les fichiers PDF sont supportés pour le parsing structuré' });
+  }
+
+  try {
+    const structured = await extractStructuredContent(req.file.buffer);
+    return res.json(structured);
+  } catch (err) {
+    return res.status(500).json({ error: 'Erreur lors du parsing PDF : ' + err.message });
+  }
+});
+
 module.exports = router;
