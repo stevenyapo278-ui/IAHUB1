@@ -1,6 +1,14 @@
 import { Flame, AlertTriangle, Info, ArrowDown, Sparkles, Radio, Calendar, Clock, CheckCircle2 } from 'lucide-react';
 
 export const STATUS_OPTIONS = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'SOLVED', 'CLOSED'];
+export const STATUS_LABELS = {
+  NEW: 'Nouveau',
+  OPEN: 'En cours',
+  PLANNED: 'Planifié',
+  PENDING: 'En attente',
+  SOLVED: 'Résolu',
+  CLOSED: 'Fermé',
+};
 export const PRIORITY_OPTIONS = ['P1', 'P2', 'P3', 'P4'];
 export const TYPE_OPTIONS = [
   { value: 'INCIDENT', label: 'Incident' },

@@ -55,7 +55,7 @@ import RemoteUserSelect from '../components/RemoteUserSelect';
 import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
 import SlaBadge from '../components/SlaBadge';
 import {
-  STATUS_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS, URGENCY_IMPACT_OPTIONS,
+  STATUS_OPTIONS, STATUS_LABELS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS, URGENCY_IMPACT_OPTIONS,
 } from '../constants/tickets';
 
 // Vue par défaut « à la GLPI » : tous les statuts sont visibles (NEW, OPEN,
@@ -959,7 +959,7 @@ export default function Tickets() {
                             onChange={(e) => handleQuickStatusChange(t.id, e.target.value, e)}
                             className="text-[10px] font-semibold px-2 py-1 rounded-md border border-outline-variant/40 bg-surface text-on-surface cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary/30 transition-all w-full"
                           >
-                            {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                            {STATUS_OPTIONS.map(s => <option key={s} value={s}>{STATUS_LABELS[s] || s}</option>)}
                           </select>
                         ) : (
                           <StatusPill status={t.status} />
