@@ -2,14 +2,14 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../api/client';
 import {
-  isVoiceAlertEnabled,
-  setVoiceAlertEnabled,
-  getVoiceAlertLang,
-  setVoiceAlertLang,
-  speakTest,
-  isSpeechSynthesisAvailable,
-  VOICE_ALERT_LANGUAGES,
-} from '../../utils/voiceAlertPreference';
+  isSoundsEnabled,
+  setSoundsEnabled,
+  getSoundsVolume,
+  setSoundsVolume,
+  isSoundsInteractionEnabled,
+  setSoundsInteractionEnabled,
+} from '../../utils/soundPreference';
+import { playSuccess, playClick, playApproval } from '../../utils/sounds';
 import {
   isBrowserNotifEnabled,
   setBrowserNotifEnabled,
@@ -98,9 +98,10 @@ export default function AutomationTab() {
   const [settings, setSettings] = useState(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [voiceAlerts, setVoiceAlerts] = useState(isVoiceAlertEnabled());
+  const [soundsEnabled, setSoundsEnabledState] = useState(isSoundsEnabled());
+  const [soundsVolume, setSoundsVolumeState] = useState(getSoundsVolume());
+  const [soundsInteraction, setSoundsInteractionState] = useState(isSoundsInteractionEnabled());
   const [browserNotif, setBrowserNotif] = useState(isBrowserNotifEnabled());
-  const [voiceLang, setVoiceLang] = useState(getVoiceAlertLang());
   const [ackMessageDraft, setAckMessageDraft] = useState('');
   const [signatureDraft, setSignatureDraft] = useState('');
   const [uploadingLogo, setUploadingLogo] = useState(false);
@@ -110,14 +111,21 @@ export default function AutomationTab() {
   const [testingSummary, setTestingSummary] = useState(false);
   const [summaryTestResult, setSummaryTestResult] = useState(null);
 
-  function toggleVoiceAlerts(value) {
-    setVoiceAlertEnabled(value);
-    setVoiceAlerts(value);
+  function toggleSounds(value) {
+    setSoundsEnabled(value);
+    setSoundsEnabledState(value);
+    if (value) playSuccess();
   }
 
-  function changeVoiceLang(lang) {
-    setVoiceAlertLang(lang);
-    setVoiceLang(lang);
+  function changeSoundsVolume(value) {
+    setSoundsVolume(value);
+    setSoundsVolumeState(value);
+  }
+
+  function toggleInteractionSounds(value) {
+    setSoundsInteractionEnabled(value);
+    setSoundsInteractionState(value);
+    if (value) playClick();
   }
 
   function load() {
@@ -497,6 +505,18 @@ export default function AutomationTab() {
               />
             </div>
           )}
+
+          <div className="space-y-md mt-lg">
+            <IntervalRow
+              title="Fermeture auto tickets résolus"
+              description="Délai avant de passer automatiquement un ticket de Résolu à Fermé. 0 = désactivé."
+              value={settings?.solvedAutoCloseDays ?? 3}
+              onChange={(v) => updateSetting('solvedAutoCloseDays', v)}
+              disabled={saving}
+              max={90}
+              unit="jours"
+            />
+          </div>
         </div>
 
         {/* Bloc validation des brouillons : notification et lien */}
@@ -683,7 +703,7 @@ export default function AutomationTab() {
             />
           </div>
 
-          {/* Colonne droite : Notifications navigateur + Alertes vocales */}
+          {/* Colonne droite : Notifications navigateur + Sons */}
           <div className="space-y-md">
             <SettingRow
               title="Notifications navigateur"
@@ -715,61 +735,42 @@ export default function AutomationTab() {
               </div>
             )}
             <SettingRow
-              title="Alerte vocale interactive"
-              description="Une voix annonce dans ce navigateur l'arrivée de nouvelles actions requérant votre validation locale."
-              checked={voiceAlerts}
-              onChange={toggleVoiceAlerts}
+              title="Sons de notification"
+              description="Joue des sons Apple style lors des nouveaux tickets, assignations et mises à jour."
+              checked={soundsEnabled}
+              onChange={toggleSounds}
             />
-
-            {!isSpeechSynthesisAvailable() && voiceAlerts && (
-              <div className="bento-card p-md flex items-start gap-3" style={{ borderLeft: '3px solid #f59e0b' }}>
-                <span className="material-symbols-outlined text-amber-500 shrink-0" style={{ fontSize: '20px', fontVariationSettings: "'FILL' 1" }}>warning</span>
-                <div>
-                  <p className="text-[13px] font-semibold text-on-surface">Synthèse vocale indisponible</p>
-                  <p className="text-[12px] text-on-surface-variant mt-0.5">
-                    Le navigateur bloque la synthèse vocale sur HTTP non sécurisé. Ouvrez l'application via <strong>https</strong> ou sur <strong>localhost</strong> pour activer les alertes vocales.
+            {soundsEnabled && (
+              <motion.div
+                variants={itemVariants}
+                whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
+                className="bento-card flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-lg p-lg"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">Volume</div>
+                  <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 font-medium break-words">
+                    Intensité des sons de notification.
                   </p>
                 </div>
-              </div>
+                <div className="flex items-center gap-sm">
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={Math.round(soundsVolume * 100)}
+                    onChange={(e) => changeSoundsVolume(Number(e.target.value) / 100)}
+                    className="w-24 accent-primary"
+                  />
+                  <span className="font-body-sm text-body-sm text-on-surface-variant font-medium w-8 text-right">{Math.round(soundsVolume * 100)}%</span>
+                </div>
+              </motion.div>
             )}
-
-            <motion.div
-              variants={itemVariants}
-              whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
-              className="bento-card flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-lg p-lg"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">Langue vocale</div>
-                <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 font-medium break-words">
-                  Langue de synthèse pour les annonces.
-                </p>
-              </div>
-              <div className="flex items-center gap-sm">
-                <select
-                  value={voiceLang}
-                  onChange={(e) => changeVoiceLang(e.target.value)}
-                  disabled={!voiceAlerts}
-                  className={`${inputClass} disabled:opacity-50`}
-                >
-                  {VOICE_ALERT_LANGUAGES.map((l) => (
-                    <option key={l.code} value={l.code}>
-                      {l.label}
-                    </option>
-                  ))}
-                </select>
-                <motion.button
-                  type="button"
-                  onClick={() => speakTest(voiceLang)}
-                  disabled={!voiceAlerts || !isSpeechSynthesisAvailable()}
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.96 }}
-                  className="px-4 py-2 border border-outline-variant/60 text-on-surface hover:bg-surface-container-high rounded-xl font-semibold text-body-sm transition-all disabled:opacity-50 shadow-sm flex items-center gap-1.5"
-                >
-                  <span className="material-symbols-outlined text-[16px]">volume_up</span>
-                  Tester
-                </motion.button>
-              </div>
-            </motion.div>
+            <SettingRow
+              title="Sons d'interaction"
+              description="Petits sons à chaque clic, validation ou action utilisateur."
+              checked={soundsInteraction}
+              onChange={toggleInteractionSounds}
+            />
           </div>
         </div>
       </div>

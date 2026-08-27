@@ -8,6 +8,7 @@ import { hasPermission } from '../utils/permissions';
 import useSystemSettings from '../hooks/useSystemSettings';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { useTheme } from '../context/ThemeContext';
+import { playApproval, playRejection, playError } from '../utils/sounds';
 import SearchableSelect from '../components/SearchableSelect';
 import RemoteUserSelect from '../components/RemoteUserSelect';
 import SlaBadge from '../components/SlaBadge';
@@ -668,6 +669,7 @@ export default function TicketDetail() {
     setApproving(true);
     try {
       const { data } = await api.post(`/tickets/${id}/approve`);
+      playApproval();
       toast.success('Ticket approuvé');
       if (data.warning) {
         toast.warning(data.warning, { duration: 8000 });
@@ -675,6 +677,7 @@ export default function TicketDetail() {
       setShowApproveModal(false);
       load();
     } catch (err) {
+      playError();
       setError(err.response?.data?.error || "Erreur lors de l'approbation");
     } finally {
       setApproving(false);
@@ -694,11 +697,13 @@ export default function TicketDetail() {
     setRejecting(true);
     try {
       await api.post(`/tickets/${id}/reject`, { reason: rejectReason.trim() });
+      playRejection();
       toast.success('Ticket rejeté');
       setShowRejectModal(false);
       setRejectReason('');
       load();
     } catch (err) {
+      playError();
       setError(err.response?.data?.error || 'Erreur lors du rejet');
     } finally {
       setRejecting(false);

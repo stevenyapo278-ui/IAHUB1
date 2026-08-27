@@ -111,7 +111,7 @@ export default function Settings() {
                   {activeTab === 'ai' && "Configurez les fournisseurs d'IA, leurs modèles, et les clés API associées (rotation de clés, Gemini)."}
                   {activeTab === 'email' && "Configurez les boîtes mail utilisées pour la réception/réponse aux tickets (Outlook / M365, IMAP/SMTP)."}
                   {activeTab === 'other' && "Gérez les autres intégrations externes (Supabase, GLPI) et connectez des webhooks n8n."}
-                  {activeTab === 'automation' && "Contrôlez les automatisations IA, accusés de réception, signatures d'email et alertes vocales."}
+                  {activeTab === 'automation' && "Contrôlez les automatisations IA, accusés de réception, signatures d'email et sons de notification."}
                   {activeTab === 'templates' && "Créez et gérez des modèles de tickets réutilisables par l'équipe."}
                   {activeTab === 'custom-fields' && "Définissez des champs personnalisés rendus à la création d'un ticket selon la catégorie (équivalent GLPI Forms)."}
                   {activeTab === 'advanced' && "Réglages système avancés réservés au super-administrateur (intervalles de sync, durées de rétention)."}

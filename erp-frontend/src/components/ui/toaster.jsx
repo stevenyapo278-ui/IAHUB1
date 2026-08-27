@@ -15,15 +15,16 @@ export default function Toaster() {
         duration: 5000,
         className: 'group-toast',
         style: {
-          borderRadius: '16px',
-          border: '1px solid var(--color-outline-variant)',
-          boxShadow: '0 8px 32px -4px rgba(0,0,0,0.18), 0 2px 8px -2px rgba(0,0,0,0.08)',
-          backdropFilter: 'blur(16px) saturate(1.6)',
-          WebkitBackdropFilter: 'blur(16px) saturate(1.6)',
-          padding: '12px 14px',
-          minHeight: '52px',
+          borderRadius: '18px',
+          border: '1px solid rgba(255,255,255,0.2)',
+          boxShadow:
+            '0 8px 32px -4px rgba(0,0,0,0.14), 0 2px 8px -2px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.2)',
+          backdropFilter: 'blur(24px) saturate(1.8)',
+          WebkitBackdropFilter: 'blur(24px) saturate(1.8)',
+          padding: '14px 16px',
+          minHeight: '56px',
           cursor: 'pointer',
-          transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+          transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
         },
       }}
       icons={{

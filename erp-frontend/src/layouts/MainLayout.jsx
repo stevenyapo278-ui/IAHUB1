@@ -37,7 +37,6 @@ import api from '../api/client';
 import { useTheme } from '../context/ThemeContext';
 import { hasPermission } from '../utils/permissions';
 import ForcePasswordChange from '../components/ForcePasswordChange';
-import { useVoiceAlerts } from '../hooks/useVoiceAlerts';
 import ConfirmDialog from '../components/ConfirmDialog';
 import GlobalSearch from '../components/GlobalSearch';
 import NotificationPanel from '../components/NotificationPanel';
@@ -151,7 +150,7 @@ export default function MainLayout() {
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
-  useVoiceAlerts();
+
   const { unreadCount } = useNotifications();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showAdminMenu, setShowAdminMenu] = useState(false);

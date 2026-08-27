@@ -102,6 +102,7 @@ router.patch(
     if (req.body.notifyTechnicianOnAssignment !== undefined) data.notifyTechnicianOnAssignment = req.body.notifyTechnicianOnAssignment;
     if (req.body.slaHours !== undefined) data.slaHours = req.body.slaHours;
     if (req.body.slaMonitorIntervalSeconds !== undefined) data.slaMonitorIntervalSeconds = req.body.slaMonitorIntervalSeconds;
+    if (req.body.solvedAutoCloseDays !== undefined) data.solvedAutoCloseDays = req.body.solvedAutoCloseDays;
 
     const updated = await prisma.systemSettings.update({ where: { id: 1 }, data });
 

@@ -4,6 +4,7 @@ import io from 'socket.io-client';
 import { toast } from 'sonner';
 import { useAuth } from './AuthContext';
 import { sendBrowserNotification, requestBrowserNotifPermission } from '../utils/browserNotification';
+import { playTicketCreated, playTicketAssigned, playTicketUpdated, playAlertP1 } from '../utils/sounds';
 
 const SocketContext = createContext(null);
 
@@ -44,6 +45,7 @@ export function SocketProvider({ children }) {
     // ── Ticket créé ────────────────────────────────────────────────────
     newSocket.on('ticket_created', (ticket) => {
       const p1 = ticket.priority === 'P1';
+      if (p1) playAlertP1(); else playTicketCreated();
       sendBrowserNotification(
         p1 ? '🚨 Incident critique' : 'Nouveau ticket',
         {
@@ -53,8 +55,9 @@ export function SocketProvider({ children }) {
         }
       );
       toast(
-        <div className="toast-clickable-content">
-          <div className="toast-icon-wrap">
+        <div className="toast-clickable-content" style={{ position: 'relative' }}>
+          {p1 && <div className="toast-accent-bar" />}
+          <div className={`toast-icon-wrap ${p1 ? 'toast-icon-p1' : ''}`}>
             <span
               className="material-symbols-outlined toast-icon"
               style={{
@@ -67,19 +70,23 @@ export function SocketProvider({ children }) {
             </span>
           </div>
           <div className="toast-body">
-            <p className="toast-title">{p1 ? 'Incident critique' : 'Nouveau ticket'}</p>
-            <p className="toast-subtitle">#{ticket.id} — {ticket.title}</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <p className="toast-title">{p1 ? '🚨 Incident critique' : 'Nouveau ticket'}</p>
+              <span className={`toast-id-chip ${p1 ? 'toast-id-p1' : ''}`}>#{ticket.id}</span>
+            </div>
+            <p className="toast-subtitle">{ticket.title}</p>
           </div>
-          <span className="material-symbols-outlined toast-arrow">open_in_new</span>
+          <div className="toast-arrow">
+            <span className="material-symbols-outlined">open_in_new</span>
+          </div>
         </div>,
         {
           duration: 6000,
           onClick: () => navigate(`/tickets/${ticket.id}`),
           style: {
             background: p1
-              ? 'linear-gradient(135deg, rgba(239,68,68,0.08) 0%, rgba(239,68,68,0.02) 100%)'
+              ? 'linear-gradient(135deg, rgba(239,68,68,0.06) 0%, rgba(239,68,68,0.01) 100%)'
               : undefined,
-            borderLeft: p1 ? '3px solid #ef4444' : undefined,
           },
         }
       );
@@ -87,6 +94,7 @@ export function SocketProvider({ children }) {
 
     // ── Ticket assigné ─────────────────────────────────────────────────
     newSocket.on('ticket_assigned_to_you', (data) => {
+      playTicketAssigned();
       const methodLabel =
         data.method === 'ai_skills' ? 'Par compétence IA' :
         data.method === 'by_category' ? 'Par catégorie' : 'Manuellement';
@@ -99,8 +107,9 @@ export function SocketProvider({ children }) {
         }
       );
       toast(
-        <div className="toast-clickable-content">
-          <div className="toast-icon-wrap" style={{ backgroundColor: 'rgba(99,102,241,0.1)' }}>
+        <div className="toast-clickable-content" style={{ position: 'relative' }}>
+          <div className="toast-accent-bar toast-accent-blue" />
+          <div className="toast-icon-wrap toast-icon-assign">
             <span
               className="material-symbols-outlined toast-icon"
               style={{ fontSize: '22px', color: '#6366f1', fontVariationSettings: "'FILL' 1" }}
@@ -109,15 +118,20 @@ export function SocketProvider({ children }) {
             </span>
           </div>
           <div className="toast-body">
-            <p className="toast-title">Ticket assigné à vous</p>
-            <p className="toast-subtitle">#{data.ticketId} — {data.title}</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <p className="toast-title">Ticket assigné à vous</p>
+              <span className="toast-id-chip">#{data.ticketId}</span>
+            </div>
+            <p className="toast-subtitle">{data.title}</p>
             <p className="toast-meta">
-              {data.method === 'ai_skills' ? 'Par compétence IA' :
-               data.method === 'by_category' ? 'Par catégorie' :
-               'Manuellement'}
+              {data.method === 'ai_skills' ? '✨ Par compétence IA' :
+               data.method === 'by_category' ? '📂 Par catégorie' :
+               '👤 Manuellement'}
             </p>
           </div>
-          <span className="material-symbols-outlined toast-arrow">open_in_new</span>
+          <div className="toast-arrow">
+            <span className="material-symbols-outlined">open_in_new</span>
+          </div>
         </div>,
         {
           duration: 8000,
@@ -129,6 +143,7 @@ export function SocketProvider({ children }) {
     // ── Ticket mis à jour ──────────────────────────────────────────────
     newSocket.on('ticket_updated', (data) => {
       if (data.changes?.status) {
+        playTicketUpdated();
         sendBrowserNotification(
           'Ticket mis à jour',
           {
@@ -138,8 +153,9 @@ export function SocketProvider({ children }) {
           }
         );
         toast.info(
-          <div className="toast-clickable-content">
-            <div className="toast-icon-wrap" style={{ backgroundColor: 'rgba(245,158,11,0.1)' }}>
+          <div className="toast-clickable-content" style={{ position: 'relative' }}>
+            <div className="toast-accent-bar toast-accent-amber" />
+            <div className="toast-icon-wrap toast-icon-update">
               <span
                 className="material-symbols-outlined toast-icon"
                 style={{ fontSize: '22px', color: '#f59e0b', fontVariationSettings: "'FILL' 1" }}
@@ -148,10 +164,15 @@ export function SocketProvider({ children }) {
               </span>
             </div>
             <div className="toast-body">
-              <p className="toast-title">Ticket mis à jour</p>
-              <p className="toast-subtitle">#{data.id} → {data.status}</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <p className="toast-title">Ticket mis à jour</p>
+                <span className="toast-id-chip">#{data.id}</span>
+              </div>
+              <p className="toast-subtitle">Statut → {data.status}</p>
             </div>
-            <span className="material-symbols-outlined toast-arrow">open_in_new</span>
+            <div className="toast-arrow">
+              <span className="material-symbols-outlined">open_in_new</span>
+            </div>
           </div>,
           {
             duration: 4000,

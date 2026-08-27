@@ -595,6 +595,9 @@ model SystemSettings {
   // Échéances manuelles des tickets — fréquence de détection des dépassements de dueDate (0 = désactivé)
   dueDateMonitorIntervalSeconds Int @default(300)
 
+  // Fermeture automatique des tickets résolus — délai en jours avant de passer de SOLVED à CLOSED (0 = désactivé)
+  solvedAutoCloseDays Int @default(3)
+
   // Texte de l'accusé de réception automatique (Paramètres > Automatisation > Emails).
   // Placeholders disponibles : {ticketId}, {subject}, {toName}. Laisser vide = texte par défaut codé en dur.
   acknowledgementMessage String? @db.Text

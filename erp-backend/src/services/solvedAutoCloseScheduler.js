@@ -2,19 +2,22 @@ const prisma = require('../prismaClient');
 const { logEvent } = require('./ticketEvent');
 const { updateGlpiTicket } = require('./glpiTicketCreator');
 
-const AUTO_CLOSE_DAYS = 3;
-
 function daysSince(date) {
   return Math.floor((Date.now() - new Date(date).getTime()) / (1000 * 60 * 60 * 24));
 }
 
 /**
- * Ferme automatiquement les tickets SOLVED depuis plus de AUTO_CLOSE_DAYS jours.
- * Appelé périodiquement par server.js.
+ * Ferme automatiquement les tickets SOLVED depuis plus de X jours.
+ * Le délai est configurable via SystemSettings.solvedAutoCloseDays (défaut : 3).
+ * Valeur 0 = désactivé.
  */
 async function runSolvedAutoCloseScheduler() {
+  const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+  const autoCloseDays = settings?.solvedAutoCloseDays ?? 3;
+  if (autoCloseDays <= 0) return [];
+
   const threshold = new Date();
-  threshold.setDate(threshold.getDate() - AUTO_CLOSE_DAYS);
+  threshold.setDate(threshold.getDate() - autoCloseDays);
 
   const tickets = await prisma.ticket.findMany({
     where: {

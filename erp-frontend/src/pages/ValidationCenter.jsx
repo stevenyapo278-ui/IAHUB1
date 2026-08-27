@@ -13,6 +13,7 @@ import {
 import { sanitizeHtml } from '../utils/sanitize';
 import api from '../api/client';
 import useSystemSettings from '../hooks/useSystemSettings';
+import { playApproval, playRejection, playError } from '../utils/sounds';
 import {
   clearClosureAnalysis,
   getClosureAnalysisState,
@@ -184,6 +185,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   async function handleApproveTicket(ticketId) {
     try {
       const res = await api.post(`/tickets/${ticketId}/approve`);
+      playApproval();
       toast.success(
         autonomousMode
           ? `Ticket #${ticketId} approuvé !`
@@ -191,6 +193,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
       );
       loadAllData(true);
     } catch (err) {
+      playError();
       toast.error(err.response?.data?.error || 'Erreur lors de l\'approbation du ticket');
     }
   }
@@ -209,10 +212,12 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     setRejecting(true);
     try {
       await api.post(`/tickets/${rejectTicketId}/reject`, { reason: rejectReason.trim() });
+      playRejection();
       toast.success('Ticket rejeté');
       setShowRejectModal(false);
       loadAllData(true);
     } catch (err) {
+      playError();
       toast.error(err.response?.data?.error || 'Erreur lors du rejet');
     } finally {
       setRejecting(false);
@@ -224,9 +229,11 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     setValidatingClosureId(ticketId);
     try {
       await api.post(`/tickets/${ticketId}/validate-close`);
+      playApproval();
       toast.success(`Clôture du ticket #${ticketId} validée`);
       loadAllData(true);
     } catch (err) {
+      playError();
       toast.error(err.response?.data?.error || "Erreur lors de la validation de la clôture");
     } finally {
       setValidatingClosureId(null);
@@ -279,10 +286,12 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     setRejectingClosure(true);
     try {
       await api.post(`/tickets/${closureRejectTicketId}/reject-close`, { reason: closureRejectReason.trim() });
+      playRejection();
       toast.success('Clôture rejetée — le ticket reste actif');
       setShowClosureRejectModal(false);
       loadAllData(true);
     } catch (err) {
+      playError();
       toast.error(err.response?.data?.error || 'Erreur lors du rejet de la clôture');
     } finally {
       setRejectingClosure(false);

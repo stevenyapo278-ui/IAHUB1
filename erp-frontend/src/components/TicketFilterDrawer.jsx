@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, useReducedMotion } from 'framer-motion';
 import {
-  X, Search, Plus, Bookmark, Trash2, User, Radio,
+  X, Plus, Bookmark, Trash2, User, Radio,
   CheckCircle2, Flag, Sparkles, Flame, UserX,
 } from 'lucide-react';
 import SearchableSelect from './SearchableSelect';
@@ -33,7 +33,7 @@ const QUICK_FILTERS = [
 export default function TicketFilterDrawer({
   onClose, activeFilterCount, filters, onUpdate, onClear, teams, users,
   flatCategories, autonomousMode, savedViews, onSaveView, onRestoreView,
-  onDeleteSavedView, searchQuery, setSearchQuery, setPage,
+  onDeleteSavedView,  searchQuery,
 }) {
   const reduceMotion = useReducedMotion();
   const panelRef = useRef(null);
@@ -150,34 +150,6 @@ export default function TicketFilterDrawer({
         {/* ── Corps ── */}
         <div className="flex-1 overflow-y-auto px-7 pb-8">
           <motion.div initial="hidden" animate="show" variants={stackVariants}>
-
-            {/* Recherche */}
-            <motion.section variants={sectionVariants}>
-              <FieldLabel>Recherche</FieldLabel>
-              <div className="relative">
-                <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); onClose(); } }}
-                  placeholder="Rechercher un ticket…"
-                  className="w-full pl-10 pr-9 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 placeholder:text-slate-400 placeholder:font-normal shadow-[0_1px_2px_rgba(15,23,42,0.04)] focus:outline-none focus:ring-2 focus:ring-slate-900/[0.08] focus:border-slate-300 transition-all dark:bg-surface dark:border-outline-variant/60 dark:text-white"
-                />
-                {searchQuery && (
-                  <button
-                    type="button"
-                    onClick={() => { setSearchQuery(''); setDebouncedSearch(''); setPage(1); }}
-                    aria-label="Effacer la recherche"
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-md text-slate-300 hover:text-slate-500 transition-colors cursor-pointer"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-            </motion.section>
-
-            <motion.div variants={sectionVariants} className="my-7 h-px bg-black/[0.05] dark:bg-white/10" />
 
             {/* Raccourcis */}
             <motion.section variants={sectionVariants}>
