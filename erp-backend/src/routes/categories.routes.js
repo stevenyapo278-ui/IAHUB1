@@ -20,6 +20,7 @@ router.get('/', async (req, res) => {
     orderBy: { name: 'asc' },
     include: {
       children: { orderBy: { name: 'asc' } },
+      createdBy: { select: { id: true, fullName: true } },
       _count: { select: { customFields: true } },
     },
   });
@@ -47,6 +48,7 @@ router.post(
         name: name.trim(),
         isCustom: true,
         parentId: parentId ? Number(parentId) : null,
+        createdById: req.user.sub,
       },
     });
 

@@ -142,6 +142,7 @@ model User {
   weeklyPatternReportsReviewed AiWeeklyPatternReport[]
   observedTeams Team[] @relation("TeamDefaultObservers")
   requesterAssignments RequesterLocation[] @relation("RequesterAssignment")
+  createdCategories TicketCategory[] @relation("CategoryCreator")
   timeEntries TicketTimeEntry[]
   ownedAssets Asset[] @relation("AssetOwner")
 
@@ -247,10 +248,13 @@ model TicketCategory {
   parent          TicketCategory? @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
   children        TicketCategory[] @relation("CategoryTree")
   customFields    CustomFieldDefinition[]
+  createdById     Int?     // utilisateur ayant créé la catégorie (null si sync GLPI)
+  createdBy       User?    @relation("CategoryCreator", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@index([parentId])
+  @@index([createdById])
 }
 
 // Définition d'un champ personnalisé (équivalent du plugin GLPI Forms) : rendu dynamique

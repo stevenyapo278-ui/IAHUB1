@@ -12,6 +12,10 @@ function formatDate(d) {
   return new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
+function creatorName(cat) {
+  return cat.createdBy?.fullName || '—';
+}
+
 export default function Categories() {
   const { user } = useAuth();
   const [categories, setCategories] = useState([]);
@@ -22,8 +26,8 @@ export default function Categories() {
   const [editing, setEditing] = useState(null);
   const [expanded, setExpanded] = useState(new Set());
   const [pendingDelete, setPendingDelete] = useState(null);
-  const [sortBy, setSortBy] = useState('name');
-  const [sortDir, setSortDir] = useState('asc');
+  const [sortBy, setSortBy] = useState('createdAt');
+  const [sortDir, setSortDir] = useState('desc');
 
   const canManage = hasPermission(user, 'tickets.manage');
 
@@ -120,7 +124,7 @@ export default function Categories() {
     const rows = [];
     function walk(nodes, depth, parentName) {
       for (const cat of nodes) {
-        rows.push({ ...cat, depth, parentName });
+        rows.push({ ...cat, depth, parentName, createdByName: cat.createdBy?.fullName || '' });
         const kids = categories.filter((c) => c.parentId != null && Number(c.parentId) === cat.id);
         if (kids.length) walk(kids, depth + 1, cat.name);
       }
@@ -131,6 +135,7 @@ export default function Categories() {
     rows.sort((a, b) => {
       let va = a[sortBy], vb = b[sortBy];
       if (sortBy === 'createdAt') { va = va ? new Date(va).getTime() : 0; vb = vb ? new Date(vb).getTime() : 0; }
+      else if (sortBy === 'createdByName') { va = (va || '').toLowerCase(); vb = (vb || '').toLowerCase(); }
       else if (sortBy === 'parentName') { va = (va || '').toLowerCase(); vb = (vb || '').toLowerCase(); }
       else { va = (va || '').toLowerCase(); vb = (vb || '').toLowerCase(); }
       if (va < vb) return sortDir === 'asc' ? -1 : 1;
@@ -258,6 +263,7 @@ export default function Categories() {
                     Sous-catégories
                   </th>
                   <SortHeader col="createdAt">Créé le</SortHeader>
+                  <SortHeader col="createdByName">Créé par</SortHeader>
                   {canManage && <th className="px-3 py-2.5 text-right text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Actions</th>}
                 </tr>
               </thead>
@@ -300,6 +306,10 @@ export default function Categories() {
                     {/* Date création */}
                     <td className="px-3 py-2.5">
                       <span className="text-xs text-on-surface-variant font-mono">{formatDate(cat.createdAt)}</span>
+                    </td>
+                    {/* Créé par */}
+                    <td className="px-3 py-2.5">
+                      <span className="text-xs text-on-surface-variant">{creatorName(cat)}</span>
                     </td>
                     {/* Actions */}
                     {canManage && (
