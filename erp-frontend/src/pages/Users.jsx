@@ -638,7 +638,6 @@ if (field === 'role') {
             <div className="flex-1 min-w-0">Utilisateur</div>
             <div className="w-28 shrink-0 hidden sm:block">Rôle</div>
             <div className="w-32 shrink-0 hidden md:block">Équipe</div>
-            <div className="w-20 shrink-0 hidden lg:block text-center">GLPI</div>
             <div className="w-16 shrink-0 text-center">Statut</div>
             <div className="w-14 shrink-0 text-center hidden xl:block">Alertes</div>
             <div className="w-20 shrink-0 text-right">Actions</div>
@@ -745,15 +744,6 @@ if (field === 'role') {
                         <option value="">Sans équipe</option>
                         {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                       </select>
-                    </div>
-
-                    {/* GLPI */}
-                    <div className="w-20 shrink-0 hidden lg:flex justify-center">
-                      {u.glpiId ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-sky-500/20 bg-sky-500/10 text-sky-600 dark:text-sky-400 text-[9px] font-bold">
-                          <Zap className="w-2.5 h-2.5" />#{u.glpiId}
-                        </span>
-                      ) : <span className="text-outline/30 text-xs">—</span>}
                     </div>
 
                     {/* Active toggle */}
