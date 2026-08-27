@@ -231,7 +231,7 @@ export default function Teams() {
             </div>
             <div>
               <p className="text-2xl font-bold text-on-surface leading-none">{totalTickets}</p>
-              <p className="text-xs text-on-surface-variant font-medium uppercase tracking-wider mt-1">Tickets Traités</p>
+              <p className="text-xs text-on-surface-variant font-medium uppercase tracking-wider mt-1">Tickets Ouverts</p>
             </div>
           </div>
         </div>
@@ -249,7 +249,7 @@ export default function Teams() {
             <div className="w-8 shrink-0" />
             <div className="flex-1 min-w-0">Équipe</div>
             <div className="w-24 shrink-0 hidden sm:block text-center">Membres</div>
-            <div className="w-36 shrink-0 hidden md:block">Tickets assignés</div>
+            <div className="w-36 shrink-0 hidden md:block">Tickets ouverts</div>
             <div className="w-12 shrink-0 text-right" />
           </div>
 
@@ -314,7 +314,7 @@ export default function Teams() {
                     {/* Tickets count progress */}
                     <div className="w-36 shrink-0 hidden md:block">
                       <div className="flex items-center justify-between text-[10px] font-bold text-on-surface-variant mb-1">
-                        <span>{t._count.tickets} ticket{t._count.tickets !== 1 ? 's' : ''}</span>
+                        <span>{t._count.tickets} ouvert{t._count.tickets !== 1 ? 's' : ''}</span>
                       </div>
                       <div className="h-1.5 rounded-full overflow-hidden bg-surface-container border border-outline-variant/30">
                         <div className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full" style={{ width: `${percent}%` }} />

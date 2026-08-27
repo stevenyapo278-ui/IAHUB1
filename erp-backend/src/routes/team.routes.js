@@ -23,7 +23,7 @@ router.get('/', async (req, res) => {
     include: {
       members: { select: { id: true, fullName: true, email: true, role: true } },
       defaultObservers: { select: { id: true, fullName: true, email: true, role: true } },
-      _count: { select: { tickets: true } },
+      _count: { select: { tickets: { where: { status: { notIn: ['SOLVED', 'CLOSED'] } } } } },
     },
     orderBy: { name: 'asc' },
   });
