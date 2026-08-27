@@ -9,6 +9,7 @@ const { requirePermission } = require('../middleware/permissions');
 const { sendDailySummary } = require('../services/dailySummary');
 const { resolveBackendUrl } = require('../services/systemSettings');
 const { auditLog } = require('../services/auditLogService');
+const { validateUpload } = require('../utils/security');
 
 const router = express.Router();
 router.use(authenticate);
@@ -53,6 +54,12 @@ router.post(
   logoUpload.single('logo'),
   async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu' });
+
+    // Valider que le fichier n'est pas dangereux
+    const validation = validateUpload(req.file.originalname, req.file.mimetype, 'logo');
+    if (!validation.valid) {
+      return res.status(400).json({ error: validation.error });
+    }
 
     const settings = await getOrCreateSettings();
     const backendUrl = resolveBackendUrl(settings);

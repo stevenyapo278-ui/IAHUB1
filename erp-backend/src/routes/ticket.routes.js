@@ -16,8 +16,10 @@ const { applySla, recordFirstResponse } = require('../services/slaService');
 const { escalateTicket } = require('../services/escalationService');
 const { mergeTickets } = require('../services/ticketMergeService');
 const { normalizeLinkType, normalizeLinkEndpoints, normalizeParentChildType, resolveChildrenIds } = require('../utils/ticketLinks');
+const { sanitizeTicketHtml } = require('../utils/security');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
+const { validateUpload, safeFilename: makeSafeFilename } = require('../utils/security');
 
 const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); // 20 Mo max
 const router = express.Router();
@@ -582,7 +584,7 @@ router.post(
       data: {
 
         title,
-        content,
+        content: sanitizeTicketHtml(content),
         priority: priority || 'P3',
         category: category || null,
         teamId: teamId ? Number(teamId) : null,
@@ -620,9 +622,14 @@ router.post(
     // Sauvegarder la pièce jointe localement
     if (req.file) {
       try {
+        // Valider que le fichier n'est pas dangereux
+        const validation = validateUpload(req.file.originalname, req.file.mimetype, 'ticket');
+        if (!validation.valid) {
+          return res.status(400).json({ error: validation.error });
+        }
         const TICKET_ATTACHMENTS_DIR = path.join(__dirname, '..', 'uploads', 'ticket-attachments');
         fs.mkdirSync(TICKET_ATTACHMENTS_DIR, { recursive: true });
-        const safeFilename = `${ticket.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${path.extname(req.file.originalname) || ''}`;
+        const safeFilename = makeSafeFilename(req.file.originalname);
         const destPath = path.join(TICKET_ATTACHMENTS_DIR, safeFilename);
         fs.writeFileSync(destPath, req.file.buffer);
         await prisma.ticketAttachment.create({
@@ -682,11 +689,20 @@ router.post(
 // Update ticket (status, priority, assignment, etc.)
 router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const id = Number(req.params.id);
+  // Whitelist : seuls ces champs acceptent la mise à jour (protection mass assignment)
+  const allowed = ['title', 'content', 'status', 'priority', 'category', 'teamId', 'assignedToId', 'requesterId', 'sourceName', 'sourceEmail', 'type', 'urgency', 'impact', 'source', 'externalId', 'dueDate', 'assetIds', 'observerIds', 'approvalStatus', 'isMajorIncident', 'impactedSites', 'closeSuggested'];
   const { title, content, status, priority, category, teamId, assignedToId, requesterId, sourceName, sourceEmail, type, urgency, impact, source, externalId, dueDate, assetIds } = req.body;
+
+  // Rejecter les champs non autorisés
+  for (const key of Object.keys(req.body)) {
+    if (!allowed.includes(key)) {
+      return res.status(400).json({ error: `Champ non autorisé : ${key}` });
+    }
+  }
 
   const data = {};
   if (title !== undefined) data.title = title;
-  if (content !== undefined) data.content = content;
+  if (content !== undefined) data.content = sanitizeTicketHtml(content);
   if (priority !== undefined) data.priority = priority;
   if (category !== undefined) data.category = category;
   if (teamId !== undefined) data.teamId = teamId;
@@ -1123,6 +1139,13 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
   const imageAttachments = [];
   if (req.files && req.files.length > 0) {
     for (const file of req.files) {
+      // Valider chaque fichier uploadé
+      const fileValidation = validateUpload(file.originalname, file.mimetype, 'followup');
+      if (!fileValidation.valid) {
+        // Supprimer les fichiers déjà traités et rejeter
+        for (const f of req.files) { try { fs.unlinkSync(f.path); } catch {} }
+        return res.status(400).json({ error: fileValidation.error });
+      }
       const ext = path.extname(file.originalname) || '.png';
       const safeFilename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
       const destPath = path.join(FOLLOWUP_IMAGES_DIR, safeFilename);
@@ -1158,6 +1181,8 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
       `<img src="${img.url}" alt="image collée" class="pasted-image" style="max-width:100%;border-radius:12px;margin:8px 0;border:1px solid rgba(128,128,128,0.2);" />`
     );
   });
+  // Sanitizer le HTML pour prévenir les XSS stockés
+  content = sanitizeTicketHtml(content);
 
   const followup = await prisma.followup.create({
     data: {

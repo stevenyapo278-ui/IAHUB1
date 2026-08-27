@@ -9,6 +9,7 @@ const { getUserPermissions } = require('../middleware/permissions');
 const { sendPasswordResetLinkEmail } = require('../services/emailSender');
 const { auditLog } = require('../services/auditLogService');
 const { isLdapEnabled, isLdapAdminUsername, ldapEmailFor, authenticateLdap } = require('../services/ldapAuth');
+const { recordFailedLogin, clearFailedLogins, isAccountLocked } = require('../utils/security');
 
 const router = express.Router();
 
@@ -86,6 +87,11 @@ router.post(
     const normalizedEmail = resolveLoginIdentifier(req.body.email);
     const { password } = req.body;
 
+    // Vérifier le lockout du compte
+    if (isAccountLocked(normalizedEmail)) {
+      return res.status(429).json({ error: 'Compte temporairement verrouillé. Trop de tentatives échouées. Réessayez dans 15 minutes.' });
+    }
+
     const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
     // Pas de filtre sur authProvider ici : un compte « local » adopté par la synchro
     // annuaire (authProvider passé à 'ldap') conserve son mot de passe d'origine et
@@ -94,10 +100,11 @@ router.post(
     if (user && user.isActive) {
       const valid = await bcrypt.compare(password, user.passwordHash);
       if (valid) {
+        clearFailedLogins(normalizedEmail);
         const token = jwt.sign(
           { sub: user.id, email: user.email, role: user.role, teamId: user.teamId },
           process.env.JWT_SECRET,
-          { expiresIn: process.env.JWT_EXPIRES_IN || '2h' }
+          { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
         );
 
         let permissions = null;
@@ -120,6 +127,8 @@ router.post(
             mustChangePassword: user.mustChangePassword,
           },
         });
+      } else {
+        recordFailedLogin(normalizedEmail);
       }
     }
 
@@ -171,10 +180,11 @@ router.post(
           });
         }
 
+        clearFailedLogins(normalizedEmail);
         const token = jwt.sign(
           { sub: account.id, email: account.email, role: account.role, teamId: account.teamId },
           process.env.JWT_SECRET,
-          { expiresIn: process.env.JWT_EXPIRES_IN || '2h' }
+          { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
         );
 
         let permissions = null;

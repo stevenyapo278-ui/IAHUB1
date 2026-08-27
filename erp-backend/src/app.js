@@ -4,6 +4,7 @@ const compression = require('compression');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const { ipKeyGenerator } = rateLimit;
 const path = require('path');
 const fs = require('fs');
 
@@ -92,11 +93,13 @@ app.use(helmet({
   // sur les origines HTTP en accès direct IP:port.
   originAgentCluster: false,
 }));
-const corsOrigin = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()) : '*';
-app.use(cors({ origin: corsOrigin }));
+const corsOrigin = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map(s => s.trim())
+  : ['http://localhost:5173', 'http://localhost:4000', 'http://127.0.0.1:4000', 'http://127.0.0.1:5173'];
+app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 
-const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, standardHeaders: true, legacyHeaders: false });
+const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 500, standardHeaders: true, legacyHeaders: false });
 app.use('/api', limiter);
 
 // ── Limiteurs de connexion à deux niveaux ────────────────────────────────────
@@ -109,23 +112,25 @@ app.use('/api', limiter);
 //    derrière le proxy) — ralentit un balayage massif sans gêner un bureau.
 const loginAccountLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 8,
+  max: 5,
   skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Trop de tentatives pour ce compte. Réessayez dans 15 minutes.' },
   keyGenerator: (req) => {
     const id = String(req.body?.email || req.body?.username || '').toLowerCase().trim();
-    return id ? `acct:${id}` : `ip:${req.ip}`;
+    return id ? `acct:${id}` : `ip:${ipKeyGenerator(req)}`;
   },
 });
 
+
 const loginNetworkLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 60,
+  max: 30,
   skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: ipKeyGenerator,
   message: { error: 'Trop de tentatives depuis votre réseau. Réessayez dans 15 minutes.' },
 });
 app.use('/api/auth/login', loginNetworkLimiter, loginAccountLimiter);
@@ -152,7 +157,25 @@ app.use((req, res, next) => {
 });
 
 // Fichiers persistants servis statiquement (ex: logo de signature email, voir systemsettings.routes.js)
-app.use('/uploads', express.static('uploads'));
+// Bloquer les extensions dangereuses pour éviter l'exécution de scripts/uploadés
+app.use('/uploads', express.static('uploads', {
+  setHeaders(res, filePath) {
+    const ext = (filePath.split('.').pop() || '').toLowerCase();
+    const blocked = ['exe','bat','cmd','com','msi','scr','pif','vbs','vbe','js','jse',
+      'ws','wsc','wsh','ps1','sh','bash','php','php3','php4','php5','phtml',
+      'cgi','pl','py','rb','asp','aspx','jsp','jspx','htaccess','htpasswd',
+      'env','config','ini','sql','db','dll','so','dylib','class','jar','war'];
+    if (blocked.includes(ext)) {
+      res.status(403).end('Type de fichier interdit');
+      return;
+    }
+    // Forcer Content-Type pour les SVG (sanitizer côté client requis)
+    if (ext === 'svg') {
+      res.setHeader('Content-Type', 'image/svg+xml');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+    }
+  },
+}));
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.get('/api/system/circuit-breakers', (req, res) => res.json(allBreakerStatuses()));

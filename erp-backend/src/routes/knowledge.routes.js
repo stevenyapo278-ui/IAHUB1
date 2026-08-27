@@ -8,6 +8,7 @@ const { chunkText } = require('../utils/chunking');
 const { generateEmbedding, toVectorLiteral } = require('../utils/embeddings');
 const { rerank, listRerankCandidates } = require('../utils/reranking');
 const { auditLog } = require('../services/auditLogService');
+const { validateUpload } = require('../utils/security');
 
 const router = express.Router();
 const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); // 20 Mo max
@@ -32,6 +33,12 @@ router.get('/documents', async (req, res) => {
 // Upload d'un document (PDF, DOCX, Markdown) : extraction, découpage et indexation pgvector
 router.post('/documents', requirePermission('knowledge.manage', ['ADMIN', 'TECHNICIAN']), upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Fichier requis' });
+
+  // Valider que le fichier n'est pas dangereux
+  const validation = validateUpload(req.file.originalname, req.file.mimetype, 'kb');
+  if (!validation.valid) {
+    return res.status(400).json({ error: validation.error });
+  }
 
   const ext = (req.file.originalname.split('.').pop() || '').toLowerCase();
   if (!['pdf', 'docx', 'md', 'markdown', 'txt'].includes(ext)) {

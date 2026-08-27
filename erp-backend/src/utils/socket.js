@@ -6,10 +6,14 @@ const prisma = require('../prismaClient');
 let io = null;
 
 function initSocket(server) {
+  const socketCorsOrigin = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',').map(s => s.trim())
+    : ['http://localhost:5173', 'http://localhost:4000', 'http://127.0.0.1:4000', 'http://127.0.0.1:5173'];
   io = new Server(server, {
     cors: {
-      origin: process.env.CORS_ORIGIN || '*',
+      origin: socketCorsOrigin,
       methods: ['GET', 'POST'],
+      credentials: true,
     },
   });
 
