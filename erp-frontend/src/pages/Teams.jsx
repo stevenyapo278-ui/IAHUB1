@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import { toast } from 'sonner';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
@@ -58,6 +59,7 @@ export default function Teams() {
       });
     } catch (err) {
       setDetailError(err.response?.data?.error || "Erreur lors du chargement de l'équipe");
+      toast.error(err.response?.data?.error || "Erreur lors du chargement");
     } finally {
       setDetailLoading(false);
     }
@@ -83,9 +85,12 @@ export default function Teams() {
         defaultObserverIds: detailDraft.defaultObserverIds,
       });
       setDetailModal(data);
+      toast.success(`Équipe « ${data.name} » enregistrée`);
       load();
     } catch (err) {
-      setDetailError(err.response?.data?.error || "Erreur lors de l'enregistrement");
+      const msg = err.response?.data?.error || "Erreur lors de l'enregistrement";
+      setDetailError(msg);
+      toast.error(msg);
     } finally {
       setDetailSaving(false);
     }
@@ -97,12 +102,15 @@ export default function Teams() {
     setCreateError('');
     setCreating(true);
     try {
-      await api.post('/teams', createForm);
+      const { data } = await api.post('/teams', createForm);
+      toast.success(`Équipe « ${data.name} » créée`);
       setCreateForm({ name: '', category: '', groupEmail: '' });
       setShowCreateModal(false);
       load();
     } catch (err) {
-      setCreateError(err.response?.data?.error || 'Erreur lors de la création');
+      const msg = err.response?.data?.error || 'Erreur lors de la création';
+      setCreateError(msg);
+      toast.error(msg);
     } finally {
       setCreating(false);
     }
@@ -112,10 +120,21 @@ export default function Teams() {
   function askDelete(id) { setConfirmDeleteId(id); }
   async function handleDelete() {
     if (!confirmDeleteId) return;
+    const team = teams.find(t => t.id === confirmDeleteId);
     setDeleting(true);
-    try { await api.delete(`/teams/${confirmDeleteId}`); load(); setConfirmDeleteId(null); closeDetail(); }
-    catch (err) { setError(err.response?.data?.error || 'Erreur lors de la suppression'); }
-    finally { setDeleting(false); }
+    try {
+      await api.delete(`/teams/${confirmDeleteId}`);
+      toast.success(`Équipe « ${team?.name || ''} » supprimée`);
+      load();
+      setConfirmDeleteId(null);
+      closeDetail();
+    } catch (err) {
+      const msg = err.response?.data?.error || 'Erreur lors de la suppression';
+      toast.error(msg);
+      setError(msg);
+    } finally {
+      setDeleting(false);
+    }
   }
 
   const totalMembers = teams.reduce((sum, t) => sum + t.members.length, 0);
@@ -405,7 +424,7 @@ export default function Teams() {
                         Observateurs par défaut ({detailDraft.defaultObserverIds.length})
                       </span>
                       <p className="text-[10px] text-on-surface-variant/70 mb-2">
-                        Les observateurs reçoivent une notification when un ticket est assigné à cette équipe.
+                        Les observateurs reçoivent une notification quand un ticket est assigné à cette équipe.
                       </p>
                       <RemoteUserMultiSelect
                         selectedIds={detailDraft.defaultObserverIds}
