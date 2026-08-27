@@ -62,7 +62,7 @@ router.get('/', async (req, res) => {
         skip,
         take: size,
         include: {
-          ticket: { select: { id: true, title: true, glpiTicketId: true } },
+          ticket: { select: { id: true, title: true } },
         },
       }),
       prisma.ticketEvent.count({ where }),
@@ -77,7 +77,6 @@ router.get('/', async (req, res) => {
         createdAt: e.createdAt,
         ticketId: e.ticket?.id || null,
         ticketTitle: e.ticket?.title || null,
-        glpiTicketId: e.ticket?.glpiTicketId || null,
       })),
       pagination: {
         page: pageNum,

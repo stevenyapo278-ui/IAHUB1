@@ -28,7 +28,7 @@ export default function TemplatesTab() {
 
   useEffect(() => {
     load();
-    api.get('/glpi/categories').then(({ data }) => setCategories(data)).catch(() => {});
+    // GLPI supprimé : catégories gérées en interne
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -4,7 +4,7 @@ const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { sendEmail } = require('../services/emailSender');
-const { addGlpiFollowup } = require('../services/glpiTicketCreator');
+
 
 // Convertit le HTML en texte simple pour le followup GLPI (champ texte, pas de rendu HTML)
 function htmlToPlainText(html) {
@@ -139,16 +139,6 @@ router.post('/:id/approve', requirePermission('emaildrafts.manage', ['ADMIN', 'T
       sentAt: new Date(),
     },
   });
-
-  // Trace l'envoi de la réponse dans GLPI — sans ça, le suivi du ticket côté GLPI ne montre que
-  // les emails reçus de l'utilisateur, jamais la réponse qui lui a été envoyée en retour.
-  if (draft.glpiTicketId) {
-    try {
-      await addGlpiFollowup(draft.glpiTicketId, `Réponse envoyée à ${finalRecipient} :\n\n${htmlToPlainText(finalContent)}`);
-    } catch (err) {
-      console.error('[aiEmailDraft] Échec ajout followup GLPI:', err.message);
-    }
-  }
 
   return res.json(updated);
 });

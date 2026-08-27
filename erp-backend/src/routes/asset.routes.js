@@ -6,7 +6,7 @@ const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
-const { syncAssetsFromGlpi } = require('../services/glpiTicketCreator');
+
 
 const router = express.Router();
 router.use(authenticate);

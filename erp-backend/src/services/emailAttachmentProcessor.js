@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const prisma = require('../prismaClient');
 const { fetchMessageAttachments } = require('./emailPoller');
-const { uploadGlpiAttachment } = require('./glpiTicketCreator');
+
 const { getActiveProviders, callProviderWithFallback } = require('./mailAnalyzer');
 
 const GENERIC_IMAGE_NAME = /^(image|img|photo)\d*\.(png|jpe?g|gif|bmp)$/i;
@@ -58,32 +58,9 @@ function hashContent(base64) {
   return crypto.createHash('sha256').update(base64, 'base64').digest('hex');
 }
 
-async function uploadPendingAttachments(ticketId, glpiTicketId) {
-  const pending = await prisma.ticketAttachment.findMany({
-    where: { ticketId, glpiDocumentId: null, localFilepath: { not: null } },
-  });
-  if (pending.length === 0) return [];
-
-  const uploaded = [];
-  for (const att of pending) {
-    try {
-      const buffer = fs.readFileSync(att.localFilepath);
-      const documentId = await uploadGlpiAttachment({
-        glpiTicketId, buffer, filename: att.filename, mimeType: att.mimeType,
-      });
-      if (documentId) {
-        await prisma.ticketAttachment.update({
-          where: { id: att.id },
-          data: { glpiDocumentId: documentId, localFilepath: null },
-        });
-        uploaded.push({ id: att.id, glpiDocumentId: documentId });
-        fs.unlink(att.localFilepath, () => {});
-      }
-    } catch (err) {
-      console.error(`[emailAttachmentProcessor] Échec upload différé attachment #${att.id}:`, err.message);
-    }
-  }
-  return uploaded;
+// Plus de upload GLPI : les pièces jointes restent en local
+async function uploadPendingAttachments() {
+  return [];
 }
 
 async function saveAttachmentLocally({ ticketId, filename, mimeType, contentBytes, contentHash, incomingEmailId }) {
@@ -105,83 +82,28 @@ async function saveAttachmentLocally({ ticketId, filename, mimeType, contentByte
   });
 }
 
-async function processIncomingAttachments({ account, graphMessageId, incomingEmailId, ticketId, glpiTicketId, simulatedAttachments, bodyText }) {
-  if (!glpiTicketId) {
-    const isSimulated = typeof graphMessageId === 'string' && graphMessageId.startsWith('SIM-');
-    if (simulatedAttachments || isSimulated) return { saved: [], cidMap: {} };
-
-    const rawAttachments = await fetchMessageAttachments(account, graphMessageId);
-    const filtered = await filterOutSignatureImages(rawAttachments, bodyText);
-    const existingHashes = new Set(
-      (await prisma.ticketAttachment.findMany({ where: { ticketId }, select: { contentHash: true } }))
-        .map((a) => a.contentHash).filter(Boolean)
-    );
-    const saved = [];
-    for (const att of filtered) {
-      const contentHash = hashContent(att.contentBytes);
-      if (existingHashes.has(contentHash)) continue;
-      const created = await saveAttachmentLocally({
-        ticketId, filename: att.name, mimeType: att.contentType,
-        contentBytes: att.contentBytes, contentHash, incomingEmailId,
-      });
-      existingHashes.add(contentHash);
-      saved.push(created);
-    }
-    return { saved, cidMap: {} };
-  }
-
+async function processIncomingAttachments({ account, graphMessageId, incomingEmailId, ticketId, simulatedAttachments, bodyText }) {
   const isSimulated = typeof graphMessageId === 'string' && graphMessageId.startsWith('SIM-');
+  if (simulatedAttachments || isSimulated) return { saved: [], cidMap: {} };
 
-  let attachments;
-  if (simulatedAttachments) {
-    attachments = simulatedAttachments;
-  } else if (isSimulated) {
-    attachments = [];
-  } else {
-    const rawAttachments = await fetchMessageAttachments(account, graphMessageId);
-    const filtered = await filterOutSignatureImages(rawAttachments, bodyText);
-    attachments = filtered.map((a) => ({ name: a.name, contentType: a.contentType, contentBytes: a.contentBytes, contentId: a.contentId }));
-  }
-
+  const rawAttachments = await fetchMessageAttachments(account, graphMessageId);
+  const filtered = await filterOutSignatureImages(rawAttachments, bodyText);
   const existingHashes = new Set(
     (await prisma.ticketAttachment.findMany({ where: { ticketId }, select: { contentHash: true } }))
       .map((a) => a.contentHash).filter(Boolean)
   );
-
   const saved = [];
-  const cidMap = {};
-  for (const att of attachments) {
-    try {
-      const contentHash = hashContent(att.contentBytes);
-      if (existingHashes.has(contentHash)) continue;
-
-      const buffer = Buffer.from(att.contentBytes, 'base64');
-      const documentId = await uploadGlpiAttachment({
-        glpiTicketId, buffer, filename: att.name, mimeType: att.contentType,
-      });
-      if (documentId) {
-        const created = await prisma.ticketAttachment.create({
-          data: {
-            ticketId,
-            glpiDocumentId: documentId,
-            filename: att.name,
-            mimeType: att.contentType,
-            source: 'INCOMING_EMAIL',
-            incomingEmailId,
-            contentHash,
-          },
-        });
-        existingHashes.add(contentHash);
-        saved.push(created);
-        if (att.contentId) {
-          cidMap[att.contentId] = documentId;
-        }
-      }
-    } catch (err) {
-      console.error('[emailAttachmentProcessor] Échec attachment', att.name, err.message);
-    }
+  for (const att of filtered) {
+    const contentHash = hashContent(att.contentBytes);
+    if (existingHashes.has(contentHash)) continue;
+    const created = await saveAttachmentLocally({
+      ticketId, filename: att.name, mimeType: att.contentType,
+      contentBytes: att.contentBytes, contentHash, incomingEmailId,
+    });
+    existingHashes.add(contentHash);
+    saved.push(created);
   }
-  return { saved, cidMap };
+  return { saved, cidMap: {} };
 }
 
 module.exports = { processIncomingAttachments, uploadPendingAttachments };

@@ -96,7 +96,7 @@ router.get('/pending-ai-drafts', async (req, res) => {
   const drafts = await prisma.aiEmailDraft.findMany({
     where: { status: 'PENDING' },
     include: {
-      ticket: { select: { id: true, title: true, glpiTicketId: true, approvalStatus: true, sourceEmail: true, sourceName: true } },
+      ticket: { select: { id: true, title: true, approvalStatus: true, sourceEmail: true, sourceName: true } },
     },
     orderBy: { createdAt: 'asc' },
     take: 20,

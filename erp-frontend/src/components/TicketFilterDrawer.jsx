@@ -218,7 +218,7 @@ export default function TicketFilterDrawer({
                 onChange={(v) => onUpdate('source', v)}
                 options={[
                   { label: 'Toutes les sources', value: '' },
-                  ...(!autonomousMode ? [{ label: 'Synchronisés GLPI', value: 'glpi' }] : []),
+                  
                   { label: 'Internes ERP', value: 'erp' },
                 ]}
                 placeholder="Source"

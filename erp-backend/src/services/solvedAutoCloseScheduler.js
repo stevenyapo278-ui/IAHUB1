@@ -1,6 +1,6 @@
 const prisma = require('../prismaClient');
 const { logEvent } = require('./ticketEvent');
-const { updateGlpiTicket } = require('./glpiTicketCreator');
+
 
 function daysSince(date) {
   return Math.floor((Date.now() - new Date(date).getTime()) / (1000 * 60 * 60 * 24));
@@ -24,7 +24,7 @@ async function runSolvedAutoCloseScheduler() {
       status: 'SOLVED',
       solvedAt: { not: null, lte: threshold },
     },
-    select: { id: true, glpiTicketId: true, title: true, solvedAt: true },
+    select: { id: true, title: true, solvedAt: true },
   });
 
   const results = [];
@@ -40,15 +40,6 @@ async function runSolvedAutoCloseScheduler() {
         reason: 'solved_auto_close',
         daysSinceSolved: daysSince(ticket.solvedAt),
       });
-
-      // Synchroniser la fermeture vers GLPI si le ticket y est lié
-      if (ticket.glpiTicketId) {
-        try {
-          await updateGlpiTicket(ticket.glpiTicketId, { status: 'CLOSED' });
-        } catch (err) {
-          console.error(`[solvedAutoClose] Échec synchro GLPI (ticket ${ticket.id}):`, err.message);
-        }
-      }
 
       results.push({ ticketId: ticket.id, action: 'AUTO_CLOSED' });
     } catch (err) {

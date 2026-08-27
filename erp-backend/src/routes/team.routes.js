@@ -3,7 +3,6 @@ const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
-const { syncTeamsFromGlpi, syncCategoriesFromGlpi } = require('../services/glpiTicketCreator');
 const { auditLog } = require('../services/auditLogService');
 
 const router = express.Router();
@@ -111,21 +110,6 @@ router.patch('/:id', requirePermission('teams.manage', ['ADMIN', 'HOTLINE']), as
     if (err.code === 'P2025') return res.status(404).json({ error: 'Équipe introuvable' });
     console.error('[team.routes] Erreur mise à jour équipe:', err);
     return res.status(500).json({ error: 'Erreur interne' });
-  }
-});
-
-// Synchronise les équipes (Group) et les catégories de tickets (ITILCategory) depuis GLPI
-router.post('/sync-glpi', requirePermission('teams.manage', ['ADMIN']), async (req, res) => {
-  try {
-    const synced = await syncTeamsFromGlpi();
-    if (synced === null) {
-      return res.status(422).json({ error: 'GLPI non configuré ou inactif (Settings → GLPI)' });
-    }
-    const syncedCategories = await syncCategoriesFromGlpi();
-    return res.json({ synced, syncedCategories: syncedCategories || 0 });
-    auditLog('TEAMS_SYNCED_FROM_GLPI', { actor: req.user, targetType: 'Team', targetLabel: `${synced} équipes, ${syncedCategories || 0} catégories`, metadata: { teamsCount: synced, categoriesCount: syncedCategories || 0 } }).catch(() => {});
-  } catch (err) {
-    return res.status(502).json({ error: err.message || 'Erreur lors de la synchronisation GLPI' });
   }
 });
 

@@ -53,15 +53,15 @@ router.get('/email-account', async (req, res) => {
   return res.json(account);
 });
 
-// Enregistre l'email d'origine (expéditeur, sujet) ayant déclenché la création d'un ticket GLPI
+// Enregistre l'email d'origine (expéditeur, sujet) ayant déclenché la création d'un ticket
 router.post('/ticket-source', async (req, res) => {
-  const { glpiTicketId, sourceEmail, sourceName, sourceSubject } = req.body;
-  if (!glpiTicketId || !sourceEmail) {
-    return res.status(400).json({ error: 'glpiTicketId et sourceEmail sont requis' });
+  const { ticketId, sourceEmail, sourceName, sourceSubject } = req.body;
+  if (!ticketId || !sourceEmail) {
+    return res.status(400).json({ error: 'ticketId et sourceEmail sont requis' });
   }
 
-  const ticket = await prisma.ticket.findUnique({ where: { glpiTicketId: Number(glpiTicketId) } });
-  if (!ticket) return res.status(404).json({ error: 'Ticket introuvable pour ce glpiTicketId' });
+  const ticket = await prisma.ticket.findUnique({ where: { id: Number(ticketId) } });
+  if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
 
   const updated = await prisma.ticket.update({
     where: { id: ticket.id },

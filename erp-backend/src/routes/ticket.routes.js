@@ -5,9 +5,7 @@ const fs = require('fs');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
-const { getActiveGlpiConfig, glpiInitSession, glpiKillSession } = require('../utils/glpiSync');
 const { notifyMajorIncidentResolved, sendTicketStatusNotification } = require('../services/emailSender');
-const { updateGlpiTicket, deleteGlpiTicket, addGlpiFollowup } = require('../services/glpiTicketCreator');
 const { approveTicket } = require('../services/ticketApproval');
 const { autoAssignTechnician } = require('../services/ticketAutoAssign');
 const { logEvent } = require('../services/ticketEvent');
@@ -55,7 +53,7 @@ router.get('/', async (req, res) => {
     } else if (status === 'CLOSED_GROUP') {
       where.status = { in: ['SOLVED', 'CLOSED'] };
     } else if (status === 'NOT_CLOSED') {
-      // Vue par défaut « à la GLPI » : tout sauf les clôturés — les résolus
+      // Vue par défaut : tout sauf les clôturés — les résolus
       // restent visibles tant qu'ils n'ont pas été fermés (auto-clôture 3 j).
       where.status = { notIn: ['CLOSED'] };
     } else {
@@ -67,7 +65,7 @@ router.get('/', async (req, res) => {
   if (assignedToId === 'none') where.assignedToId = null;
   else if (assignedToId) where.assignedToId = Number(assignedToId);
   if (category) where.category = category;
-  if (locationId) where.glpiLocationId = Number(locationId);
+
   if (aiProcessed === 'true') where.aiProcessed = true;
 
   if (mine === 'true') {
@@ -92,10 +90,7 @@ router.get('/', async (req, res) => {
   if (req.query.closeSuggested === 'true') where.closeSuggested = true;
   if (req.query.closeSuggested === 'false') where.closeSuggested = false;
 
-  // source=glpi -> uniquement les tickets synchronisés avec GLPI
-  // source=erp  -> uniquement les tickets internes (jamais envoyés à GLPI)
-  if (req.query.source === 'glpi') where.glpiTicketId = { not: null };
-  if (req.query.source === 'erp') where.glpiTicketId = null;
+
 
   if (searchQuery) {
     const numericId = parseInt(searchQuery, 10);
@@ -103,11 +98,9 @@ router.get('/', async (req, res) => {
       { title: { contains: searchQuery, mode: 'insensitive' } },
       { content: { contains: searchQuery, mode: 'insensitive' } },
       { category: { contains: searchQuery, mode: 'insensitive' } },
-      { glpiLocationName: { contains: searchQuery, mode: 'insensitive' } },
     ];
     if (!isNaN(numericId)) {
       orConditions.push({ id: numericId });
-      orConditions.push({ glpiTicketId: numericId });
     }
     where.OR = orConditions;
   }
@@ -123,7 +116,7 @@ router.get('/', async (req, res) => {
     else if (sortBy === 'status') orderBy = { status: order };
     else if (sortBy === 'assignedTo') orderBy = { assignedTo: { fullName: order } };
     else if (sortBy === 'requester') orderBy = { requester: { fullName: order } };
-    else if (sortBy === 'location') orderBy = { glpiLocationName: order };
+
     else if (sortBy === 'updatedAt') orderBy = { updatedAt: order };
   }
 
@@ -215,8 +208,6 @@ router.get('/export', async (req, res) => {
   if (approvalStatus) where.approvalStatus = approvalStatus;
   if (closeSuggested === 'true') where.closeSuggested = true;
   if (closeSuggested === 'false') where.closeSuggested = false;
-  if (source === 'glpi') where.glpiTicketId = { not: null };
-  if (source === 'erp') where.glpiTicketId = null;
 
   if (search) {
     const numericId = parseInt(search, 10);
@@ -241,8 +232,8 @@ router.get('/export', async (req, res) => {
     orderBy,
     select: {
       id: true, title: true, status: true, priority: true, category: true, type: true,
-      source: true, requesterId: true, assignedToId: true, teamId: true, glpiTicketId: true,
-      glpiLocationName: true, createdAt: true, solvedAt: true, closedAt: true,
+      source: true, requesterId: true, assignedToId: true, teamId: true,
+      createdAt: true, solvedAt: true, closedAt: true,
       slaResponseDueAt: true, slaResolutionDueAt: true, slaBreachedAt: true, firstResponseAt: true,
       aiProcessed: true, approvalStatus: true, requester: { select: { email: true, fullName: true } },
       assignedTo: { select: { email: true, fullName: true } },
@@ -264,7 +255,6 @@ router.get('/export', async (req, res) => {
       { header: 'Demandeur', key: 'requester', width: 28 },
       { header: 'Technicien', key: 'technician', width: 28 },
       { header: 'Équipe', key: 'team', width: 20 },
-      { header: 'GLPI ticket ID', key: 'glpiTicketId', width: 14 },
       { header: 'Lieu', key: 'location', width: 18 },
       { header: 'Créé le', key: 'createdAt', width: 18 },
       { header: 'Résolu le', key: 'solvedAt', width: 18 },
@@ -284,7 +274,7 @@ router.get('/export', async (req, res) => {
     headerRow.font = { bold: true };
     headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F0FE' } };
     sheet.views = [{ state: 'frozen', ySplit: 1 }];
-    sheet.autoFilter = { from: 'A1', to: 'U1' };
+    sheet.autoFilter = { from: 'A1', to: 'T1' };
 
     for (const t of tickets) {
       sheet.addRow({
@@ -295,11 +285,10 @@ router.get('/export', async (req, res) => {
         category: t.category || '',
         type: t.type,
         source: t.source || '',
-        requester: t.requester?.email || '',
-        technician: t.assignedTo?.email || '',
+        requester: t.requester?.fullName ? `${t.requester.fullName} (${t.requester.email})` : (t.requester?.email || ''),
+        technician: t.assignedTo?.fullName ? `${t.assignedTo.fullName} (${t.assignedTo.email})` : (t.assignedTo?.email || ''),
         team: t.team?.name || '',
-        glpiTicketId: t.glpiTicketId || '',
-        location: t.glpiLocationName || '',
+        location: '',
         createdAt: t.createdAt,
         solvedAt: t.solvedAt,
         closedAt: t.closedAt,
@@ -317,11 +306,11 @@ router.get('/export', async (req, res) => {
   }
 
   if (format === 'csv') {
-    const header = ['id', 'titre', 'statut', 'priorite', 'categorie', 'type', 'source', 'demandeur', 'technicien', 'equipe', 'glpi_ticket_id', 'lieu', 'cree_le', 'resolu_le', 'ferme_le', 'sla_reponse_due', 'sla_resolution_due', 'sla_depasse_le', 'premiere_reponse', 'ia', 'approbation'];
+    const header = ['id', 'titre', 'statut', 'priorite', 'categorie', 'type', 'source', 'demandeur', 'technicien', 'equipe', 'lieu', 'cree_le', 'resolu_le', 'ferme_le', 'sla_reponse_due', 'sla_resolution_due', 'sla_depasse_le', 'premiere_reponse', 'ia', 'approbation'];
     const rows = tickets.map((t) => [
       t.id, `"${(t.title || '').replace(/"/g, '""')}"`, t.status, t.priority, `"${(t.category || '').replace(/"/g, '""')}"`,
-      t.type, t.source || '', t.requester?.email || '', t.assignedTo?.email || '', t.team?.name || '',
-      t.glpiTicketId || '', t.glpiLocationName || '', t.createdAt?.toISOString() || '', t.solvedAt?.toISOString() || '',
+      t.type, t.source || '', t.requester?.fullName ? `${t.requester.fullName} (${t.requester.email})` : (t.requester?.email || ''), t.assignedTo?.fullName ? `${t.assignedTo.fullName} (${t.assignedTo.email})` : (t.assignedTo?.email || ''), t.team?.name || '',
+      '', t.createdAt?.toISOString() || '', t.solvedAt?.toISOString() || '',
       t.closedAt?.toISOString() || '', t.slaResponseDueAt?.toISOString() || '', t.slaResolutionDueAt?.toISOString() || '',
       t.slaBreachedAt?.toISOString() || '', t.firstResponseAt?.toISOString() || '', t.aiProcessed ? 'oui' : 'non', t.approvalStatus,
     ]);
@@ -362,7 +351,7 @@ router.post(
       try {
         const before = await prisma.ticket.findUnique({
           where: { id },
-          select: { status: true, priority: true, glpiTicketId: true },
+          select: { status: true, priority: true },
         });
         if (!before) { failures.push({ id, error: 'Ticket introuvable' }); continue; }
 
@@ -378,20 +367,6 @@ router.post(
         // SLA recalculé si la priorité change
         if (data.priority) {
           try { await applySla(ticket); } catch (err) { console.error('[ticket.routes] Recalcul SLA bulk échoué:', err.message); }
-        }
-
-        // Répercuter vers GLPI si synchronisé
-        if (before.glpiTicketId) {
-          try {
-            let assignedToGlpiId;
-            if (assignedToId !== undefined && assignedToId) {
-              const assignee = await prisma.user.findUnique({ where: { id: Number(assignedToId) }, select: { glpiId: true } });
-              assignedToGlpiId = assignee?.glpiId || undefined;
-            }
-            await updateGlpiTicket(before.glpiTicketId, { status, priority, assignedToGlpiId });
-          } catch (err) {
-            await logEvent(id, 'GLPI_SYNC_FAILED', 'SYSTEM', { action: 'bulk-update', error: err.message });
-          }
         }
 
         emitTicketUpdated(ticket, { status, priority, assignedToId });
@@ -470,7 +445,7 @@ router.get('/:id', async (req, res) => {
       aiSuggestions: { orderBy: { createdAt: 'desc' } },
       linksA: { include: { ticketB: { select: { id: true, title: true, status: true, priority: true } } }, orderBy: { createdAt: 'asc' } },
       linksB: { include: { ticketA: { select: { id: true, title: true, status: true, priority: true } } }, orderBy: { createdAt: 'asc' } },
-      assets: { include: { asset: { include: { glpiLocation: { select: { name: true, completename: true } } } } }, orderBy: { assetId: 'asc' } },
+      assets: { include: { asset: true }, orderBy: { assetId: 'asc' } },
     },
   });
 
@@ -492,7 +467,7 @@ router.get('/:id', async (req, res) => {
   return res.json(ticket);
 });
 
-// Télécharge le contenu d'une pièce jointe via le proxy GLPI
+// Télécharge le contenu d'une pièce jointe locale
 router.get('/:id/attachments/:attachmentId/file', async (req, res) => {
   const attachment = await prisma.ticketAttachment.findFirst({
     where: { id: Number(req.params.attachmentId), ticketId: Number(req.params.id) },
@@ -508,7 +483,6 @@ router.get('/:id/attachments/:attachmentId/file', async (req, res) => {
     if (!ownerTicket) return res.status(404).json({ error: 'Pièce jointe introuvable' });
   }
 
-  // Priorité au fichier local (pièces jointes en attente d'approbation ou jamais synchronisées GLPI)
   if (attachment.localFilepath) {
     const localPath = path.isAbsolute(attachment.localFilepath)
       ? attachment.localFilepath
@@ -520,29 +494,7 @@ router.get('/:id/attachments/:attachmentId/file', async (req, res) => {
     }
   }
 
-  // Sinon, document GLPI (sync historique)
-  if (!attachment.glpiDocumentId) {
-    return res.status(404).json({ error: 'Fichier non disponible sur ce serveur' });
-  }
-
-  const config = await getActiveGlpiConfig();
-  if (!config) return res.status(422).json({ error: 'GLPI non configuré' });
-
-  const sessionToken = await glpiInitSession(config);
-  try {
-    const fileRes = await fetch(
-      `${config.baseUrl}/Document/${attachment.glpiDocumentId}?alt=media`,
-      { headers: { 'App-Token': config.appToken, 'Session-Token': sessionToken } }
-    );
-    if (!fileRes.ok) return res.status(502).json({ error: 'Téléchargement GLPI échoué' });
-
-    res.setHeader('Content-Type', attachment.mimeType || 'application/octet-stream');
-    res.setHeader('Content-Disposition', `inline; filename="${attachment.filename}"`);
-    const buffer = Buffer.from(await fileRes.arrayBuffer());
-    return res.send(buffer);
-  } finally {
-    await glpiKillSession(config, sessionToken);
-  }
+  return res.status(404).json({ error: 'Fichier non disponible sur ce serveur' });
 });
 
 // Create ticket
@@ -600,12 +552,6 @@ router.post(
     const canSetStatus = ['ADMIN', 'TECHNICIAN', 'HOTLINE', 'SUPERADMIN'].includes(req.user.role);
     const finalStatus = canSetStatus && status ? status : 'NEW';
 
-    let glpiLocationName = null;
-    if (locationId) {
-      const loc = await prisma.glpiLocation.findUnique({ where: { glpiLocationId: Number(locationId) } });
-      glpiLocationName = loc?.completename || loc?.name || null;
-    }
-
     // Champs personnalisés : validation des champs requis de la catégorie (ou globaux)
     let customFields = null;
     if (req.body.customFields !== undefined && req.body.customFields !== null && req.body.customFields !== '') {
@@ -634,7 +580,7 @@ router.post(
 
     const ticket = await prisma.ticket.create({
       data: {
-        ...(locationId ? { glpiLocationId: Number(locationId), glpiLocationName } : {}),
+
         title,
         content,
         priority: priority || 'P3',
@@ -667,11 +613,11 @@ router.post(
         await autoAssignTechnician(ticket.id, ticket.category);
       } catch (err) {
         console.error('[ticket.routes] Auto-assignation échouée:', err.message);
-        await logEvent(ticket.id, 'GLPI_SYNC_FAILED', 'SYSTEM', { action: 'auto-assign', error: err.message });
+        await logEvent(ticket.id, 'AUTO_ASSIGN_FAILED', 'SYSTEM', { action: 'auto-assign', error: err.message });
       }
     }
 
-    // Sauvegarder la pièce jointe localement (l'upload GLPI sera fait à l'approbation)
+    // Sauvegarder la pièce jointe localement
     if (req.file) {
       try {
         const TICKET_ATTACHMENTS_DIR = path.join(__dirname, '..', 'uploads', 'ticket-attachments');
@@ -714,11 +660,11 @@ router.post(
           approvedById: req.user.sub,
           approvedByEmail: req.user.email || 'HOTLINE',
         });
-        // Recharger le ticket pour refléter l'approbation (APPROVED, glpiTicketId éventuel)
+        // Recharger le ticket pour refléter l'approbation
         finalTicket = await prisma.ticket.findUnique({ where: { id: ticket.id } });
       } catch (err) {
         console.error('[ticket.routes] Auto-approbation échouée:', err.message);
-        await logEvent(ticket.id, 'GLPI_SYNC_FAILED', 'SYSTEM', { action: 'auto-approve', error: err.message }).catch(() => {});
+        await logEvent(ticket.id, 'AUTO_APPROVE_FAILED', 'SYSTEM', { action: 'auto-approve', error: err.message }).catch(() => {});
       }
     }
 
@@ -778,16 +724,6 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
   if (source !== undefined) data.source = source;
   if (externalId !== undefined) data.externalId = externalId;
 
-  if (req.body.locationId !== undefined) {
-    data.glpiLocationId = Number(req.body.locationId);
-    if (data.glpiLocationId) {
-      const loc = await prisma.glpiLocation.findUnique({ where: { glpiLocationId: data.glpiLocationId } });
-      data.glpiLocationName = loc?.completename || loc?.name || null;
-    } else {
-      data.glpiLocationName = null;
-    }
-  }
-
   if (status !== undefined) {
     data.status = status;
     if (status === 'SOLVED') data.solvedAt = new Date();
@@ -810,7 +746,7 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
         title: true, content: true, priority: true, category: true, teamId: true,
         assignedToId: true, type: true, urgency: true, impact: true, source: true,
         externalId: true, status: true, isMajorIncident: true, impactedSites: true,
-        glpiTicketId: true, glpiLocationId: true, sourceEmail: true, requesterId: true, sourceName: true,
+        sourceEmail: true, requesterId: true, sourceName: true,
       },
     });
 
@@ -837,7 +773,7 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
     // Enregistrer les corrections de champs par la Hotline/Technicien
     const trackFields = [
       'title', 'content', 'priority', 'category', 'teamId', 'assignedToId',
-      'type', 'urgency', 'impact', 'source', 'externalId', 'glpiLocationId',
+      'type', 'urgency', 'impact', 'source', 'externalId',
       'requesterId', 'sourceName', 'sourceEmail'
     ];
     for (const field of trackFields) {
@@ -854,53 +790,17 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
       }
     }
 
-    // Répercuter les changements vers GLPI si le ticket y est synchronisé
-    if (before?.glpiTicketId) {
-      try {
-        let assignedToGlpiId, teamGlpiId;
-        if (assignedToId !== undefined && assignedToId) {
-          const assignee = await prisma.user.findUnique({ where: { id: Number(assignedToId) }, select: { glpiId: true } });
-          assignedToGlpiId = assignee?.glpiId || undefined;
-        }
-        if (teamId !== undefined && teamId) {
-          const team = await prisma.team.findUnique({ where: { id: Number(teamId) }, select: { glpiGroupId: true } });
-          teamGlpiId = team?.glpiGroupId || undefined;
-        }
-        await updateGlpiTicket(before.glpiTicketId, { status, priority, category, type, urgency, impact, assignedToGlpiId, teamGlpiId });
-      } catch (err) {
-        console.error('[ticket.routes] Mise à jour GLPI échouée:', err.message);
-        await logEvent(id, 'GLPI_SYNC_FAILED', 'SYSTEM', { action: 'update', error: err.message, attemptedChanges: { status, priority, category, type, urgency, impact, assignedToId, teamId } });
-      }
-    }
-
     // Notifier tous les sites impactés si un incident majeur vient d'être résolu/clôturé
     const isNowResolved = (status === 'SOLVED' || status === 'CLOSED');
     const wasOpen = before && !['SOLVED', 'CLOSED'].includes(before.status);
     if (isNowResolved && wasOpen && before?.isMajorIncident && before.impactedSites?.length > 0) {
       notifyMajorIncidentResolved({
         ticketId: id,
-        glpiTicketId: before.glpiTicketId,
         ticketTitle: before.title,
         impactedSites: before.impactedSites,
       }).catch((err) => {
         console.error(`[ticket.routes] Échec notification résolution incident majeur (ticket ${id}):`, err.message);
       });
-    }
-
-    // Associer l'expéditeur au lieu si la Hotline a corrigé le lieu
-    if (ticket.sourceEmail && data.glpiLocationId !== undefined && before.glpiLocationId !== data.glpiLocationId) {
-      try {
-        const glpiLoc = await prisma.glpiLocation.findUnique({ where: { glpiLocationId: ticket.glpiLocationId } });
-        if (glpiLoc) {
-          await prisma.requesterLocation.upsert({
-            where: { email_glpiLocationId: { email: ticket.sourceEmail.toLowerCase().trim(), glpiLocationId: glpiLoc.id } },
-            update: { assignmentCount: { increment: 1 }, lastUsedAt: new Date(), assignedById: req.user.sub },
-            create: { email: ticket.sourceEmail.toLowerCase().trim(), glpiLocationId: glpiLoc.id, assignedById: req.user.sub },
-          });
-        }
-      } catch (err) {
-        console.error('[ticket.routes] Échec auto-association RequesterLocation:', err.message);
-      }
     }
 
     // Émettre événement temps réel
@@ -953,7 +853,7 @@ router.get('/:id/corrections', async (req, res) => {
   return res.json(corrections);
 });
 
-// Approve a ticket (triggers GLPI ticket creation if enabled and not created yet)
+// Approve a ticket
 router.post('/:id/approve', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
   const id = Number(req.params.id);
   try {
@@ -1006,7 +906,7 @@ router.post('/:id/reject', requirePermission('tickets.approve', ['ADMIN', 'TECHN
 // L'IA ne clôt plus jamais un ticket seule : elle marque closeSuggested=true (détection
 // de résolution). La Hotline valide ici → SOLVED, ou rejette → le ticket reste actif.
 
-// Valider la clôture suggérée : passe le ticket en SOLVED et synchronise GLPI.
+// Valider la clôture suggérée : passe le ticket en SOLVED.
 router.post('/:id/validate-close', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
   const id = Number(req.params.id);
   try {
@@ -1042,22 +942,6 @@ router.post('/:id/validate-close', requirePermission('tickets.approve', ['ADMIN'
     // Boucle de feedback : une clôture validée renforce la réputation de l'expéditeur
     const { recordClosureDecision } = require('../services/senderReputation');
     await recordClosureDecision({ email: existing.sourceEmail, decision: 'APPROVED' }).catch(() => {});
-
-    if (ticket.glpiTicketId) {
-      try {
-        await updateGlpiTicket(ticket.glpiTicketId, { status: 'SOLVED' });
-      } catch (err) {
-        console.error('[ticket.routes] Synchro GLPI clôture validée échouée — mise en file de retry:', err.message);
-        await logEvent(id, 'GLPI_SYNC_FAILED', 'SYSTEM', { action: 'validate-close', error: err.message, queuedRetry: true });
-        const { enqueueGlpiSyncRetry } = require('../services/glpiSyncRetry');
-        await enqueueGlpiSyncRetry({
-          entityType: 'Ticket',
-          entityId: ticket.glpiTicketId,
-          action: 'status:SOLVED',
-          lastError: err.message,
-        }).catch(() => {});
-      }
-    }
 
     emitTicketUpdated(ticket, { status: 'SOLVED', closeSuggested: false });
     notifyRequesterOnStatusChange(id, 'SOLVED');
@@ -1159,19 +1043,6 @@ router.patch('/:id/reassign', requirePermission('tickets.assign', ['ADMIN', 'TEC
     });
 
     emitTicketAssigned(id, ticket.title, Number(assignedToId), 'manual');
-
-    // Mettre à jour GLPI si synchronisé
-    if (ticket.glpiTicketId) {
-      try {
-        const assignee = await prisma.user.findUnique({ where: { id: Number(assignedToId) }, select: { glpiId: true } });
-        if (assignee?.glpiId) {
-          await updateGlpiTicket(ticket.glpiTicketId, { assignedToGlpiId: assignee.glpiId });
-        }
-      } catch (err) {
-        console.error('[ticket.routes] Mise à jour GLPI échouée:', err.message);
-        await logEvent(id, 'GLPI_SYNC_FAILED', 'SYSTEM', { action: 'reassign', error: err.message });
-      }
-    }
 
     return res.json(ticket);
   } catch (err) {
@@ -1305,19 +1176,7 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
     } catch (err) {
       console.error('[ticket.routes] Enregistrement première réponse échoué:', err.message);
     }
-  }
-
-  // Toute action humaine sur le ticket doit se répercuter dans GLPI, pas seulement les emails.
-  if (ticket.glpiTicketId) {
-    try {
-      await addGlpiFollowup(ticket.glpiTicketId, `${followup.author.fullName} :\n\n${req.body.content}`);
-    } catch (err) {
-      console.error('[ticket.routes] Échec ajout followup GLPI:', err.message);
-      await logEvent(ticketId, 'GLPI_SYNC_FAILED', 'SYSTEM', { action: 'followup', error: err.message });
-    }
-  }
-
-  return res.status(201).json({ followup, imageAttachments });
+  }  return res.status(201).json({ followup, imageAttachments });
 });
 
 // Bascule privé/public d'un commentaire (visible uniquement par l'équipe)
@@ -1427,8 +1286,7 @@ router.post('/:id/children', requirePermission('tickets.assign', ['ADMIN', 'TECH
       teamId: parent.teamId,
       assignedToId: parent.assignedToId || null,
       requesterId: parent.requesterId || null,
-      glpiLocationId: parent.glpiLocationId,
-      glpiLocationName: parent.glpiLocationName,
+
       ...(observerIds.length > 0 ? { observers: { connect: observerIds.map((userId) => ({ id: userId })) } } : {}),
     },
   });
@@ -1507,26 +1365,10 @@ router.post('/:id/csat', async (req, res) => {
 router.delete('/:id', requirePermission('tickets.delete', ['ADMIN']), async (req, res) => {
   const id = Number(req.params.id);
   try {
-    const ticket = await prisma.ticket.findUnique({ where: { id }, select: { glpiTicketId: true } });
+    const ticket = await prisma.ticket.findUnique({ where: { id }, select: { id: true } });
     if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
 
-    let glpiDeletionError = null;
-    if (ticket.glpiTicketId) {
-      try {
-        await deleteGlpiTicket(ticket.glpiTicketId);
-      } catch (err) {
-        console.error('[ticket.routes] Suppression GLPI échouée:', err.message);
-        glpiDeletionError = err.message;
-      }
-    }
-
     await prisma.ticket.delete({ where: { id } });
-    // Le ticket ERP est bien supprimé même si GLPI a échoué (cohérent avec le comportement existant),
-    // mais on prévient explicitement l'admin via la réponse plutôt que de le laisser croire à un
-    // nettoyage complet — un ticket fantôme peut subsister côté GLPI à nettoyer manuellement.
-    if (glpiDeletionError) {
-      return res.status(200).json({ warning: `Ticket supprimé côté ERP, mais la suppression dans GLPI a échoué (#${ticket.glpiTicketId}) : ${glpiDeletionError}. Une suppression manuelle dans GLPI est nécessaire.` });
-    }
     return res.status(204).send();
   } catch (err) {
     if (err.code === 'P2025') return res.status(404).json({ error: 'Ticket introuvable' });
@@ -1543,51 +1385,8 @@ router.post('/bulk-delete', requirePermission('tickets.bulkDelete', ['ADMIN']), 
   const ids = req.body.ids.map(Number).filter((n) => !Number.isNaN(n));
   if (ids.length === 0) return res.status(400).json({ error: 'Aucun identifiant valide fourni' });
 
-  const ticketsToDelete = await prisma.ticket.findMany({
-    where: { id: { in: ids } },
-    select: { glpiTicketId: true },
-  });
-
-  const glpiFailures = [];
-  await Promise.all(
-    ticketsToDelete
-      .filter((t) => t.glpiTicketId)
-      .map((t) => deleteGlpiTicket(t.glpiTicketId).catch((err) => {
-        console.error('[ticket.routes] Suppression GLPI échouée:', err.message);
-        glpiFailures.push(t.glpiTicketId);
-      }))
-  );
-
   const result = await prisma.ticket.deleteMany({ where: { id: { in: ids } } });
-  // Mêmes tickets fantômes possibles qu'en suppression unitaire (voir DELETE /:id) — on les liste
-  // explicitement plutôt que de les enterrer dans les logs serveur.
-  return res.json({
-    deleted: result.count,
-    ...(glpiFailures.length > 0 ? { glpiDeletionFailedFor: glpiFailures } : {}),
-  });
-});
-
-// Lier manuellement un ticket GLPI existant à un ticket ERP
-// Utilisé quand la création GLPI automatique retourne 200 vide (bug GLPI 10.0.x)
-router.patch('/:id/glpi-link', requirePermission('tickets.edit', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
-  const id = Number(req.params.id);
-  const { glpiTicketId } = req.body;
-  if (!glpiTicketId || !Number.isInteger(Number(glpiTicketId))) {
-    return res.status(400).json({ error: 'glpiTicketId (nombre) requis' });
-  }
-  try {
-    const ticket = await prisma.ticket.findUnique({ where: { id } });
-    if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
-
-    await prisma.ticket.update({
-      where: { id },
-      data: { glpiTicketId: Number(glpiTicketId), lastGlpiSyncAt: new Date() },
-    });
-    await logEvent(id, 'GLPI_LINKED', req.user.email, { glpiTicketId });
-    return res.json({ success: true, glpiTicketId: Number(glpiTicketId) });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
+  return res.json({ deleted: result.count });
 });
 
 module.exports = router;

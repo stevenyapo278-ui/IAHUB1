@@ -1,5 +1,5 @@
 const prisma = require('../prismaClient');
-const { getGlpiConfig, glpiInitSession, glpiKillSession } = require('../utils/glpiSync');
+
 
 /* ── Helper : décoder les entités HTML provenant de GLPI ────────────── */
 // Note : GLPI stocke souvent les caractères > < & sous forme d'entités HTML

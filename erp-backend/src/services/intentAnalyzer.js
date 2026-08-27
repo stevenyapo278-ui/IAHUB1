@@ -116,7 +116,7 @@ function daysSince(date) {
 // context.fromEmail/fromName/originalBody/originalSubject servent à créer le nouveau ticket en cas de NEW_ISSUE_IN_THREAD.
 async function applyIntentActions(ticketId, { intent, confidence, newIssueSummary, isAutoReply }, actor = 'AI', context = {}) {
   const { logEvent } = require('./ticketEvent');
-  const { updateGlpiTicket, createTicketFromEmail } = require('./glpiTicketCreator');
+  const { createTicketFromEmail } = require('./ticketCreator');
   const { fromEmail, fromName, emailAccountId, originalBody, originalSubject } = context;
 
   // Réponse automatique détectée (auto-reply, disclaimer, accusé système) : on ne change rien au statut,

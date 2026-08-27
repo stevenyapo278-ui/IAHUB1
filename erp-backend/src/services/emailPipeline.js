@@ -2,7 +2,7 @@ const prisma = require('../prismaClient');
 const { getIO } = require('../utils/socket');
 const { pollAllAccounts } = require('./emailPoller');
 const { analyzeEmail } = require('./mailAnalyzer');
-const { createTicketFromEmail, addGlpiFollowup } = require('./glpiTicketCreator');
+const { createTicketFromEmail } = require('./ticketCreator');
 const { findExistingTicket } = require('./conversationMatcher');
 const { findSimilarOpenTicket, attachSiteToTicket, saveTicketEmbedding } = require('./similarIncidentDetector');
 const { analyzeIntent, applyIntentActions } = require('./intentAnalyzer');
@@ -43,14 +43,14 @@ function isTransientError(err) {
 
 // Selon le réglage "Auto-envoi des emails sans validation humaine" (Paramètres > Automatisation) :
 // envoie directement l'email, ou crée un AiEmailDraft en attente d'approbation comme aujourd'hui.
-async function dispatchOrQueueEmail({ ticketId, glpiTicketId, recipientEmail, ccRecipients, subject, html, draftType, inReplyToGraphMessageId, outlookConversationId }) {
+async function dispatchOrQueueEmail({ ticketId, recipientEmail, ccRecipients, subject, html, draftType, inReplyToGraphMessageId, outlookConversationId }) {
   const settings = await getSystemSettings();
   if (settings.autoSendAiEmails) {
     await sendEmail({ ticketId, to: recipientEmail, cc: ccRecipients, subject, bodyHtml: html, saveAsMessage: true, inReplyToGraphMessageId, conversationId: outlookConversationId });
     await logEvent(ticketId, 'EMAIL_SENT', 'AI', { to: recipientEmail, cc: ccRecipients, subject, autoSent: true });
   } else {
     await prisma.aiEmailDraft.create({
-      data: { ticketId, glpiTicketId, recipientEmail, ccRecipients, subject, proposedContent: html, inReplyToGraphMessageId, outlookConversationId },
+      data: { ticketId, recipientEmail, ccRecipients, subject, proposedContent: html, inReplyToGraphMessageId, outlookConversationId },
     });
     await logEvent(ticketId, 'AI_DRAFT_GENERATED', 'AI', { type: draftType });
   }
@@ -150,28 +150,17 @@ async function processMessage(message, account) {
 
       const { cidMap } = await processIncomingAttachments({
         account, graphMessageId, incomingEmailId: incoming.id,
-        ticketId: match.ticketId, glpiTicketId: ticket?.glpiTicketId,
+        ticketId: match.ticketId,
         simulatedAttachments: message.simulatedAttachments,
         bodyText: cleanBody,
       });
 
-      // Réécrit les références cid: dans le bodyHtml pour pointer vers le proxy GLPI
       const rewrittenHtml = rewriteCidRefs(ticketMsg.bodyHtml, cidMap);
       if (rewrittenHtml !== ticketMsg.bodyHtml) {
         await prisma.ticketMessage.update({
           where: { id: ticketMsg.id },
           data: { bodyHtml: rewrittenHtml },
         });
-      }
-
-      // Répercute la réponse de l'utilisateur dans GLPI (pas seulement le mail initial à la création) :
-      // sans ça, les échanges ultérieurs n'apparaissent jamais dans l'interface GLPI.
-      if (ticket?.glpiTicketId) {
-        try {
-          await addGlpiFollowup(ticket.glpiTicketId, `Email de ${fromName || fromEmail} <${fromEmail}> :\n\n${cleanBody}`);
-        } catch (err) {
-          console.error('[emailPipeline] Échec ajout followup GLPI:', err.message);
-        }
       }
 
       await logEvent(match.ticketId, 'EMAIL_RECEIVED', fromEmail, { subject, method: match.method });
@@ -236,10 +225,9 @@ async function processMessage(message, account) {
             await prisma.aiEmailDraft.create({
               data: {
                 ticketId: match.ticketId,
-                glpiTicketId: ticketForFollowup?.glpiTicketId,
                 recipientEmail: fromEmail,
                 ccRecipients,
-                subject: `[Ticket #${ticketForFollowup?.glpiTicketId}] ${subject}`,
+                subject: `[Ticket #${match.ticketId}] ${subject}`,
                 proposedContent: followupHtml,
                 draftKind: 'CONVERSATION_FOLLOWUP',
                 exchangeTurn: nextExchangeTurn,
@@ -256,7 +244,6 @@ async function processMessage(message, account) {
         }
       }
 
-      // Si réouverture, noter dans GLPI
       if (match.method === 'REOPEN') {
         await logEvent(match.ticketId, 'REOPENED', fromEmail, { conversationId });
         await prisma.ticket.update({ where: { id: match.ticketId }, data: { status: 'OPEN', closedAt: null } });
@@ -415,17 +402,16 @@ async function processMessage(message, account) {
       const updatedTicket = await prisma.ticket.update({
         where: { id: similarMatch.ticketId },
         data: { lastUserReplyAt: receivedAt },
-        select: { glpiTicketId: true, impactedSites: true, isMajorIncident: true },
+        select: { impactedSites: true, isMajorIncident: true },
       });
 
       const { cidMap } = await processIncomingAttachments({
         account, graphMessageId, incomingEmailId: incoming.id,
-        ticketId: similarMatch.ticketId, glpiTicketId: updatedTicket.glpiTicketId,
+        ticketId: similarMatch.ticketId,
         simulatedAttachments: message.simulatedAttachments,
         bodyText: cleanBody,
       });
 
-      // Réécrit les références cid: dans le bodyHtml pour pointer vers le proxy GLPI
       const rewrittenHtml = rewriteCidRefs(ticketMsg.bodyHtml, cidMap);
       if (rewrittenHtml !== ticketMsg.bodyHtml) {
         await prisma.ticketMessage.update({
@@ -434,19 +420,10 @@ async function processMessage(message, account) {
         });
       }
 
-      if (updatedTicket.glpiTicketId) {
-        try {
-          await addGlpiFollowup(updatedTicket.glpiTicketId, `Email de ${fromName || fromEmail} <${fromEmail}> (site impacté supplémentaire) :\n\n${cleanBody}`);
-        } catch (err) {
-          console.error('[emailPipeline] Échec ajout followup GLPI:', err.message);
-        }
-      }
-
       // Notification "incident déjà connu" — envoyée directement ou mise en attente d'approbation
       // selon le réglage Paramètres > Automatisation > Auto-envoi des emails IA.
       const knownIncidentHtml = buildKnownIncidentNotificationHtml({
         toName: fromName,
-        glpiTicketId: updatedTicket.glpiTicketId,
         originalSubject: similarMatch.ticketTitle,
         isMajor: updatedTicket.isMajorIncident,
         impactedCount: updatedTicket.impactedSites.length,
@@ -454,10 +431,9 @@ async function processMessage(message, account) {
       });
       await dispatchOrQueueEmail({
         ticketId: similarMatch.ticketId,
-        glpiTicketId: updatedTicket.glpiTicketId,
         recipientEmail: fromEmail,
         ccRecipients,
-        subject: `[Ticket #${updatedTicket.glpiTicketId}] ${similarMatch.ticketTitle}`,
+        subject: `[Ticket #${similarMatch.ticketId}] ${similarMatch.ticketTitle}`,
         html: knownIncidentHtml,
         draftType: 'KNOWN_INCIDENT',
         inReplyToGraphMessageId: graphMessageId,
@@ -488,35 +464,18 @@ async function processMessage(message, account) {
     let locationId = null;
     let resolvedLocationName = null; // nom du lieu finalement retenu (pour cohérence du titre)
 
-    // 1. Vérifier si l'expéditeur a un lieu connu (appris des corrections Hotline)
-    const knownLinks = fromEmail
-      ? await prisma.requesterLocation.findMany({
-          where: { email: fromEmail.toLowerCase().trim() },
-          include: { glpiLocation: { select: { glpiLocationId: true, name: true, completename: true } } },
-          orderBy: { assignmentCount: 'desc' },
-          take: 3,
-        })
-      : [];
-
-    // 2. Suggestion IA (peut override l'historique du demandeur)
+    // 1. Suggestion IA (peut override l'historique du demandeur)
     if (analysis.location) {
       const loc = await prisma.glpiLocation.findFirst({
         where: { completename: analysis.location },
-        select: { glpiLocationId: true, name: true, completename: true },
+        select: { id: true, name: true, completename: true },
       });
       if (loc) {
-        locationId = loc.glpiLocationId;
         resolvedLocationName = loc.name || loc.completename;
       }
     }
 
-    // 3. Fallback : si l'IA n'a rien trouvé mais qu'on a un historique, utiliser le lieu connu
-    if (!locationId && knownLinks.length > 0) {
-      locationId = knownLinks[0].glpiLocation.glpiLocationId;
-      resolvedLocationName = knownLinks[0].glpiLocation.name || knownLinks[0].glpiLocation.completename;
-    }
-
-    // 4. Aligner le titre avec le lieu résolu pour éviter toute incohérence SITE ≠ LIEU
+    // 2. Aligner le titre avec le lieu résolu pour éviter toute incohérence SITE ≠ LIEU
     //    Si le titre IA contient " : " (format "SITE : ACTION"), on remplace la partie SITE
     //    par le nom du lieu réellement assigné dès lors que les deux diffèrent.
     if (resolvedLocationName && analysis.suggestedTitle && analysis.suggestedTitle.includes(' : ')) {
@@ -531,11 +490,10 @@ async function processMessage(message, account) {
       }
     }
 
-    // Étape 3 : créer ticket GLPI + ERP dans une transaction pour éviter l'incohérence
-    // Vérifier la réputation de l'expéditeur (boucle de rétroaction : taux de rejets humains)
+    // Étape 3 : créer ticket ERP dans une transaction
     const lowTrustSender = await isLowTrustSender(fromEmail).catch(() => false);
 
-    const { glpiTicketId, erpTicketId, ticketMessageId } = await prisma.$transaction(async (tx) => {
+    const { erpTicketId, ticketMessageId } = await prisma.$transaction(async (tx) => {
       const created = await createTicketFromEmail({
         subject, body: bodyPreview, from: fromEmail, fromName, analysis, emailAccountId: account.id, locationId, lowTrustSender, tx,
         escalateMinutes: ruleMatch?.autoEscalateMinutes || null,
@@ -569,7 +527,7 @@ async function processMessage(message, account) {
         },
       });
 
-      await logEvent(created.erpTicketId, 'CREATED', fromEmail, { glpiTicketId: created.glpiTicketId, source: 'EMAIL' }, tx);
+      await logEvent(created.erpTicketId, 'CREATED', fromEmail, { source: 'EMAIL' }, tx);
       await logEvent(created.erpTicketId, 'AI_ANALYZED', 'AI', { analysis }, tx);
 
       // Expéditeur dégradé par la boucle de rétroaction (taux de rejets élevé) : tracer pour la Hotline
@@ -584,7 +542,7 @@ async function processMessage(message, account) {
 
     const { cidMap } = await processIncomingAttachments({
       account, graphMessageId, incomingEmailId: incoming.id,
-      ticketId: erpTicketId, glpiTicketId,
+      ticketId: erpTicketId,
       simulatedAttachments: message.simulatedAttachments,
       bodyText: cleanBody,
     });
@@ -638,10 +596,9 @@ async function processMessage(message, account) {
     });
     await dispatchOrQueueEmail({
       ticketId: erpTicketId,
-      glpiTicketId,
       recipientEmail: fromEmail,
       ccRecipients,
-      subject: `[Ticket #${glpiTicketId || erpTicketId || 'N/A'}] ${subject}`,
+      subject: `[Ticket #${erpTicketId}] ${subject}`,
       html: acknowledgementHtml,
       draftType: 'ACKNOWLEDGEMENT',
       inReplyToGraphMessageId: graphMessageId,
@@ -651,7 +608,7 @@ async function processMessage(message, account) {
     const updated = await prisma.incomingEmail.update({
       where: { id: incoming.id },
       data: {
-        status: 'DONE', glpiTicketId, erpTicketId, isNewTicket: true,
+        status: 'DONE', erpTicketId, isNewTicket: true,
         aiSummary: analysis.summary, aiCategory: analysis.category,
         aiPriority: analysis.priority, aiTeam: analysis.team,
         aiConfidence: analysis.confidence, aiIsSpam: false,

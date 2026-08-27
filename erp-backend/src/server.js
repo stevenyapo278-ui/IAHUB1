@@ -5,9 +5,7 @@ const https = require('https');
 const fs = require('fs');
 const { initSocket } = require('./utils/socket');
 const { syncAllProviders } = require('./utils/modelSync');
-const { syncGlpiTickets } = require('./utils/glpiSync');
 const { runEmailPipeline } = require('./services/emailPipeline');
-const { syncTeamsFromGlpi, syncCategoriesFromGlpi, syncLocationsFromGlpi, syncUsersFromGlpi, syncAssetsFromGlpi } = require('./services/glpiTicketCreator');
 const { getSystemSettings } = require('./services/systemSettings');
 const { runDraftReminderScheduler } = require('./services/draftReminderScheduler');
 const { runReminderScheduler } = require('./services/reminderScheduler');
@@ -75,20 +73,6 @@ server.listen(PORT, () => {
   }
 });
 
-async function syncGlpiTeamsAndCategories() {
-  await syncTeamsFromGlpi();
-  await syncCategoriesFromGlpi();
-  await syncUsersFromGlpi();
-}
-
-async function syncGlpiLocationsOnly() {
-  await syncLocationsFromGlpi();
-}
-
-async function syncGlpiAssetsOnly() {
-  await syncAssetsFromGlpi();
-}
-
 // Lance périodiquement `syncFn`, en relisant à chaque cycle la fréquence configurée via
 // `getIntervalSeconds(settings)` (Paramètres > Automatisation > Fréquences de synchronisation).
 // Un changement dans l'UI s'applique donc au prochain cycle, sans redémarrer le serveur.
@@ -115,11 +99,7 @@ function scheduleSync(name, syncFn, getIntervalSeconds) {
   tick();
 }
 
-scheduleSync('tickets GLPI', syncGlpiTickets, (s) => s.glpiTicketsSyncIntervalSeconds);
 scheduleSync('emails entrants', runEmailPipeline, (s) => s.emailSyncIntervalSeconds);
-scheduleSync('équipes/catégories GLPI', syncGlpiTeamsAndCategories, (s) => s.glpiTeamsCategoriesSyncIntervalMinutes * 60);
-scheduleSync('lieux GLPI', syncGlpiLocationsOnly, (s) => s.glpiLocationsSyncIntervalMinutes * 60);
-scheduleSync('assets GLPI', syncGlpiAssetsOnly, () => 24 * 3600);
 scheduleSync('modèles IA', syncAllProviders, (s) => s.aiModelsSyncIntervalHours * 3600);
 
 // Annuaire Active Directory : reflète les utilisateurs AD dans IA Hub toutes les
@@ -131,11 +111,6 @@ if (isLdapSyncConfigured()) {
 } else {
   logger.info('[server] Synchro annuaire LDAP inactive (LDAP_BIND_PASSWORD/LDAP_BASE_DN non configurés)');
 }
-
-// File de retry GLPI : rejoue les actions différées qui ont échoué (ex. clôture validée par la
-// Hotline pendant une indisponibilité GLPI) — toutes les 5 minutes, backoff exponentiel interne.
-const { processGlpiSyncRetries } = require('./services/glpiSyncRetry');
-scheduleSync('retry GLPI', processGlpiSyncRetries, () => 300);
 
 // Santé des suggestions de clôture : si le taux d'acceptation par la Hotline passe sous 50 %
 // sur la fenêtre de 30 jours (3 contrôles consécutifs), alerte email aux admins — la détection

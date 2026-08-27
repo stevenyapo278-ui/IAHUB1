@@ -3,13 +3,12 @@ const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
-const { syncLocationsFromGlpi, createGlpiLocation, updateGlpiLocation } = require('../services/glpiTicketCreator');
 const { auditLog } = require('../services/auditLogService');
 
 const router = express.Router();
 router.use(authenticate);
 
-// Liste tous les lieux (GLPI + customs)
+// Liste tous les lieux
 router.get('/', async (req, res) => {
   const { active, search } = req.query;
   const where = {};
@@ -32,7 +31,7 @@ router.get('/', async (req, res) => {
   res.json(locations);
 });
 
-// Créer un lieu custom (et le push vers GLPI si configuré)
+// Créer un lieu
 router.post(
   '/',
   requirePermission('locations.manage', ['ADMIN', 'HOTLINE']),
@@ -48,18 +47,10 @@ router.post(
     });
     if (existing) return res.status(409).json({ error: 'Un lieu avec ce nom existe déjà' });
 
-    let glpiLocationId = null;
-    try {
-      glpiLocationId = await createGlpiLocation({ name, completename, address, postcode, town, country, building, room });
-    } catch (err) {
-      console.error('[location.routes] Échec création lieu GLPI:', err.message);
-    }
-
     const location = await prisma.glpiLocation.create({
       data: {
         name,
         completename: completename || name,
-        glpiLocationId: glpiLocationId || null,
         isCustom: true,
         address: address || null,
         postcode: postcode || null,
@@ -70,12 +61,8 @@ router.post(
       },
     });
 
-    res.status(201).json({
-      ...location,
-      glpiSyncStatus: glpiLocationId ? 'synced' : 'pending',
-    });
-
-    auditLog('LOCATION_CREATED', { actor: req.user, targetType: 'GlpiLocation', targetId: location.id, targetLabel: name, metadata: { glpiLocationId, town } }).catch(() => {});
+    res.status(201).json(location);
+    auditLog('LOCATION_CREATED', { actor: req.user, targetType: 'GlpiLocation', targetId: location.id, targetLabel: name, metadata: { town } }).catch(() => {});
   }
 );
 
@@ -101,15 +88,6 @@ router.patch(
     if (room !== undefined) data.room = room;
     if (isActive !== undefined) data.isActive = isActive;
 
-    // Push les modifs vers GLPI si le lieu est synced
-    if (existing.glpiLocationId && Object.keys(data).some((k) => k !== 'isActive')) {
-      try {
-        await updateGlpiLocation(existing.glpiLocationId, data);
-      } catch (err) {
-        console.error('[location.routes] Échec mise à jour lieu GLPI:', err.message);
-      }
-    }
-
     const location = await prisma.glpiLocation.update({ where: { id }, data });
     res.json(location);
     auditLog('LOCATION_UPDATED', { actor: req.user, targetType: 'GlpiLocation', targetId: id, targetLabel: existing.name, metadata: { changedFields: Object.keys(data) } }).catch(() => {});
@@ -125,45 +103,6 @@ router.delete('/:id', requirePermission('locations.manage', ['ADMIN']), async (r
   await prisma.glpiLocation.update({ where: { id }, data: { isActive: false } });
   await auditLog('LOCATION_DEACTIVATED', { actor: req.user, targetType: 'GlpiLocation', targetId: id, targetLabel: existing.name });
   res.status(204).send();
-});
-
-// Pousser un lieu custom vers GLPI (rattrapage si la création initiale a échoué)
-router.post('/:id/push-to-glpi', requirePermission('locations.manage', ['ADMIN', 'HOTLINE']), async (req, res) => {
-  const id = Number(req.params.id);
-  const location = await prisma.glpiLocation.findUnique({ where: { id } });
-  if (!location) return res.status(404).json({ error: 'Lieu introuvable' });
-  if (location.glpiLocationId) return res.status(400).json({ error: 'Ce lieu est déjà synchronisé avec GLPI' });
-
-  try {
-    const glpiLocationId = await createGlpiLocation({
-      name: location.name,
-      completename: location.completename,
-      address: location.address,
-      postcode: location.postcode,
-      town: location.town,
-      country: location.country,
-      building: location.building,
-      room: location.room,
-    });
-
-    await prisma.glpiLocation.update({ where: { id }, data: { glpiLocationId } });
-    await auditLog('LOCATION_PUSHED_TO_GLPI', { actor: req.user, targetType: 'GlpiLocation', targetId: id, targetLabel: location.name, metadata: { glpiLocationId } });
-    res.json({ glpiLocationId });
-  } catch (err) {
-    res.status(502).json({ error: err.message || 'Erreur de push vers GLPI' });
-  }
-});
-
-// Sync manuelle depuis GLPI
-router.post('/sync-glpi', requirePermission('locations.manage', ['ADMIN']), async (req, res) => {
-  try {
-    const result = await syncLocationsFromGlpi();
-    if (result === null) return res.status(422).json({ error: 'GLPI non configuré' });
-    res.json({ synced: result });
-    auditLog('LOCATIONS_SYNCED_FROM_GLPI', { actor: req.user, targetType: 'GlpiLocation', targetLabel: 'Synchronisation manuelle des lieux GLPI', metadata: { synced: result } }).catch(() => {});
-  } catch (err) {
-    res.status(502).json({ error: err.message || 'Erreur de synchronisation GLPI' });
-  }
 });
 
 // ── Associations expéditeur ↔ lieu ─────────────────────────────────────

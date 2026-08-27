@@ -1,22 +1,17 @@
 const prisma = require('../prismaClient');
 const { logEvent } = require('./ticketEvent');
-const { updateGlpiTicket } = require('./glpiTicketCreator');
+
 const { processApprovalReminders } = require('./approvalReminderScheduler');
 
 function daysSince(date) {
   return Math.floor((Date.now() - new Date(date).getTime()) / (1000 * 60 * 60 * 24));
 }
 
-function buildReminderDraftBody({ toName, glpiTicketId, subject, isPreClose }) {
+function buildReminderDraftBody({ toName, ticketId, subject, isPreClose }) {
   if (isPreClose) {
-    return `<p>Bonjour ${toName || ''},</p>
-<p>Sans réponse de votre part dans les 5 prochains jours, votre ticket <strong>#${glpiTicketId}</strong> (${subject}) sera automatiquement clôturé.</p>
-<p>Si le problème est résolu, vous n'avez rien à faire. Sinon, répondez à cet email.</p>`;
+    return `<p>Bonjour ${toName || ''},</p>\n<p>Sans réponse de votre part dans les 5 prochains jours, votre ticket <strong>#${ticketId}</strong> (${subject}) sera automatiquement clôturé.</p>\n<p>Si le problème est résolu, vous n'avez rien à faire. Sinon, répondez à cet email.</p>`;
   }
-  return `<p>Bonjour ${toName || ''},</p>
-<p>Nous revenons vers vous concernant votre ticket <strong>#${glpiTicketId}</strong> : ${subject}.</p>
-<p>Votre demande est toujours en attente. Pouvez-vous nous confirmer si le problème est résolu ou s'il persiste ?</p>
-<p>Répondez simplement à cet email.</p>`;
+  return `<p>Bonjour ${toName || ''},</p>\n<p>Nous revenons vers vous concernant votre ticket <strong>#${ticketId}</strong> : ${subject}.</p>\n<p>Votre demande est toujours en attente. Pouvez-vous nous confirmer si le problème est résolu ou s'il persiste ?</p>\n<p>Répondez simplement à cet email.</p>`;
 }
 
 async function runReminderScheduler() {
@@ -51,13 +46,6 @@ async function runReminderScheduler() {
           data: { status: 'CLOSED', closedAt: new Date() },
         });
         await logEvent(ticket.id, 'CLOSED_AUTO', 'SYSTEM', { reason: 'no_response', daysSinceLastReply: since });
-        if (ticket.glpiTicketId) {
-          try {
-            await updateGlpiTicket(ticket.glpiTicketId, { status: 'CLOSED' });
-          } catch (err) {
-            console.error('[reminderScheduler] Échec synchro statut GLPI:', err.message);
-          }
-        }
         results.push({ ticketId: ticket.id, action: 'AUTO_CLOSED' });
         continue;
       }
@@ -72,12 +60,11 @@ async function runReminderScheduler() {
           await prisma.aiEmailDraft.create({
             data: {
               ticketId: ticket.id,
-              glpiTicketId: ticket.glpiTicketId,
               recipientEmail: ticket.sourceEmail,
               recipientName: ticket.sourceName || ticket.sourceEmail,
-              subject: `[Ticket #${ticket.glpiTicketId || ticket.id}] ${ticket.title}`,
+              subject: `[Ticket #${ticket.id}] ${ticket.title}`,
               proposedContent: buildReminderDraftBody({
-                toName: ticket.sourceName, glpiTicketId: ticket.glpiTicketId || ticket.id,
+                toName: ticket.sourceName, ticketId: ticket.id,
                 subject: ticket.title, isPreClose: true,
               }),
               draftKind: 'REMINDER',
@@ -94,12 +81,11 @@ async function runReminderScheduler() {
           await prisma.aiEmailDraft.create({
             data: {
               ticketId: ticket.id,
-              glpiTicketId: ticket.glpiTicketId,
               recipientEmail: ticket.sourceEmail,
               recipientName: ticket.sourceName || ticket.sourceEmail,
-              subject: `[Ticket #${ticket.glpiTicketId || ticket.id}] ${ticket.title}`,
+              subject: `[Ticket #${ticket.id}] ${ticket.title}`,
               proposedContent: buildReminderDraftBody({
-                toName: ticket.sourceName, glpiTicketId: ticket.glpiTicketId || ticket.id,
+                toName: ticket.sourceName, ticketId: ticket.id,
                 subject: ticket.title, isPreClose: false,
               }),
               draftKind: 'REMINDER',
@@ -116,12 +102,11 @@ async function runReminderScheduler() {
           await prisma.aiEmailDraft.create({
             data: {
               ticketId: ticket.id,
-              glpiTicketId: ticket.glpiTicketId,
               recipientEmail: ticket.sourceEmail,
               recipientName: ticket.sourceName || ticket.sourceEmail,
-              subject: `[Ticket #${ticket.glpiTicketId || ticket.id}] ${ticket.title}`,
+              subject: `[Ticket #${ticket.id}] ${ticket.title}`,
               proposedContent: buildReminderDraftBody({
-                toName: ticket.sourceName, glpiTicketId: ticket.glpiTicketId || ticket.id,
+                toName: ticket.sourceName, ticketId: ticket.id,
                 subject: ticket.title, isPreClose: false,
               }),
               draftKind: 'REMINDER',

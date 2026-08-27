@@ -16,7 +16,6 @@ export const PERMISSION_DEFINITIONS = [
   { key: 'settings.integrations', label: 'Paramètres : Autres intégrations' },
   { key: 'knowledge.manage', label: 'Gérer la base de connaissances' },
   { key: 'inbox.sync', label: 'Synchroniser la boîte mail' },
-  { key: 'glpi.manage', label: 'Gérer la synchronisation GLPI' },
   { key: 'prompts.manage', label: 'Modifier les prompts IA' },
   { key: 'emaildrafts.manage', label: 'Approuver / rejeter les réponses email IA' },
   { key: 'aiweeklyreports.manage', label: "Valider les rapports hebdo & patterns d'apprentissage IA (Hotline)" },
