@@ -1,10 +1,10 @@
 const prisma = require('../prismaClient');
 
-// Colonne pgvector figée à 1024 dimensions (cf. prisma/schema.prisma — choisi pour matcher les
-// modèles d'embedding NVIDIA NIM disponibles en l'absence de clé Gemini/OpenAI) — chaque candidat
+// Colonne pgvector figée à 768 dimensions (cf. prisma/schema.prisma — choisi pour matcher
+// Gemini text-embedding-004 qui produit nativement 768 dimensions) — chaque candidat
 // d'embeddings essayé ci-dessous doit produire un vecteur de cette taille, sinon il est écarté
 // et le candidat suivant est tenté (load balancing par compatibilité, pas seulement par priorité).
-const EMBEDDING_DIMENSIONS = 1024;
+const EMBEDDING_DIMENSIONS = 768;
 
 // Anthropic n'a pas d'API d'embeddings — toujours ignoré pour cet usage, même actif/avec clé.
 const PROVIDERS_WITHOUT_EMBEDDINGS = new Set(['anthropic']);
@@ -64,7 +64,11 @@ async function embedWithGemini(config, text) {
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.apiKey },
     body: JSON.stringify({ model: `models/${config.model}`, content: { parts: [{ text }] } }),
   });
-  if (!res.ok) throw new Error(`Échec de la génération d'embedding Gemini (${res.status})`);
+  if (!res.ok) {
+    let detail = '';
+    try { const err = await res.json(); detail = err?.error?.message || JSON.stringify(err); } catch {}
+    throw new Error(`Gemini ${res.status} : ${detail || res.statusText} (vérifiez la clé API et l'activation de l'API Embedding dans Google AI Studio)`);
+  }
   const data = await res.json();
   return data.embedding.values;
 }
@@ -102,7 +106,7 @@ async function essaiEmbedding(config, text) {
   return vector;
 }
 
-// Génère l'embedding (vecteur de 1024 dimensions) d'un texte en essayant TOUS les fournisseurs/
+// Génère l'embedding (vecteur de 768 dimensions) d'un texte en essayant TOUS les fournisseurs/
 // modèles actifs disponibles dans l'ordre, et en gardant le premier qui produit un vecteur
 // compatible — load balancing par compatibilité : un fournisseur incompatible (mauvaise taille,
 // clé invalide, quota dépassé) ne bloque pas la génération si un autre fournisseur actif convient.

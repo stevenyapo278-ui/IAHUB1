@@ -362,7 +362,7 @@ model Ticket {
   reminderSentAt        DateTime?
   reminderCount         Int       @default(0)
   aiSummary             String?
-  contentEmbedding      Unsupported("vector(1024)")?
+  contentEmbedding      Unsupported("vector(768)")?
 
   // Garde-fous sur l'analyse d'intention automatique des réponses email
   splitCount            Int       @default(0) // nombre de tickets déjà créés par scission depuis ce ticket
@@ -1042,7 +1042,7 @@ model KnowledgeChunk {
   documentId  Int
   chunkIndex  Int
   content     String
-  embedding   Unsupported("vector(1024)")?
+  embedding   Unsupported("vector(768)")?
   createdAt   DateTime          @default(now())
 
   @@index([documentId])
@@ -1194,7 +1194,7 @@ model TicketSimilarityIndex {
   summary          String
   bodyShort        String
   content          String
-  embedding        Unsupported("vector(1024)")?
+  embedding        Unsupported("vector(768)")?
   status           String
   requesterEmail   String
   metadata         Json?
