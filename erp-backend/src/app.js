@@ -36,6 +36,7 @@ const chatbotRoutes = require('./routes/chatbot.routes');
 const logsRoutes = require('./routes/logs.routes');
 const auditLogRoutes = require('./routes/auditLog.routes');
 const locationRoutes = require('./routes/location.routes');
+const categoriesRoutes = require('./routes/categories.routes');
 const { allBreakerStatuses } = require('./utils/circuitBreaker');
 
 const aiWeeklyReportRoutes = require('./routes/aiweeklyreport.routes');
@@ -186,6 +187,7 @@ app.use('/api/reassignments', reassignmentRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/triage-rules', apiCache(30), triageRuleRoutes);
 app.use('/api/locations', apiCache(60), locationRoutes);
+app.use('/api/categories', apiCache(30), categoriesRoutes);
 app.use('/api/ai-weekly-reports', aiWeeklyReportRoutes);
 app.use('/api/chat', chatbotRoutes);
 app.use('/api/logs', logsRoutes);

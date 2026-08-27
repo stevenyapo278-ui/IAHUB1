@@ -18,11 +18,11 @@ export default function Categories() {
   const [expanded, setExpanded] = useState(new Set()); // ids des nœuds dépliés
   const [pendingDelete, setPendingDelete] = useState(null);
 
-  const canManage = hasPermission(user, 'glpi.manage');
+  const canManage = hasPermission(user, 'tickets.manage');
 
   function loadCategories() {
     setLoading(true);
-    api.get('/glpi/categories')
+    api.get('/categories')
       .then(({ data }) => setCategories(data))
       .catch((err) => toast.error(err.response?.data?.error || 'Erreur chargement catégories'))
       .finally(() => setLoading(false));
@@ -62,7 +62,7 @@ export default function Categories() {
     e.preventDefault();
     if (!form.name.trim()) return;
     try {
-      await api.post('/glpi/categories', { name: form.name.trim(), parentId: form.parentId ? Number(form.parentId) : null });
+      await api.post('/categories', { name: form.name.trim(), parentId: form.parentId ? Number(form.parentId) : null });
       toast.success(`Catégorie \"${form.name.trim()}\" créée`);
       setShowForm(false);
       setForm({ name: '', parentId: '' });
@@ -76,7 +76,7 @@ export default function Categories() {
     e.preventDefault();
     if (!form.name.trim() || !editing) return;
     try {
-      await api.patch(`/glpi/categories/${editing.id}`, { name: form.name.trim(), parentId: form.parentId ? Number(form.parentId) : null });
+      await api.patch( `/categories/${editing.id}`, { name: form.name.trim(), parentId: form.parentId ? Number(form.parentId) : null });
       toast.success(`Catégorie mise à jour`);
       setEditing(null);
       setForm({ name: '', parentId: '' });
@@ -89,7 +89,7 @@ export default function Categories() {
   async function handleDelete() {
     if (!pendingDelete) return;
     try {
-      await api.delete(`/glpi/categories/${pendingDelete.id}`);
+      await api.delete( `/categories/${pendingDelete.id}`);
       toast.success(`Catégorie \"${pendingDelete.name}\" supprimée`);
       setPendingDelete(null);
       loadCategories();
@@ -137,7 +137,7 @@ export default function Categories() {
           <span className={`text-[10px] px-2 py-0.5 rounded-full border font-bold shrink-0 ${cat.isCustom
             ? 'bg-purple-500/10 text-purple-500 border-purple-500/20'
             : 'bg-blue-500/10 text-blue-500 border-blue-500/20'}`}>
-            {cat.isCustom ? 'Locale' : 'GLPI'}
+            {cat.isCustom ? 'Locale' : 'Sync'}
           </span>
 
           {canManage && (
@@ -266,7 +266,7 @@ export default function Categories() {
               <span className={`text-[10px] px-2 py-0.5 rounded-full border font-bold ${cat.isCustom
                 ? 'bg-purple-500/10 text-purple-500 border-purple-500/20'
                 : 'bg-blue-500/10 text-blue-500 border-blue-500/20'}`}>
-                {cat.isCustom ? 'Locale' : 'GLPI'}
+                {cat.isCustom ? 'Locale' : 'Sync'}
               </span>
               {canManage && (
                 <div className="flex gap-1 shrink-0">
