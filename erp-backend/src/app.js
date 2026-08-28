@@ -207,6 +207,11 @@ app.use('/api/advanced-settings', advancedSettingsRoutes);
 app.use('/api/prompt-templates', promptTemplateRoutes);
 app.use('/api/skills', apiCache(30), skillRoutes);
 app.use('/api/reassignments', reassignmentRoutes);
+
+// Routes GLPI stubs — compatibilité avec l'ancien frontend qui les appelle encore
+app.get('/api/glpi/users', (req, res) => res.json([]));
+app.get('/api/glpi/locations', (req, res) => res.json([]));
+app.get('/api/glpi/categories', (req, res) => res.json([]));
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/triage-rules', apiCache(30), triageRuleRoutes);
 app.use('/api/locations', apiCache(60), locationRoutes);
