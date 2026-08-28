@@ -36,6 +36,10 @@ export default function Teams() {
   const [detailSaving, setDetailSaving] = useState(false);
   const [detailError, setDetailError] = useState('');
   const [detailDraft, setDetailDraft] = useState({ name: '', category: '', groupEmail: '', defaultObserverIds: [] });
+  const [allUsers, setAllUsers] = useState([]);
+  const [memberSearch, setMemberSearch] = useState('');
+  const [addingMember, setAddingMember] = useState(false);
+  const [removingMemberId, setRemovingMemberId] = useState(null);
 
   function load() {
     api.get('/teams')
@@ -112,6 +116,63 @@ export default function Teams() {
       toast.error(msg);
     } finally {
       setDetailSaving(false);
+    }
+  }
+
+  // ── Charger les utilisateurs pour l'ajout de membres ─────────────
+  useEffect(() => {
+    if (detailModal) {
+      api.get('/users?all=true')
+        .then(({ data }) => {
+          const list = Array.isArray(data) ? data : (data.users || []);
+          setAllUsers(list.filter(u => u.isActive));
+        })
+        .catch(() => {});
+    }
+  }, [detailModal?.id]);
+
+  // Utilisateurs non-membres de l'équipe actuelle
+  const availableUsers = allUsers.filter(u => {
+    const isMember = detailModal?.members?.some(m => m.id === u.id);
+    if (isMember) return false;
+    if (!memberSearch.trim()) return true;
+    const q = memberSearch.toLowerCase();
+    return [u.fullName, u.email].some(f => f?.toLowerCase().includes(q));
+  });
+
+  // ── Ajouter un membre ─────────────────────────────────────────────
+  async function handleAddMember(userId) {
+    if (!detailModal) return;
+    setAddingMember(true);
+    try {
+      const { data } = await api.post(`/teams/${detailModal.id}/members`, { userId });
+      toast.success(data.message || 'Membre ajouté');
+      // Recharger l'équipe pour avoir la liste à jour
+      const { data: updated } = await api.get(`/teams/${detailModal.id}`);
+      setDetailModal(updated);
+      setMemberSearch('');
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || "Erreur lors de l'ajout");
+    } finally {
+      setAddingMember(false);
+    }
+  }
+
+  // ── Retirer un membre ─────────────────────────────────────────────
+  async function handleRemoveMember(userId) {
+    if (!detailModal) return;
+    setRemovingMemberId(userId);
+    try {
+      const { data } = await api.delete(`/teams/${detailModal.id}/members/${userId}`);
+      toast.success(data.message || 'Membre retiré');
+      const { data: updated } = await api.get(`/teams/${detailModal.id}`);
+      setDetailModal(updated);
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors du retrait');
+    } finally {
+      setRemovingMemberId(null);
     }
   }
 
@@ -430,9 +491,49 @@ export default function Teams() {
                         <Users className="w-3.5 h-3.5 text-blue-500" />
                         Membres ({detailModal.members?.length || 0})
                       </span>
+
+                      {/* Ajouter un membre */}
+                      {canManageTeams && (
+                        <div className="mb-3">
+                          <div className="relative">
+                            <input
+                              value={memberSearch}
+                              onChange={e => setMemberSearch(e.target.value)}
+                              placeholder="Ajouter un membre... (recherche par nom ou email)"
+                              className="w-full pl-3.5 pr-3 py-2 rounded-xl border border-outline-variant/60 bg-surface text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                            />
+                          </div>
+                          {memberSearch && (
+                            <div className="mt-1 max-h-40 overflow-y-auto rounded-xl border border-outline-variant/40 bg-surface-container-lowest shadow-lg">
+                              {availableUsers.length === 0 ? (
+                                <p className="px-3 py-2.5 text-[11px] text-on-surface-variant italic">Aucun utilisateur trouvé</p>
+                              ) : (
+                                availableUsers.slice(0, 10).map(u => (
+                                  <button
+                                    key={u.id}
+                                    onClick={() => handleAddMember(u.id)}
+                                    disabled={addingMember}
+                                    className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-blue-500/5 text-left transition-colors cursor-pointer disabled:opacity-50"
+                                  >
+                                    <div className="w-7 h-7 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 font-bold text-[10px] flex items-center justify-center shrink-0">
+                                      {u.fullName?.charAt(0)?.toUpperCase()}
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <p className="text-xs font-semibold text-on-surface truncate">{u.fullName}</p>
+                                      <p className="text-[10px] text-on-surface-variant truncate">{u.email}</p>
+                                    </div>
+                                    <Plus className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                                  </button>
+                                ))
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       <div className="space-y-1.5">
                         {detailModal.members?.map(m => (
-                          <div key={m.id} className="flex items-center gap-2.5 p-2.5 rounded-xl bg-surface border border-outline-variant/30">
+                          <div key={m.id} className="flex items-center gap-2.5 p-2.5 rounded-xl bg-surface border border-outline-variant/30 group">
                             <div className="w-8 h-8 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-600 font-bold text-[11px] flex items-center justify-center shrink-0">
                               {m.fullName?.charAt(0)?.toUpperCase()}
                             </div>
@@ -440,12 +541,22 @@ export default function Teams() {
                               <p className="text-xs font-semibold text-on-surface truncate">{m.fullName}</p>
                               <p className="text-[10px] text-on-surface-variant font-mono truncate">{m.email}</p>
                             </div>
-                            <div className="text-right shrink-0">
+                            <div className="flex items-center gap-2 shrink-0">
                               <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
                                 m.activeTicketCount > 0 ? 'bg-amber-500/10 text-amber-600' : 'bg-emerald-500/10 text-emerald-600'
                               }`}>
                                 {m.activeTicketCount || 0} ticket{(m.activeTicketCount || 0) > 1 ? 's' : ''}
                               </span>
+                              {canManageTeams && (
+                                <button
+                                  onClick={() => handleRemoveMember(m.id)}
+                                  disabled={removingMemberId === m.id}
+                                  title="Retirer de l'équipe"
+                                  className="p-1.5 rounded-lg text-on-surface/30 hover:text-red-500 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all cursor-pointer disabled:opacity-40"
+                                >
+                                  {removingMemberId === m.id ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
+                                </button>
+                              )}
                             </div>
                           </div>
                         ))}

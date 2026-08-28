@@ -130,4 +130,57 @@ router.delete('/:id', requirePermission('teams.manage', ['ADMIN']), async (req, 
   }
 });
 
+// ── Ajouter un membre à l'équipe ─────────────────────────────────────────
+router.post('/:id/members', requirePermission('teams.manage', ['ADMIN', 'HOTLINE']), async (req, res) => {
+  const { userId } = req.body;
+  if (!userId) return res.status(400).json({ error: 'userId requis' });
+
+  const team = await prisma.team.findUnique({ where: { id: Number(req.params.id) } });
+  if (!team) return res.status(404).json({ error: 'Équipe introuvable' });
+
+  const user = await prisma.user.findUnique({ where: { id: Number(userId) } });
+  if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
+
+  // Si l'utilisateur est déjà dans cette équipe, rien à faire
+  if (user.teamId === team.id) {
+    return res.status(200).json({ message: 'Membre déjà dans cette équipe' });
+  }
+
+  // Si l'utilisateur est dans une autre équipe, on le retire d'abord
+  if (user.teamId && user.teamId !== team.id) {
+    // Pas besoin de retirer, on écrase simplement le teamId
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: Number(userId) },
+    data: { teamId: team.id },
+    select: { id: true, fullName: true, email: true, role: true, teamId: true },
+  });
+
+  cacheStore.clear('GET /api/teams');
+  cacheStore.clear('GET /api/users');
+  auditLog('TEAM_MEMBER_ADDED', { actor: req.user, targetType: 'Team', targetId: team.id, targetLabel: team.name, metadata: { userId: updated.id, userName: updated.fullName } }).catch(() => {});
+  return res.json({ message: `${updated.fullName} ajouté à l'équipe ${team.name}`, user: updated });
+});
+
+// ── Retirer un membre de l'équipe ──────────────────────────────────────────
+router.delete('/:id/members/:userId', requirePermission('teams.manage', ['ADMIN', 'HOTLINE']), async (req, res) => {
+  const team = await prisma.team.findUnique({ where: { id: Number(req.params.id) } });
+  if (!team) return res.status(404).json({ error: 'Équipe introuvable' });
+
+  const user = await prisma.user.findUnique({ where: { id: Number(req.params.userId) } });
+  if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
+  if (user.teamId !== team.id) return res.status(400).json({ error: 'Cet utilisateur n\'est pas dans cette équipe' });
+
+  await prisma.user.update({
+    where: { id: Number(req.params.userId) },
+    data: { teamId: null },
+  });
+
+  cacheStore.clear('GET /api/teams');
+  cacheStore.clear('GET /api/users');
+  auditLog('TEAM_MEMBER_REMOVED', { actor: req.user, targetType: 'Team', targetId: team.id, targetLabel: team.name, metadata: { userId: user.id, userName: user.fullName } }).catch(() => {});
+  return res.json({ message: `${user.fullName} retiré de l'équipe ${team.name}` });
+});
+
 module.exports = router;
