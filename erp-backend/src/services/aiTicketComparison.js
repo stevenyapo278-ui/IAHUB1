@@ -1,4 +1,5 @@
 const prisma = require('../prismaClient');
+const { formatProviderHttpError, compactErrorMessage } = require('../utils/aiErrorFormatter');
 
 
 /* ── Helper : décoder les entités HTML provenant de GLPI ────────────── */
@@ -217,7 +218,7 @@ async function callAI(prompt, maxTokens = 2048) {
     }
   }
 
-  throw new Error(lastError || 'Tous les providers IA ont échoué');
+  throw new Error(lastError ? compactErrorMessage(lastError, 500) : 'Tous les providers IA ont échoué');
 }
 
 async function makeAIRequest(providerName, baseUrl, apiKey, model, prompt, maxTokens) {
@@ -236,7 +237,10 @@ async function makeAIRequest(providerName, baseUrl, apiKey, model, prompt, maxTo
         messages: [{ role: 'user', content: prompt }],
       }),
     });
-    if (!res.ok) throw new Error(`Anthropic ${res.status}: ${await res.text()}`);
+    if (!res.ok) {
+      const bodyText = await res.text();
+      throw new Error(formatProviderHttpError({ label: 'Anthropic', status: res.status, body: bodyText }));
+    }
     const data = await res.json();
     return data.content?.[0]?.text || '';
   }
@@ -263,7 +267,8 @@ async function makeAIRequest(providerName, baseUrl, apiKey, model, prompt, maxTo
           }),
         });
         if (!res.ok) {
-          lastErr = `Gemini ${res.status}: ${await res.text()}`;
+          const bodyText = await res.text();
+          lastErr = formatProviderHttpError({ label: `Gemini (${m})`, status: res.status, body: bodyText });
           continue; // Essayer le prochain modèle de secours
         }
         const data = await res.json();
@@ -291,7 +296,10 @@ async function makeAIRequest(providerName, baseUrl, apiKey, model, prompt, maxTo
       max_tokens: maxTokens,
     }),
   });
-  if (!res.ok) throw new Error(`${providerName} ${res.status}: ${await res.text()}`);
+  if (!res.ok) {
+    const bodyText = await res.text();
+    throw new Error(formatProviderHttpError({ label: providerName, status: res.status, body: bodyText }));
+  }
   const data = await res.json();
   return data.choices?.[0]?.message?.content || '';
 }

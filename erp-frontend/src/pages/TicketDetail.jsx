@@ -45,6 +45,16 @@ const TICKET_SLIDE_VARIANTS = {
   }),
 };
 
+// Couleur d'accent pleine par statut — barre supérieure de la carte ticket et points de timeline
+const STATUS_ACCENT = {
+  NEW: 'bg-blue-500',
+  OPEN: 'bg-indigo-500',
+  PLANNED: 'bg-purple-500',
+  PENDING: 'bg-amber-500',
+  SOLVED: 'bg-emerald-500',
+  CLOSED: 'bg-slate-400',
+};
+
 function AttachmentThumbnail({ ticketId, attachment }) {
   const [blobUrl, setBlobUrl] = useState(null);
 
@@ -64,6 +74,49 @@ function AttachmentThumbnail({ ticketId, attachment }) {
     return <div className="h-20 w-20 border border-outline-variant/60 bg-surface-container-low rounded-xl animate-pulse" />;
   }
   return <img src={blobUrl} alt={attachment.filename} className="h-20 w-20 object-cover border border-outline-variant/60 rounded-xl shadow-sm hover:shadow-md transition-all duration-300" />;
+}
+
+// Tuile d'information compacte (icône + libellé + valeur) — utilisée pour les
+// cartes d'information du ticket (demandeur, équipe, catégorie, lieu, etc.)
+function InfoTile({ icon: Icon, label, value, tone = 'primary', title }) {
+  const toneColor = {
+    primary: 'text-primary',
+    emerald: 'text-emerald-500',
+    amber: 'text-amber-500',
+    violet: 'text-violet-500',
+    slate: 'text-slate-400',
+  }[tone] || 'text-primary';
+
+  return (
+    <div className="flex flex-col gap-1 rounded-xl border border-outline-variant/30 bg-surface-container-low/50 px-3 py-2.5 min-w-0 transition-colors hover:bg-surface-container-low">
+      <span className="flex items-center gap-1.5 text-[9px] font-extrabold uppercase tracking-wider text-on-surface-variant">
+        <Icon className={`w-3 h-3 ${toneColor} shrink-0`} />
+        {label}
+      </span>
+      <span
+        className="text-xs font-bold text-on-surface truncate"
+        title={title || value}
+      >
+        {value || '—'}
+      </span>
+    </div>
+  );
+}
+
+// Puce méta discrète pour la rangée d'informations sous le titre du ticket
+function MetaChip({ icon: Icon, children, tone }) {
+  const toneClass = {
+    red: 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/25',
+    amber: 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30',
+    emerald: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25',
+  }[tone] || 'bg-surface-container-low/70 text-on-surface-variant border-outline-variant/30';
+
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[11px] font-semibold ${toneClass}`}>
+      <Icon className="w-3.5 h-3.5 shrink-0" />
+      <span className="truncate max-w-[220px]">{children}</span>
+    </span>
+  );
 }
 
 export default function TicketDetail() {
@@ -853,7 +906,7 @@ export default function TicketDetail() {
               <div className="flex items-center gap-3">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-sm font-bold text-primary">#{ticket.id}</span>
+                    <span className="font-mono text-sm font-black text-primary bg-primary/10 border border-primary/20 rounded-lg px-2 py-0.5 leading-6">#{ticket.id}</span>
                     {ticket.glpiTicketId && (
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 dark:bg-surface-container-high dark:text-on-surface-variant border border-slate-200 dark:border-outline-variant/40 flex items-center gap-1">
                         <RefreshCw className="w-2.5 h-2.5" />
@@ -892,7 +945,7 @@ export default function TicketDetail() {
                     </div>
                   ) : (
                     <div className="flex items-center gap-2 group/title">
-                      <h1 className="text-lg font-bold text-on-surface leading-snug line-clamp-1">{ticket.title}</h1>
+                      <h1 className="text-xl sm:text-2xl font-black text-on-surface leading-tight tracking-tight line-clamp-2">{ticket.title}</h1>
                       {canEdit && (
                         <button
                           onClick={() => { setEditingTitleValue(ticket.title); setEditingTitle(true); }}
@@ -961,6 +1014,30 @@ export default function TicketDetail() {
               </div>
             </div>
 
+              {/* Méta strip : acteurs, dates et contexte */}
+              <div className="flex flex-wrap items-center gap-2 pb-1">
+                <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-outline-variant/30 bg-surface-container-low/70 text-[11px] font-semibold text-on-surface">
+                  <span className="w-5 h-5 rounded-full bg-primary/15 text-primary border border-primary/25 flex items-center justify-center text-[8px] font-black shrink-0">
+                    {initials(ticket.requester?.fullName || ticket.sourceName)}
+                  </span>
+                  <span className="truncate max-w-[200px]">{ticket.requester?.fullName || ticket.sourceName || ticket.sourceEmail || 'Demandeur inconnu'}</span>
+                </span>
+                <MetaChip icon={Clock}>{`Créé le ${new Date(ticket.createdAt).toLocaleString('fr-FR')}`}</MetaChip>
+                {ticket.dueDate && (
+                  <MetaChip
+                    icon={Clock}
+                    tone={new Date(ticket.dueDate) < new Date() && ticket.status !== 'CLOSED' && ticket.status !== 'SOLVED' ? 'red' : 'amber'}
+                  >
+                    {new Date(ticket.dueDate) < new Date() && ticket.status !== 'CLOSED' && ticket.status !== 'SOLVED'
+                      ? `En retard depuis le ${new Date(ticket.dueDate).toLocaleString('fr-FR')}`
+                      : `Échéance ${new Date(ticket.dueDate).toLocaleString('fr-FR')}`}
+                  </MetaChip>
+                )}
+                {ticket.source && <MetaChip icon={Inbox}>{ticket.source}</MetaChip>}
+                <MetaChip icon={MapPin}>{ticket.glpiLocationName || 'Aucun lieu'}</MetaChip>
+                {ticket.team?.name && <MetaChip icon={Layers}>{ticket.team.name}</MetaChip>}
+              </div>
+
       {/* Sync Failure Banner (GLPI uniquement — masqué en mode autonome) */}
       {!autonomousMode && syncFailures.length > 0 && (
         <div className="border border-red-500/25 bg-red-500/10 rounded-xl p-4 flex items-start gap-3 text-red-700 dark:text-red-400">
@@ -1001,41 +1078,37 @@ export default function TicketDetail() {
           {/* Left Column: Main Ticket Content & Timeline */}
         <div className="xl:col-span-8 flex flex-col gap-6">
           {/* Main Ticket Card */}
-          <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-5">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-4 border-b border-outline-variant/20">
-              <div className="flex items-center gap-2 flex-wrap">
+          <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest shadow-sm overflow-hidden">
+            {/* Barre d'accent selon le statut */}
+            <div className={`h-1.5 w-full ${STATUS_ACCENT[ticket.status] || 'bg-primary'}`} />
+            <div className="p-6 space-y-5">
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <h2 className="text-sm font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
+                  <span className="w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                    <FileText className="w-4 h-4" />
+                  </span>
+                  Description
+                  {ticket.aiProcessed && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-purple-200 bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-400 text-[10px] font-bold">
+                      <Sparkles className="w-3 h-3 text-purple-600 dark:text-purple-400" />
+                      Traité par IA
+                    </span>
+                  )}
+                </h2>
                 {ticket.category && (
                   <span className="bg-slate-100 text-slate-700 dark:bg-surface-container-high dark:text-on-surface-variant border border-slate-200 dark:border-outline-variant/40 text-[11px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
                     {ticket.category}
                   </span>
                 )}
-                {ticket.aiProcessed && (
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border border-purple-200 bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-400 text-[11px] font-bold">
-                    <Sparkles className="w-3 h-3 text-purple-600 dark:text-purple-400" />
-                    Traité par IA
-                  </span>
-                )}
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <div className="text-[11px] font-medium text-on-surface-variant flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5 text-on-surface-variant/60" />
-                  <span>Créé le {new Date(ticket.createdAt).toLocaleString('fr-FR')}</span>
-                </div>
-                {ticket.dueDate && (
-                  <span
-                    className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
-                      new Date(ticket.dueDate) < new Date() && ticket.status !== 'CLOSED' && ticket.status !== 'SOLVED'
-                        ? 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30'
-                        : 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30'
-                    }`}
-                    title="Échéance manuelle"
-                  >
-                    <Clock className="w-3 h-3" />
-                    {new Date(ticket.dueDate) < new Date() && ticket.status !== 'CLOSED' && ticket.status !== 'SOLVED'
-                      ? `En retard depuis le ${new Date(ticket.dueDate).toLocaleString('fr-FR')}`
-                      : `Échéance ${new Date(ticket.dueDate).toLocaleString('fr-FR')}`}
-                  </span>
-                )}
+
+              {/* Grille d'informations rapides */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+                <InfoTile icon={User} label="Demandeur" value={ticket.requester?.fullName || ticket.sourceName || ticket.sourceEmail || '—'} />
+                <InfoTile icon={Layers} label="Équipe" value={ticket.team?.name || 'Non assignée'} />
+                <InfoTile icon={MapPin} label="Lieu" value={ticket.glpiLocationName || '—'} tone="violet" />
+                <InfoTile icon={Clock} label="Créé le" value={new Date(ticket.createdAt).toLocaleDateString('fr-FR')} tone="amber" />
               </div>
             </div>
 
@@ -1262,17 +1335,22 @@ export default function TicketDetail() {
                 )}
               </div>
             )}
+            </div>
           </div>
 
           {/* Follow-up / Timeline Card */}
           <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-6">
             <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface border-b border-outline-variant/20 pb-3 flex items-center gap-2">
-              <MessageSquare className="w-4 h-4 text-primary" />
+              <span className="w-8 h-8 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                <MessageSquare className="w-4 h-4" />
+              </span>
               Suivi & Échanges
             </h3>
 
             {/* Timeline entries */}
-            <div className="space-y-4" ref={followupContainerRef}>
+            <div className="relative pl-10 space-y-4" ref={followupContainerRef}>
+              {/* Rail verticale de la timeline */}
+              <div className="absolute left-[19px] top-3 bottom-3 w-px bg-gradient-to-b from-primary/40 via-outline-variant/40 to-transparent" aria-hidden="true" />
               {(() => {
                 const timeline = [
                   ...(ticket?.followups || []).map((f) => ({ kind: 'followup', date: f.createdAt, data: f })),
@@ -1290,7 +1368,8 @@ export default function TicketDetail() {
 
                 return timeline.map((item) =>
                   item.kind === 'followup' ? (
-                    <div key={`f-${item.data.id}`} className="p-4 rounded-2xl border border-outline-variant/30 bg-surface-container-low/30 flex gap-3">
+                    <div key={`f-${item.data.id}`} className="relative p-4 rounded-2xl border border-outline-variant/30 bg-surface-container-low/30 flex gap-3">
+                      <span className="absolute -left-[26px] top-5 w-2.5 h-2.5 rounded-full bg-primary ring-4 ring-surface-container-lowest shrink-0" aria-hidden="true" />
                       <div className="w-9 h-9 rounded-full border border-outline-variant/60 bg-surface-container-high text-on-surface flex items-center justify-center text-xs font-bold shrink-0 shadow-sm">
                         {initials(item.data.author?.fullName)}
                       </div>
@@ -1340,7 +1419,8 @@ export default function TicketDetail() {
                       </div>
                     </div>
                   ) : item.kind === 'event' ? (
-                    <div key={`e-${item.data.id}`} className="flex items-center gap-3 px-4 py-2.5 rounded-xl border border-dashed border-outline-variant/40 bg-surface-container-low/20">
+                    <div key={`e-${item.data.id}`} className="relative flex items-center gap-3 px-4 py-2.5 rounded-xl border border-dashed border-outline-variant/40 bg-surface-container-low/20">
+                      <span className="absolute -left-[26px] top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-slate-400 ring-4 ring-surface-container-lowest shrink-0" aria-hidden="true" />
                       <div className="w-7 h-7 rounded-full border border-outline-variant/40 bg-surface-container text-on-surface-variant flex items-center justify-center shrink-0">
                         {eventIcon(item.data.type)}
                       </div>
@@ -1379,12 +1459,13 @@ export default function TicketDetail() {
                       return (
                         <div
                           key={`m-${item.data.id}`}
-                          className={`rounded-2xl border transition-all duration-200 ${
+                          className={`relative rounded-2xl border transition-all duration-200 ${
                             emailExpanded
                               ? 'border-outline-variant/50 bg-surface-container-lowest shadow-md'
                               : 'border-outline-variant/30 bg-surface-container-lowest hover:border-outline-variant/50 hover:shadow-sm'
                           }`}
                         >
+                          <span className="absolute -left-[26px] top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-sky-500 ring-4 ring-surface-container-lowest shrink-0" aria-hidden="true" />
                           {/* Header compact : toujours visible, cliquable pour déplier/replier */}
                           <button
                             type="button"
@@ -1705,7 +1786,9 @@ export default function TicketDetail() {
           {ticket.sourceEmail && (
             <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-3">
               <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2 border-b border-outline-variant/20 pb-3">
-                <Mail className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                <span className="w-7 h-7 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                  <Mail className="w-4 h-4" />
+                </span>
                 Email d'origine
               </h3>
               <dl className="space-y-2 text-xs">
@@ -1809,12 +1892,21 @@ export default function TicketDetail() {
 
           {/* Properties Card */}
           <div className="rounded-3xl border border-outline-variant/20 dark:border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm space-y-4">
-            <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface border-b border-outline-variant/15 dark:border-outline-variant/8 pb-3 flex items-center gap-2">
-              <Layers className="w-4 h-4 text-primary" />
-              Propriétés du ticket
-            </h3>
+            <div className="flex items-center justify-between border-b border-outline-variant/15 dark:border-outline-variant/8 pb-3">
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
+                <span className="w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                  <Layers className="w-4 h-4" />
+                </span>
+                Propriétés du ticket
+              </h3>
+              <span className="text-[9px] font-bold px-2 py-1 rounded-full bg-surface-container-high text-on-surface-variant uppercase tracking-wider">
+                Modifiable
+              </span>
+            </div>
 
-            <div className="space-y-3.5">
+            <div className="space-y-4">
+              {/* Zone 1 — Informations générales (grille 2 colonnes) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div>
                 <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
                   Date d'ouverture
@@ -1955,7 +2047,10 @@ export default function TicketDetail() {
                   onBlur={(e) => updateField('externalId', e.target.value)}
                 />
               </div>
+              </div>
 
+              {/* Zone 2 — Assignation & suivi */}
+              <div className="border-t border-outline-variant/15 pt-4 space-y-3.5">
               <div>
                 <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
                   <Clock className="w-3 h-3 text-primary" />
@@ -2114,6 +2209,7 @@ export default function TicketDetail() {
                   </div>
                 </div>
               )}
+              </div>
             </div>
           </div>
 
@@ -2121,7 +2217,9 @@ export default function TicketDetail() {
           <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-3">
             <div className="flex items-center justify-between border-b border-outline-variant/20 pb-3">
               <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
-                <User className="w-4 h-4 text-primary" />
+                <span className="w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                  <User className="w-4 h-4" />
+                </span>
                 Demandeur
               </h3>
               {canEdit && !editingRequester && (

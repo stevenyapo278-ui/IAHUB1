@@ -1105,8 +1105,14 @@ export default function Inbox() {
                   </p>
 
                   {testError && (
-                    <div className="border border-red-500/20 bg-red-500/5 text-red-400 p-3 rounded-xl text-sm">
-                      {testError}
+                    <div className="border border-red-500/20 bg-red-500/5 rounded-xl overflow-hidden">
+                      <div className="flex items-center gap-2 px-3 py-2 bg-red-500/10 border-b border-red-500/20 text-red-400 text-xs font-bold">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                        Analyse impossible
+                      </div>
+                      <div className="p-3 text-xs text-red-300/90 leading-relaxed max-h-64 overflow-y-auto whitespace-pre-wrap break-words font-mono">
+                        {testError}
+                      </div>
                     </div>
                   )}
 

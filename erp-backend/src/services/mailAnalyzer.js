@@ -1,6 +1,7 @@
 const prisma = require('../prismaClient');
 const { getBreaker } = require('../utils/circuitBreaker');
 const { logger } = require('../utils/logger');
+const { formatProviderHttpError, compactErrorMessage } = require('../utils/aiErrorFormatter');
 
 // Circuit breakers créés à la demande par nom de provider (ex: 'ai-openai', 'ai-gemini').
 // On ne pré-crée plus des breakers hardcodés par type : plusieurs providers peuvent
@@ -49,7 +50,11 @@ async function callOpenAICompat(provider, apiKey, model, prompt) {
         max_tokens: 2048,
       }),
     });
-    if (!res.ok) throw new Error(`Erreur ${provider.label} (${res.status}) : ${await res.text()}`);
+    if (!res.ok) {
+      const bodyText = await res.text();
+      logger.debug(`[AI] Réponse d'erreur brute de ${provider.label} (${res.status}) : ${bodyText.substring(0, 2000)}`);
+      throw new Error(formatProviderHttpError({ provider, status: res.status, body: bodyText }));
+    }
     const data = await res.json();
     return data.choices?.[0]?.message?.content || '';
   });
@@ -72,7 +77,11 @@ async function callGemini(provider, apiKey, prompt, modelName) {
         }),
       }
     );
-    if (!res.ok) throw new Error(`Erreur Gemini (${res.status}) : ${await res.text()}`);
+    if (!res.ok) {
+      const bodyText = await res.text();
+      logger.debug(`[AI] Réponse d'erreur brute de ${provider.label} (${res.status}) : ${bodyText.substring(0, 2000)}`);
+      throw new Error(formatProviderHttpError({ provider, status: res.status, body: bodyText }));
+    }
     const data = await res.json();
     return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
   });
@@ -97,7 +106,11 @@ async function callAnthropic(provider, apiKey, prompt, modelName) {
         messages: [{ role: 'user', content: prompt }],
       }),
     });
-    if (!res.ok) throw new Error(`Erreur Anthropic (${res.status}) : ${await res.text()}`);
+    if (!res.ok) {
+      const bodyText = await res.text();
+      logger.debug(`[AI] Réponse d'erreur brute de ${provider.label} (${res.status}) : ${bodyText.substring(0, 2000)}`);
+      throw new Error(formatProviderHttpError({ provider, status: res.status, body: bodyText }));
+    }
     const data = await res.json();
     return data.content?.[0]?.text || '';
   });
@@ -154,11 +167,13 @@ async function callProviderWithFallback(providers, prompt) {
       return result;
     } catch (err) {
       logger.warn(`[AI] Provider "${provider.label}" indisponible, tentative suivante : ${err.message}`);
-      errors.push(`${provider.label}: ${err.message}`);
+      errors.push(`${provider.label} : ${compactErrorMessage(err.message, 700)}`);
     }
   }
 
-  throw new Error(`Tous les providers IA ont échoué :\n${errors.join('\n')}`);
+  const details = errors.map((e) => `• ${e}`).join('\n');
+  const hint = 'Vérifiez les clés API et les quotas dans Paramètres → Intelligence Artificielle, puis relancez.';
+  throw new Error(`Tous les providers IA ont échoué :\n${details}\n\n${hint}`);
 }
 
 async function getFewShotExamples(subject, body) {
