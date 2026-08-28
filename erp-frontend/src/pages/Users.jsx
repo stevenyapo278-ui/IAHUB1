@@ -10,6 +10,7 @@ import Skeleton from '../components/Skeleton';
 import { useAuth } from '../context/AuthContext';
 import { useFilterParam } from '../hooks/useFilterParam';
 import useSystemSettings from '../hooks/useSystemSettings';
+import { hasPermission } from '../utils/permissions';
 import {
   Users as UsersIcon, UserPlus, ShieldCheck, UserX,
   Trash2, Upload, Download, X, Search, CheckCircle2,
@@ -72,6 +73,7 @@ function ToggleSwitch({ checked, onChange, disabled = false, title }) {
 export default function Users() {
   const { user: currentUser } = useAuth();
   const { autonomousMode } = useSystemSettings();
+  const canManage = hasPermission(currentUser, 'users.manage') || currentUser?.role === 'SUPERADMIN' || currentUser?.role === 'ADMIN';
   const ROLES = assignableRoles(currentUser?.role);
   const [users, setUsers] = useState([]);
   const [teams, setTeams] = useState([]);
