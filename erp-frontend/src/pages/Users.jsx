@@ -131,6 +131,12 @@ export default function Users() {
   const [purgeMode, setPurgeMode] = useState('smart');
   const [purging, setPurging] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [showTeamManager, setShowTeamManager] = useState(false);
+  const [teamManagerTeams, setTeamManagerTeams] = useState([]);
+  const [teamManagerUsers, setTeamManagerUsers] = useState([]);
+  const [teamManagerLoading, setTeamManagerLoading] = useState(false);
+  const [tmSearch, setTmSearch] = useState('');
+  const [tmDragUser, setTmDragUser] = useState(null);
   const loadReqIdRef = useRef(0);
 
   function load() {
@@ -382,6 +388,22 @@ if (field === 'role') {
             <Upload className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">CSV</span>
           </button>
+          <button onClick={async () => {
+              setShowTeamManager(true); setTeamManagerLoading(true); setTmSearch('');
+              try {
+                const [tRes, uRes] = await Promise.all([api.get('/teams'), api.get('/users?all=true')]);
+                setTeamManagerTeams(tRes.data);
+                const list = Array.isArray(uRes.data) ? uRes.data : (uRes.data.users || []);
+                setTeamManagerUsers(list.filter(u => u.isActive));
+              } catch (err) { toast.error(err.response?.data?.error || 'Erreur chargement'); setShowTeamManager(false); }
+              finally { setTeamManagerLoading(false); }
+            }}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 text-xs font-semibold transition-all"
+              title="Gérer les équipes par glisser-déposer"
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Équipes</span>
+            </button>
           {!autonomousMode && (
             <button onClick={async () => {
               setError(''); setImportResult(null);
@@ -1185,6 +1207,198 @@ if (field === 'role') {
                     <span>{purging ? 'Purge en cours...' : 'Exécuter la Purge'}</span>
                   </button>
                 </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
+
+      {/* ── Modal Gestion Équipes (Drag & Drop) ─────────────────────── */}
+      {createPortal(
+        <AnimatePresence>
+          {showTeamManager && (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                onClick={() => setShowTeamManager(false)}
+                className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer" />
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+                transition={{ type: 'spring', duration: 0.35, bounce: 0.12 }}
+                className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[85vh] flex flex-col overflow-hidden">
+
+                {/* Header */}
+                <div className="flex items-center gap-3 px-5 py-4 border-b border-outline-variant/30 shrink-0">
+                  <div className="p-1.5 rounded-lg bg-emerald-500/10"><Users className="w-4 h-4 text-emerald-600 dark:text-emerald-400" /></div>
+                  <div>
+                    <h3 className="text-sm font-bold text-on-surface">Gérer les équipes</h3>
+                    <p className="text-[10px] text-on-surface-variant">Glissez les utilisateurs dans une équipe • Recherche multiple avec virgules</p>
+                  </div>
+                  <motion.button onClick={() => setShowTeamManager(false)} whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }}
+                    className="ml-auto p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all">
+                    <X className="w-4 h-4" />
+                  </motion.button>
+                </div>
+
+                {teamManagerLoading ? (
+                  <div className="flex items-center justify-center py-16 gap-2 text-on-surface-variant text-xs">
+                    <RefreshCw className="w-4 h-4 animate-spin text-emerald-600" />
+                    Chargement...
+                  </div>
+                ) : (
+                  <div className="flex flex-1 min-h-0 overflow-hidden">
+                    {/* ── Panneau gauche : Utilisateurs non assignés ────────── */}
+                    <div className="w-[320px] shrink-0 border-r border-outline-variant/30 flex flex-col">
+                      <div className="px-4 py-3 border-b border-outline-variant/20">
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-on-surface-variant/40" />
+                          <input
+                            value={tmSearch}
+                            onChange={e => setTmSearch(e.target.value)}
+                            placeholder="Recherche (séparez par des virgules)"
+                            className="w-full pl-9 pr-3 py-2 rounded-xl border border-outline-variant/60 bg-surface text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                          />
+                        </div>
+                        {tmSearch.includes(',') && (
+                          <div className="flex flex-wrap gap-1 mt-2">
+                            {tmSearch.split(',').map((term, i) => term.trim() && (
+                              <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-semibold border border-emerald-500/20">
+                                {term.trim()}
+                                <button onClick={() => {
+                                  const parts = tmSearch.split(',').filter((_, idx) => idx !== i);
+                                  setTmSearch(parts.join(', '));
+                                }} className="hover:text-red-500 transition-colors"><X className="w-2.5 h-2.5" /></button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                        {(() => {
+                          // Recherche multi-terme : chaque terme séparé par virgule est combiné avec OR
+                          const terms = tmSearch.split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
+                          const filtered = teamManagerUsers.filter(u => {
+                            // Exclure les utilisateurs qui ont déjà une équipe (ils sont dans une colonne d'équipe)
+                            if (u.teamId) return false;
+                            if (terms.length === 0) return true;
+                            return terms.some(q =>
+                              u.fullName?.toLowerCase().includes(q) ||
+                              u.email?.toLowerCase().includes(q)
+                            );
+                          });
+                          if (filtered.length === 0) {
+                            return (
+                              <div className="text-center py-8 text-on-surface-variant/50">
+                                <UserX className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                                <p className="text-[11px] italic">Aucun utilisateur sans équipe</p>
+                              </div>
+                            );
+                          }
+                          return filtered.map(u => (
+                            <div
+                              key={u.id}
+                              draggable
+                              onDragStart={() => setTmDragUser(u)}
+                              onDragEnd={() => setTmDragUser(null)}
+                              className={`flex items-center gap-2.5 p-2.5 rounded-xl border cursor-grab active:cursor-grabbing transition-all ${
+                                tmDragUser?.id === u.id
+                                  ? 'border-emerald-500/40 bg-emerald-500/10 shadow-md scale-[1.02]'
+                                  : 'border-outline-variant/20 bg-surface hover:border-outline-variant/40 hover:bg-surface-container-low'
+                              }`}
+                            >
+                              <div className="w-8 h-8 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 font-bold text-[11px] flex items-center justify-center shrink-0">
+                                {u.fullName?.charAt(0)?.toUpperCase() || '?'}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-semibold text-on-surface truncate">{u.fullName}</p>
+                                <p className="text-[10px] text-on-surface-variant truncate">{u.email}</p>
+                              </div>
+                            </div>
+                          ));
+                        })()}
+                      </div>
+                      <div className="px-4 py-2 border-t border-outline-variant/20 text-[10px] text-on-surface-variant/50 text-center">
+                        {teamManagerUsers.filter(u => !u.teamId).length} utilisateur(s) disponible(s)
+                      </div>
+                    </div>
+
+                    {/* ── Panneau droit : Équipes (zones de drop) ──────────── */}
+                    <div className="flex-1 overflow-y-auto p-4">
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                        {teamManagerTeams.map(team => {
+                          const teamMembers = teamManagerUsers.filter(u => u.teamId === team.id);
+                          const isDragOver = false; // géré par onDragOver/Leave
+                          return (
+                            <div
+                              key={team.id}
+                              onDragOver={e => { e.preventDefault(); e.currentTarget.classList.add('ring-2', 'ring-emerald-500/40', 'bg-emerald-500/5'); }}
+                              onDragLeave={e => { e.currentTarget.classList.remove('ring-2', 'ring-emerald-500/40', 'bg-emerald-500/5'); }}
+                              onDrop={async (e) => {
+                                e.preventDefault();
+                                e.currentTarget.classList.remove('ring-2', 'ring-emerald-500/40', 'bg-emerald-500/5');
+                                const user = tmDragUser;
+                                if (!user) return;
+                                try {
+                                  await api.post(`/teams/${team.id}/members`, { userId: user.id });
+                                  toast.success(`${user.fullName} assigné à « ${team.name} »`);
+                                  // Mettre à jour localement
+                                  setTeamManagerUsers(prev => prev.map(u => u.id === user.id ? { ...u, teamId: team.id } : u));
+                                  setTmDragUser(null);
+                                  load();
+                                } catch (err) {
+                                  toast.error(err.response?.data?.error || "Erreur lors de l'assignation");
+                                }
+                              }}
+                              className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest hover:border-outline-variant/50 transition-all overflow-hidden"
+                            >
+                              {/* Header équipe */}
+                              <div className="px-4 py-3 border-b border-outline-variant/20 flex items-center gap-2">
+                                <div className="p-1 rounded-md bg-blue-500/10"><Layers className="w-3.5 h-3.5 text-blue-500" /></div>
+                                <span className="text-xs font-bold text-on-surface">{team.name}</span>
+                                {team.category && <span className="text-[10px] text-on-surface-variant">· {team.category}</span>}
+                                <span className="ml-auto text-[10px] font-semibold text-on-surface-variant bg-surface-container px-1.5 py-0.5 rounded-md">
+                                  {teamMembers.length}
+                                </span>
+                              </div>
+                              {/* Membres */}
+                              <div className="p-2 min-h-[60px]">
+                                {teamMembers.length === 0 ? (
+                                  <p className="text-[10px] text-on-surface-variant/30 text-center py-3 italic">Glissez un utilisateur ici</p>
+                                ) : (
+                                  <div className="space-y-1">
+                                    {teamMembers.map(u => (
+                                      <div key={u.id} className="flex items-center gap-2 p-2 rounded-lg bg-surface border border-outline-variant/20 group">
+                                        <div className="w-6 h-6 rounded-full bg-blue-500/10 text-blue-600 font-bold text-[9px] flex items-center justify-center shrink-0">
+                                          {u.fullName?.charAt(0)?.toUpperCase()}
+                                        </div>
+                                        <span className="text-[11px] font-medium text-on-surface truncate flex-1">{u.fullName}</span>
+                                        <button
+                                          onClick={async () => {
+                                            try {
+                                              await api.delete(`/teams/${team.id}/members/${u.id}`);
+                                              toast.success(`${u.fullName} retiré de « ${team.name} »`);
+                                              setTeamManagerUsers(prev => prev.map(usr => usr.id === u.id ? { ...usr, teamId: null } : usr));
+                                              load();
+                                            } catch (err) {
+                                              toast.error(err.response?.data?.error || 'Erreur');
+                                            }
+                                          }}
+                                          className="p-1 rounded-md text-on-surface/20 hover:text-red-500 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
+                                          title="Retirer de l'équipe"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </motion.div>
             </div>
           )}
