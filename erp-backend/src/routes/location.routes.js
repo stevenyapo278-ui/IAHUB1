@@ -94,20 +94,27 @@ router.patch(
   }
 );
 
-// Supprimer (désactiver) un lieu
-router.delete('/:id', requirePermission('locations.manage', ['ADMIN']), async (req, res) => {
-  const id = Number(req.params.id);
-  const existing = await prisma.glpiLocation.findUnique({ where: { id } });
-  if (!existing) return res.status(404).json({ error: 'Lieu introuvable' });
 
-  await prisma.glpiLocation.update({ where: { id }, data: { isActive: false } });
-  await auditLog('LOCATION_DEACTIVATED', { actor: req.user, targetType: 'GlpiLocation', targetId: id, targetLabel: existing.name });
-  res.status(204).send();
-});
 
 // ── Associations expéditeur ↔ lieu ─────────────────────────────────────
 
-// Liste les associations expéditeur-lieu
+// Liste les demandeurs d'un lieu spécifique
+router.get('/:id/requesters', async (req, res) => {
+  const locationId = Number(req.params.id);
+  const location = await prisma.glpiLocation.findUnique({ where: { id: locationId }, select: { id: true, name: true } });
+  if (!location) return res.status(404).json({ error: 'Lieu introuvable' });
+
+  const links = await prisma.requesterLocation.findMany({
+    where: { glpiLocationId: locationId },
+    include: {
+      assignedBy: { select: { id: true, fullName: true, email: true } },
+    },
+    orderBy: [{ assignmentCount: 'desc' }, { lastUsedAt: 'desc' }],
+  });
+  res.json({ location, requesters: links });
+});
+
+// Liste toutes les associations expéditeur-lieu (pour la vue globale)
 router.get('/requesters', async (req, res) => {
   const { email } = req.query;
   const where = {};
@@ -160,10 +167,84 @@ router.post(
   }
 );
 
-// Supprimer une association
+// Supprimer une association demandeur↔lieu
 router.delete('/requesters/:id', requirePermission('locations.manage', ['ADMIN']), async (req, res) => {
   const id = Number(req.params.id);
   await prisma.requesterLocation.delete({ where: { id } }).catch(() => {});
+  res.status(204).send();
+});
+
+// Réassigner les demandeurs d'un lieu vers un autre lieu (avant suppression)
+router.post('/:id/reassign', requirePermission('locations.manage', ['ADMIN']), async (req, res) => {
+  const sourceId = Number(req.params.id);
+  const { targetLocationId } = req.body;
+
+  if (!targetLocationId || targetLocationId === sourceId) {
+    return res.status(400).json({ error: 'Lieu cible invalide' });
+  }
+
+  const source = await prisma.glpiLocation.findUnique({ where: { id: sourceId } });
+  if (!source) return res.status(404).json({ error: 'Lieu source introuvable' });
+
+  const target = await prisma.glpiLocation.findUnique({ where: { id: Number(targetLocationId) } });
+  if (!target) return res.status(404).json({ error: 'Lieu cible introuvable' });
+
+  // Déplacer toutes les associations du lieu source vers le lieu cible
+  const requesters = await prisma.requesterLocation.findMany({ where: { glpiLocationId: sourceId } });
+  let moved = 0;
+  let skipped = 0;
+
+  for (const r of requesters) {
+    try {
+      await prisma.requesterLocation.upsert({
+        where: { email_glpiLocationId: { email: r.email, glpiLocationId: Number(targetLocationId) } },
+        update: { assignmentCount: { increment: r.assignmentCount }, lastUsedAt: r.lastUsedAt },
+        create: {
+          email: r.email,
+          glpiLocationId: Number(targetLocationId),
+          assignedById: req.user.sub,
+          assignmentCount: r.assignmentCount,
+          lastUsedAt: r.lastUsedAt,
+        },
+      });
+      await prisma.requesterLocation.delete({ where: { id: r.id } });
+      moved++;
+    } catch {
+      // Si l'association existe déjà dans le lieu cible, on supprime simplement la source
+      await prisma.requesterLocation.delete({ where: { id: r.id } });
+      skipped++;
+    }
+  }
+
+  // Aussi mettre à jour les tickets existants qui pointent vers ce lieu
+  const ticketsUpdated = await prisma.ticket.updateMany({
+    where: { glpiLocationId: sourceId },
+    data: { glpiLocationId: Number(targetLocationId) },
+  });
+
+  res.json({ moved, skipped, ticketsUpdated: ticketsUpdated.count, source: source.name, target: target.name });
+  auditLog('LOCATION_REASSIGNED', {
+    actor: req.user, targetType: 'GlpiLocation', targetId: sourceId, targetLabel: source.name,
+    metadata: { targetId: Number(targetLocationId), targetName: target.name, moved, skipped, ticketsUpdated: ticketsUpdated.count },
+  }).catch(() => {});
+});
+
+// Supprimer définitivement un lieu (après réassignation)
+router.delete('/:id', requirePermission('locations.manage', ['ADMIN']), async (req, res) => {
+  const id = Number(req.params.id);
+  const existing = await prisma.glpiLocation.findUnique({ where: { id }, include: { _count: { select: { requesterLinks: true } } } });
+  if (!existing) return res.status(404).json({ error: 'Lieu introuvable' });
+
+  // S'il reste des demandeurs associés, refuser la suppression
+  if (existing._count.requesterLinks > 0) {
+    return res.status(409).json({
+      error: `Ce lieu a encore ${existing._count.requesterLinks} demandeur(s) associé(s). Réassignez-les avant de supprimer.`,
+      requesterCount: existing._count.requesterLinks,
+    });
+  }
+
+  await prisma.glpiLocation.delete({ where: { id } });
+  await auditLog('LOCATION_DELETED', { actor: req.user, targetType: 'GlpiLocation', targetId: id, targetLabel: existing.name });
   res.status(204).send();
 });
 

@@ -510,19 +510,55 @@ async function processMessage(message, account) {
       return updated;
     }
 
-    // Résoudre le lieu : d'abord via l'historique du demandeur (RequesterLocation), puis IA
+    // Résoudre le lieu : 1) fallback RequesterLocation (historique du demandeur), 2) suggestion IA
     let locationId = null;
     let resolvedLocationName = null; // nom du lieu finalement retenu (pour cohérence du titre)
 
-    // 1. Suggestion IA (peut override l'historique du demandeur)
+    // 1. Fallback RequesterLocation — si on a déjà associé cet email à un lieu, l'utiliser
+    //    Cela évite de devoir deviner le lieu à chaque fois pour un demandeur connu.
+    if (!locationId && fromEmail) {
+      const knownLocation = await prisma.requesterLocation.findFirst({
+        where: { email: fromEmail.toLowerCase().trim() },
+        orderBy: { lastUsedAt: 'desc' },
+        select: { glpiLocationId: true, glpiLocation: { select: { id: true, name: true, completename: true } } },
+      });
+      if (knownLocation?.glpiLocation) {
+        locationId = knownLocation.glpiLocation.id;
+        resolvedLocationName = knownLocation.glpiLocation.name || knownLocation.glpiLocation.completename;
+        // Mettre à jour le compteur et la date de dernière utilisation
+        await prisma.requesterLocation.updateMany({
+          where: { email: fromEmail.toLowerCase().trim() },
+          data: { lastUsedAt: new Date(), assignmentCount: { increment: 1 } },
+        }).catch(() => {});
+        console.log(`[emailPipeline] Lieu résolu via historique demandeur : "${resolvedLocationName}" pour ${fromEmail}`);
+      }
+    }
+
+    // 2. Suggestion IA (peut override l'historique du demandeur si l'IA trouve mieux)
     if (analysis.location) {
       const loc = await prisma.glpiLocation.findFirst({
         where: { completename: analysis.location },
         select: { id: true, name: true, completename: true },
       });
       if (loc) {
-        resolvedLocationName = loc.name || loc.completename;
+        // Si l'IA a trouvé un lieu différent de l'historique, on le note mais on garde l'historique
+        // (l'historique est plus fiable que la devinette IA)
+        if (locationId && locationId !== loc.id) {
+          console.log(`[emailPipeline] Lieu IA "${loc.completename}" ignoré — lieu historique "${resolvedLocationName}" conservé`);
+        } else {
+          locationId = loc.id;
+          resolvedLocationName = loc.name || loc.completename;
+        }
       }
+    }
+
+    // 3. Créer/mettre à jour l'association RequesterLocation si on a résolu un lieu
+    if (locationId && fromEmail) {
+      await prisma.requesterLocation.upsert({
+        where: { email_glpiLocationId: { email: fromEmail.toLowerCase().trim(), glpiLocationId: locationId } },
+        update: { lastUsedAt: new Date(), assignmentCount: { increment: 1 } },
+        create: { email: fromEmail.toLowerCase().trim(), glpiLocationId: locationId },
+      }).catch(() => {});
     }
 
     // 2. Aligner le titre avec le lieu résolu pour éviter toute incohérence SITE ≠ LIEU
