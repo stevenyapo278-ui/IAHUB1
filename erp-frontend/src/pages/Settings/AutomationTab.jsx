@@ -446,6 +446,14 @@ export default function AutomationTab() {
             onChange={(v) => updateSetting('enableFewShotTriage', v)}
             disabled={saving}
           />
+
+        <SettingRow
+            title="Auto-création des compétences"
+            description="Lors de l'analyse IA d'un email, si la compétence suggérée n'existe pas encore, elle est automatiquement créée dans la base."
+            checked={settings.enableAutoCreateSkills}
+            onChange={(v) => updateSetting('enableAutoCreateSkills', v)}
+            disabled={saving}
+          />
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}

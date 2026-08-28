@@ -322,7 +322,7 @@ async function analyzeEmail({ subject, body, from, fromName }) {
 
   // Validation, nettoyage, matrice déterministe et vérification d'existence en BDD
   const { validateAndCleanAnalysis } = require('./emailAnalysisValidator');
-  const result = validateAndCleanAnalysis(rawResult, skills, locations, { body: body || '' });
+  const result = validateAndCleanAnalysis(rawResult, skills, locations, { body: body || '', enableAutoCreateSkills: !!settings?.enableAutoCreateSkills });
 
   // Fallback : si le LLM n'a pas retourné suggestedSkill (ou a retourné null),
   // on tente une correspondance par mot-clé sur le texte brut de l'email.

@@ -1,4 +1,5 @@
 const { calculatePriority } = require('./emailPriorityMatrix');
+const prisma = require('../prismaClient');
 
 const TICKET_DECISIONS = ['CREATE', 'DO_NOT_CREATE', 'NEEDS_REVIEW'];
 const DECISION_REASONS = ['INCIDENT', 'SERVICE_REQUEST', 'INFORMATION', 'SPAM', 'AUTOMATED', 'DUPLICATE', 'AMBIGUOUS'];
@@ -123,7 +124,24 @@ function validateAndCleanAnalysis(rawAnalysis = {}, availableSkills = [], availa
   if (analysis.suggestedSkill && availableSkills.length > 0) {
     const normSkill = String(analysis.suggestedSkill).trim().toLowerCase();
     const matchSkill = availableSkills.find((s) => s.name?.toLowerCase().trim() === normSkill);
-    analysis.suggestedSkill = matchSkill ? matchSkill.name : null;
+    if (matchSkill) {
+      analysis.suggestedSkill = matchSkill.name;
+    } else if (options.enableAutoCreateSkills) {
+      // Auto-création de la compétence si elle n'existe pas encore
+      try {
+        const newSkill = await prisma.skill.create({
+          data: { name: String(analysis.suggestedSkill).trim(), category: analysis.category || null },
+        });
+        console.log(`[emailAnalysisValidator] Compétence auto-créée : "${newSkill.name}" (catégorie: ${newSkill.category || 'aucune'})`);
+        analysis.suggestedSkill = newSkill.name;
+        analysis._skillAutoCreated = true;
+      } catch (err) {
+        console.error(`[emailAnalysisValidator] Échec auto-création skill "${analysis.suggestedSkill}":`, err.message);
+        analysis.suggestedSkill = null;
+      }
+    } else {
+      analysis.suggestedSkill = null;
+    }
   } else if (!analysis.suggestedSkill) {
     analysis.suggestedSkill = null;
   }

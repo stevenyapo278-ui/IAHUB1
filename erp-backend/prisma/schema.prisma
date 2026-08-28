@@ -568,6 +568,7 @@ model SystemSettings {
   autonomousMode         Boolean  @default(false) // mode autonome : la plateforme fonctionne comme e-ticketing sans GLPI, toutes les syncs GLPI sont désactivées
   closeChildrenWithParent Boolean @default(false) // clôture en cascade : fermer un parent ferme aussi ses sous-tickets (enfants)
   autoApproveManualTickets Boolean @default(false) // auto-approuve les tickets créés manuellement (formulaire/portail) — les tickets créés par email/IA restent soumis à validation
+  enableAutoCreateSkills  Boolean  @default(false) // crée automatiquement les compétences suggérées par l'IA lors de l'analyse email si elles n'existent pas encore
 
   // URLs absolues du serveur, utilisées pour générer des liens/ressources dans les emails sortants
   // (logo de signature, lien d'approbation de brouillon, lien de réinitialisation de mot de passe).
