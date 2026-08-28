@@ -6,7 +6,6 @@ import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import ConfirmDialog from '../components/ConfirmDialog';
-import Pagination from '../components/Pagination';
 import { useTheme } from '../context/ThemeContext';
 import { Users, ShieldCheck, Ticket, Plus, RefreshCw, Trash2, X, AlertTriangle, Mail, Check, Layers, Save, ChevronDown } from 'lucide-react';
 import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
@@ -21,7 +20,7 @@ export default function Teams() {
   const [error, setError] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [deleting, setDeleting] = useState(false);
-  const [search, setSearch] = useState('');
+
   const [categories, setCategories] = useState([]);
 
   // ── Modal création ────────────────────────────────────────────────
@@ -220,18 +219,7 @@ export default function Teams() {
   const totalMembers = teams.reduce((sum, t) => sum + t.members.length, 0);
   const totalTickets = teams.reduce((sum, t) => sum + t._count.tickets, 0);
 
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(12);
 
-  const filtered = teams.filter((t) => {
-    if (!search.trim()) return true;
-    const q = search.toLowerCase();
-    return [t.name, t.category].some((f) => f?.toLowerCase().includes(q));
-  });
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
-  useEffect(() => { setPage(1); }, [search, pageSize]);
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -296,99 +284,81 @@ export default function Teams() {
         </div>
       </div>
 
-      {/* ── Search ────────────────────────────────────────────────────────── */}
-      <div className="px-4 sm:px-6 lg:px-8 py-3">
-        <div className="relative max-w-md">
-          <input
-            value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Rechercher une équipe..."
-            className="w-full pl-4 pr-4 py-2 rounded-xl border border-outline-variant/60 bg-surface text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-          />
-        </div>
-      </div>
-
-      {/* ── Teams Cards ──────────────────────────────────────────────────── */}
+      {/* ── Sélecteur d'équipe ──────────────────────────────────────────── */}
       <div className="flex-1 px-4 sm:px-6 lg:px-8 pb-6">
         {loading ? (
           <div className="text-center py-12 text-on-surface/40">
             <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-2" />
             Chargement...
           </div>
-        ) : filtered.length === 0 ? (
+        ) : teams.length === 0 ? (
           <div className="text-center py-12 text-on-surface/40">
             <Users className="w-12 h-12 mx-auto mb-3 opacity-30" />
-            {search ? 'Aucune équipe ne correspond à votre recherche' : 'Aucune équipe. Créez-en une !'}
+            Aucune équipe. Créez-en une !
           </div>
         ) : (
-          <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {paginated.map((t) => (
-              <motion.div
-                key={t.id}
-                whileHover={{ scale: 1.01, y: -2 }}
-                whileTap={{ scale: 0.99 }}
-                onClick={() => openDetail(t.id)}
-                className="relative group p-4 rounded-2xl border border-outline-variant/20 bg-surface-container-lowest hover:border-blue-500/30 hover:shadow-md transition-all cursor-pointer"
-              >
-                <div className="flex items-start justify-between mb-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-500">
-                      <Layers className="w-4 h-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-on-surface truncate flex items-center gap-1.5">
-                        {t.name}
-                        {t.category && <span className="text-[10px] text-on-surface-variant font-normal">· {t.category}</span>}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Stats */}
-                <div className="flex items-center gap-3 text-xs text-on-surface/50 mt-3">
-                  <span className="flex items-center gap-1">
-                    <Users className="w-3 h-3" /> {t.members.length} membre{t.members.length > 1 ? 's' : ''}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Ticket className="w-3 h-3" /> {t._count.tickets} ouvert{t._count.tickets > 1 ? 's' : ''}
-                  </span>
-                  {t.defaultObservers?.length > 0 && (
-                    <span className="flex items-center gap-1">
-                      <ShieldCheck className="w-3 h-3" /> {t.defaultObservers.length} obs.
-                    </span>
-                  )}
-                </div>
-
-                {/* Progress bar */}
-                <div className="mt-2 h-1.5 rounded-full overflow-hidden bg-surface-container border border-outline-variant/30">
-                  <div className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all"
-                    style={{ width: `${Math.min(100, (t._count.tickets / Math.max(1, ...teams.map(x => x._count.tickets))) * 100)}%` }} />
-                </div>
-
-                {/* Actions hover */}
-                {canManageTeams && (
-                  <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={(e) => { e.stopPropagation(); openDetail(t.id); }}
-                      title="Modifier"
-                      className="p-1.5 rounded-lg bg-surface-container text-on-surface/60 hover:text-amber-500 hover:bg-amber-500/10 cursor-pointer transition-colors">
-                      <Save className="w-3.5 h-3.5" />
-                    </button>
-                    <button onClick={(e) => { e.stopPropagation(); askDelete(t.id); }}
-                      title="Supprimer"
-                      className="p-1.5 rounded-lg bg-surface-container text-on-surface/60 hover:text-red-500 hover:bg-red-500/10 cursor-pointer transition-colors">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                )}
-              </motion.div>
-            ))}
-          </div>
-          {filtered.length > 0 && (
-            <div className="mt-4">
-              <Pagination page={page} totalPages={totalPages} total={filtered.length} label="équipes" onPageChange={setPage} pageSize={pageSize} onPageSizeChange={(s) => { setPageSize(s); setPage(1); }} />
+          <div className="max-w-xl mx-auto space-y-4">
+            {/* Sélecteur équipe */}
+            <div className="relative">
+              <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                <Layers className="w-3.5 h-3.5 text-blue-500" />
+                Sélectionner une équipe
+              </label>
+              <div className="relative">
+                <select
+                  value=""
+                  onChange={(e) => { if (e.target.value) openDetail(Number(e.target.value)); }}
+                  className="w-full appearance-none bg-surface-container-lowest border border-outline-variant/40 rounded-2xl px-5 py-4 pr-12 text-sm font-semibold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer shadow-sm hover:border-blue-500/30 hover:shadow-md"
+                >
+                  <option value="" disabled>— Choisir une équipe ({teams.length} disponibles) —</option>
+                  {teams.sort((a, b) => a.name.localeCompare(b.name)).map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}{t.category ? ` · ${t.category}` : ''} — {t.members.length} membre{t.members.length > 1 ? 's' : ''} · {t._count.tickets} ticket{t._count.tickets > 1 ? 's' : ''}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="w-5 h-5 text-on-surface-variant absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+              </div>
             </div>
-          )}
-          </>
+
+            {/* Résumé rapide de toutes les équipes */}
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Toutes les équipes</p>
+              {teams.sort((a, b) => a.name.localeCompare(b.name)).map((t) => (
+                <motion.div
+                  key={t.id}
+                  whileHover={{ x: 4 }}
+                  onClick={() => openDetail(t.id)}
+                  className="flex items-center gap-3 px-4 py-3 rounded-xl border border-outline-variant/20 bg-surface-container-lowest hover:border-blue-500/30 hover:shadow-sm transition-all cursor-pointer group"
+                >
+                  <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-500 shrink-0">
+                    <Layers className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-on-surface truncate">{t.name}</p>
+                    {t.category && <p className="text-[10px] text-on-surface-variant">{t.category}</p>}
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-on-surface/50 shrink-0">
+                    <span className="flex items-center gap-1">
+                      <Users className="w-3 h-3" /> {t.members.length}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <Ticket className="w-3 h-3" /> {t._count.tickets}
+                    </span>
+                  </div>
+                  {canManageTeams && (
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                      <button onClick={(e) => { e.stopPropagation(); askDelete(t.id); }}
+                        title="Supprimer"
+                        className="p-1.5 rounded-lg text-on-surface/30 hover:text-red-500 hover:bg-red-500/10 cursor-pointer transition-colors">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </motion.div>
+              ))}
+            </div>
+          </div>
         )}
       </div>
 
