@@ -1,7 +1,7 @@
 const prisma = require('../prismaClient');
 const { getBreaker } = require('../utils/circuitBreaker');
 const { logger } = require('../utils/logger');
-const { formatProviderHttpError, compactErrorMessage } = require('../utils/aiErrorFormatter');
+const { formatProviderHttpError, formatProviderHttpErrorShort, compactErrorMessage } = require('../utils/aiErrorFormatter');
 
 // Circuit breakers créés à la demande par nom de provider (ex: 'ai-openai', 'ai-gemini').
 // On ne pré-crée plus des breakers hardcodés par type : plusieurs providers peuvent
@@ -152,6 +152,9 @@ async function callProvider(provider, prompt) {
 // Si un provider échoue (timeout, circuit ouvert, toutes les clés KO),
 // on passe automatiquement au suivant — fallback inter-providers.
 // Lève une exception récapitulative seulement si TOUS les providers ont échoué.
+// L'erreur porteur Propriétés :
+//   - error.message   : message court (toast / affichage résumé)
+//   - error.errorDetail : message long complet (logs / détail inline)
 async function callProviderWithFallback(providers, prompt) {
   if (!providers || providers.length === 0) {
     throw new Error('Aucun provider IA configuré (Paramètres → Intelligence Artificielle)');
@@ -167,13 +170,20 @@ async function callProviderWithFallback(providers, prompt) {
       return result;
     } catch (err) {
       logger.warn(`[AI] Provider "${provider.label}" indisponible, tentative suivante : ${err.message}`);
-      errors.push(`${provider.label} : ${compactErrorMessage(err.message, 700)}`);
+      errors.push({ label: provider.label, full: compactErrorMessage(err.message, 700) });
     }
   }
 
-  const details = errors.map((e) => `• ${e}`).join('\n');
+  const details = errors.map((e) => `• ${e.label} : ${e.full}`).join('\n');
   const hint = 'Vérifiez les clés API et les quotas dans Paramètres → Intelligence Artificielle, puis relancez.';
-  throw new Error(`Tous les providers IA ont échoué :\n${details}\n\n${hint}`);
+
+  const longMessage = `Tous les providers IA ont échoué :\n${details}\n\n${hint}`;
+  const shortParts = errors.map((e) => `${e.label}`).join(', ');
+  const shortMessage = `Tous les providers IA ont échoué (${shortParts})`;
+
+  const err = new Error(shortMessage);
+  err.errorDetail = longMessage;
+  throw err;
 }
 
 async function getFewShotExamples(subject, body) {

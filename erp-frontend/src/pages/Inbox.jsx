@@ -13,9 +13,9 @@ import { sanitizeHtml } from '../utils/sanitize';
 import {
   Inbox as InboxIcon, MailOpen, RefreshCw, Clock, CheckCircle2, XCircle, Ban,
   Paperclip, Search, X, FlaskConical, Bot, ArrowUpRight, Reply, ChevronDown,
-  ChevronRight, Flame, AlertTriangle, ArrowDownWideNarrow, Rows3, Rows4,
+  ChevronRight, ChevronUp, Flame, AlertTriangle, ArrowDownWideNarrow, Rows3, Rows4,
   CircleDot, Mail, CheckCheck, Send, FileText, Tag, Users, Filter, Sparkles, Plus,
-  CalendarRange
+  CalendarRange, Info
 } from 'lucide-react';
 
 const STATUS_LABELS = {
@@ -189,6 +189,7 @@ export default function Inbox() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [bulkAction, setBulkAction] = useState(null);
+  const [expandedErrors, setExpandedErrors] = useState(new Set());
 
   // ── Modal création ticket depuis email ──────────────────────────────
   const [showCreateTicket, setShowCreateTicket] = useState(false);
@@ -1053,9 +1054,35 @@ export default function Inbox() {
 
                             {/* Erreur */}
                             {isInbound && msg.error && (
-                              <div className="ml-12 rounded-xl border border-red-500/20 bg-red-500/5 p-4 flex items-start gap-3">
-                                <XCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                                <p className="text-sm text-red-400">{msg.error}</p>
+                              <div className="ml-12 rounded-xl border border-red-500/20 bg-red-500/5 p-4 space-y-2">
+                                <div className="flex items-start gap-3">
+                                  <XCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                                  <p className="text-sm text-red-400 flex-1">{msg.error}</p>
+                                  {msg.errorDetail && (
+                                    <button
+                                      onClick={() => {
+                                        const key = msg.emailId || msg.messageId;
+                                        setExpandedErrors((prev) => {
+                                          const next = new Set(prev);
+                                          if (next.has(key)) next.delete(key); else next.add(key);
+                                          return next;
+                                        });
+                                      }}
+                                      className="shrink-0 flex items-center gap-1 text-[11px] text-red-300/70 hover:text-red-300 transition-colors cursor-pointer"
+                                    >
+                                      <Info className="w-3 h-3" />
+                                      {expandedErrors.has(msg.emailId || msg.messageId) ? 'Masquer' : 'Détails'}
+                                      {expandedErrors.has(msg.emailId || msg.messageId)
+                                        ? <ChevronUp className="w-3 h-3" />
+                                        : <ChevronDown className="w-3 h-3" />}
+                                    </button>
+                                  )}
+                                </div>
+                                {msg.errorDetail && expandedErrors.has(msg.emailId || msg.messageId) && (
+                                  <div className="ml-7 rounded-lg border border-red-500/10 bg-red-500/[0.03] p-3">
+                                    <pre className="text-xs text-red-300/60 whitespace-pre-wrap font-sans leading-relaxed">{msg.errorDetail}</pre>
+                                  </div>
+                                )}
                               </div>
                             )}
 

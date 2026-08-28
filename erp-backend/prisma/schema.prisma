@@ -611,6 +611,10 @@ model SystemSettings {
   // (Paramètres > Automatisation > Notifications internes).
   notifyTechnicianOnAssignment Boolean @default(false)
 
+  // Adresse email de notification en cas d'échec de traitement d'un email entrant.
+  // Laisser vide = pas d'email de notification (les notifications in-app restent actives).
+  emailFailureNotificationEmail String?
+
   // Signature HTML insérée en bas de tous les emails automatiques (accusé de réception, relance,
   // notification d'incident connu), à la place du "Cordialement, Support IT" codé en dur. Laisser vide = défaut.
   emailSignature String? @db.Text
@@ -804,6 +808,7 @@ model IncomingEmail {
   status              String        @default("PENDING")
   isRead              Boolean       @default(false)
   error               String?
+  errorDetail         String?       @db.Text  // message d'erreur détaillé (fournisseur + quota + délai)
   retryCount          Int           @default(0)
   nextRetryAt         DateTime?
   lastError           String?

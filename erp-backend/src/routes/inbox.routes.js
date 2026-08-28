@@ -128,7 +128,7 @@ router.post('/sync', requirePermission('inbox.sync', ['ADMIN', 'TECHNICIAN']), a
     const results = await runEmailPipeline();
     res.json({ processed: results.length, results });
   } catch (err) {
-    res.status(502).json({ error: err.message });
+    res.status(502).json({ error: err.message, errorDetail: err.errorDetail || null });
   }
 });
 
@@ -140,7 +140,7 @@ router.post('/test-analyze', requirePermission('inbox.sync', ['ADMIN', 'TECHNICI
     const analysis = await analyzeEmail({ subject, body, from: from || 'test@example.com', fromName });
     res.json(analysis);
   } catch (err) {
-    res.status(502).json({ error: err.message });
+    res.status(502).json({ error: err.message, errorDetail: err.errorDetail || null });
   }
 });
 
@@ -178,7 +178,7 @@ router.post('/simulate', requirePermission('inbox.sync', ['ADMIN', 'TECHNICIAN']
       glpiTicketId: result?.glpiTicketId,
     });
   } catch (err) {
-    res.status(502).json({ error: err.message });
+    res.status(502).json({ error: err.message, errorDetail: err.errorDetail || null });
   }
 });
 
@@ -324,7 +324,7 @@ router.post('/retry-all', requirePermission('inbox.sync', ['ADMIN']), async (req
       total: failed.length,
     });
   } catch (err) {
-    return res.status(500).json({ error: err.message || 'Erreur lors du relancement groupé' });
+    return res.status(500).json({ error: err.message || 'Erreur lors du relancement groupé', errorDetail: err.errorDetail || null });
   }
 });
 
@@ -369,7 +369,7 @@ router.post('/:id/retry', requirePermission('inbox.sync', ['ADMIN']), async (req
     return res.json({ message: 'Email relancé avec succès', status: result?.status, id: result?.id });
   } catch (err) {
     console.error('[inbox/retry] Erreur:', err.message);
-    return res.status(500).json({ error: err.message || 'Erreur lors du relancement' });
+    return res.status(500).json({ error: err.message || 'Erreur lors du relancement', errorDetail: err.errorDetail || null });
   }
 });
 

@@ -86,6 +86,7 @@ router.patch(
     body('dailySummaryRecipients').optional().isArray(),
     body('dailySummaryRecipients.*').optional().isEmail(),
     body('notifyTechnicianOnAssignment').optional().isBoolean(),
+    body('emailFailureNotificationEmail').optional({ nullable: true }).isEmail(),
     body('slaHours').optional().isObject(),
     body('slaMonitorIntervalSeconds').optional().isInt({ min: 0, max: 3600 }),
     body('enableAutoCreateSkills').optional().isBoolean(),
@@ -108,6 +109,7 @@ router.patch(
     if (req.body.dailySummaryTime !== undefined) data.dailySummaryTime = req.body.dailySummaryTime;
     if (req.body.dailySummaryRecipients !== undefined) data.dailySummaryRecipients = req.body.dailySummaryRecipients;
     if (req.body.notifyTechnicianOnAssignment !== undefined) data.notifyTechnicianOnAssignment = req.body.notifyTechnicianOnAssignment;
+    if (req.body.emailFailureNotificationEmail !== undefined) data.emailFailureNotificationEmail = req.body.emailFailureNotificationEmail || null;
     if (req.body.enableAutoCreateSkills !== undefined) data.enableAutoCreateSkills = req.body.enableAutoCreateSkills;
     if (req.body.slaHours !== undefined) data.slaHours = req.body.slaHours;
     if (req.body.slaMonitorIntervalSeconds !== undefined) data.slaMonitorIntervalSeconds = req.body.slaMonitorIntervalSeconds;

@@ -114,25 +114,20 @@ function cleanMessage(message, maxLength = MAX_MESSAGE_LENGTH) {
   return `${cleaned.slice(0, maxLength - 1)}…`;
 }
 
-// Point d'entrée principal : formate une erreur HTTP d'un provider d'IA.
-// Exemple de sortie :
-//   [Google Gemini] Quota ou limite de débit atteint (HTTP 429) : You exceeded your
-//   current quota… — Limite concernée : generate_requests_per_model_per_day
-//   (gemini-omni-1.1-flash) — Nouvelle tentative possible dans environ 10h 20m
-function formatProviderHttpError({ provider, label, status, body } = {}) {
+// Parse une erreur HTTP de provider une seule fois et retourne un objet structuré
+// réutilisable par formatProviderHttpError (long) et formatProviderHttpErrorShort (court).
+function parseProviderError({ provider, label, status, body } = {}) {
   const providerLabel = label || provider?.label || provider?.name || 'Provider IA';
   const statusCode = Number(status) || 0;
   const responseBody = String(body || '');
   const parsed = tryParseJson(responseBody);
 
-  // Message lisible : champ error.message des API, sinon le corps brut nettoyé
   let message = String(parsed?.error?.message || parsed?.message || responseBody || '').trim();
   if ((message.startsWith('"') && message.endsWith('"')) || (message.startsWith("'") && message.endsWith("'"))) {
     message = message.slice(1, -1).trim();
   }
   message = cleanMessage(message);
 
-  // Catégorie : d'abord le code d'erreur JSON (plus précis), puis le code HTTP
   const errorCode = String(parsed?.error?.status || parsed?.error?.code || parsed?.code || '');
   let category = CATEGORY_BY_STATUS[statusCode] || 'Erreur';
   for (const { pattern, label: catLabel } of CATEGORY_BY_CODE_PATTERN) {
@@ -141,7 +136,6 @@ function formatProviderHttpError({ provider, label, status, body } = {}) {
       break;
     }
   }
-  // Certains fournisseurs renvoient "Quota exceeded" avec un statut 400
   if (/quota|rate limit|trop de requêtes/i.test(message) && statusCode !== 429) {
     category = 'Quota ou limite de débit atteint';
   }
@@ -150,12 +144,37 @@ function formatProviderHttpError({ provider, label, status, body } = {}) {
   const retryLabel = retrySeconds ? formatDuration(retrySeconds) : null;
   const quota = extractQuotaInfo(parsed);
 
+  return { providerLabel, statusCode, category, message, retryLabel, quota };
+}
+
+// Point d'entrée principal : formate une erreur HTTP d'un provider d'IA.
+// Exemple de sortie :
+//   [Google Gemini] Quota ou limite de débit atteint (HTTP 429) : You exceeded your
+//   current quota… — Limite concernée : generate_requests_per_model_per_day
+//   (gemini-omni-1.1-flash) — Nouvelle tentative possible dans environ 10h 20m
+function formatProviderHttpError({ provider, label, status, body } = {}) {
+  const { providerLabel, statusCode, category, message, retryLabel, quota } =
+    parseProviderError({ provider, label, status, body });
+
   const parts = [`[${providerLabel}] ${category} (HTTP ${statusCode || '—'})`];
   if (message) parts.push(message);
   if (quota && (quota.metric || quota.model)) {
     parts.push(`Limite concernée : ${[quota.model, quota.metric].filter(Boolean).join(' — ')}`);
   }
   if (retryLabel) parts.push(`Nouvelle tentative possible dans environ ${retryLabel}`);
+  return parts.join(' — ');
+}
+
+// Version courte pour les toasts et affichages résumés.
+// Exemple de sortie :
+//   [Google Gemini] Quota débit atteint — Réessayer dans ~9h
+function formatProviderHttpErrorShort({ provider, label, status, body } = {}) {
+  const { providerLabel, category, retryLabel, quota } =
+    parseProviderError({ provider, label, status, body });
+
+  const parts = [`[${providerLabel}] ${category}`];
+  if (quota && quota.model) parts.push(quota.model);
+  if (retryLabel) parts.push(`Réessayer dans ${retryLabel}`);
   return parts.join(' — ');
 }
 
@@ -176,4 +195,4 @@ function compactErrorMessage(message, maxLength = 800) {
   return cleanMessage(text, maxLength);
 }
 
-module.exports = { formatProviderHttpError, formatDuration, compactErrorMessage };
+module.exports = { formatProviderHttpError, formatProviderHttpErrorShort, formatDuration, compactErrorMessage };

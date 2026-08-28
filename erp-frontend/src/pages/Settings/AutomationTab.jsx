@@ -709,6 +709,28 @@ export default function AutomationTab() {
               onChange={(v) => updateSetting('notifyTechnicianOnAssignment', v)}
               disabled={saving}
             />
+
+            {/* Notification email en cas d'échec de traitement */}
+            <motion.div
+              variants={itemVariants}
+              whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
+              className="bento-card flex flex-col gap-4 p-lg"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="font-headline-sm text-headline-sm text-on-surface font-semibold break-words">Email en cas d'échec IA</div>
+                <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 break-words">
+                  Adresse email de notification quand un email entrant n'a pas pu être traité par l'IA (quota dépassé, erreur provider, etc.).
+                </p>
+              </div>
+              <input
+                type="email"
+                value={settings.emailFailureNotificationEmail || ''}
+                onChange={(e) => updateSetting('emailFailureNotificationEmail', e.target.value || null)}
+                placeholder="admin@exemple.com"
+                className={inputClass}
+                disabled={saving}
+              />
+            </motion.div>
           </div>
 
           {/* Colonne droite : Notifications navigateur + Sons */}

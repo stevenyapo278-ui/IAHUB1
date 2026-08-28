@@ -22,7 +22,7 @@ const { generateEmailSummary } = require('./emailSummaryGenerator');
 const MAX_RETRIES = 3;const RETRY_DELAYS_MS = [180000, 600000, 1800000]; // 3min, 10min, 30min
 
 // ── Notification admin en cas d'échec d'analyse email ─────────────────
-async function notifyAdminsEmailFailed({ incomingId, subject, fromEmail, error, retryCount, maxRetries, nextRetryAt, phase }) {
+async function notifyAdminsEmailFailed({ incomingId, subject, fromEmail, error, errorDetail, retryCount, maxRetries, nextRetryAt, phase }) {
   try {
     // Trouver tous les ADMIN/SUPERADMIN actifs
     const admins = await prisma.user.findMany({
@@ -61,11 +61,41 @@ async function notifyAdminsEmailFailed({ incomingId, subject, fromEmail, error, 
         subject,
         fromEmail,
         error,
+        errorDetail,
         retryCount,
         maxRetries,
         phase,
         nextRetryAt,
       });
+    }
+
+    // ── Email de notification à l'adresse configurée ──────────────────
+    const settings = await getSystemSettings();
+    const notifyEmail = settings?.emailFailureNotificationEmail;
+    if (notifyEmail) {
+      const { sendEmail: sendEmailNotification } = require('./emailSender');
+      const retryInfoLine = nextRetryAt
+        ? `<p>Prochain essai automatique dans <strong>${Math.round((new Date(nextRetryAt).getTime() - Date.now()) / 60000)} min</strong>.</p>`
+        : '';
+      const detailBlock = errorDetail
+        ? `<blockquote style="border-left:3px solid #e53e3e;margin:12px 0;padding:8px 16px;color:#444;white-space:pre-wrap;font-size:13px">${errorDetail}</blockquote>`
+        : `<blockquote style="border-left:3px solid #e53e3e;margin:12px 0;padding:8px 16px;color:#444">${error}</blockquote>`;
+      const bodyHtml = `
+<p>Bonjour,</p>
+<p>Un email entrant n'a pas pu être traité par l'IA.</p>
+<table style="border-collapse:collapse;margin:12px 0;font-size:13px">
+  <tr><td style="padding:4px 12px;font-weight:bold">Expéditeur</td><td style="padding:4px 12px">${fromEmail || 'inconnu'}</td></tr>
+  <tr><td style="padding:4px 12px;font-weight:bold">Objet</td><td style="padding:4px 12px">${subject || '(sans objet)'}</td></tr>
+  <tr><td style="padding:4px 12px;font-weight:bold">Statut</td><td style="padding:4px 12px">${isDeadLetter ? 'Échec définitif' : `Relance (${retryCount}/${maxRetries})`}</td></tr>
+</table>
+${retryInfoLine}
+<p>Détail de l'erreur :</p>
+${detailBlock}
+<p>Vous pouvez relancer le traitement manuellement depuis l'<a href="${settings?.frontendUrl || 'http://localhost:3000'}/inbox">Inbox</a>.</p>
+`.trim();
+      const subjectLine = `${isDeadLetter ? '❌' : '⚠️'} Email non traité — ${subject || '(sans objet)'}`;
+      await sendEmailNotification({ to: notifyEmail, subject: subjectLine, bodyHtml, saveAsMessage: false })
+        .catch((e) => console.error(`[emailPipeline] Échec envoi email notification vers ${notifyEmail}:`, e.message));
     }
   } catch (err) {
     console.error('[emailPipeline] Erreur notification admin:', err.message);
@@ -705,6 +735,7 @@ async function processMessage(message, account) {
   } catch (err) {
     const isTransient = isTransientError(err);
     const currentRetryCount = incoming.retryCount || 0;
+    const errorDetail = err.errorDetail || null;
 
     if (isTransient && currentRetryCount < MAX_RETRIES) {
       const nextDelay = RETRY_DELAYS_MS[currentRetryCount] || RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1];
@@ -713,6 +744,7 @@ async function processMessage(message, account) {
         data: {
           status: 'RETRY',
           error: err.message,
+          errorDetail,
           lastError: err.message,
           retryCount: currentRetryCount + 1,
           nextRetryAt: new Date(Date.now() + nextDelay),
@@ -725,6 +757,7 @@ async function processMessage(message, account) {
         subject: subject || 'Objet inconnu',
         fromEmail,
         error: err.message,
+        errorDetail,
         retryCount: currentRetryCount + 1,
         maxRetries: MAX_RETRIES,
         nextRetryAt: updated.nextRetryAt,
@@ -788,6 +821,7 @@ async function processMessage(message, account) {
         data: {
           status: deadLetter ? 'DEAD_LETTER' : 'ERROR',
           error: err.message,
+          errorDetail,
           lastError: err.message,
           retryCount: currentRetryCount + (deadLetter ? 0 : 1),
           erpTicketId: fallbackTicketId,
@@ -802,6 +836,7 @@ async function processMessage(message, account) {
         subject: subject || 'Objet inconnu',
         fromEmail,
         error: err.message,
+        errorDetail,
         retryCount: currentRetryCount + (deadLetter ? 0 : 1),
         maxRetries: MAX_RETRIES,
         nextRetryAt: null,

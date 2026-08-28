@@ -50,6 +50,7 @@ function inboundToMessage(email) {
       ? email.attachments.map((a) => ({ id: a.id, filename: a.filename, mimeType: a.mimeType }))
       : [],
     error: email.error,
+    errorDetail: email.errorDetail,
     bodyPreview: email.bodyPreview,
     bodyHtml: email.bodyHtml,
   };
@@ -290,6 +291,7 @@ async function getThread(key, scope = null) {
         attachments: [],
         bodyHtml: null,
         error: null,
+        errorDetail: null,
       };
       emails = [fallbackEmail];
     }
