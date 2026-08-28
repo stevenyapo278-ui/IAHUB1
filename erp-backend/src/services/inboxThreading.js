@@ -24,6 +24,7 @@ function matchesSearch(email, q) {
 function inboundToMessage(email) {
   return {
     kind: 'inbound',
+    id: email.id,           // id IncomingEmail (requis pour le retry, etc.)
     emailId: email.id,
     conversationId: email.conversationId,
     fromEmail: email.fromEmail,

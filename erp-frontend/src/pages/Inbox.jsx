@@ -865,7 +865,7 @@ export default function Inbox() {
                           <button
                             onClick={async () => {
                               try {
-                                await api.post(`/inbox/${threadDetail.latest.id}/retry`);
+                                await api.post(`/inbox/${threadDetail.latest.id ?? threadDetail.latest.emailId}/retry`);
                                 toast.success('Email relancé avec succès');
                                 refreshSelection();
                                 load();

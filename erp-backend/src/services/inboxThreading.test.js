@@ -44,6 +44,8 @@ describe('buildThreads', () => {
     expect(conv.sentCount).toBe(1);
     expect(conv.inboundCount).toBe(2);
     expect(conv.latest.subject).toBe('Re: Sujet A');
+    expect(conv.latest.id).toBe(2); // exposition de l'id IncomingEmail (retry, etc.)
+    expect(conv.latest.emailId).toBe(2);
     expect(conv.messages.map((m) => m.kind)).toEqual(['inbound', 'sent', 'inbound']);
   });
 
