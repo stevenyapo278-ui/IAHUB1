@@ -79,6 +79,10 @@ export function ThemeProvider({ children }) {
     const unlock = () => { animatingRef.current = false; };
 
     try {
+      // Ajouter .theme-animating pour supprimer les transitions CSS globales
+      // pendant que la vague circulaire gère l'animation des couleurs.
+      document.documentElement.classList.add('theme-animating');
+
       const viewTransition = document.startViewTransition(() => {
         // flushSync : React commit le nouveau rendu DEHORS le snapshot « new ».
         // Le useLayoutEffect applique la classe .dark avant le retour du callback.
@@ -107,9 +111,16 @@ export function ThemeProvider({ children }) {
         })
         .catch(() => {});
 
-      // Déverrouille que la transition finisse ou soit ignorée (skip)
-      viewTransition.finished.then(unlock, unlock);
+      // Retirer .theme-animating quand la vague est terminée
+      viewTransition.finished.then(() => {
+        document.documentElement.classList.remove('theme-animating');
+        unlock();
+      }, () => {
+        document.documentElement.classList.remove('theme-animating');
+        unlock();
+      });
     } catch {
+      document.documentElement.classList.remove('theme-animating');
       setTheme(next);
       unlock();
     }

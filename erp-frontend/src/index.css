@@ -199,17 +199,22 @@
 }
 
 /* ─── Transition fluide entre les thèmes ─────────────────────────────────────── */
-/* Uniquement les propriétés visuelles de thème — PAS transform/opacity : celles-ci
-   provoquent des flashs au chargement de la page (les éléments partent de la valeur
-   initiale du navigateur vers leur style final avec un délai visible).
-   Les composants qui ont besoin d'animer transform/opacity le font via Framer Motion
-   ou des classes Tailwind ciblées (transition-transform, animate-*).
-   Cette transition sert aussi de fallback élégant quand l'API View Transitions
-   n'est pas disponible (la vague circulaire prend le relais ailleurs). */
+/* Transition globale pour les vues SANS View Transitions API (fallback).
+   Quand la vague circulaire est active, on ajoute .theme-animating sur <html>
+   pour supprimer ces transitions — sinon on obtient un double-fondu flou. */
 *, *::before, *::after {
   transition-property: background-color, border-color, color, fill, stroke, box-shadow;
   transition-duration: 400ms;
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Pendant la vague circulaire : zéro transition CSS sur les couleurs */
+html.theme-animating,
+html.theme-animating *,
+html.theme-animating *::before,
+html.theme-animating *::after {
+  transition-property: none !important;
+  transition-duration: 0ms !important;
 }
 
 /* ─── Vague circulaire Dark ↔ Light (View Transitions API) ──────────────────── */
