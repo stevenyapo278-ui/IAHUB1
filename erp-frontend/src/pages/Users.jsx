@@ -13,7 +13,8 @@ import useSystemSettings from '../hooks/useSystemSettings';
 import {
   Users as UsersIcon, UserPlus, ShieldCheck, UserX,
   Trash2, Upload, Download, X, Search, CheckCircle2,
-  RotateCcw, KeyRound, Edit2, AlertTriangle, Zap, Database
+  RotateCcw, KeyRound, Edit2, AlertTriangle, Zap, Database,
+  RefreshCw, Layers
 } from 'lucide-react';
 
 const ROLE_LABELS = {
