@@ -82,14 +82,24 @@ function byDateAsc(a, b) {
 }
 
 // Regroupe des emails (+ jambes envoyées) en fils de conversation.
+// Parse un paramètre status qui peut être un statut unique (string) ou une liste
+// séparée par virgules (ex: "ERROR,RETRY,DEAD_LETTER"). Retourne un Set pour
+// un lookup O(1).
+function parseStatusFilter(status) {
+  if (!status) return null;
+  const parts = String(status).split(',').map((s) => s.trim()).filter(Boolean);
+  return parts.length > 1 ? new Set(parts) : null; // null = single status, Set = multi
+}
+
 // Retourne les fils triés du plus récent au plus ancien.
 function buildThreads(emails, sentMessages, { status, q }) {
   const ql = q?.trim().toLowerCase();
+  const statusSet = parseStatusFilter(status);
 
   // 1) Regrouper les emails entrants par clé (filtre status + recherche au niveau du fil)
   const groups = new Map();
   for (const email of emails) {
-    if (status && email.status !== status) continue;
+    if (status && statusSet ? !statusSet.has(email.status) : (status && email.status !== status)) continue;
     if (ql && !matchesSearch(email, ql)) continue;
     const key = threadKeyFor(email);
     if (!groups.has(key)) groups.set(key, []);
@@ -226,17 +236,19 @@ async function listThreads({ status, q, priority, attachments, category, read, d
 // Compteurs globaux pour les badges des dossiers (façon Outlook)
 async function getInboxCounts(scope = null) {
   const countWhere = (extra) => ({ ...(scope || {}), ...extra });
-  const [total, pending, processing, done, error, spam, withAttachments, unread] = await Promise.all([
+  const [total, pending, processing, done, error, retry, deadLetter, spam, withAttachments, unread] = await Promise.all([
     prisma.incomingEmail.count({ where: Object.keys(countWhere({})).length > 0 ? countWhere({}) : undefined }),
     prisma.incomingEmail.count({ where: countWhere({ status: 'PENDING' }) }),
     prisma.incomingEmail.count({ where: countWhere({ status: 'PROCESSING' }) }),
     prisma.incomingEmail.count({ where: countWhere({ status: 'DONE' }) }),
     prisma.incomingEmail.count({ where: countWhere({ status: 'ERROR' }) }),
+    prisma.incomingEmail.count({ where: countWhere({ status: 'RETRY' }) }),
+    prisma.incomingEmail.count({ where: countWhere({ status: 'DEAD_LETTER' }) }),
     prisma.incomingEmail.count({ where: countWhere({ status: 'SPAM' }) }),
     prisma.incomingEmail.count({ where: countWhere({ hasAttachments: true }) }),
     prisma.incomingEmail.count({ where: countWhere({ isRead: false }) }),
   ]);
-  return { total, pending, processing, done, error, spam, withAttachments, unread };
+  return { total, pending, processing, done, error: error + retry + deadLetter, errorOnly: error, retry, deadLetter, spam, withAttachments, unread };
 }
 
 async function getThread(key, scope = null) {

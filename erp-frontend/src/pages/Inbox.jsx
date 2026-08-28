@@ -51,7 +51,7 @@ const FOLDERS = [
   { id: 'unread',       label: 'Non lus',            icon: MailOpen,      read: 'unread' },
   { id: 'pending',      label: 'En attente',         icon: Clock,         status: 'PENDING' },
   { id: 'done',         label: 'Traités',            icon: CheckCircle2,  status: 'DONE' },
-  { id: 'error',        label: 'Erreurs',            icon: XCircle,       status: 'ERROR' },
+  { id: 'error',        label: 'Erreurs',            icon: XCircle,       status: 'ERROR,RETRY,DEAD_LETTER' },
   { id: 'retry',        label: 'En relance',          icon: RefreshCw,     status: 'RETRY' },
   { id: 'dead_letter',  label: 'Échecs définitifs',   icon: AlertTriangle, status: 'DEAD_LETTER' },
   { id: 'spam',         label: 'Spam',               icon: Ban,           status: 'SPAM' },
@@ -688,11 +688,9 @@ export default function Inbox() {
                   return (
                     <motion.button
                       key={t.id}
-                      layout
-                      initial={{ opacity: 0, y: -4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, x: -20 }}
-                      transition={{ duration: 0.15 }}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ duration: 0.1 }}
                       onClick={() => openThread(t)}
                       className={`w-full text-left flex items-stretch gap-0 border-b border-outline-variant/15 transition-all group ${
                         isSelected
@@ -811,14 +809,14 @@ export default function Inbox() {
         </div>
 
         {/* ═══ Volet de lecture (façon Outlook) ═══ */}
-        <AnimatePresence mode="wait">
+        <AnimatePresence>
           {selectedThread ? (
             <motion.div
               key={selectedThread.id}
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 20 }}
-              transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
               className="flex-1 flex flex-col min-w-0 overflow-hidden bg-surface-container-lowest"
             >
               {detailLoading && !threadDetail ? (
