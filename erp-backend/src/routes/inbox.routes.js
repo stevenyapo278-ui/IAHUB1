@@ -248,16 +248,37 @@ router.post(
   }
 );
 
-// ── Relancer tous les emails DEAD_LETTER / ERROR ─────────────────────────────
+// ── Relancer les emails DEAD_LETTER / ERROR, avec plage de dates optionnelle ──
+// Body optionnel : { from?: ISO, to?: ISO } — filtre sur receivedAt (inclusif)
 // ⚠️ Doit être AVANT /:id/retry pour éviter le conflit de route
 router.post('/retry-all', requirePermission('inbox.sync', ['ADMIN']), async (req, res) => {
   try {
+    const { from, to } = req.body || {};
+
+    // Filtre temporel optionnel (plage de dates couvrant toute la journée côté client)
+    const receivedAt = {};
+    if (from) {
+      const dFrom = new Date(from);
+      if (!Number.isNaN(dFrom.getTime())) receivedAt.gte = dFrom;
+    }
+    if (to) {
+      const dTo = new Date(to);
+      if (!Number.isNaN(dTo.getTime())) receivedAt.lte = dTo;
+    }
+
+    const where = { status: { in: ['DEAD_LETTER', 'ERROR'] } };
+    if (Object.keys(receivedAt).length > 0) where.receivedAt = receivedAt;
+
     const failed = await prisma.incomingEmail.findMany({
-      where: { status: { in: ['DEAD_LETTER', 'ERROR'] } },
+      where,
       orderBy: { receivedAt: 'asc' },
     });
 
-    if (failed.length === 0) return res.json({ message: 'Aucun email en erreur à relancer', retried: 0 });
+    const rangeLabel = Object.keys(receivedAt).length > 0
+      ? ` sur la période du ${new Date(receivedAt.gte).toLocaleDateString('fr-FR')} au ${new Date(receivedAt.lte || Date.now()).toLocaleDateString('fr-FR')}`
+      : '';
+
+    if (failed.length === 0) return res.json({ message: `Aucun email en erreur à relancer${rangeLabel}`, retried: 0, errors: 0, total: 0 });
 
     let retried = 0;
     let errors = 0;
@@ -296,7 +317,12 @@ router.post('/retry-all', requirePermission('inbox.sync', ['ADMIN']), async (req
       }
     }
 
-    return res.json({ message: `${retried} email(s) relancé(s), ${errors} erreur(s)`, retried, errors });
+    return res.json({
+      message: `${retried} email(s) relancé(s)${rangeLabel}, ${errors} erreur(s)`,
+      retried,
+      errors,
+      total: failed.length,
+    });
   } catch (err) {
     return res.status(500).json({ error: err.message || 'Erreur lors du relancement groupé' });
   }

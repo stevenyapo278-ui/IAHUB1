@@ -14,7 +14,8 @@ import {
   Inbox as InboxIcon, MailOpen, RefreshCw, Clock, CheckCircle2, XCircle, Ban,
   Paperclip, Search, X, FlaskConical, Bot, ArrowUpRight, Reply, ChevronDown,
   ChevronRight, Flame, AlertTriangle, ArrowDownWideNarrow, Rows3, Rows4,
-  CircleDot, Mail, CheckCheck, Send, FileText, Tag, Users, Filter, Sparkles, Plus
+  CircleDot, Mail, CheckCheck, Send, FileText, Tag, Users, Filter, Sparkles, Plus,
+  CalendarRange
 } from 'lucide-react';
 
 const STATUS_LABELS = {
@@ -211,6 +212,55 @@ export default function Inbox() {
   const [testResult, setTestResult] = useState(null);
   const [showTestModal, setShowTestModal] = useState(false);
   const [testError, setTestError] = useState('');
+
+  // ── Relance groupée avec plage de dates ─────────────────────────────────
+  const [showRetryModal, setShowRetryModal] = useState(false);
+  const [retryFrom, setRetryFrom] = useState('');
+  const [retryTo, setRetryTo] = useState('');
+  const [retryingAll, setRetryingAll] = useState(false);
+
+  // Ouvre la modale de relance avec une plage par défaut : 7 derniers jours
+  function openRetryModal() {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 86400000);
+    const today = new Date();
+    const toLocal = (d) => {
+      const p = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    };
+    setRetryFrom(toLocal(sevenDaysAgo));
+    setRetryTo(toLocal(today));
+    setShowRetryModal(true);
+  }
+
+  // Relance les emails en erreur reçus dans la plage sélectionnée (inclusive)
+  async function handleRetryRange(e) {
+    e.preventDefault();
+    if (!retryFrom && !retryTo) {
+      toast.error('Définissez une plage de dates (début et/ou fin)');
+      return;
+    }
+    if (retryFrom && retryTo && retryFrom > retryTo) {
+      toast.error('La date de début doit être antérieure à la date de fin');
+      return;
+    }
+    setRetryingAll(true);
+    try {
+      // Convertit en bornes UTC couvrant toute la journée (fuseau local du navigateur)
+      const fromISO = retryFrom ? new Date(`${retryFrom}T00:00:00`).toISOString() : null;
+      const toISO = retryTo ? new Date(`${retryTo}T23:59:59.999`).toISOString() : null;
+      const { data } = await api.post('/inbox/retry-all', { from: fromISO, to: toISO });
+      toast.success(data.message || 'Relancement terminé');
+      setShowRetryModal(false);
+      setRetryFrom('');
+      setRetryTo('');
+      load();
+      refreshCounts();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors du relancement groupé');
+    } finally {
+      setRetryingAll(false);
+    }
+  }
 
   const pageRef = useRef(1);
   useEffect(() => { pageRef.current = page; }, [page]);
@@ -430,21 +480,14 @@ export default function Inbox() {
 
         {/* Actions */}
         <div className="flex items-center gap-2 ml-auto shrink-0">
-          {['error', 'dead_letter'].includes(folder) && (
+          {['error', 'dead_letter', 'retry'].includes(folder) && (
             <button
-              onClick={async () => {
-                try {
-                  const { data } = await api.post('/inbox/retry-all');
-                  toast.success(data.message || 'Relancement terminé');
-                  load();
-                } catch (err) {
-                  toast.error(err.response?.data?.error || 'Erreur lors du relancement groupé');
-                }
-              }}
+              onClick={openRetryModal}
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 text-xs font-semibold transition-all cursor-pointer"
+              title="Relancer les emails en erreur reçus sur une période donnée"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Relancer tout</span>
+              <CalendarRange className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Relancer (dates)</span>
             </button>
           )}
           {canSync && (
@@ -1180,6 +1223,104 @@ export default function Inbox() {
                   </AnimatePresence>
                 </div>
               </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
+
+      {/* ── Modale Relance groupée (plage de dates) ──────────────────────── */}
+      {canSync && createPortal(
+        <AnimatePresence>
+          {showRetryModal && (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                onClick={() => !retryingAll && setShowRetryModal(false)}
+                className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer"
+              />
+              <motion.form
+                onSubmit={handleRetryRange}
+                initial={{ opacity: 0, scale: 0.95, y: 16 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 16 }}
+                transition={{ type: 'spring', duration: 0.35, bounce: 0.15 }}
+                className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl max-w-md w-full p-6 card-shadow flex flex-col gap-5 overflow-hidden max-h-[90vh]"
+              >
+                <div className="flex justify-between items-center pb-3 border-b border-outline-variant/30">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-xl bg-amber-500/10">
+                      <CalendarRange className="w-5 h-5 text-amber-500" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-on-surface">Relancer les traitements échoués</h3>
+                      <p className="text-[10px] text-on-surface-variant">Emails en erreur / échec — par période de réception</p>
+                    </div>
+                  </div>
+                  <motion.button
+                    type="button"
+                    onClick={() => setShowRetryModal(false)}
+                    disabled={retryingAll}
+                    whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }}
+                    className="p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer disabled:opacity-40"
+                  >
+                    <X className="w-4 h-4" />
+                  </motion.button>
+                </div>
+
+                {/* Plage de dates */}
+                <div className="space-y-4">
+                  <p className="text-xs text-on-surface-variant leading-relaxed">
+                    Sélectionnez la plage de dates de <strong className="text-on-surface">réception des emails</strong> à relancer.
+                    Les <strong className="text-on-surface">7 derniers jours</strong> sont présélectionnés — ajustez selon vos besoins.
+                    Seuls les emails en <strong className="text-amber-600 dark:text-amber-400">erreur / échec définitif</strong> seront traités.
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Du *</span>
+                      <input
+                        type="date"
+                        required
+                        value={retryFrom}
+                        max={retryTo || undefined}
+                        onChange={(e) => setRetryFrom(e.target.value)}
+                        className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3 py-2 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Au *</span>
+                      <input
+                        type="date"
+                        required
+                        value={retryTo}
+                        min={retryFrom || undefined}
+                        onChange={(e) => setRetryTo(e.target.value)}
+                        className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3 py-2 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-outline-variant/30 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowRetryModal(false)}
+                    disabled={retryingAll}
+                    className="px-4 py-2.5 rounded-xl border border-outline-variant text-on-surface text-xs font-medium hover:bg-surface-container transition-colors cursor-pointer disabled:opacity-40"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={retryingAll}
+                    className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs font-bold shadow-md shadow-amber-500/20 transition-all hover:brightness-110 cursor-pointer disabled:opacity-60"
+                  >
+                    {retryingAll ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                    {retryingAll ? 'Relance en cours...' : 'Relancer'}
+                  </button>
+                </div>
+              </motion.form>
             </div>
           )}
         </AnimatePresence>,
