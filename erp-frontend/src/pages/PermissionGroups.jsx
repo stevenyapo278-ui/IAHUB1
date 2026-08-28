@@ -7,9 +7,11 @@ import Skeleton from '../components/Skeleton';
 import { PERMISSION_DEFINITIONS } from '../config/permissions';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { createPortal } from 'react-dom';
 import {
   Shield, Users, Plus, Trash2, X, Search,
-  Lock, Check, AlertTriangle, Headphones, ArrowRightLeft
+  Lock, Check, AlertTriangle, Headphones, ArrowRightLeft,
+  HelpCircle, RefreshCcw, UserX, Layers, GripVertical
 } from 'lucide-react';
 
 const emptyForm = { name: '', description: '', permissions: [] };
@@ -70,6 +72,13 @@ export default function PermissionGroups() {
   const [memberLoading, setMemberLoading] = useState(false);
   const [togglingMember, setTogglingMember] = useState(null);
   const [moveConfirm, setMoveConfirm] = useState(null); // { user, fromGroup } — déplacement vers le groupe ouvert
+  const [showHelp, setShowHelp] = useState(false);
+  const [showGroupManager, setShowGroupManager] = useState(false);
+  const [gmGroups, setGmGroups] = useState([]);
+  const [gmUsers, setGmUsers] = useState([]);
+  const [gmLoading, setGmLoading] = useState(false);
+  const [gmSearch, setGmSearch] = useState('');
+  const [gmDragUser, setGmDragUser] = useState(null);
   const memberDebounceRef = useRef(null);
   const memberRequestSeq = useRef(0);
 
@@ -296,8 +305,33 @@ export default function PermissionGroups() {
         </div>
 
         {/* Actions */}
-        {canManageGroups && (
-          <div className="flex items-center gap-2 ml-auto">
+        <div className="flex items-center gap-2 ml-auto">
+          <button onClick={() => setShowHelp(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/40 text-on-surface-variant hover:bg-surface-container text-xs font-semibold transition-all"
+            title="Aide — Comment fonctionnent les groupes de droits ?"
+          >
+            <HelpCircle className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Aide</span>
+          </button>
+          {canManageGroups && (
+            <button onClick={async () => {
+                setShowGroupManager(true); setGmLoading(true); setGmSearch('');
+                try {
+                  const [gRes, uRes] = await Promise.all([api.get('/permission-groups'), api.get('/users?all=true')]);
+                  setGmGroups(gRes.data);
+                  const list = Array.isArray(uRes.data) ? uRes.data : (uRes.data.users || []);
+                  setGmUsers(list.filter(u => u.isActive));
+                } catch (err) { toast.error(err.response?.data?.error || 'Erreur chargement'); setShowGroupManager(false); }
+                finally { setGmLoading(false); }
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-purple-500/40 text-purple-600 dark:text-purple-400 hover:bg-purple-500/10 text-xs font-semibold transition-all"
+              title="Gérer les membres par glisser-déposer"
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Membres</span>
+            </button>
+          )}
+          {canManageGroups && (
             <motion.button
               whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
               onClick={() => { setShowForm(v => !v); setError(''); }}
@@ -306,8 +340,8 @@ export default function PermissionGroups() {
               {showForm ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
               <span className="hidden sm:inline">{showForm ? 'Fermer' : 'Nouveau groupe'}</span>
             </motion.button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* ── Error Banner ─────────────────────────────────────────────────── */}
@@ -782,6 +816,255 @@ export default function PermissionGroups() {
         onConfirm={handleDelete}
         onCancel={() => setConfirmDeleteId(null)}
       />
+
+      {/* ── Modal Aide ──────────────────────────────────────────────────── */}
+      {createPortal(
+        <AnimatePresence>
+          {showHelp && (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                onClick={() => setShowHelp(false)}
+                className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer" />
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+                transition={{ type: 'spring', duration: 0.35, bounce: 0.12 }}
+                className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
+                <div className="flex items-center gap-3 px-5 py-4 border-b border-outline-variant/30 shrink-0">
+                  <div className="p-1.5 rounded-lg bg-purple-500/10"><HelpCircle className="w-4 h-4 text-purple-600" /></div>
+                  <h3 className="text-sm font-bold text-on-surface">Aide — Groupes de droits</h3>
+                  <motion.button onClick={() => setShowHelp(false)} whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }}
+                    className="ml-auto p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all">
+                    <X className="w-4 h-4" />
+                  </motion.button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-5 space-y-5 text-xs text-on-surface">
+                  <div>
+                    <h4 className="font-bold text-sm mb-2 flex items-center gap-2"><Shield className="w-4 h-4 text-purple-500" /> Qu'est-ce qu'un groupe de droits ?</h4>
+                    <p className="text-on-surface-variant leading-relaxed">
+                      Un groupe de droits définit <strong>ce qu'un utilisateur peut faire</strong> dans l'application : gérer les tickets, accéder à l'administration, visualiser les logs, etc.
+                      Chaque utilisateur peut appartenir à <strong>un seul groupe de droits</strong> à la fois.
+                    </p>
+                  </div>
+
+                  <div>
+                    <h4 className="font-bold text-sm mb-2 flex items-center gap-2"><Users className="w-4 h-4 text-blue-500" /> Gérer les membres</h4>
+                    <ul className="space-y-1.5 text-on-surface-variant">
+                      <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5">•</span> <span><strong>Clic sur un groupe</strong> dans la liste de gauche pour ouvrir son panneau de détail.</span></li>
+                      <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5">•</span> <span><strong>Barre de recherche</strong> dans le panneau détail pour trouver et ajouter un utilisateur au groupe.</span></li>
+                      <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5">•</span> <span><strong>Bouton « Membres »</strong> dans la barre du haut : ouvre un modal glisser-déposer pour assigner rapidement des utilisateurs à plusieurs groupes.</span></li>
+                      <li className="flex items-start gap-2"><span className="text-purple-500 mt-0.5">•</span> <span><strong>Déplacement</strong> : si un utilisateur est déjà dans un autre groupe, un pop-up de confirmation apparaît pour le déplacer.</span></li>
+                    </ul>
+                  </div>
+
+                  <div>
+                    <h4 className="font-bold text-sm mb-2 flex items-center gap-2"><Lock className="w-4 h-4 text-amber-500" /> Permissions</h4>
+                    <ul className="space-y-1.5 text-on-surface-variant">
+                      <li className="flex items-start gap-2"><span className="text-amber-500 mt-0.5">•</span> <span>Chaque groupe contient une liste de <strong>permissions spécifiques</strong> (ex : gérer les tickets, modifier les paramètres, etc.).</span></li>
+                      <li className="flex items-start gap-2"><span className="text-amber-500 mt-0.5">•</span> <span>Vous pouvez <strong>cocher/décocher</strong> les permissions directement dans le panneau de détail du groupe.</span></li>
+                      <li className="flex items-start gap-2"><span className="text-amber-500 mt-0.5">•</span> <span>Un Superadmin a automatiquement <strong>toutes les permissions</strong> sans besoin de groupe.</span></li>
+                    </ul>
+                  </div>
+
+                  <div>
+                    <h4 className="font-bold text-sm mb-2 flex items-center gap-2"><ArrowRightLeft className="w-4 h-4 text-emerald-500" /> Rôle vs Groupe</h4>
+                    <p className="text-on-surface-variant leading-relaxed">
+                      Le <strong>rôle</strong> (Admin, Technicien, Demandeur…) et le <strong>groupe de droits</strong> sont liés mais distincts.
+                      Quand un technicien est déplacé vers le groupe « Équipe Hotline », son rôle est automatiquement mis à jour en « Hotline ».
+                      Le rôle se change depuis la vue <strong>Utilisateurs</strong>.
+                    </p>
+                  </div>
+
+                  <div>
+                    <h4 className="font-bold text-sm mb-2 flex items-center gap-2"><GripVertical className="w-4 h-4 text-cyan-500" /> Glisser-déposer</h4>
+                    <p className="text-on-surface-variant leading-relaxed">
+                      Dans le modal « Membres », vous pouvez <strong>glisser un utilisateur</strong> depuis la colonne de gauche et le <strong>poser sur un groupe</strong> dans la colonne de droite pour l'y assigner instantanément.
+                      La recherche supporte <strong>plusieurs termes séparés par des virgules</strong> (ex : "Jean, Koné, Marie").
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>, document.body
+      )}
+
+      {/* ── Modal Gestion Groupes (Drag & Drop) ────────────────────────── */}
+      {createPortal(
+        <AnimatePresence>
+          {showGroupManager && (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                onClick={() => setShowGroupManager(false)}
+                className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer" />
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+                transition={{ type: 'spring', duration: 0.35, bounce: 0.12 }}
+                className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[85vh] flex flex-col overflow-hidden">
+
+                {/* Header */}
+                <div className="flex items-center gap-3 px-5 py-4 border-b border-outline-variant/30 shrink-0">
+                  <div className="p-1.5 rounded-lg bg-purple-500/10"><Users className="w-4 h-4 text-purple-600" /></div>
+                  <div>
+                    <h3 className="text-sm font-bold text-on-surface">Gérer les membres</h3>
+                    <p className="text-[10px] text-on-surface-variant">Glissez les utilisateurs dans un groupe • Recherche multi-terme avec virgules</p>
+                  </div>
+                  <motion.button onClick={() => setShowGroupManager(false)} whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }}
+                    className="ml-auto p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all">
+                    <X className="w-4 h-4" />
+                  </motion.button>
+                </div>
+
+                {gmLoading ? (
+                  <div className="flex items-center justify-center py-16 gap-2 text-on-surface-variant text-xs">
+                    <RefreshCcw className="w-4 h-4 animate-spin text-purple-600" />
+                    Chargement...
+                  </div>
+                ) : (
+                  <div className="flex flex-1 min-h-0 overflow-hidden">
+                    {/* ── Panneau gauche : Utilisateurs sans groupe ──────────── */}
+                    <div className="w-[320px] shrink-0 border-r border-outline-variant/30 flex flex-col">
+                      <div className="px-4 py-3 border-b border-outline-variant/20">
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-on-surface-variant/40" />
+                          <input
+                            value={gmSearch}
+                            onChange={e => setGmSearch(e.target.value)}
+                            placeholder="Recherche (séparez par des virgules)"
+                            className="w-full pl-9 pr-3 py-2 rounded-xl border border-outline-variant/60 bg-surface text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                          />
+                        </div>
+                        {gmSearch.includes(',') && (
+                          <div className="flex flex-wrap gap-1 mt-2">
+                            {gmSearch.split(',').map((term, i) => term.trim() && (
+                              <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 text-[10px] font-semibold border border-purple-500/20">
+                                {term.trim()}
+                                <button onClick={() => {
+                                  const parts = gmSearch.split(',').filter((_, idx) => idx !== i);
+                                  setGmSearch(parts.join(', '));
+                                }} className="hover:text-red-500 transition-colors"><X className="w-2.5 h-2.5" /></button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                        {(() => {
+                          const terms = gmSearch.split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
+                          const filtered = gmUsers.filter(u => {
+                            if (u.permissionGroups?.length > 0) return false;
+                            if (terms.length === 0) return true;
+                            return terms.some(q =>
+                              u.fullName?.toLowerCase().includes(q) ||
+                              u.email?.toLowerCase().includes(q)
+                            );
+                          });
+                          if (filtered.length === 0) {
+                            return (
+                              <div className="text-center py-8 text-on-surface-variant/50">
+                                <UserX className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                                <p className="text-[11px] italic">Aucun utilisateur sans groupe</p>
+                              </div>
+                            );
+                          }
+                          return filtered.map(u => (
+                            <div
+                              key={u.id}
+                              draggable
+                              onDragStart={() => setGmDragUser(u)}
+                              onDragEnd={() => setGmDragUser(null)}
+                              className={`flex items-center gap-2.5 p-2.5 rounded-xl border cursor-grab active:cursor-grabbing transition-all ${
+                                gmDragUser?.id === u.id
+                                  ? 'border-purple-500/40 bg-purple-500/10 shadow-md scale-[1.02]'
+                                  : 'border-outline-variant/20 bg-surface hover:border-outline-variant/40 hover:bg-surface-container-low'
+                              }`}
+                            >
+                              <div className="w-8 h-8 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-600 font-bold text-[11px] flex items-center justify-center shrink-0">
+                                {u.fullName?.charAt(0)?.toUpperCase() || '?'}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-semibold text-on-surface truncate">{u.fullName}</p>
+                                <p className="text-[10px] text-on-surface-variant truncate">{u.email}</p>
+                              </div>
+                              {u.role && ROLE_STYLES[u.role] && (
+                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md border shrink-0 ${ROLE_STYLES[u.role].cls}`}>
+                                  {ROLE_STYLES[u.role].label}
+                                </span>
+                              )}
+                            </div>
+                          ));
+                        })()}
+                      </div>
+                      <div className="px-4 py-2 border-t border-outline-variant/20 text-[10px] text-on-surface-variant/50 text-center">
+                        {gmUsers.filter(u => !u.permissionGroups?.length).length} disponible(s)
+                      </div>
+                    </div>
+
+                    {/* ── Panneau droit : Groupes (zones de drop) ──────────── */}
+                    <div className="flex-1 overflow-y-auto p-4">
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                        {gmGroups.map(group => {
+                          const groupMembers = gmUsers.filter(u => u.permissionGroups?.some(g => g.id === group.id));
+                          return (
+                            <div
+                              key={group.id}
+                              onDragOver={e => { e.preventDefault(); e.currentTarget.classList.add('ring-2', 'ring-purple-500/40', 'bg-purple-500/5'); }}
+                              onDragLeave={e => { e.currentTarget.classList.remove('ring-2', 'ring-purple-500/40', 'bg-purple-500/5'); }}
+                              onDrop={async (e) => {
+                                e.preventDefault();
+                                e.currentTarget.classList.remove('ring-2', 'ring-purple-500/40', 'bg-purple-500/5');
+                                const user = gmDragUser;
+                                if (!user) return;
+                                try {
+                                  await api.post(`/permission-groups/${group.id}/assign`, { userIds: [user.id] });
+                                  toast.success(`${user.fullName} assigné au groupe « ${group.name} »`);
+                                  setGmUsers(prev => prev.map(u => u.id === user.id ? { ...u, permissionGroups: [{ id: group.id, name: group.name }] } : u));
+                                  setGmDragUser(null);
+                                  load();
+                                } catch (err) {
+                                  toast.error(err.response?.data?.error || "Erreur lors de l'assignation");
+                                }
+                              }}
+                              className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest hover:border-outline-variant/50 transition-all overflow-hidden"
+                            >
+                              <div className="px-4 py-3 border-b border-outline-variant/20 flex items-center gap-2">
+                                <div className="p-1 rounded-md bg-purple-500/10"><Shield className="w-3.5 h-3.5 text-purple-500" /></div>
+                                <span className="text-xs font-bold text-on-surface">{group.name}</span>
+                                <span className="ml-auto text-[10px] font-semibold text-on-surface-variant bg-surface-container px-1.5 py-0.5 rounded-md">
+                                  {groupMembers.length}
+                                </span>
+                              </div>
+                              <div className="p-2 min-h-[60px]">
+                                {groupMembers.length === 0 ? (
+                                  <p className="text-[10px] text-on-surface-variant/30 text-center py-3 italic">Glissez un utilisateur ici</p>
+                                ) : (
+                                  <div className="space-y-1">
+                                    {groupMembers.map(u => (
+                                      <div key={u.id} className="flex items-center gap-2 p-2 rounded-lg bg-surface border border-outline-variant/20 group">
+                                        <div className="w-6 h-6 rounded-full bg-purple-500/10 text-purple-600 font-bold text-[9px] flex items-center justify-center shrink-0">
+                                          {u.fullName?.charAt(0)?.toUpperCase()}
+                                        </div>
+                                        <span className="text-[11px] font-medium text-on-surface truncate flex-1">{u.fullName}</span>
+                                        {u.role && ROLE_STYLES[u.role] && (
+                                          <span className={`text-[9px] font-bold px-1 py-0.5 rounded border shrink-0 ${ROLE_STYLES[u.role].cls}`}>
+                                            {ROLE_STYLES[u.role].label}
+                                          </span>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>, document.body
+      )}
+
     </div>
   );
 }
