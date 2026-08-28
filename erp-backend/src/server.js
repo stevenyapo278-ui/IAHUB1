@@ -102,6 +102,55 @@ function scheduleSync(name, syncFn, getIntervalSeconds) {
 scheduleSync('emails entrants', runEmailPipeline, (s) => s.emailSyncIntervalSeconds);
 scheduleSync('modèles IA', syncAllProviders, (s) => s.aiModelsSyncIntervalHours * 3600);
 
+// ── Retry automatique des emails DEAD_LETTER (toutes les 30 minutes) ─────────
+// Relance les emails en échec définitif : l'erreur initiale était peut-être temporaire
+// (provider IA down, rate limit, etc.) et un nouveauessai peut aboutir.
+async function retryDeadLetters() {
+  try {
+    const deadLetters = await require('./prismaClient').incomingEmail.findMany({
+      where: { status: 'DEAD_LETTER' },
+      orderBy: { receivedAt: 'asc' },
+      take: 20, // max 20 par cycle pour ne pas surcharger
+    });
+    if (deadLetters.length === 0) return;
+    console.log(`[server] Retry automatique : ${deadLetters.length} email(s) DEAD_LETTER en cours de relance...`);
+    let retried = 0;
+    for (const incoming of deadLetters) {
+      try {
+        const account = await require('./prismaClient').emailAccount.findUnique({ where: { id: incoming.emailAccountId } });
+        if (!account) continue;
+        const message = {
+          id: incoming.graphMessageId,
+          from: { emailAddress: { address: incoming.fromEmail, name: incoming.fromName || '' } },
+          subject: incoming.subject,
+          bodyPreview: incoming.bodyPreview,
+          body: { content: incoming.bodyHtml || '' },
+          receivedDateTime: incoming.receivedAt?.toISOString?.() || new Date().toISOString(),
+          conversationId: incoming.conversationId,
+          internetMessageId: incoming.internetMessageId,
+          hasAttachments: incoming.hasAttachments,
+          toRecipients: [],
+          ccRecipients: (incoming.ccRecipients || []).map(e => ({ emailAddress: { address: e } })),
+          internetMessageHeaders: [],
+        };
+        await require('./prismaClient').incomingEmail.update({
+          where: { id: incoming.id },
+          data: { status: 'PROCESSING', error: null, lastError: null, retryCount: 0 },
+        });
+        const { processMessage } = require('./services/emailPipeline');
+        await processMessage(message, account);
+        retried++;
+      } catch (err) {
+        console.error(`[server] Retry auto échoué pour email #${incoming.id}:`, err.message);
+      }
+    }
+    console.log(`[server] Retry DEAD_LETTER terminé : ${retried}/${deadLetters.length} relancé(s)`);
+  } catch (err) {
+    console.error('[server] Erreur retry DEAD_LETTER:', err.message);
+  }
+}
+scheduleSync('retry DEAD_LETTER', retryDeadLetters, () => 30 * 60); // toutes les 30 min
+
 // Annuaire Active Directory : reflète les utilisateurs AD dans IA Hub toutes les
 // 10 minutes (création des nouveaux, maj nom complet, désactivation des partants).
 // Ne démarre que si le compte de service LDAP est configuré (.env).

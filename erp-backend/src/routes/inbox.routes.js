@@ -248,4 +248,102 @@ router.post(
   }
 );
 
+// ── Relancer un email en erreur / DEAD_LETTER ────────────────────────────────
+router.post('/:id/retry', requirePermission('inbox.sync', ['ADMIN']), async (req, res) => {
+  try {
+    const incoming = await prisma.incomingEmail.findUnique({ where: { id: Number(req.params.id) } });
+    if (!incoming) return res.status(404).json({ error: 'Email introuvable' });
+    if (!['ERROR', 'DEAD_LETTER', 'RETRY'].includes(incoming.status)) {
+      return res.status(400).json({ error: `Impossible de relancer un email en statut « ${incoming.status} »` });
+    }
+
+    // Trouver le compte email associé
+    const account = await prisma.emailAccount.findUnique({ where: { id: incoming.emailAccountId } });
+    if (!account) return res.status(400).json({ error: 'Compte email associé introuvable' });
+
+    // Reconstruire un objet message minimal pour reprocessMessage
+    const message = {
+      id: incoming.graphMessageId,
+      from: { emailAddress: { address: incoming.fromEmail, name: incoming.fromName || '' } },
+      subject: incoming.subject,
+      bodyPreview: incoming.bodyPreview,
+      body: { content: incoming.bodyHtml || '' },
+      receivedDateTime: incoming.receivedAt?.toISOString?.() || new Date().toISOString(),
+      conversationId: incoming.conversationId,
+      internetMessageId: incoming.internetMessageId,
+      hasAttachments: incoming.hasAttachments,
+      toRecipients: [],
+      ccRecipients: (incoming.ccRecipients || []).map(e => ({ emailAddress: { address: e } })),
+      internetMessageHeaders: [],
+    };
+
+    // Réinitialiser le statut pour que processMessage le traite à nouveau
+    await prisma.incomingEmail.update({
+      where: { id: incoming.id },
+      data: { status: 'PROCESSING', error: null, lastError: null, retryCount: 0 },
+    });
+
+    const { processMessage: pm } = require('../services/emailPipeline');
+    const result = await pm(message, account);
+
+    return res.json({ message: 'Email relancé avec succès', status: result?.status, id: result?.id });
+  } catch (err) {
+    console.error('[inbox/retry] Erreur:', err.message);
+    return res.status(500).json({ error: err.message || 'Erreur lors du relancement' });
+  }
+});
+
+// ── Relancer tous les emails DEAD_LETTER / ERROR ─────────────────────────────
+router.post('/retry-all', requirePermission('inbox.sync', ['ADMIN']), async (req, res) => {
+  try {
+    const failed = await prisma.incomingEmail.findMany({
+      where: { status: { in: ['DEAD_LETTER', 'ERROR'] } },
+      orderBy: { receivedAt: 'asc' },
+    });
+
+    if (failed.length === 0) return res.json({ message: 'Aucun email en erreur à relancer', retried: 0 });
+
+    let retried = 0;
+    let errors = 0;
+
+    for (const incoming of failed) {
+      try {
+        const account = await prisma.emailAccount.findUnique({ where: { id: incoming.emailAccountId } });
+        if (!account) { errors++; continue; }
+
+        const message = {
+          id: incoming.graphMessageId,
+          from: { emailAddress: { address: incoming.fromEmail, name: incoming.fromName || '' } },
+          subject: incoming.subject,
+          bodyPreview: incoming.bodyPreview,
+          body: { content: incoming.bodyHtml || '' },
+          receivedDateTime: incoming.receivedAt?.toISOString?.() || new Date().toISOString(),
+          conversationId: incoming.conversationId,
+          internetMessageId: incoming.internetMessageId,
+          hasAttachments: incoming.hasAttachments,
+          toRecipients: [],
+          ccRecipients: (incoming.ccRecipients || []).map(e => ({ emailAddress: { address: e } })),
+          internetMessageHeaders: [],
+        };
+
+        await prisma.incomingEmail.update({
+          where: { id: incoming.id },
+          data: { status: 'PROCESSING', error: null, lastError: null, retryCount: 0 },
+        });
+
+        const { processMessage: pm } = require('../services/emailPipeline');
+        await pm(message, account);
+        retried++;
+      } catch (err) {
+        console.error(`[inbox/retry-all] Erreur email #${incoming.id}:`, err.message);
+        errors++;
+      }
+    }
+
+    return res.json({ message: `${retried} email(s) relancé(s), ${errors} erreur(s)`, retried, errors });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || 'Erreur lors du relancement groupé' });
+  }
+});
+
 module.exports = router;

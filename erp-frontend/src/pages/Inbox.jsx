@@ -30,7 +30,11 @@ const STATUS_CONFIG = {
   PROCESSING:{label: 'Traitement',icon: RefreshCw,    color: 'text-blue-400',   bg: 'bg-blue-500/10',   border: 'border-blue-500/20'   },
   DONE:    { label: 'Traité',     icon: CheckCircle2, color: 'text-emerald-400',bg: 'bg-emerald-500/10',border: 'border-emerald-500/20' },
   ERROR:   { label: 'Erreur',     icon: XCircle,      color: 'text-red-400',    bg: 'bg-red-500/10',    border: 'border-red-500/20'    },
+  RETRY:   { label: 'Relance',    icon: RefreshCw,    color: 'text-amber-400',  bg: 'bg-amber-500/10',  border: 'border-amber-500/20'  },
+  DEAD_LETTER: { label: 'Échec',  icon: AlertTriangle,color: 'text-red-500',    bg: 'bg-red-500/15',    border: 'border-red-500/25'    },
   SPAM:    { label: 'Spam',       icon: Ban,          color: 'text-zinc-400',   bg: 'bg-zinc-500/10',   border: 'border-zinc-500/20'   },
+  INFORMATIONAL: { label: 'Info', icon: Mail,          color: 'text-slate-400',  bg: 'bg-slate-500/10',  border: 'border-slate-500/20'  },
+  NEEDS_REVIEW: { label: 'Révision', icon: AlertTriangle, color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20' },
 };
 
 const PRIORITY_CONFIG = {
@@ -47,6 +51,8 @@ const FOLDERS = [
   { id: 'pending',      label: 'En attente',         icon: Clock,         status: 'PENDING' },
   { id: 'done',         label: 'Traités',            icon: CheckCircle2,  status: 'DONE' },
   { id: 'error',        label: 'Erreurs',            icon: XCircle,       status: 'ERROR' },
+  { id: 'retry',        label: 'En relance',          icon: RefreshCw,     status: 'RETRY' },
+  { id: 'dead_letter',  label: 'Échecs définitifs',   icon: AlertTriangle, status: 'DEAD_LETTER' },
   { id: 'spam',         label: 'Spam',               icon: Ban,           status: 'SPAM' },
   { id: 'attachments',  label: 'Pièces jointes',     icon: Paperclip,     attachments: 'with' },
 ];
@@ -418,6 +424,23 @@ export default function Inbox() {
 
         {/* Actions */}
         <div className="flex items-center gap-2 ml-auto shrink-0">
+          {['error', 'dead_letter'].includes(folder) && (
+            <button
+              onClick={async () => {
+                try {
+                  const { data } = await api.post('/inbox/retry-all');
+                  toast.success(data.message || 'Relancement terminé');
+                  load();
+                } catch (err) {
+                  toast.error(err.response?.data?.error || 'Erreur lors du relancement groupé');
+                }
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 text-xs font-semibold transition-all cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Relancer tout</span>
+            </button>
+          )}
           {canSync && (
             <button
               onClick={openTestModal}
@@ -811,15 +834,35 @@ export default function Inbox() {
                           {threadDetail.sentCount > 0 && ` · ${threadDetail.sentCount} envoyé${threadDetail.sentCount !== 1 ? 's' : ''}`}
                         </div>
                       </div>
-                      {threadDetail.latest?.erpTicketId && (
-                        <button
-                          onClick={() => navigate(`/tickets/${threadDetail.latest.erpTicketId}`)}
-                          className="ml-auto shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary/10 text-primary border border-primary/20 text-xs font-bold hover:bg-primary/15 transition-all cursor-pointer"
-                        >
-                          <ArrowUpRight className="w-3.5 h-3.5" />
-                          Ticket #{threadDetail.latest.erpTicketId}
-                        </button>
-                      )}
+                      <div className="ml-auto shrink-0 flex items-center gap-2">
+                        {['ERROR', 'DEAD_LETTER', 'RETRY'].includes(threadDetail.latest?.status) && (
+                          <button
+                            onClick={async () => {
+                              try {
+                                await api.post(`/inbox/${threadDetail.latest.id}/retry`);
+                                toast.success('Email relancé avec succès');
+                                refreshSelection();
+                                load();
+                              } catch (err) {
+                                toast.error(err.response?.data?.error || 'Erreur lors du relancement');
+                              }
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-xs font-bold hover:bg-amber-500/15 transition-all cursor-pointer"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            Relancer
+                          </button>
+                        )}
+                        {threadDetail.latest?.erpTicketId && (
+                          <button
+                            onClick={() => navigate(`/tickets/${threadDetail.latest.erpTicketId}`)}
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary/10 text-primary border border-primary/20 text-xs font-bold hover:bg-primary/15 transition-all cursor-pointer"
+                          >
+                            <ArrowUpRight className="w-3.5 h-3.5" />
+                            Ticket #{threadDetail.latest.erpTicketId}
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {/* Pièces jointes */}

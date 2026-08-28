@@ -734,6 +734,52 @@ async function processMessage(message, account) {
       }) || console.warn(`[emailPipeline] Retry ${currentRetryCount + 1}/${MAX_RETRIES} pour incoming #${incoming.id} dans ${nextDelay / 1000}s`);
     } else {
       const deadLetter = !isTransient || currentRetryCount >= MAX_RETRIES;
+
+      // ── Fallback : créer un ticket basique quand l'analyse échoue définitivement ──
+      let fallbackTicketId = null;
+      if (deadLetter) {
+        try {
+          const fallbackTicket = await prisma.ticket.create({
+            data: {
+              title: (subject || '(Email sans analyse IA)').substring(0, 200),
+              content: (bodyPreview || bodyHtml || '').substring(0, 5000),
+              status: 'OPEN',
+              priority: 'P3',
+              source: 'Email',
+              requesterEmail: fromEmail || null,
+              aiProcessed: false,
+              aiConfidence: 0,
+              aiSummary: `[FALLBACK] Analyse IA échouée — email nécessitant une révision manuelle. Erreur : ${err.message}`,
+            },
+          });
+          fallbackTicketId = fallbackTicket.id;
+
+          // Enregistrer le message dans le ticket
+          await prisma.ticketMessage.create({
+            data: {
+              ticketId: fallbackTicket.id,
+              direction: 'INBOUND',
+              sender: fromEmail,
+              recipients: [],
+              ccRecipients: incoming.ccRecipients || [],
+              subject,
+              body: bodyPreview,
+              bodyHtml,
+              outlookMessageId: graphMessageId,
+              internetMessageId,
+              inReplyTo,
+              conversationId,
+              timestamp: receivedAt,
+              summary: '[FALLBACK] Message brut — analyse IA échouée',
+            },
+          });
+
+          console.log(`[emailPipeline] Ticket fallback #${fallbackTicket.id} créé pour email en échec (incoming #${incoming.id})`);
+        } catch (fallbackErr) {
+          console.error('[emailPipeline] Échec création ticket fallback:', fallbackErr.message);
+        }
+      }
+
       const updated = await prisma.incomingEmail.update({
         where: { id: incoming.id },
         data: {
@@ -741,6 +787,8 @@ async function processMessage(message, account) {
           error: err.message,
           lastError: err.message,
           retryCount: currentRetryCount + (deadLetter ? 0 : 1),
+          erpTicketId: fallbackTicketId,
+          isNewTicket: !!fallbackTicketId,
         },
       });
       if (io) io.emit('email_updated', updated);
