@@ -6,10 +6,19 @@ const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
+const cacheStore = require('../services/cacheStore');
 
 
 const router = express.Router();
 router.use(authenticate);
+
+// Invalider le cache assets après toute mutation (sinon la vue affiche des équipements supprimés)
+router.use((req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.on('finish', () => { if (res.statusCode < 400) cacheStore.clear('GET /api/assets'); });
+  }
+  next();
+});
 
 const ASSET_TYPES = ['COMPUTER', 'PRINTER', 'NETWORK', 'SOFTWARE', 'PHONE', 'OTHER'];
 const ASSET_STATUSES = ['IN_USE', 'STOCK', 'BROKEN', 'OUT_OF_SERVICE'];
