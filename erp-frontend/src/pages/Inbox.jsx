@@ -14,7 +14,7 @@ import {
   Inbox as InboxIcon, MailOpen, RefreshCw, Clock, CheckCircle2, XCircle, Ban,
   Paperclip, Search, X, FlaskConical, Bot, ArrowUpRight, Reply, ChevronDown,
   ChevronRight, Flame, AlertTriangle, ArrowDownWideNarrow, Rows3, Rows4,
-  CircleDot, Mail, CheckCheck, Send, FileText, Tag, Users, Filter, Sparkles
+  CircleDot, Mail, CheckCheck, Send, FileText, Tag, Users, Filter, Sparkles, Plus
 } from 'lucide-react';
 
 const STATUS_LABELS = {
@@ -188,6 +188,12 @@ export default function Inbox() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [bulkAction, setBulkAction] = useState(null);
+
+  // ── Modal création ticket depuis email ──────────────────────────────
+  const [showCreateTicket, setShowCreateTicket] = useState(false);
+  const [ticketForm, setTicketForm] = useState({ title: '', content: '', priority: 'P3', category: '', teamId: '', assignedToId: '' });
+  const [ticketSaving, setTicketSaving] = useState(false);
+  const [aiAnalyzing, setAiAnalyzing] = useState(false);
 
   // Recherche locale avec debounce
   const [searchInput, setSearchInput] = useState('');
@@ -835,6 +841,26 @@ export default function Inbox() {
                         </div>
                       </div>
                       <div className="ml-auto shrink-0 flex items-center gap-2">
+                        {!threadDetail.latest?.erpTicketId && (
+                          <button
+                            onClick={() => {
+                              const latest = threadDetail.latest || {};
+                              setTicketForm({
+                                title: (latest.subject || '').substring(0, 200),
+                                content: (latest.bodyPreview || latest.bodyHtml || '').substring(0, 5000),
+                                priority: 'P3',
+                                category: '',
+                                teamId: '',
+                                assignedToId: '',
+                              });
+                              setShowCreateTicket(true);
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-xs font-bold hover:bg-emerald-500/15 transition-all cursor-pointer"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            Créer un ticket
+                          </button>
+                        )}
                         {['ERROR', 'DEAD_LETTER', 'RETRY'].includes(threadDetail.latest?.status) && (
                           <button
                             onClick={async () => {
@@ -1146,6 +1172,170 @@ export default function Inbox() {
                       </motion.div>
                     )}
                   </AnimatePresence>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
+
+      {/* ── Modal Création Ticket depuis Email ────────────────────────────── */}
+      {createPortal(
+        <AnimatePresence>
+          {showCreateTicket && (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                onClick={() => !ticketSaving && setShowCreateTicket(false)}
+                className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer" />
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+                transition={{ type: 'spring', duration: 0.35, bounce: 0.12 }}
+                className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+
+                {/* Header */}
+                <div className="flex items-center gap-3 px-5 py-4 border-b border-outline-variant/30 shrink-0">
+                  <div className="p-1.5 rounded-lg bg-emerald-500/10"><FileText className="w-4 h-4 text-emerald-600" /></div>
+                  <div>
+                    <h3 className="text-sm font-bold text-on-surface">Créer un ticket</h3>
+                    <p className="text-[10px] text-on-surface-variant">À partir de l'email « {threadDetail?.subject || ''} »</p>
+                  </div>
+                  <motion.button onClick={() => setShowCreateTicket(false)} whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }}
+                    className="ml-auto p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all">
+                    <X className="w-4 h-4" />
+                  </motion.button>
+                </div>
+
+                {/* Body */}
+                <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                  {/* Bouton Assistant IA */}
+                  <button
+                    onClick={async () => {
+                      setAiAnalyzing(true);
+                      try {
+                        const { data } = await api.post('/inbox/test-analyze', {
+                          subject: ticketForm.title,
+                          body: ticketForm.content,
+                          from: threadDetail?.latest?.fromEmail || '',
+                          fromName: threadDetail?.latest?.fromName || '',
+                        });
+                        setTicketForm(prev => ({
+                          ...prev,
+                          title: data.suggestedTitle || prev.title,
+                          priority: data.priority || prev.priority,
+                          category: data.category || prev.category,
+                        }));
+                        toast.success('Assistant IA : champs pré-remplis !');
+                      } catch (err) {
+                        toast.error(err.response?.data?.error || 'Erreur analyse IA');
+                      } finally {
+                        setAiAnalyzing(false);
+                      }
+                    }}
+                    disabled={aiAnalyzing}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-violet-500/10 to-purple-500/10 border border-violet-500/30 text-violet-600 dark:text-violet-400 text-xs font-bold hover:from-violet-500/15 hover:to-purple-500/15 transition-all cursor-pointer disabled:opacity-60"
+                  >
+                    {aiAnalyzing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4" />}
+                    {aiAnalyzing ? 'Analyse en cours...' : 'Assistant IA — Remplir automatiquement'}
+                  </button>
+
+                  {/* Champs */}
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Titre *</span>
+                    <input
+                      required
+                      value={ticketForm.title}
+                      onChange={e => setTicketForm({ ...ticketForm, title: e.target.value })}
+                      placeholder="Titre du ticket"
+                      className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                    />
+                  </label>
+
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Description *</span>
+                    <textarea
+                      rows={5} required
+                      value={ticketForm.content}
+                      onChange={e => setTicketForm({ ...ticketForm, content: e.target.value })}
+                      placeholder="Description détaillée du problème..."
+                      className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-none"
+                    />
+                  </label>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Priorité</span>
+                      <select
+                        value={ticketForm.priority}
+                        onChange={e => setTicketForm({ ...ticketForm, priority: e.target.value })}
+                        className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                      >
+                        <option value="P1">P1 — Critique</option>
+                        <option value="P2">P2 — Haute</option>
+                        <option value="P3">P3 — Moyenne</option>
+                        <option value="P4">P4 — Basse</option>
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Catégorie</span>
+                      <input
+                        value={ticketForm.category}
+                        onChange={e => setTicketForm({ ...ticketForm, category: e.target.value })}
+                        placeholder="ex: Réseau, Logiciel..."
+                        className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                      />
+                    </label>
+                  </div>
+
+                  {/* Info email source */}
+                  <div className="p-3 rounded-xl bg-surface-container border border-outline-variant/30 text-[11px] text-on-surface-variant space-y-1">
+                    <p><span className="font-bold text-on-surface">De :</span> {threadDetail?.latest?.fromEmail || 'Inconnu'}</p>
+                    <p><span className="font-bold text-on-surface">Date :</span> {formatDateTime(threadDetail?.latest?.date)}</p>
+                    {threadDetail?.latest?.erpTicketId && (
+                      <p className="text-amber-500 font-bold">⚠️ Un ticket est déjà associé (#{threadDetail.latest.erpTicketId})</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-outline-variant/30 shrink-0">
+                  <button onClick={() => setShowCreateTicket(false)} disabled={ticketSaving}
+                    className="px-4 py-2 rounded-xl border border-outline-variant/40 text-on-surface text-xs font-semibold hover:bg-surface-container transition-all cursor-pointer">
+                    Annuler
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!ticketForm.title.trim() || !ticketForm.content.trim()) {
+                        toast.error('Titre et description requis');
+                        return;
+                      }
+                      setTicketSaving(true);
+                      try {
+                        const { data } = await api.post('/tickets', {
+                          title: ticketForm.title.trim(),
+                          content: ticketForm.content.trim(),
+                          priority: ticketForm.priority,
+                          category: ticketForm.category.trim() || null,
+                          teamId: ticketForm.teamId ? Number(ticketForm.teamId) : null,
+                          assignedToId: ticketForm.assignedToId ? Number(ticketForm.assignedToId) : null,
+                          source: 'Email',
+                          requesterEmail: threadDetail?.latest?.fromEmail || null,
+                        });
+                        toast.success(`Ticket #${data.id} créé avec succès`);
+                        setShowCreateTicket(false);
+                        load();
+                        refreshSelection();
+                      } catch (err) {
+                        toast.error(err.response?.data?.error || 'Erreur lors de la création');
+                      } finally {
+                        setTicketSaving(false);
+                      }
+                    }}
+                    disabled={ticketSaving || !ticketForm.title.trim() || !ticketForm.content.trim()}
+                    className="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white text-xs font-bold shadow-md shadow-emerald-500/20 transition-all hover:brightness-110 cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    {ticketSaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                    {ticketSaving ? 'Création...' : 'Créer le ticket'}
+                  </button>
                 </div>
               </motion.div>
             </div>
