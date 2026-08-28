@@ -1808,8 +1808,8 @@ export default function TicketDetail() {
           )}
 
           {/* Properties Card */}
-          <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-4">
-            <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface border-b border-outline-variant/20 pb-3 flex items-center gap-2">
+          <div className="rounded-3xl border border-outline-variant/20 dark:border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm space-y-4">
+            <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface border-b border-outline-variant/15 dark:border-outline-variant/8 pb-3 flex items-center gap-2">
               <Layers className="w-4 h-4 text-primary" />
               Propriétés du ticket
             </h3>
@@ -1819,7 +1819,7 @@ export default function TicketDetail() {
                 <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
                   Date d'ouverture
                 </label>
-                <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/15 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
                   {new Date(ticket.createdAt).toLocaleString('fr-FR')}
                 </div>
               </div>
@@ -1829,7 +1829,7 @@ export default function TicketDetail() {
                   Type
                 </label>
                 <select
-                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                   value={ticket.type}
                   disabled={!canAssign || savingField === 'type'}
                   onChange={(e) => updateField('type', e.target.value)}
@@ -1846,7 +1846,7 @@ export default function TicketDetail() {
                 </label>
                 {canAssign ? (
                   <select
-                    className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                    className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                     value={ticket.category || ''}
                     disabled={savingField === 'category'}
                     onChange={(e) => updateField('category', e.target.value)}
@@ -1857,7 +1857,7 @@ export default function TicketDetail() {
                     ))}
                   </select>
                 ) : (
-                  <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                  <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/15 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
                     {ticket.category || '-'}
                   </div>
                 )}
@@ -1868,7 +1868,7 @@ export default function TicketDetail() {
                   Statut
                 </label>
                 <select
-                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                   value={ticket.status}
                   disabled={!canAssign || savingField === 'status'}
                   onChange={(e) => updateField('status', e.target.value)}
@@ -1884,7 +1884,7 @@ export default function TicketDetail() {
                   Source de la demande
                 </label>
                 <select
-                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                   value={ticket.source || ''}
                   disabled={!canAssign || savingField === 'source'}
                   onChange={(e) => updateField('source', e.target.value)}
@@ -1901,7 +1901,7 @@ export default function TicketDetail() {
                   Urgence
                 </label>
                 <select
-                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                   value={ticket.urgency}
                   disabled={!canAssign || savingField === 'urgency'}
                   onChange={(e) => updateField('urgency', e.target.value)}
@@ -1917,7 +1917,7 @@ export default function TicketDetail() {
                   Impact
                 </label>
                 <select
-                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                   value={ticket.impact}
                   disabled={!canAssign || savingField === 'impact'}
                   onChange={(e) => updateField('impact', e.target.value)}
@@ -1933,7 +1933,7 @@ export default function TicketDetail() {
                   Priorité
                 </label>
                 <select
-                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                   value={ticket.priority}
                   disabled={!canAssign || savingField === 'priority'}
                   onChange={(e) => updateField('priority', e.target.value)}
@@ -1949,7 +1949,7 @@ export default function TicketDetail() {
                   ID externe
                 </label>
                 <input
-                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
                   defaultValue={ticket.externalId || ''}
                   disabled={!canAssign}
                   onBlur={(e) => updateField('externalId', e.target.value)}
@@ -1965,7 +1965,7 @@ export default function TicketDetail() {
                   <div className="flex gap-2">
                     <input
                       type="datetime-local"
-                      className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                      className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
                       defaultValue={ticket.dueDate ? new Date(ticket.dueDate).toISOString().slice(0, 16) : ''}
                       disabled={savingField === 'dueDate'}
                       onBlur={(e) => {
@@ -1999,7 +1999,7 @@ export default function TicketDetail() {
                 </label>
                 {canAssign ? (
                   <select
-                    className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                    className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                     value={ticket.teamId || ''}
                     disabled={savingField === 'teamId'}
                     onChange={(e) => updateField('teamId', e.target.value ? Number(e.target.value) : null)}
@@ -2010,7 +2010,7 @@ export default function TicketDetail() {
                     ))}
                   </select>
                 ) : (
-                  <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                  <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/15 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
                     {ticket.team?.name || 'Non assignée'}
                   </div>
                 )}
@@ -2030,7 +2030,7 @@ export default function TicketDetail() {
                     searchPlaceholder="Rechercher un technicien..."
                   />
                 ) : (
-                  <div className="w-full flex items-center gap-2 bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                  <div className="w-full flex items-center gap-2 bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/15 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
                     {ticket.assignedTo ? (
                       <>
                         <div className="w-5 h-5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center text-[9px] font-bold border border-blue-500/20">
@@ -2050,7 +2050,7 @@ export default function TicketDetail() {
                   <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
                     Observateur(s)
                   </label>
-                  <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                  <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/15 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
                     {(ticket.observers || []).map((o) => o?.fullName || o?.email || '').filter(Boolean).join(', ')}
                   </div>
                 </div>
