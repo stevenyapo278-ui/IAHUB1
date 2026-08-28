@@ -294,11 +294,11 @@ export default function MainLayout() {
       >
         {/* Logo */}
         <div className="sidebar-logo flex items-center gap-3">
-          <div className="sidebar-logo-icon bg-gradient-to-tr from-indigo-600 to-violet-500 rounded-xl p-2 shadow-md shadow-indigo-500/20">
-            <Sparkles className="w-4 h-4 text-white" />
+          <div className="sidebar-logo-icon">
+            <Sparkles className="w-4 h-4 text-indigo-400" />
           </div>
-          <span className="sidebar-logo-text font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-indigo-200 to-indigo-400">
-            IA HUB
+          <span className="sidebar-logo-text">
+            IA Hub
           </span>
         </div>
 
@@ -382,22 +382,22 @@ export default function MainLayout() {
           onClick={() => setShowUserMenu(!showUserMenu)}
           ref={userMenuRef}
         >
-          <div className="sidebar-user-avatar border border-indigo-500/30 text-indigo-300 font-bold">
+          <div className="sidebar-user-avatar">
             {user?.fullName?.charAt(0)?.toUpperCase() || '?'}
           </div>
           <div className="sidebar-user-info min-w-0">
-            <p className="text-xs font-semibold text-white truncate">{user?.fullName}</p>
-            <p className="text-[10px] text-slate-400 truncate">{user?.role}</p>
+            <p className="text-xs font-medium text-white/80 truncate">{user?.fullName}</p>
+            <p className="text-[10px] text-white/30 truncate capitalize">{user?.role?.toLowerCase()}</p>
           </div>
 
           {showUserMenu && (
             <div className="sidebar-dropdown" style={{ bottom: '100%', left: 0, top: 'auto', marginBottom: 8 }}>
               <button
                 onClick={(e) => { e.stopPropagation(); setShowUserMenu(false); handleLogout(); }}
-                className="sidebar-dropdown-item text-red-400 hover:text-red-300 flex items-center gap-2"
+                className="sidebar-dropdown-item text-red-400/80 hover:text-red-400 flex items-center gap-2"
               >
                 <LogOut className="w-4 h-4" />
-                <span>Se déconnecter</span>
+                <span>Déconnexion</span>
               </button>
             </div>
           )}
@@ -524,7 +524,7 @@ function CompactSectionButton({ items, isActive, currentItem, label, icon: Icon,
         style={{ justifyContent: 'center' }}
       >
         <span className="sidebar-item-icon">
-          <Icon className="w-5 h-5 text-indigo-400" />
+          <Icon className="w-[18px] h-[18px] text-white/50" />
         </span>
         <span className="sidebar-item-label">
           {currentItem?.label || label}
@@ -572,14 +572,14 @@ function SidebarItem({ item, user, isSidebarExpanded, count }) {
       }
     >
       <span className="sidebar-item-icon relative">
-        <Icon className={`w-4 h-4 ${item.color || 'text-primary'}`} />
+        <Icon className="w-[18px] h-[18px] text-white/50" style={item.active ? {} : {}} />
         {!isSidebarExpanded && count > 0 && (
-          <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-primary animate-pulse" />
+          <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
         )}
       </span>
       <span className="sidebar-item-label flex-1 truncate">{item.label}</span>
       {isSidebarExpanded && count > 0 && (
-        <span className="ml-auto px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary/20 text-primary border border-primary/30 shrink-0">
+        <span className="ml-auto px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-indigo-500/15 text-indigo-300 shrink-0">
           {count > 99 ? '99+' : count}
         </span>
       )}
