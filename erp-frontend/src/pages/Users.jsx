@@ -71,9 +71,12 @@ function ToggleSwitch({ checked, onChange, disabled = false, title }) {
 }
 
 export default function Users() {
+  console.log('[Users] Component mounting...');
   const { user: currentUser } = useAuth();
+  console.log('[Users] currentUser:', currentUser?.fullName, currentUser?.role);
   const { autonomousMode } = useSystemSettings();
   const canManage = hasPermission(currentUser, 'users.manage') || currentUser?.role === 'SUPERADMIN' || currentUser?.role === 'ADMIN';
+  console.log('[Users] canManage:', canManage, 'hasPermission:', typeof hasPermission);
   const ROLES = assignableRoles(currentUser?.role);
   const [users, setUsers] = useState([]);
   const [teams, setTeams] = useState([]);
@@ -143,6 +146,7 @@ export default function Users() {
   const loadReqIdRef = useRef(0);
 
   function load() {
+    console.log('[Users] Loading data...');
     const reqId = ++loadReqIdRef.current;
     const params = new URLSearchParams();
     params.set('page', page); params.set('limit', limit);
@@ -153,6 +157,7 @@ export default function Users() {
     else if (statusFilter === 'inactive') params.set('isActive', 'false');
     Promise.all([api.get(`/users?${params}`), api.get('/teams'), api.get('/permission-groups')])
       .then(([uRes, tRes, gRes]) => {
+        console.log('[Users] Data loaded:', { users: uRes.data.users?.length || uRes.data?.length, teams: tRes.data?.length, groups: gRes.data?.length });
         if (reqId !== loadReqIdRef.current) return;
         if (uRes.data.users) {
           setUsers(uRes.data.users); setTotal(uRes.data.total || 0);
@@ -167,7 +172,7 @@ export default function Users() {
         }
         setTeams(tRes.data); setGroups(gRes.data); setSelectedIds([]);
       })
-      .catch(err => { if (reqId === loadReqIdRef.current) setError(err.response?.data?.error || 'Erreur de chargement'); })
+      .catch(err => { console.error('[Users] Load error:', err); if (reqId === loadReqIdRef.current) setError(err.response?.data?.error || 'Erreur de chargement'); })
       .finally(() => { if (reqId === loadReqIdRef.current) setLoading(false); });
   }
   useEffect(() => { load(); }, [page, debouncedSearch, roleFilter, teamFilter, statusFilter]);
@@ -308,6 +313,7 @@ if (field === 'role') {
     }
   }
 
+  console.log('[Users] Rendering, users:', users.length, 'loading:', loading);
   return (
     <div className="flex flex-col min-h-screen">
       {/* ── AD Sync Loading Overlay ────────────────────────────────────── */}
