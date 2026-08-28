@@ -341,7 +341,7 @@ export default function Locations() {
   const [detailId, setDetailId] = useState(null);
   const [reassignData, setReassignData] = useState(null);
   const [reassigning, setReassigning] = useState(false);
-  const PAGE_SIZE = 25;
+  const [pageSize, setPageSize] = useState(25);
 
   function loadLocations() {
     setLoading(true);
@@ -468,9 +468,9 @@ export default function Locations() {
     return list;
   }, [locations, search, sortBy, sortDir]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  useEffect(() => { setPage(1); }, [search]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
+  useEffect(() => { setPage(1); }, [search, pageSize]);
 
   function SortHeader({ col, children }) {
     const active = sortBy === col;
@@ -620,7 +620,7 @@ export default function Locations() {
                 ))}
               </tbody>
             </table>
-            <Pagination page={page} totalPages={totalPages} total={filtered.length} label="lieux" onPageChange={setPage} />
+            <Pagination page={page} totalPages={totalPages} total={filtered.length} label="lieux" onPageChange={setPage} pageSize={pageSize} onPageSizeChange={(s) => { setPageSize(s); setPage(1); }} />
           </div>
         )}
       </div>

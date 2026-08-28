@@ -160,7 +160,7 @@ export default function Teams() {
   const totalTickets = teams.reduce((sum, t) => sum + t._count.tickets, 0);
 
   const [page, setPage] = useState(1);
-  const PAGE_SIZE = 12;
+  const [pageSize, setPageSize] = useState(12);
 
   const filtered = teams.filter((t) => {
     if (!search.trim()) return true;
@@ -168,9 +168,9 @@ export default function Teams() {
     return [t.name, t.category].some((f) => f?.toLowerCase().includes(q));
   });
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  useEffect(() => { setPage(1); }, [search]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
+  useEffect(() => { setPage(1); }, [search, pageSize]);
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -324,7 +324,7 @@ export default function Teams() {
           </div>
           {filtered.length > 0 && (
             <div className="mt-4">
-              <Pagination page={page} totalPages={totalPages} total={filtered.length} label="équipes" onPageChange={setPage} />
+              <Pagination page={page} totalPages={totalPages} total={filtered.length} label="équipes" onPageChange={setPage} pageSize={pageSize} onPageSizeChange={(s) => { setPageSize(s); setPage(1); }} />
             </div>
           )}
           </>

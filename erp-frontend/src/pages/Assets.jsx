@@ -64,7 +64,7 @@ export default function Assets() {
   const [sortBy, setSortBy] = useState('name');
   const [sortDir, setSortDir] = useState('asc');
   const [page, setPage] = useState(1);
-  const PAGE_SIZE = 25;
+  const [pageSize, setPageSize] = useState(25);
 
   const canManage = hasPermission(user, 'assets.manage');
 
@@ -221,9 +221,9 @@ export default function Assets() {
     return list;
   }, [assets, sortBy, sortDir]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  useEffect(() => { setPage(1); }, [search, typeFilter, statusFilter]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
+  useEffect(() => { setPage(1); }, [search, typeFilter, statusFilter, pageSize]);
 
   function SortHeader({ col, children }) {
     const active = sortBy === col;
@@ -437,7 +437,7 @@ export default function Assets() {
                   );
                 })}
               </tbody>            </table>
-            <Pagination page={page} totalPages={totalPages} total={filtered.length} label="équipements" onPageChange={setPage} />
+            <Pagination page={page} totalPages={totalPages} total={filtered.length} label="équipements" onPageChange={setPage} pageSize={pageSize} onPageSizeChange={(s) => { setPageSize(s); setPage(1); }} />
           </div>
         )}
       </div>

@@ -27,7 +27,7 @@ export default function Categories() {
   const [sortBy, setSortBy] = useState('createdAt');
   const [sortDir, setSortDir] = useState('desc');
   const [page, setPage] = useState(1);
-  const PAGE_SIZE = 25;
+  const [pageSize, setPageSize] = useState(25);
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -156,11 +156,11 @@ export default function Categories() {
     return rows;
   }, [categories, tree, filtered, sortBy, sortDir]);
 
-  const totalPages = Math.max(1, Math.ceil(tableRows.length / PAGE_SIZE));
-  const paginatedRows = tableRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(tableRows.length / pageSize));
+  const paginatedRows = tableRows.slice((page - 1) * pageSize, page * pageSize);
 
   // Reset page when filters change
-  useEffect(() => { setPage(1); }, [search, sortBy, sortDir]);
+  useEffect(() => { setPage(1); }, [search, sortBy, sortDir, pageSize]);
 
   function SortHeader({ col, children }) {
     const active = sortBy === col;
@@ -306,7 +306,7 @@ export default function Categories() {
                 ))}
               </tbody>
             </table>
-            <Pagination page={page} totalPages={totalPages} total={tableRows.length} label="catégories" onPageChange={setPage} />
+            <Pagination page={page} totalPages={totalPages} total={tableRows.length} label="catégories" onPageChange={setPage} pageSize={pageSize} onPageSizeChange={(s) => { setPageSize(s); setPage(1); }} />
           </div>
         )}
       </div>

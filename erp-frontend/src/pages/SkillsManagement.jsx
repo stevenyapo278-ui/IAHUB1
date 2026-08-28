@@ -35,7 +35,7 @@ export default function SkillsManagement() {
   const [catFilter, setCatFilter] = useState('');
   const [assignModal, setAssignModal] = useState({ open: false, skill: null, tech: null });
   const [page, setPage] = useState(1);
-  const PAGE_SIZE = 12;
+  const [pageSize, setPageSize] = useState(12);
 
   function load() {
     setLoading(true);
@@ -97,9 +97,9 @@ export default function SkillsManagement() {
     return matchQ && matchCat;
   });
 
-  const totalPages = Math.max(1, Math.ceil(filteredSkills.length / PAGE_SIZE));
-  const paginatedSkills = filteredSkills.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  useEffect(() => { setPage(1); }, [search, catFilter]);
+  const totalPages = Math.max(1, Math.ceil(filteredSkills.length / pageSize));
+  const paginatedSkills = filteredSkills.slice((page - 1) * pageSize, page * pageSize);
+  useEffect(() => { setPage(1); }, [search, catFilter, pageSize]);
 
   // Group by category
   const skillGroups = (() => {
@@ -274,9 +274,9 @@ export default function SkillsManagement() {
               ))}
             </AnimatePresence>
           </div>
-          {filteredSkills.length > PAGE_SIZE && (
+          {filteredSkills.length > 0 && (
             <div className="mt-4">
-              <Pagination page={page} totalPages={totalPages} total={filteredSkills.length} label="compétences" onPageChange={setPage} />
+              <Pagination page={page} totalPages={totalPages} total={filteredSkills.length} label="compétences" onPageChange={setPage} pageSize={pageSize} onPageSizeChange={(s) => { setPageSize(s); setPage(1); }} />
             </div>
           )}
           </>

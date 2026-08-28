@@ -1,16 +1,20 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+
 /**
- * Composant de pagination réutilisable.
+ * Composant de pagination réutilisable avec sélecteur de lignes par page.
  * @param {number} page - Page actuelle (1-indexed)
  * @param {number} totalPages - Nombre total de pages
  * @param {number} total - Nombre total d'éléments
  * @param {string} label - Libellé des éléments (ex: "catégories", "utilisateurs")
  * @param {function} onPageChange - Callback (newPage) => void
+ * @param {number} pageSize - Nombre d'éléments par page
+ * @param {function} onPageSizeChange - Callback (newSize) => void
  * @param {number} [maxVisible=5] - Nombre max de boutons de pages visibles
  */
-export default function Pagination({ page, totalPages, total, label, onPageChange, maxVisible = 5 }) {
-  if (totalPages <= 1) return null;
+export default function Pagination({ page, totalPages, total, label, onPageChange, pageSize = 25, onPageSizeChange, maxVisible = 5 }) {
+  if (total <= 0) return null;
 
   // Générer les numéros de page visibles
   const pages = [];
@@ -23,10 +27,28 @@ export default function Pagination({ page, totalPages, total, label, onPageChang
 
   return (
     <div className="flex items-center justify-between px-4 py-2.5 border-t border-outline-variant/20 bg-surface-container-low/20">
-      <span className="text-[11px] text-on-surface-variant font-medium">
-        Page <strong>{page}</strong> / <strong>{totalPages}</strong> ({total} {label})
-      </span>
+      {/* Sélecteur lignes par page */}
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] text-on-surface-variant font-medium">Lignes par page</span>
+        <select
+          value={pageSize}
+          onChange={(e) => onPageSizeChange(Number(e.target.value))}
+          className="text-[11px] font-semibold bg-surface-container border border-outline-variant/30 rounded-lg px-2 py-1 text-on-surface focus:outline-none focus:ring-1 focus:ring-primary/40 cursor-pointer"
+        >
+          {PAGE_SIZE_OPTIONS.map((n) => (
+            <option key={n} value={n}>{n}</option>
+          ))}
+        </select>
+        <span className="text-[11px] text-on-surface-variant">
+          {total} {label}
+        </span>
+      </div>
+
+      {/* Navigation pages */}
       <div className="flex items-center gap-1">
+        <span className="text-[11px] text-on-surface-variant font-medium mr-2">
+          Page <strong>{page}</strong> / <strong>{totalPages}</strong>
+        </span>
         <button
           disabled={page <= 1}
           onClick={() => onPageChange(page - 1)}
