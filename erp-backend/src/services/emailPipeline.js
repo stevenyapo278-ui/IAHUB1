@@ -54,6 +54,7 @@ async function notifyAdminsEmailFailed({ incomingId, subject, fromEmail, error, 
     }
 
     // Événement socket pour alerte temps réel
+    const io = getIO();
     if (io) {
       io.to('notifications').emit('email_analysis_failed', {
         incomingId,
@@ -746,7 +747,9 @@ async function processMessage(message, account) {
               status: 'OPEN',
               priority: 'P3',
               source: 'Email',
-              requesterEmail: fromEmail || null,
+              sourceEmail: fromEmail || null,
+              sourceName: (fromEmail || '').split('@')[0],
+              sourceSubject: subject || null,
               aiProcessed: false,
               aiConfidence: 0,
               aiSummary: `[FALLBACK] Analyse IA échouée — email nécessitant une révision manuelle. Erreur : ${err.message}`,
