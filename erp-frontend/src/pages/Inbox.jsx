@@ -1,7 +1,8 @@
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Virtuoso } from 'react-virtuoso';
 import { toast } from 'sonner';
 import api from '../api/client';
 import Skeleton from '../components/Skeleton';
@@ -118,6 +119,130 @@ function formatDate(d) {
 function formatDateTime(d) {
   return new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
+
+// ── Thread item mémoïsé (ne re-render que si ses props changent) ─────────────
+const ThreadItem = memo(function ThreadItem({ thread, isSelected, isUnread, isCompact, onSelect, onContextMenu, onToggleSelect }) {
+  const latest = thread.latest || {};
+  const pCfg = PRIORITY_CONFIG[latest.aiPriority];
+  const sCfg = STATUS_CONFIG[latest.status];
+  const SIcon = sCfg?.icon;
+  const sender = latest.fromName || latest.fromEmail || participantsLabel(thread.participants);
+  const snippet = latest.aiSummary || latest.bodyPreview || '';
+
+  return (
+    <button
+      onClick={() => onSelect(thread)}
+      onContextMenu={(e) => onContextMenu(e, thread)}
+      className={`w-full text-left flex items-stretch gap-0 border-b border-outline-variant/15 transition-all group ${
+        isSelected
+          ? 'bg-sky-500/10 ring-1 ring-inset ring-sky-500/20'
+          : isUnread
+            ? 'bg-surface-container-low/40 hover:bg-surface-container'
+            : 'hover:bg-surface-container-low/60'
+      }`}
+    >
+      {/* Bande de priorité */}
+      <div className="w-0.5 shrink-0 rounded-r" style={{ background: pCfg ? pCfg.stripe : 'transparent' }} />
+
+      <div className={`flex items-start gap-2.5 flex-1 min-w-0 px-3 ${isCompact ? 'py-2' : 'py-3'}`}>
+        {/* Case à cocher */}
+        <div className="shrink-0 flex items-center pt-1.5" onClick={(e) => e.stopPropagation()}>
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => onToggleSelect(thread.id)}
+            className="cursor-pointer accent-sky-500 w-3.5 h-3.5 rounded"
+          />
+        </div>
+
+        {/* Avatar */}
+        <div className={`shrink-0 rounded-full flex items-center justify-center text-[11px] font-bold text-white ring-2 ring-surface-container-lowest ${pCfg ? pCfg.bg : isUnread ? 'bg-sky-600' : 'bg-zinc-500'}`}
+          style={{ width: isCompact ? 30 : 34, height: isCompact ? 30 : 34 }}
+        >
+          {initialOf(latest.fromName, latest.fromEmail)}
+        </div>
+
+        {/* Contenu */}
+        <div className="flex-1 min-w-0">
+          {/* Ligne 1 : expéditeur + heure */}
+          <div className="flex items-center gap-1.5">
+            <span className={`truncate ${isUnread ? 'text-on-surface font-bold' : 'text-on-surface font-semibold'}`}
+              style={{ fontSize: isCompact ? 11 : 12 }}
+            >
+              {sender}
+            </span>
+            {isUnread && <CircleDot className="w-2.5 h-2.5 text-sky-400 shrink-0" />}
+            <span className="ml-auto shrink-0 text-[10px] text-on-surface-variant/70">{formatDate(latest.date)}</span>
+          </div>
+
+          {/* Ligne 2 : sujet + badges */}
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className={`truncate ${isUnread ? 'text-on-surface font-bold' : 'text-on-surface'}`} style={{ fontSize: isCompact ? 11 : 12 }}>
+              {latest.subject || '(sans objet)'}
+            </span>
+            {thread.count > 1 && (
+              <span className="shrink-0 inline-flex items-center justify-center min-w-4 px-1 py-0.5 rounded-full bg-sky-500/10 text-sky-400 text-[9px] font-bold border border-sky-500/20">
+                {thread.count}
+              </span>
+            )}
+            {thread.hasAttachments && <Paperclip className="w-3 h-3 text-on-surface-variant/70 shrink-0" />}
+            {pCfg && <pCfg.icon className="w-3 h-3 shrink-0" style={{ color: pCfg.stripe }} />}
+          </div>
+
+          {/* Ligne 3 : extrait IA */}
+          {snippet && (
+            <p className={`truncate mt-0.5 ${latest.aiSummary ? 'text-on-surface-variant italic' : 'text-on-surface-variant/70'}`} style={{ fontSize: isCompact ? 10 : 11 }}>
+              {snippet}
+            </p>
+          )}
+
+          {/* Ligne 4 : CC + métadonnées */}
+          {(thread.ccRecipients?.length > 0 || latest.erpTicketId || sCfg) && (
+            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+              {thread.ccRecipients?.length > 0 && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-[9px] font-semibold text-on-surface-variant">
+                  <Send className="w-2.5 h-2.5 shrink-0" />
+                  Cc : {thread.ccRecipients.slice(0, 2).map(displayAddr).join(', ')}
+                  {thread.ccRecipients.length > 2 ? ` +${thread.ccRecipients.length - 2}` : ''}
+                </span>
+              )}
+              {latest.erpTicketId && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-primary/10 text-primary border border-primary/20 text-[9px] font-bold hover:bg-primary/15 transition-all cursor-pointer">
+                  <ArrowUpRight className="w-2.5 h-2.5" /> Ticket #{latest.erpTicketId}
+                </span>
+              )}
+              {sCfg && (
+                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold border ${sCfg.bg} ${sCfg.color} ${sCfg.border}`}>
+                  {SIcon && <SIcon className="w-2 h-2" />}
+                  {sCfg.label}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Actions rapides au hover (Outlook-like) */}
+      <div className="hidden group-hover:flex items-center gap-0.5 shrink-0 px-2 self-center" onClick={(e) => e.stopPropagation()}>
+        <button onClick={() => onToggleRead(thread)}
+          className="p-1.5 rounded-lg text-on-surface-variant/60 hover:text-sky-400 hover:bg-sky-500/10 transition-all cursor-pointer"
+          title={isUnread ? 'Marquer lu' : 'Marquer non lu'}>
+          {isUnread ? <MailOpen className="w-3.5 h-3.5" /> : <CircleDot className="w-3.5 h-3.5" />}
+        </button>
+        <button onClick={() => onMove(thread)}
+          className="p-1.5 rounded-lg text-on-surface-variant/60 hover:text-violet-400 hover:bg-violet-500/10 transition-all cursor-pointer"
+          title="Déplacer">
+          <ArrowRight className="w-3.5 h-3.5" />
+        </button>
+        {thread.hasAttachments && (
+          <span className="p-1.5 text-on-surface-variant/40">
+            <Paperclip className="w-3.5 h-3.5" />
+          </span>
+        )}
+      </div>
+    </button>
+  );
+});
 
 // Petit sélecteur déroulant pour la barre d'outils (façon ruban Outlook)
 function FilterSelect({ label, icon: Icon, value, options, onChange, active }) {
@@ -457,14 +582,13 @@ export default function Inbox() {
   useEffect(() => { refreshCounts(); }, [refreshCounts]);
   useEffect(() => { loadCustomFolders(); }, [loadCustomFolders]);
 
-  // Auto-refresh toutes les 15s (comportement existant)
+  // Auto-refresh toutes les 15s — uniquement les compteurs (pas la liste complète)
   useEffect(() => {
     const id = setInterval(() => {
-      if (pageRef.current === 1) load(1);
       refreshCounts();
     }, 15000);
     return () => clearInterval(id);
-  }, [load, refreshCounts]);
+  }, [refreshCounts]);
 
   // Recharge le fil sélectionné (après un event socket) si besoin
   const refreshSelection = useCallback(() => {
@@ -880,7 +1004,7 @@ export default function Inbox() {
           </AnimatePresence>
 
           {/* Liste des fils */}
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1">
             {loading && threads.length === 0 ? (
               <div className="p-3 space-y-2">
                 {Array.from({ length: 6 }, (_, i) => (
@@ -908,139 +1032,24 @@ export default function Inbox() {
                 )}
               </div>
             ) : (
-              <div className="divide-y divide-outline-variant/10">
-                {threads.map((t) => {
-                  const latest = t.latest || {};
-                  const pCfg = PRIORITY_CONFIG[latest.aiPriority];
-                  const sCfg = STATUS_CONFIG[latest.status];
-                  const SIcon = sCfg?.icon;
-                  const isSelected = selectedThread?.id === t.id;
-                  const isChecked = selectedIds.includes(t.id);
-                  const sender = latest.fromName || latest.fromEmail || participantsLabel(t.participants);
-                  const snippet = latest.aiSummary || latest.bodyPreview || '';
-
-                  return (
-                    <motion.button
-                      key={t.id}
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      transition={{ duration: 0.1 }}
-                      onClick={() => openThread(t)}
-                      onContextMenu={(e) => handleContextMenu(e, t)}
-                      className={`w-full text-left flex items-stretch gap-0 border-b border-outline-variant/15 transition-all group ${
-                        isSelected
-                          ? 'bg-sky-500/10 ring-1 ring-inset ring-sky-500/20'
-                          : t.isUnread
-                            ? 'bg-surface-container-low/40 hover:bg-surface-container'
-                            : 'hover:bg-surface-container-low/60'
-                      }`}
-                    >
-                      {/* Bande de priorité */}
-                      <div className="w-0.5 shrink-0 rounded-r" style={{ background: pCfg ? pCfg.stripe : 'transparent' }} />
-
-                      <div className={`flex items-start gap-2.5 flex-1 min-w-0 px-3 ${isCompact ? 'py-2' : 'py-3'}`}>
-                        {/* Case à cocher */}
-                        <div className="shrink-0 flex items-center pt-1.5" onClick={(e) => e.stopPropagation()}>
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={() => toggleSelect(t.id)}
-                            className="cursor-pointer accent-sky-500 w-3.5 h-3.5 rounded"
-                          />
-                        </div>
-
-                        {/* Avatar */}
-                        <div className={`shrink-0 rounded-full flex items-center justify-center text-[11px] font-bold text-white ring-2 ring-surface-container-lowest ${pCfg ? pCfg.bg : t.isUnread ? 'bg-sky-600' : 'bg-zinc-500'}`}
-                          style={{ width: isCompact ? 30 : 34, height: isCompact ? 30 : 34 }}
-                        >
-                          {initialOf(latest.fromName, latest.fromEmail)}
-                        </div>
-
-                        {/* Contenu */}
-                        <div className="flex-1 min-w-0">
-                          {/* Ligne 1 : expéditeur + heure */}
-                          <div className="flex items-center gap-1.5">
-                            <span className={`truncate ${t.isUnread ? 'text-on-surface font-bold' : 'text-on-surface font-semibold'}`}
-                              style={{ fontSize: isCompact ? 11 : 12 }}
-                            >
-                              {sender}
-                            </span>
-                            {t.isUnread && <CircleDot className="w-2.5 h-2.5 text-sky-400 shrink-0" />}
-                            <span className="ml-auto shrink-0 text-[10px] text-on-surface-variant/70">{formatDate(latest.date)}</span>
-                          </div>
-
-                          {/* Ligne 2 : sujet + badges */}
-                          <div className="flex items-center gap-1.5 mt-0.5">
-                            <span className={`truncate ${t.isUnread ? 'text-on-surface font-bold' : 'text-on-surface'}`} style={{ fontSize: isCompact ? 11 : 12 }}>
-                              {latest.subject || '(sans objet)'}
-                            </span>
-                            {t.count > 1 && (
-                              <span className="shrink-0 inline-flex items-center justify-center min-w-4 px-1 py-0.5 rounded-full bg-sky-500/10 text-sky-400 text-[9px] font-bold border border-sky-500/20">
-                                {t.count}
-                              </span>
-                            )}
-                            {t.hasAttachments && <Paperclip className="w-3 h-3 text-on-surface-variant/70 shrink-0" />}
-                            {pCfg && <pCfg.icon className="w-3 h-3 shrink-0" style={{ color: pCfg.stripe }} />}
-                          </div>
-
-                          {/* Ligne 3 : extrait IA */}
-                          {snippet && (
-                            <p className={`truncate mt-0.5 ${latest.aiSummary ? 'text-on-surface-variant italic' : 'text-on-surface-variant/70'}`} style={{ fontSize: isCompact ? 10 : 11 }}>
-                              {snippet}
-                            </p>
-                          )}
-
-                          {/* Ligne 4 : CC + métadonnées */}
-                          {(t.ccRecipients?.length > 0 || latest.erpTicketId || sCfg) && (
-                            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                              {t.ccRecipients?.length > 0 && (
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-[9px] font-semibold text-on-surface-variant">
-                                  <Send className="w-2.5 h-2.5 shrink-0" />
-                                  Cc : {t.ccRecipients.slice(0, 2).map(displayAddr).join(', ')}
-                                  {t.ccRecipients.length > 2 ? ` +${t.ccRecipients.length - 2}` : ''}
-                                </span>
-                              )}
-                              {latest.erpTicketId && (
-                                <span
-                                  onClick={(e) => { e.stopPropagation(); navigate(`/tickets/${latest.erpTicketId}`); }}
-                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-primary/10 text-primary border border-primary/20 text-[9px] font-bold hover:bg-primary/15 transition-all cursor-pointer"
-                                >
-                                  <ArrowUpRight className="w-2.5 h-2.5" /> Ticket #{latest.erpTicketId}
-                                </span>
-                              )}
-                              {sCfg && (
-                                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold border ${sCfg.bg} ${sCfg.color} ${sCfg.border}`}>
-                                  {SIcon && <SIcon className="w-2 h-2" />}
-                                  {sCfg.label}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Actions rapides au hover (Outlook-like) */}
-                      <div className="hidden group-hover:flex items-center gap-0.5 shrink-0 px-2 self-center" onClick={(e) => e.stopPropagation()}>
-                        <button onClick={() => ctxMarkRead(t.isUnread)}
-                          className="p-1.5 rounded-lg text-on-surface-variant/60 hover:text-sky-400 hover:bg-sky-500/10 transition-all cursor-pointer"
-                          title={t.isUnread ? 'Marquer lu' : 'Marquer non lu'}>
-                          {t.isUnread ? <MailOpen className="w-3.5 h-3.5" /> : <CircleDot className="w-3.5 h-3.5" />}
-                        </button>
-                        <button onClick={() => { setSelectedIds([t.id]); setShowMoveModal(true); }}
-                          className="p-1.5 rounded-lg text-on-surface-variant/60 hover:text-violet-400 hover:bg-violet-500/10 transition-all cursor-pointer"
-                          title="Déplacer">
-                          <ArrowRight className="w-3.5 h-3.5" />
-                        </button>
-                        {t.hasAttachments && (
-                          <span className="p-1.5 text-on-surface-variant/40">
-                            <Paperclip className="w-3.5 h-3.5" />
-                          </span>
-                        )}
-                      </div>
-                    </motion.button>
-                  );
-                })}
-              </div>
+              <Virtuoso
+                className="h-full"
+                data={threads}
+                itemContent={(index, t) => (
+                  <ThreadItem
+                    key={t.id}
+                    thread={t}
+                    isSelected={selectedThread?.id === t.id}
+                    isUnread={t.isUnread}
+                    isCompact={isCompact}
+                    onSelect={openThread}
+                    onContextMenu={handleContextMenu}
+                    onToggleSelect={toggleSelect}
+                    onToggleRead={(thread) => ctxMarkRead(thread.isUnread)}
+                    onMove={(thread) => { setSelectedIds([thread.id]); setShowMoveModal(true); }}
+                  />
+                )}
+              />
             )}
           </div>
 
