@@ -6,7 +6,7 @@
 const prisma = require('../prismaClient');
 
 // Limite de fenêtre analysée : on regroupe parmi les emails les plus récents.
-const MAX_EMAILS = 3000;
+const MAX_EMAILS = 10000;
 
 function threadKeyFor(email) {
   return email.conversationId || `single-${email.id}`;
@@ -160,7 +160,8 @@ function buildThreads(emails, sentMessages, { status, q }) {
 }
 
 // Filtres applicables au niveau du fil (après regroupement)
-function applyThreadFilters(threads, { priority, attachments, category, read }) {
+function applyThreadFilters(threads, { priority, attachments, category, read, toEmail }) {
+  const toEmailLower = toEmail?.toLowerCase();
   return threads.filter((t) => {
     if (priority && t.latest.aiPriority !== priority) return false;
     if (attachments === 'with' && !t.hasAttachments) return false;
@@ -168,6 +169,11 @@ function applyThreadFilters(threads, { priority, attachments, category, read }) 
     if (category && t.latest.aiCategory !== category) return false;
     if (read === 'unread' && !t.isUnread) return false;
     if (read === 'read' && t.isUnread) return false;
+    if (toEmailLower) {
+      const inCc = (t.ccRecipients || []).some((r) => String(r).toLowerCase().includes(toEmailLower));
+      const inParticipants = (t.participants || []).some((p) => String(p.email).toLowerCase().includes(toEmailLower));
+      if (!inCc && !inParticipants) return false;
+    }
     return true;
   });
 }
@@ -200,24 +206,32 @@ function applyThreadSort(threads, sort) {
   return list;
 }
 
-async function listThreads({ status, q, priority, attachments, category, read, days, sort, page = 1, limit = 25, scope = null, folderId = null }) {
+async function listThreads({ status, q, priority, attachments, category, read, days, dateFrom, dateTo, fromEmail, toEmail, sort, scope = null, folderId = null }) {
   // Déterminer si on est dans une vue dossier custom ou une vue built-in
   const isCustomFolder = folderId !== undefined && folderId !== null && folderId !== '';
   const isBuiltInFilter = status || read || attachments;
 
+  // Construire le filtre receivedAt (days OU dateFrom/dateTo)
+  const receivedAtFilter = {};
+  if (days) {
+    receivedAtFilter.gte = new Date(Date.now() - days * 86400000);
+  } else {
+    if (dateFrom) receivedAtFilter.gte = new Date(dateFrom);
+    if (dateTo) receivedAtFilter.lte = new Date(dateTo + 'T23:59:59.999Z');
+  }
+
   const emailWhere = {
     ...(scope || {}),
-    ...(days ? { receivedAt: { gte: new Date(Date.now() - days * 86400000) } } : {}),
+    ...(Object.keys(receivedAtFilter).length > 0 ? { receivedAt: receivedAtFilter } : {}),
+    ...(fromEmail ? { fromEmail: { contains: fromEmail, mode: 'insensitive' } } : {}),
   };
 
   if (isCustomFolder) {
-    // Vue dossier custom : filtrer par ce dossier
     emailWhere.folderId = folderId === 'null' ? null : Number(folderId);
   } else if (isBuiltInFilter) {
-    // Vue built-in (Non lus, En cours, Erreurs…) : exclure les emails dans des dossiers custom
     emailWhere.folderId = null;
   }
-  // Si ni folderId ni filtre built-in → "Tous" → pas de filtre folderId
+
   const emails = await prisma.incomingEmail.findMany({
     where: Object.keys(emailWhere).length > 0 ? emailWhere : undefined,
     orderBy: { receivedAt: 'desc' },
@@ -237,13 +251,10 @@ async function listThreads({ status, q, priority, attachments, category, read, d
   }
 
   let threads = buildThreads(emails, sentMessages, { status, q });
-  threads = applyThreadFilters(threads, { priority, attachments, category, read });
+  threads = applyThreadFilters(threads, { priority, attachments, category, read, toEmail });
   threads = applyThreadSort(threads, sort);
-  const total = threads.length;
-  const start = (page - 1) * limit;
-  threads = threads.slice(start, start + limit);
 
-  return { items: threads, total, page, pages: Math.ceil(total / limit) };
+  return { items: threads, total: threads.length };
 }
 
 // Compteurs globaux pour les badges des dossiers (façon Outlook)

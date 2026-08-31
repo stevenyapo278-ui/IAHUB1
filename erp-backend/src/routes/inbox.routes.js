@@ -26,11 +26,9 @@ async function buildEmailScope(user) {
   };
 }
 
-// Liste des emails reçus regroupés par conversation (façon Outlook), avec pagination + recherche.
+// Liste des emails reçus regroupés par conversation (façon Outlook), avec filtrage avancé.
 // La recherche porte sur le fil entier : si un message d'une conversation correspond, tout le fil est renvoyé.
 router.get('/', async (req, res) => {
-  const page = Math.max(1, parseInt(req.query.page) || 1);
-  const limit = Math.min(50, parseInt(req.query.limit) || 25);
   const status = req.query.status || undefined;
   const q = req.query.q?.trim() || undefined;
   const priority = req.query.priority || undefined;
@@ -38,12 +36,16 @@ router.get('/', async (req, res) => {
   const category = req.query.category || undefined;
   const read = req.query.read || undefined; // unread | read
   const days = parseInt(req.query.days) > 0 ? parseInt(req.query.days) : undefined;
+  const dateFrom = req.query.dateFrom || undefined;
+  const dateTo = req.query.dateTo || undefined;
+  const fromEmail = req.query.fromEmail || undefined;
+  const toEmail = req.query.toEmail || undefined;
   const sort = req.query.sort || undefined; // date | date_asc | priority | sender | unread
   const folderId = req.query.folderId !== undefined ? req.query.folderId : undefined;
 
   const scope = await buildEmailScope(req.user);
 
-  const { items, total, pages } = await listThreads({ status, q, priority, attachments, category, read, days, sort, page, limit, scope, folderId });
+  const { items, total } = await listThreads({ status, q, priority, attachments, category, read, days, dateFrom, dateTo, fromEmail, toEmail, sort, scope, folderId });
 
   // Allège la liste : on retirera les corps HTML (conservés uniquement dans le détail du fil)
   const stripped = items.map((thread) => ({
@@ -52,7 +54,7 @@ router.get('/', async (req, res) => {
     latest: { ...thread.latest, bodyHtml: undefined, body: undefined },
   }));
 
-  res.json({ items: stripped, total, page, pages });
+  res.json({ items: stripped, total });
 });
 
 // Compteurs globaux (badges des dossiers façon Outlook)

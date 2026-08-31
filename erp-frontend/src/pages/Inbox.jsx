@@ -300,11 +300,17 @@ export default function Inbox() {
   const [period, setPeriod] = useFilterParam('days', '');
   const [density, setDensity] = useFilterParam('density', 'comfortable');
 
+  // ── Filtres avancés Outlook ────────────────────────────────────────────
+  const [dateFrom, setDateFrom] = useFilterParam('dateFrom', '');
+  const [dateTo, setDateTo] = useFilterParam('dateTo', '');
+  const [fromEmail, setFromEmail] = useFilterParam('fromEmail', '');
+  const [toEmail, setToEmail] = useFilterParam('toEmail', '');
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+
   const folderCfg = FOLDERS.find((f) => f.id === folder) || FOLDERS[0];
 
   const [threads, setThreads] = useState([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState('');
@@ -486,12 +492,9 @@ export default function Inbox() {
     }
   }
 
-  const pageRef = useRef(1);
-  useEffect(() => { pageRef.current = page; }, [page]);
-
   // ── Chargement ──────────────────────────────────────────────────────────
-  const buildParams = useCallback((p) => {
-    const params = new URLSearchParams({ page: p, limit: 25 });
+  const buildParams = useCallback(() => {
+    const params = new URLSearchParams();
     // Supporte les dossiers custom (folder-123) et les dossiers built-in
     if (folder.startsWith('folder-')) {
       params.set('folderId', folder.slice('folder-'.length));
@@ -503,13 +506,17 @@ export default function Inbox() {
     if (priorityFilter) params.set('priority', priorityFilter);
     if (categoryFilter) params.set('category', categoryFilter);
     if (period) params.set('days', period);
+    if (dateFrom) params.set('dateFrom', dateFrom);
+    if (dateTo) params.set('dateTo', dateTo);
+    if (fromEmail) params.set('fromEmail', fromEmail);
+    if (toEmail) params.set('toEmail', toEmail);
     if (sortBy && sortBy !== 'date') params.set('sort', sortBy);
     if (searchQuery.trim()) params.set('q', searchQuery.trim());
     return params;
-  }, [folder, folderCfg, priorityFilter, categoryFilter, period, sortBy, searchQuery]);
+  }, [folder, folderCfg, priorityFilter, categoryFilter, period, dateFrom, dateTo, fromEmail, toEmail, sortBy, searchQuery]);
 
-  const load = useCallback((p) => {
-    api.get(`/inbox?${buildParams(p).toString()}`)
+  const load = useCallback(() => {
+    api.get(`/inbox?${buildParams().toString()}`)
       .then(({ data }) => { setThreads(data.items); setTotal(data.total); setSelectedIds([]); })
       .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'))
       .finally(() => setLoading(false));
@@ -570,7 +577,7 @@ export default function Inbox() {
       toast.success(`${emailIds.length} email(s) déplacé(s)`);
       setSelectedIds([]);
       setShowMoveModal(false);
-      load(pageRef.current);
+      load();
       refreshCounts();
       loadCustomFolders();
     } catch (err) {
@@ -578,7 +585,7 @@ export default function Inbox() {
     }
   }
 
-  useEffect(() => { load(1); setPage(1); }, [load]);
+  useEffect(() => { load(); }, [load]);
   useEffect(() => { refreshCounts(); }, [refreshCounts]);
   useEffect(() => { loadCustomFolders(); }, [loadCustomFolders]);
 
@@ -602,13 +609,13 @@ export default function Inbox() {
   useEffect(() => {
     if (!socket) return;
     const onReceived = (email) => {
-      if (pageRef.current === 1) load(1);
+      load();
       refreshCounts();
       toast.info('Nouveau mail reçu', { description: `Sujet : ${email.subject}` });
       if (selectedThread && email.conversationId === selectedThread.conversationId) refreshSelection();
     };
     const onUpdated = (email) => {
-      if (pageRef.current === 1) load(1);
+      load();
       if (selectedThread && (keyOfEmail(email) === selectedThread.id)) refreshSelection();
     };
     socket.on('email_received', onReceived);
@@ -621,7 +628,7 @@ export default function Inbox() {
     setSyncing(true); setError(''); 
     try {
       const { data } = await api.post('/inbox/sync');
-      load(pageRef.current);
+      load();
       refreshCounts();
       toast.success('Synchronisation terminée', { description: `${data.processed} email(s) traité(s) par l'agent IA.` });
     } catch (err) {
@@ -666,7 +673,7 @@ export default function Inbox() {
       await api.post('/inbox/read', { keys: selectedIds, read });
       toast.success(read ? `${selectedIds.length} conversation(s) marquée(s) comme lue(s)` : 'Conversations marquées comme non lues');
       setSelectedIds([]);
-      load(pageRef.current);
+      load();
       refreshCounts();
     } catch (err) {
       toast.error(err.response?.data?.error || "Erreur lors de l'action");
@@ -938,6 +945,19 @@ export default function Inbox() {
             )}
             <FilterSelect icon={Filter} label={periodLabel} value={period} options={PERIOD_OPTIONS} onChange={setPeriod} active={!!period} />
 
+            {/* Filtres avancés */}
+            <button
+              onClick={() => setShowAdvancedFilters((v) => !v)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border transition-all cursor-pointer ${
+                showAdvancedFilters || dateFrom || dateTo || fromEmail || toEmail
+                  ? 'bg-violet-500/10 text-violet-400 border-violet-500/30'
+                  : 'border-outline-variant/30 text-on-surface-variant hover:bg-surface-container'
+              }`}
+            >
+              <Settings className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Avancé</span>
+            </button>
+
             {/* Densité */}
             <div className="ml-auto flex items-center gap-0.5 shrink-0">
               <button
@@ -956,6 +976,73 @@ export default function Inbox() {
               </button>
             </div>
           </div>
+
+          {/* Panneau filtres avancés */}
+          <AnimatePresence>
+            {showAdvancedFilters && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+                className="shrink-0 overflow-hidden border-b border-outline-variant/20 bg-surface-container-low/60"
+              >
+                <div className="px-3 py-3 space-y-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Settings className="w-3.5 h-3.5 text-violet-400" />
+                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Filtres avancés</span>
+                    {(dateFrom || dateTo || fromEmail || toEmail) && (
+                      <button
+                        onClick={() => { setDateFrom(''); setDateTo(''); setFromEmail(''); setToEmail(''); }}
+                        className="ml-auto text-[10px] text-violet-400 hover:text-violet-300 cursor-pointer"
+                      >
+                        Tout effacer
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[9px] font-bold text-on-surface-variant/70 uppercase">Date début</span>
+                      <input
+                        type="date"
+                        value={dateFrom}
+                        onChange={(e) => setDateFrom(e.target.value)}
+                        max={dateTo || undefined}
+                        className="w-full px-2 py-1.5 rounded-lg border border-outline-variant/40 bg-surface-container text-[11px] text-on-surface focus:outline-none focus:ring-1 focus:ring-violet-500/40 cursor-pointer"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[9px] font-bold text-on-surface-variant/70 uppercase">Date fin</span>
+                      <input
+                        type="date"
+                        value={dateTo}
+                        onChange={(e) => setDateTo(e.target.value)}
+                        min={dateFrom || undefined}
+                        className="w-full px-2 py-1.5 rounded-lg border border-outline-variant/40 bg-surface-container text-[11px] text-on-surface focus:outline-none focus:ring-1 focus:ring-violet-500/40 cursor-pointer"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[9px] font-bold text-on-surface-variant/70 uppercase">Expéditeur</span>
+                      <input
+                        type="text"
+                        value={fromEmail}
+                        onChange={(e) => setFromEmail(e.target.value)}
+                        placeholder="email@..."
+                        className="w-full px-2 py-1.5 rounded-lg border border-outline-variant/40 bg-surface-container text-[11px] text-on-surface placeholder:text-on-surface-variant/30 focus:outline-none focus:ring-1 focus:ring-violet-500/40"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[9px] font-bold text-on-surface-variant/70 uppercase">Destinataire / Cc</span>
+                      <input
+                        type="text"
+                        value={toEmail}
+                        onChange={(e) => setToEmail(e.target.value)}
+                        placeholder="email@..."
+                        className="w-full px-2 py-1.5 rounded-lg border border-outline-variant/40 bg-surface-container text-[11px] text-on-surface placeholder:text-on-surface-variant/30 focus:outline-none focus:ring-1 focus:ring-violet-500/40"
+                      />
+                    </label>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Barre d'actions groupées */}
           <AnimatePresence>
@@ -1052,23 +1139,6 @@ export default function Inbox() {
               />
             )}
           </div>
-
-          {/* Pagination */}
-          {total > 25 && (
-            <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-t border-outline-variant/20 bg-surface-bright/10">
-              <button
-                disabled={page === 1}
-                onClick={() => { const p = page - 1; setPage(p); load(p); }}
-                className="text-[11px] font-semibold text-on-surface-variant disabled:opacity-30 hover:text-on-surface transition-colors px-2 py-1 rounded-lg hover:bg-surface-container cursor-pointer"
-              >← Préc.</button>
-              <span className="text-[11px] text-on-surface-variant">{page} / {Math.ceil(total / 25)}</span>
-              <button
-                disabled={page * 25 >= total}
-                onClick={() => { const p = page + 1; setPage(p); load(p); }}
-                className="text-[11px] font-semibold text-on-surface-variant disabled:opacity-30 hover:text-on-surface transition-colors px-2 py-1 rounded-lg hover:bg-surface-container cursor-pointer"
-              >Suiv. →</button>
-            </div>
-          )}
         </div>
 
         {/* ═══ Volet de lecture (façon Outlook) ═══ */}
