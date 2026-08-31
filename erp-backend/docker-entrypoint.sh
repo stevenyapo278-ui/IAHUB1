@@ -20,6 +20,9 @@ npx prisma migrate resolve --rolled-back 20260820110000_enforce_single_permissio
 echo "Migration de la base de données..."
 npx prisma migrate deploy
 
+echo "Génération du client Prisma..."
+npx prisma generate
+
 echo "Seed initial..."
 node prisma/seed.js 2>/dev/null || true
 
