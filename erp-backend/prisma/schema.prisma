@@ -829,6 +829,12 @@ model IncomingEmail {
   @@index([conversationId])
   @@index([internetMessageId])
   @@index([folderId])
+  @@index([receivedAt])
+  @@index([fromEmail])
+  @@index([status])
+  @@index([isRead])
+  @@index([status, receivedAt])
+  @@index([folderId, receivedAt])
 }
 
 // Dossiers custom de la boîte de réception (type Outlook)

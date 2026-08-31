@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, useMemo, memo } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo, memo, useTransition } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -402,6 +402,7 @@ export default function Inbox() {
     const t = contextMenu.thread;
     try {
       await api.post('/inbox/read', { key: t.id, read: !unread });
+      cacheRef.current.clear();
       setThreads((prev) => prev.map((th) => th.id === t.id ? { ...th, isUnread: unread, unreadCount: unread ? 1 : 0 } : th));
       refreshCounts();
     } catch (err) { toast.error('Erreur'); }
@@ -413,10 +414,10 @@ export default function Inbox() {
     const t = contextMenu.thread;
     if (!confirm('Marquer ce fil comme spam ?')) return;
     try {
-      // Marquer tous les emails du fil comme spam
       for (const emailId of (t.emailIds || [])) {
         await api.patch(`/inbox/${emailId}`, { status: 'SPAM', aiIsSpam: true });
       }
+      cacheRef.current.clear();
       setThreads((prev) => prev.filter((th) => th.id !== t.id));
       refreshCounts();
       toast.success('Marqué comme spam');
@@ -432,6 +433,7 @@ export default function Inbox() {
       for (const emailId of (t.emailIds || [])) {
         await api.delete(`/inbox/${emailId}`);
       }
+      cacheRef.current.clear();
       setThreads((prev) => prev.filter((th) => th.id !== t.id));
       refreshCounts();
       toast.success('Fil supprimé');
@@ -479,6 +481,7 @@ export default function Inbox() {
       const fromISO = retryFrom ? new Date(`${retryFrom}T00:00:00`).toISOString() : null;
       const toISO = retryTo ? new Date(`${retryTo}T23:59:59.999`).toISOString() : null;
       const { data } = await api.post('/inbox/retry-all', { from: fromISO, to: toISO });
+      cacheRef.current.clear();
       toast.success(data.message || 'Relancement terminé');
       setShowRetryModal(false);
       setRetryFrom('');
@@ -515,9 +518,37 @@ export default function Inbox() {
     return params;
   }, [folder, folderCfg, priorityFilter, categoryFilter, period, dateFrom, dateTo, fromEmail, toEmail, sortBy, searchQuery]);
 
+  // Cache des réponses API (évite de re-fetcher les mêmes données)
+  const cacheRef = useRef(new Map());
+  const [isPending, startTransition] = useTransition();
+
   const load = useCallback(() => {
-    api.get(`/inbox?${buildParams().toString()}`)
-      .then(({ data }) => { setThreads(data.items); setTotal(data.total); setSelectedIds([]); })
+    const key = buildParams().toString();
+    const cached = cacheRef.current.get(key);
+    if (cached && Date.now() - cached.ts < 5000) {
+      // Utiliser le cache si < 5 secondes
+      startTransition(() => {
+        setThreads(cached.data.items);
+        setTotal(cached.data.total);
+        setSelectedIds([]);
+      });
+      setLoading(false);
+      return;
+    }
+    api.get(`/inbox?${key}`)
+      .then(({ data }) => {
+        cacheRef.current.set(key, { data, ts: Date.now() });
+        // Nettoyer le cache si trop gros (> 20 entrées)
+        if (cacheRef.current.size > 20) {
+          const oldest = cacheRef.current.keys().next().value;
+          cacheRef.current.delete(oldest);
+        }
+        startTransition(() => {
+          setThreads(data.items);
+          setTotal(data.total);
+          setSelectedIds([]);
+        });
+      })
       .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'))
       .finally(() => setLoading(false));
   }, [buildParams]);
@@ -574,6 +605,7 @@ export default function Inbox() {
       }).filter(Boolean);
       if (emailIds.length === 0) return;
       await api.post('/inbox/folders/move', { ids: emailIds, folderId });
+      cacheRef.current.clear();
       toast.success(`${emailIds.length} email(s) déplacé(s)`);
       setSelectedIds([]);
       setShowMoveModal(false);
@@ -628,6 +660,7 @@ export default function Inbox() {
     setSyncing(true); setError(''); 
     try {
       const { data } = await api.post('/inbox/sync');
+      cacheRef.current.clear(); // Invalider le cache après sync
       load();
       refreshCounts();
       toast.success('Synchronisation terminée', { description: `${data.processed} email(s) traité(s) par l'agent IA.` });
@@ -671,6 +704,7 @@ export default function Inbox() {
     setBulkAction('mark');
     try {
       await api.post('/inbox/read', { keys: selectedIds, read });
+      cacheRef.current.clear();
       toast.success(read ? `${selectedIds.length} conversation(s) marquée(s) comme lue(s)` : 'Conversations marquées comme non lues');
       setSelectedIds([]);
       load();
@@ -1092,7 +1126,7 @@ export default function Inbox() {
 
           {/* Liste des fils */}
           <div className="flex-1">
-            {loading && threads.length === 0 ? (
+            {(loading || isPending) && threads.length === 0 ? (
               <div className="p-3 space-y-2">
                 {Array.from({ length: 6 }, (_, i) => (
                   <div key={i} className="flex items-center gap-3 px-4 py-3.5 border-b border-outline-variant/10">
@@ -1120,8 +1154,10 @@ export default function Inbox() {
               </div>
             ) : (
               <Virtuoso
-                className="h-full"
+                className={`h-full transition-opacity duration-150 ${isPending ? 'opacity-60' : 'opacity-100'}`}
                 data={threads}
+                computeItemKey={(index, t) => t.id}
+                overscan={300}
                 itemContent={(index, t) => (
                   <ThreadItem
                     key={t.id}
