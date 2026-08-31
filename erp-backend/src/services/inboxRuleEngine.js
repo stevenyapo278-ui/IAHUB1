@@ -48,10 +48,12 @@ function evaluateRule(rule, email) {
 // Applique l'action d'une règle sur un email (mutateur)
 async function applyRuleAction(rule, emailId) {
   const config = rule.actionConfig || {};
+  console.log(`[inboxRuleEngine] Application règle "${rule.action}" sur email #${emailId}`, JSON.stringify(config));
   switch (rule.action) {
     case 'move_to_folder':
       if (config.folderId) {
-        await prisma.incomingEmail.update({ where: { id: emailId }, data: { folderId: config.folderId } });
+        await prisma.incomingEmail.update({ where: { id: emailId }, data: { folderId: Number(config.folderId) } });
+        console.log(`[inboxRuleEngine] Email #${emailId} déplacé vers dossier #${config.folderId}`);
       }
       break;
     case 'mark_read':

@@ -15,7 +15,7 @@ import {
   Paperclip, Search, X, FlaskConical, Bot, ArrowUpRight, Reply, ChevronDown,
   ChevronRight, ChevronUp, Flame, AlertTriangle, ArrowDownWideNarrow, Rows3, Rows4,
   CircleDot, Mail, CheckCheck, Send, FileText, Tag, Users, Filter, Sparkles, Plus,
-  CalendarRange, Info, FolderPlus, ArrowRight, Loader2, Folder, Settings, Trash2
+  CalendarRange, Info, FolderPlus, ArrowRight, Loader2, Folder, Settings, Trash2, Play
 } from 'lucide-react';
 
 const STATUS_LABELS = {
@@ -1952,6 +1952,16 @@ function InboxRulesModal({ onClose }) {
     }
   }
 
+  async function handleApply(id) {
+    if (!confirm('Appliquer cette règle sur tous les emails existants ?')) return;
+    try {
+      const { data } = await api.post(`/inbox/rules/${id}/apply`);
+      toast.success(`${data.applied} email(s) déplacé(s) sur ${data.total} analysés`);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de l\'application');
+    }
+  }
+
   const FIELD_OPTIONS = [
     { value: 'subject', label: 'Sujet' },
     { value: 'fromEmail', label: 'Email expéditeur' },
@@ -2020,8 +2030,13 @@ function InboxRulesModal({ onClose }) {
                     <div className="flex items-center gap-1 shrink-0">
                       <button onClick={() => handleTest(rule.id)} disabled={testLoading === rule.id}
                         className="p-1.5 rounded-lg text-on-surface-variant hover:text-sky-400 hover:bg-sky-500/10 transition-all cursor-pointer disabled:opacity-50"
-                        title="Tester">
+                        title="Tester (compter les matchs)">
                         {testLoading === rule.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FlaskConical className="w-3.5 h-3.5" />}
+                      </button>
+                      <button onClick={() => handleApply(rule.id)}
+                        className="p-1.5 rounded-lg text-on-surface-variant hover:text-emerald-400 hover:bg-emerald-500/10 transition-all cursor-pointer"
+                        title="Appliquer sur tous les emails existants">
+                        <Play className="w-3.5 h-3.5" />
                       </button>
                       <button onClick={() => handleToggle(rule.id)}
                         className={`p-1.5 rounded-lg transition-all cursor-pointer ${rule.isEnabled ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-on-surface-variant/40 hover:bg-surface-container'}`}
