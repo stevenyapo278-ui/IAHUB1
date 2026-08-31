@@ -260,23 +260,28 @@ router.post('/rules/:id/test', async (req, res) => {
 
 // Appliquer une règle sur tous les emails existants (rétroactif)
 router.post('/rules/:id/apply', async (req, res) => {
-  const id = Number(req.params.id);
-  const rule = await prisma.inboxRule.findUnique({ where: { id } });
-  if (!rule || rule.createdById !== req.user.sub) return res.status(404).json({ error: 'Règle introuvable' });
-  const { evaluateRule, applyRuleAction } = require('../services/inboxRuleEngine');
-  const emails = await prisma.incomingEmail.findMany({
-    where: { status: 'DONE' },
-    orderBy: { receivedAt: 'desc' },
-    take: 5000,
-  });
-  let applied = 0;
-  for (const email of emails) {
-    if (evaluateRule(rule, email)) {
-      await applyRuleAction(rule, email.id);
-      applied++;
+  try {
+    const id = Number(req.params.id);
+    const rule = await prisma.inboxRule.findUnique({ where: { id } });
+    if (!rule || rule.createdById !== req.user.sub) return res.status(404).json({ error: 'Règle introuvable' });
+    const { evaluateRule, applyRuleAction } = require('../services/inboxRuleEngine');
+    const emails = await prisma.incomingEmail.findMany({
+      where: { status: 'DONE' },
+      orderBy: { receivedAt: 'desc' },
+      take: 5000,
+    });
+    let applied = 0;
+    for (const email of emails) {
+      if (evaluateRule(rule, email)) {
+        await applyRuleAction(rule, email.id);
+        applied++;
+      }
     }
+    res.json({ applied, total: emails.length });
+  } catch (err) {
+    console.error('[inbox/rules/apply] Erreur:', err.message, err.stack);
+    return res.status(500).json({ error: err.message || 'Erreur lors de l\'application de la règle' });
   }
-  res.json({ applied, total: emails.length });
 });
 
 // Détail complet d'un fil de conversation (corps HTML + jambes envoyées/reçues)
