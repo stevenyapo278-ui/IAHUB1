@@ -201,12 +201,23 @@ function applyThreadSort(threads, sort) {
 }
 
 async function listThreads({ status, q, priority, attachments, category, read, days, sort, page = 1, limit = 25, scope = null, folderId = null }) {
+  // Déterminer si on est dans une vue dossier custom ou une vue built-in
+  const isCustomFolder = folderId !== undefined && folderId !== null && folderId !== '';
+  const isBuiltInFilter = status || read || attachments;
+
   const emailWhere = {
     ...(scope || {}),
     ...(days ? { receivedAt: { gte: new Date(Date.now() - days * 86400000) } } : {}),
-    // folderId: null = inbox (pas de dossier), folderId number = dossier custom
-    ...(folderId !== undefined && folderId !== null ? { folderId: folderId === 'null' || folderId === '' ? null : Number(folderId) } : {}),
   };
+
+  if (isCustomFolder) {
+    // Vue dossier custom : filtrer par ce dossier
+    emailWhere.folderId = folderId === 'null' ? null : Number(folderId);
+  } else if (isBuiltInFilter) {
+    // Vue built-in (Non lus, En cours, Erreurs…) : exclure les emails dans des dossiers custom
+    emailWhere.folderId = null;
+  }
+  // Si ni folderId ni filtre built-in → "Tous" → pas de filtre folderId
   const emails = await prisma.incomingEmail.findMany({
     where: Object.keys(emailWhere).length > 0 ? emailWhere : undefined,
     orderBy: { receivedAt: 'desc' },
@@ -236,19 +247,24 @@ async function listThreads({ status, q, priority, attachments, category, read, d
 }
 
 // Compteurs globaux pour les badges des dossiers (façon Outlook)
+// Les badges built-in n comptent que les emails dans l'inbox (folderId IS NULL)
 async function getInboxCounts(scope = null) {
-  const countWhere = (extra) => ({ ...(scope || {}), ...extra });
+  const inboxScope = { ...(scope || {}), folderId: null };
+  const countInbox = (extra) => {
+    const where = { ...inboxScope, ...extra };
+    return Object.keys(where).length > 0 ? where : undefined;
+  };
   const [total, pending, processing, done, error, retry, deadLetter, spam, withAttachments, unread] = await Promise.all([
-    prisma.incomingEmail.count({ where: Object.keys(countWhere({})).length > 0 ? countWhere({}) : undefined }),
-    prisma.incomingEmail.count({ where: countWhere({ status: 'PENDING' }) }),
-    prisma.incomingEmail.count({ where: countWhere({ status: 'PROCESSING' }) }),
-    prisma.incomingEmail.count({ where: countWhere({ status: 'DONE' }) }),
-    prisma.incomingEmail.count({ where: countWhere({ status: 'ERROR' }) }),
-    prisma.incomingEmail.count({ where: countWhere({ status: 'RETRY' }) }),
-    prisma.incomingEmail.count({ where: countWhere({ status: 'DEAD_LETTER' }) }),
-    prisma.incomingEmail.count({ where: countWhere({ status: 'SPAM' }) }),
-    prisma.incomingEmail.count({ where: countWhere({ hasAttachments: true }) }),
-    prisma.incomingEmail.count({ where: countWhere({ isRead: false }) }),
+    prisma.incomingEmail.count({ where: countInbox({}) }),
+    prisma.incomingEmail.count({ where: countInbox({ status: 'PENDING' }) }),
+    prisma.incomingEmail.count({ where: countInbox({ status: 'PROCESSING' }) }),
+    prisma.incomingEmail.count({ where: countInbox({ status: 'DONE' }) }),
+    prisma.incomingEmail.count({ where: countInbox({ status: 'ERROR' }) }),
+    prisma.incomingEmail.count({ where: countInbox({ status: 'RETRY' }) }),
+    prisma.incomingEmail.count({ where: countInbox({ status: 'DEAD_LETTER' }) }),
+    prisma.incomingEmail.count({ where: countInbox({ status: 'SPAM' }) }),
+    prisma.incomingEmail.count({ where: countInbox({ hasAttachments: true }) }),
+    prisma.incomingEmail.count({ where: countInbox({ isRead: false }) }),
   ]);
   return { total, pending, processing, done, error: error + retry + deadLetter, errorOnly: error, retry, deadLetter, spam, withAttachments, unread };
 }
