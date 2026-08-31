@@ -99,4 +99,4 @@ async function matchRuleAgainstEmails(rule) {
   return count;
 }
 
-module.exports = { applyRulesToEmail, matchRuleAgainstEmails, evaluateRule };
+module.exports = { applyRulesToEmail, applyRuleAction, matchRuleAgainstEmails, evaluateRule };
