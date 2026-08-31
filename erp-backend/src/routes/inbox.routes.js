@@ -380,18 +380,23 @@ router.post('/:id/retry', requirePermission('inbox.sync', ['ADMIN']), async (req
 
 // Lister tous les dossiers (built-in + custom de l'utilisateur)
 router.get('/folders', async (req, res) => {
-  const folders = await prisma.inboxFolder.findMany({
-    where: { OR: [{ isSystem: true }, { createdById: req.user.sub }] },
-    orderBy: [{ position: 'asc' }, { name: 'asc' }],
-  });
-  // Compter les emails par dossier
-  const folderIds = folders.map((f) => f.id);
-  const counts = folderIds.length > 0
-    ? await prisma.incomingEmail.groupBy({ by: ['folderId'], where: { folderId: { in: folderIds } }, _count: true })
-    : [];
-  const countMap = Object.fromEntries(counts.map((c) => [c.folderId, c._count]));
-  const result = folders.map((f) => ({ ...f, emailCount: countMap[f.id] || 0 }));
-  res.json(result);
+  try {
+    const folders = await prisma.inboxFolder.findMany({
+      where: { OR: [{ isSystem: true }, { createdById: req.user.sub }] },
+      orderBy: [{ position: 'asc' }, { name: 'asc' }],
+    });
+    // Compter les emails par dossier
+    const folderIds = folders.map((f) => f.id);
+    const counts = folderIds.length > 0
+      ? await prisma.incomingEmail.groupBy({ by: ['folderId'], where: { folderId: { in: folderIds } }, _count: true })
+      : [];
+    const countMap = Object.fromEntries(counts.map((c) => [c.folderId, c._count]));
+    const result = folders.map((f) => ({ ...f, emailCount: countMap[f.id] || 0 }));
+    res.json(result);
+  } catch (err) {
+    console.error('[inbox/folders] Erreur:', err.message, err.stack);
+    return res.status(500).json({ error: err.message || 'Erreur lors du chargement des dossiers' });
+  }
 });
 
 // Créer un dossier custom
