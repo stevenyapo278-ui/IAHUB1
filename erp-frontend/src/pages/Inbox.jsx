@@ -200,6 +200,11 @@ export default function Inbox() {
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [showRulesModal, setShowRulesModal] = useState(false);
 
+  // ── Menu contextuel clic droit ─────────────────────────────────────
+  const [contextMenu, setContextMenu] = useState(null); // { x, y, thread }
+  const [showCreateRuleFromEmail, setShowCreateRuleFromEmail] = useState(false);
+  const [ruleFromEmail, setRuleFromEmail] = useState(null); // email data for pre-filling
+
   // ── Modal création ticket depuis email ──────────────────────────────
   const [showCreateTicket, setShowCreateTicket] = useState(false);
   const [ticketForm, setTicketForm] = useState({ title: '', content: '', priority: 'P3', category: '', teamId: '', assignedToId: '' });
@@ -240,6 +245,90 @@ export default function Inbox() {
     setRetryFrom(toLocal(sevenDaysAgo));
     setRetryTo(toLocal(today));
     setShowRetryModal(true);
+  }
+
+  // ── Menu contextuel clic droit ─────────────────────────────────────
+  function handleContextMenu(e, thread) {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY, thread });
+  }
+
+  function closeContextMenu() {
+    setContextMenu(null);
+  }
+
+  useEffect(() => {
+    const handleClick = () => setContextMenu(null);
+    if (contextMenu) {
+      document.addEventListener('click', handleClick);
+      return () => document.removeEventListener('click', handleClick);
+    }
+  }, [contextMenu]);
+
+  async function ctxMarkRead(unread) {
+    if (!contextMenu) return;
+    const t = contextMenu.thread;
+    try {
+      await api.post('/inbox/read', { key: t.id, read: !unread });
+      setThreads((prev) => prev.map((th) => th.id === t.id ? { ...th, isUnread: unread, unreadCount: unread ? 1 : 0 } : th));
+      refreshCounts();
+    } catch (err) { toast.error('Erreur'); }
+    closeContextMenu();
+  }
+
+  async function ctxMarkSpam() {
+    if (!contextMenu) return;
+    const t = contextMenu.thread;
+    if (!confirm('Marquer ce fil comme spam ?')) return;
+    try {
+      // Marquer tous les emails du fil comme spam
+      for (const emailId of (t.emailIds || [])) {
+        await api.patch(`/inbox/${emailId}`, { status: 'SPAM', aiIsSpam: true });
+      }
+      setThreads((prev) => prev.filter((th) => th.id !== t.id));
+      refreshCounts();
+      toast.success('Marqué comme spam');
+    } catch (err) { toast.error('Erreur'); }
+    closeContextMenu();
+  }
+
+  async function ctxDelete() {
+    if (!contextMenu) return;
+    const t = contextMenu.thread;
+    if (!confirm('Supprimer ce fil ?')) return;
+    try {
+      for (const emailId of (t.emailIds || [])) {
+        await api.delete(`/inbox/${emailId}`);
+      }
+      setThreads((prev) => prev.filter((th) => th.id !== t.id));
+      refreshCounts();
+      toast.success('Fil supprimé');
+    } catch (err) { toast.error('Erreur'); }
+    closeContextMenu();
+  }
+
+  function ctxCreateRule() {
+    if (!contextMenu) return;
+    const t = contextMenu.thread;
+    const latest = t.latest || {};
+    setRuleFromEmail({ fromEmail: latest.fromEmail || '', subject: latest.subject || '' });
+    setShowCreateRuleFromEmail(true);
+    closeContextMenu();
+  }
+
+  function ctxCreateTicket() {
+    if (!contextMenu) return;
+    setSelectedThread(contextMenu.thread);
+    setShowCreateTicket(true);
+    closeContextMenu();
+  }
+
+  function ctxMoveToFolder() {
+    if (!contextMenu) return;
+    setSelectedIds([contextMenu.thread.id]);
+    setShowMoveModal(true);
+    closeContextMenu();
   }
 
   // Relance les emails en erreur reçus dans la plage sélectionnée (inclusive)
@@ -837,6 +926,7 @@ export default function Inbox() {
                       animate={{ opacity: 1 }}
                       transition={{ duration: 0.1 }}
                       onClick={() => openThread(t)}
+                      onContextMenu={(e) => handleContextMenu(e, t)}
                       className={`w-full text-left flex items-stretch gap-0 border-b border-outline-variant/15 transition-all group ${
                         isSelected
                           ? 'bg-sky-500/10 ring-1 ring-inset ring-sky-500/20'
@@ -927,6 +1017,25 @@ export default function Inbox() {
                             </div>
                           )}
                         </div>
+                      </div>
+
+                      {/* Actions rapides au hover (Outlook-like) */}
+                      <div className="hidden group-hover:flex items-center gap-0.5 shrink-0 px-2 self-center" onClick={(e) => e.stopPropagation()}>
+                        <button onClick={() => ctxMarkRead(t.isUnread)}
+                          className="p-1.5 rounded-lg text-on-surface-variant/60 hover:text-sky-400 hover:bg-sky-500/10 transition-all cursor-pointer"
+                          title={t.isUnread ? 'Marquer lu' : 'Marquer non lu'}>
+                          {t.isUnread ? <MailOpen className="w-3.5 h-3.5" /> : <CircleDot className="w-3.5 h-3.5" />}
+                        </button>
+                        <button onClick={() => { setSelectedIds([t.id]); setShowMoveModal(true); }}
+                          className="p-1.5 rounded-lg text-on-surface-variant/60 hover:text-violet-400 hover:bg-violet-500/10 transition-all cursor-pointer"
+                          title="Déplacer">
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+                        {t.hasAttachments && (
+                          <span className="p-1.5 text-on-surface-variant/40">
+                            <Paperclip className="w-3.5 h-3.5" />
+                          </span>
+                        )}
                       </div>
                     </motion.button>
                   );
@@ -1737,6 +1846,67 @@ export default function Inbox() {
         document.body
       )}
 
+      {/* ── Menu contextuel clic droit ──────────────────────────────────────── */}
+      {contextMenu && createPortal(
+        <div
+          className="fixed z-[99999]"
+          style={{ left: Math.min(contextMenu.x, window.innerWidth - 220), top: Math.min(contextMenu.y, window.innerHeight - 300) }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+            className="bg-surface-container-lowest border border-outline-variant/60 rounded-xl shadow-2xl py-1.5 w-56 overflow-hidden"
+          >
+            <div className="px-3 py-1.5 border-b border-outline-variant/20">
+              <p className="text-[10px] font-bold text-on-surface truncate">{contextMenu.thread.latest?.subject || '(sans objet)'}</p>
+              <p className="text-[9px] text-on-surface-variant/60 truncate">{contextMenu.thread.latest?.fromEmail}</p>
+            </div>
+            <button onClick={() => ctxMarkRead(contextMenu.thread.isUnread)}
+              className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-on-surface hover:bg-surface-container transition-colors cursor-pointer">
+              {contextMenu.thread.isUnread ? <MailOpen className="w-3.5 h-3.5" /> : <CircleDot className="w-3.5 h-3.5" />}
+              {contextMenu.thread.isUnread ? 'Marquer comme lu' : 'Marquer comme non lu'}
+            </button>
+            <button onClick={ctxMoveToFolder}
+              className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-on-surface hover:bg-surface-container transition-colors cursor-pointer">
+              <ArrowRight className="w-3.5 h-3.5" />
+              Déplacer vers un dossier...
+            </button>
+            <div className="mx-3 border-t border-outline-variant/20" />
+            <button onClick={ctxCreateRule}
+              className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-on-surface hover:bg-surface-container transition-colors cursor-pointer">
+              <Filter className="w-3.5 h-3.5 text-violet-400" />
+              <span>Créer une règle...</span>
+            </button>
+            <button onClick={ctxCreateTicket}
+              className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-on-surface hover:bg-surface-container transition-colors cursor-pointer">
+              <FileText className="w-3.5 h-3.5 text-emerald-400" />
+              Créer un ticket...
+            </button>
+            <div className="mx-3 border-t border-outline-variant/20" />
+            <button onClick={ctxMarkSpam}
+              className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-amber-500 hover:bg-amber-500/10 transition-colors cursor-pointer">
+              <Ban className="w-3.5 h-3.5" />
+              Marquer comme spam
+            </button>
+            <button onClick={ctxDelete}
+              className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer">
+              <Trash2 className="w-3.5 h-3.5" />
+              Supprimer
+            </button>
+          </motion.div>
+        </div>,
+        document.body
+      )}
+
+      {/* ── Modal Créer une règle depuis un email ───────────────────────────── */}
+      {showCreateRuleFromEmail && ruleFromEmail && createPortal(
+        <CreateRuleFromEmailModal
+          email={ruleFromEmail}
+          folders={customFolders}
+          onClose={() => { setShowCreateRuleFromEmail(false); setRuleFromEmail(null); }}
+        />
+      ), document.body}
+
       {/* ── Modal Déplacer vers dossier ──────────────────────────────────────── */}
       {createPortal(
         <AnimatePresence>
@@ -2176,6 +2346,187 @@ function InboxRulesModal({ onClose }) {
           </div>
         )}
       </motion.div>
+    </div>
+  );
+}
+
+// ── Modal Créer une règle depuis un email (clic droit) ────────────────────────
+function CreateRuleFromEmailModal({ email, folders, onClose }) {
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    label: `Messages de ${email.fromEmail}`,
+    conditions: [
+      { field: 'fromEmail', operator: 'contains', value: email.fromEmail || '' },
+    ],
+    conditionOperator: 'AND',
+    action: 'move_to_folder',
+    actionConfig: { folderId: '', category: '' },
+  });
+
+  const FIELD_OPTIONS = [
+    { value: 'fromEmail', label: 'Email expéditeur' },
+    { value: 'fromName', label: 'Nom expéditeur' },
+    { value: 'subject', label: 'Sujet' },
+    { value: 'bodyPreview', label: 'Contenu' },
+    { value: 'aiCategory', label: 'Catégorie IA' },
+  ];
+  const OP_OPTIONS = [
+    { value: 'contains', label: 'contient' },
+    { value: 'not_contains', label: 'ne contient pas' },
+    { value: 'equals', label: 'égal à' },
+    { value: 'starts_with', label: 'commence par' },
+    { value: 'ends_with', label: 'finit par' },
+  ];
+
+  function addCondition() {
+    setForm((f) => ({ ...f, conditions: [...f.conditions, { field: 'subject', operator: 'contains', value: '' }] }));
+  }
+
+  function updateCondition(index, key, value) {
+    setForm((f) => {
+      const conditions = [...f.conditions];
+      conditions[index] = { ...conditions[index], [key]: value };
+      return { ...f, conditions };
+    });
+  }
+
+  function removeCondition(index) {
+    setForm((f) => ({ ...f, conditions: f.conditions.filter((_, i) => i !== index) }));
+  }
+
+  async function handleSave(e) {
+    e.preventDefault();
+    if (!form.label.trim() || form.conditions.some((c) => !c.value.trim())) {
+      toast.error('Remplissez le libellé et toutes les conditions');
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload = { ...form, actionConfig: { ...form.actionConfig } };
+      if (form.action === 'move_to_folder') payload.actionConfig.folderId = Number(form.actionConfig.folderId) || null;
+      await api.post('/inbox/rules', payload);
+      toast.success('Règle créée');
+      onClose();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={() => !saving && onClose()}
+        className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer" />
+      <motion.form
+        onSubmit={handleSave}
+        initial={{ opacity: 0, scale: 0.95, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 16 }}
+        transition={{ type: 'spring', duration: 0.35, bounce: 0.15 }}
+        className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl max-w-lg w-full p-6 card-shadow flex flex-col gap-4 overflow-hidden max-h-[85vh]"
+      >
+        <div className="flex justify-between items-center pb-3 border-b border-outline-variant/30">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-violet-500/10"><Filter className="w-5 h-5 text-violet-500" /></div>
+            <div>
+              <h3 className="text-sm font-bold text-on-surface">Créer une règle depuis cet email</h3>
+              <p className="text-[10px] text-on-surface-variant">De : {email.fromEmail}</p>
+            </div>
+          </div>
+          <motion.button type="button" onClick={onClose} disabled={saving}
+            whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }}
+            className="p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer disabled:opacity-40">
+            <X className="w-4 h-4" />
+          </motion.button>
+        </div>
+
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Libellé *</span>
+          <input type="text" required maxLength={100} value={form.label}
+            onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
+            className="w-full px-3 py-2 rounded-lg border border-outline-variant/60 bg-surface-container text-on-surface text-xs" />
+        </label>
+
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Conditions</span>
+            <select value={form.conditionOperator} onChange={(e) => setForm((f) => ({ ...f, conditionOperator: e.target.value }))}
+              className="px-2 py-1 rounded-lg border border-outline-variant/40 bg-surface-container text-[10px] text-on-surface-variant cursor-pointer">
+              <option value="AND">ET (toutes)</option>
+              <option value="OR">OU (au moins une)</option>
+            </select>
+            <button type="button" onClick={addCondition}
+              className="p-1 rounded text-on-surface-variant/60 hover:text-sky-400 transition-colors cursor-pointer">
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          {form.conditions.map((c, i) => (
+            <div key={i} className="flex items-center gap-1.5">
+              <select value={c.field} onChange={(e) => updateCondition(i, 'field', e.target.value)}
+                className="flex-1 px-2 py-1.5 rounded-lg border border-outline-variant/40 bg-surface-container text-[10px] text-on-surface cursor-pointer">
+                {FIELD_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+              <select value={c.operator} onChange={(e) => updateCondition(i, 'operator', e.target.value)}
+                className="w-28 px-2 py-1.5 rounded-lg border border-outline-variant/40 bg-surface-container text-[10px] text-on-surface cursor-pointer">
+                {OP_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+              <input type="text" required placeholder="Valeur" value={c.value}
+                onChange={(e) => updateCondition(i, 'value', e.target.value)}
+                className="flex-1 px-2 py-1.5 rounded-lg border border-outline-variant/40 bg-surface-container text-[10px] text-on-surface" />
+              {form.conditions.length > 1 && (
+                <button type="button" onClick={() => removeCondition(i)}
+                  className="p-1 text-on-surface-variant/40 hover:text-red-400 cursor-pointer">
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div className="flex items-end gap-3">
+          <label className="flex flex-col gap-1.5 flex-1">
+            <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Action</span>
+            <select value={form.action} onChange={(e) => setForm((f) => ({ ...f, action: e.target.value, actionConfig: {} }))}
+              className="px-2 py-2 rounded-lg border border-outline-variant/40 bg-surface-container text-xs text-on-surface cursor-pointer">
+              <option value="move_to_folder">Déplacer vers un dossier</option>
+              <option value="mark_read">Marquer comme lu</option>
+              <option value="mark_spam">Marquer comme spam</option>
+              <option value="mark_category">Appliquer une catégorie</option>
+            </select>
+          </label>
+          {form.action === 'move_to_folder' && (
+            <label className="flex flex-col gap-1.5 flex-1">
+              <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Dossier</span>
+              <select value={form.actionConfig.folderId || ''} onChange={(e) => setForm((f) => ({ ...f, actionConfig: { ...f.actionConfig, folderId: e.target.value } }))}
+                className="px-2 py-2 rounded-lg border border-outline-variant/40 bg-surface-container text-xs text-on-surface cursor-pointer">
+                <option value="">— Choisir —</option>
+                {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+              </select>
+            </label>
+          )}
+          {form.action === 'mark_category' && (
+            <label className="flex flex-col gap-1.5 flex-1">
+              <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Catégorie</span>
+              <input type="text" placeholder="Ex: COMMERCIAL"
+                value={form.actionConfig.category || ''}
+                onChange={(e) => setForm((f) => ({ ...f, actionConfig: { ...f.actionConfig, category: e.target.value } }))}
+                className="px-2 py-2 rounded-lg border border-outline-variant/40 bg-surface-container text-xs text-on-surface" />
+            </label>
+          )}
+        </div>
+
+        <div className="pt-3 border-t border-outline-variant/30 flex justify-end gap-2">
+          <button type="button" onClick={onClose} disabled={saving}
+            className="px-4 py-2.5 rounded-xl border border-outline-variant text-on-surface text-xs font-medium hover:bg-surface-container transition-colors cursor-pointer disabled:opacity-40">
+            Annuler
+          </button>
+          <button type="submit" disabled={saving}
+            className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-purple-500 text-white text-xs font-bold shadow-md shadow-violet-500/20 transition-all hover:brightness-110 cursor-pointer disabled:opacity-60">
+            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Filter className="w-3.5 h-3.5" />}
+            {saving ? 'Création...' : 'Créer la règle'}
+          </button>
+        </div>
+      </motion.form>
     </div>
   );
 }
