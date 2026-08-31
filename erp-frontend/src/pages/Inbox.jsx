@@ -1904,8 +1904,9 @@ export default function Inbox() {
           email={ruleFromEmail}
           folders={customFolders}
           onClose={() => { setShowCreateRuleFromEmail(false); setRuleFromEmail(null); }}
-        />
-      ), document.body}
+        />,
+        document.body
+      )}
 
       {/* ── Modal Déplacer vers dossier ──────────────────────────────────────── */}
       {createPortal(
