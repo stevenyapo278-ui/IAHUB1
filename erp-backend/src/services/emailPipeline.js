@@ -18,6 +18,7 @@ const { tryHandleReminderReply } = require('./draftReplyApproval');
 const { getBreaker } = require('../utils/circuitBreaker');
 const { isLowTrustSender } = require('./senderReputation');
 const { generateEmailSummary } = require('./emailSummaryGenerator');
+const { applyRulesToEmail } = require('./inboxRuleEngine');
 
 const MAX_RETRIES = 3;const RETRY_DELAYS_MS = [180000, 600000, 1800000]; // 3min, 10min, 30min
 
@@ -731,6 +732,12 @@ async function processMessage(message, account) {
         aiConfidence: analysis.confidence, aiIsSpam: false,
       },
     });
+    // Appliquer les règles de tri après l'analyse IA
+    try {
+      await applyRulesToEmail(updated);
+    } catch (ruleErr) {
+      console.error('[emailPipeline] Erreur application règles:', ruleErr.message);
+    }
     if (io) io.emit('email_updated', updated);
   } catch (err) {
     const isTransient = isTransientError(err);

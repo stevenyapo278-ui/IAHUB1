@@ -15,7 +15,7 @@ import {
   Paperclip, Search, X, FlaskConical, Bot, ArrowUpRight, Reply, ChevronDown,
   ChevronRight, ChevronUp, Flame, AlertTriangle, ArrowDownWideNarrow, Rows3, Rows4,
   CircleDot, Mail, CheckCheck, Send, FileText, Tag, Users, Filter, Sparkles, Plus,
-  CalendarRange, Info
+  CalendarRange, Info, FolderPlus, ArrowRight, Loader2, Folder, Settings, Trash2
 } from 'lucide-react';
 
 const STATUS_LABELS = {
@@ -191,6 +191,15 @@ export default function Inbox() {
   const [bulkAction, setBulkAction] = useState(null);
   const [expandedErrors, setExpandedErrors] = useState(new Set());
 
+  // ── Dossiers custom ────────────────────────────────────────────────
+  const [customFolders, setCustomFolders] = useState([]);
+  const [showCreateFolder, setShowCreateFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [newFolderColor, setNewFolderColor] = useState('#3b82f6');
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [showMoveModal, setShowMoveModal] = useState(false);
+  const [showRulesModal, setShowRulesModal] = useState(false);
+
   // ── Modal création ticket depuis email ──────────────────────────────
   const [showCreateTicket, setShowCreateTicket] = useState(false);
   const [ticketForm, setTicketForm] = useState({ title: '', content: '', priority: 'P3', category: '', teamId: '', assignedToId: '' });
@@ -269,7 +278,12 @@ export default function Inbox() {
   // ── Chargement ──────────────────────────────────────────────────────────
   const buildParams = useCallback((p) => {
     const params = new URLSearchParams({ page: p, limit: 25 });
-    if (folderCfg.status) params.set('status', folderCfg.status);
+    // Supporte les dossiers custom (folder-123) et les dossiers built-in
+    if (folder.startsWith('folder-')) {
+      params.set('folderId', folder.slice('folder-'.length));
+    } else if (folderCfg.status) {
+      params.set('status', folderCfg.status);
+    }
     if (folderCfg.read) params.set('read', folderCfg.read);
     if (folderCfg.attachments) params.set('attachments', folderCfg.attachments);
     if (priorityFilter) params.set('priority', priorityFilter);
@@ -278,7 +292,7 @@ export default function Inbox() {
     if (sortBy && sortBy !== 'date') params.set('sort', sortBy);
     if (searchQuery.trim()) params.set('q', searchQuery.trim());
     return params;
-  }, [folderCfg, priorityFilter, categoryFilter, period, sortBy, searchQuery]);
+  }, [folder, folderCfg, priorityFilter, categoryFilter, period, sortBy, searchQuery]);
 
   const load = useCallback((p) => {
     api.get(`/inbox?${buildParams(p).toString()}`)
@@ -293,8 +307,66 @@ export default function Inbox() {
       .catch(() => {});
   }, []);
 
+  // ── Dossiers custom ────────────────────────────────────────────────
+  const loadCustomFolders = useCallback(() => {
+    api.get('/inbox/folders')
+      .then(({ data }) => setCustomFolders(data))
+      .catch(() => {});
+  }, []);
+
+  async function handleCreateFolder(e) {
+    e.preventDefault();
+    if (!newFolderName.trim()) return;
+    setCreatingFolder(true);
+    try {
+      await api.post('/inbox/folders', { name: newFolderName.trim(), color: newFolderColor });
+      setNewFolderName('');
+      setShowCreateFolder(false);
+      loadCustomFolders();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de la création');
+    } finally {
+      setCreatingFolder(false);
+    }
+  }
+
+  async function handleDeleteFolder(id) {
+    if (!confirm('Les emails de ce dossier reviendront dans la boîte de réception. Supprimer ?')) return;
+    try {
+      await api.delete(`/inbox/folders/${id}`);
+      loadCustomFolders();
+      if (folder === `folder-${id}`) setFolder('all');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de la suppression');
+    }
+  }
+
+  async function handleMoveToFolder(folderId) {
+    if (selectedIds.length === 0) return;
+    try {
+      // Extraire les email IDs à partir des keys sélectionnées
+      const emailIds = selectedIds.map((key) => {
+        if (key.startsWith('single-')) return Number(key.slice('single-'.length));
+        // Pour les conversations, on prend le premier email
+        const thread = threads.find((t) => t.id === key);
+        return thread?.latest?.emailId || null;
+      }).filter(Boolean);
+      if (emailIds.length === 0) return;
+      await api.post('/inbox/folders/move', { ids: emailIds, folderId });
+      toast.success(`${emailIds.length} email(s) déplacé(s)`);
+      setSelectedIds([]);
+      setShowMoveModal(false);
+      load(pageRef.current);
+      refreshCounts();
+      loadCustomFolders();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors du déplacement');
+    }
+  }
+
   useEffect(() => { load(1); setPage(1); }, [load]);
   useEffect(() => { refreshCounts(); }, [refreshCounts]);
+  useEffect(() => { loadCustomFolders(); }, [loadCustomFolders]);
 
   // Auto-refresh toutes les 15s (comportement existant)
   useEffect(() => {
@@ -500,6 +572,14 @@ export default function Inbox() {
               <span className="hidden sm:inline">Test IA</span>
             </button>
           )}
+          <button
+            onClick={() => setShowRulesModal(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-violet-500/40 text-violet-600 dark:text-violet-400 hover:bg-violet-500/10 text-xs font-semibold transition-all cursor-pointer"
+            title="Règles de tri automatique"
+          >
+            <Filter className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Règles</span>
+          </button>
           {canSync && (
             <button
               onClick={handleSync}
@@ -558,6 +638,64 @@ export default function Inbox() {
                 </button>
               );
             })}
+
+            {/* Dossiers custom */}
+            {customFolders.length > 0 && (
+              <>
+                <div className="flex items-center gap-2 px-3 pt-3 pb-1">
+                  <span className="text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-wider flex-1">Mes dossiers</span>
+                  <button
+                    onClick={() => setShowCreateFolder(true)}
+                    className="p-0.5 rounded text-on-surface-variant/60 hover:text-sky-400 transition-colors cursor-pointer"
+                    title="Créer un dossier"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </button>
+                </div>
+                {customFolders.map((f) => {
+                  const isActive = folder === `folder-${f.id}`;
+                  return (
+                    <button
+                      key={`folder-${f.id}`}
+                      onClick={() => { setFolder(`folder-${f.id}`); }}
+                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer group ${
+                        isActive
+                          ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20'
+                          : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface border border-transparent'
+                      }`}
+                    >
+                      <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: f.color || '#6b7280' }} />
+                      <span className="flex-1 text-left truncate">{f.name}</span>
+                      {f.emailCount > 0 && (
+                        <span className={`shrink-0 min-w-4 px-1 py-0.5 rounded-full text-center text-[9px] font-bold ${
+                          isActive ? 'bg-sky-500/20 text-sky-300' : 'bg-surface-container-high text-on-surface-variant'
+                        }`}>
+                          {f.emailCount > 999 ? '999+' : f.emailCount}
+                        </span>
+                      )}
+                      {!f.isSystem && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDeleteFolder(f.id); }}
+                          className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-red-400/60 hover:text-red-400 transition-all cursor-pointer"
+                          title="Supprimer"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </button>
+                  );
+                })}
+              </>
+            )}
+            {customFolders.length === 0 && (
+              <button
+                onClick={() => setShowCreateFolder(true)}
+                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs text-on-surface-variant/50 hover:text-on-surface-variant hover:bg-surface-container transition-all cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Créer un dossier</span>
+              </button>
+            )}
           </div>
           <div className="mt-auto px-3 py-3 border-t border-outline-variant/20 text-[10px] text-on-surface-variant/70 leading-relaxed">
             Fils de conversation triés par l'IA Gemini · rafraîchissement auto 15s
@@ -618,6 +756,13 @@ export default function Inbox() {
                     {selectedIds.length} sélectionnée{selectedIds.length !== 1 ? 's' : ''}
                   </span>
                   <div className="ml-auto flex items-center gap-1.5">
+                    <button
+                      onClick={() => setShowMoveModal(true)}
+                      disabled={bulkAction}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-violet-600 text-white text-[10px] font-bold disabled:opacity-50 hover:bg-violet-700 transition-all cursor-pointer"
+                    >
+                      <ArrowRight className="w-3 h-3" /> Déplacer
+                    </button>
                     <button
                       onClick={() => bulkMarkRead(true)}
                       disabled={bulkAction}
@@ -1515,6 +1660,144 @@ export default function Inbox() {
         </AnimatePresence>,
         document.body
       )}
+
+      {/* ── Modal Créer un dossier ──────────────────────────────────────────── */}
+      {createPortal(
+        <AnimatePresence>
+          {showCreateFolder && (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                onClick={() => !creatingFolder && setShowCreateFolder(false)}
+                className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer" />
+              <motion.form
+                onSubmit={handleCreateFolder}
+                initial={{ opacity: 0, scale: 0.95, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 16 }}
+                transition={{ type: 'spring', duration: 0.35, bounce: 0.15 }}
+                className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl max-w-sm w-full p-6 card-shadow flex flex-col gap-5 overflow-hidden max-h-[90vh]"
+              >
+                <div className="flex justify-between items-center pb-3 border-b border-outline-variant/30">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-xl bg-sky-500/10">
+                      <FolderPlus className="w-5 h-5 text-sky-500" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-on-surface">Créer un dossier</h3>
+                      <p className="text-[10px] text-on-surface-variant">Classez vos emails par thème</p>
+                    </div>
+                  </div>
+                  <motion.button type="button" onClick={() => setShowCreateFolder(false)} disabled={creatingFolder}
+                    whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }}
+                    className="p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer disabled:opacity-40">
+                    <X className="w-4 h-4" />
+                  </motion.button>
+                </div>
+
+                <div className="space-y-4">
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Nom du dossier *</span>
+                    <input
+                      type="text"
+                      autoFocus
+                      required
+                      maxLength={50}
+                      placeholder="Ex: Projets clients"
+                      value={newFolderName}
+                      onChange={(e) => setNewFolderName(e.target.value)}
+                      className="w-full px-3 py-2.5 rounded-xl border border-outline-variant/60 bg-surface-container text-on-surface text-sm placeholder-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-sky-500/40 focus:border-sky-500/60"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Couleur</span>
+                    <div className="flex items-center gap-2">
+                      {['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#6b7280'].map((c) => (
+                        <button key={c} type="button"
+                          onClick={() => setNewFolderColor(c)}
+                          className={`w-7 h-7 rounded-full border-2 transition-all cursor-pointer ${newFolderColor === c ? 'border-on-surface scale-110' : 'border-transparent hover:scale-105'}`}
+                          style={{ backgroundColor: c }} />
+                      ))}
+                    </div>
+                  </label>
+                </div>
+
+                <div className="pt-3 border-t border-outline-variant/30 flex justify-end gap-2">
+                  <button type="button" onClick={() => setShowCreateFolder(false)} disabled={creatingFolder}
+                    className="px-4 py-2.5 rounded-xl border border-outline-variant text-on-surface text-xs font-medium hover:bg-surface-container transition-colors cursor-pointer disabled:opacity-40">
+                    Annuler
+                  </button>
+                  <button type="submit" disabled={creatingFolder || !newFolderName.trim()}
+                    className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-blue-500 text-white text-xs font-bold shadow-md shadow-sky-500/20 transition-all hover:brightness-110 cursor-pointer disabled:opacity-60">
+                    {creatingFolder ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FolderPlus className="w-3.5 h-3.5" />}
+                    {creatingFolder ? 'Création...' : 'Créer'}
+                  </button>
+                </div>
+              </motion.form>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
+
+      {/* ── Modal Déplacer vers dossier ──────────────────────────────────────── */}
+      {createPortal(
+        <AnimatePresence>
+          {showMoveModal && (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                onClick={() => setShowMoveModal(false)}
+                className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer" />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 16 }}
+                transition={{ type: 'spring', duration: 0.35, bounce: 0.15 }}
+                className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl max-w-sm w-full p-6 card-shadow flex flex-col gap-3 overflow-hidden max-h-[90vh]"
+              >
+                <div className="flex justify-between items-center pb-3 border-b border-outline-variant/30">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-xl bg-sky-500/10">
+                      <ArrowRight className="w-5 h-5 text-sky-500" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-on-surface">Déplacer {selectedIds.length} email(s)</h3>
+                      <p className="text-[10px] text-on-surface-variant">Choisissez le dossier de destination</p>
+                    </div>
+                  </div>
+                  <motion.button onClick={() => setShowMoveModal(false)} whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }}
+                    className="p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer">
+                    <X className="w-4 h-4" />
+                  </motion.button>
+                </div>
+
+                <div className="space-y-1 max-h-60 overflow-y-auto overscroll-contain">
+                  {/* Inbox */}
+                  <button onClick={() => handleMoveToFolder(null)}
+                    className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all cursor-pointer">
+                    <InboxIcon className="w-4 h-4" />
+                    <span>Boîte de réception</span>
+                  </button>
+                  {customFolders.map((f) => (
+                    <button key={f.id} onClick={() => handleMoveToFolder(f.id)}
+                      className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all cursor-pointer">
+                      <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: f.color || '#6b7280' }} />
+                      <span className="flex-1 text-left truncate">{f.name}</span>
+                      <span className="text-[9px] text-on-surface-variant/60">{f.emailCount || 0}</span>
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
+
+      {/* ── Modal Gestion des règles ─────────────────────────────────────────── */}
+      {createPortal(
+        <AnimatePresence>
+          {showRulesModal && (
+            <InboxRulesModal onClose={() => setShowRulesModal(false)} />
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
     </div>
   );
 }
@@ -1539,5 +1822,345 @@ function StatusBadge({ status }) {
       <cfg.icon className="w-2.5 h-2.5" />
       {cfg.label}
     </span>
+  );
+}
+
+// ── Modal Gestion des Règles de tri ──────────────────────────────────────────
+function InboxRulesModal({ onClose }) {
+  const [rules, setRules] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [editingRule, setEditingRule] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+  const [testLoading, setTestLoading] = useState(null);
+  const [form, setForm] = useState({
+    label: '',
+    conditions: [{ field: 'subject', operator: 'contains', value: '' }],
+    conditionOperator: 'AND',
+    action: 'move_to_folder',
+    actionConfig: { folderId: null, category: '' },
+  });
+  const [folders, setFolders] = useState([]);
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      api.get('/inbox/rules').catch(() => ({ data: [] })),
+      api.get('/inbox/folders').catch(() => ({ data: [] })),
+    ]).then(([rulesRes, foldersRes]) => {
+      setRules(rulesRes.data || []);
+      setFolders(foldersRes.data || []);
+    }).finally(() => setLoading(false));
+  }, []);
+
+  function resetForm() {
+    setForm({
+      label: '',
+      conditions: [{ field: 'subject', operator: 'contains', value: '' }],
+      conditionOperator: 'AND',
+      action: 'move_to_folder',
+      actionConfig: { folderId: null, category: '' },
+    });
+    setEditingRule(null);
+    setShowForm(false);
+    setTestResult(null);
+  }
+
+  function startEdit(rule) {
+    setForm({
+      label: rule.label,
+      conditions: Array.isArray(rule.conditions) ? rule.conditions : [],
+      conditionOperator: rule.conditionOperator || 'AND',
+      action: rule.action,
+      actionConfig: rule.actionConfig || {},
+    });
+    setEditingRule(rule);
+    setShowForm(true);
+  }
+
+  function addCondition() {
+    setForm((f) => ({ ...f, conditions: [...f.conditions, { field: 'subject', operator: 'contains', value: '' }] }));
+  }
+
+  function updateCondition(index, key, value) {
+    setForm((f) => {
+      const conditions = [...f.conditions];
+      conditions[index] = { ...conditions[index], [key]: value };
+      return { ...f, conditions };
+    });
+  }
+
+  function removeCondition(index) {
+    setForm((f) => ({ ...f, conditions: f.conditions.filter((_, i) => i !== index) }));
+  }
+
+  async function handleSave(e) {
+    e.preventDefault();
+    if (!form.label.trim() || form.conditions.length === 0 || form.conditions.some((c) => !c.value.trim())) {
+      toast.error('Remplissez le libellé et toutes les conditions');
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload = { ...form, actionConfig: { ...form.actionConfig } };
+      if (form.action === 'move_to_folder') payload.actionConfig.folderId = Number(form.actionConfig.folderId) || null;
+      if (editingRule) {
+        await api.patch(`/inbox/rules/${editingRule.id}`, payload);
+      } else {
+        await api.post('/inbox/rules', payload);
+      }
+      const { data } = await api.get('/inbox/rules');
+      setRules(data);
+      resetForm();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de la sauvegarde');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(id) {
+    if (!confirm('Supprimer cette règle ?')) return;
+    try {
+      await api.delete(`/inbox/rules/${id}`);
+      setRules((r) => r.filter((x) => x.id !== id));
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur');
+    }
+  }
+
+  async function handleToggle(id) {
+    try {
+      const { data } = await api.patch(`/inbox/rules/${id}/toggle`);
+      setRules((rs) => rs.map((r) => (r.id === id ? data : r)));
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur');
+    }
+  }
+
+  async function handleTest(id) {
+    setTestLoading(id);
+    setTestResult(null);
+    try {
+      const { data } = await api.post(`/inbox/rules/${id}/test`);
+      setTestResult({ id, count: data.matchCount });
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors du test');
+    } finally {
+      setTestLoading(null);
+    }
+  }
+
+  const FIELD_OPTIONS = [
+    { value: 'subject', label: 'Sujet' },
+    { value: 'fromEmail', label: 'Email expéditeur' },
+    { value: 'fromName', label: 'Nom expéditeur' },
+    { value: 'bodyPreview', label: 'Contenu' },
+    { value: 'aiCategory', label: 'Catégorie IA' },
+    { value: 'aiPriority', label: 'Priorité IA' },
+    { value: 'aiTeam', label: 'Équipe IA' },
+  ];
+  const OP_OPTIONS = [
+    { value: 'contains', label: 'contient' },
+    { value: 'not_contains', label: 'ne contient pas' },
+    { value: 'equals', label: 'égal à' },
+    { value: 'starts_with', label: 'commence par' },
+    { value: 'ends_with', label: 'finit par' },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={() => !saving && onClose()}
+        className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer" />
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 16 }}
+        transition={{ type: 'spring', duration: 0.35, bounce: 0.15 }}
+        className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden"
+      >
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-outline-variant/30 shrink-0">
+          <div className="p-1.5 rounded-lg bg-violet-500/10"><Filter className="w-4 h-4 text-violet-500" /></div>
+          <div>
+            <h3 className="text-sm font-bold text-on-surface">Règles de tri automatique</h3>
+            <p className="text-[10px] text-on-surface-variant">Classez automatiquement vos emails selon des conditions</p>
+          </div>
+          <motion.button onClick={onClose} whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }}
+            className="ml-auto p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer">
+            <X className="w-4 h-4" />
+          </motion.button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto overscroll-contain p-5 space-y-4">
+          {loading ? (
+            <div className="space-y-3">{[1,2,3].map((i) => <div key={i} className="h-16 rounded-xl bg-surface-container animate-pulse" />)}</div>
+          ) : (
+            <>
+              {rules.map((rule) => (
+                <div key={rule.id} className={`rounded-xl border p-3 transition-all ${rule.isEnabled ? 'border-violet-500/30 bg-violet-500/5' : 'border-outline-variant/30 bg-surface-container-lowest opacity-60'}`}>
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-on-surface truncate">{rule.label}</span>
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-surface-container-high text-on-surface-variant">
+                          {rule.action === 'move_to_folder' ? '→ Déplacer' : rule.action === 'mark_read' ? '✓ Lu' : rule.action === 'mark_spam' ? '⚠ Spam' : '🏷 Catégorie'}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {Array.isArray(rule.conditions) && rule.conditions.map((c, i) => (
+                          <span key={i} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-surface-container-high text-[9px] text-on-surface-variant">
+                            {FIELD_OPTIONS.find((f) => f.value === c.field)?.label || c.field} {OP_OPTIONS.find((o) => o.value === c.operator)?.label || c.operator} "{c.value}"
+                          </span>
+                        ))}
+                      </div>
+                      {testResult && testResult.id === rule.id && (
+                        <p className="mt-1 text-[10px] text-sky-500 font-medium">{testResult.count} email(s) correspondent</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button onClick={() => handleTest(rule.id)} disabled={testLoading === rule.id}
+                        className="p-1.5 rounded-lg text-on-surface-variant hover:text-sky-400 hover:bg-sky-500/10 transition-all cursor-pointer disabled:opacity-50"
+                        title="Tester">
+                        {testLoading === rule.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FlaskConical className="w-3.5 h-3.5" />}
+                      </button>
+                      <button onClick={() => handleToggle(rule.id)}
+                        className={`p-1.5 rounded-lg transition-all cursor-pointer ${rule.isEnabled ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-on-surface-variant/40 hover:bg-surface-container'}`}
+                        title={rule.isEnabled ? 'Désactiver' : 'Activer'}>
+                        <div className={`w-3.5 h-3.5 rounded-full border-2 ${rule.isEnabled ? 'bg-emerald-400 border-emerald-400' : 'border-on-surface-variant/40'}`} />
+                      </button>
+                      <button onClick={() => startEdit(rule)}
+                        className="p-1.5 rounded-lg text-on-surface-variant hover:text-sky-400 hover:bg-sky-500/10 transition-all cursor-pointer"
+                        title="Modifier">
+                        <Settings className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={() => handleDelete(rule.id)}
+                        className="p-1.5 rounded-lg text-on-surface-variant hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
+                        title="Supprimer">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {rules.length === 0 && !showForm && (
+                <div className="text-center py-8 text-on-surface-variant/50 text-xs">
+                  <Filter className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                  <p>Aucune règle configurée</p>
+                  <p className="text-[10px] mt-1">Créez une règle pour trier vos emails automatiquement</p>
+                </div>
+              )}
+
+              {showForm && (
+                <form onSubmit={handleSave} className="rounded-xl border border-violet-500/30 bg-violet-500/5 p-4 space-y-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Settings className="w-4 h-4 text-violet-500" />
+                    <span className="text-xs font-bold text-on-surface">{editingRule ? 'Modifier la règle' : 'Nouvelle règle'}</span>
+                    <button type="button" onClick={resetForm} className="ml-auto text-[10px] text-on-surface-variant hover:text-on-surface cursor-pointer">Annuler</button>
+                  </div>
+
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Libellé *</span>
+                    <input type="text" required maxLength={100} placeholder="Ex: Spam promotionnel"
+                      value={form.label} onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
+                      className="w-full px-3 py-2 rounded-lg border border-outline-variant/60 bg-surface-container text-on-surface text-xs" />
+                  </label>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Conditions</span>
+                      <select value={form.conditionOperator} onChange={(e) => setForm((f) => ({ ...f, conditionOperator: e.target.value }))}
+                        className="px-2 py-1 rounded-lg border border-outline-variant/40 bg-surface-container text-[10px] text-on-surface-variant cursor-pointer">
+                        <option value="AND">ET (toutes)</option>
+                        <option value="OR">OU (au moins une)</option>
+                      </select>
+                      <button type="button" onClick={addCondition}
+                        className="p-1 rounded text-on-surface-variant/60 hover:text-sky-400 transition-colors cursor-pointer">
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    {form.conditions.map((c, i) => (
+                      <div key={i} className="flex items-center gap-1.5">
+                        <select value={c.field} onChange={(e) => updateCondition(i, 'field', e.target.value)}
+                          className="flex-1 px-2 py-1.5 rounded-lg border border-outline-variant/40 bg-surface-container text-[10px] text-on-surface cursor-pointer">
+                          {FIELD_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                        </select>
+                        <select value={c.operator} onChange={(e) => updateCondition(i, 'operator', e.target.value)}
+                          className="w-28 px-2 py-1.5 rounded-lg border border-outline-variant/40 bg-surface-container text-[10px] text-on-surface cursor-pointer">
+                          {OP_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                        </select>
+                        <input type="text" required placeholder="Valeur"
+                          value={c.value} onChange={(e) => updateCondition(i, 'value', e.target.value)}
+                          className="flex-1 px-2 py-1.5 rounded-lg border border-outline-variant/40 bg-surface-container text-[10px] text-on-surface" />
+                        {form.conditions.length > 1 && (
+                          <button type="button" onClick={() => removeCondition(i)}
+                            className="p-1 text-on-surface-variant/40 hover:text-red-400 cursor-pointer">
+                            <X className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex items-end gap-3">
+                    <label className="flex flex-col gap-1.5 flex-1">
+                      <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Action</span>
+                      <select value={form.action} onChange={(e) => setForm((f) => ({ ...f, action: e.target.value, actionConfig: {} }))}
+                        className="px-2 py-2 rounded-lg border border-outline-variant/40 bg-surface-container text-xs text-on-surface cursor-pointer">
+                        <option value="move_to_folder">Déplacer vers un dossier</option>
+                        <option value="mark_read">Marquer comme lu</option>
+                        <option value="mark_spam">Marquer comme spam</option>
+                        <option value="mark_category">Appliquer une catégorie</option>
+                      </select>
+                    </label>
+                    {form.action === 'move_to_folder' && (
+                      <label className="flex flex-col gap-1.5 flex-1">
+                        <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Dossier</span>
+                        <select value={form.actionConfig.folderId || ''} onChange={(e) => setForm((f) => ({ ...f, actionConfig: { ...f.actionConfig, folderId: e.target.value } }))}
+                          className="px-2 py-2 rounded-lg border border-outline-variant/40 bg-surface-container text-xs text-on-surface cursor-pointer">
+                          <option value="">— Choisir —</option>
+                          {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                        </select>
+                      </label>
+                    )}
+                    {form.action === 'mark_category' && (
+                      <label className="flex flex-col gap-1.5 flex-1">
+                        <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Catégorie</span>
+                        <input type="text" placeholder="Ex: COMMERCIAL"
+                          value={form.actionConfig.category || ''}
+                          onChange={(e) => setForm((f) => ({ ...f, actionConfig: { ...f.actionConfig, category: e.target.value } }))}
+                          className="px-2 py-2 rounded-lg border border-outline-variant/40 bg-surface-container text-xs text-on-surface" />
+                      </label>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-2 border-t border-outline-variant/20">
+                    <button type="button" onClick={resetForm} disabled={saving}
+                      className="px-4 py-2 rounded-xl border border-outline-variant text-on-surface text-xs font-medium hover:bg-surface-container transition-colors cursor-pointer disabled:opacity-40">
+                      Annuler
+                    </button>
+                    <button type="submit" disabled={saving}
+                      className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-gradient-to-r from-violet-500 to-purple-500 text-white text-xs font-bold shadow-md shadow-violet-500/20 transition-all hover:brightness-110 cursor-pointer disabled:opacity-60">
+                      {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Filter className="w-3.5 h-3.5" />}
+                      {saving ? 'Sauvegarde...' : editingRule ? 'Modifier' : 'Créer'}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </>
+          )}
+        </div>
+
+        {!showForm && (
+          <div className="px-5 py-3 border-t border-outline-variant/30 flex justify-end shrink-0">
+            <button onClick={() => setShowForm(true)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-violet-500 to-purple-500 text-white text-xs font-bold shadow-md shadow-violet-500/20 transition-all hover:brightness-110 cursor-pointer">
+              <Plus className="w-3.5 h-3.5" />
+              Nouvelle règle
+            </button>
+          </div>
+        )}
+      </motion.div>
+    </div>
   );
 }

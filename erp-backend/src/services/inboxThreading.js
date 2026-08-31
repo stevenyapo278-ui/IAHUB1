@@ -200,10 +200,12 @@ function applyThreadSort(threads, sort) {
   return list;
 }
 
-async function listThreads({ status, q, priority, attachments, category, read, days, sort, page = 1, limit = 25, scope = null }) {
+async function listThreads({ status, q, priority, attachments, category, read, days, sort, page = 1, limit = 25, scope = null, folderId = null }) {
   const emailWhere = {
     ...(scope || {}),
     ...(days ? { receivedAt: { gte: new Date(Date.now() - days * 86400000) } } : {}),
+    // folderId: null = inbox (pas de dossier), folderId number = dossier custom
+    ...(folderId !== undefined && folderId !== null ? { folderId: folderId === 'null' || folderId === '' ? null : Number(folderId) } : {}),
   };
   const emails = await prisma.incomingEmail.findMany({
     where: Object.keys(emailWhere).length > 0 ? emailWhere : undefined,

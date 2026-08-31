@@ -39,10 +39,11 @@ router.get('/', async (req, res) => {
   const read = req.query.read || undefined; // unread | read
   const days = parseInt(req.query.days) > 0 ? parseInt(req.query.days) : undefined;
   const sort = req.query.sort || undefined; // date | date_asc | priority | sender | unread
+  const folderId = req.query.folderId !== undefined ? req.query.folderId : undefined;
 
   const scope = await buildEmailScope(req.user);
 
-  const { items, total, pages } = await listThreads({ status, q, priority, attachments, category, read, days, sort, page, limit, scope });
+  const { items, total, pages } = await listThreads({ status, q, priority, attachments, category, read, days, sort, page, limit, scope, folderId });
 
   // Allège la liste : on retirera les corps HTML (conservés uniquement dans le détail du fil)
   const stripped = items.map((thread) => ({
@@ -371,6 +372,172 @@ router.post('/:id/retry', requirePermission('inbox.sync', ['ADMIN']), async (req
     console.error('[inbox/retry] Erreur:', err.message);
     return res.status(500).json({ error: err.message || 'Erreur lors du relancement', errorDetail: err.errorDetail || null });
   }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DOSSIERS CUSTOM
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Lister tous les dossiers (built-in + custom de l'utilisateur)
+router.get('/folders', async (req, res) => {
+  const folders = await prisma.inboxFolder.findMany({
+    where: { OR: [{ isSystem: true }, { createdById: req.user.sub }] },
+    orderBy: [{ position: 'asc' }, { name: 'asc' }],
+  });
+  // Compter les emails par dossier
+  const folderIds = folders.map((f) => f.id);
+  const counts = folderIds.length > 0
+    ? await prisma.incomingEmail.groupBy({ by: ['folderId'], where: { folderId: { in: folderIds } }, _count: true })
+    : [];
+  const countMap = Object.fromEntries(counts.map((c) => [c.folderId, c._count]));
+  const result = folders.map((f) => ({ ...f, emailCount: countMap[f.id] || 0 }));
+  res.json(result);
+});
+
+// Créer un dossier custom
+router.post('/folders', [body('name').trim().isLength({ min: 1, max: 50 })], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+  const { name, icon, color } = req.body;
+  // Vérifier l'unicité par utilisateur
+  const existing = await prisma.inboxFolder.findUnique({ where: { name_createdById: { name, createdById: req.user.sub } } });
+  if (existing) return res.status(409).json({ error: 'Un dossier avec ce nom existe déjà' });
+  const maxPos = await prisma.inboxFolder.aggregate({ where: { createdById: req.user.sub }, _max: { position: true } });
+  const folder = await prisma.inboxFolder.create({
+    data: { name, icon: icon || null, color: color || null, position: (maxPos._max.position || 0) + 1, createdById: req.user.sub },
+  });
+  res.status(201).json(folder);
+});
+
+// Modifier un dossier (nom, icône, couleur, position)
+router.patch('/folders/:id', [body('name').optional().trim().isLength({ min: 1, max: 50 })], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+  const id = Number(req.params.id);
+  const folder = await prisma.inboxFolder.findUnique({ where: { id } });
+  if (!folder || (folder.createdById !== req.user.sub && !folder.isSystem)) {
+    return res.status(404).json({ error: 'Dossier introuvable' });
+  }
+  if (folder.isSystem) return res.status(403).json({ error: 'Impossible de modifier un dossier système' });
+  const data = {};
+  if (req.body.name !== undefined) data.name = req.body.name;
+  if (req.body.icon !== undefined) data.icon = req.body.icon || null;
+  if (req.body.color !== undefined) data.color = req.body.color || null;
+  if (req.body.position !== undefined) data.position = req.body.position;
+  const updated = await prisma.inboxFolder.update({ where: { id }, data });
+  res.json(updated);
+});
+
+// Supprimer un dossier — les emails reviennent en inbox (folderId → null)
+router.delete('/folders/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const folder = await prisma.inboxFolder.findUnique({ where: { id } });
+  if (!folder || (folder.createdById !== req.user.sub && !folder.isSystem)) {
+    return res.status(404).json({ error: 'Dossier introuvable' });
+  }
+  if (folder.isSystem) return res.status(403).json({ error: 'Impossible de supprimer un dossier système' });
+  await prisma.incomingEmail.updateMany({ where: { folderId: id }, data: { folderId: null } });
+  await prisma.inboxFolder.delete({ where: { id } });
+  res.json({ message: 'Dossier supprimé' });
+});
+
+// Déplacer des emails vers un dossier (ou null pour revenir en inbox)
+router.post('/folders/move', [body('ids').isArray({ min: 1 })], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+  const { ids, folderId } = req.body;
+  if (folderId !== null && folderId !== undefined) {
+    const folder = await prisma.inboxFolder.findUnique({ where: { id: folderId } });
+    if (!folder) return res.status(404).json({ error: 'Dossier introuvable' });
+  }
+  const result = await prisma.incomingEmail.updateMany({
+    where: { id: { in: ids.map(Number) } },
+    data: { folderId: folderId || null },
+  });
+  res.json({ moved: result.count });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// RÈGLES DE TRI
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Lister les règles de l'utilisateur
+router.get('/rules', async (req, res) => {
+  const rules = await prisma.inboxRule.findMany({
+    where: { createdById: req.user.sub },
+    orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+  });
+  res.json(rules);
+});
+
+// Créer une règle
+router.post('/rules', [
+  body('label').trim().isLength({ min: 1, max: 100 }),
+  body('conditions').isArray({ min: 1 }),
+  body('action').isIn(['move_to_folder', 'mark_read', 'mark_spam', 'mark_category']),
+  body('actionConfig').isObject(),
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+  const { label, conditions, conditionOperator, action, actionConfig } = req.body;
+  if (action === 'move_to_folder' && actionConfig.folderId) {
+    const folder = await prisma.inboxFolder.findUnique({ where: { id: actionConfig.folderId } });
+    if (!folder) return res.status(400).json({ error: 'Dossier de destination introuvable' });
+  }
+  const maxPos = await prisma.inboxRule.aggregate({ where: { createdById: req.user.sub }, _max: { position: true } });
+  const rule = await prisma.inboxRule.create({
+    data: {
+      label,
+      conditions,
+      conditionOperator: conditionOperator || 'AND',
+      action,
+      actionConfig,
+      position: (maxPos._max.position || 0) + 1,
+      createdById: req.user.sub,
+    },
+  });
+  res.status(201).json(rule);
+});
+
+// Modifier une règle
+router.patch('/rules/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const rule = await prisma.inboxRule.findUnique({ where: { id } });
+  if (!rule || rule.createdById !== req.user.sub) return res.status(404).json({ error: 'Règle introuvable' });
+  const data = {};
+  for (const key of ['label', 'isEnabled', 'position', 'conditions', 'conditionOperator', 'action', 'actionConfig']) {
+    if (req.body[key] !== undefined) data[key] = req.body[key];
+  }
+  const updated = await prisma.inboxRule.update({ where: { id }, data });
+  res.json(updated);
+});
+
+// Activer / Désactiver une règle
+router.patch('/rules/:id/toggle', async (req, res) => {
+  const id = Number(req.params.id);
+  const rule = await prisma.inboxRule.findUnique({ where: { id } });
+  if (!rule || rule.createdById !== req.user.sub) return res.status(404).json({ error: 'Règle introuvable' });
+  const updated = await prisma.inboxRule.update({ where: { id }, data: { isEnabled: !rule.isEnabled } });
+  res.json(updated);
+});
+
+// Supprimer une règle
+router.delete('/rules/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const rule = await prisma.inboxRule.findUnique({ where: { id } });
+  if (!rule || rule.createdById !== req.user.sub) return res.status(404).json({ error: 'Règle introuvable' });
+  await prisma.inboxRule.delete({ where: { id } });
+  res.json({ message: 'Règle supprimée' });
+});
+
+// Tester une règle sur les emails existants (retourne le nombre de match)
+router.post('/rules/:id/test', async (req, res) => {
+  const id = Number(req.params.id);
+  const rule = await prisma.inboxRule.findUnique({ where: { id } });
+  if (!rule || rule.createdById !== req.user.sub) return res.status(404).json({ error: 'Règle introuvable' });
+  const { matchRuleAgainstEmails } = require('../services/inboxRuleEngine');
+  const count = await matchRuleAgainstEmails(rule);
+  res.json({ matchCount: count });
 });
 
 module.exports = router;

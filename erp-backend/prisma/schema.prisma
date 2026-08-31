@@ -145,6 +145,8 @@ model User {
   createdCategories TicketCategory[] @relation("CategoryCreator")
   timeEntries TicketTimeEntry[]
   ownedAssets Asset[] @relation("AssetOwner")
+  inboxFolders InboxFolder[]
+  inboxRules   InboxRule[]
 
   @@index([teamId])
 }
@@ -817,11 +819,49 @@ model IncomingEmail {
   hasAttachments      Boolean       @default(false)
   attachments         TicketAttachment[]
 
+  // Dossier custom (null = boîte de réception par défaut)
+  folderId            Int?
+  folder              InboxFolder?    @relation(fields: [folderId], references: [id], onDelete: SetNull)
+
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
 
   @@index([conversationId])
   @@index([internetMessageId])
+  @@index([folderId])
+}
+
+// Dossiers custom de la boîte de réception (type Outlook)
+model InboxFolder {
+  id            Int             @id @default(autoincrement())
+  name          String          // nom affiché dans la sidebar
+  icon          String?         // nom d'icône lucide (optionnel)
+  color         String?         // code couleur hex (optionnel)
+  position      Int             @default(0) // ordre d'affichage
+  isSystem      Boolean         @default(false) // true pour les dossiers built-in (non supprimables)
+  createdById   Int?            // null = dossier système
+  createdBy     User?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  emails        IncomingEmail[]
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@unique([name, createdById])
+}
+
+// Règles de tri automatique (type Outlook)
+model InboxRule {
+  id                Int       @id @default(autoincrement())
+  label             String    // nom de la règle
+  isEnabled         Boolean   @default(true)
+  position          Int       @default(0) // ordre d'application
+  conditions        Json      // [{ field: "fromEmail", operator: "contains", value: "prosuma" }]
+  conditionOperator String    @default("AND") // AND | OR
+  action            String    // move_to_folder | mark_read | mark_spam | mark_category
+  actionConfig      Json      // { folderId: 5 } | { category: "Urgent" }
+  createdById       Int
+  createdBy         User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 }
 
 // Historique complet des messages entrants et sortants d'un ticket
