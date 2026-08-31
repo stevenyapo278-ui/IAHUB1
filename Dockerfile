@@ -41,7 +41,7 @@ ENV NODE_ENV=production
 # Backend deps
 COPY erp-backend/package*.json ./erp-backend/
 WORKDIR /app/erp-backend
-RUN npm ci --only=production
+RUN npm ci --omit=dev
 
 # Prisma
 COPY erp-backend/prisma ./prisma
