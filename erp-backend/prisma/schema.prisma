@@ -104,6 +104,17 @@ enum TicketImpact {
   MAJOR
 }
 
+enum ProblemStatus {
+  NEW
+  IN_PROGRESS
+  ASSIGNED
+  PLANNED
+  WAITING
+  SOLVED
+  CLOSED
+  OBSERVED
+}
+
 enum ApprovalStatus {
   NOT_REQUIRED
   PENDING
@@ -147,6 +158,10 @@ model User {
   ownedAssets Asset[] @relation("AssetOwner")
   inboxFolders InboxFolder[]
   inboxRules   InboxRule[]
+  problemsCreated  Problem[] @relation("ProblemRequester")
+  problemsAssigned Problem[] @relation("ProblemAssignee")
+  problemsObserved Problem[] @relation("ProblemObservers")
+  problemFollowups ProblemFollowup[]
 
   @@index([teamId])
 }
@@ -235,6 +250,7 @@ model Team {
   tickets Ticket[]
   defaultObservers User[] @relation("TeamDefaultObservers")
   assets Asset[]
+  problems Problem[]
 }
 
 // Catégories de tickets. La plateforme peut fonctionner en autonomie (mode autonome) : dans ce
@@ -414,6 +430,7 @@ model Ticket {
   linksA          TicketLink[] @relation("TicketLinksA")
   linksB          TicketLink[] @relation("TicketLinksB")
   assets          AssetTicket[]
+  problems        ProblemTicket[]
 
   @@index([requesterId])
   @@index([assignedToId])
@@ -1376,6 +1393,105 @@ model AuditLog {
   @@index([action])
   @@index([actorEmail])
   @@index([createdAt])
+}
+
+// ── Problèmes (ITIL Problem Management) ────────────────────────────────
+
+model Problem {
+  id              Int            @id @default(autoincrement())
+  title           String
+  description     String
+  status          ProblemStatus  @default(NEW)
+  priority        TicketPriority @default(P3)
+  urgency         TicketUrgency  @default(MEDIUM)
+  impact          TicketImpact   @default(MEDIUM)
+  category        String?
+  glpiLocationId  Int?
+  glpiLocationName String?
+  dueDate         DateTime?
+
+  // Acteurs
+  requester       User?   @relation("ProblemRequester", fields: [requesterId], references: [id], onDelete: SetNull)
+  requesterId     Int?
+  assignedTo      User?   @relation("ProblemAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  assignedToId    Int?
+  team            Team?   @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  teamId          Int?
+  observers       User[]  @relation("ProblemObservers")
+
+  // Dates
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  solvedAt        DateTime?
+  closedAt        DateTime?
+
+  // Relations
+  tickets         ProblemTicket[]
+  followups       ProblemFollowup[]
+  events          ProblemEvent[]
+  linksA          ProblemLink[] @relation("ProblemLinksA")
+  linksB          ProblemLink[] @relation("ProblemLinksB")
+
+  @@index([status])
+  @@index([requesterId])
+  @@index([assignedToId])
+  @@index([teamId])
+  @@index([createdAt])
+}
+
+// Liaison Problème ↔ Ticket (plusieurs incidents liés à un problème racine)
+model ProblemTicket {
+  id          Int      @id @default(autoincrement())
+  problem     Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  problemId   Int
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ticketId    Int
+  createdAt   DateTime @default(now())
+
+  @@unique([problemId, ticketId])
+  @@index([ticketId])
+}
+
+// Suivi / commentaires sur un problème (comme Followup pour les tickets)
+model ProblemFollowup {
+  id              Int      @id @default(autoincrement())
+  problem         Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  problemId       Int
+  author          User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  authorId        Int?
+  content         String
+  isPrivate       Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  @@index([problemId])
+  @@index([authorId])
+}
+
+// Journal d'événements sur un problème
+model ProblemEvent {
+  id          Int             @id @default(autoincrement())
+  problem     Problem         @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  problemId   Int
+  type        String          @default("CREATED") // CREATED, STATUS_CHANGED, PRIORITY_CHANGED, ASSIGNED, FOLLOWUP_ADDED
+  actor       String          @default("SYSTEM")
+  payload     Json?
+  createdAt   DateTime        @default(now())
+
+  @@index([problemId])
+}
+
+// Liens entre problèmes (lié à, doublon, bloque/bloqué)
+model ProblemLink {
+  id          Int      @id @default(autoincrement())
+  problemA    Problem  @relation("ProblemLinksA", fields: [problemAId], references: [id], onDelete: Cascade)
+  problemAId  Int
+  problemB    Problem  @relation("ProblemLinksB", fields: [problemBId], references: [id], onDelete: Cascade)
+  problemBId  Int
+  type        String   @default("RELATED") // RELATED, DUPLICATE_OF
+  createdAt   DateTime @default(now())
+
+  @@unique([problemAId, problemBId, type])
+  @@index([problemBId])
 }
 
 

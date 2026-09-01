@@ -32,6 +32,7 @@ import {
   ChevronRight,
   Gauge,
   TrendingUp,
+  AlertTriangle,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
@@ -52,6 +53,7 @@ const platformItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, color: 'text-amber-400', end: true, permission: null },
   { to: '/portal', label: 'Portail', icon: Ticket, color: 'text-teal-400', permission: null },
   { to: '/tickets', label: 'Tickets', icon: Ticket, color: 'text-gold-400', permission: null },
+  { to: '/problems', label: 'Problèmes', icon: AlertTriangle, color: 'text-amber-400', permission: null },
   { to: '/email-drafts', label: 'Centre de Validation', icon: ShieldCheck, color: 'text-amber-400', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
   { to: '/inbox', label: 'Boîte mail', icon: Inbox, color: 'text-sky-400', permission: null },
   { to: '/knowledge-base', label: 'Base de connaissances', icon: BookOpen, color: 'text-purple-400', permission: null },
@@ -83,9 +85,10 @@ const ROUTE_SEMANTICS = {
   '/': { zone: 'main', idx: 0 },
   '/portal': { zone: 'main', idx: 1 },
   '/tickets': { zone: 'main', idx: 1 },
-  '/email-drafts': { zone: 'main', idx: 2 },
-  '/inbox': { zone: 'main', idx: 3 },
-  '/knowledge-base': { zone: 'main', idx: 4 },
+  '/problems': { zone: 'main', idx: 2 },
+  '/email-drafts': { zone: 'main', idx: 3 },
+  '/inbox': { zone: 'main', idx: 4 },
+  '/knowledge-base': { zone: 'main', idx: 5 },
   '/teams': { zone: 'org', idx: 0 },
   '/users': { zone: 'org', idx: 1 },
   '/technician-stats': { zone: 'org', idx: 2 },

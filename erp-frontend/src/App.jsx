@@ -37,6 +37,8 @@ const Categories = lazy(() => import('./pages/Categories'));
 const Assets = lazy(() => import('./pages/Assets'));
 const Portal = lazy(() => import('./pages/Portal'));
 const TicketEvolution = lazy(() => import('./pages/TicketEvolution'));
+const Problems = lazy(() => import('./pages/Problems'));
+const ProblemDetail = lazy(() => import('./pages/ProblemDetail'));
 
 // Fallback léger pendant le chargement d'un chunk (réseau ou navigation rapide)
 function PageLoader() {
@@ -79,6 +81,8 @@ export default function App() {
               }
             />
             <Route path="tickets/:id" element={<TicketDetail />} />
+            <Route path="problems" element={<Problems />} />
+            <Route path="problems/:id" element={<ProblemDetail />} />
             <Route path="teams" element={<Teams />} />
             <Route path="knowledge-base" element={<KnowledgeBase />} />
             <Route path="inbox" element={<Inbox />} />
