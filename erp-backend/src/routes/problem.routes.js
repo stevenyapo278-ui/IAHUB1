@@ -317,4 +317,22 @@ router.get('/:id/events', async (req, res) => {
   res.json(events);
 });
 
+// ── Problèmes liés à un ticket (pour affichage dans TicketDetail) ─────
+router.get('/by-ticket/:ticketId', async (req, res) => {
+  const ticketId = Number(req.params.ticketId);
+  const links = await prisma.problemTicket.findMany({
+    where: { ticketId },
+    include: {
+      problem: {
+        select: {
+          id: true, title: true, status: true, priority: true,
+          _count: { select: { tickets: true, followups: true } },
+        },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+  res.json(links.map((l) => l.problem));
+});
+
 module.exports = router;

@@ -177,6 +177,12 @@ export default function TicketDetail() {
   const [approving, setApproving] = useState(false);
   const [manualGlpiId, setManualGlpiId] = useState('');
   const [linking, setLinking] = useState(false);
+  const [linkedProblems, setLinkedProblems] = useState([]);
+  const [problemLinkModalOpen, setProblemLinkModalOpen] = useState(false);
+  const [problemLinkSearch, setProblemLinkSearch] = useState('');
+  const [problemLinkResults, setProblemLinkResults] = useState([]);
+  const [problemLinkLoading, setProblemLinkLoading] = useState(false);
+  const [linkingProblem, setLinkingProblem] = useState(null);
   const [escalating, setEscalating] = useState(false);
   const [expandedEmails, setExpandedEmails] = useState(new Set());
   const [editingTitle, setEditingTitle] = useState(false);
@@ -236,6 +242,10 @@ export default function TicketDetail() {
     api
       .get(`/tickets/${id}/corrections`)
       .then(({ data }) => setCorrections(data))
+      .catch(() => {});
+    api
+      .get(`/problems/by-ticket/${id}`)
+      .then(({ data }) => setLinkedProblems(data))
       .catch(() => {});
   }, [id]);
 
@@ -515,6 +525,40 @@ export default function TicketDetail() {
     }), [linkedTickets, ticket?.linksA]);
   const parentTicket = subTickets.find((s) => s.isParent)?.otherTicket || null;
   const children = subTickets.filter((s) => s.isChild);
+
+  // ── Liaison Problème ──────────────────────────────────────────────
+  async function searchLinkableProblems(q) {
+    if (!q.trim()) { setProblemLinkResults([]); return; }
+    setProblemLinkLoading(true);
+    try {
+      const { data } = await api.get('/problems', { params: { search: q, limit: 8 } });
+      setProblemLinkResults(data.problems || []);
+    } catch { setProblemLinkResults([]); } finally { setProblemLinkLoading(false); }
+  }
+
+  async function linkProblem(problemId) {
+    setLinkingProblem(problemId);
+    try {
+      await api.post(`/problems/${problemId}/link-ticket`, { ticketId: Number(id) });
+      toast.success('Problème lié au ticket');
+      setProblemLinkModalOpen(false);
+      setProblemLinkSearch('');
+      setProblemLinkResults([]);
+      api.get(`/problems/by-ticket/${id}`).then(({ data }) => setLinkedProblems(data)).catch(() => {});
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur liaison');
+    } finally { setLinkingProblem(null); }
+  }
+
+  async function unlinkProblem(problemId) {
+    try {
+      await api.delete(`/problems/${problemId}/unlink-ticket/${id}`);
+      toast.success('Problème détaché');
+      api.get(`/problems/by-ticket/${id}`).then(({ data }) => setLinkedProblems(data)).catch(() => {});
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur');
+    }
+  }
 
   async function searchLinkableTickets(q) {
     if (!q.trim()) { setLinkResults([]); return; }
@@ -1002,6 +1046,21 @@ export default function TicketDetail() {
                   {pConfig.label}
                 </span>
                 <SlaBadge ticket={ticket} />
+                {linkedProblems.length > 0 && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {linkedProblems.map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => navigate(`/problems/${p.id}`)}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400 border border-amber-200 dark:border-amber-500/25 hover:bg-amber-100 dark:hover:bg-amber-500/25 cursor-pointer transition-colors"
+                        title={`Problème #${p.id}: ${p.title}`}
+                      >
+                        <AlertTriangle className="w-3 h-3" />
+                        P#{p.id}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {canDelete && (
                   <button
                     onClick={() => setShowDeleteConfirm(true)}
@@ -1234,6 +1293,72 @@ export default function TicketDetail() {
                         onClick={() => removeLink(l)}
                         className="p-1.5 rounded-lg text-on-surface-variant hover:text-error hover:bg-error/5 transition-colors cursor-pointer"
                         title="Supprimer le lien"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Problèmes liés */}
+          <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm">
+            <div className="flex items-center justify-between gap-3 pb-3 border-b border-outline-variant/20 mb-4">
+              <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-500" />
+                Problèmes racines
+                {linkedProblems.length > 0 && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                    {linkedProblems.length}
+                  </span>
+                )}
+              </h3>
+              {canAssign && (
+                <button
+                  onClick={() => setProblemLinkModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 text-white text-[11px] font-bold hover:bg-amber-600 transition-colors cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Lier un problème
+                </button>
+              )}
+            </div>
+            {linkedProblems.length === 0 ? (
+              <p className="text-xs text-on-surface-variant/70 italic py-2">
+                Aucun problème lié. Liez ce ticket à un problème racine pour regrouper les incidents similaires.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {linkedProblems.map((p) => (
+                  <div key={p.id} className="flex items-center gap-3 p-3 rounded-xl border border-amber-200/40 dark:border-amber-500/20 bg-amber-50/30 dark:bg-amber-500/5 hover:border-amber-400/60 transition-colors">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <button
+                        onClick={() => navigate(`/problems/${p.id}`)}
+                        className="text-xs font-bold text-on-surface hover:text-amber-600 dark:hover:text-amber-400 transition-colors line-clamp-1 text-left cursor-pointer"
+                      >
+                        #{p.id} — {p.title}
+                      </button>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
+                          p.status === 'SOLVED' || p.status === 'CLOSED'
+                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                            : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                        }`}>
+                          {p.status}
+                        </span>
+                        <span className="text-[9px] font-semibold text-on-surface-variant">
+                          {p._count?.tickets || 0} ticket(s) lié(s)
+                        </span>
+                      </div>
+                    </div>
+                    {canAssign && (
+                      <button
+                        onClick={() => unlinkProblem(p.id)}
+                        className="p-1.5 rounded-lg text-on-surface-variant hover:text-error hover:bg-error/5 transition-colors cursor-pointer"
+                        title="Détacher le problème"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -2665,6 +2790,57 @@ export default function TicketDetail() {
                   <span className="font-mono text-[10px] font-bold text-primary shrink-0">#{t.id}</span>
                   <span className="flex-1 min-w-0 text-xs font-semibold text-on-surface truncate">{t.title}</span>
                   <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-surface-container-high text-on-surface-variant shrink-0">{t.status}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal : Lier à un problème */}
+      {problemLinkModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-500" />
+                Lier à un problème
+              </h3>
+              <button onClick={() => setProblemLinkModalOpen(false)} className="p-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container transition-colors cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
+              <input
+                type="text"
+                value={problemLinkSearch}
+                onChange={(e) => { setProblemLinkSearch(e.target.value); searchLinkableProblems(e.target.value); }}
+                placeholder="Rechercher un problème par titre ou n°..."
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface text-xs focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 focus:outline-none"
+                autoFocus
+              />
+            </div>
+
+            <div className="max-h-60 overflow-y-auto space-y-1.5">
+              {problemLinkLoading && <p className="text-xs text-on-surface-variant text-center py-3">Recherche…</p>}
+              {!problemLinkLoading && problemLinkResults.length === 0 && (
+                <p className="text-xs text-on-surface-variant/70 italic text-center py-3">
+                  {problemLinkSearch ? 'Aucun résultat' : 'Tapez pour rechercher un problème'}
+                </p>
+              )}
+              {problemLinkResults.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => linkProblem(p.id)}
+                  disabled={linkingProblem === p.id}
+                  className="w-full flex items-center gap-3 p-2.5 rounded-xl border border-outline-variant/30 hover:border-amber-500/50 hover:bg-amber-50/30 dark:hover:bg-amber-500/5 transition-all cursor-pointer text-left disabled:opacity-50"
+                >
+                  <span className="font-mono text-[10px] font-bold text-amber-600 dark:text-amber-400 shrink-0">P#{p.id}</span>
+                  <span className="flex-1 min-w-0 text-xs font-semibold text-on-surface truncate">{p.title}</span>
+                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-surface-container-high text-on-surface-variant shrink-0">{p.status}</span>
+                  {linkingProblem === p.id && <RefreshCw className="w-3 h-3 animate-spin text-amber-500 shrink-0" />}
                 </button>
               ))}
             </div>
