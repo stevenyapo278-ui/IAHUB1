@@ -17,12 +17,17 @@
 // Un faux négatif (résolution manquée) est accepté : le ticket reste actif et la Hotline/l'utilisateur
 // peut toujours le clôturer; l'inverse (clôture à tort) coûte plus cher et reste bloqué par le LLM.
 
-// Normalise un texte pour des correspondances robustes : minuscules + suppression des accents.
+// Normalise un texte pour des correspondances robustes : minuscules + suppression des accents
+// + apostrophes/ponctuation → espace (pour matcher "c'est" → "c est").
 function normalize(text) {
   return (text || '')
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[''`]/g, ' ')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 // Signaux que l'utilisateur confirme (même sans le mot) la résolution du problème précis.
@@ -32,6 +37,12 @@ const RESOLUTION_SIGNALS = [
   'remarche', 'marche a nouveau', 'ca marche', 'c est bon', 'c est regle',
   'plus de souci', 'plus de probleme', 'plus de panne', 'plus rien',
   'ca va mieux', 'sans probleme', 'reussi', 'reconnette', 'je suis connecte', 'connecte a nouveau',
+  // Acknowledgments courts qui confirment la résolution en contexte support
+  'ok', 'okay', 'c est ok', 'c est okay', 'c est bon merci', 'ok merci', 'okay merci',
+  'super', 'parfait', 'nickel', 'top', 'genial', 'bravo',
+  'merci beaucoup', 'merci bien', 'merci infiniment',
+  'c est tout', 'c est tout bon', 'ca roule', 'impec', 'impeccable',
+  'valid', 'valide', 'confirme', 'acquitte', 'acquitte',
 ];
 
 // Signaux que le problème PERSISTE (le LLM tranchera STILL_PRESENT vs NEW_INFO vs QUESTION).
@@ -39,6 +50,8 @@ const CONTINUATION_SIGNALS = [
   'toujours', 'encore', 'pas resolu', 'ne fonctionne', 'ne marche', 'en panne',
   'indisponible', 'pas de retour', 'est en erreur', 'plante', 'crash', 'bug',
   'ne s affiche', 'ne peux pas', 'impossible de', 'pas arrive a', 'deconnexion',
+  'not ok', 'pas ok', 'ca marche pas', 'ca fonctionne pas', 'c est pas bon',
+  'pas encore', 'tjrs', 'reste bloque', 'reste en erreur',
 ];
 
 // Signaux d'une question posée au support.
@@ -66,7 +79,9 @@ function prefilterReply({ body = '', subject = '' }) {
   const hasSignal = (list) => list.some((s) => text.includes(s));
 
   // Un signal substantif prime toujours : on laisse le LLM trancher (précision requise).
-  if (hasSignal(RESOLUTION_SIGNALS) || hasSignal(CONTINUATION_SIGNALS) || hasSignal(QUESTION_SIGNALS)) {
+  // Les signaux négatifs (continuation) sont vérifiés en PRIORITÉ pour éviter les faux positifs
+  // sur les signaux courts (ex: "not ok" ne doit pas matcher "ok").
+  if (hasSignal(CONTINUATION_SIGNALS) || hasSignal(RESOLUTION_SIGNALS) || hasSignal(QUESTION_SIGNALS)) {
     return { skip: false };
   }
 

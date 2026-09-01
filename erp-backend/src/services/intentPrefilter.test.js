@@ -32,16 +32,47 @@ describe('prefilterReply — pré-filtre zéro-coût avant appel LLM', () => {
   });
 
   describe('messages triviaux → skip sans LLM', () => {
-    it('ignore un simple merci', () => {
-      expect(prefilterReply({ body: 'Merci beaucoup pour votre aide.' })).toEqual({ skip: true, intent: 'UNKNOWN', isAutoReply: false });
-    });
-
-    it('ignore un « ok » seul', () => {
-      expect(prefilterReply({ body: 'OK' })).toEqual({ skip: true, intent: 'UNKNOWN', isAutoReply: false });
-    });
-
     it('ignore un accusé court sans lien (« c est noté, merci »)', () => {
       expect(prefilterReply({ body: 'C\'est noté, merci.' })).toEqual({ skip: true, intent: 'UNKNOWN', isAutoReply: false });
+    });
+
+    it('ignore un corps vide même avec un sujet', () => {
+      expect(prefilterReply({ body: '', subject: 'Re: Ticket #12' }))
+        .toEqual({ skip: true, intent: 'UNKNOWN', isAutoReply: false });
+    });
+  });
+
+  describe('acknowledgments courts → analyse LLM requise (skip=false)', () => {
+    it('« ok » seul déclenche le LLM (résolution implicite possible)', () => {
+      expect(prefilterReply({ body: 'OK' })).toEqual({ skip: false });
+    });
+
+    it('« merci beaucoup » déclenche le LLM', () => {
+      expect(prefilterReply({ body: 'Merci beaucoup pour votre aide.' })).toEqual({ skip: false });
+    });
+
+    it('« c est okay merci » déclenche le LLM', () => {
+      expect(prefilterReply({ body: 'C\'est okay merci' })).toEqual({ skip: false });
+    });
+
+    it('« ok merci » déclenche le LLM', () => {
+      expect(prefilterReply({ body: 'Ok merci' })).toEqual({ skip: false });
+    });
+
+    it('« super » déclenche le LLM', () => {
+      expect(prefilterReply({ body: 'Super' })).toEqual({ skip: false });
+    });
+
+    it('« parfait » déclenche le LLM', () => {
+      expect(prefilterReply({ body: 'Parfait' })).toEqual({ skip: false });
+    });
+
+    it('« nickel » déclenche le LLM', () => {
+      expect(prefilterReply({ body: 'Nickel' })).toEqual({ skip: false });
+    });
+
+    it('« c est bon » déclenche le LLM', () => {
+      expect(prefilterReply({ body: 'C\'est bon' })).toEqual({ skip: false });
     });
   });
 
@@ -62,13 +93,21 @@ describe('prefilterReply — pré-filtre zéro-coût avant appel LLM', () => {
       expect(prefilterReply({ body: '[Message généré automatiquement] Tout fonctionne désormais.' })).toEqual({ skip: false });
     });
 
+    it('« not ok » déclenche le LLM (signal de continuation, pas de résolution)', () => {
+      expect(prefilterReply({ body: 'C\'est not ok' })).toEqual({ skip: false });
+    });
+
+    it('« pas ok » déclenche le LLM (signal de continuation)', () => {
+      expect(prefilterReply({ body: 'C\'est pas ok' })).toEqual({ skip: false });
+    });
+
     it('corps vide = skip trivial (sujet seul sans signal)', () => {
       expect(prefilterReply({ body: '', subject: 'Re: [Ticket #12] Problème VPN' }))
         .toEqual({ skip: true, intent: 'UNKNOWN', isAutoReply: false });
     });
 
-    it('un vague « merci » reste skip même avec accents et majuscules', () => {
-      expect(prefilterReply({ body: 'MERCÍ Beaucoup !' })).toEqual({ skip: true, intent: 'UNKNOWN', isAutoReply: false });
+    it('un vague « merci » avec accents déclenche le LLM (merci beaucoup matche)', () => {
+      expect(prefilterReply({ body: 'MERCÍ Beaucoup !' })).toEqual({ skip: false });
     });
   });
 });
