@@ -32,16 +32,16 @@ import { sanitizeHtml } from '../utils/sanitize';
 // Variants du "défilement" entre tickets (carrousel) : le ticket sorti glisse dans le sens du voyage,
 // le nouveau entre par le côté opposé — sortie rapide puis entrée longue et douce (ease-out quintique)
 const TICKET_SLIDE_VARIANTS = {
-  initial: (dir) => ({ x: dir === 'next' ? '55%' : '-55%', opacity: 0 }),
+  initial: (dir) => ({ x: dir === 'next' ? '20%' : '-20%', opacity: 0 }),
   animate: {
     x: 0,
     opacity: 1,
-    transition: { duration: 0.45, ease: [0.22, 1, 0.36, 1] },
+    transition: { duration: 0.22, ease: [0.22, 1, 0.36, 1] },
   },
   exit: (dir) => ({
-    x: dir === 'next' ? '-55%' : '55%',
+    x: dir === 'next' ? '-15%' : '15%',
     opacity: 0,
-    transition: { duration: 0.28, ease: [0.4, 0, 0.2, 1] },
+    transition: { duration: 0.12, ease: [0.4, 0, 1, 1] },
   }),
 };
 
@@ -932,7 +932,7 @@ export default function TicketDetail() {
       </div>
 
       {/* Zone de contenu Ticket — carrousel directionnel (sortie + entrée) via AnimatePresence keyed par ticket.id */}
-      <div className="overflow-hidden">
+      <div className="relative overflow-hidden" style={{ minHeight: 400 }}>
         <AnimatePresence mode="popLayout" initial={false} custom={slideDirectionRef.current}>
           {ticket && (
             <motion.div
