@@ -21,9 +21,10 @@ function FieldLabel({ children }) {
 }
 
 const QUICK_FILTERS = [
-  { key: 'mine', val: 'true', label: 'Mes tickets', Icon: User },
+  { key: 'status', val: '', label: 'Tous les statuts', Icon: CheckCircle2 },
   { key: 'status', val: 'OPEN_GROUP', label: 'Ouverts', Icon: Radio },
   { key: 'status', val: 'CLOSED_GROUP', label: 'Clôturés', Icon: CheckCircle2 },
+  { key: 'mine', val: 'true', label: 'Mes tickets', Icon: User },
   { key: 'closeSuggested', val: 'true', label: 'Clôture suggérée', Icon: Flag },
   { key: 'aiProcessed', val: 'true', label: 'Traité IA', Icon: Sparkles },
   { key: 'priority', val: 'P1', label: 'P1 Critiques', Icon: Flame },

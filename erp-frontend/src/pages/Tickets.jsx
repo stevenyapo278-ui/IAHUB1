@@ -306,7 +306,7 @@ export default function Tickets() {
   }
 
   function clearFilters() {
-    setFilters({ status: DEFAULT_STATUS_FILTER, priority: '', source: '', category: '', teamId: '', assignedToId: '', mine: '', aiProcessed: '', approvalStatus: '', closeSuggested: '' });
+    setFilters({ status: '', priority: '', source: '', category: '', teamId: '', assignedToId: '', mine: '', aiProcessed: '', approvalStatus: '', closeSuggested: '' });
     setSearchQuery('');
     setDebouncedSearch('');
     setSortBy('createdAt');
