@@ -224,7 +224,7 @@ export default function Tickets() {
   }
 
   const [filters, setFilters] = useState({
-    status: searchParams.get('status') || DEFAULT_STATUS_FILTER,
+    status: searchParams.get('status') ?? DEFAULT_STATUS_FILTER,
     approvalStatus: searchParams.get('approvalStatus') || '',
     priority: searchParams.get('priority') || '',
     source: searchParams.get('source') || '',
@@ -275,8 +275,14 @@ export default function Tickets() {
     if (sortOrder && sortOrder !== 'desc') params.set('sortOrder', sortOrder); else params.delete('sortOrder');
     if (page && page !== 1) params.set('page', String(page)); else params.delete('page');
     Object.entries(filters).forEach(([k, v]) => {
-      // Le statut par défaut reste implicite : /tickets ne s'alourdit pas de ?status=OPEN_GROUP
-      if (v && !(k === 'status' && v === DEFAULT_STATUS_FILTER)) params.set(k, v); else params.delete(k);
+      if (k === 'status') {
+        // Statut vide = tous les statuts (on garde ?status= pour que ça survive au rechargement)
+        params.set(k, v || '');
+      } else if (v) {
+        params.set(k, v);
+      } else {
+        params.delete(k);
+      }
     });
     setSearchParams(params, { replace: true });
   }, [debouncedSearch, sortBy, sortOrder, filters, page]);
@@ -855,8 +861,8 @@ export default function Tickets() {
                   if (col.key === 'assignedTo') return <SortTH key="assignedTo" field="assignedTo" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left w-36">Assigné</SortTH>;
                   if (col.key === 'requester') return <SortTH key="requester" field="requester" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left w-36">Demandeur</SortTH>;
                   if (col.key === 'location') return <SortTH key="location" field="location" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left w-36">Lieu</SortTH>;
-                  if (col.key === 'createdAt') return <SortTH key="createdAt" field="createdAt" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-right w-20">Ouvert</SortTH>;
-                  if (col.key === 'updatedAt') return <SortTH key="updatedAt" field="updatedAt" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-right w-20">Modifié</SortTH>;
+                  if (col.key === 'createdAt') return <SortTH key="createdAt" field="createdAt" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-right whitespace-nowrap min-w-[100px]">Ouvert</SortTH>;
+                  if (col.key === 'updatedAt') return <SortTH key="updatedAt" field="updatedAt" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-right whitespace-nowrap min-w-[120px]">Modifié</SortTH>;
                   return null;
                 })}
                 <th className="w-12 px-3 py-2.5" />
@@ -990,12 +996,12 @@ export default function Tickets() {
                           </td>
                         );
                         if (col.key === 'createdAt') return (
-                          <td key="createdAt" className="px-3 py-3 w-20 text-right" title={`Ouvert le ${new Date(t.createdAt).toLocaleString('fr-FR')}`}>
+                          <td key="createdAt" className="px-3 py-3 text-right whitespace-nowrap min-w-[100px]" title={`Ouvert le ${new Date(t.createdAt).toLocaleString('fr-FR')}`}>
                             <span className="text-[11px] font-medium tabular-nums text-on-surface-variant">{dateStr}</span>
                           </td>
                         );
                         if (col.key === 'updatedAt') return (
-                          <td key="updatedAt" className="px-3 py-3 w-20 text-right" title={`Modifié le ${t.updatedAt ? new Date(t.updatedAt).toLocaleString('fr-FR') : '—'}`}>
+                          <td key="updatedAt" className="px-3 py-3 text-right whitespace-nowrap min-w-[120px]" title={`Modifié le ${t.updatedAt ? new Date(t.updatedAt).toLocaleString('fr-FR') : '—'}`}>
                             <span className="text-[11px] font-medium tabular-nums text-on-surface-variant">{formatDateTimeShort(t.updatedAt)}</span>
                           </td>
                         );
@@ -1574,8 +1580,8 @@ function saveColumnConfig(cols) {
 function ColumnConfigPanel({ columns, onChange }) {
   const [open, setOpen] = useState(false);
   const panelRef = useRef(null);
-  const dragItem = useRef(null);
-  const dragOverItem = useRef(null);
+  const [dragIdx, setDragIdx] = useState(null);
+  const [overIdx, setOverIdx] = useState(null);
 
   useEffect(() => {
     if (!open) return;
@@ -1590,17 +1596,33 @@ function ColumnConfigPanel({ columns, onChange }) {
     saveColumnConfig(next);
   }
 
-  function handleDragStart(idx) { dragItem.current = idx; }
-  function handleDragEnter(idx) { dragOverItem.current = idx; }
-  function handleDragEnd() {
-    if (dragItem.current === null || dragOverItem.current === null) return;
+  function handleDragStart(e, idx) {
+    setDragIdx(idx);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(idx));
+  }
+
+  function handleDragOver(e, idx) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (idx !== overIdx) setOverIdx(idx);
+  }
+
+  function handleDrop(e, idx) {
+    e.preventDefault();
+    if (dragIdx === null || dragIdx === idx) { setDragIdx(null); setOverIdx(null); return; }
     const next = [...columns];
-    const dragged = next.splice(dragItem.current, 1)[0];
-    next.splice(dragOverItem.current, 0, dragged);
-    dragItem.current = null;
-    dragOverItem.current = null;
+    const dragged = next.splice(dragIdx, 1)[0];
+    next.splice(idx, 0, dragged);
+    setDragIdx(null);
+    setOverIdx(null);
     onChange(next);
     saveColumnConfig(next);
+  }
+
+  function handleDragEnd() {
+    setDragIdx(null);
+    setOverIdx(null);
   }
 
   function resetToDefault() {
@@ -1624,31 +1646,37 @@ function ColumnConfigPanel({ columns, onChange }) {
             <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Colonnes</span>
             <button onClick={resetToDefault} className="text-[10px] text-primary font-semibold hover:underline">Réinitialiser</button>
           </div>
-          {columns.map((col, idx) => (
-            <div
-              key={col.key}
-              draggable={!col.alwaysVisible}
-              onDragStart={() => handleDragStart(idx)}
-              onDragEnter={() => handleDragEnter(idx)}
-              onDragEnd={handleDragEnd}
-              onDragOver={(e) => e.preventDefault()}
-              className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-colors ${
-                col.alwaysVisible ? 'opacity-60' : 'hover:bg-surface-container cursor-grab active:cursor-grabbing'
-              }`}
-            >
-              {!col.alwaysVisible && <GripVertical className="w-3 h-3 text-on-surface-variant/40 shrink-0" />}
-              <label className="flex items-center gap-2 flex-1 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={col.visible}
-                  onChange={() => toggleVisible(col.key)}
-                  disabled={col.alwaysVisible}
-                  className="accent-primary w-3 h-3 rounded"
-                />
-                <span className="text-on-surface font-medium">{col.label}</span>
-              </label>
-            </div>
-          ))}
+          {columns.map((col, idx) => {
+            const isDraggable = !col.alwaysVisible;
+            const isDragging = dragIdx === idx;
+            const isOver = overIdx === idx && dragIdx !== null && dragIdx !== idx;
+            return (
+              <div
+                key={col.key}
+                draggable={isDraggable}
+                onDragStart={(e) => isDraggable && handleDragStart(e, idx)}
+                onDragOver={(e) => isDraggable && handleDragOver(e, idx)}
+                onDrop={(e) => isDraggable && handleDrop(e, idx)}
+                onDragEnd={handleDragEnd}
+                onDragEnter={(e) => { e.preventDefault(); if (isDraggable) setOverIdx(idx); }}
+                className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-all ${
+                  col.alwaysVisible ? 'opacity-60' : 'hover:bg-surface-container cursor-grab active:cursor-grabbing'
+                } ${isDragging ? 'opacity-40 bg-primary/10' : ''} ${isOver ? 'border-t-2 border-primary' : ''}`}
+              >
+                {isDraggable && <GripVertical className="w-3 h-3 text-on-surface-variant/40 shrink-0" />}
+                <label className="flex items-center gap-2 flex-1 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={col.visible}
+                    onChange={() => toggleVisible(col.key)}
+                    disabled={col.alwaysVisible}
+                    className="accent-primary w-3 h-3 rounded"
+                  />
+                  <span className="text-on-surface font-medium">{col.label}</span>
+                </label>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

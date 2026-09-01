@@ -1171,19 +1171,19 @@ export default function TicketDetail() {
               </div>
 
               {/* Dates en ligne */}
-              <div className="flex items-center gap-4 text-[11px] text-on-surface-variant flex-wrap">
-                <span className="flex items-center gap-1.5">
+              <div className="flex items-center gap-4 text-[11px] text-on-surface-variant flex-nowrap overflow-x-auto">
+                <span className="flex items-center gap-1.5 shrink-0">
                   <Clock className="w-3 h-3 text-amber-500" />
                   <span className="font-semibold">Ouvert :</span>
                   <span className="font-mono">{new Date(ticket.firstOpenedAt || ticket.createdAt).toLocaleString('fr-FR')}</span>
                 </span>
-                <span className="flex items-center gap-1.5">
+                <span className="flex items-center gap-1.5 shrink-0">
                   <Clock className="w-3 h-3 text-blue-500" />
                   <span className="font-semibold">Créé :</span>
                   <span className="font-mono">{new Date(ticket.createdAt).toLocaleString('fr-FR')}</span>
                 </span>
                 <span
-                  className="flex items-center gap-1.5 group relative"
+                  className="flex items-center gap-1.5 group relative shrink-0"
                   title={ticket.lastModifiedBy ? `Dernière modification par ${ticket.lastModifiedBy.fullName}` : undefined}
                 >
                   <Clock className="w-3 h-3 text-emerald-500" />
