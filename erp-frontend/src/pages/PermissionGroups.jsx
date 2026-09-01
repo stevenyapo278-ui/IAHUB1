@@ -33,7 +33,7 @@ const ROLE_STYLES = {
 
 // RBAC « le rôle suit le groupe » (miroir du backend) : déplacer un utilisateur vers un de ces
 // groupes met aussi à jour son rôle automatiquement — on le signale dans les messages de confirmation.
-const GROUP_ROLE_KEY = { 'Équipe Hotline': 'HOTLINE', 'Techniciens': 'TECHNICIAN' };
+const GROUP_ROLE_KEY = { 'Administrateurs': 'ADMIN', 'Équipe Hotline': 'HOTLINE', 'Techniciens': 'TECHNICIAN', 'Demandeurs': 'REQUESTER' };
 function roleHintFor(groupName) {
   const key = GROUP_ROLE_KEY[groupName];
   return key ? ROLE_STYLES[key]?.label || key : null;
@@ -474,7 +474,23 @@ export default function PermissionGroups() {
                   const isSelected = openGroupId === g.id;
                   const memberCount = g._count?.members ?? g.members?.length ?? 0;
                   const permCount = g.permissions.length;
-                  const isHotline = g.name.toLowerCase().includes('hotline');
+                  const SYSTEM_GROUPS = {
+                    'administrateurs': { color: 'purple', icon: Shield, label: 'Système Admin' },
+                    'équipe hotline': { color: 'amber', icon: Headphones, label: 'Système Hotline' },
+                    'techniciens': { color: 'blue', icon: Layers, label: 'Système Tech' },
+                    'demandeurs': { color: 'teal', icon: Users, label: 'Système Demandeur' },
+                  };
+                  const sysKey = g.name.toLowerCase();
+                  const sysGroup = SYSTEM_GROUPS[sysKey];
+                  const isSystem = !!sysGroup;
+                  const colorMap = {
+                    purple: { stripe: 'bg-purple-600 dark:bg-purple-400', iconBg: 'bg-purple-500/15 border-purple-500/30 text-purple-600 dark:text-purple-400', badge: 'bg-purple-500/15 text-purple-700 dark:text-purple-400 border-purple-500/30', selText: 'text-purple-600 dark:text-purple-400' },
+                    amber: { stripe: 'bg-amber-500', iconBg: 'bg-amber-500/15 border-amber-500/30 text-amber-600 dark:text-amber-400', badge: 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30', selText: 'text-amber-600 dark:text-amber-400' },
+                    blue: { stripe: 'bg-blue-600 dark:bg-blue-400', iconBg: 'bg-blue-500/15 border-blue-500/30 text-blue-600 dark:text-blue-400', badge: 'bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30', selText: 'text-blue-600 dark:text-blue-400' },
+                    teal: { stripe: 'bg-teal-600 dark:bg-teal-400', iconBg: 'bg-teal-500/15 border-teal-500/30 text-teal-600 dark:text-teal-400', badge: 'bg-teal-500/15 text-teal-700 dark:text-teal-400 border-teal-500/30', selText: 'text-teal-600 dark:text-teal-400' },
+                  };
+                  const colors = isSystem ? colorMap[sysGroup.color] : colorMap.purple;
+                  const IconComp = isSystem ? sysGroup.icon : Lock;
 
                   return (
                     <motion.button
@@ -491,29 +507,22 @@ export default function PermissionGroups() {
                           : 'hover:bg-surface-container-low/60'
                       }`}
                     >
-                      {/* Priority / Color stripe */}
-                      <div className={`w-1 shrink-0 ${isHotline ? 'bg-amber-500' : 'bg-purple-600 dark:bg-purple-400'}`} />
+                      <div className={`w-1 shrink-0 ${colors.stripe}`} />
 
                       <div className="flex items-start gap-3 px-4 py-3.5 flex-1 min-w-0">
-                        {/* Group Icon */}
-                        <div className={`w-8 h-8 shrink-0 rounded-xl flex items-center justify-center mt-0.5 border ${
-                          isHotline
-                            ? 'bg-amber-500/15 border-amber-500/30 text-amber-600 dark:text-amber-400'
-                            : 'bg-purple-500/10 border-purple-500/20 text-purple-600 dark:text-purple-400'
-                        }`}>
-                          {isHotline ? <Headphones className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+                        <div className={`w-8 h-8 shrink-0 rounded-xl flex items-center justify-center mt-0.5 border ${colors.iconBg}`}>
+                          <IconComp className="w-4 h-4" />
                         </div>
 
-                        {/* Content */}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between gap-2 mb-0.5">
                             <div className="flex items-center gap-2 truncate">
-                              <p className={`text-xs font-bold truncate ${isSelected ? 'text-purple-600 dark:text-purple-400' : 'text-on-surface group-hover:text-primary transition-colors'}`}>
+                              <p className={`text-xs font-bold truncate ${isSelected ? colors.selText : 'text-on-surface group-hover:text-primary transition-colors'}`}>
                                 {g.name}
                               </p>
-                              {isHotline && (
-                                <span className="px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-400 text-[9px] font-extrabold uppercase border border-amber-500/30 shrink-0">
-                                  Système Hotline
+                              {isSystem && (
+                                <span className={`px-1.5 py-0.5 rounded-md ${colors.badge} text-[9px] font-extrabold uppercase border shrink-0`}>
+                                  {sysGroup.label}
                                 </span>
                               )}
                             </div>
