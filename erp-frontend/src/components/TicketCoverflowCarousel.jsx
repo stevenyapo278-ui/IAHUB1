@@ -5,6 +5,7 @@
  * Rest cards: narrow portrait slats (200 × 270px, radius 16px)
  * Navigation: white circular arrow buttons, no wheel scroll
  * Physics: linear rAF interpolation (no React re-renders during animation)
+ * Uses transform: scale() for smooth transitions without text reflow.
  */
 import React, { useCallback, useEffect, useRef } from 'react';
 import { motion, useMotionValue, useTransform } from 'framer-motion';
@@ -60,7 +61,8 @@ function relOf(idx, pos, count) {
   return r;
 }
 
-/** X centre of card at relative position `rel` from active */
+/** X centre of card at relative position `rel` from active.
+ *  Uses REST_W for side cards so positions match their visual scale. */
 function xForRel(rel) {
   const ar  = Math.abs(rel);
   const c1  = ACTIVE_W / 2 + GAP + REST_W / 2;   // dist to first slat
@@ -87,13 +89,14 @@ function Card({ ticket, index, pos, count, onSelect }) {
   });
   const zIndex  = useTransform(pos, p => Math.round(1000 - Math.abs(relOf(index, p, count)) * 100));
 
-  const width   = useTransform(pos, p => {
+  // Use transform: scale() instead of width/height — avoids text reflow
+  const scaleX = useTransform(pos, p => {
     const a = blend(relOf(index, p, count));
-    return ACTIVE_W + (REST_W - ACTIVE_W) * a;
+    return 1 + (REST_W / ACTIVE_W - 1) * a;
   });
-  const height  = useTransform(pos, p => {
+  const scaleY = useTransform(pos, p => {
     const a = blend(relOf(index, p, count));
-    return ACTIVE_H + (REST_H - ACTIVE_H) * a;
+    return 1 + (REST_H / ACTIVE_H - 1) * a;
   });
 
   // Slight 3D tilt on side cards (Originkit feel)
@@ -139,8 +142,8 @@ function Card({ ticket, index, pos, count, onSelect }) {
     >
       <motion.div
         style={{
-          width,
-          height,
+          width: ACTIVE_W,
+          height: ACTIVE_H,
           borderRadius: RADIUS,
           rotateY,
           boxShadow,
@@ -148,6 +151,10 @@ function Card({ ticket, index, pos, count, onSelect }) {
           position: 'relative',
           background: 'linear-gradient(135deg, #1e2130 0%, #141824 60%, #1e2130 100%)',
           border: '1px solid rgba(100,116,139,0.25)',
+          transformOrigin: 'center center',
+          scaleX,
+          scaleY,
+          willChange: 'transform',
         }}
       >
         {/* Priority stripe */}
@@ -315,17 +322,24 @@ export default function TicketCoverflowCarousel({ tickets = [], isDark = true })
   const lastTRef   = useRef(null);
   // Track the currently displayed integer index for disabling arrows
   const [activeIdx, setActiveIdx] = React.useState(0);
+  // Preserve position across re-renders (ticket refresh, navigation)
+  const savedIdxRef = useRef(0);
 
-  // Reset position when ticket list changes (filter change)
+  // Clamp position when ticket list shrinks, but never reset to 0
   useEffect(() => {
-    targetRef.current = 0;
-    pos.set(0);
-    setActiveIdx(0);
-    if (rafRef.current != null) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
+    const maxIdx = Math.max(0, tickets.length - 1);
+    if (savedIdxRef.current > maxIdx) {
+      savedIdxRef.current = maxIdx;
+      targetRef.current = maxIdx;
+      pos.set(maxIdx);
+      setActiveIdx(maxIdx);
     }
-  }, [tickets]);
+  }, [tickets.length, pos]);
+
+  // Cleanup rAF on unmount
+  useEffect(() => () => {
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+  }, []);
 
   const tick = useCallback((t) => {
     const last = lastTRef.current ?? t;
@@ -338,7 +352,9 @@ export default function TicketCoverflowCarousel({ tickets = [], isDark = true })
 
     if (Math.abs(diff) <= step) {
       pos.set(targetRef.current);
-      setActiveIdx(Math.round(targetRef.current));
+      const finalIdx = Math.round(targetRef.current);
+      setActiveIdx(finalIdx);
+      savedIdxRef.current = finalIdx;
       rafRef.current  = null;
       lastTRef.current = null;
       return;
@@ -377,10 +393,6 @@ export default function TicketCoverflowCarousel({ tickets = [], isDark = true })
     if (e.key === 'ArrowRight') { e.preventDefault(); goNext(); }
   }, [goNext, goPrev]);
 
-  useEffect(() => () => {
-    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-  }, []);
-
   const atStart = activeIdx <= 0;
   const atEnd   = activeIdx >= count - 1;
 
@@ -413,7 +425,7 @@ export default function TicketCoverflowCarousel({ tickets = [], isDark = true })
       }}
     >
       {/* Stage */}
-      <div style={{ position: 'absolute', inset: 0 }}>
+      <div style={{ position: 'absolute', inset: 0, contain: 'layout style' }}>
         {tickets.map((t, i) => (
           <Card
             key={t.id || i}
