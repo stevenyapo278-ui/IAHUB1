@@ -54,14 +54,14 @@ const platformItems = [
   { to: '/portal', label: 'Portail', icon: Ticket, color: 'text-teal-400', permission: null },
   { to: '/tickets', label: 'Tickets', icon: Ticket, color: 'text-gold-400', permission: null },
   { to: '/problems', label: 'Problèmes', icon: AlertTriangle, color: 'text-amber-400', permission: null },
-  { to: '/email-drafts', label: 'Centre de Validation', icon: ShieldCheck, color: 'text-amber-400', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
-  { to: '/inbox', label: 'Boîte mail', icon: Inbox, color: 'text-sky-400', permission: null },
+  { to: '/email-drafts', label: 'Centre de Validation', icon: ShieldCheck, color: 'text-amber-400', permission: 'emaildrafts.manage', fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
+  { to: '/inbox', label: 'Boîte mail', icon: Inbox, color: 'text-sky-400', permission: 'inbox.sync', fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
   { to: '/knowledge-base', label: 'Base de connaissances', icon: BookOpen, color: 'text-purple-400', permission: null },
   { to: '/ticket-evolution', label: 'Évolution tickets', icon: TrendingUp, color: 'text-cyan-400', permission: null, fallbackRoles: ['ADMIN', 'TECHNICIAN', 'HOTLINE'] },
 ];
 
 const orgItems = [
-  { to: '/teams', label: 'Équipes', icon: Users, color: 'text-emerald-400', permission: null },
+  { to: '/teams', label: 'Équipes', icon: Users, color: 'text-emerald-400', permission: 'teams.manage', fallbackRoles: ['ADMIN'] },
   { to: '/users', label: 'Utilisateurs', icon: User, color: 'text-emerald-400', permission: 'users.manage', fallbackRoles: ['ADMIN'] },
   { to: '/technician-stats', label: 'Perf. techniciens', icon: Gauge, color: 'text-orange-400', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
   { to: '/skills', label: 'Compétences', icon: BrainCircuit, color: 'text-teal-400', permission: null, fallbackRoles: ['ADMIN', 'TECHNICIAN'] },

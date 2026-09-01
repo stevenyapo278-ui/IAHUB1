@@ -2,19 +2,60 @@ const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 const { PERMISSION_KEYS } = require('../src/config/permissions');
 
-// Liste exacte des permissions que le rôle TECHNICIAN possédait déjà avant l'introduction du
-// système de groupes (cf. fallbackRoles de chaque requirePermission() dans les routes) — ce groupe
-// par défaut doit reproduire fidèlement l'accès historique, ni plus (pas de prompts.manage ni
-// automation.manage, qui étaient ADMIN-only) ni moins (pas de perte au déploiement).
-const TECHNICIAN_DEFAULT_PERMISSIONS = [
-  'tickets.create',
+// ── Permissions par défaut pour chaque rôle ─────────────────────────────────
+// Chaque rôle a un groupe de permissions dédié qui reproduit fidèlement l'accès
+// historique (avant l'introduction des groupes). Les groupes ne sont créés qu'une
+// seule fois — jamais écrasés après création, pour laisser l'admin personnaliser.
+
+const ADMIN_DEFAULT_PERMISSIONS = [
+  'tickets.view',
+  'tickets.delete',
+  'tickets.bulkDelete',
   'tickets.assign',
   'tickets.approve',
+  'tickets.timesheet',
+  'tickets.manage',
+  'users.manage',
+  'teams.manage',
+  'settings.ai',
+  'settings.email',
+  'settings.integrations',
   'knowledge.manage',
   'inbox.sync',
-  'dashboard.view',
-  'glpi.manage',
+  'prompts.manage',
   'emaildrafts.manage',
+  'automation.manage',
+  'locations.manage',
+  'assets.manage',
+  'aiweeklyreports.manage',
+];
+
+const TECHNICIAN_DEFAULT_PERMISSIONS = [
+  'tickets.view',
+  'tickets.assign',
+  'tickets.approve',
+  'tickets.timesheet',
+  'tickets.manage',
+  'knowledge.manage',
+  'inbox.sync',
+  'emaildrafts.manage',
+  'locations.manage',
+  'assets.manage',
+];
+
+const HOTLINE_DEFAULT_PERMISSIONS = [
+  'tickets.approve',
+  'tickets.assign',
+  'tickets.manage',
+  'teams.manage',
+  'aiweeklyreports.manage',
+  'emaildrafts.manage',
+  'locations.manage',
+];
+
+const REQUESTER_DEFAULT_PERMISSIONS = [
+  'tickets.view',
+  'assets.manage',
 ];
 
 const prisma = new PrismaClient();
@@ -125,33 +166,50 @@ async function main() {
     });
   }
 
-  // Groupe de droits par défaut pour les techniciens : créé une seule fois (jamais ré-écrasé après
-  // sa création, pour laisser l'admin retirer des permissions sans que le seed les remette à chaque
-  // démarrage), avec TOUTES les permissions — équivalent exact de ce que le rôle TECHNICIAN donnait
-  // déjà par défaut avant l'introduction du système de groupes de droits. Tout TECHNICIAN existant
-  // sans groupe est automatiquement ajouté ici, pour ne perdre aucun accès au déploiement.
-  let techniciansGroup = await prisma.permissionGroup.findUnique({ where: { name: 'Techniciens' } });
-  if (!techniciansGroup) {
-    techniciansGroup = await prisma.permissionGroup.create({
-      data: {
-        name: 'Techniciens',
-        description: 'Groupe par défaut couvrant toutes les permissions historiquement accordées au rôle Technicien.',
-        permissions: TECHNICIAN_DEFAULT_PERMISSIONS,
-      },
-    });
-    console.log('Groupe de droits "Techniciens" créé avec toutes les permissions.');
+  // ── Groupes de permissions par défaut ──────────────────────────────────────
+  // Chaque rôle (hors SUPERADMIN) a un groupe de permissions dédié. Les groupes ne
+  // sont créés qu'une seule fois (idempotent) et jamais écrasés après création.
+  // Tout utilisateur existant sans groupe est automatiquement ajouté au groupe de son rôle.
+
+  const defaultGroups = [
+    { name: 'Administrateurs', description: 'Groupe par défaut pour le rôle Administrateur. Accès complet à la gestion utilisateur, équipe, paramètres.', permissions: ADMIN_DEFAULT_PERMISSIONS },
+    { name: 'Techniciens', description: 'Groupe par défaut pour le rôle Technicien. Gestion de tickets, knowledge base, inbox, supervision.', permissions: TECHNICIAN_DEFAULT_PERMISSIONS },
+    { name: 'Équipe Hotline', description: 'Groupe par défaut pour le rôle Hotline. Validation de tickets, rapports IA, gestion des lieux.', permissions: HOTLINE_DEFAULT_PERMISSIONS },
+    { name: 'Demandeurs', description: 'Groupe par défaut pour le rôle Demandeur. Création de tickets et consultation de l\'inventaire.', permissions: REQUESTER_DEFAULT_PERMISSIONS },
+  ];
+
+  for (const { name, description, permissions } of defaultGroups) {
+    let group = await prisma.permissionGroup.findUnique({ where: { name } });
+    if (!group) {
+      group = await prisma.permissionGroup.create({
+        data: { name, description, permissions },
+      });
+      console.log(`Groupe de droits "${name}" créé avec ${permissions.length} permissions.`);
+    }
   }
 
-  const techniciansWithoutGroup = await prisma.user.findMany({
-    where: { role: 'TECHNICIAN', permissionGroups: { none: {} } },
-    select: { id: true },
-  });
-  if (techniciansWithoutGroup.length > 0) {
-    await prisma.permissionGroup.update({
-      where: { id: techniciansGroup.id },
-      data: { members: { connect: techniciansWithoutGroup.map((u) => ({ id: u.id })) } },
+  // Auto-assigner les utilisateurs sans groupe à leur groupe de rôle
+  const roleGroupMap = [
+    { role: 'ADMIN', groupName: 'Administrateurs' },
+    { role: 'TECHNICIAN', groupName: 'Techniciens' },
+    { role: 'HOTLINE', groupName: 'Équipe Hotline' },
+    { role: 'REQUESTER', groupName: 'Demandeurs' },
+  ];
+
+  for (const { role, groupName } of roleGroupMap) {
+    const group = await prisma.permissionGroup.findUnique({ where: { name: groupName } });
+    if (!group) continue;
+    const usersWithoutGroup = await prisma.user.findMany({
+      where: { role, permissionGroups: { none: {} } },
+      select: { id: true },
     });
-    console.log(`${techniciansWithoutGroup.length} technicien(s) ajouté(s) au groupe "Techniciens".`);
+    if (usersWithoutGroup.length > 0) {
+      await prisma.permissionGroup.update({
+        where: { id: group.id },
+        data: { members: { connect: usersWithoutGroup.map((u) => ({ id: u.id })) } },
+      });
+      console.log(`${usersWithoutGroup.length} utilisateur(s) ${role} ajouté(s) au groupe "${groupName}".`);
+    }
   }
 
   console.log('Seed terminé.');

@@ -67,11 +67,11 @@ const SUPERADMIN_ONLY_KEY = 'superadmin.manage';
 // Un rôle sans groupe associé (null) ne touche pas à l'appartenance ; un groupe hors tableau ne
 // touche pas au rôle. Les groupes sont retrouvés par nom (best effort si absent).
 const ROLE_DEFAULT_GROUP_NAME = {
+  SUPERADMIN: null,
+  ADMIN: 'Administrateurs',
   HOTLINE: 'Équipe Hotline',
   TECHNICIAN: 'Techniciens',
-  ADMIN: null,
-  SUPERADMIN: null,
-  REQUESTER: null,
+  REQUESTER: 'Demandeurs',
 };
 
 // Inverse automatique : nom de groupe → rôle de travail associé
