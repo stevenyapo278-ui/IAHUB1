@@ -1132,40 +1132,7 @@ export default function Tickets() {
               {[25, 50, 100, 200].map((n) => <option key={n} value={n}>{n}/p</option>)}
             </select>
           </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page <= 1}
-              className="w-7 h-7 flex items-center justify-center rounded-lg border border-outline-variant/40 hover:bg-surface-container transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              <ChevronLeft className="w-3.5 h-3.5 text-on-surface-variant" />
-            </button>
-            {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
-              let pageNum;
-              if (totalPages <= 7) pageNum = i + 1;
-              else if (page <= 4) pageNum = i + 1;
-              else if (page >= totalPages - 3) pageNum = totalPages - 6 + i;
-              else pageNum = page - 3 + i;
-              return (
-                <button
-                  key={pageNum}
-                  onClick={() => setPage(pageNum)}
-                  className={`w-7 h-7 rounded-lg text-[11px] font-semibold transition-colors ${
-                    pageNum === page ? 'bg-primary text-white' : 'text-on-surface-variant hover:bg-surface-container'
-                  }`}
-                >
-                  {pageNum}
-                </button>
-              );
-            })}
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page >= totalPages}
-              className="w-7 h-7 flex items-center justify-center rounded-lg border border-outline-variant/40 hover:bg-surface-container transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              <ChevronRight className="w-3.5 h-3.5 text-on-surface-variant" />
-            </button>
-          </div>
+          <PaginationButtons page={page} totalPages={totalPages} onPageChange={setPage} />
         </div>
       )}
 
@@ -1524,5 +1491,51 @@ function SortTH({ field, current, order, onSort, className, children }) {
         )}
       </div>
     </th>
+  );
+}
+
+function PaginationButtons({ page, totalPages, onPageChange }) {
+  const pages = [];
+  if (totalPages <= 9) {
+    for (let i = 1; i <= totalPages; i++) pages.push(i);
+  } else {
+    pages.push(1);
+    if (page > 4) pages.push('...');
+    const start = Math.max(2, page - 2);
+    const end = Math.min(totalPages - 1, page + 2);
+    for (let i = start; i <= end; i++) pages.push(i);
+    if (page < totalPages - 3) pages.push('...');
+    pages.push(totalPages);
+  }
+
+  const btn = 'w-7 h-7 flex items-center justify-center rounded-lg text-[11px] font-semibold transition-colors';
+  return (
+    <div className="flex items-center gap-0.5">
+      <button onClick={() => onPageChange(1)} disabled={page <= 1} className={`${btn} text-on-surface-variant hover:bg-surface-container disabled:opacity-30 disabled:cursor-not-allowed`}>
+        «
+      </button>
+      <button onClick={() => onPageChange((p) => Math.max(1, p - 1))} disabled={page <= 1} className={`${btn} text-on-surface-variant hover:bg-surface-container disabled:opacity-30 disabled:cursor-not-allowed`}>
+        ‹
+      </button>
+      {pages.map((p, i) =>
+        p === '...' ? (
+          <span key={`e${i}`} className="w-5 h-7 flex items-center justify-center text-[10px] text-on-surface-variant/50">…</span>
+        ) : (
+          <button
+            key={p}
+            onClick={() => onPageChange(p)}
+            className={`${btn} ${p === page ? 'bg-primary text-white' : 'text-on-surface-variant hover:bg-surface-container'}`}
+          >
+            {p}
+          </button>
+        )
+      )}
+      <button onClick={() => onPageChange((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages} className={`${btn} text-on-surface-variant hover:bg-surface-container disabled:opacity-30 disabled:cursor-not-allowed`}>
+        ›
+      </button>
+      <button onClick={() => onPageChange(totalPages)} disabled={page >= totalPages} className={`${btn} text-on-surface-variant hover:bg-surface-container disabled:opacity-30 disabled:cursor-not-allowed`}>
+        »
+      </button>
+    </div>
   );
 }
