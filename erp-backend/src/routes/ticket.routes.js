@@ -448,6 +448,7 @@ router.get('/:id', async (req, res) => {
     include: {
       requester: { select: { id: true, fullName: true, email: true } },
       assignedTo: { select: { id: true, fullName: true, email: true } },
+      lastModifiedBy: { select: { id: true, fullName: true, email: true } },
       observers: { select: { id: true, fullName: true, email: true } },
       team: { select: { id: true, name: true } },
       approvedBy: { select: { id: true, fullName: true, email: true } },
@@ -764,6 +765,9 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
       data.approvalNote = null;
     }
   }
+
+  // Track who last modified the ticket
+  data.lastModifiedById = req.user.sub;
 
   try {
     const before = await prisma.ticket.findUnique({

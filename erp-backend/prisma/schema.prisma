@@ -142,6 +142,7 @@ model User {
   ticketsCreated  Ticket[] @relation("TicketRequester")
   ticketsAssigned Ticket[] @relation("TicketAssignee")
   ticketsApproved Ticket[] @relation("TicketApprover")
+  ticketsModified Ticket[] @relation("TicketLastModifier")
   ticketsObserved Ticket[] @relation("TicketObservers")
   followups       Followup[]
   aiEmailDraftsReviewed AiEmailDraft[]
@@ -338,6 +339,9 @@ model Ticket {
 
   assignedTo    User?  @relation("TicketAssignee", fields: [assignedToId], references: [id])
   assignedToId  Int?
+
+  lastModifiedBy User?  @relation("TicketLastModifier", fields: [lastModifiedById], references: [id])
+  lastModifiedById Int?
 
   team          Team?  @relation(fields: [teamId], references: [id])
   teamId        Int?

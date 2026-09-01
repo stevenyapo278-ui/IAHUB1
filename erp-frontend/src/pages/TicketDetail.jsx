@@ -1169,6 +1169,33 @@ export default function TicketDetail() {
                 <InfoTile icon={MapPin} label="Lieu" value={ticket.glpiLocationName || '—'} tone="violet" />
                 <InfoTile icon={Clock} label="Créé le" value={new Date(ticket.createdAt).toLocaleDateString('fr-FR')} tone="amber" />
               </div>
+
+              {/* Dates en ligne */}
+              <div className="flex items-center gap-4 text-[11px] text-on-surface-variant flex-wrap">
+                <span className="flex items-center gap-1.5">
+                  <Clock className="w-3 h-3 text-amber-500" />
+                  <span className="font-semibold">Ouvert :</span>
+                  <span className="font-mono">{new Date(ticket.firstOpenedAt || ticket.createdAt).toLocaleString('fr-FR')}</span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <Clock className="w-3 h-3 text-blue-500" />
+                  <span className="font-semibold">Créé :</span>
+                  <span className="font-mono">{new Date(ticket.createdAt).toLocaleString('fr-FR')}</span>
+                </span>
+                <span
+                  className="flex items-center gap-1.5 group relative"
+                  title={ticket.lastModifiedBy ? `Dernière modification par ${ticket.lastModifiedBy.fullName}` : undefined}
+                >
+                  <Clock className="w-3 h-3 text-emerald-500" />
+                  <span className="font-semibold">Modifié :</span>
+                  <span className="font-mono">{ticket.updatedAt ? new Date(ticket.updatedAt).toLocaleString('fr-FR') : '—'}</span>
+                  {ticket.lastModifiedBy && (
+                    <span className="text-on-surface-variant/60 hidden group-hover:inline">
+                      par {ticket.lastModifiedBy.fullName}
+                    </span>
+                  )}
+                </span>
+              </div>
             </div>
 
             {/* Ticket Description Content */}
@@ -2032,15 +2059,6 @@ export default function TicketDetail() {
             <div className="space-y-4">
               {/* Zone 1 — Informations générales (grille 2 colonnes) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-              <div>
-                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
-                  Date d'ouverture
-                </label>
-                <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/15 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
-                  {new Date(ticket.createdAt).toLocaleString('fr-FR')}
-                </div>
-              </div>
-
               <div>
                 <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
                   Type
