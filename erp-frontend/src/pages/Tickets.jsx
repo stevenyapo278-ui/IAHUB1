@@ -324,6 +324,10 @@ export default function Tickets() {
   }
 
   function loadTickets(isManualRefresh = false) {
+    if (abortRef.current) abortRef.current.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     if (isManualRefresh) {
       setRefreshing(true);
     } else if (isFirstLoad.current) {
@@ -343,7 +347,7 @@ export default function Tickets() {
     if (filters.approvalStatus) params.approvalStatus = filters.approvalStatus;
     if (filters.closeSuggested) params.closeSuggested = filters.closeSuggested;
     if (debouncedSearch) params.search = debouncedSearch;
-    api.get('/tickets', { params })
+    api.get('/tickets', { params, signal: controller.signal })
       .then(({ data }) => {
         setTickets(data.items);
         setTotalPages(data.pages);
@@ -351,8 +355,14 @@ export default function Tickets() {
         if (data.stats) setServerStats(data.stats);
         setSelectedIds([]);
         if (isManualRefresh) toast.success('Tickets rafraîchis');
+        if (!isFirstLoad.current && tableContainerRef.current) {
+          tableContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+        }
       })
-      .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'))
+      .catch((err) => {
+        if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') return;
+        setError(err.response?.data?.error || 'Erreur de chargement');
+      })
       .finally(() => {
         isFirstLoad.current = false;
         setLoading(false);
@@ -384,6 +394,8 @@ export default function Tickets() {
     return () => clearInterval(intervalId);
   }, [filters, debouncedSearch, sortBy, sortOrder]);
 
+  const tableContainerRef = useRef(null);
+  const abortRef = useRef(null);
   const searchInputRef = useRef(null);
   useEffect(() => {
     const onKey = (e) => {
@@ -749,7 +761,7 @@ export default function Tickets() {
       </div>
 
       {/* ── MAIN CONTENT ────────────────────────────────────────────────────── */}
-      <div className="flex-1 min-h-0 relative overflow-auto">
+      <div ref={tableContainerRef} className="flex-1 min-h-0 relative overflow-auto">
         {/* Overlay discret pendant rafraîchissement */}
         {refreshing && !loading && (
           <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
@@ -760,10 +772,7 @@ export default function Tickets() {
         )}
 
         {loading ? (
-          <div className="flex flex-col items-center justify-center h-48 gap-3">
-            <RefreshCw className="w-6 h-6 animate-spin text-primary" />
-            <p className="text-sm text-on-surface-variant">Chargement...</p>
-          </div>
+          <TableSkeleton />
         ) : viewMode === 'carousel' ? (
           <TicketCoverflowCarousel tickets={tickets} isDark={isDark} />
         ) : viewMode === 'kanban' ? (
@@ -839,13 +848,12 @@ export default function Tickets() {
           </div>
         ) : (
           /* ── TABLE VIEW ─────────────────────────────────────────────────── */
-          <table className="w-full border-collapse">
+          <div className="mx-4 sm:mx-6 lg:mx-8 mb-4 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest overflow-hidden">
+          <table className="w-full text-left">
             <thead>
-              <tr className={`text-[10px] font-bold uppercase tracking-widest select-none border-b ${
-                isDark ? 'border-outline-variant/20 text-slate-500 bg-surface-container-low/30' : 'border-slate-200/60 text-slate-400 bg-slate-50/70'
-              }`}>
+              <tr className="border-b border-outline-variant/20 bg-surface-container-low/50">
                 {showSelectionColumn && (
-                  <th className="w-10 px-4 py-2.5 text-left">
+                  <th className="w-10 px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider">
                     <input
                       type="checkbox"
                       checked={tickets.length > 0 && selectedIds.length === tickets.length}
@@ -855,7 +863,7 @@ export default function Tickets() {
                   </th>
                 )}
                 {columns.filter(c => c.visible).map(col => {
-                  if (col.key === 'priority') return <th key="priority" className="w-6 px-2 py-2.5" />;
+                  if (col.key === 'priority') return <th key="priority" className="w-6 px-2 py-2.5 text-[10px]" />;
                   if (col.key === 'ticket') return <SortTH key="ticket" field="title" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left min-w-0 flex-1">Ticket</SortTH>;
                   if (col.key === 'status') return <SortTH key="status" field="status" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left w-28">Statut</SortTH>;
                   if (col.key === 'assignedTo') return <SortTH key="assignedTo" field="assignedTo" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left w-36">Assigné</SortTH>;
@@ -868,7 +876,7 @@ export default function Tickets() {
                 <th className="w-12 px-3 py-2.5" />
               </tr>
             </thead>
-            <tbody className="divide-y divide-outline-variant/10">
+            <tbody>
               <AnimatePresence mode="popLayout">
                 {tickets.map((t) => {
                   const dateStr = formatDateShort(t.createdAt);
@@ -883,13 +891,11 @@ export default function Tickets() {
                       exit={{ opacity: 0 }}
                       layout
                       onClick={() => navigate(`/tickets/${t.id}`)}
-                      className={`cursor-pointer group transition-colors ${
-                        isDark ? 'hover:bg-white/[0.025]' : 'hover:bg-slate-50'
-                      }`}
+                      className="group border-b border-outline-variant/10 hover:bg-amber-500/5 transition-colors cursor-pointer"
                     >
                       {/* Checkbox */}
                       {showSelectionColumn && (
-                        <td className="w-10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                        <td className="w-10 px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
                             checked={selectedIds.includes(t.id)}
@@ -901,12 +907,12 @@ export default function Tickets() {
 
                       {columns.filter(c => c.visible).map(col => {
                         if (col.key === 'priority') return (
-                          <td key="priority" className="w-6 px-2 py-3">
+                          <td key="priority" className="w-6 px-2 py-2.5">
                             <PriorityDot priority={t.priority} />
                           </td>
                         );
                         if (col.key === 'ticket') return (
-                          <td key="ticket" className="px-3 py-3 min-w-0">
+                          <td key="ticket" className="px-3 py-2.5 min-w-0">
                             <div className="flex items-center gap-1.5 mb-0.5">
                               <span className={`font-mono text-[10px] font-bold tabular-nums ${PRIORITY_DOT[t.priority]?.text || 'text-on-surface-variant'}`}>
                                 #{t.id}
@@ -922,7 +928,7 @@ export default function Tickets() {
                               )}
                               <SlaBadge ticket={t} compact />
                             </div>
-                            <p className="text-sm font-semibold text-on-surface group-hover:text-primary transition-colors truncate max-w-[340px] leading-tight">
+                            <p className="text-xs font-semibold text-on-surface group-hover:text-amber-600 transition-colors truncate max-w-[340px] leading-tight">
                               <HighlightText text={t.title} query={debouncedSearch} />
                             </p>
                             <div className="flex items-center gap-2 mt-0.5">
@@ -931,7 +937,7 @@ export default function Tickets() {
                               )}
                               {t.glpiLocationName && (
                                 <span className="xl:hidden text-[10px] text-on-surface-variant/70 flex items-center gap-0.5 truncate max-w-[120px]">
-                                  <MapPin className="w-2.5 h-2.5 shrink-0 text-primary/60" />
+                                  <MapPin className="w-2.5 h-2.5 shrink-0 text-amber-500/60" />
                                   {t.glpiLocationName}
                                 </span>
                               )}
@@ -945,7 +951,7 @@ export default function Tickets() {
                           </td>
                         );
                         if (col.key === 'status') return (
-                          <td key="status" className="px-3 py-3 w-28" onClick={(e) => { if (canAssign) e.stopPropagation(); }}>
+                          <td key="status" className="px-3 py-2.5 w-28" onClick={(e) => { if (canAssign) e.stopPropagation(); }}>
                             {canAssign ? (
                               <select
                                 value={t.status}
@@ -960,56 +966,56 @@ export default function Tickets() {
                           </td>
                         );
                         if (col.key === 'assignedTo') return (
-                          <td key="assignedTo" className="px-3 py-3 w-36">
+                          <td key="assignedTo" className="px-3 py-2.5 w-36">
                             {t.assignedTo ? (
                               <div className="flex items-center gap-1.5 min-w-0" title={t.assignedTo.fullName}>
                                 <Avatar name={t.assignedTo.fullName} />
                                 <span className="text-xs font-medium text-on-surface truncate">{t.assignedTo.fullName}</span>
                               </div>
                             ) : (
-                              <span className="text-[11px] text-on-surface-variant/60 italic">Non assigné</span>
+                              <span className="text-xs text-on-surface-variant/60 italic">Non assigné</span>
                             )}
                           </td>
                         );
                         if (col.key === 'requester') return (
-                          <td key="requester" className="px-3 py-3 w-36">
+                          <td key="requester" className="px-3 py-2.5 w-36">
                             {reqName ? (
                               <div className="flex items-center gap-1.5 min-w-0" title={reqName}>
                                 <Avatar name={reqName} colorClass="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20" />
                                 <span className="text-xs font-medium text-on-surface truncate">{reqName}</span>
                               </div>
                             ) : (
-                              <span className="text-[11px] text-on-surface-variant/60 italic">—</span>
+                              <span className="text-xs text-on-surface-variant/60 italic">—</span>
                             )}
                           </td>
                         );
                         if (col.key === 'location') return (
-                          <td key="location" className="px-3 py-3 w-36">
+                          <td key="location" className="px-3 py-2.5 w-36">
                             {t.glpiLocationName ? (
                               <div className="flex items-center gap-1.5 min-w-0" title={t.glpiLocationName}>
-                                <MapPin className="w-3 h-3 shrink-0 text-primary/60" />
+                                <MapPin className="w-3 h-3 shrink-0 text-amber-500/60" />
                                 <span className="text-xs font-medium text-on-surface truncate">{t.glpiLocationName}</span>
                               </div>
                             ) : (
-                              <span className="text-[11px] text-on-surface-variant/60 italic">—</span>
+                              <span className="text-xs text-on-surface-variant/60 italic">—</span>
                             )}
                           </td>
                         );
                         if (col.key === 'createdAt') return (
-                          <td key="createdAt" className="px-3 py-3 text-right whitespace-nowrap min-w-[100px]" title={`Ouvert le ${new Date(t.createdAt).toLocaleString('fr-FR')}`}>
-                            <span className="text-[11px] font-medium tabular-nums text-on-surface-variant">{dateStr}</span>
+                          <td key="createdAt" className="px-3 py-2.5 text-right whitespace-nowrap min-w-[100px]" title={`Ouvert le ${new Date(t.createdAt).toLocaleString('fr-FR')}`}>
+                            <span className="text-xs font-medium tabular-nums text-on-surface-variant">{dateStr}</span>
                           </td>
                         );
                         if (col.key === 'updatedAt') return (
-                          <td key="updatedAt" className="px-3 py-3 text-right whitespace-nowrap min-w-[120px]" title={`Modifié le ${t.updatedAt ? new Date(t.updatedAt).toLocaleString('fr-FR') : '—'}`}>
-                            <span className="text-[11px] font-medium tabular-nums text-on-surface-variant">{formatDateTimeShort(t.updatedAt)}</span>
+                          <td key="updatedAt" className="px-3 py-2.5 text-right whitespace-nowrap min-w-[120px]" title={`Modifié le ${t.updatedAt ? new Date(t.updatedAt).toLocaleString('fr-FR') : '—'}`}>
+                            <span className="text-xs font-medium tabular-nums text-on-surface-variant">{formatDateTimeShort(t.updatedAt)}</span>
                           </td>
                         );
                         return null;
                       })}
 
                       {/* Actions */}
-                      <td className="px-3 py-3 w-12">
+                      <td className="px-3 py-2.5 w-12">
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           {canDelete && (
                             <button
@@ -1039,6 +1045,7 @@ export default function Tickets() {
               )}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
@@ -1114,19 +1121,25 @@ export default function Tickets() {
 
       {/* ── PAGINATION ───────────────────────────────────────────────────────── */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between px-4 sm:px-6 py-2.5 border-t border-outline-variant/20 bg-surface-container-lowest shrink-0">
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] text-on-surface-variant tabular-nums">
-              {totalCount} ticket{totalCount > 1 ? 's' : ''} — p.{page}/{totalPages}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-4 sm:px-6 py-3 border-t border-outline-variant/20 bg-surface-container-lowest shrink-0">
+          {/* Left: info + page size */}
+          <div className="flex items-center gap-3 text-[11px] text-on-surface-variant">
+            <span className="font-medium tabular-nums">
+              {totalCount > 0
+                ? `${Math.min((page - 1) * pageSize + 1, totalCount)}–${Math.min(page * pageSize, totalCount)} sur ${totalCount.toLocaleString('fr-FR')}`
+                : '0 résultat'}
             </span>
+            <div className="w-px h-3.5 bg-outline-variant/40" />
             <select
               value={pageSize}
               onChange={(e) => { const v = Number(e.target.value); setPageSize(v); localStorage.setItem('tickets_page_size', String(v)); setPage(1); }}
-              className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-outline-variant/40 bg-surface text-on-surface cursor-pointer focus:outline-none"
+              className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-outline-variant/40 bg-surface text-on-surface cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all"
             >
-              {[25, 50, 100, 200].map((n) => <option key={n} value={n}>{n}/p</option>)}
+              {[25, 50, 100, 200].map((n) => <option key={n} value={n}>{n}/page</option>)}
             </select>
           </div>
+
+          {/* Right: pagination buttons */}
           <PaginationButtons page={page} totalPages={totalPages} onPageChange={setPage} />
         </div>
       )}
@@ -1475,7 +1488,7 @@ function SortTH({ field, current, order, onSort, className, children }) {
   return (
     <th
       onClick={() => onSort(field)}
-      className={`cursor-pointer select-none transition-colors hover:text-primary ${active ? 'text-primary' : ''} ${className || ''}`}
+      className={`cursor-pointer select-none transition-colors hover:text-on-surface ${active ? 'text-amber-600' : 'text-on-surface-variant'} ${className || ''}`}
     >
       <div className="flex items-center gap-1">
         {children}
@@ -1489,49 +1502,187 @@ function SortTH({ field, current, order, onSort, className, children }) {
   );
 }
 
+function TableSkeleton() {
+  return (
+    <div className="mx-4 sm:mx-6 lg:mx-8 mb-4 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest overflow-hidden animate-pulse">
+      <table className="w-full text-left">
+        <thead>
+          <tr className="border-b border-outline-variant/20 bg-surface-container-low/50">
+            {[...Array(7)].map((_, i) => (
+              <th key={i} className="px-3 py-2.5">
+                <div className="h-2.5 rounded bg-outline-variant/20 w-16" />
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {[...Array(12)].map((_, row) => (
+            <tr key={row} className="border-b border-outline-variant/10">
+              <td className="px-3 py-2.5 w-6"><div className="h-2.5 w-2.5 rounded-full bg-outline-variant/20" /></td>
+              <td className="px-3 py-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="h-2.5 w-10 rounded bg-outline-variant/20" />
+                  <div className="h-3 w-28 rounded bg-outline-variant/15" />
+                </div>
+              </td>
+              <td className="px-3 py-2.5"><div className="h-5 w-14 rounded-md bg-outline-variant/15" /></td>
+              <td className="px-3 py-2.5"><div className="flex items-center gap-1.5"><div className="h-5 w-5 rounded-full bg-outline-variant/15" /><div className="h-2.5 w-16 rounded bg-outline-variant/15" /></div></td>
+              <td className="px-3 py-2.5"><div className="flex items-center gap-1.5"><div className="h-5 w-5 rounded-full bg-outline-variant/15" /><div className="h-2.5 w-14 rounded bg-outline-variant/15" /></div></td>
+              <td className="px-3 py-2.5"><div className="h-2.5 w-16 rounded bg-outline-variant/15" /></td>
+              <td className="px-3 py-2.5"><div className="h-2.5 w-16 rounded bg-outline-variant/15" /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function PaginationButtons({ page, totalPages, onPageChange }) {
-  const pages = [];
-  if (totalPages <= 9) {
-    for (let i = 1; i <= totalPages; i++) pages.push(i);
-  } else {
-    pages.push(1);
-    if (page > 4) pages.push('...');
-    const start = Math.max(2, page - 2);
-    const end = Math.min(totalPages - 1, page + 2);
-    for (let i = start; i <= end; i++) pages.push(i);
-    if (page < totalPages - 3) pages.push('...');
-    pages.push(totalPages);
+  const [jumpValue, setJumpValue] = useState('');
+  const jumpRef = useRef(null);
+
+  const pages = useMemo(() => {
+    if (totalPages <= 7) {
+      return Array.from({ length: totalPages }, (_, i) => i + 1);
+    }
+    const result = [];
+    result.push(1);
+    if (page > 3) result.push('...');
+    const start = Math.max(2, page - 1);
+    const end = Math.min(totalPages - 1, page + 1);
+    for (let i = start; i <= end; i++) result.push(i);
+    if (page < totalPages - 2) result.push('...');
+    result.push(totalPages);
+    return result;
+  }, [page, totalPages]);
+
+  function handleKeyDown(e) {
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      onPageChange(Math.max(1, page - 1));
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      onPageChange(Math.min(totalPages, page + 1));
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      onPageChange(1);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      onPageChange(totalPages);
+    }
   }
 
-  const btn = 'w-7 h-7 flex items-center justify-center rounded-lg text-[11px] font-semibold transition-colors';
+  function handleJump(e) {
+    e.preventDefault();
+    const val = parseInt(jumpValue, 10);
+    if (!isNaN(val) && val >= 1 && val <= totalPages && val !== page) {
+      onPageChange(val);
+    }
+    setJumpValue('');
+    jumpRef.current?.blur();
+  }
+
+  const btnBase = 'h-10 min-w-[40px] flex items-center justify-center rounded-lg text-xs font-semibold transition-all duration-150 active:scale-95';
+  const btnEnabled = 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface';
+  const btnDisabled = 'text-on-surface-variant/30 cursor-not-allowed';
+  const btnActive = 'bg-primary text-white shadow-sm shadow-primary/20';
+
   return (
-    <div className="flex items-center gap-0.5">
-      <button onClick={() => onPageChange(1)} disabled={page <= 1} className={`${btn} text-on-surface-variant hover:bg-surface-container disabled:opacity-30 disabled:cursor-not-allowed`}>
-        «
-      </button>
-      <button onClick={() => onPageChange((p) => Math.max(1, p - 1))} disabled={page <= 1} className={`${btn} text-on-surface-variant hover:bg-surface-container disabled:opacity-30 disabled:cursor-not-allowed`}>
-        ‹
-      </button>
-      {pages.map((p, i) =>
-        p === '...' ? (
-          <span key={`e${i}`} className="w-5 h-7 flex items-center justify-center text-[10px] text-on-surface-variant/50">…</span>
-        ) : (
-          <button
-            key={p}
-            onClick={() => onPageChange(p)}
-            className={`${btn} ${p === page ? 'bg-primary text-white' : 'text-on-surface-variant hover:bg-surface-container'}`}
-          >
-            {p}
-          </button>
-        )
+    <div className="flex items-center gap-2" onKeyDown={handleKeyDown} role="navigation" aria-label="Pagination">
+      {/* Navigation buttons */}
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => onPageChange(1)}
+          disabled={page <= 1}
+          aria-label="Première page"
+          className={`${btnBase} px-1.5 ${page <= 1 ? btnDisabled : btnEnabled}`}
+        >
+          <ChevronsLeft className="w-4 h-4" />
+        </button>
+        <button
+          onClick={() => onPageChange(Math.max(1, page - 1))}
+          disabled={page <= 1}
+          aria-label="Page précédente"
+          className={`${btnBase} px-1.5 ${page <= 1 ? btnDisabled : btnEnabled}`}
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Page numbers */}
+      <div className="flex items-center gap-1">
+        {pages.map((p, i) =>
+          p === '...' ? (
+            <span key={`e${i}`} className="w-8 h-10 flex items-center justify-center text-xs text-on-surface-variant/40 select-none">…</span>
+          ) : (
+            <button
+              key={p}
+              onClick={() => onPageChange(p)}
+              aria-label={`Page ${p}`}
+              aria-current={p === page ? 'page' : undefined}
+              disabled={p === page}
+              className={`${btnBase} px-2 ${p === page ? btnActive : btnEnabled}`}
+            >
+              {p}
+            </button>
+          )
+        )}
+      </div>
+
+      {/* Next + Last */}
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+          disabled={page >= totalPages}
+          aria-label="Page suivante"
+          className={`${btnBase} px-1.5 ${page >= totalPages ? btnDisabled : btnEnabled}`}
+        >
+          <ChevronRight className="w-4 h-4" />
+        </button>
+        <button
+          onClick={() => onPageChange(totalPages)}
+          disabled={page >= totalPages}
+          aria-label="Dernière page"
+          className={`${btnBase} px-1.5 ${page >= totalPages ? btnDisabled : btnEnabled}`}
+        >
+          <ChevronsRight className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Jump to page (desktop only) */}
+      {totalPages > 7 && (
+        <form onSubmit={handleJump} className="hidden lg:flex items-center gap-1.5 ml-1 pl-2 border-l border-outline-variant/30">
+          <span className="text-[10px] text-on-surface-variant/60 font-medium whitespace-nowrap">Aller à</span>
+          <input
+            ref={jumpRef}
+            type="number"
+            min={1}
+            max={totalPages}
+            value={jumpValue}
+            onChange={(e) => setJumpValue(e.target.value)}
+            placeholder="#"
+            className="w-12 h-8 px-1.5 text-center text-[11px] font-mono font-semibold bg-surface border border-outline-variant/30 rounded-md text-on-surface placeholder-on-surface-variant/30 focus:outline-none focus:ring-1 focus:ring-primary/30 focus:border-primary transition-all"
+          />
+        </form>
       )}
-      <button onClick={() => onPageChange((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages} className={`${btn} text-on-surface-variant hover:bg-surface-container disabled:opacity-30 disabled:cursor-not-allowed`}>
-        ›
-      </button>
-      <button onClick={() => onPageChange(totalPages)} disabled={page >= totalPages} className={`${btn} text-on-surface-variant hover:bg-surface-container disabled:opacity-30 disabled:cursor-not-allowed`}>
-        »
-      </button>
     </div>
+  );
+}
+
+function ChevronsLeft({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m11 17-5-5 5-5" /><path d="m18 17-5-5 5-5" />
+    </svg>
+  );
+}
+
+function ChevronsRight({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m6 17 5-5-5-5" /><path d="m13 17 5-5-5-5" />
+    </svg>
   );
 }
 
