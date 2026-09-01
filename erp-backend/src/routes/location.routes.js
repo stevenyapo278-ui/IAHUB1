@@ -98,20 +98,75 @@ router.patch(
 
 // ── Associations expéditeur ↔ lieu ─────────────────────────────────────
 
-// Liste les demandeurs d'un lieu spécifique
-router.get('/:id/requesters', async (req, res) => {
-  const locationId = Number(req.params.id);
-  const location = await prisma.glpiLocation.findUnique({ where: { id: locationId }, select: { id: true, name: true } });
-  if (!location) return res.status(404).json({ error: 'Lieu introuvable' });
+// Liste des demandeurs potentiels (utilisateurs ERP + expéditeurs d'emails connus)
+// DOIT être AVANT /:id/requesters pour éviter le conflit de route
+router.get('/potential-requesters', async (req, res) => {
+  const { search } = req.query;
+  const q = search?.trim().toLowerCase() || '';
 
-  const links = await prisma.requesterLocation.findMany({
-    where: { glpiLocationId: locationId },
-    include: {
-      assignedBy: { select: { id: true, fullName: true, email: true } },
-    },
-    orderBy: [{ assignmentCount: 'desc' }, { lastUsedAt: 'desc' }],
+  // 1. Utilisateurs ERP
+  const userWhere = q ? {
+    OR: [
+      { fullName: { contains: q, mode: 'insensitive' } },
+      { email: { contains: q, mode: 'insensitive' } },
+    ],
+  } : {};
+  const users = await prisma.user.findMany({
+    where: userWhere,
+    select: { id: true, fullName: true, email: true, role: true },
+    orderBy: { fullName: 'asc' },
+    take: 50,
   });
-  res.json({ location, requesters: links });
+
+  // 2. Expéditeurs d'emails connus (depuis les tickets/email entrants, distincts)
+  const emailWhere = q ? {
+    OR: [
+      { fromEmail: { contains: q, mode: 'insensitive' } },
+      { fromName: { contains: q, mode: 'insensitive' } },
+    ],
+  } : {};
+  const knownEmails = await prisma.incomingEmail.groupBy({
+    by: ['fromEmail'],
+    where: emailWhere,
+    _count: { fromEmail: true },
+    _max: { fromName: true, receivedAt: true },
+    orderBy: { _count: { fromEmail: 'desc' } },
+    take: 50,
+  });
+
+  // 3. Combiner et dédupliquer
+  const seen = new Set();
+  const result = [];
+
+  for (const u of users) {
+    const key = u.email?.toLowerCase();
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      result.push({
+        type: 'user',
+        label: u.fullName || u.email,
+        email: u.email,
+        subLabel: u.role,
+        id: u.id,
+      });
+    }
+  }
+
+  for (const e of knownEmails) {
+    const key = e.fromEmail?.toLowerCase();
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      result.push({
+        type: 'requester',
+        label: e._max.fromName || e.fromEmail,
+        email: e.fromEmail,
+        subLabel: `${e._count.fromEmail} email(s) reçu(s)`,
+        lastSeen: e._max.receivedAt,
+      });
+    }
+  }
+
+  res.json(result);
 });
 
 // Liste toutes les associations expéditeur-lieu (pour la vue globale)
@@ -129,6 +184,22 @@ router.get('/requesters', async (req, res) => {
     orderBy: { lastUsedAt: 'desc' },
   });
   res.json(links);
+});
+
+// Liste les demandeurs d'un lieu spécifique
+router.get('/:id/requesters', async (req, res) => {
+  const locationId = Number(req.params.id);
+  const location = await prisma.glpiLocation.findUnique({ where: { id: locationId }, select: { id: true, name: true } });
+  if (!location) return res.status(404).json({ error: 'Lieu introuvable' });
+
+  const links = await prisma.requesterLocation.findMany({
+    where: { glpiLocationId: locationId },
+    include: {
+      assignedBy: { select: { id: true, fullName: true, email: true } },
+    },
+    orderBy: [{ assignmentCount: 'desc' }, { lastUsedAt: 'desc' }],
+  });
+  res.json({ location, requesters: links });
 });
 
 // Associer manuellement un expéditeur à un lieu
