@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   Gauge, Timer, CheckCircle2, Star, Users, RefreshCw,
-  TrendingUp, ArrowUpDown, Clock, AlertTriangle,
+  TrendingUp, ArrowUpDown, Clock, AlertTriangle, User,
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar,
@@ -10,6 +10,7 @@ import {
 } from 'recharts';
 import { toast } from 'sonner';
 import api from '../api/client';
+import { useAuth } from '../context/AuthContext';
 import EmptyState from '../components/EmptyState';
 
 const PERIODS = ['7 Jours', '1 Mois', '3 Mois', '6 Mois'];
@@ -40,6 +41,8 @@ function KpiCard({ label, value, sub, icon: Icon, color }) {
 }
 
 export default function TechnicianStats() {
+  const { user } = useAuth();
+  const isTechnicianOnly = user?.role === 'TECHNICIAN';
   const [activePeriod, setActivePeriod] = useState('1 Mois');
   const [data, setData] = useState({ items: [], totals: null, trend: [] });
   const [loading, setLoading] = useState(true);
@@ -106,18 +109,22 @@ export default function TechnicianStats() {
     [data.trend]
   );
 
-  const columns = [
-    { key: 'fullName', label: 'Technicien' },
-    { key: 'teamName', label: 'Équipe' },
-    { key: 'assigned', label: 'Assignés', numeric: true },
-    { key: 'open', label: 'Ouverts', numeric: true },
-    { key: 'resolved', label: 'Résolus', numeric: true },
-    { key: 'avgResolutionHours', label: 'Délai moyen', numeric: true },
-    { key: 'avgFirstResponseHours', label: '1ère rép.', numeric: true },
-    { key: 'slaCompliancePct', label: 'SLA respecté', numeric: true },
-    { key: 'csatAvg', label: 'CSAT', numeric: true },
-    { key: 'loggedMinutes', label: 'Temps loggé', numeric: true },
-  ];
+  const columns = useMemo(() => {
+    const base = [
+      { key: 'assigned', label: 'Assignés', numeric: true },
+      { key: 'open', label: 'Ouverts', numeric: true },
+      { key: 'resolved', label: 'Résolus', numeric: true },
+      { key: 'avgResolutionHours', label: 'Délai moyen', numeric: true },
+      { key: 'avgFirstResponseHours', label: '1ère rép.', numeric: true },
+      { key: 'slaCompliancePct', label: 'SLA respecté', numeric: true },
+      { key: 'csatAvg', label: 'CSAT', numeric: true },
+      { key: 'loggedMinutes', label: 'Temps loggé', numeric: true },
+    ];
+    if (!isTechnicianOnly) {
+      base.unshift({ key: 'fullName', label: 'Technicien' }, { key: 'teamName', label: 'Équipe' });
+    }
+    return base;
+  }, [isTechnicianOnly]);
 
   return (
     <div className="px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-8 space-y-6 min-h-screen">
@@ -130,9 +137,15 @@ export default function TechnicianStats() {
               <div className="p-2 bg-orange-500/10 rounded-xl">
                 <Gauge className="w-6 h-6 text-orange-600 dark:text-orange-400" />
               </div>
-              <h1 className="text-2xl sm:text-3xl font-display font-bold truncate text-on-surface">Performance Techniciens</h1>
+              <h1 className="text-2xl sm:text-3xl font-display font-bold truncate text-on-surface">
+                {isTechnicianOnly ? 'Mes Statistiques' : 'Performance Techniciens'}
+              </h1>
             </div>
-            <p className="text-sm sm:text-base text-on-surface-variant font-medium">Statistiques individuelles : volumes, délais de résolution, respect des SLA, satisfaction et temps passé.</p>
+            <p className="text-sm sm:text-base text-on-surface-variant font-medium">
+              {isTechnicianOnly
+                ? 'Vos statistiques individuelles : volumes, délais de résolution, respect des SLA, satisfaction et temps passé.'
+                : 'Statistiques individuelles : volumes, délais de résolution, respect des SLA, satisfaction et temps passé.'}
+            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
@@ -166,8 +179,9 @@ export default function TechnicianStats() {
         </div>
 
         {/* KPIs globaux */}
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 mt-6">
-          <KpiCard label="Techniciens actifs" value={loading ? '…' : data.totals?.technicians ?? 0} icon={Users} color="#f97316" />
+        <div className={`grid gap-4 mt-6 ${isTechnicianOnly ? 'grid-cols-2 md:grid-cols-4' : 'grid-cols-2 md:grid-cols-3 xl:grid-cols-5'}`}>
+          {!isTechnicianOnly && <KpiCard label="Techniciens actifs" value={loading ? '…' : data.totals?.technicians ?? 0} icon={Users} color="#f97316" />}
+          {isTechnicianOnly && <KpiCard label="Assignés" value={loading ? '…' : data.items?.[0]?.assigned ?? 0} icon={User} color="#f97316" />}
           <KpiCard label="Tickets résolus" value={loading ? '…' : data.totals?.resolved ?? 0} sub={`${data.totals?.open ?? 0} encore ouverts`} icon={CheckCircle2} color="#10b981" />
           <KpiCard label="Délai moyen résolution" value={loading ? '…' : fmtH(data.totals?.avgResolutionHours)} icon={Timer} color="#3b82f6" />
           <KpiCard label="SLA respecté" value={loading ? '…' : fmtPct(data.totals?.slaCompliancePct)} sub={`${data.totals?.slaRespected ?? 0}/${data.totals?.slaTotal ?? 0} tickets éligibles`} icon={Clock} color="#8b5cf6" />
@@ -177,31 +191,33 @@ export default function TechnicianStats() {
 
       {/* Graphiques */}
       <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
-        <div className="xl:col-span-2 p-5 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest shadow-sm">
-          <div className="flex items-center gap-2 mb-4">
-            <Timer className="w-4 h-4 text-blue-500" />
-            <h2 className="text-sm font-bold uppercase tracking-wider text-on-surface">Délai moyen de résolution par technicien</h2>
+        {!isTechnicianOnly && (
+          <div className="xl:col-span-2 p-5 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest shadow-sm">
+            <div className="flex items-center gap-2 mb-4">
+              <Timer className="w-4 h-4 text-blue-500" />
+              <h2 className="text-sm font-bold uppercase tracking-wider text-on-surface">Délai moyen de résolution par technicien</h2>
+            </div>
+            {chartData.length === 0 ? (
+              <EmptyStateInlineNoData label="Aucun ticket résolu sur la période." />
+            ) : (
+              <ResponsiveContainer width="100%" height={Math.max(220, chartData.length * 34)}>
+                <BarChart data={chartData} layout="vertical" margin={{ top: 0, right: 24, left: 8, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="currentColor" opacity={0.08} />
+                  <XAxis type="number" tick={{ fontSize: 11 }} unit=" h" stroke="currentColor" opacity={0.5} />
+                  <YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 11 }} stroke="currentColor" opacity={0.7} />
+                  <Tooltip
+                    formatter={(v) => [fmtH(v), 'Délai moyen']}
+                    labelFormatter={(label, payload) => payload?.[0]?.payload?.full || label}
+                    contentStyle={{ borderRadius: 12, border: '1px solid rgba(120,120,120,0.25)', fontSize: 12 }}
+                  />
+                  <Bar dataKey="hours" fill="#f59e0b" radius={[0, 8, 8, 0]} barSize={16} name="Délai moyen" />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
-          {chartData.length === 0 ? (
-            <EmptyStateInlineNoData label="Aucun ticket résolu sur la période." />
-          ) : (
-            <ResponsiveContainer width="100%" height={Math.max(220, chartData.length * 34)}>
-              <BarChart data={chartData} layout="vertical" margin={{ top: 0, right: 24, left: 8, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="currentColor" opacity={0.08} />
-                <XAxis type="number" tick={{ fontSize: 11 }} unit=" h" stroke="currentColor" opacity={0.5} />
-                <YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 11 }} stroke="currentColor" opacity={0.7} />
-                <Tooltip
-                  formatter={(v) => [fmtH(v), 'Délai moyen']}
-                  labelFormatter={(label, payload) => payload?.[0]?.payload?.full || label}
-                  contentStyle={{ borderRadius: 12, border: '1px solid rgba(120,120,120,0.25)', fontSize: 12 }}
-                />
-                <Bar dataKey="hours" fill="#f59e0b" radius={[0, 8, 8, 0]} barSize={16} name="Délai moyen" />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
+        )}
 
-        <div className="xl:col-span-3 p-5 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest shadow-sm">
+        <div className={`${isTechnicianOnly ? 'col-span-1' : 'xl:col-span-3'} p-5 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest shadow-sm`}>
           <div className="flex items-center gap-2 mb-4">
             <TrendingUp className="w-4 h-4 text-emerald-500" />
             <h2 className="text-sm font-bold uppercase tracking-wider text-on-surface">Tickets créés vs résolus</h2>
@@ -272,11 +288,15 @@ export default function TechnicianStats() {
                     transition={{ delay: Math.min(i * 0.02, 0.3) }}
                     className="border-b border-outline-variant/20 last:border-b-0 hover:bg-surface-container/50 transition-colors"
                   >
-                    <td className="px-4 py-3">
-                      <p className="font-semibold text-on-surface whitespace-nowrap">{t.fullName}</p>
-                      <p className="text-xs text-on-surface-variant">{t.email}</p>
-                    </td>
-                    <td className="px-4 py-3 text-on-surface-variant whitespace-nowrap">{t.teamName || '—'}</td>
+                    {!isTechnicianOnly && (
+                      <>
+                        <td className="px-4 py-3">
+                          <p className="font-semibold text-on-surface whitespace-nowrap">{t.fullName}</p>
+                          <p className="text-xs text-on-surface-variant">{t.email}</p>
+                        </td>
+                        <td className="px-4 py-3 text-on-surface-variant whitespace-nowrap">{t.teamName || '—'}</td>
+                      </>
+                    )}
                     <td className="px-4 py-3 text-right tabular-nums text-on-surface">{t.assigned}</td>
                     <td className="px-4 py-3 text-right tabular-nums">
                       {t.open > 0 ? (

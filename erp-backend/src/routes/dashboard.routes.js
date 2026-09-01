@@ -206,6 +206,8 @@ router.get('/technician-stats', async (req, res) => {
       where: {
         role: { in: ['TECHNICIAN', 'ADMIN'] },
         isActive: true,
+        // Un technicien ne voit que ses propres stats
+        ...(req.user.role === 'TECHNICIAN' ? { id: req.user.sub } : {}),
         ...(teamId ? { teamId: Number(teamId) } : {}),
       },
       select: { id: true, fullName: true, email: true, teamId: true },
