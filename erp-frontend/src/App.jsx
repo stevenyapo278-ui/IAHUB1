@@ -142,7 +142,7 @@ export default function App() {
             <Route
               path="skills"
               element={
-                <ProtectedRoute roles={['ADMIN', 'TECHNICIAN']}>
+                <ProtectedRoute roles={['ADMIN', 'SUPERADMIN']}>
                   <SkillsManagement />
                 </ProtectedRoute>
               }

@@ -64,7 +64,7 @@ const orgItems = [
   { to: '/teams', label: 'Équipes', icon: Users, color: 'text-emerald-400', permission: 'teams.manage', fallbackRoles: ['ADMIN'] },
   { to: '/users', label: 'Utilisateurs', icon: User, color: 'text-emerald-400', permission: 'users.manage', fallbackRoles: ['ADMIN'] },
   { to: '/technician-stats', label: 'Perf. techniciens', icon: Gauge, color: 'text-orange-400', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
-  { to: '/skills', label: 'Compétences', icon: BrainCircuit, color: 'text-teal-400', permission: null, fallbackRoles: ['ADMIN', 'TECHNICIAN'] },
+  { to: '/skills', label: 'Compétences', icon: BrainCircuit, color: 'text-teal-400', permission: null, fallbackRoles: ['ADMIN'] },
   { to: '/categories', label: 'Catégories', icon: Tag, color: 'text-gold-400', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
   { to: '/locations', label: 'Lieux', icon: MapPin, color: 'text-amber-400', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE'] },
   { to: '/assets', label: 'Inventaire', icon: Boxes, color: 'text-blue-400', permission: null },
