@@ -32,6 +32,11 @@ function isRequesterOnly(user) {
   return user.role === 'REQUESTER';
 }
 
+// Un technicien ne voit que les tickets qui lui sont assignés ou qu'il a ouverts.
+function isTechnicianOnly(user) {
+  return user.role === 'TECHNICIAN';
+}
+
 // List tickets (with optional filters + pagination + sorting)
 router.get('/', async (req, res) => {
   const {
@@ -46,8 +51,18 @@ router.get('/', async (req, res) => {
 
   const where = {};
   if (isRequesterOnly(req.user)) {
-    // Le demandeur ne voit que les tickets qu'il a ouverts — peu importe le filtre "mine" envoyé
-    where.requesterId = req.user.sub;
+    // Le demandeur ne voit que les tickets qu'il a ouverts ou dont il est observateur
+    where.OR = [
+      { requesterId: req.user.sub },
+      { observers: { some: { id: req.user.sub } } },
+    ];
+  } else if (isTechnicianOnly(req.user)) {
+    // Le technicien voit ses tickets assignés, ceux qu'il a ouverts, et ceux qu'il observe
+    where.OR = [
+      { assignedToId: req.user.sub },
+      { requesterId: req.user.sub },
+      { observers: { some: { id: req.user.sub } } },
+    ];
   }
   if (status) {
     if (status === 'OPEN_GROUP') {
@@ -72,7 +87,17 @@ router.get('/', async (req, res) => {
 
   if (mine === 'true') {
     if (req.user.role === 'REQUESTER') {
-      where.requesterId = req.user.sub;
+      where.OR = [
+        { requesterId: req.user.sub },
+        { observers: { some: { id: req.user.sub } } },
+      ];
+    } else if (req.user.role === 'TECHNICIAN') {
+      // Le technicien voit ses tickets assignés, ceux qu'il a ouverts, et ceux qu'il observe
+      where.OR = [
+        { assignedToId: req.user.sub },
+        { requesterId: req.user.sub },
+        { observers: { some: { id: req.user.sub } } },
+      ];
     } else {
       where.assignedToId = req.user.sub;
     }
@@ -188,8 +213,18 @@ router.get('/export', async (req, res) => {
 
   const where = {};
   if (isRequesterOnly(req.user)) {
-    // Le demandeur n'exporte que ses propres tickets
-    where.requesterId = req.user.sub;
+    // Le demandeur n'exporte que ses propres tickets ou ceux qu'il observe
+    where.OR = [
+      { requesterId: req.user.sub },
+      { observers: { some: { id: req.user.sub } } },
+    ];
+  } else if (isTechnicianOnly(req.user)) {
+    // Le technicien n'exporte que ses tickets assignés, ouverts, ou observés
+    where.OR = [
+      { assignedToId: req.user.sub },
+      { requesterId: req.user.sub },
+      { observers: { some: { id: req.user.sub } } },
+    ];
   }
   if (status) {
     if (status === 'OPEN_GROUP') where.status = { in: ['NEW', 'OPEN', 'PLANNED', 'PENDING'] };
@@ -205,7 +240,12 @@ router.get('/export', async (req, res) => {
   if (aiProcessed === 'true') where.aiProcessed = true;
   if (mine === 'true') {
     if (req.user.role === 'REQUESTER') where.requesterId = req.user.sub;
-    else where.assignedToId = req.user.sub;
+    else if (req.user.role === 'TECHNICIAN') {
+      where.OR = [
+        { assignedToId: req.user.sub },
+        { requesterId: req.user.sub },
+      ];
+    } else where.assignedToId = req.user.sub;
   }
   if (approvalStatus) where.approvalStatus = approvalStatus;
   if (closeSuggested === 'true') where.closeSuggested = true;
@@ -240,6 +280,7 @@ router.get('/export', async (req, res) => {
       aiProcessed: true, approvalStatus: true, requester: { select: { email: true, fullName: true } },
       assignedTo: { select: { email: true, fullName: true } },
       team: { select: { name: true } },
+      observers: { select: { id: true, fullName: true } },
     },
   });
 
@@ -403,8 +444,13 @@ router.get('/:id/adjacent', async (req, res) => {
   const current = await prisma.ticket.findUnique({ where: { id }, select: { id: true } });
   if (!current) return res.status(404).json({ error: 'Ticket introuvable' });
 
-  // Filtre demandeur (REQUESTER ne navigue que dans ses tickets)
-  const baseWhere = isRequesterOnly(req.user) ? { requesterId: req.user.sub } : {};
+  // Filtre demandeur/technicien (ne navigue que dans ses tickets + observés)
+  let baseWhere = {};
+  if (isRequesterOnly(req.user)) {
+    baseWhere = { OR: [{ requesterId: req.user.sub }, { observers: { some: { id: req.user.sub } } }] };
+  } else if (isTechnicianOnly(req.user)) {
+    baseWhere = { OR: [{ assignedToId: req.user.sub }, { requesterId: req.user.sub }, { observers: { some: { id: req.user.sub } } }] };
+  }
 
   const [first, prev, next, last] = await Promise.all([
     // Premier (<<) : ID min
@@ -467,7 +513,15 @@ router.get('/:id', async (req, res) => {
   }
 
   // Un demandeur ne consulte que ses propres tickets (404 = ne révèle pas l'existence des autres)
-  if (isRequesterOnly(req.user) && ticket.requesterId !== req.user.sub) {
+  if (isRequesterOnly(req.user) && ticket.requesterId !== req.user.sub &&
+      !ticket.observers?.some(o => o.id === req.user.sub)) {
+    return res.status(404).json({ error: 'Ticket introuvable' });
+  }
+
+  // Un technicien ne consulte que ses tickets assignés, ceux qu'il a ouverts, ou ceux qu'il observe
+  if (isTechnicianOnly(req.user) && ticket.assignedToId !== req.user.sub &&
+      ticket.requesterId !== req.user.sub &&
+      !ticket.observers?.some(o => o.id === req.user.sub)) {
     return res.status(404).json({ error: 'Ticket introuvable' });
   }
 
@@ -487,13 +541,14 @@ router.get('/:id/attachments/:attachmentId/file', async (req, res) => {
   });
   if (!attachment) return res.status(404).json({ error: 'Pièce jointe introuvable' });
 
-  // Un demandeur ne télécharge que les pièces jointes de ses propres tickets
-  if (isRequesterOnly(req.user)) {
-    const ownerTicket = await prisma.ticket.findFirst({
-      where: { id: attachment.ticketId, requesterId: req.user.sub },
-      select: { id: true },
-    });
-    if (!ownerTicket) return res.status(404).json({ error: 'Pièce jointe introuvable' });
+  // Un demandeur/technicien ne télécharge que les pièces jointes de ses propres tickets ou observés
+  if (isRequesterOnly(req.user) || isTechnicianOnly(req.user)) {
+    const where = isRequesterOnly(req.user)
+      ? { id: attachment.ticketId, requesterId: req.user.sub }
+      : { id: attachment.ticketId, OR: [{ assignedToId: req.user.sub }, { requesterId: req.user.sub }] };
+    const ownerTicket = await prisma.ticket.findFirst({ where, select: { id: true } });
+    const isObserver = await prisma.ticket.findFirst({ where: { id: attachment.ticketId, observers: { some: { id: req.user.sub } } }, select: { id: true } });
+    if (!ownerTicket && !isObserver) return res.status(404).json({ error: 'Pièce jointe introuvable' });
   }
 
   if (attachment.localFilepath) {
@@ -766,6 +821,14 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
     }
   }
 
+  // Observateurs : remplacement complet de la liste (many-to-many implicite)
+  if (req.body.observerIds !== undefined) {
+    const ids = Array.isArray(req.body.observerIds)
+      ? req.body.observerIds.map(Number)
+      : [];
+    data.observers = { set: ids.map((id) => ({ id })) };
+  }
+
   // Track who last modified the ticket
   data.lastModifiedById = req.user.sub;
 
@@ -777,6 +840,7 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
         assignedToId: true, type: true, urgency: true, impact: true, source: true,
         externalId: true, status: true, isMajorIncident: true, impactedSites: true,
         sourceEmail: true, requesterId: true, sourceName: true,
+        observers: { select: { id: true } },
       },
     });
 
@@ -870,10 +934,14 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
 // Get ticket field corrections (audit trail)
 router.get('/:id/corrections', async (req, res) => {
   const id = Number(req.params.id);
-  // Un demandeur ne voit les corrections que de ses propres tickets
-  if (isRequesterOnly(req.user)) {
-    const ownerTicket = await prisma.ticket.findFirst({ where: { id, requesterId: req.user.sub }, select: { id: true } });
-    if (!ownerTicket) return res.status(404).json({ error: 'Ticket introuvable' });
+  // Un demandeur/technicien ne voit les corrections que de ses propres tickets ou ceux qu'il observe
+  if (isRequesterOnly(req.user) || isTechnicianOnly(req.user)) {
+    const where = isRequesterOnly(req.user)
+      ? { id, requesterId: req.user.sub }
+      : { id, OR: [{ assignedToId: req.user.sub }, { requesterId: req.user.sub }] };
+    const ownerTicket = await prisma.ticket.findFirst({ where, select: { id: true } });
+    const isObserver = await prisma.ticket.findFirst({ where: { id, observers: { some: { id: req.user.sub } } }, select: { id: true } });
+    if (!ownerTicket && !isObserver) return res.status(404).json({ error: 'Ticket introuvable' });
   }
   const corrections = await prisma.ticketFieldCorrection.findMany({
     where: { ticketId: id },
@@ -1144,9 +1212,20 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
     return res.status(404).json({ error: 'Ticket introuvable' });
   }
 
-  // Un demandeur ne commente que ses propres tickets
+  // Un demandeur/technicien ne commente que ses propres tickets ou ceux qu'il observe
   if (isRequesterOnly(req.user) && ticket.requesterId !== req.user.sub) {
-    return res.status(404).json({ error: 'Ticket introuvable' });
+    const isObserver = await prisma.ticket.findFirst({
+      where: { id: ticketId, observers: { some: { id: req.user.sub } } },
+      select: { id: true },
+    });
+    if (!isObserver) return res.status(404).json({ error: 'Ticket introuvable' });
+  }
+  if (isTechnicianOnly(req.user) && ticket.assignedToId !== req.user.sub && ticket.requesterId !== req.user.sub) {
+    const isObserver = await prisma.ticket.findFirst({
+      where: { id: ticketId, observers: { some: { id: req.user.sub } } },
+      select: { id: true },
+    });
+    if (!isObserver) return res.status(404).json({ error: 'Ticket introuvable' });
   }
 
   // Sauvegarder les images uploadées et créer des TicketAttachment

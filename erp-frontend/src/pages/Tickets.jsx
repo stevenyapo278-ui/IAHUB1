@@ -38,6 +38,7 @@ import {
   CheckSquare,
   GripVertical,
   Settings2,
+  Eye,
 } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -908,6 +909,12 @@ export default function Tickets() {
                                 <span className="2xl:hidden text-[10px] text-on-surface-variant/70 flex items-center gap-0.5 truncate max-w-[120px]">
                                   <User className="w-2.5 h-2.5 shrink-0" />
                                   {reqName}
+                                </span>
+                              )}
+                              {t.observers?.length > 0 && user && t.observers.some(o => o.id === user.id) && (
+                                <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold flex items-center gap-0.5">
+                                  <Eye className="w-2.5 h-2.5" />
+                                  Observé
                                 </span>
                               )}
                             </div>
