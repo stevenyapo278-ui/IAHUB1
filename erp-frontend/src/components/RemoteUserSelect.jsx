@@ -9,14 +9,6 @@ import api from '../api/client';
 
 const PAGE_SIZE = 30;
 
-const ROLE_BADGES = {
-  SUPERADMIN: { label: 'Superadmin', cls: 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20' },
-  ADMIN: { label: 'Admin', cls: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' },
-  HOTLINE: { label: 'Hotline', cls: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20' },
-  TECHNICIAN: { label: 'Technicien', cls: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' },
-  REQUESTER: { label: 'Demandeur', cls: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20' },
-};
-
 export default function RemoteUserSelect({
   value,
   onChange,
@@ -145,7 +137,6 @@ export default function RemoteUserSelect({
             ) : (
               visibleOptions.map((opt) => {
                 const isSelected = String(value) === String(opt.id);
-                const badge = ROLE_BADGES[opt.role];
                 return (
                   <button
                     key={opt.id}
@@ -161,11 +152,6 @@ export default function RemoteUserSelect({
                       <p className="truncate font-semibold">{opt.fullName}</p>
                       <p className="text-[10px] text-on-surface-variant font-medium truncate">{opt.email}</p>
                     </div>
-                    {badge && (
-                      <span className={`shrink-0 px-2 py-0.5 rounded-full border text-[9px] font-extrabold uppercase tracking-wide ${badge.cls}`}>
-                        {badge.label}
-                      </span>
-                    )}
                     {isSelected && <Check className="w-4 h-4 text-primary shrink-0" />}
                   </button>
                 );
