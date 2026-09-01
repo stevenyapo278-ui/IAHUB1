@@ -19,7 +19,7 @@ import {
   RefreshCw, Mail, FileText, Check, X, Send, ChevronRight,
   Flame, Radio, Info, ArrowDown, UserCheck, HelpCircle, Layers, History,
   TrendingUp, Lock, Link2, Merge, Plus, GitBranch, Timer, Play, Square, ListChecks, Boxes,
-  ChevronDown, Inbox, Pencil, Save,
+  ChevronDown, Inbox, Pencil, Save, Search,
   ChevronsLeft, ChevronLeft, ChevronsRight, Eye
 } from 'lucide-react';
 import {
