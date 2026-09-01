@@ -323,7 +323,7 @@ export default function TicketDetail() {
 
   useEffect(() => {
     api.get('/glpi/categories').then(({ data }) => setCategories(data)).catch(() => {});
-    api.get('/glpi/locations').then(({ data }) => setLocations(data)).catch(() => {});
+    api.get('/locations').then(({ data }) => setLocations(data)).catch(() => {});
     api.get('/glpi/users').then(({ data }) => setGlpiUsers(data)).catch(() => {});
     api.get('/users').then(({ data }) => setAllUsers(Array.isArray(data) ? data : (data?.users || []))).catch(() => {});
     api.get('/custom-fields').then(({ data }) => setCustomFieldDefs(data || [])).catch(() => {});

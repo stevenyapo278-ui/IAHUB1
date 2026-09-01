@@ -473,7 +473,7 @@ export default function Tickets() {
   }
 
   useEffect(() => {
-    api.get('/glpi/locations').then(({ data }) => setLocations(data)).catch(() => {});
+    api.get('/locations').then(({ data }) => setLocations(data)).catch(() => {});
     api.get('/glpi/categories').then(({ data }) => setCategories(data)).catch(() => {});
     api.get('/glpi/users').then(({ data }) => setGlpiUsers(data)).catch(() => {});
     api.get('/ticket-templates').then(({ data }) => setTemplates(data)).catch(() => {});
