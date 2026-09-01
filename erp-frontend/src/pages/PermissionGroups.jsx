@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef } from 'react';
+import { useEffect, useState, useMemo, useRef, useCallback, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import api from '../api/client';
@@ -38,6 +38,20 @@ function roleHintFor(groupName) {
   const key = GROUP_ROLE_KEY[groupName];
   return key ? ROLE_STYLES[key]?.label || key : null;
 }
+
+const SYSTEM_GROUPS = {
+  'administrateurs': { color: 'purple', icon: Shield, label: 'Système Admin' },
+  'équipe hotline': { color: 'amber', icon: Headphones, label: 'Système Hotline' },
+  'techniciens': { color: 'blue', icon: Layers, label: 'Système Tech' },
+  'demandeurs': { color: 'teal', icon: Users, label: 'Système Demandeur' },
+};
+
+const COLOR_MAP = {
+  purple: { stripe: 'bg-purple-600 dark:bg-purple-400', iconBg: 'bg-purple-500/15 border-purple-500/30 text-purple-600 dark:text-purple-400', badge: 'bg-purple-500/15 text-purple-700 dark:text-purple-400 border-purple-500/30', selText: 'text-purple-600 dark:text-purple-400' },
+  amber: { stripe: 'bg-amber-500', iconBg: 'bg-amber-500/15 border-amber-500/30 text-amber-600 dark:text-amber-400', badge: 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30', selText: 'text-amber-600 dark:text-amber-400' },
+  blue: { stripe: 'bg-blue-600 dark:bg-blue-400', iconBg: 'bg-blue-500/15 border-blue-500/30 text-blue-600 dark:text-blue-400', badge: 'bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30', selText: 'text-blue-600 dark:text-blue-400' },
+  teal: { stripe: 'bg-teal-600 dark:bg-teal-400', iconBg: 'bg-teal-500/15 border-teal-500/30 text-teal-600 dark:text-teal-400', badge: 'bg-teal-500/15 text-teal-700 dark:text-teal-400 border-teal-500/30', selText: 'text-teal-600 dark:text-teal-400' },
+};
 
 function RoleBadge({ role }) {
   const style = ROLE_STYLES[role] || { label: role, cls: 'bg-outline/10 border-outline/30 text-on-surface-variant' };
@@ -112,13 +126,13 @@ export default function PermissionGroups() {
     memberDebounceRef.current = setTimeout(() => searchMembers(text), 250);
   }
 
-  function openGroupDetail(group) {
+  const openGroupDetail = useCallback((group) => {
     setOpenGroupId(group.id);
     setDetailForm({ name: group.name, description: group.description || '' });
     setMemberQuery('');
     setMemberResults([]);
     searchMembers('');
-  }
+  }, []);
 
   function togglePermission(key) {
     setForm((f) => ({
@@ -144,12 +158,6 @@ export default function PermissionGroups() {
     } finally {
       setSubmitting(false);
     }
-  }
-
-  function openGroupDetail(group) {
-    setOpenGroupId(group.id);
-    setDetailForm({ name: group.name, description: group.description || '' });
-    setMemberSearch('');
   }
 
   async function saveGroupDetail(group) {
@@ -252,9 +260,9 @@ export default function PermissionGroups() {
   }, [groups, search]);
 
   // Utilisateurs proposés à l'ajout : résultats distants, hors membres actuels du groupe
-  const memberCandidates = openGroup
+  const memberCandidates = useMemo(() => openGroup
     ? memberResults.filter((u) => !openGroup.members?.some((m) => m.id === u.id))
-    : [];
+    : [], [openGroup, memberResults]);
 
   // Carte userId → groupe actuel (les groupes sont EXCLUSIFS : chaque utilisateur n'appartient qu'à un seul)
   const groupOfUser = useMemo(() => {
@@ -267,7 +275,9 @@ export default function PermissionGroups() {
     return map;
   }, [groups]);
 
-  const totalMembers = groups.reduce((acc, g) => acc + (g._count?.members ?? g.members?.length ?? 0), 0);
+  const totalMembers = useMemo(() =>
+    groups.reduce((acc, g) => acc + (g._count?.members ?? g.members?.length ?? 0), 0),
+  [groups]);
 
   return (
     <div className="flex flex-col h-[calc(100vh-64px)] max-h-[calc(100vh-64px)] overflow-hidden">
@@ -470,38 +480,21 @@ export default function PermissionGroups() {
               </div>
             ) : (
               <AnimatePresence mode="popLayout">
-                {filteredGroups.map((g, idx) => {
+                {filteredGroups.map((g) => {
                   const isSelected = openGroupId === g.id;
                   const memberCount = g._count?.members ?? g.members?.length ?? 0;
                   const permCount = g.permissions.length;
-                  const SYSTEM_GROUPS = {
-                    'administrateurs': { color: 'purple', icon: Shield, label: 'Système Admin' },
-                    'équipe hotline': { color: 'amber', icon: Headphones, label: 'Système Hotline' },
-                    'techniciens': { color: 'blue', icon: Layers, label: 'Système Tech' },
-                    'demandeurs': { color: 'teal', icon: Users, label: 'Système Demandeur' },
-                  };
                   const sysKey = g.name.toLowerCase();
                   const sysGroup = SYSTEM_GROUPS[sysKey];
                   const isSystem = !!sysGroup;
-                  const colorMap = {
-                    purple: { stripe: 'bg-purple-600 dark:bg-purple-400', iconBg: 'bg-purple-500/15 border-purple-500/30 text-purple-600 dark:text-purple-400', badge: 'bg-purple-500/15 text-purple-700 dark:text-purple-400 border-purple-500/30', selText: 'text-purple-600 dark:text-purple-400' },
-                    amber: { stripe: 'bg-amber-500', iconBg: 'bg-amber-500/15 border-amber-500/30 text-amber-600 dark:text-amber-400', badge: 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30', selText: 'text-amber-600 dark:text-amber-400' },
-                    blue: { stripe: 'bg-blue-600 dark:bg-blue-400', iconBg: 'bg-blue-500/15 border-blue-500/30 text-blue-600 dark:text-blue-400', badge: 'bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30', selText: 'text-blue-600 dark:text-blue-400' },
-                    teal: { stripe: 'bg-teal-600 dark:bg-teal-400', iconBg: 'bg-teal-500/15 border-teal-500/30 text-teal-600 dark:text-teal-400', badge: 'bg-teal-500/15 text-teal-700 dark:text-teal-400 border-teal-500/30', selText: 'text-teal-600 dark:text-teal-400' },
-                  };
-                  const colors = isSystem ? colorMap[sysGroup.color] : colorMap.purple;
+                  const colors = isSystem ? COLOR_MAP[sysGroup.color] : COLOR_MAP.purple;
                   const IconComp = isSystem ? sysGroup.icon : Lock;
 
                   return (
-                    <motion.button
+                    <button
                       key={g.id}
-                      layout
-                      initial={{ opacity: 0, y: -4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, x: -20 }}
-                      transition={{ duration: 0.15, delay: idx * 0.01 }}
                       onClick={() => openGroupDetail(g)}
-                      className={`w-full text-left flex items-stretch border-b border-outline-variant/10 transition-all group ${
+                      className={`w-full text-left flex items-stretch border-b border-outline-variant/10 transition-colors group ${
                         isSelected
                           ? 'bg-purple-500/10 ring-1 ring-inset ring-purple-500/30'
                           : 'hover:bg-surface-container-low/60'
@@ -550,7 +543,7 @@ export default function PermissionGroups() {
                           </div>
                         </div>
                       </div>
-                    </motion.button>
+                    </button>
                   );
                 })}
               </AnimatePresence>
