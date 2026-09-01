@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -37,6 +37,8 @@ import {
   Boxes,
   Calendar,
   CheckSquare,
+  GripVertical,
+  Settings2,
 } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -259,6 +261,7 @@ export default function Tickets() {
   const [searchQuery, setSearchQuery] = useState(() => searchParams.get('search') || '');
   const [debouncedSearch, setDebouncedSearch] = useState(() => searchParams.get('search') || '');
   const debounceRef = useRef(null);
+  const [columns, setColumns] = useState(loadColumnConfig);
 
   function changeViewMode(mode) {
     setViewMode(mode);
@@ -655,6 +658,11 @@ export default function Tickets() {
             ))}
           </div>
 
+          {/* Column config (table view only) */}
+          {viewMode === 'table' && (
+            <ColumnConfigPanel columns={columns} onChange={setColumns} />
+          )}
+
           {/* Filter button */}
           <button
             onClick={() => setFilterPanelOpen(true)}
@@ -840,28 +848,17 @@ export default function Tickets() {
                     />
                   </th>
                 )}
-                <th className="w-6 px-2 py-2.5" /> {/* Priority dot col */}
-                <SortTH field="title" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left min-w-0 flex-1">
-                  Ticket
-                </SortTH>
-                <SortTH field="status" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left w-28 hidden md:table-cell">
-                  Statut
-                </SortTH>
-                <SortTH field="assignedTo" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left w-36 hidden xl:table-cell">
-                  Assigné
-                </SortTH>
-                <SortTH field="requester" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left w-36 hidden xl:table-cell">
-                  Demandeur
-                </SortTH>
-                <SortTH field="location" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left w-36 hidden lg:table-cell">
-                  Lieu
-                </SortTH>
-                <SortTH field="createdAt" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-right w-20 hidden lg:table-cell">
-                  Ouvert
-                </SortTH>
-                <SortTH field="updatedAt" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-right w-20 hidden xl:table-cell">
-                  Modifié
-                </SortTH>
+                {columns.filter(c => c.visible).map(col => {
+                  if (col.key === 'priority') return <th key="priority" className="w-6 px-2 py-2.5" />;
+                  if (col.key === 'ticket') return <SortTH key="ticket" field="title" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left min-w-0 flex-1">Ticket</SortTH>;
+                  if (col.key === 'status') return <SortTH key="status" field="status" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left w-28">Statut</SortTH>;
+                  if (col.key === 'assignedTo') return <SortTH key="assignedTo" field="assignedTo" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left w-36">Assigné</SortTH>;
+                  if (col.key === 'requester') return <SortTH key="requester" field="requester" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left w-36">Demandeur</SortTH>;
+                  if (col.key === 'location') return <SortTH key="location" field="location" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left w-36">Lieu</SortTH>;
+                  if (col.key === 'createdAt') return <SortTH key="createdAt" field="createdAt" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-right w-20">Ouvert</SortTH>;
+                  if (col.key === 'updatedAt') return <SortTH key="updatedAt" field="updatedAt" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-right w-20">Modifié</SortTH>;
+                  return null;
+                })}
                 <th className="w-12 px-3 py-2.5" />
               </tr>
             </thead>
@@ -896,122 +893,114 @@ export default function Tickets() {
                         </td>
                       )}
 
-                      {/* Priority dot */}
-                      <td className="w-6 px-2 py-3">
-                        <PriorityDot priority={t.priority} />
-                      </td>
-
-                      {/* Main cell: ID + Title + meta */}
-                      <td className="px-3 py-3 min-w-0">
-                        <div className="flex items-center gap-1.5 mb-0.5">
-                          <span className={`font-mono text-[10px] font-bold tabular-nums ${PRIORITY_DOT[t.priority]?.text || 'text-on-surface-variant'}`}>
-                            #{t.id}
-                          </span>
-                          {t.aiProcessed && (
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-500/10 text-purple-500 dark:text-purple-400">IA</span>
-                          )}
-                          {t.glpiTicketId && (
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-surface-container text-on-surface-variant">GLPI</span>
-                          )}
-                          {overdue && (
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/10 text-red-500 dark:text-red-400">Retard</span>
-                          )}
-                          <SlaBadge ticket={t} compact />
-                        </div>
-                        <p className="text-sm font-semibold text-on-surface group-hover:text-primary transition-colors truncate max-w-[340px] leading-tight">
-                          <HighlightText text={t.title} query={debouncedSearch} />
-                        </p>
-                        {/* Sub-line */}
-                        <div className="flex items-center gap-2 mt-0.5">
-                          {t.category && (
-                            <span className="text-[10px] text-on-surface-variant truncate max-w-[120px]">{t.category}</span>
-                          )}
-                          {t.glpiLocationName && (
-                            <span className="lg:hidden text-[10px] text-on-surface-variant/70 flex items-center gap-0.5 truncate max-w-[120px]">
-                              <MapPin className="w-2.5 h-2.5 shrink-0 text-primary/60" />
-                              {t.glpiLocationName}
-                            </span>
-                          )}
-                          {/* Demandeur visible sur petits écrans */}
-                          {reqName && (
-                            <span className="xl:hidden text-[10px] text-on-surface-variant/70 flex items-center gap-0.5 truncate max-w-[120px]">
-                              <User className="w-2.5 h-2.5 shrink-0" />
-                              {reqName}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-
-                      {/* Status */}
-                      <td className="px-3 py-3 w-28 hidden md:table-cell" onClick={(e) => { if (canAssign) e.stopPropagation(); }}>
-                        {canAssign ? (
-                          <select
-                            value={t.status}
-                            onChange={(e) => handleQuickStatusChange(t.id, e.target.value, e)}
-                            className="text-[10px] font-semibold px-2 py-1 rounded-md border border-outline-variant/40 bg-surface text-on-surface cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary/30 transition-all w-full"
-                          >
-                            {STATUS_OPTIONS.map(s => <option key={s} value={s}>{STATUS_LABELS[s] || s}</option>)}
-                          </select>
-                        ) : (
-                          <StatusPill status={t.status} />
-                        )}
-                      </td>
-
-                      {/* Assignee */}
-                      <td className="px-3 py-3 w-36 hidden xl:table-cell">
-                        {t.assignedTo ? (
-                          <div className="flex items-center gap-1.5 min-w-0" title={t.assignedTo.fullName}>
-                            <Avatar name={t.assignedTo.fullName} />
-                            <span className="text-xs font-medium text-on-surface truncate">{t.assignedTo.fullName}</span>
-                          </div>
-                        ) : (
-                          <span className="text-[11px] text-on-surface-variant/60 italic">Non assigné</span>
-                        )}
-                      </td>
-
-                      {/* Requester */}
-                      <td className="px-3 py-3 w-36 hidden xl:table-cell">
-                        {reqName ? (
-                          <div className="flex items-center gap-1.5 min-w-0" title={reqName}>
-                            <Avatar name={reqName} colorClass="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20" />
-                            <span className="text-xs font-medium text-on-surface truncate">{reqName}</span>
-                          </div>
-                        ) : (
-                          <span className="text-[11px] text-on-surface-variant/60 italic">—</span>
-                        )}
-                      </td>
-
-                      {/* Lieu */}
-                      <td className="px-3 py-3 w-36 hidden lg:table-cell">
-                        {t.glpiLocationName ? (
-                          <div className="flex items-center gap-1.5 min-w-0" title={t.glpiLocationName}>
-                            <MapPin className="w-3 h-3 shrink-0 text-primary/60" />
-                            <span className="text-xs font-medium text-on-surface truncate">{t.glpiLocationName}</span>
-                          </div>
-                        ) : (
-                          <span className="text-[11px] text-on-surface-variant/60 italic">—</span>
-                        )}
-                      </td>
-
-                      {/* Ouvert le */}
-                      <td
-                        className="px-3 py-3 w-20 hidden lg:table-cell text-right"
-                        title={`Ouvert le ${new Date(t.createdAt).toLocaleString('fr-FR')}`}
-                      >
-                        <span className="text-[11px] font-medium tabular-nums text-on-surface-variant">
-                          {dateStr}
-                        </span>
-                      </td>
-
-                      {/* Modifié le */}
-                      <td
-                        className="px-3 py-3 w-20 hidden xl:table-cell text-right"
-                        title={`Modifié le ${t.updatedAt ? new Date(t.updatedAt).toLocaleString('fr-FR') : '—'}`}
-                      >
-                        <span className="text-[11px] font-medium tabular-nums text-on-surface-variant">
-                          {formatDateTimeShort(t.updatedAt)}
-                        </span>
-                      </td>
+                      {columns.filter(c => c.visible).map(col => {
+                        if (col.key === 'priority') return (
+                          <td key="priority" className="w-6 px-2 py-3">
+                            <PriorityDot priority={t.priority} />
+                          </td>
+                        );
+                        if (col.key === 'ticket') return (
+                          <td key="ticket" className="px-3 py-3 min-w-0">
+                            <div className="flex items-center gap-1.5 mb-0.5">
+                              <span className={`font-mono text-[10px] font-bold tabular-nums ${PRIORITY_DOT[t.priority]?.text || 'text-on-surface-variant'}`}>
+                                #{t.id}
+                              </span>
+                              {t.aiProcessed && (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-500/10 text-purple-500 dark:text-purple-400">IA</span>
+                              )}
+                              {t.glpiTicketId && (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-surface-container text-on-surface-variant">GLPI</span>
+                              )}
+                              {overdue && (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/10 text-red-500 dark:text-red-400">Retard</span>
+                              )}
+                              <SlaBadge ticket={t} compact />
+                            </div>
+                            <p className="text-sm font-semibold text-on-surface group-hover:text-primary transition-colors truncate max-w-[340px] leading-tight">
+                              <HighlightText text={t.title} query={debouncedSearch} />
+                            </p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              {t.category && (
+                                <span className="text-[10px] text-on-surface-variant truncate max-w-[120px]">{t.category}</span>
+                              )}
+                              {t.glpiLocationName && (
+                                <span className="xl:hidden text-[10px] text-on-surface-variant/70 flex items-center gap-0.5 truncate max-w-[120px]">
+                                  <MapPin className="w-2.5 h-2.5 shrink-0 text-primary/60" />
+                                  {t.glpiLocationName}
+                                </span>
+                              )}
+                              {reqName && (
+                                <span className="2xl:hidden text-[10px] text-on-surface-variant/70 flex items-center gap-0.5 truncate max-w-[120px]">
+                                  <User className="w-2.5 h-2.5 shrink-0" />
+                                  {reqName}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        );
+                        if (col.key === 'status') return (
+                          <td key="status" className="px-3 py-3 w-28" onClick={(e) => { if (canAssign) e.stopPropagation(); }}>
+                            {canAssign ? (
+                              <select
+                                value={t.status}
+                                onChange={(e) => handleQuickStatusChange(t.id, e.target.value, e)}
+                                className="text-[10px] font-semibold px-2 py-1 rounded-md border border-outline-variant/40 bg-surface text-on-surface cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary/30 transition-all w-full"
+                              >
+                                {STATUS_OPTIONS.map(s => <option key={s} value={s}>{STATUS_LABELS[s] || s}</option>)}
+                              </select>
+                            ) : (
+                              <StatusPill status={t.status} />
+                            )}
+                          </td>
+                        );
+                        if (col.key === 'assignedTo') return (
+                          <td key="assignedTo" className="px-3 py-3 w-36">
+                            {t.assignedTo ? (
+                              <div className="flex items-center gap-1.5 min-w-0" title={t.assignedTo.fullName}>
+                                <Avatar name={t.assignedTo.fullName} />
+                                <span className="text-xs font-medium text-on-surface truncate">{t.assignedTo.fullName}</span>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-on-surface-variant/60 italic">Non assigné</span>
+                            )}
+                          </td>
+                        );
+                        if (col.key === 'requester') return (
+                          <td key="requester" className="px-3 py-3 w-36">
+                            {reqName ? (
+                              <div className="flex items-center gap-1.5 min-w-0" title={reqName}>
+                                <Avatar name={reqName} colorClass="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20" />
+                                <span className="text-xs font-medium text-on-surface truncate">{reqName}</span>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-on-surface-variant/60 italic">—</span>
+                            )}
+                          </td>
+                        );
+                        if (col.key === 'location') return (
+                          <td key="location" className="px-3 py-3 w-36">
+                            {t.glpiLocationName ? (
+                              <div className="flex items-center gap-1.5 min-w-0" title={t.glpiLocationName}>
+                                <MapPin className="w-3 h-3 shrink-0 text-primary/60" />
+                                <span className="text-xs font-medium text-on-surface truncate">{t.glpiLocationName}</span>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-on-surface-variant/60 italic">—</span>
+                            )}
+                          </td>
+                        );
+                        if (col.key === 'createdAt') return (
+                          <td key="createdAt" className="px-3 py-3 w-20 text-right" title={`Ouvert le ${new Date(t.createdAt).toLocaleString('fr-FR')}`}>
+                            <span className="text-[11px] font-medium tabular-nums text-on-surface-variant">{dateStr}</span>
+                          </td>
+                        );
+                        if (col.key === 'updatedAt') return (
+                          <td key="updatedAt" className="px-3 py-3 w-20 text-right" title={`Modifié le ${t.updatedAt ? new Date(t.updatedAt).toLocaleString('fr-FR') : '—'}`}>
+                            <span className="text-[11px] font-medium tabular-nums text-on-surface-variant">{formatDateTimeShort(t.updatedAt)}</span>
+                          </td>
+                        );
+                        return null;
+                      })}
 
                       {/* Actions */}
                       <td className="px-3 py-3 w-12">
@@ -1536,6 +1525,132 @@ function PaginationButtons({ page, totalPages, onPageChange }) {
       <button onClick={() => onPageChange(totalPages)} disabled={page >= totalPages} className={`${btn} text-on-surface-variant hover:bg-surface-container disabled:opacity-30 disabled:cursor-not-allowed`}>
         »
       </button>
+    </div>
+  );
+}
+
+// ─── Column configuration ────────────────────────────────────────────────────
+
+const DEFAULT_COLUMNS = [
+  { key: 'priority', label: 'Priorité', defaultVisible: true, alwaysVisible: true },
+  { key: 'ticket', label: 'Ticket', defaultVisible: true, alwaysVisible: true },
+  { key: 'status', label: 'Statut', defaultVisible: true },
+  { key: 'assignedTo', label: 'Assigné', defaultVisible: true },
+  { key: 'requester', label: 'Demandeur', defaultVisible: true },
+  { key: 'location', label: 'Lieu', defaultVisible: true },
+  { key: 'createdAt', label: 'Ouvert', defaultVisible: true },
+  { key: 'updatedAt', label: 'Modifié', defaultVisible: true },
+];
+
+const COLUMNS_STORAGE_KEY = 'tickets_column_config';
+
+function loadColumnConfig() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(COLUMNS_STORAGE_KEY));
+    if (saved && Array.isArray(saved)) {
+      const keys = saved.map(c => c.key);
+      const merged = DEFAULT_COLUMNS.map(dc => {
+        const found = saved.find(s => s.key === dc.key);
+        return { ...dc, visible: found ? found.visible : dc.defaultVisible };
+      });
+      // Add any new columns not in saved config
+      for (const dc of DEFAULT_COLUMNS) {
+        if (!keys.includes(dc.key)) merged.push({ ...dc, visible: dc.defaultVisible });
+      }
+      // Reorder according to saved
+      const orderMap = {};
+      saved.forEach((s, i) => { orderMap[s.key] = i; });
+      merged.sort((a, b) => (orderMap[a.key] ?? 99) - (orderMap[b.key] ?? 99));
+      return merged;
+    }
+  } catch {}
+  return DEFAULT_COLUMNS.map(c => ({ ...c, visible: c.defaultVisible }));
+}
+
+function saveColumnConfig(cols) {
+  localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(cols.map(c => ({ key: c.key, visible: c.visible }))));
+}
+
+function ColumnConfigPanel({ columns, onChange }) {
+  const [open, setOpen] = useState(false);
+  const panelRef = useRef(null);
+  const dragItem = useRef(null);
+  const dragOverItem = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => { if (panelRef.current && !panelRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  function toggleVisible(key) {
+    const next = columns.map(c => c.key === key ? { ...c, visible: !c.visible } : c);
+    onChange(next);
+    saveColumnConfig(next);
+  }
+
+  function handleDragStart(idx) { dragItem.current = idx; }
+  function handleDragEnter(idx) { dragOverItem.current = idx; }
+  function handleDragEnd() {
+    if (dragItem.current === null || dragOverItem.current === null) return;
+    const next = [...columns];
+    const dragged = next.splice(dragItem.current, 1)[0];
+    next.splice(dragOverItem.current, 0, dragged);
+    dragItem.current = null;
+    dragOverItem.current = null;
+    onChange(next);
+    saveColumnConfig(next);
+  }
+
+  function resetToDefault() {
+    const next = DEFAULT_COLUMNS.map(c => ({ ...c, visible: c.defaultVisible }));
+    onChange(next);
+    saveColumnConfig(next);
+  }
+
+  return (
+    <div className="relative" ref={panelRef}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="p-1.5 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"
+        title="Configurer les colonnes"
+      >
+        <Settings2 className="w-3.5 h-3.5" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-surface-container-lowest border border-outline-variant/30 rounded-xl shadow-xl p-2">
+          <div className="flex items-center justify-between px-2 py-1 mb-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Colonnes</span>
+            <button onClick={resetToDefault} className="text-[10px] text-primary font-semibold hover:underline">Réinitialiser</button>
+          </div>
+          {columns.map((col, idx) => (
+            <div
+              key={col.key}
+              draggable={!col.alwaysVisible}
+              onDragStart={() => handleDragStart(idx)}
+              onDragEnter={() => handleDragEnter(idx)}
+              onDragEnd={handleDragEnd}
+              onDragOver={(e) => e.preventDefault()}
+              className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-colors ${
+                col.alwaysVisible ? 'opacity-60' : 'hover:bg-surface-container cursor-grab active:cursor-grabbing'
+              }`}
+            >
+              {!col.alwaysVisible && <GripVertical className="w-3 h-3 text-on-surface-variant/40 shrink-0" />}
+              <label className="flex items-center gap-2 flex-1 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={col.visible}
+                  onChange={() => toggleVisible(col.key)}
+                  disabled={col.alwaysVisible}
+                  className="accent-primary w-3 h-3 rounded"
+                />
+                <span className="text-on-surface font-medium">{col.label}</span>
+              </label>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
