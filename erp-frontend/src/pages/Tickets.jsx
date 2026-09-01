@@ -684,40 +684,37 @@ export default function Tickets() {
         </div>
       </div>
 
-      {/* ── SEARCH BAR ──────────────────────────────────────────────────────── */}
+      {/* ── SEARCH + FILTER CHIPS (same line) ────────────────────────────────── */}
       <div className="px-4 sm:px-6 py-2.5 border-b border-outline-variant/20 bg-surface-container-lowest shrink-0">
-        <div className="relative">
-          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/60" />
-          <input
-            ref={searchInputRef}
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Rechercher un ticket... ⌘K"
-            className="w-full pl-9 pr-8 py-2 text-sm bg-surface border border-outline-variant/30 rounded-lg text-on-surface placeholder-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => { setSearchQuery(''); setDebouncedSearch(''); setPage(1); }}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface transition-colors"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-      </div>
+        <div className="flex items-center gap-2.5">
+          {/* Search */}
+          <div className="relative shrink-0">
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/60" />
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Rechercher... ⌘K"
+              className="w-48 pl-9 pr-8 py-1.5 text-xs bg-surface border border-outline-variant/30 rounded-lg text-on-surface placeholder-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => { setSearchQuery(''); setDebouncedSearch(''); setPage(1); }}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface transition-colors"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
 
-      {/* ── ACTIVE FILTER CHIPS ─────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {hasActiveFilters && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="border-b border-outline-variant/20 bg-surface-container-lowest shrink-0 overflow-hidden"
-          >
-            <div className="flex items-center gap-1.5 px-4 sm:px-6 py-2 overflow-x-auto">
-              <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest shrink-0 mr-1">Filtres :</span>
+          {/* Separator */}
+          {hasActiveFilters && <div className="w-px h-4 bg-outline-variant/40 shrink-0" />}
+
+          {/* Filter chips */}
+          {hasActiveFilters && (
+            <>
+              <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest shrink-0">Filtres :</span>
               {debouncedSearch && <ActiveChip label={`"${debouncedSearch}"`} onRemove={() => { setSearchQuery(''); setDebouncedSearch(''); setPage(1); }} />}
               {filters.status && <ActiveChip label={filters.status === 'NOT_CLOSED' ? 'Non clôturés' : filters.status === 'OPEN_GROUP' ? 'Ouverts' : filters.status === 'CLOSED_GROUP' ? 'Clôturés' : filters.status} onRemove={() => updateFilter('status', '')} />}
               {filters.priority && <ActiveChip label={filters.priority} onRemove={() => updateFilter('priority', '')} />}
@@ -729,13 +726,13 @@ export default function Tickets() {
               {filters.aiProcessed && <ActiveChip label="Traité IA" onRemove={() => updateFilter('aiProcessed', '')} />}
               {filters.approvalStatus && <ActiveChip label={`Approbation: ${filters.approvalStatus}`} onRemove={() => updateFilter('approvalStatus', '')} />}
               {filters.closeSuggested && <ActiveChip label="Clôture suggérée" onRemove={() => updateFilter('closeSuggested', '')} />}
-              <button onClick={clearFilters} className="shrink-0 ml-1 text-[10px] font-bold text-on-surface-variant hover:text-red-500 transition-colors flex items-center gap-0.5 whitespace-nowrap">
+              <button onClick={clearFilters} className="shrink-0 text-[10px] font-bold text-on-surface-variant hover:text-red-500 transition-colors flex items-center gap-0.5 whitespace-nowrap">
                 <X className="w-2.5 h-2.5" /> Tout effacer
               </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            </>
+          )}
+        </div>
+      </div>
 
       {/* ── MAIN CONTENT ────────────────────────────────────────────────────── */}
       <div className="flex-1 min-h-0 relative overflow-auto">
