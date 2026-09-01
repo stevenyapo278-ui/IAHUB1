@@ -22,7 +22,6 @@ import {
   Plus,
   X,
   Search,
-  SlidersHorizontal,
   User,
   Users,
   MapPin,
@@ -52,6 +51,7 @@ import TicketCoverflowCarousel from '../components/TicketCoverflowCarousel';
 import KanbanBoard from '../components/KanbanBoard';
 import SearchableSelect from '../components/SearchableSelect';
 import TicketFilterDrawer from '../components/TicketFilterDrawer';
+import TicketFilterBar from '../components/TicketFilterBar';
 import SearchableMultiSelect from '../components/SearchableMultiSelect';
 import RemoteUserSelect from '../components/RemoteUserSelect';
 import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
@@ -575,12 +575,6 @@ export default function Tickets() {
     return () => window.removeEventListener('keydown', onKey);
   }, [showForm]);
 
-  const hasActiveFilters = Boolean(
-    filters.status || filters.priority || filters.source || filters.category ||
-    filters.teamId || filters.assignedToId || filters.mine || filters.aiProcessed ||
-    filters.approvalStatus || filters.closeSuggested || searchQuery
-  );
-
   const activeFilterCount = [
     filters.status, filters.priority, filters.source, filters.category,
     filters.teamId, filters.assignedToId, filters.mine, filters.aiProcessed,
@@ -681,24 +675,6 @@ export default function Tickets() {
             <ColumnConfigPanel columns={columns} onChange={setColumns} />
           )}
 
-          {/* Filter button */}
-          <button
-            onClick={() => setFilterPanelOpen(true)}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold transition-all ${
-              activeFilterCount > 0
-                ? 'bg-primary/10 text-primary border-primary/30 hover:bg-primary/20'
-                : 'border-outline-variant/40 text-on-surface-variant hover:bg-surface-container hover:text-on-surface'
-            }`}
-          >
-            <SlidersHorizontal className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Filtres</span>
-            {activeFilterCount > 0 && (
-              <span className="w-4 h-4 flex items-center justify-center rounded-full bg-primary text-white text-[9px] font-black">
-                {activeFilterCount}
-              </span>
-            )}
-          </button>
-
           {/* New ticket */}
           <button
             onClick={toggleForm}
@@ -710,8 +686,8 @@ export default function Tickets() {
         </div>
       </div>
 
-      {/* ── SEARCH + FILTER CHIPS (same line) ────────────────────────────────── */}
-      <div className="px-4 sm:px-6 py-2.5 border-b border-outline-variant/20 bg-surface-container-lowest shrink-0">
+      {/* ── FILTER BAR (hybrid: quick chips + drawer) ──────────────────────────── */}
+      <div className="px-4 sm:px-6 py-2 border-b border-outline-variant/20 bg-surface-container-lowest shrink-0">
         <div className="flex items-center gap-2.5">
           {/* Search */}
           <div className="relative shrink-0">
@@ -733,32 +709,19 @@ export default function Tickets() {
               </button>
             )}
           </div>
-
-          {/* Separator */}
-          {hasActiveFilters && <div className="w-px h-4 bg-outline-variant/40 shrink-0" />}
-
-          {/* Filter chips */}
-          {hasActiveFilters && (
-            <>
-              <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest shrink-0">Filtres :</span>
-              {debouncedSearch && <ActiveChip label={`"${debouncedSearch}"`} onRemove={() => { setSearchQuery(''); setDebouncedSearch(''); setPage(1); }} />}
-              {filters.status && <ActiveChip label={filters.status === 'NOT_CLOSED' ? 'Non clôturés' : filters.status === 'OPEN_GROUP' ? 'Ouverts' : filters.status === 'CLOSED_GROUP' ? 'Clôturés' : filters.status} onRemove={() => updateFilter('status', '')} />}
-              {filters.priority && <ActiveChip label={filters.priority} onRemove={() => updateFilter('priority', '')} />}
-              {filters.source && <ActiveChip label={filters.source === 'glpi' ? 'GLPI' : 'ERP'} onRemove={() => updateFilter('source', '')} />}
-              {filters.teamId && <ActiveChip label={teams.find(t => String(t.id) === filters.teamId)?.name || `Équipe #${filters.teamId}`} onRemove={() => updateFilter('teamId', '')} />}
-              {filters.category && <ActiveChip label={filters.category} onRemove={() => updateFilter('category', '')} />}
-              {filters.assignedToId && <ActiveChip label={filters.assignedToId === 'none' ? 'Non assigné' : users.find(u => String(u.id) === filters.assignedToId)?.fullName || `#${filters.assignedToId}`} onRemove={() => updateFilter('assignedToId', '')} />}
-              {filters.mine && <ActiveChip label="Mes tickets" onRemove={() => updateFilter('mine', '')} />}
-              {filters.aiProcessed && <ActiveChip label="Traité IA" onRemove={() => updateFilter('aiProcessed', '')} />}
-              {filters.approvalStatus && <ActiveChip label={`Approbation: ${filters.approvalStatus}`} onRemove={() => updateFilter('approvalStatus', '')} />}
-              {filters.closeSuggested && <ActiveChip label="Clôture suggérée" onRemove={() => updateFilter('closeSuggested', '')} />}
-              <button onClick={clearFilters} className="shrink-0 text-[10px] font-bold text-on-surface-variant hover:text-red-500 transition-colors flex items-center gap-0.5 whitespace-nowrap">
-                <X className="w-2.5 h-2.5" /> Tout effacer
-              </button>
-            </>
-          )}
         </div>
       </div>
+      <TicketFilterBar
+        filters={filters}
+        onUpdate={updateFilter}
+        onClear={clearFilters}
+        onOpenDrawer={() => setFilterPanelOpen(true)}
+        activeFilterCount={activeFilterCount}
+        teams={teams}
+        users={users}
+        searchQuery={searchQuery}
+        onClearSearch={() => { setSearchQuery(''); setDebouncedSearch(''); setPage(1); }}
+      />
 
       {/* ── MAIN CONTENT ────────────────────────────────────────────────────── */}
       <div ref={tableContainerRef} className="flex-1 min-h-0 relative overflow-auto">
@@ -1469,17 +1432,6 @@ function StatPill({ color, count, label, onClick }) {
       <span className="tabular-nums font-bold text-on-surface">{count}</span>
       <span>{label}</span>
     </button>
-  );
-}
-
-function ActiveChip({ label, onRemove }) {
-  return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-container border border-outline-variant/40 text-[11px] font-medium text-on-surface whitespace-nowrap shrink-0">
-      {label}
-      <button onClick={onRemove} className="p-0.5 rounded-full hover:bg-outline-variant/30 transition-colors">
-        <X className="w-2.5 h-2.5" />
-      </button>
-    </span>
   );
 }
 
