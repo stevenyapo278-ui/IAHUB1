@@ -4,22 +4,20 @@ import { toast } from 'sonner';
 import api from '../api/client';
 import ConfirmDialog from '../components/ConfirmDialog';
 import Pagination from '../components/Pagination';
-import { useTheme } from '../context/ThemeContext';
 import {
-  Award, Plus, Trash2, X, Check,
-  Search, Star, UserPlus
+  BrainCircuit, Plus, Trash2, X, Check,
+  Search, Star, UserPlus, Users, Layers, Award,
 } from 'lucide-react';
 
 const LEVEL_CONFIG = {
-  1: { label: 'Débutant',       color: 'bg-zinc-500/15 text-zinc-700 dark:text-zinc-400 border-zinc-500/25' },
-  2: { label: 'Junior',         color: 'bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/25' },
-  3: { label: 'Intermédiaire',  color: 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/25' },
-  4: { label: 'Avancé',         color: 'bg-orange-500/15 text-orange-700 dark:text-orange-400 border-orange-500/25' },
-  5: { label: 'Expert',         color: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/25' },
+  1: { label: 'Débutant',       color: 'bg-zinc-500/10 text-zinc-600 dark:text-zinc-400 border border-zinc-500/20' },
+  2: { label: 'Junior',         color: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20' },
+  3: { label: 'Intermédiaire',  color: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20' },
+  4: { label: 'Avancé',         color: 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20' },
+  5: { label: 'Expert',         color: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' },
 };
 
 export default function SkillsManagement() {
-  const { theme } = useTheme();
   const [skills, setSkills] = useState([]);
   const [users, setUsers] = useState([]);
   const [newSkillName, setNewSkillName] = useState('');
@@ -101,7 +99,6 @@ export default function SkillsManagement() {
   const paginatedSkills = filteredSkills.slice((page - 1) * pageSize, page * pageSize);
   useEffect(() => { setPage(1); }, [search, catFilter, pageSize]);
 
-  // Group by category
   const skillGroups = (() => {
     const groups = [];
     const cats = [...new Set(paginatedSkills.map(s => s.category).filter(Boolean))];
@@ -115,96 +112,128 @@ export default function SkillsManagement() {
   })();
 
   return (
-    <div className="flex flex-col min-h-screen">
-      {/* ── Top Bar ─────────────────────────────────────────────────────── */}
-      <div className="sticky top-0 z-20 shrink-0 border-b border-outline-variant/30 bg-surface-container-lowest/95 backdrop-blur-sm px-4 sm:px-6 lg:px-8 py-3 flex items-center gap-4 flex-wrap">
-        <div className="flex items-center gap-3">
-          <div className="p-1.5 bg-amber-500/10 rounded-lg">
-            <Award className="w-5 h-5 text-amber-600 dark:text-amber-400" />
-          </div>
-          <div>
-            <h1 className="text-base font-bold text-on-surface">Compétences</h1>
-            <p className="text-[11px] text-on-surface-variant font-medium">{skills.length} compétences · {totalAssignations} assignations · {techs.length} techniciens</p>
-          </div>
-        </div>
+    <div className="px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-8 space-y-5 min-h-screen">
 
-        {/* Search */}
-        <div className="relative flex-1 max-w-xs hidden sm:block">
-          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50" />
-          <input
-            type="text"
-            placeholder="Rechercher une compétence..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full bg-surface border border-outline-variant/60 rounded-xl pl-8 pr-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-          />
-        </div>
-
-        {/* Category filter */}
-        {categories.length > 0 && (
-          <div className="flex items-center gap-1">
-            <button onClick={() => setCatFilter('')}
-              className={`px-2.5 py-1 rounded-full text-[10px] font-bold border transition-all ${!catFilter ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' : 'border-outline-variant/30 text-on-surface-variant hover:bg-surface-container'}`}
-            >Tout</button>
-            {categories.map(cat => (
-              <button key={cat} onClick={() => setCatFilter(catFilter === cat ? '' : cat)}
-                className={`px-2.5 py-1 rounded-full text-[10px] font-bold border transition-all ${catFilter === cat ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' : 'border-outline-variant/30 text-on-surface-variant hover:bg-surface-container'}`}
-              >{cat}</button>
-            ))}
+      {/* ── HERO HEADER ──────────────────────────────────────────────────── */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+        className="p-6 sm:p-8 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest shadow-sm"
+      >
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-3 mb-1.5">
+              <div className="p-2 rounded-xl bg-primary/10">
+                <BrainCircuit className="w-5 h-5 text-primary" />
+              </div>
+              <h1 className="text-xl sm:text-2xl font-bold text-on-surface tracking-tight">Compétences</h1>
+            </div>
+            <p className="text-sm text-on-surface-variant">Gestion des compétences techniques et assignations</p>
           </div>
-        )}
-
-        <div className="flex items-center gap-2 ml-auto">
           <motion.button
             whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-            onClick={() => setShowCreateForm(!showCreateForm)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 text-xs font-bold shadow-md shadow-amber-500/20"
+            onClick={() => setShowCreateForm(true)}
+            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 text-xs font-bold shadow-md shadow-amber-500/20 cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Nouvelle compétence</span>
+            <span>Nouvelle compétence</span>
           </motion.button>
+        </div>
+      </motion.div>
+
+      {/* ── STAT CARDS ──────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+        {[
+          { icon: Award, label: 'Compétences', value: skills.length, color: 'bg-primary/10 text-primary' },
+          { icon: UserPlus, label: 'Assignations', value: totalAssignations, color: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' },
+          { icon: Users, label: 'Techniciens', value: techs.length, color: 'bg-blue-500/10 text-blue-600 dark:text-blue-400' },
+          { icon: Layers, label: 'Catégories', value: categories.length, color: 'bg-violet-500/10 text-violet-600 dark:text-violet-400' },
+        ].map((s, i) => (
+          <motion.div key={i} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+            className="bg-surface-container-lowest border border-outline-variant/20 rounded-2xl p-4">
+            <div className="flex items-center gap-3">
+              <div className={`p-2 rounded-xl ${s.color}`}>
+                <s.icon className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-on-surface">{s.value ?? '—'}</p>
+                <p className="text-xs text-on-surface/50">{s.label}</p>
+              </div>
+            </div>
+          </motion.div>
+        ))}
+      </div>
+
+      {/* ── FILTER BAR ──────────────────────────────────────────────────── */}
+      <div className="bg-surface-container-lowest border border-outline-variant/20 rounded-2xl p-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Search */}
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50" />
+            <input
+              type="text"
+              placeholder="Rechercher une compétence..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full bg-surface border border-outline-variant/60 rounded-xl pl-8 pr-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+            />
+          </div>
+
+          {/* Category pills */}
+          {categories.length > 0 && (
+            <>
+              <div className="w-px h-6 bg-outline-variant/30" />
+              <div className="flex items-center gap-1 flex-wrap">
+                <button onClick={() => setCatFilter('')}
+                  className={`px-2.5 py-1 rounded-full text-[10px] font-bold border cursor-pointer transition-all ${!catFilter ? 'bg-primary/10 text-primary border-primary/20' : 'border-outline-variant/30 text-on-surface-variant hover:bg-surface-container'}`}
+                >Tout</button>
+                {categories.map(cat => (
+                  <button key={cat} onClick={() => setCatFilter(catFilter === cat ? '' : cat)}
+                    className={`px-2.5 py-1 rounded-full text-[10px] font-bold border cursor-pointer transition-all ${catFilter === cat ? 'bg-primary/10 text-primary border-primary/20' : 'border-outline-variant/30 text-on-surface-variant hover:bg-surface-container'}`}
+                  >{cat}</button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
-      {/* ── Create form panel → modal ─────────────────────────────────────── */}
-
-      {/* ── Legend ────────────────────────────────────────────────────────── */}
-      <div className="px-4 sm:px-6 lg:px-8 py-2.5 border-b border-outline-variant/10 flex items-center gap-4 overflow-x-auto">
-        <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider shrink-0">Niveaux :</span>
+      {/* ── Level legend ────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="text-[10px] font-bold text-on-surface/40 uppercase tracking-wider">Niveaux :</span>
         {Object.entries(LEVEL_CONFIG).map(([lvl, cfg]) => (
-          <div key={lvl} className={`shrink-0 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border ${cfg.color}`}>
+          <div key={lvl} className={`shrink-0 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold ${cfg.color}`}>
             {[...Array(Number(lvl))].map((_, i) => <Star key={i} className="w-2 h-2 fill-current" />)}
             <span>{cfg.label}</span>
           </div>
         ))}
       </div>
 
-      {/* ── Content ───────────────────────────────────────────────────────── */}
-      <div className="flex-1 px-4 sm:px-6 lg:px-8 py-6">
-        {loading && skills.length === 0 ? (
-          <div className="flex items-center justify-center py-20 gap-2 text-on-surface-variant">
-            <div className="w-5 h-5 rounded-full border-2 border-amber-500/30 border-t-amber-500 animate-spin" />
-            <span className="text-sm">Chargement...</span>
+      {/* ── Content ─────────────────────────────────────────────────────── */}
+      {loading && skills.length === 0 ? (
+        <div className="flex items-center justify-center py-20 gap-2 text-on-surface-variant">
+          <div className="w-5 h-5 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
+          <span className="text-sm">Chargement...</span>
+        </div>
+      ) : filteredSkills.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 gap-3 text-on-surface-variant">
+          <div className="p-5 rounded-full bg-surface-container">
+            <Award className="w-10 h-10 text-outline/30" />
           </div>
-        ) : filteredSkills.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 gap-3 text-on-surface-variant">
-            <div className="p-5 rounded-full bg-surface-container">
-              <Award className="w-10 h-10 text-outline/30" />
-            </div>
-            <p className="text-sm italic">{search ? 'Aucune compétence trouvée.' : 'Aucune compétence définie. Créez-en une !'}</p>
-          </div>
-        ) : (
-          <>
+          <p className="text-sm italic">{search ? 'Aucune compétence trouvée.' : 'Aucune compétence définie. Créez-en une !'}</p>
+        </div>
+      ) : (
+        <>
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
             <AnimatePresence initial={false}>
               {skillGroups.map((group, gi) => (
                 <Fragment key={gi}>
-                  {/* Category header */}
                   {group.category && (
                     <div className="col-span-full flex items-center gap-2 py-2 first:pt-0">
-                      <div className="w-1 h-4 rounded-full bg-amber-500" />
-                      <span className="text-[11px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-400">{group.category}</span>
-                      <span className="text-[10px] text-on-surface-variant/50 font-medium">({group.skills.length})</span>
+                      <div className="w-1 h-4 rounded-full bg-primary" />
+                      <span className="text-[11px] font-black uppercase tracking-widest text-primary">{group.category}</span>
+                      <span className="text-[10px] text-on-surface/40 font-medium">({group.skills.length})</span>
                     </div>
                   )}
                   {group.skills.map((skill, idx) => (
@@ -213,11 +242,12 @@ export default function SkillsManagement() {
                       layout
                       initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}
                       transition={{ duration: 0.18, delay: idx * 0.025 }}
-                      className="rounded-2xl border border-outline-variant/30 overflow-hidden bg-surface-container-lowest"
+                      className="rounded-2xl border border-outline-variant/20 overflow-hidden bg-surface-container-lowest"
                     >
-                      <div className="flex items-center gap-3 px-4 py-3 border-b border-outline-variant/15">
-                        <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
-                          <Award className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                      {/* Skill header */}
+                      <div className="flex items-center gap-3 px-4 py-3 border-b border-outline-variant/10">
+                        <div className="w-8 h-8 rounded-xl bg-primary/10 border border-primary/15 flex items-center justify-center">
+                          <Award className="w-4 h-4 text-primary" />
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-bold text-on-surface truncate">{skill.name}</p>
@@ -226,19 +256,22 @@ export default function SkillsManagement() {
                         <div className="flex items-center gap-1 shrink-0">
                           <button
                             onClick={() => setAssignModal({ open: true, skill, tech: null })}
-                            className="p-1.5 rounded-lg border border-outline-variant/30 text-[10px] font-bold flex items-center gap-1 text-on-surface-variant hover:bg-surface-container transition-all"
+                            className="p-1.5 rounded-lg border border-outline-variant/30 text-on-surface-variant hover:bg-surface-container transition-all cursor-pointer"
+                            title="Assigner"
                           >
                             <UserPlus className="w-3 h-3" />
                           </button>
                           <button
                             onClick={() => setDeleteConfirm(skill.id)}
-                            className="p-1.5 rounded-lg text-on-surface-variant/50 hover:text-red-500 hover:bg-red-500/10 transition-all"
+                            className="p-1.5 rounded-lg text-on-surface-variant/40 hover:text-red-500 hover:bg-red-500/10 transition-all cursor-pointer"
+                            title="Supprimer"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </div>
 
+                      {/* Assigned technicians */}
                       <div className="px-4 py-3 space-y-2 min-h-[60px]">
                         {skill.userSkills?.length > 0 ? skill.userSkills.map(us => {
                           const cfg = LEVEL_CONFIG[us.level] || LEVEL_CONFIG[3];
@@ -251,7 +284,7 @@ export default function SkillsManagement() {
                                 <span className="text-xs text-on-surface font-medium">{us.user.fullName}</span>
                               </div>
                               <div className="flex items-center gap-1.5">
-                                <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[9px] font-bold border ${cfg.color}`}>
+                                <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[9px] font-bold ${cfg.color}`}>
                                   {[...Array(us.level)].map((_, i) => <Star key={i} className="w-2 h-2 fill-current" />)}
                                   <span className="ml-0.5">{cfg.label}</span>
                                 </span>
@@ -265,7 +298,7 @@ export default function SkillsManagement() {
                             </div>
                           );
                         }) : (
-                          <p className="text-xs text-on-surface-variant/50 italic">Aucun technicien assigné</p>
+                          <p className="text-xs text-on-surface-variant/40 italic">Aucun technicien assigné</p>
                         )}
                       </div>
                     </motion.div>
@@ -279,9 +312,8 @@ export default function SkillsManagement() {
               <Pagination page={page} totalPages={totalPages} total={filteredSkills.length} label="compétences" onPageChange={setPage} pageSize={pageSize} onPageSizeChange={(s) => { setPageSize(s); setPage(1); }} />
             </div>
           )}
-          </>
-        )}
-      </div>
+        </>
+      )}
 
       {/* ── Assignment Modal ──────────────────────────────────────────── */}
       <AnimatePresence>
@@ -302,11 +334,10 @@ export default function SkillsManagement() {
               transition={{ type: 'spring', damping: 25, stiffness: 300 }}
               className="relative w-full max-w-lg rounded-3xl border border-outline-variant/30 bg-surface shadow-2xl overflow-hidden"
             >
-              {/* Header */}
               <div className="flex items-center justify-between px-5 py-4 border-b border-outline-variant/20">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-xl bg-amber-500/10">
-                    <UserPlus className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  <div className="p-2 rounded-xl bg-primary/10">
+                    <UserPlus className="w-4 h-4 text-primary" />
                   </div>
                   <div>
                     <h2 className="text-sm font-bold text-on-surface">Assigner une compétence</h2>
@@ -321,9 +352,7 @@ export default function SkillsManagement() {
                 </button>
               </div>
 
-              {/* Body */}
               <div className="px-5 py-5 space-y-5">
-                {/* Tech selector */}
                 <label className="flex flex-col gap-2">
                   <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Technicien</span>
                   <select value={assigningUserId} onChange={e => setAssigningUserId(e.target.value)}
@@ -334,7 +363,6 @@ export default function SkillsManagement() {
                   </select>
                 </label>
 
-                {/* Level selector */}
                 <label className="flex flex-col gap-2">
                   <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Niveau</span>
                   <div className="grid grid-cols-5 gap-2">
@@ -342,7 +370,7 @@ export default function SkillsManagement() {
                       <button
                         key={lvl}
                         onClick={() => setAssigningLevel(lvl)}
-                        className={`py-3 rounded-xl border text-center transition-all ${
+                        className={`py-3 rounded-xl border text-center cursor-pointer transition-all ${
                           assigningLevel === lvl
                             ? `${LEVEL_CONFIG[lvl].color} scale-105 shadow-sm`
                             : 'border-outline-variant/30 text-on-surface-variant hover:bg-surface-container hover:border-outline-variant/50'
@@ -359,8 +387,7 @@ export default function SkillsManagement() {
                   </div>
                 </label>
 
-                {/* Description */}
-                <div className={`px-3 py-2 rounded-xl border ${LEVEL_CONFIG[assigningLevel]?.color} border-current/20`}>
+                <div className={`px-3 py-2 rounded-xl ${LEVEL_CONFIG[assigningLevel]?.color}`}>
                   <p className="text-[11px] font-medium">
                     {assigningLevel === 1 && 'Connaissances de base, nécessite une supervision régulière.'}
                     {assigningLevel === 2 && 'Peut réaliser des tâches simples en autonomie avec des vérifications.'}
@@ -371,7 +398,6 @@ export default function SkillsManagement() {
                 </div>
               </div>
 
-              {/* Footer */}
               <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-outline-variant/20 bg-surface-container-low/40">
                 <button
                   onClick={() => setAssignModal({ open: false, skill: null, tech: null })}
@@ -385,7 +411,7 @@ export default function SkillsManagement() {
                     setAssignModal({ open: false, skill: null, tech: null });
                   }}
                   disabled={!assigningUserId}
-                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 text-xs font-bold shadow-md hover:brightness-110 transition-all disabled:opacity-40"
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 text-xs font-bold shadow-md hover:brightness-110 transition-all disabled:opacity-40 cursor-pointer"
                 >
                   <Check className="w-3.5 h-3.5 inline-block mr-1.5 -mt-0.5" />
                   Assigner
@@ -415,11 +441,10 @@ export default function SkillsManagement() {
               transition={{ type: 'spring', damping: 25, stiffness: 300 }}
               className="relative w-full max-w-md bg-surface rounded-2xl border border-outline-variant/30 shadow-2xl overflow-hidden"
             >
-              {/* Header */}
               <div className="flex items-center justify-between px-5 py-4 border-b border-outline-variant/20">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-xl bg-amber-500/10">
-                    <Award className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  <div className="p-2 rounded-xl bg-primary/10">
+                    <Award className="w-4 h-4 text-primary" />
                   </div>
                   <h2 className="text-sm font-bold text-on-surface">Nouvelle compétence</h2>
                 </div>
@@ -430,7 +455,6 @@ export default function SkillsManagement() {
                 ><X className="w-4 h-4" /></motion.button>
               </div>
 
-              {/* Body */}
               <form onSubmit={handleCreateSkill} className="px-5 py-5 space-y-4">
                 <label className="flex flex-col gap-1.5">
                   <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Nom *</span>
@@ -449,14 +473,13 @@ export default function SkillsManagement() {
                 </label>
               </form>
 
-              {/* Footer */}
               <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-outline-variant/20 bg-surface-container-low/40">
                 <button type="button" onClick={() => setShowCreateForm(false)} disabled={savingCreate}
-                  className="px-4 py-2 rounded-xl border border-outline-variant/40 text-on-surface text-xs font-semibold hover:bg-surface-container transition-colors disabled:opacity-50">
+                  className="px-4 py-2 rounded-xl border border-outline-variant/40 text-on-surface text-xs font-semibold hover:bg-surface-container transition-colors disabled:opacity-50 cursor-pointer">
                   Annuler
                 </button>
                 <button type="button" onClick={handleCreateSkill} disabled={savingCreate || !newSkillName.trim()}
-                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 text-xs font-bold shadow-md disabled:opacity-50 flex items-center gap-2 transition-all">
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 text-xs font-bold shadow-md disabled:opacity-50 flex items-center gap-2 transition-all cursor-pointer">
                   {savingCreate ? <span className="w-3.5 h-3.5 border-2 border-slate-950/30 border-t-slate-950 rounded-full animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
                   {savingCreate ? 'Création...' : 'Créer'}
                 </button>

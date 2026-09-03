@@ -1,11 +1,34 @@
 # Mode développement : hot reload sur backend et frontend
-# Usage : docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# Usage : docker compose -f docker-compose.dev.yml up -d --build
 
 services:
 
+  # ── PostgreSQL ───────────────────────────────────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-erp_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-erp_password}
+      POSTGRES_DB: ${POSTGRES_DB:-erp_itsm}
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-erp_user} -d ${POSTGRES_DB:-erp_itsm}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5435:5432"
+    networks:
+      - ia-hub-network
+
+  # ── Backend Express (hot reload via nodemon) ─────────────────────────────────
   backend:
     build:
       context: ./erp-backend
+      dockerfile: Dockerfile
     command: npm run dev
     depends_on:
       postgres:
@@ -13,12 +36,14 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
+      NODE_ENV: development
       DATABASE_URL: postgresql://erp_user:erp_password@postgres:5432/erp_itsm?schema=public
       JWT_SECRET: ${JWT_SECRET:-dev_jwt_secret_change_in_production}
       JWT_EXPIRES_IN: 8h
-      CORS_ORIGIN: "*"
+      CORS_ORIGIN: http://localhost:5173,http://localhost:4000
       FRONTEND_URL: http://localhost:5173
       BACKEND_URL: http://localhost:4000
+      PORT: 4000
       AUTH_EMAIL_DOMAIN: ${AUTH_EMAIL_DOMAIN:-}
       LDAP_ENABLED: ${LDAP_ENABLED:-false}
       LDAP_URL: ${LDAP_URL:-ldap://10.0.70.1}
@@ -39,15 +64,21 @@ services:
       - ./erp-backend/src:/app/src
       - ./erp-backend/prisma:/app/prisma
 
+  # ── Frontend React (Vite HMR) ───────────────────────────────────────────────
   frontend:
     build:
       context: ./erp-frontend
+      dockerfile: Dockerfile
       target: builder
     command: npm run dev
+    depends_on:
+      - backend
     ports:
       - "5173:5173"
     environment:
       VITE_API_URL: http://localhost:4000/api
+    networks:
+      - ia-hub-network
     volumes:
       - ./erp-frontend/src:/app/src
       - ./erp-frontend/public:/app/public
@@ -55,3 +86,10 @@ services:
       - ./erp-frontend/postcss.config.js:/app/postcss.config.js
       - ./erp-frontend/vite.config.js:/app/vite.config.js
       - ./erp-frontend/index.html:/app/index.html
+
+networks:
+  ia-hub-network:
+    driver: bridge
+
+volumes:
+  postgres_dev_data:

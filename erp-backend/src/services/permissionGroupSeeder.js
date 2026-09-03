@@ -9,7 +9,7 @@ const DEFAULT_GROUPS = [
     description: 'Groupe par défaut pour le rôle Administrateur.',
     permissions: [
       'tickets.view', 'tickets.delete', 'tickets.bulkDelete', 'tickets.assign',
-      'tickets.approve', 'tickets.timesheet', 'tickets.manage',
+      'tickets.approve', 'tickets.timesheet', 'tickets.manage', 'problems.manage',
       'users.manage', 'teams.manage',
       'settings.ai', 'settings.email', 'settings.integrations',
       'knowledge.manage', 'inbox.sync', 'prompts.manage',
@@ -21,7 +21,7 @@ const DEFAULT_GROUPS = [
     name: 'Équipe Hotline',
     description: 'Groupe par défaut pour le rôle Hotline.',
     permissions: [
-      'tickets.approve', 'tickets.assign', 'tickets.manage', 'teams.manage',
+      'tickets.approve', 'tickets.assign', 'tickets.manage', 'problems.manage', 'teams.manage',
       'aiweeklyreports.manage', 'emaildrafts.manage', 'locations.manage',
     ],
   },

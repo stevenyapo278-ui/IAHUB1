@@ -1,14 +1,11 @@
 import { motion } from 'framer-motion';
 import {
   CheckCircle2, Radio, User, UserX, Flag, Sparkles, Flame, SlidersHorizontal,
-  X,
+  X, Search,
 } from 'lucide-react';
 
 // ── TicketFilterBar ──────────────────────────────────────────────────────────
 // Barre de filtres rapide toujours visible au-dessus du tableau.
-// Affiche des raccourcis cliquables (toggle) pour les filtres les plus courants,
-// les filtres actifs en tant que chips supprimables, et un bouton "Filtres avancés"
-// qui ouvre le drawer existant.
 const QUICK_TOGGLES = [
   { key: 'status', val: 'OPEN_GROUP', label: 'Ouverts', Icon: Radio },
   { key: 'status', val: 'CLOSED_GROUP', label: 'Clôturés', Icon: CheckCircle2 },
@@ -41,22 +38,43 @@ export default function TicketFilterBar({
   teams,
   users,
   searchQuery,
+  onSearchChange,
   onClearSearch,
 }) {
   return (
-    <div className="px-4 sm:px-6 py-2 border-b border-outline-variant/20 bg-surface-container-lowest shrink-0">
-      {/* ── Row 1 : Quick toggle chips ── */}
-      <div className="flex items-center gap-1.5 flex-wrap">
+    <div className="px-4 sm:px-6 py-2.5 border-b border-outline-variant/20 bg-surface-container-lowest shrink-0">
+      {/* ── Row 1 : Search + Quick toggle chips + Advanced filters ── */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {/* Live Search Input */}
+        <div className="relative shrink-0 mr-1">
+          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50" />
+          <input
+            type="text"
+            value={searchQuery || ''}
+            onChange={(e) => onSearchChange?.(e.target.value)}
+            placeholder="Rechercher... ⌘K"
+            className="w-48 pl-8 pr-7 py-1.5 text-xs bg-surface border border-outline-variant/60 rounded-xl text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+          />
+          {searchQuery && (
+            <button
+              onClick={onClearSearch}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-on-surface-variant/60 hover:text-on-surface"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+
         {QUICK_TOGGLES.map(({ key, val, label, Icon }) => {
           const active = filters[key] === val;
           return (
             <button
               key={`${key}-${val}`}
               onClick={() => onUpdate(key, active ? '' : val)}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-all cursor-pointer shrink-0 ${
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-semibold border transition-all cursor-pointer shrink-0 ${
                 active
-                  ? 'bg-primary/10 text-primary border-primary/30 shadow-sm'
-                  : 'bg-transparent border-outline-variant/30 text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface hover:border-outline-variant/50'
+                  ? 'bg-primary/10 text-primary border-primary/30 shadow-xs'
+                  : 'bg-surface border-outline-variant/30 text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
               }`}
             >
               <Icon className="w-3 h-3" />

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import {
@@ -57,6 +57,7 @@ import SearchableMultiSelect from '../components/SearchableMultiSelect';
 import RemoteUserSelect from '../components/RemoteUserSelect';
 import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
 import SlaBadge from '../components/SlaBadge';
+import DataGrid from '../components/DataGrid';
 import {
   STATUS_OPTIONS, STATUS_LABELS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS, URGENCY_IMPACT_OPTIONS,
   STATUS_CONFIG,
@@ -126,8 +127,6 @@ const PRIORITY_DOT = {
   P4: { color: 'bg-emerald-500',label: 'P4', text: 'text-emerald-500'},
 };
 
-// STATUS_CONFIG importé depuis constants/tickets.js — pas de doublon local
-
 function PriorityDot({ priority, showLabel = false }) {
   const conf = PRIORITY_DOT[priority] || PRIORITY_DOT.P4;
   return (
@@ -154,6 +153,430 @@ function Avatar({ name, colorClass = 'bg-blue-500/15 text-blue-600 dark:text-blu
     <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full border text-[10px] font-bold shrink-0 ${colorClass}`}>
       {name.charAt(0).toUpperCase()}
     </span>
+  );
+}
+
+// ── AG Grid cell renderers ───────────────────────────────────────────────────
+function PriorityRenderer({ data }) {
+  if (!data) return null;
+  return <PriorityDot priority={data.priority} />;
+}
+
+function TicketInfoRenderer({ data, context }) {
+  if (!data) return null;
+  const { debouncedSearch } = context || {};
+  return (
+    <div className="flex flex-col justify-center h-full py-1 min-w-0 w-full overflow-hidden leading-snug">
+      {/* Row 1: ID + Title + Badges */}
+      <div className="flex items-center gap-1.5 min-w-0 w-full overflow-hidden">
+        <Link
+          to={`/tickets/${data.id}`}
+          onClick={(e) => e.stopPropagation()}
+          className={`font-mono text-xs font-extrabold tabular-nums shrink-0 hover:underline ${PRIORITY_DOT[data.priority]?.text || 'text-on-surface-variant'}`}
+        >
+          #{data.id}
+        </Link>
+        <Link
+          to={`/tickets/${data.id}`}
+          onClick={(e) => e.stopPropagation()}
+          className="text-xs font-bold text-on-surface hover:text-primary transition-colors truncate min-w-0 flex-1 overflow-hidden"
+        >
+          <HighlightText text={data.title} query={debouncedSearch} />
+        </Link>
+        {data.aiProcessed && (
+          <span className="px-1.5 py-0.5 rounded-md text-[9px] font-extrabold bg-purple-500/15 text-purple-600 dark:text-purple-400 shrink-0">
+            IA
+          </span>
+        )}
+        {data.glpiTicketId && (
+          <span className="px-1.5 py-0.5 rounded-md text-[9px] font-semibold bg-surface-container text-on-surface-variant shrink-0">
+            GLPI
+          </span>
+        )}
+      </div>
+      {/* Row 2: Category · Location */}
+      {(data.category || data.glpiLocationName) && (
+        <div className="flex items-center gap-2 mt-0.5 text-[11px] text-on-surface-variant font-medium min-w-0 w-full overflow-hidden truncate">
+          {data.category && <span className="truncate max-w-[140px]">{data.category}</span>}
+          {data.glpiLocationName && (
+            <span className="flex items-center gap-0.5 truncate max-w-[140px]">
+              <MapPin className="w-3 h-3 shrink-0 text-amber-500/70" />
+              {data.glpiLocationName}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatusRenderer({ data, context }) {
+  if (!data) return null;
+  const { canAssign, handleQuickStatusChange, STATUS_OPTIONS: opts, STATUS_LABELS: labels } = context || {};
+  if (canAssign) {
+    return (
+      <div className="flex items-center h-full w-full">
+        <select
+          value={data.status}
+          onChange={(e) => handleQuickStatusChange?.(data.id, e.target.value, e)}
+          className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-outline-variant/40 bg-surface text-on-surface cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary/30 transition-all w-full max-w-[125px] truncate"
+        >
+          {(opts || STATUS_OPTIONS).map(s => <option key={s} value={s}>{(labels || STATUS_LABELS)[s] || s}</option>)}
+        </select>
+      </div>
+    );
+  }
+  return <StatusPill status={data.status} />;
+}
+
+function AssigneeRenderer({ data }) {
+  if (!data) return null;
+  const assignee = data.assignedTo;
+  if (!assignee) return <span className="text-sm text-muted-foreground/60 italic">Non assigné</span>;
+  return (
+    <div className="flex h-full items-center gap-2.5">
+      <Avatar name={assignee.fullName} />
+      <span className="text-sm font-medium text-foreground truncate">{assignee.fullName}</span>
+    </div>
+  );
+}
+
+function RequesterRenderer({ data }) {
+  if (!data) return null;
+  const reqName = data.requester?.fullName || data.sourceName || data.sourceEmail;
+  if (!reqName) return <span className="text-sm text-muted-foreground/60 italic">—</span>;
+  return (
+    <div className="flex h-full items-center gap-2.5">
+      <Avatar name={reqName} colorClass="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20" />
+      <span className="text-sm font-medium text-foreground truncate">{reqName}</span>
+    </div>
+  );
+}
+
+function LocationRenderer({ data }) {
+  if (!data) return null;
+  if (!data.glpiLocationName) return <span className="text-sm text-muted-foreground/60 italic">—</span>;
+  return (
+    <div className="flex h-full items-center gap-2">
+      <MapPin className="w-3.5 h-3.5 shrink-0 text-amber-500/60" />
+      <span className="text-sm font-medium text-foreground truncate">{data.glpiLocationName}</span>
+    </div>
+  );
+}
+
+function ObserverRenderer({ data }) {
+  if (!data) return null;
+  const observers = data.observers;
+  if (!observers || observers.length === 0) return <span className="text-sm text-muted-foreground/60 italic">—</span>;
+  return (
+    <div className="flex h-full items-center gap-1.5 flex-wrap">
+      {observers.slice(0, 2).map((o) => (
+        <span key={o.id} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400 text-[10px] font-semibold">
+          <Eye className="w-3 h-3" />
+          {o.fullName}
+        </span>
+      ))}
+      {observers.length > 2 && (
+        <span className="text-[10px] text-muted-foreground font-medium">+{observers.length - 2}</span>
+      )}
+    </div>
+  );
+}
+
+function DateCellRenderer({ value, titlePrefix }) {
+  if (!value) return <span className="text-sm text-muted-foreground/40">—</span>;
+  return (
+    <span className="text-sm font-medium tabular-nums text-muted-foreground" title={`${titlePrefix} ${new Date(value).toLocaleString('fr-FR')}`}>
+      {formatDateShort(value)}
+    </span>
+  );
+}
+
+function ActionsRenderer({ data, context }) {
+  if (!data) return null;
+  const { canDelete, askDeleteOne } = context || {};
+  const btnCls = "inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground";
+  return (
+    <div className="flex h-full items-center gap-1">
+      {canDelete && (
+        <button type="button" aria-label="Supprimer" className={btnCls}
+          onClick={(e) => { e.stopPropagation(); askDeleteOne?.(data.id); }}>
+          <Trash2 className="h-4 w-4" />
+        </button>
+      )}
+      <Link
+        to={`/tickets/${data.id}`}
+        aria-label="Voir"
+        className={btnCls}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <ChevronRight className="h-4 w-4" />
+      </Link>
+    </div>
+  );
+}
+
+function TableSkeleton() {
+  return (
+    <div className="mx-4 sm:mx-6 lg:mx-8 mb-4 rounded-2xl border border-border/30 bg-surface overflow-hidden animate-pulse">
+      <table className="w-full text-left">
+        <thead>
+          <tr className="border-b border-border/20 bg-surface-muted/50">
+            {[...Array(7)].map((_, i) => (
+              <th key={i} className="px-3 py-2.5">
+                <div className="h-2.5 rounded bg-border/20 w-16" />
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {[...Array(12)].map((_, row) => (
+            <tr key={row} className="border-b border-border/10">
+              <td className="px-3 py-2.5 w-6"><div className="h-2.5 w-2.5 rounded-full bg-border/20" /></td>
+              <td className="px-3 py-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="h-2.5 w-10 rounded bg-border/20" />
+                  <div className="h-3 w-28 rounded bg-border/15" />
+                </div>
+              </td>
+              <td className="px-3 py-2.5"><div className="h-5 w-14 rounded-md bg-border/15" /></td>
+              <td className="px-3 py-2.5"><div className="flex items-center gap-1.5"><div className="h-5 w-5 rounded-full bg-border/15" /><div className="h-2.5 w-16 rounded bg-border/15" /></div></td>
+              <td className="px-3 py-2.5"><div className="flex items-center gap-1.5"><div className="h-5 w-5 rounded-full bg-border/15" /><div className="h-2.5 w-14 rounded bg-border/15" /></div></td>
+              <td className="px-3 py-2.5"><div className="h-2.5 w-16 rounded bg-border/15" /></td>
+              <td className="px-3 py-2.5"><div className="h-2.5 w-16 rounded bg-border/15" /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PaginationButtons({ page, totalPages, onPageChange }) {
+  const [jumpValue, setJumpValue] = useState('');
+  const jumpRef = useRef(null);
+
+  const pages = useMemo(() => {
+    if (totalPages <= 7) {
+      return Array.from({ length: totalPages }, (_, i) => i + 1);
+    }
+    const result = [];
+    result.push(1);
+    if (page > 3) result.push('...');
+    const start = Math.max(2, page - 1);
+    const end = Math.min(totalPages - 1, page + 1);
+    for (let i = start; i <= end; i++) result.push(i);
+    if (page < totalPages - 2) result.push('...');
+    result.push(totalPages);
+    return result;
+  }, [page, totalPages]);
+
+  function handleKeyDown(e) {
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      onPageChange(Math.max(1, page - 1));
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      onPageChange(Math.min(totalPages, page + 1));
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      onPageChange(1);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      onPageChange(totalPages);
+    }
+  }
+
+  function handleJump(e) {
+    e.preventDefault();
+    const val = parseInt(jumpValue, 10);
+    if (!isNaN(val) && val >= 1 && val <= totalPages && val !== page) {
+      onPageChange(val);
+    }
+    setJumpValue('');
+    jumpRef.current?.blur();
+  }
+
+  const btnBase = 'h-10 min-w-[40px] flex items-center justify-center rounded-lg text-xs font-semibold transition-all duration-150 active:scale-95';
+  const btnEnabled = 'text-muted-foreground hover:bg-surface-muted hover:text-foreground';
+  const btnDisabled = 'text-muted-foreground/30 cursor-not-allowed';
+  const btnActive = 'bg-primary text-primary-foreground shadow-sm shadow-primary/20';
+
+  return (
+    <div className="flex items-center gap-2" onKeyDown={handleKeyDown} role="navigation" aria-label="Pagination">
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => onPageChange(1)}
+          disabled={page <= 1}
+          aria-label="Première page"
+          className={`${btnBase} px-1.5 ${page <= 1 ? btnDisabled : btnEnabled}`}
+        >
+          <ChevronsLeft className="w-4 h-4" />
+        </button>
+        <button
+          onClick={() => onPageChange(Math.max(1, page - 1))}
+          disabled={page <= 1}
+          aria-label="Page précédente"
+          className={`${btnBase} px-1.5 ${page <= 1 ? btnDisabled : btnEnabled}`}
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+
+        {pages.map((p, i) =>
+          p === '...' ? (
+            <span key={`dots-${i}`} className="w-8 h-10 flex items-center justify-center text-xs text-muted-foreground/40">…</span>
+          ) : (
+            <button
+              key={p}
+              onClick={() => onPageChange(p)}
+              aria-label={`Page ${p}`}
+              aria-current={p === page ? 'page' : undefined}
+              className={`${btnBase} px-1 ${p === page ? btnActive : btnEnabled}`}
+            >
+              {p}
+            </button>
+          )
+        )}
+
+        <button
+          onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+          disabled={page >= totalPages}
+          aria-label="Page suivante"
+          className={`${btnBase} px-1.5 ${page >= totalPages ? btnDisabled : btnEnabled}`}
+        >
+          <ChevronRight className="w-4 h-4" />
+        </button>
+        <button
+          onClick={() => onPageChange(totalPages)}
+          disabled={page >= totalPages}
+          aria-label="Dernière page"
+          className={`${btnBase} px-1.5 ${page >= totalPages ? btnDisabled : btnEnabled}`}
+        >
+          <ChevronsRight className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Jump-to */}
+      <form onSubmit={handleJump} className="flex items-center gap-1.5 ml-2">
+        <span className="text-[11px] text-muted-foreground">→</span>
+        <input
+          ref={jumpRef}
+          type="number"
+          min={1}
+          max={totalPages}
+          value={jumpValue}
+          onChange={(e) => setJumpValue(e.target.value)}
+          placeholder={`1–${totalPages}`}
+          className="w-16 h-8 px-2 text-[11px] text-center font-semibold bg-surface border border-border/40 rounded-lg text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-primary/30 transition-all"
+        />
+      </form>
+    </div>
+  );
+}
+
+function ColumnConfigPanel({ columns, onChange }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-surface-muted transition-all"
+        title="Configurer les colonnes"
+      >
+        <Settings2 className="w-4 h-4" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full pt-1 z-40">
+            <div className="rounded-xl border border-border/30 bg-surface shadow-xl p-2 min-w-[200px]">
+              <p className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Colonnes</p>
+              {columns.map((col) => (
+                <label key={col.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium text-foreground hover:bg-surface-muted cursor-pointer transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={col.visible}
+                    onChange={() => {
+                      const next = columns.map((c) => c.key === col.key ? { ...c, visible: !c.visible } : c);
+                      onChange(next);
+                      localStorage.setItem('tickets_columns', JSON.stringify(next));
+                    }}
+                    className="accent-primary w-3.5 h-3.5 rounded"
+                  />
+                  {col.label}
+                </label>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function loadColumnConfig() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('tickets_columns'));
+    if (Array.isArray(saved) && saved.length > 0) return saved;
+  } catch {}
+  return [
+    { key: 'priority', label: 'Priorité', visible: true },
+    { key: 'ticket', label: 'Ticket', visible: true },
+    { key: 'status', label: 'Statut', visible: true },
+    { key: 'assignedTo', label: 'Assigné', visible: true },
+    { key: 'requester', label: 'Demandeur', visible: true },
+    { key: 'location', label: 'Lieu', visible: true },
+    { key: 'observers', label: 'Observateurs', visible: true },
+    { key: 'createdAt', label: 'Ouvert', visible: true },
+    { key: 'updatedAt', label: 'Modifié', visible: true },
+  ];
+}
+
+function isDueOverdue(t) {
+  if (!t.dueDate) return false;
+  if (['SOLVED', 'CLOSED'].includes(t.status)) return false;
+  return new Date(t.dueDate) < new Date();
+}
+
+function StatPill({ color, count, label, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold transition-all hover:scale-105 active:scale-95"
+      style={{ backgroundColor: `color-mix(in srgb, ${color} 12%, transparent)`, color }}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full`} style={{ backgroundColor: color }} />
+      {count} {label}
+    </button>
+  );
+}
+
+function FormField({ label, children, error }) {
+  return (
+    <div>
+      <label className="block text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-1.5">{label}</label>
+      {children}
+      {error && <p className="mt-1 text-[10px] font-semibold text-red-500">{error}</p>}
+    </div>
+  );
+}
+
+const FIELD_CLS = "w-full px-3 py-2 text-sm bg-surface border border-outline-variant/30 rounded-xl text-on-surface placeholder-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all";
+
+// ── ChevronsRight icon (small) ───────────────────────────────────────────────
+function ChevronsLeft({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m11 17-5-5 5-5" /><path d="m18 17-5-5 5-5" />
+    </svg>
+  );
+}
+function ChevronsRight({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m6 17 5-5-5-5" /><path d="m13 17 5-5-5-5" />
+    </svg>
   );
 }
 
@@ -270,19 +693,16 @@ export default function Tickets() {
   }
 
   useEffect(() => {
-    const params = new URLSearchParams(searchParams);
-    if (debouncedSearch) params.set('search', debouncedSearch); else params.delete('search');
-    if (sortBy && sortBy !== 'createdAt') params.set('sortBy', sortBy); else params.delete('sortBy');
-    if (sortOrder && sortOrder !== 'desc') params.set('sortOrder', sortOrder); else params.delete('sortOrder');
-    if (page && page !== 1) params.set('page', String(page)); else params.delete('page');
+    const params = new URLSearchParams();
+    if (debouncedSearch) params.set('search', debouncedSearch);
+    if (sortBy && sortBy !== 'createdAt') params.set('sortBy', sortBy);
+    if (sortOrder && sortOrder !== 'desc') params.set('sortOrder', sortOrder);
+    if (page && page !== 1) params.set('page', String(page));
     Object.entries(filters).forEach(([k, v]) => {
       if (k === 'status') {
-        // Statut vide = tous les statuts (on garde ?status= pour que ça survive au rechargement)
-        params.set(k, v || '');
+        if (v) params.set(k, v);
       } else if (v) {
         params.set(k, v);
-      } else {
-        params.delete(k);
       }
     });
     setSearchParams(params, { replace: true });
@@ -305,15 +725,14 @@ export default function Tickets() {
     setPage(1);
   }
 
-  function toggleSort(field) {
-    if (sortBy === field) {
-      setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setSortBy(field);
-      setSortOrder('asc');
+  // ── Visibility set for column config
+  const visibleKeys = useMemo(() => {
+    const set = new Set(['priority']);
+    for (const c of columns) {
+      if (c.visible) set.add(c.key);
     }
-    setPage(1);
-  }
+    return set;
+  }, [columns]);
 
   function clearFilters() {
     setFilters({ status: '', priority: '', source: '', category: '', teamId: '', assignedToId: '', mine: '', aiProcessed: '', approvalStatus: '', closeSuggested: '' });
@@ -324,7 +743,7 @@ export default function Tickets() {
     setPage(1);
   }
 
-  function loadTickets(isManualRefresh = false) {
+  const loadTickets = useCallback(function loadTickets(isManualRefresh = false) {
     if (abortRef.current) abortRef.current.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -369,9 +788,9 @@ export default function Tickets() {
         setLoading(false);
         setRefreshing(false);
       });
-  }
+  }, [page, pageSize, sortBy, sortOrder, filters, debouncedSearch]);
 
-  function refreshTicketsSilently() {
+  const refreshTicketsSilently = useCallback(function refreshTicketsSilently() {
     const params = { page, limit: pageSize, sortBy, sortOrder };
     if (filters.status) params.status = filters.status;
     if (filters.priority) params.priority = filters.priority;
@@ -385,7 +804,7 @@ export default function Tickets() {
     if (filters.closeSuggested) params.closeSuggested = filters.closeSuggested;
     if (debouncedSearch) params.search = debouncedSearch;
     api.get('/tickets', { params }).then(({ data }) => { setTickets(data.items); setTotalPages(data.pages); setTotalCount(data.total); if (data.stats) setServerStats(data.stats); }).catch(() => {});
-  }
+  }, [page, pageSize, sortBy, sortOrder, filters, debouncedSearch]);
 
   useEffect(() => { loadTickets(); }, [filters, page, pageSize, debouncedSearch, sortBy, sortOrder]);
   useEffect(() => {
@@ -446,7 +865,6 @@ export default function Tickets() {
     if (debouncedSearch) params.search = debouncedSearch;
     params.sortBy = sortBy; params.sortOrder = sortOrder; params.format = fmt;
     try {
-      // Téléchargement via axios pour envoyer le header Authorization
       const res = await api.get('/tickets/export', { params, responseType: 'blob' });
       const url = window.URL.createObjectURL(res.data);
       const a = document.createElement('a');
@@ -460,7 +878,7 @@ export default function Tickets() {
     }
   }
 
-  async function handleQuickStatusChange(ticketId, newStatus, e) {
+  const handleQuickStatusChange = useCallback(async (ticketId, newStatus, e) => {
     if (e) e.stopPropagation();
     try {
       await api.patch(`/tickets/${ticketId}`, { status: newStatus });
@@ -469,10 +887,10 @@ export default function Tickets() {
     } catch (err) {
       toast.error(err.response?.data?.error || 'Échec mise à jour statut');
     }
-  }
+  }, []);
 
   const [confirmDelete, setConfirmDelete] = useState(null);
-  function askDeleteOne(id) { setConfirmDelete({ mode: 'one', id }); }
+  const askDeleteOne = useCallback((id) => { setConfirmDelete({ mode: 'one', id }); }, []);
   function askDeleteSelected() { if (selectedIds.length > 0) setConfirmDelete({ mode: 'bulk' }); }
 
   async function confirmDeleteAction() {
@@ -526,7 +944,6 @@ export default function Tickets() {
           return next;
         });
       }).catch(() => setCustomFieldDefs([]));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.category]);
 
   async function handleCreate(e) {
@@ -582,154 +999,251 @@ export default function Tickets() {
     filters.approvalStatus, filters.closeSuggested,
   ].filter(Boolean).length;
 
+  // ── AG Grid column definitions (Katalyst pinned style) ─────────────────────
+  const agGridContext = useMemo(() => ({
+    debouncedSearch,
+    canAssign,
+    canDelete,
+    handleQuickStatusChange,
+    askDeleteOne,
+    navigate,
+    STATUS_OPTIONS,
+    STATUS_LABELS,
+  }), [debouncedSearch, canAssign, canDelete, handleQuickStatusChange, askDeleteOne, navigate]);
+
+  const gridColumnDefs = useMemo(() => {
+    const cols = [];
+
+    if (showSelectionColumn) {
+      cols.push({
+        headerCheckboxSelection: true,
+        checkboxSelection: true,
+        width: 48,
+        pinned: 'left',
+        suppressMenu: true,
+        resizable: false,
+        sortable: false,
+        filter: false,
+        suppressMovable: true,
+      });
+    }
+
+    if (visibleKeys.has('priority')) {
+      cols.push({
+        field: 'priority',
+        headerName: '',
+        width: 48,
+        pinned: 'left',
+        cellRenderer: PriorityRenderer,
+        suppressMenu: true,
+        resizable: false,
+        suppressMovable: true,
+      });
+    }
+
+    if (visibleKeys.has('ticket')) {
+      cols.push({
+        field: 'title',
+        headerName: 'TICKET',
+        flex: 2,
+        minWidth: 280,
+        cellRenderer: TicketInfoRenderer,
+        valueFormatter: (p) => p.data?.title || '',
+      });
+    }
+
+    if (visibleKeys.has('status')) {
+      cols.push({
+        field: 'status',
+        headerName: 'STATUT',
+        width: 160,
+        cellRenderer: StatusRenderer,
+      });
+    }
+
+    if (visibleKeys.has('assignedTo')) {
+      cols.push({
+        field: 'assignedTo',
+        headerName: 'ASSIGNÉ',
+        width: 180,
+        cellRenderer: AssigneeRenderer,
+        valueGetter: (p) => p.data?.assignedTo?.fullName || '',
+      });
+    }
+
+    if (visibleKeys.has('requester')) {
+      cols.push({
+        field: 'requester',
+        headerName: 'DEMANDEUR',
+        width: 180,
+        cellRenderer: RequesterRenderer,
+        valueGetter: (p) => p.data?.requester?.fullName || p.data?.sourceName || '',
+      });
+    }
+
+    if (visibleKeys.has('location')) {
+      cols.push({
+        field: 'location',
+        headerName: 'LIEU',
+        width: 160,
+        cellRenderer: LocationRenderer,
+        valueGetter: (p) => p.data?.glpiLocationName || '',
+      });
+    }
+
+    if (visibleKeys.has('observers')) {
+      cols.push({
+        field: 'observers',
+        headerName: 'OBSERVATEURS',
+        width: 200,
+        cellRenderer: ObserverRenderer,
+        valueGetter: (p) => (p.data?.observers || []).map((o) => o.fullName).join(', '),
+      });
+    }
+
+    if (visibleKeys.has('createdAt')) {
+      cols.push({
+        field: 'createdAt',
+        headerName: 'OUVERT',
+        width: 120,
+        valueFormatter: (p) => formatDateShort(p.value),
+      });
+    }
+
+    if (visibleKeys.has('updatedAt')) {
+      cols.push({
+        field: 'updatedAt',
+        headerName: 'MODIFIÉ',
+        width: 120,
+        valueFormatter: (p) => formatDateShort(p.value),
+      });
+    }
+
+    // Actions column — pinned right (always visible)
+    cols.push({
+      headerName: '',
+      width: 80,
+      pinned: 'right',
+      cellRenderer: ActionsRenderer,
+      sortable: false,
+      filter: false,
+      suppressMenu: true,
+      resizable: false,
+      suppressMovable: true,
+    });
+
+    return cols;
+  }, [visibleKeys, showSelectionColumn]);
+
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full w-full min-w-0 gap-0">
 
       {/* ── COMPACT HEADER ──────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 px-4 sm:px-6 py-3 border-b border-outline-variant/20 bg-surface-container-lowest shrink-0">
-        {/* Title */}
+      <div className="flex items-center gap-3 px-4 sm:px-6 py-3 border-b border-border/20 bg-surface shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <Ticket className="w-4 h-4 text-primary shrink-0" />
-          <h1 className="text-sm font-bold text-on-surface whitespace-nowrap">Tickets</h1>
-          <span className="text-[11px] text-on-surface-variant font-medium tabular-nums">
+          <h1 className="text-sm font-bold text-foreground whitespace-nowrap">Tickets</h1>
+          <span className="text-[11px] text-muted-foreground font-medium tabular-nums">
             {totalCount > 0 && `${totalCount}`}
           </span>
         </div>
 
-        {/* Live badge */}
         <span className="hidden sm:flex items-center gap-1 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
           Live
         </span>
 
-        {/* Stats pills */}
-        <div className="hidden lg:flex items-center gap-2 flex-1 min-w-0 overflow-hidden">
-          <div className="w-px h-3.5 bg-outline-variant/40 mx-1 shrink-0" />
-          {serverStats.open > 0 && <StatPill color="bg-blue-500" count={serverStats.open} label="ouverts" onClick={() => updateFilter('status', 'OPEN_GROUP')} />}
-          {serverStats.pending > 0 && <StatPill color="bg-amber-400" count={serverStats.pending} label="en attente" onClick={() => updateFilter('status', 'PENDING')} />}
-          {serverStats.p1 > 0 && <StatPill color="bg-red-500" count={serverStats.p1} label="P1" onClick={() => updateFilter('priority', 'P1')} />}
-          {serverStats.p2 > 0 && <StatPill color="bg-orange-400" count={serverStats.p2} label="P2" onClick={() => updateFilter('priority', 'P2')} />}
-          {serverStats.ai > 0 && <StatPill color="bg-purple-500" count={serverStats.ai} label="IA" onClick={() => updateFilter('aiProcessed', 'true')} />}
-          {serverStats.unassigned > 0 && <StatPill color="bg-rose-500" count={serverStats.unassigned} label="orphelins" onClick={() => updateFilter('assignedToId', 'none')} />}
-        </div>
+        <div className="flex-1" />
 
-        {/* Spacer */}
-        <div className="flex-1 lg:hidden" />
-
-        {/* Actions */}
         <div className="flex items-center gap-1.5 shrink-0">
-          {/* Export */}
           <div className="relative group">
-            <button
-              className="p-2 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"
-              title="Exporter"
-            >
+            <button className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-surface-muted transition-all" title="Exporter">
               <FileSpreadsheet className="w-4 h-4" />
             </button>
             <div className="absolute right-0 top-full pt-1 z-30 hidden group-hover:block">
-              <div className="rounded-xl border border-outline-variant/30 bg-surface-container-lowest shadow-xl p-1.5 min-w-[180px]">
-                <button onClick={() => exportAll('xlsx')} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-on-surface hover:bg-surface-container transition-colors cursor-pointer text-left">
+              <div className="rounded-xl border border-border/30 bg-surface shadow-xl p-1.5 min-w-[180px]">
+                <button onClick={() => exportAll('xlsx')} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-foreground hover:bg-surface-muted transition-colors cursor-pointer text-left">
                   <FileSpreadsheet className="w-3.5 h-3.5 text-green-600" /> Exporter tout (XLSX)
                 </button>
-                <button onClick={() => exportAll('csv')} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-on-surface hover:bg-surface-container transition-colors cursor-pointer text-left">
+                <button onClick={() => exportAll('csv')} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-foreground hover:bg-surface-muted transition-colors cursor-pointer text-left">
                   <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" /> Exporter tout (CSV)
                 </button>
-                <button onClick={() => exportAll('json')} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-on-surface hover:bg-surface-container transition-colors cursor-pointer text-left">
+                <button onClick={() => exportAll('json')} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-foreground hover:bg-surface-muted transition-colors cursor-pointer text-left">
                   <FileCode2 className="w-3.5 h-3.5 text-blue-500" /> Exporter tout (JSON)
                 </button>
               </div>
             </div>
           </div>
 
-          {/* Refresh */}
-          <button
-            onClick={() => loadTickets(true)}
-            disabled={refreshing}
-            className="p-2 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all disabled:opacity-40"
-            title="Rafraîchir"
-          >
+          <button onClick={() => loadTickets(true)} disabled={refreshing}
+            className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-surface-muted transition-all disabled:opacity-40" title="Rafraîchir">
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
           </button>
 
-          {/* View mode */}
-          <div className="flex items-center p-0.5 rounded-lg border border-outline-variant/30 bg-surface-container gap-0.5">
+          <div className="flex items-center p-0.5 rounded-lg border border-border/30 bg-surface-muted gap-0.5">
             {[
               { mode: 'table', Icon: Table, label: 'Tableau' },
               { mode: 'grid', Icon: LayoutGrid, label: 'Grille' },
-              { mode: 'carousel', Icon: Sparkles, label: 'Coverflow' },
+              { mode: 'carousel', Icon: Sparkles, label: 'Carousel' },
               { mode: 'kanban', Icon: KanbanSquare, label: 'Kanban' },
             ].map(({ mode, Icon, label }) => (
-              <button
-                key={mode}
-                onClick={() => changeViewMode(mode)}
-                title={label}
-                className={`p-1.5 rounded-md transition-all ${viewMode === mode ? 'bg-primary text-white shadow-sm' : 'text-on-surface-variant hover:text-on-surface'}`}
-              >
+              <button key={mode} onClick={() => changeViewMode(mode)} title={label}
+                className={`p-1.5 rounded-md transition-all ${viewMode === mode ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
                 <Icon className="w-3.5 h-3.5" />
               </button>
             ))}
           </div>
 
-          {/* Column config (table view only) */}
           {viewMode === 'table' && (
             <ColumnConfigPanel columns={columns} onChange={setColumns} />
           )}
 
-          {/* New ticket */}
-          <button
-            onClick={toggleForm}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-white text-xs font-bold hover:opacity-90 transition-opacity shadow-sm"
-          >
+          <button onClick={toggleForm}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-bold hover:opacity-90 transition-opacity shadow-sm">
             <Plus className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Nouveau</span>
           </button>
         </div>
       </div>
 
-      {/* ── FILTER BAR (hybrid: quick chips + drawer) ──────────────────────────── */}
-      <div className="px-4 sm:px-6 py-2 border-b border-outline-variant/20 bg-surface-container-lowest shrink-0">
-        <div className="flex items-center gap-2.5">
-          {/* Search */}
-          <div className="relative shrink-0">
-            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/60" />
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Rechercher... ⌘K"
-              className="w-48 pl-9 pr-8 py-1.5 text-xs bg-surface border border-outline-variant/30 rounded-lg text-on-surface placeholder-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => { setSearchQuery(''); setDebouncedSearch(''); setPage(1); }}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface transition-colors"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            )}
+      {/* ── STATS BAR ──────────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 px-4 sm:px-6 py-3 shrink-0">
+        {[
+          { label: 'Total', value: totalCount, color: 'text-on-surface' },
+          { label: 'Ouverts', value: serverStats.open, color: 'text-amber-600 dark:text-amber-400' },
+          { label: 'Résolus', value: serverStats.resolved, color: 'text-emerald-600 dark:text-emerald-400' },
+          { label: 'Fermés', value: serverStats.pending, color: 'text-slate-600 dark:text-slate-400' },
+        ].map((s) => (
+          <div key={s.label} className="bg-surface-container rounded-xl p-3 text-center">
+            <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
+            <p className="text-xs text-on-surface-variant">{s.label}</p>
           </div>
-        </div>
+        ))}
       </div>
+
+      {/* ── FILTER BAR ──────────────────────────────────────────────────────── */}
       <TicketFilterBar
-        filters={filters}
-        onUpdate={updateFilter}
-        onClear={clearFilters}
-        onOpenDrawer={() => setFilterPanelOpen(true)}
-        activeFilterCount={activeFilterCount}
-        teams={teams}
-        users={users}
-        searchQuery={searchQuery}
+        filters={filters} onUpdate={updateFilter} onClear={clearFilters}
+        onOpenDrawer={() => setFilterPanelOpen(true)} activeFilterCount={activeFilterCount}
+        teams={teams} users={users} searchQuery={searchQuery}
+        onSearchChange={(q) => setSearchQuery(q)}
         onClearSearch={() => { setSearchQuery(''); setDebouncedSearch(''); setPage(1); }}
       />
 
       {/* ── MAIN CONTENT ────────────────────────────────────────────────────── */}
       <div ref={tableContainerRef} className="flex-1 min-h-0 relative overflow-auto">
-        {/* Overlay discret pendant rafraîchissement */}
+        {error && (
+          <div className="mx-4 sm:mx-6 lg:mx-8 mt-3 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-700 dark:text-red-400 text-xs font-semibold flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 text-red-500" />
+            <span className="flex-1">{error}</span>
+            <button type="button" onClick={() => setError('')} className="p-1 hover:bg-red-500/20 rounded cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+          </div>
+        )}
+
         {refreshing && !loading && (
           <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold bg-surface-container-lowest border border-outline-variant/30 shadow-md text-on-surface-variant">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold bg-surface border border-border/30 shadow-md text-muted-foreground">
               <RefreshCw className="w-3 h-3 animate-spin" /> Mise à jour...
             </div>
           </div>
@@ -741,8 +1255,7 @@ export default function Tickets() {
           <TicketCoverflowCarousel tickets={tickets} isDark={isDark} />
         ) : viewMode === 'kanban' ? (
           <KanbanBoard
-            tickets={tickets}
-            canAssign={canAssign}
+            tickets={tickets} canAssign={canAssign}
             onStatusChange={(ticket, newStatus) => handleQuickStatusChange(ticket.id, newStatus)}
           />
         ) : viewMode === 'grid' ? (
@@ -750,60 +1263,46 @@ export default function Tickets() {
           <div className="p-4 sm:p-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
             <AnimatePresence mode="popLayout">
               {tickets.map((t) => (
-                <motion.div
-                  key={t.id}
-                  initial={false}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
+                <motion.div key={t.id} initial={false} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                   onClick={() => navigate(`/tickets/${t.id}`)}
-                  className="rounded-xl border border-outline-variant/25 bg-surface-container-lowest hover:border-primary/30 hover:shadow-sm transition-all cursor-pointer group relative overflow-hidden p-4 flex flex-col gap-3"
-                >
-                  {/* Priority stripe */}
+                  className="rounded-xl border border-border/25 bg-surface hover:border-primary/30 hover:shadow-sm transition-all cursor-pointer group relative overflow-hidden p-4 flex flex-col gap-3">
                   <div className={`absolute top-0 left-0 right-0 h-0.5 ${
                     t.priority === 'P1' ? 'bg-red-500' : t.priority === 'P2' ? 'bg-orange-400' :
                     t.priority === 'P3' ? 'bg-amber-400' : 'bg-emerald-500'
                   }`} />
-
                   <div className="flex items-start justify-between gap-2 pt-1">
                     <div className="flex items-center gap-1.5">
                       <PriorityDot priority={t.priority} />
-                      <span className="text-[11px] font-mono text-on-surface-variant">#{t.id}</span>
-                      {t.aiProcessed && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-500/10 text-purple-600 dark:text-purple-400">IA</span>}
-                      {t.glpiTicketId && <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-surface-container text-on-surface-variant">GLPI</span>}
+                      <span className="text-[11px] font-mono text-muted-foreground">#{t.id}</span>
                     </div>
                     <StatusPill status={t.status} />
                   </div>
-
                   <div>
-                    <p className="text-sm font-semibold text-on-surface group-hover:text-primary transition-colors leading-snug line-clamp-2">
+                    <p className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors leading-snug line-clamp-2">
                       <HighlightText text={t.title} query={debouncedSearch} />
                     </p>
                     {t.category && (
-                      <span className="mt-1 inline-block text-[10px] font-medium text-on-surface-variant bg-surface-container px-2 py-0.5 rounded-full">
+                      <span className="mt-1 inline-block text-[10px] font-medium text-muted-foreground bg-surface-muted px-2 py-0.5 rounded-full">
                         {t.category}
                       </span>
                     )}
                   </div>
-
                   <div className="flex items-center justify-between gap-2 mt-auto">
-                    <div className="flex items-center gap-1.5 text-[11px] text-on-surface-variant">
+                    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                       {t.glpiLocationName && <><MapPin className="w-3 h-3 shrink-0" /><span className="truncate max-w-[100px]">{t.glpiLocationName}</span></>}
                     </div>
                     {t.assignedTo ? (
                       <div className="flex items-center gap-1.5">
                         <Avatar name={t.assignedTo.fullName} />
-                        <span className="text-[11px] font-medium text-on-surface truncate max-w-[80px]">{t.assignedTo.fullName}</span>
+                        <span className="text-[11px] font-medium text-foreground truncate max-w-[80px]">{t.assignedTo.fullName}</span>
                       </div>
                     ) : (
-                      <span className="text-[10px] text-outline italic">Non assigné</span>
+                      <span className="text-[10px] text-muted-foreground/60 italic">Non assigné</span>
                     )}
                   </div>
-
-                  <SlaBadge ticket={t} />
                 </motion.div>
               ))}
             </AnimatePresence>
-
             {tickets.length === 0 && (
               <div className="col-span-full py-16">
                 <EmptyState icon="tickets" title="Aucun ticket trouvé" description="Modifie les filtres ou crée un nouveau ticket." />
@@ -811,278 +1310,75 @@ export default function Tickets() {
             )}
           </div>
         ) : (
-          /* ── TABLE VIEW ─────────────────────────────────────────────────── */
-          <div className="mx-4 sm:mx-6 lg:mx-8 mb-4 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest overflow-hidden">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="border-b border-outline-variant/20 bg-surface-container-low/50">
-                {showSelectionColumn && (
-                  <th className="w-10 px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider">
-                    <input
-                      type="checkbox"
-                      checked={tickets.length > 0 && selectedIds.length === tickets.length}
-                      onChange={toggleSelectAll}
-                      className="cursor-pointer accent-primary w-3.5 h-3.5 rounded"
-                    />
-                  </th>
-                )}
-                {columns.filter(c => c.visible).map(col => {
-                  if (col.key === 'priority') return <th key="priority" className="w-6 px-2 py-2.5 text-[10px]" />;
-                  if (col.key === 'ticket') return <SortTH key="ticket" field="title" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left min-w-0 flex-1">Ticket</SortTH>;
-                  if (col.key === 'status') return <SortTH key="status" field="status" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left w-28">Statut</SortTH>;
-                  if (col.key === 'assignedTo') return <SortTH key="assignedTo" field="assignedTo" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left w-36">Assigné</SortTH>;
-                  if (col.key === 'requester') return <SortTH key="requester" field="requester" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left w-36">Demandeur</SortTH>;
-                  if (col.key === 'location') return <SortTH key="location" field="location" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-left w-36">Lieu</SortTH>;
-                  if (col.key === 'createdAt') return <SortTH key="createdAt" field="createdAt" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-right whitespace-nowrap min-w-[100px]">Ouvert</SortTH>;
-                  if (col.key === 'updatedAt') return <SortTH key="updatedAt" field="updatedAt" current={sortBy} order={sortOrder} onSort={toggleSort} className="px-3 py-2.5 text-right whitespace-nowrap min-w-[120px]">Modifié</SortTH>;
-                  return null;
-                })}
-                <th className="w-12 px-3 py-2.5" />
-              </tr>
-            </thead>
-            <tbody>
-              <AnimatePresence mode="popLayout">
-                {tickets.map((t) => {
-                  const dateStr = formatDateShort(t.createdAt);
-                  const reqName = t.requester?.fullName || t.sourceName || t.sourceEmail;
-                  const overdue = isDueOverdue(t);
-
-                  return (
-                    <motion.tr
-                      key={t.id}
-                      initial={false}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      layout
-                      onClick={() => navigate(`/tickets/${t.id}`)}
-                      className="group border-b border-outline-variant/10 hover:bg-amber-500/5 transition-colors cursor-pointer"
-                    >
-                      {/* Checkbox */}
-                      {showSelectionColumn && (
-                        <td className="w-10 px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.includes(t.id)}
-                            onChange={() => toggleSelect(t.id)}
-                            className="cursor-pointer accent-primary w-3.5 h-3.5 rounded"
-                          />
-                        </td>
-                      )}
-
-                      {columns.filter(c => c.visible).map(col => {
-                        if (col.key === 'priority') return (
-                          <td key="priority" className="w-6 px-2 py-2.5">
-                            <PriorityDot priority={t.priority} />
-                          </td>
-                        );
-                        if (col.key === 'ticket') return (
-                          <td key="ticket" className="px-3 py-2.5 min-w-0">
-                            <div className="flex items-center gap-1.5 mb-0.5">
-                              <span className={`font-mono text-[10px] font-bold tabular-nums ${PRIORITY_DOT[t.priority]?.text || 'text-on-surface-variant'}`}>
-                                #{t.id}
-                              </span>
-                              {t.aiProcessed && (
-                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-500/10 text-purple-500 dark:text-purple-400">IA</span>
-                              )}
-                              {t.glpiTicketId && (
-                                <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-surface-container text-on-surface-variant">GLPI</span>
-                              )}
-                              {overdue && (
-                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/10 text-red-500 dark:text-red-400">Retard</span>
-                              )}
-                              <SlaBadge ticket={t} compact />
-                            </div>
-                            <p className="text-xs font-semibold text-on-surface group-hover:text-amber-600 transition-colors truncate max-w-[340px] leading-tight">
-                              <HighlightText text={t.title} query={debouncedSearch} />
-                            </p>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              {t.category && (
-                                <span className="text-[10px] text-on-surface-variant truncate max-w-[120px]">{t.category}</span>
-                              )}
-                              {t.glpiLocationName && (
-                                <span className="xl:hidden text-[10px] text-on-surface-variant/70 flex items-center gap-0.5 truncate max-w-[120px]">
-                                  <MapPin className="w-2.5 h-2.5 shrink-0 text-amber-500/60" />
-                                  {t.glpiLocationName}
-                                </span>
-                              )}
-                              {reqName && (
-                                <span className="2xl:hidden text-[10px] text-on-surface-variant/70 flex items-center gap-0.5 truncate max-w-[120px]">
-                                  <User className="w-2.5 h-2.5 shrink-0" />
-                                  {reqName}
-                                </span>
-                              )}
-                              {t.observers?.length > 0 && user && t.observers.some(o => o.id === user.id) && (
-                                <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold flex items-center gap-0.5">
-                                  <Eye className="w-2.5 h-2.5" />
-                                  Observé
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                        );
-                        if (col.key === 'status') return (
-                          <td key="status" className="px-3 py-2.5 w-28" onClick={(e) => { if (canAssign) e.stopPropagation(); }}>
-                            {canAssign ? (
-                              <select
-                                value={t.status}
-                                onChange={(e) => handleQuickStatusChange(t.id, e.target.value, e)}
-                                className="text-[10px] font-semibold px-2 py-1 rounded-md border border-outline-variant/40 bg-surface text-on-surface cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary/30 transition-all w-full"
-                              >
-                                {STATUS_OPTIONS.map(s => <option key={s} value={s}>{STATUS_LABELS[s] || s}</option>)}
-                              </select>
-                            ) : (
-                              <StatusPill status={t.status} />
-                            )}
-                          </td>
-                        );
-                        if (col.key === 'assignedTo') return (
-                          <td key="assignedTo" className="px-3 py-2.5 w-36">
-                            {t.assignedTo ? (
-                              <div className="flex items-center gap-1.5 min-w-0" title={t.assignedTo.fullName}>
-                                <Avatar name={t.assignedTo.fullName} />
-                                <span className="text-xs font-medium text-on-surface truncate">{t.assignedTo.fullName}</span>
-                              </div>
-                            ) : (
-                              <span className="text-xs text-on-surface-variant/60 italic">Non assigné</span>
-                            )}
-                          </td>
-                        );
-                        if (col.key === 'requester') return (
-                          <td key="requester" className="px-3 py-2.5 w-36">
-                            {reqName ? (
-                              <div className="flex items-center gap-1.5 min-w-0" title={reqName}>
-                                <Avatar name={reqName} colorClass="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20" />
-                                <span className="text-xs font-medium text-on-surface truncate">{reqName}</span>
-                              </div>
-                            ) : (
-                              <span className="text-xs text-on-surface-variant/60 italic">—</span>
-                            )}
-                          </td>
-                        );
-                        if (col.key === 'location') return (
-                          <td key="location" className="px-3 py-2.5 w-36">
-                            {t.glpiLocationName ? (
-                              <div className="flex items-center gap-1.5 min-w-0" title={t.glpiLocationName}>
-                                <MapPin className="w-3 h-3 shrink-0 text-amber-500/60" />
-                                <span className="text-xs font-medium text-on-surface truncate">{t.glpiLocationName}</span>
-                              </div>
-                            ) : (
-                              <span className="text-xs text-on-surface-variant/60 italic">—</span>
-                            )}
-                          </td>
-                        );
-                        if (col.key === 'createdAt') return (
-                          <td key="createdAt" className="px-3 py-2.5 text-right whitespace-nowrap min-w-[100px]" title={`Ouvert le ${new Date(t.createdAt).toLocaleString('fr-FR')}`}>
-                            <span className="text-xs font-medium tabular-nums text-on-surface-variant">{dateStr}</span>
-                          </td>
-                        );
-                        if (col.key === 'updatedAt') return (
-                          <td key="updatedAt" className="px-3 py-2.5 text-right whitespace-nowrap min-w-[120px]" title={`Modifié le ${t.updatedAt ? new Date(t.updatedAt).toLocaleString('fr-FR') : '—'}`}>
-                            <span className="text-xs font-medium tabular-nums text-on-surface-variant">{formatDateTimeShort(t.updatedAt)}</span>
-                          </td>
-                        );
-                        return null;
-                      })}
-
-                      {/* Actions */}
-                      <td className="px-3 py-2.5 w-12">
-                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          {canDelete && (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); askDeleteOne(t.id); }}
-                              className="p-1.5 rounded-md text-on-surface-variant hover:text-red-500 hover:bg-red-500/10 transition-all"
-                              title="Supprimer"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                          <div className="p-1.5 rounded-md text-on-surface-variant group-hover:text-primary transition-colors">
-                            <ChevronRight className="w-3.5 h-3.5" />
-                          </div>
-                        </div>
-                      </td>
-                    </motion.tr>
-                  );
-                })}
-              </AnimatePresence>
-
-              {tickets.length === 0 && (
-                <tr>
-                  <td colSpan={99} className="py-16">
-                    <EmptyState icon="tickets" title="Aucun ticket trouvé" description="Modifie les filtres ou crée un nouveau ticket." />
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+          /* ── TABLE VIEW (AG Grid with pinned columns — Katalyst style) ── */
+          <div className="mx-4 sm:mx-6 lg:mx-8 mt-3.5 mb-4">
+            <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest overflow-hidden">
+              <DataGrid
+                columns={gridColumnDefs}
+                rowData={tickets}
+                context={agGridContext}
+                rowSelection={showSelectionColumn ? 'multiple' : undefined}
+                selectedIds={selectedIds}
+                onSelectionChange={setSelectedIds}
+                pagination={false}
+                loading={false}
+                height={Math.max(250, Math.min(tickets.length * 60 + 52, 750))}
+                animateRows={true}
+                headerHeight={44}
+                rowHeight={60}
+                suppressRowClickSelection={!!showSelectionColumn}
+                onRowClick={(data) => navigate(`/tickets/${data.id}`)}
+                noRowsText="Aucun ticket trouvé"
+                className="rounded-2xl overflow-hidden"
+              />
+            </div>
           </div>
         )}
       </div>
 
-      {/* ── BULK ACTIONS BAR (floating, bottom) ─────────────────────────────── */}
+      {/* ── BULK ACTIONS BAR ──────────────────────────────────────────────── */}
       <AnimatePresence>
         {selectedIds.length > 0 && (
-          <motion.div
-            initial={{ y: 80, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 80, opacity: 0 }}
+          <motion.div initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 80, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 400, damping: 40 }}
-            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest shadow-2xl shadow-black/20"
-          >
-            <span className="text-xs font-bold text-on-surface-variant pr-2 border-r border-outline-variant/30 mr-1">
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-border/30 bg-surface shadow-2xl shadow-black/20">
+            <span className="text-xs font-bold text-muted-foreground pr-2 border-r border-border/30 mr-1">
               {selectedIds.length} sélectionné{selectedIds.length > 1 ? 's' : ''}
             </span>
             {canAssign && (
               <>
-                <select
-                  value={bulkChanges.status}
-                  onChange={(e) => setBulkChanges((b) => ({ ...b, status: e.target.value }))}
-                  className="text-xs font-semibold px-2 py-1.5 rounded-lg border border-outline-variant/40 bg-surface text-on-surface cursor-pointer focus:outline-none"
-                >
+                <select value={bulkChanges.status} onChange={(e) => setBulkChanges((b) => ({ ...b, status: e.target.value }))}
+                  className="text-xs font-semibold px-2 py-1.5 rounded-lg border border-border/40 bg-background text-foreground cursor-pointer focus:outline-none">
                   <option value="">Statut…</option>
                   {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
-                <select
-                  value={bulkChanges.priority}
-                  onChange={(e) => setBulkChanges((b) => ({ ...b, priority: e.target.value }))}
-                  className="text-xs font-semibold px-2 py-1.5 rounded-lg border border-outline-variant/40 bg-surface text-on-surface cursor-pointer focus:outline-none"
-                >
+                <select value={bulkChanges.priority} onChange={(e) => setBulkChanges((b) => ({ ...b, priority: e.target.value }))}
+                  className="text-xs font-semibold px-2 py-1.5 rounded-lg border border-border/40 bg-background text-foreground cursor-pointer focus:outline-none">
                   <option value="">Priorité…</option>
                   {PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
                 </select>
-                <select
-                  value={bulkChanges.assignedToId}
-                  onChange={(e) => setBulkChanges((b) => ({ ...b, assignedToId: e.target.value }))}
-                  className="text-xs font-semibold px-2 py-1.5 rounded-lg border border-outline-variant/40 bg-surface text-on-surface cursor-pointer focus:outline-none max-w-[120px]"
-                >
+                <select value={bulkChanges.assignedToId} onChange={(e) => setBulkChanges((b) => ({ ...b, assignedToId: e.target.value }))}
+                  className="text-xs font-semibold px-2 py-1.5 rounded-lg border border-border/40 bg-background text-foreground cursor-pointer focus:outline-none max-w-[120px]">
                   <option value="">Assigner…</option>
                   <option value="none">Non assigné</option>
                   {users.filter((u) => u.isActive).map((u) => <option key={u.id} value={u.id}>{u.fullName}</option>)}
                 </select>
-                <button
-                  onClick={handleBulkUpdate}
-                  disabled={bulkUpdating}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-bold hover:opacity-90 transition-opacity disabled:opacity-50"
-                >
+                <button onClick={handleBulkUpdate} disabled={bulkUpdating}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold hover:opacity-90 transition-opacity disabled:opacity-50">
                   <CheckSquare className="w-3.5 h-3.5" />
                   {bulkUpdating ? 'Application…' : 'Appliquer'}
                 </button>
               </>
             )}
             {canBulkDelete && (
-              <button
-                onClick={askDeleteSelected}
-                disabled={deleting}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/30 text-red-500 text-xs font-semibold hover:bg-red-500/10 transition-colors disabled:opacity-50"
-              >
+              <button onClick={askDeleteSelected} disabled={deleting}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/30 text-red-500 text-xs font-semibold hover:bg-red-500/10 transition-colors disabled:opacity-50">
                 <Trash2 className="w-3.5 h-3.5" />
                 Supprimer
               </button>
             )}
-            <button
-              onClick={() => { setSelectedIds([]); setBulkChanges({ status: '', priority: '', assignedToId: '' }); }}
-              className="p-1.5 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"
-            >
+            <button onClick={() => { setSelectedIds([]); setBulkChanges({ status: '', priority: '', assignedToId: '' }); }}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-surface-muted transition-all">
               <X className="w-3.5 h-3.5" />
             </button>
           </motion.div>
@@ -1090,29 +1386,22 @@ export default function Tickets() {
       </AnimatePresence>
 
       {/* ── PAGINATION ───────────────────────────────────────────────────────── */}
-      {totalPages > 1 && (
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-4 sm:px-6 py-3 border-t border-outline-variant/20 bg-surface-container-lowest shrink-0">
-          {/* Left: info + page size */}
-          <div className="flex items-center gap-3 text-[11px] text-on-surface-variant">
-            <span className="font-medium tabular-nums">
-              {totalCount > 0
-                ? `${Math.min((page - 1) * pageSize + 1, totalCount)}–${Math.min(page * pageSize, totalCount)} sur ${totalCount.toLocaleString('fr-FR')}`
-                : '0 résultat'}
-            </span>
-            <div className="w-px h-3.5 bg-outline-variant/40" />
-            <select
-              value={pageSize}
-              onChange={(e) => { const v = Number(e.target.value); setPageSize(v); localStorage.setItem('tickets_page_size', String(v)); setPage(1); }}
-              className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-outline-variant/40 bg-surface text-on-surface cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all"
-            >
-              {[25, 50, 100, 200].map((n) => <option key={n} value={n}>{n}/page</option>)}
-            </select>
-          </div>
-
-          {/* Right: pagination buttons */}
-          <PaginationButtons page={page} totalPages={totalPages} onPageChange={setPage} />
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-4 sm:px-6 py-3 border-t border-border/20 bg-surface shrink-0">
+        <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+          <span className="font-medium tabular-nums">
+            {totalCount > 0
+              ? `${Math.min((page - 1) * pageSize + 1, totalCount)}–${Math.min(page * pageSize, totalCount)} sur ${totalCount.toLocaleString('fr-FR')}`
+              : '0 résultat'}
+          </span>
+          <div className="w-px h-3.5 bg-border/40" />
+          <select value={pageSize}
+            onChange={(e) => { const v = Number(e.target.value); setPageSize(v); localStorage.setItem('tickets_page_size', String(v)); setPage(1); }}
+            className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-border/40 bg-background text-foreground cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all">
+            {[25, 50, 100, 200].map((n) => <option key={n} value={n}>{n}/page</option>)}
+          </select>
         </div>
-      )}
+        <PaginationButtons page={page} totalPages={Math.max(totalPages, 1)} onPageChange={setPage} />
+      </div>
 
       {/* ── DRAWER DE FILTRES ────────────────────────────────────────────────── */}
       <AnimatePresence>
@@ -1121,21 +1410,13 @@ export default function Tickets() {
             key="tickets-filter-drawer"
             onClose={() => setFilterPanelOpen(false)}
             activeFilterCount={activeFilterCount}
-            filters={filters}
-            onUpdate={updateFilter}
-            onClear={clearFilters}
-            teams={teams}
-            users={users}
-            flatCategories={flatCategories}
+            filters={filters} onUpdate={updateFilter} onClear={clearFilters}
+            teams={teams} users={users} flatCategories={flatCategories}
             autonomousMode={autonomousMode}
-            savedViews={savedViews}
-            onSaveView={saveCurrentView}
-            onRestoreView={restoreView}
-            onDeleteSavedView={deleteSavedView}
-            searchQuery={searchQuery}
-            setSearchQuery={setSearchQuery}
-            setDebouncedSearch={setDebouncedSearch}
-            setPage={setPage}
+            savedViews={savedViews} onSaveView={saveCurrentView}
+            onRestoreView={restoreView} onDeleteSavedView={deleteSavedView}
+            searchQuery={searchQuery} setSearchQuery={setSearchQuery}
+            setDebouncedSearch={setDebouncedSearch} setPage={setPage}
           />
         )}
       </AnimatePresence>
@@ -1145,38 +1426,25 @@ export default function Tickets() {
         <AnimatePresence>
           {showForm && (
             <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={toggleForm}
-                className="fixed inset-0 bg-black/60 backdrop-blur-sm cursor-pointer"
-              />
-              <motion.div
-                initial={{ opacity: 0, scale: 0.97, y: 12 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.97, y: 12 }}
-                transition={{ type: 'spring', duration: 0.3, bounce: 0.1 }}
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                onClick={toggleForm} className="fixed inset-0 bg-black/60 backdrop-blur-sm cursor-pointer" />
+              <motion.div initial={{ opacity: 0, scale: 0.97, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.97, y: 12 }} transition={{ type: 'spring', duration: 0.3, bounce: 0.1 }}
                 className={`relative max-w-3xl w-full rounded-2xl border p-6 sm:p-7 shadow-2xl overflow-hidden max-h-[92vh] flex flex-col z-10 ${
-                  isDark ? 'bg-surface-container-lowest border-outline-variant/40 text-on-surface' : 'bg-white border-slate-200 text-slate-900'
-                }`}
-              >
-                {/* Modal header */}
-                <div className="flex items-center justify-between pb-4 border-b border-outline-variant/20 mb-5 shrink-0">
+                  isDark ? 'bg-surface border-border/40 text-foreground' : 'bg-white border-slate-200 text-slate-900'
+                }`}>
+                <div className="flex items-center justify-between pb-4 border-b border-border/20 mb-5 shrink-0">
                   <div className="flex items-center gap-2.5">
                     <div className="p-1.5 bg-primary/10 rounded-lg">
                       <Plus className="w-4 h-4 text-primary" />
                     </div>
                     <div>
-                      <h3 className="text-base font-bold text-on-surface">Nouveau ticket d'assistance</h3>
-                      <p className="text-[11px] text-on-surface-variant">Remplissez les informations ci-dessous.</p>
+                      <h3 className="text-base font-bold text-foreground">Nouveau ticket d'assistance</h3>
+                      <p className="text-[11px] text-muted-foreground">Remplissez les informations ci-dessous.</p>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={toggleForm}
-                    className="p-1.5 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"
-                  >
+                  <button type="button" onClick={toggleForm}
+                    className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-surface-muted transition-all">
                     <X className="w-4 h-4" />
                   </button>
                 </div>
@@ -1200,12 +1468,9 @@ export default function Tickets() {
                   )}
 
                   <FormField label="Titre *">
-                    <input
-                      type="text" required value={form.title}
+                    <input type="text" required value={form.title}
                       onChange={(e) => setForm({ ...form, title: e.target.value })}
-                      placeholder="ex: Problème d'impression ou accès réseau..."
-                      className={FIELD_CLS}
-                    />
+                      placeholder="ex: Problème d'impression ou accès réseau..." className={FIELD_CLS} />
                   </FormField>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1222,7 +1487,6 @@ export default function Tickets() {
                     </FormField>
                   </div>
 
-                  {/* Champs personnalisés */}
                   {customFieldDefs.length > 0 && (
                     <div className="rounded-xl border border-dashed border-primary/25 bg-primary/5 p-4 space-y-3">
                       <p className="text-[10px] font-bold uppercase tracking-widest text-primary flex items-center gap-1.5">
@@ -1242,7 +1506,7 @@ export default function Tickets() {
                                 {f.type === 'CHECKBOX' && (
                                   <label className="flex items-center gap-2 cursor-pointer">
                                     <input type="checkbox" checked={!!customValues[key]} onChange={(e) => set(e.target.checked ? 'true' : '')} className="accent-primary w-4 h-4" />
-                                    <span className="text-sm text-on-surface">{customValues[key] === 'true' ? 'Oui' : 'Non'}</span>
+                                    <span className="text-sm text-foreground">{customValues[key] === 'true' ? 'Oui' : 'Non'}</span>
                                   </label>
                                 )}
                                 {f.type === 'SELECT' && (
@@ -1276,112 +1540,68 @@ export default function Tickets() {
                     </FormField>
                     {locations.length > 0 && (
                       <FormField label="Lieu / Emplacement">
-                        <SearchableSelect
-                          options={locations} value={form.locationId}
+                        <SearchableSelect options={locations} value={form.locationId}
                           onChange={(val) => setForm({ ...form, locationId: val })}
-                          placeholder="Rechercher un lieu GLPI..."
-                          searchPlaceholder="Rechercher un lieu..."
-                          labelKey="name" valueKey="id" subLabelKey="completename" icon={MapPin}
-                        />
+                          placeholder="Rechercher un lieu GLPI..." searchPlaceholder="Rechercher un lieu..." />
+                      </FormField>
+                    )}
+                    {canAssign && teams.length > 0 && (
+                      <FormField label="Équipe assignée">
+                        <select value={form.teamId} onChange={(e) => {
+                          const selectedTeam = teams.find((t) => String(t.id) === e.target.value);
+                          const teamObserverIds = (selectedTeam?.defaultObservers || []).map((o) => o.id);
+                          setForm({ ...form, teamId: e.target.value, assignedToId: '', observerIds: teamObserverIds });
+                        }} className={FIELD_CLS}>
+                          <option value="">— Aucune équipe —</option>
+                          {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                        </select>
+                      </FormField>
+                    )}
+                    {canAssign && users.length > 0 && (
+                      <FormField label="Assigné à">
+                        <select value={form.assignedToId} onChange={(e) => setForm({ ...form, assignedToId: e.target.value })} className={FIELD_CLS}>
+                          <option value="">— Non assigné —</option>
+                          {users.filter((u) => u.isActive).map((u) => <option key={u.id} value={u.id}>{u.fullName}</option>)}
+                        </select>
                       </FormField>
                     )}
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <FormField label="Équipe assignée">
-                      <select value={form.teamId} onChange={(e) => setForm({ ...form, teamId: e.target.value })} className={FIELD_CLS}>
-                        <option value="">Sélectionner une équipe</option>
-                        {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                      </select>
-                    </FormField>
-                    <FormField label="Technicien assigné">
-                      <RemoteUserSelect
-                        value={form.assignedToId || ''} valueLabel={users.find((u) => String(u.id) === String(form.assignedToId))?.fullName}
-                        onChange={(val) => setForm({ ...form, assignedToId: val })}
-                        placeholder="Auto-assignation ou technicien..."
-                        searchPlaceholder="Rechercher un technicien..."
-                      />
-                    </FormField>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <FormField label="Urgence">
-                      <select value={form.urgency} onChange={(e) => setForm({ ...form, urgency: e.target.value })} className={FIELD_CLS}>
-                        {URGENCY_IMPACT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                      </select>
-                    </FormField>
-                    <FormField label="Impact">
-                      <select value={form.impact} onChange={(e) => setForm({ ...form, impact: e.target.value })} className={FIELD_CLS}>
-                        {URGENCY_IMPACT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                      </select>
-                    </FormField>
-                  </div>
-
-                  <FormField label="Échéance (optionnel)">
-                    <input
-                      type="datetime-local" value={form.dueDate}
-                      onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
-                      className={FIELD_CLS}
-                    />
+                  <FormField label="Demandeur">
+                    <RemoteUserSelect value={form.requesterId} onChange={(val) => setForm({ ...form, requesterId: val })}
+                      glpiUsers={glpiUsers} placeholder="Rechercher un demandeur..." />
                   </FormField>
 
-                  {canAssign && (
-                    <FormField label={`Demandeur (pour tiers)`}>
-                      <RemoteUserSelect
-                        value={form.requesterId || ''} valueLabel={users.find((u) => String(u.id) === String(form.requesterId))?.fullName}
-                        onChange={(val) => setForm({ ...form, requesterId: val })}
-                        placeholder={`Moi-même (${user?.fullName || ''})`}
-                        searchPlaceholder="Rechercher un demandeur..."
-                      />
-                    </FormField>
-                  )}
-
-                  <FormField label={`Observateurs (${form.observerIds?.length || 0})`}>
-                    <RemoteUserMultiSelect
-                      selectedIds={form.observerIds || []}
-                      onChange={(nextIds) => setForm({ ...form, observerIds: nextIds })}
-                      placeholder="Rechercher des observateurs..."
-                    />
+                  <FormField label="Observateurs">
+                    <RemoteUserMultiSelect value={form.observerIds} onChange={(vals) => setForm({ ...form, observerIds: vals })}
+                      users={users} glpiUsers={glpiUsers} placeholder="Rechercher un observateur..." />
                   </FormField>
 
                   {assetOptions.length > 0 && (
-                    <FormField label={`Équipements concernés (${form.assetIds?.length || 0})`}>
-                      <SearchableMultiSelect
-                        options={assetOptions} selectedIds={form.assetIds || []}
-                        onChange={(nextIds) => setForm({ ...form, assetIds: nextIds })}
-                        placeholder="Rechercher un équipement..."
-                        searchPlaceholder="Nom, n° série, inventaire..."
-                        labelKey="label" valueKey="id" subLabelKey="subLabel"
-                      />
+                    <FormField label="Assets liés">
+                      <SearchableMultiSelect options={assetOptions} value={form.assetIds}
+                        onChange={(vals) => setForm({ ...form, assetIds: vals })}
+                        placeholder="Rechercher un asset..." />
                     </FormField>
                   )}
 
-                  <FormField label="Description *">
-                    <textarea
-                      rows={4} required value={form.content}
-                      onChange={(e) => setForm({ ...form, content: e.target.value })}
-                      placeholder="Décrivez le problème ou le besoin en détails..."
-                      className={`${FIELD_CLS} resize-none`}
-                    />
+                  <FormField label="Description">
+                    <textarea rows={4} value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })}
+                      placeholder="Décrivez le problème..." className={`${FIELD_CLS} resize-none`} />
                   </FormField>
 
-                  <FormField label="Pièce jointe (optionnel)">
-                    <input
-                      type="file"
-                      onChange={(e) => setAttachment(e.target.files[0])}
-                      className="block w-full text-xs text-on-surface-variant file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border file:border-primary/20 file:text-xs file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer"
-                    />
+                  <FormField label="Pièce jointe">
+                    <input type="file" onChange={(e) => setAttachment(e.target.files?.[0] || null)} className="text-sm text-muted-foreground file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 file:cursor-pointer" />
                   </FormField>
 
-                  <div className="pt-4 border-t border-outline-variant/20 flex justify-end gap-2.5 shrink-0">
-                    <button type="button" onClick={toggleForm} className="px-4 py-2 rounded-xl border border-outline-variant/40 font-semibold text-sm transition-all bg-surface text-on-surface hover:bg-surface-container">
+                  <div className="flex items-center justify-end gap-3 pt-4 border-t border-border/20">
+                    <button type="button" onClick={toggleForm}
+                      className="px-4 py-2 rounded-xl text-xs font-semibold text-muted-foreground hover:bg-surface-muted transition-colors">
                       Annuler
                     </button>
-                    <button
-                      type="submit" disabled={creating}
-                      className="px-5 py-2 rounded-xl bg-primary text-white font-bold text-sm transition-all disabled:opacity-50 hover:opacity-90 shadow-sm"
-                    >
-                      {creating ? 'Création...' : 'Créer le ticket'}
+                    <button type="submit" disabled={creating}
+                      className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:opacity-90 transition-opacity disabled:opacity-50 shadow-sm">
+                      {creating ? 'Création…' : 'Créer le ticket'}
                     </button>
                   </div>
                 </form>
@@ -1392,402 +1612,17 @@ export default function Tickets() {
         document.body
       )}
 
-      <ConfirmDialog
-        open={!!confirmDelete}
-        title="Supprimer le ticket"
-        message={
-          confirmDelete?.mode === 'bulk'
-            ? `Supprimer définitivement ${selectedIds.length} ticket(s) ? Cette action est irréversible.`
-            : `Supprimer définitivement le ticket #${confirmDelete?.id} ? Cette action est irréversible.`
-        }
-        confirmLabel="Supprimer"
-        danger
-        loading={deleting}
-        onConfirm={confirmDeleteAction}
-        onCancel={() => setConfirmDelete(null)}
-      />
-    </div>
-  );
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function isDueOverdue(t) {
-  if (!t?.dueDate) return false;
-  if (t.status === 'SOLVED' || t.status === 'CLOSED') return false;
-  return new Date(t.dueDate) < new Date();
-}
-
-const FIELD_CLS = 'w-full px-3 py-2 rounded-lg border border-outline-variant/40 bg-surface text-on-surface text-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary placeholder-on-surface-variant/50';
-
-function FormField({ label, children }) {
-  return (
-    <div>
-      <label className="block text-[11px] font-semibold text-on-surface-variant mb-1.5 uppercase tracking-wide">{label}</label>
-      {children}
-    </div>
-  );
-}
-
-function StatPill({ color, count, label, onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-all whitespace-nowrap"
-    >
-      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${color}`} />
-      <span className="tabular-nums font-bold text-on-surface">{count}</span>
-      <span>{label}</span>
-    </button>
-  );
-}
-
-function SortTH({ field, current, order, onSort, className, children }) {
-  const active = current === field;
-  return (
-    <th
-      onClick={() => onSort(field)}
-      className={`cursor-pointer select-none transition-colors hover:text-on-surface ${active ? 'text-amber-600' : 'text-on-surface-variant'} ${className || ''}`}
-    >
-      <div className="flex items-center gap-1">
-        {children}
-        {active ? (
-          order === 'asc' ? <ArrowUp className="w-2.5 h-2.5" /> : <ArrowDown className="w-2.5 h-2.5" />
-        ) : (
-          <ArrowUpDown className="w-2.5 h-2.5 opacity-30" />
-        )}
-      </div>
-    </th>
-  );
-}
-
-function TableSkeleton() {
-  return (
-    <div className="mx-4 sm:mx-6 lg:mx-8 mb-4 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest overflow-hidden animate-pulse">
-      <table className="w-full text-left">
-        <thead>
-          <tr className="border-b border-outline-variant/20 bg-surface-container-low/50">
-            {[...Array(7)].map((_, i) => (
-              <th key={i} className="px-3 py-2.5">
-                <div className="h-2.5 rounded bg-outline-variant/20 w-16" />
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {[...Array(12)].map((_, row) => (
-            <tr key={row} className="border-b border-outline-variant/10">
-              <td className="px-3 py-2.5 w-6"><div className="h-2.5 w-2.5 rounded-full bg-outline-variant/20" /></td>
-              <td className="px-3 py-2.5">
-                <div className="flex items-center gap-2">
-                  <div className="h-2.5 w-10 rounded bg-outline-variant/20" />
-                  <div className="h-3 w-28 rounded bg-outline-variant/15" />
-                </div>
-              </td>
-              <td className="px-3 py-2.5"><div className="h-5 w-14 rounded-md bg-outline-variant/15" /></td>
-              <td className="px-3 py-2.5"><div className="flex items-center gap-1.5"><div className="h-5 w-5 rounded-full bg-outline-variant/15" /><div className="h-2.5 w-16 rounded bg-outline-variant/15" /></div></td>
-              <td className="px-3 py-2.5"><div className="flex items-center gap-1.5"><div className="h-5 w-5 rounded-full bg-outline-variant/15" /><div className="h-2.5 w-14 rounded bg-outline-variant/15" /></div></td>
-              <td className="px-3 py-2.5"><div className="h-2.5 w-16 rounded bg-outline-variant/15" /></td>
-              <td className="px-3 py-2.5"><div className="h-2.5 w-16 rounded bg-outline-variant/15" /></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function PaginationButtons({ page, totalPages, onPageChange }) {
-  const [jumpValue, setJumpValue] = useState('');
-  const jumpRef = useRef(null);
-
-  const pages = useMemo(() => {
-    if (totalPages <= 7) {
-      return Array.from({ length: totalPages }, (_, i) => i + 1);
-    }
-    const result = [];
-    result.push(1);
-    if (page > 3) result.push('...');
-    const start = Math.max(2, page - 1);
-    const end = Math.min(totalPages - 1, page + 1);
-    for (let i = start; i <= end; i++) result.push(i);
-    if (page < totalPages - 2) result.push('...');
-    result.push(totalPages);
-    return result;
-  }, [page, totalPages]);
-
-  function handleKeyDown(e) {
-    if (e.key === 'ArrowLeft') {
-      e.preventDefault();
-      onPageChange(Math.max(1, page - 1));
-    } else if (e.key === 'ArrowRight') {
-      e.preventDefault();
-      onPageChange(Math.min(totalPages, page + 1));
-    } else if (e.key === 'Home') {
-      e.preventDefault();
-      onPageChange(1);
-    } else if (e.key === 'End') {
-      e.preventDefault();
-      onPageChange(totalPages);
-    }
-  }
-
-  function handleJump(e) {
-    e.preventDefault();
-    const val = parseInt(jumpValue, 10);
-    if (!isNaN(val) && val >= 1 && val <= totalPages && val !== page) {
-      onPageChange(val);
-    }
-    setJumpValue('');
-    jumpRef.current?.blur();
-  }
-
-  const btnBase = 'h-10 min-w-[40px] flex items-center justify-center rounded-lg text-xs font-semibold transition-all duration-150 active:scale-95';
-  const btnEnabled = 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface';
-  const btnDisabled = 'text-on-surface-variant/30 cursor-not-allowed';
-  const btnActive = 'bg-primary text-white shadow-sm shadow-primary/20';
-
-  return (
-    <div className="flex items-center gap-2" onKeyDown={handleKeyDown} role="navigation" aria-label="Pagination">
-      {/* Navigation buttons */}
-      <div className="flex items-center gap-1">
-        <button
-          onClick={() => onPageChange(1)}
-          disabled={page <= 1}
-          aria-label="Première page"
-          className={`${btnBase} px-1.5 ${page <= 1 ? btnDisabled : btnEnabled}`}
-        >
-          <ChevronsLeft className="w-4 h-4" />
-        </button>
-        <button
-          onClick={() => onPageChange(Math.max(1, page - 1))}
-          disabled={page <= 1}
-          aria-label="Page précédente"
-          className={`${btnBase} px-1.5 ${page <= 1 ? btnDisabled : btnEnabled}`}
-        >
-          <ChevronLeft className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* Page numbers */}
-      <div className="flex items-center gap-1">
-        {pages.map((p, i) =>
-          p === '...' ? (
-            <span key={`e${i}`} className="w-8 h-10 flex items-center justify-center text-xs text-on-surface-variant/40 select-none">…</span>
-          ) : (
-            <button
-              key={p}
-              onClick={() => onPageChange(p)}
-              aria-label={`Page ${p}`}
-              aria-current={p === page ? 'page' : undefined}
-              disabled={p === page}
-              className={`${btnBase} px-2 ${p === page ? btnActive : btnEnabled}`}
-            >
-              {p}
-            </button>
-          )
-        )}
-      </div>
-
-      {/* Next + Last */}
-      <div className="flex items-center gap-1">
-        <button
-          onClick={() => onPageChange(Math.min(totalPages, page + 1))}
-          disabled={page >= totalPages}
-          aria-label="Page suivante"
-          className={`${btnBase} px-1.5 ${page >= totalPages ? btnDisabled : btnEnabled}`}
-        >
-          <ChevronRight className="w-4 h-4" />
-        </button>
-        <button
-          onClick={() => onPageChange(totalPages)}
-          disabled={page >= totalPages}
-          aria-label="Dernière page"
-          className={`${btnBase} px-1.5 ${page >= totalPages ? btnDisabled : btnEnabled}`}
-        >
-          <ChevronsRight className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* Jump to page (desktop only) */}
-      {totalPages > 7 && (
-        <form onSubmit={handleJump} className="hidden lg:flex items-center gap-1.5 ml-1 pl-2 border-l border-outline-variant/30">
-          <span className="text-[10px] text-on-surface-variant/60 font-medium whitespace-nowrap">Aller à</span>
-          <input
-            ref={jumpRef}
-            type="number"
-            min={1}
-            max={totalPages}
-            value={jumpValue}
-            onChange={(e) => setJumpValue(e.target.value)}
-            placeholder="#"
-            className="w-12 h-8 px-1.5 text-center text-[11px] font-mono font-semibold bg-surface border border-outline-variant/30 rounded-md text-on-surface placeholder-on-surface-variant/30 focus:outline-none focus:ring-1 focus:ring-primary/30 focus:border-primary transition-all"
-          />
-        </form>
-      )}
-    </div>
-  );
-}
-
-function ChevronsLeft({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m11 17-5-5 5-5" /><path d="m18 17-5-5 5-5" />
-    </svg>
-  );
-}
-
-function ChevronsRight({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m6 17 5-5-5-5" /><path d="m13 17 5-5-5-5" />
-    </svg>
-  );
-}
-
-// ─── Column configuration ────────────────────────────────────────────────────
-
-const DEFAULT_COLUMNS = [
-  { key: 'priority', label: 'Priorité', defaultVisible: true, alwaysVisible: true },
-  { key: 'ticket', label: 'Ticket', defaultVisible: true, alwaysVisible: true },
-  { key: 'status', label: 'Statut', defaultVisible: true },
-  { key: 'assignedTo', label: 'Assigné', defaultVisible: true },
-  { key: 'requester', label: 'Demandeur', defaultVisible: true },
-  { key: 'location', label: 'Lieu', defaultVisible: true },
-  { key: 'createdAt', label: 'Ouvert', defaultVisible: true },
-  { key: 'updatedAt', label: 'Modifié', defaultVisible: true },
-];
-
-const COLUMNS_STORAGE_KEY = 'tickets_column_config';
-
-function loadColumnConfig() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(COLUMNS_STORAGE_KEY));
-    if (saved && Array.isArray(saved)) {
-      const keys = saved.map(c => c.key);
-      const merged = DEFAULT_COLUMNS.map(dc => {
-        const found = saved.find(s => s.key === dc.key);
-        return { ...dc, visible: found ? found.visible : dc.defaultVisible };
-      });
-      // Add any new columns not in saved config
-      for (const dc of DEFAULT_COLUMNS) {
-        if (!keys.includes(dc.key)) merged.push({ ...dc, visible: dc.defaultVisible });
-      }
-      // Reorder according to saved
-      const orderMap = {};
-      saved.forEach((s, i) => { orderMap[s.key] = i; });
-      merged.sort((a, b) => (orderMap[a.key] ?? 99) - (orderMap[b.key] ?? 99));
-      return merged;
-    }
-  } catch {}
-  return DEFAULT_COLUMNS.map(c => ({ ...c, visible: c.defaultVisible }));
-}
-
-function saveColumnConfig(cols) {
-  localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(cols.map(c => ({ key: c.key, visible: c.visible }))));
-}
-
-function ColumnConfigPanel({ columns, onChange }) {
-  const [open, setOpen] = useState(false);
-  const panelRef = useRef(null);
-  const [dragIdx, setDragIdx] = useState(null);
-  const [overIdx, setOverIdx] = useState(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e) => { if (panelRef.current && !panelRef.current.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
-
-  function toggleVisible(key) {
-    const next = columns.map(c => c.key === key ? { ...c, visible: !c.visible } : c);
-    onChange(next);
-    saveColumnConfig(next);
-  }
-
-  function handleDragStart(e, idx) {
-    setDragIdx(idx);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', String(idx));
-  }
-
-  function handleDragOver(e, idx) {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    if (idx !== overIdx) setOverIdx(idx);
-  }
-
-  function handleDrop(e, idx) {
-    e.preventDefault();
-    if (dragIdx === null || dragIdx === idx) { setDragIdx(null); setOverIdx(null); return; }
-    const next = [...columns];
-    const dragged = next.splice(dragIdx, 1)[0];
-    next.splice(idx, 0, dragged);
-    setDragIdx(null);
-    setOverIdx(null);
-    onChange(next);
-    saveColumnConfig(next);
-  }
-
-  function handleDragEnd() {
-    setDragIdx(null);
-    setOverIdx(null);
-  }
-
-  function resetToDefault() {
-    const next = DEFAULT_COLUMNS.map(c => ({ ...c, visible: c.defaultVisible }));
-    onChange(next);
-    saveColumnConfig(next);
-  }
-
-  return (
-    <div className="relative" ref={panelRef}>
-      <button
-        onClick={() => setOpen(!open)}
-        className="p-1.5 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"
-        title="Configurer les colonnes"
-      >
-        <Settings2 className="w-3.5 h-3.5" />
-      </button>
-      {open && (
-        <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-surface-container-lowest border border-outline-variant/30 rounded-xl shadow-xl p-2">
-          <div className="flex items-center justify-between px-2 py-1 mb-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Colonnes</span>
-            <button onClick={resetToDefault} className="text-[10px] text-primary font-semibold hover:underline">Réinitialiser</button>
-          </div>
-          {columns.map((col, idx) => {
-            const isDraggable = !col.alwaysVisible;
-            const isDragging = dragIdx === idx;
-            const isOver = overIdx === idx && dragIdx !== null && dragIdx !== idx;
-            return (
-              <div
-                key={col.key}
-                draggable={isDraggable}
-                onDragStart={(e) => isDraggable && handleDragStart(e, idx)}
-                onDragOver={(e) => isDraggable && handleDragOver(e, idx)}
-                onDrop={(e) => isDraggable && handleDrop(e, idx)}
-                onDragEnd={handleDragEnd}
-                onDragEnter={(e) => { e.preventDefault(); if (isDraggable) setOverIdx(idx); }}
-                className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-all ${
-                  col.alwaysVisible ? 'opacity-60' : 'hover:bg-surface-container cursor-grab active:cursor-grabbing'
-                } ${isDragging ? 'opacity-40 bg-primary/10' : ''} ${isOver ? 'border-t-2 border-primary' : ''}`}
-              >
-                {isDraggable && <GripVertical className="w-3 h-3 text-on-surface-variant/40 shrink-0" />}
-                <label className="flex items-center gap-2 flex-1 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={col.visible}
-                    onChange={() => toggleVisible(col.key)}
-                    disabled={col.alwaysVisible}
-                    className="accent-primary w-3 h-3 rounded"
-                  />
-                  <span className="text-on-surface font-medium">{col.label}</span>
-                </label>
-              </div>
-            );
-          })}
-        </div>
+      {/* ── CONFIRM DELETE ───────────────────────────────────────────────────── */}
+      {confirmDelete && (
+        <ConfirmDialog
+          title={confirmDelete.mode === 'one' ? 'Supprimer ce ticket ?' : `Supprimer ${selectedIds.length} ticket(s) ?`}
+          message="Cette action est irréversible."
+          confirmLabel="Supprimer"
+          onConfirm={confirmDeleteAction}
+          onCancel={() => setConfirmDelete(null)}
+          loading={deleting}
+          danger
+        />
       )}
     </div>
   );

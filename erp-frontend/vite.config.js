@@ -19,7 +19,8 @@ export default defineConfig({
         manualChunks: {
           'react-vendor': ['react', 'react-dom', 'react-router-dom'],
           'ui-vendor': ['framer-motion', 'canvas-confetti'],
-          'chart-vendor': ['recharts']
+          'chart-vendor': ['recharts'],
+          'ag-grid': ['ag-grid-react', 'ag-grid-community']
         }
       }
     }

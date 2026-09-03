@@ -5,6 +5,7 @@ import api from '../api/client';
 import { useSocket } from '../context/SocketContext';
 import { useTheme } from '../context/ThemeContext';
 import { Activity, Radio, CheckCircle2, Clock, Brain, AlertTriangle, RefreshCw, Bolt, TrendingUp, Terminal, X, ShieldAlert } from 'lucide-react';
+import PageShell from '../components/PageShell';
 
 const EVENT_TYPES = {
   ticket_created: { icon: 'add_task', color: '#2563EB', label: 'Ticket créé' },
@@ -387,44 +388,30 @@ export default function Supervision() {
   }
 
   return (
-    <div className="max-w-full mx-auto w-full space-y-6 px-4 sm:px-6 lg:px-8 min-w-0 pt-4 sm:pt-6 pb-8 min-h-screen">
-      {/* Hero Header SEVEN-T */}
-      <div className="p-6 sm:p-8 rounded-2xl sm:rounded-3xl border border-outline-variant/30 bg-surface-container-lowest shadow-sm mb-6">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-          <div className="min-w-0">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="p-2 bg-blue-500/10 rounded-xl">
-                <Activity className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-              </div>
-              <h1 className="text-2xl sm:text-3xl font-display font-bold truncate text-on-surface">Supervision IA</h1>
-              <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold uppercase tracking-wider animate-pulse border border-emerald-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                {globalStatus.label}
-              </span>
-            </div>
-            <p className="text-sm sm:text-base text-on-surface-variant font-medium">Centre de contrôle temps réel du triage IA et santé du système.</p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <LiveClock />
-            <motion.button
-              onClick={handleSync}
-              disabled={syncing}
-              whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold text-xs flex items-center gap-2 shadow-md shadow-blue-500/20 disabled:opacity-50 transition-all cursor-pointer"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
-              <span>{syncing ? 'Syncing...' : 'Sync'}</span>
-            </motion.button>
-          </div>
+    <PageShell
+      icon={Activity}
+      iconColor="text-blue-400"
+      title="Supervision IA"
+      subtitle="Centre de contrôle temps réel du triage IA et santé du système."
+      actions={
+        <div className="flex items-center gap-3">
+          <LiveClock />
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            className="btn-primary"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
+            <span>{syncing ? 'Syncing...' : 'Sync'}</span>
+          </button>
         </div>
-
-        <div className="flex flex-wrap items-center gap-2 mt-6">
-          <StatusChip label="Daemon" ok={systemHealth.daemon} />
-          <StatusChip label="Gemini IA" ok={systemHealth.ai} />
-          <StatusChip label="Boîtes mail" ok={systemHealth.mail} />
-          <StatusChip label="GLPI Sync" ok={systemHealth.glpi} />
-        </div>
+      }
+    >
+      <div className="flex flex-wrap items-center gap-2 mb-6 p-3 rounded-2xl bg-surface-container-low/30 border border-outline-variant/20">
+        <StatusChip label="Daemon" ok={systemHealth.daemon} />
+        <StatusChip label="Gemini IA" ok={systemHealth.ai} />
+        <StatusChip label="Boîtes mail" ok={systemHealth.mail} />
+        <StatusChip label="GLPI Sync" ok={systemHealth.glpi} />
       </div>
 
       {/* ═══ KPI GRID ═══ */}
@@ -527,10 +514,10 @@ export default function Supervision() {
       </div>
 
       {/* ═══ FOOTER ═══ */}
-      <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-surface-container-low/40 border border-outline-variant/20 text-on-surface-variant text-[11px] font-mono">
+      <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-surface-container-low/40 border border-outline-variant/20 text-on-surface-variant text-[11px] font-mono mt-6">
         <Terminal className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
         <span>supervision:~$ active</span>
       </div>
-    </div>
+    </PageShell>
   );
 }

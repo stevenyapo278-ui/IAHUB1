@@ -1,75 +1,133 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   MapPin, Plus, X, Search, RefreshCw, Trash2, Globe,
-  Building2, Mail, Check, ChevronDown, ChevronRight, Pencil,
-  Users, ArrowRightLeft, UserMinus, UserPlus, Clock
+  Building2, Mail, Check, ChevronLeft, ChevronRight, ChevronDown, Pencil,
+  Users, ArrowRightLeft, UserMinus, UserPlus, Clock, CheckCircle2
 } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import useSystemSettings from '../hooks/useSystemSettings';
 import ConfirmDialog from '../components/ConfirmDialog';
-import Pagination from '../components/Pagination';
+import DataGrid from '../components/DataGrid';
+import FormDrawer from '../components/FormDrawer';
+
+function PaginationButtons({ page, totalPages, onPageChange }) {
+  const pages = useMemo(() => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    const r = [1];
+    if (page > 3) r.push('...');
+    for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) r.push(i);
+    if (page < totalPages - 2) r.push('...');
+    r.push(totalPages);
+    return r;
+  }, [page, totalPages]);
+
+  const btn = 'h-10 min-w-[40px] flex items-center justify-center rounded-lg text-xs font-semibold transition-all duration-150 active:scale-95';
+  const on = 'text-muted-foreground hover:bg-surface-muted hover:text-foreground';
+  const off = 'text-muted-foreground/30 cursor-not-allowed';
+  const active = 'bg-primary text-primary-foreground shadow-sm shadow-primary/20';
+
+  return (
+    <div className="flex items-center gap-1">
+      <button onClick={() => onPageChange(1)} disabled={page <= 1} className={`${btn} px-1.5 ${page <= 1 ? off : on}`}>
+        <ChevronsLeft className="w-4 h-4" />
+      </button>
+      <button onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page <= 1} className={`${btn} px-1.5 ${page <= 1 ? off : on}`}>
+        <ChevronLeft className="w-4 h-4" />
+      </button>
+      {pages.map((p, i) => p === '...' ? (
+        <span key={`dots-${i}`} className="w-8 h-10 flex items-center justify-center text-xs text-muted-foreground/40">…</span>
+      ) : (
+        <button key={p} onClick={() => onPageChange(p)} className={`${btn} px-1 ${p === page ? active : on}`}>{p}</button>
+      ))}
+      <button onClick={() => onPageChange(Math.min(totalPages, page + 1))} disabled={page >= totalPages} className={`${btn} px-1.5 ${page >= totalPages ? off : on}`}>
+        <ChevronRight className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
+const ChevronsLeft = ({ className }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/>
+  </svg>
+);
 
 const emptyForm = { name: '', completename: '', address: '', postcode: '', town: '', country: '', building: '', room: '' };
 
 const inputCls = 'px-3.5 py-2 rounded-xl border border-outline-variant/60 bg-surface text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all';
 
-// ── Modal création/édition lieu ──────────────────────────────────────
-function LocationModal({ open, onClose, onSave, form, setForm, title, saving }) {
-  if (!open) return null;
+// ── Drawer création/édition lieu ──────────────────────────────────────
+function LocationModal({ open, onClose, onSave, form, setForm, title, saving, isEdit }) {
   return (
-    <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-          className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} />
-        <motion.div initial={{ opacity: 0, scale: 0.95, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95, y: 16 }} transition={{ type: 'spring', duration: 0.35, bounce: 0.15 }}
-          className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-bold text-on-surface flex items-center gap-2">
-              <MapPin className="w-5 h-5 text-amber-500" /> {title}
-            </h2>
-            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-surface-container-high text-on-surface/40 hover:text-on-surface cursor-pointer transition-colors">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+    <FormDrawer
+      open={open}
+      onClose={onClose}
+      title={title}
+      subtitle={isEdit ? form.name : null}
+      icon={isEdit ? Pencil : Plus}
+      iconColor="text-amber-400"
+      size="md"
+      footer={
+        <>
+          <button type="button" onClick={onClose} className="btn-secondary">
+            Annuler
+          </button>
+          <button onClick={onSave} disabled={saving || !form.name.trim()} className="btn-primary">
+            {saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+            {saving ? 'Enregistrement...' : 'Enregistrer'}
+          </button>
+        </>
+      }
+    >
+      <form onSubmit={(e) => { e.preventDefault(); onSave(); }} className="space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label className="field-label sm:col-span-2">
+            <span>Nom du lieu *</span>
             <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required
-              placeholder="Nom du lieu *" className={inputCls} />
+              placeholder="ex: Siège Abidjan, Entrepôt San Pédro" className="input-katalyst" />
+          </label>
+          <label className="field-label sm:col-span-2">
+            <span>Nom complet (hiérarchique)</span>
             <input value={form.completename} onChange={(e) => setForm({ ...form, completename: e.target.value })}
-              placeholder="Nom complet (hiérarchique)" className={inputCls} />
+              placeholder="ex: Côte d'Ivoire > Abidjan > Plateau" className="input-katalyst" />
+          </label>
+          <label className="field-label">
+            <span>Ville</span>
             <input value={form.town} onChange={(e) => setForm({ ...form, town: e.target.value })}
-              placeholder="Ville" className={inputCls} />
+              placeholder="Ville" className="input-katalyst" />
+          </label>
+          <label className="field-label">
+            <span>Pays</span>
             <input value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })}
-              placeholder="Pays" className={inputCls} />
+              placeholder="Pays" className="input-katalyst" />
+          </label>
+          <label className="field-label sm:col-span-2">
+            <span>Adresse</span>
             <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })}
-              placeholder="Adresse" className={inputCls} />
+              placeholder="Adresse" className="input-katalyst" />
+          </label>
+          <label className="field-label">
+            <span>Code postal</span>
             <input value={form.postcode} onChange={(e) => setForm({ ...form, postcode: e.target.value })}
-              placeholder="Code postal" className={inputCls} />
+              placeholder="Code postal" className="input-katalyst" />
+          </label>
+          <label className="field-label">
+            <span>Bâtiment</span>
             <input value={form.building} onChange={(e) => setForm({ ...form, building: e.target.value })}
-              placeholder="Bâtiment" className={inputCls} />
+              placeholder="Bâtiment" className="input-katalyst" />
+          </label>
+          <label className="field-label sm:col-span-2">
+            <span>Salle</span>
             <input value={form.room} onChange={(e) => setForm({ ...form, room: e.target.value })}
-              placeholder="Salle" className={inputCls} />
-          </div>
-
-          <div className="flex justify-end gap-2 pt-1">
-            <button type="button" onClick={onClose}
-              className="px-4 py-2 rounded-xl border border-outline-variant/40 text-on-surface text-xs font-semibold hover:bg-surface-container cursor-pointer transition-colors">
-              Annuler
-            </button>
-            <button onClick={onSave} disabled={saving || !form.name.trim()}
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs font-bold shadow-md hover:shadow-lg flex items-center gap-2 cursor-pointer transition-all disabled:opacity-50">
-              {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-              {saving ? 'Enregistrement...' : 'Enregistrer'}
-            </button>
-          </div>
-        </motion.div>
-      </div>
-    </AnimatePresence>
+              placeholder="Salle" className="input-katalyst" />
+          </label>
+        </div>
+      </form>
+    </FormDrawer>
   );
 }
 
@@ -401,7 +459,6 @@ function ReassignModal({ open, onClose, onConfirm, sourceLocation, locations, lo
 // ── Composant principal ───────────────────────────────────────────────
 export default function Locations() {
   const { user } = useAuth();
-  const { autonomousMode } = useSystemSettings();
   const [locations, setLocations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -412,26 +469,39 @@ export default function Locations() {
   const [saving, setSaving] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
-  const [sortBy, setSortBy] = useState('name');
-  const [sortDir, setSortDir] = useState('asc');
-  const [page, setPage] = useState(1);
   const [detailId, setDetailId] = useState(null);
   const [reassignData, setReassignData] = useState(null);
   const [reassigning, setReassigning] = useState(false);
-  const [pageSize, setPageSize] = useState(25);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(() => Number(localStorage.getItem('locations_page_size') || '25'));
+
+  const total = useMemo(() => {
+    if (!search.trim()) return locations.length;
+    const q = search.toLowerCase();
+    return locations.filter((l) => [l.name, l.completename, l.town, l.building, l.country].some((f) => f?.toLowerCase().includes(q))).length;
+  }, [locations, search]);
+  const totalPages = Math.ceil(total / pageSize) || 1;
+
+  const filteredLocations = useMemo(() => {
+    let list = locations;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter((l) => [l.name, l.completename, l.town, l.building, l.country].some((f) => f?.toLowerCase().includes(q)));
+    }
+    const start = (page - 1) * pageSize;
+    return list.slice(start, start + pageSize);
+  }, [locations, search, page, pageSize]);
 
   function loadLocations() {
     setLoading(true);
-    const params = new URLSearchParams();
-    params.set('active', 'true');
-    if (search.trim()) params.set('search', search.trim());
-    api.get(`/locations?${params}`)
+    api.get('/locations')
       .then(({ data }) => setLocations(data))
       .catch((err) => toast.error(err.response?.data?.error || 'Erreur chargement lieux'))
       .finally(() => setLoading(false));
   }
 
-  useEffect(() => { loadLocations(); }, [search]);
+  useEffect(() => { loadLocations(); }, []);
+  useEffect(() => { setPage(1); }, [search]);
 
   function openCreate() {
     setModalMode('create');
@@ -483,7 +553,6 @@ export default function Locations() {
     } catch (err) {
       const data = err.response?.data;
       if (err.response?.status === 409 && data?.requesterCount) {
-        // Il reste des demandeurs → afficher le modal de réassignation
         setPendingDelete(null);
         setReassignData({ location: locations.find((l) => l.id === id), requesterCount: data.requesterCount });
       } else {
@@ -500,7 +569,6 @@ export default function Locations() {
     try {
       const { data } = await api.post(`/locations/${reassignData.location.id}/reassign`, { targetLocationId: targetId });
       toast.success(`${data.moved} demandeur(s) déplacé(s) vers « ${data.target} » — ${data.ticketsUpdated} ticket(s) mis à jour`);
-      // Maintenant supprimer le lieu source (plus de demandeurs = suppression autorisée)
       await api.delete(`/locations/${reassignData.location.id}`);
       setReassignData(null);
       loadLocations();
@@ -511,204 +579,168 @@ export default function Locations() {
     }
   }
 
-  async function handleToggleActive(id, isActive) {
-    try {
-      await api.patch(`/locations/${id}`, { isActive: !isActive });
-      toast.success(isActive ? 'Lieu désactivé' : 'Lieu activé');
-      loadLocations();
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'Erreur mise à jour');
-    }
-  }
-
   const canManage = hasPermission(user, 'locations.manage') || ['ADMIN', 'HOTLINE'].includes(user?.role);
 
-  function toggleSort(col) {
-    if (sortBy === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    else { setSortBy(col); setSortDir('asc'); }
-  }
+  const stats = useMemo(() => {
+    const towns = new Set(locations.map((l) => l.town).filter(Boolean)).size;
+    const buildings = new Set(locations.map((l) => l.building).filter(Boolean)).size;
+    return [
+      { label: 'Total', value: locations.length, icon: MapPin, color: 'text-amber-400', bg: 'bg-amber-500/10' },
+      { label: 'Villes', value: towns, icon: Globe, color: 'text-blue-400', bg: 'bg-blue-500/10' },
+      { label: 'Bâtiments', value: buildings, icon: Building2, color: 'text-purple-400', bg: 'bg-purple-500/10' },
+      { label: 'Actifs', value: locations.filter((l) => l.isActive !== false).length, icon: CheckCircle2, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
+    ];
+  }, [locations]);
 
-  const filtered = useMemo(() => {
-    let list = locations;
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter((l) => [l.name, l.completename, l.town, l.building, l.country].some((f) => f?.toLowerCase().includes(q)));
+  const columnDefs = useMemo(() => {
+    const cols = [
+      {
+        field: 'name', headerName: 'Lieu', flex: 1.5, minWidth: 180,
+        cellRenderer: (params) => (
+          <div className="flex items-center gap-2">
+            <div className="p-1 rounded-md bg-amber-500/10 text-amber-500 shrink-0">
+              <MapPin className="w-3.5 h-3.5" />
+            </div>
+            <div className="min-w-0">
+              <span className="text-sm font-semibold text-on-surface truncate block">{params.value}</span>
+              {params.data.completename && (
+                <span className="text-[10px] text-on-surface-variant truncate block">{params.data.completename}</span>
+              )}
+            </div>
+          </div>
+        ),
+      },
+      {
+        field: 'town', headerName: 'Ville / Bâtiment', width: 160,
+        valueGetter: (params) => [params.data.town, params.data.building].filter(Boolean).join(' · ') || '—',
+        cellRenderer: (params) => <span className="text-xs text-on-surface-variant">{params.value}</span>,
+      },
+      {
+        field: 'country', headerName: 'Pays', width: 120,
+        cellRenderer: (params) => <span className="text-xs text-on-surface-variant">{params.value || '—'}</span>,
+      },
+      {
+        field: 'requesterCount', headerName: 'Demandeurs', width: 120,
+        valueGetter: (params) => params.data._count?.requesters ?? params.data.requesters?.length ?? 0,
+        cellRenderer: (params) => <span className="text-xs font-semibold text-on-surface">{params.value}</span>,
+      },
+    ];
+
+    if (canManage) {
+      cols.push({
+        field: 'actions', headerName: '', width: 80, sortable: false, filter: false,
+        cellRenderer: (params) => (
+          <div className="flex gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+            <button onClick={(e) => { e.stopPropagation(); openEdit(params.data); }} title="Modifier"
+              className="p-1.5 rounded-lg text-on-surface/60 hover:text-amber-500 hover:bg-amber-500/10 cursor-pointer transition-colors">
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+            <button onClick={(e) => { e.stopPropagation(); setPendingDelete(params.data.id); }} title="Supprimer"
+              className="p-1.5 rounded-lg text-on-surface/60 hover:text-red-500 hover:bg-red-500/10 cursor-pointer transition-colors">
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ),
+      });
     }
-    list = [...list].sort((a, b) => {
-      let va = a[sortBy] || '', vb = b[sortBy] || '';
-      if (sortBy === '_count') { va = a._count?.requesterLinks || 0; vb = b._count?.requesterLinks || 0; }
-      if (typeof va === 'string') { va = va.toLowerCase(); vb = vb.toLowerCase(); }
-      if (va < vb) return sortDir === 'asc' ? -1 : 1;
-      if (va > vb) return sortDir === 'asc' ? 1 : -1;
-      return 0;
-    });
-    return list;
-  }, [locations, search, sortBy, sortDir]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
-  useEffect(() => { setPage(1); }, [search, pageSize]);
-
-  function SortHeader({ col, children }) {
-    const active = sortBy === col;
-    return (
-      <th
-        onClick={() => toggleSort(col)}
-        className={`px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider cursor-pointer select-none transition-colors ${active ? 'text-amber-600' : 'text-on-surface-variant hover:text-on-surface'}`}
-      >
-        <span className="inline-flex items-center gap-1">
-          {children}
-          {active && (sortDir === 'asc' ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />)}
-        </span>
-      </th>
-    );
-  }
+    return cols;
+  }, [canManage]);
 
   return (
-    <div className="flex flex-col min-h-screen">
-      {/* ── Top Bar ─────────────────────────────────────────────────────── */}
-      <div className="sticky top-0 z-20 shrink-0 border-b border-outline-variant/30 bg-surface-container-lowest/95 backdrop-blur-sm px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-3">
-          <div className="p-1.5 bg-amber-500/10 rounded-lg">
-            <MapPin className="w-5 h-5 text-amber-600 dark:text-amber-400" />
-          </div>
-          <div>
-            <h1 className="text-base font-bold text-on-surface">Lieux</h1>
-            <p className="text-[11px] text-on-surface-variant font-medium">{locations.length} lieu(x) — associations expéditeur↔lieu automatiques</p>
-          </div>
+    <div className="flex flex-col h-full w-full min-w-0 gap-0">
+      {/* ── HEADER ─────────────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-border/20 bg-surface shrink-0">
+        <div className="flex items-center gap-2">
+          <MapPin className="w-4 h-4 text-amber-500 shrink-0" />
+          <h1 className="text-sm font-bold text-on-surface whitespace-nowrap">Lieux</h1>
+          <span className="text-[11px] text-on-surface-variant font-medium tabular-nums">
+            {total > 0 && `${total}`}
+          </span>
         </div>
         {canManage && (
           <button onClick={openCreate}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs font-bold shadow-md hover:shadow-lg transition-all">
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-bold hover:opacity-90 transition-opacity shadow-sm cursor-pointer">
             <Plus className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Nouveau lieu</span>
           </button>
         )}
       </div>
 
-      {/* ── Search ───────────────────────────────────────────────────────── */}
-      <div className="px-4 sm:px-6 lg:px-8 py-3">
-        <div className="relative max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface/40" />
+      {/* ── STATS ──────────────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 px-4 sm:px-6 py-3 shrink-0">
+        {[
+          { label: 'Total', value: total, color: 'text-on-surface' },
+          { label: 'Villes', value: new Set(locations.map((l) => l.town).filter(Boolean)).size, color: 'text-blue-600 dark:text-blue-400' },
+          { label: 'Bâtiments', value: new Set(locations.map((l) => l.building).filter(Boolean)).size, color: 'text-purple-600 dark:text-purple-400' },
+          { label: 'Actifs', value: locations.filter((l) => l.isActive !== false).length, color: 'text-emerald-600 dark:text-emerald-400' },
+        ].map((s) => (
+          <div key={s.label} className="bg-surface-container rounded-xl p-3 text-center">
+            <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
+            <p className="text-xs text-on-surface-variant">{s.label}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* ── SEARCH + REFRESH ────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-2 px-4 sm:px-6 py-3 shrink-0">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface/30" />
           <input
             value={search} onChange={(e) => setSearch(e.target.value)}
             placeholder="Rechercher un lieu..."
-            className="w-full pl-9 pr-4 py-2 rounded-xl border border-outline-variant/60 bg-surface text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+            className={`${inputCls} w-full pl-9`}
           />
+        </div>
+        <button onClick={loadLocations}
+          className="p-2 rounded-xl border border-outline-variant/60 text-on-surface-variant hover:bg-surface-container-high cursor-pointer transition-colors">
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+        </button>
+      </div>
+
+      {/* ── MAIN CONTENT ───────────────────────────────────────────────────── */}
+      <div className="flex-1 min-h-0 relative overflow-auto">
+        <div className="mx-4 sm:mx-6 lg:mx-8 mt-3.5 mb-4">
+          <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest overflow-hidden">
+            <DataGrid
+              columns={columnDefs}
+              rowData={filteredLocations}
+              loading={loading}
+              onRowClick={(data) => setDetailId(data.id)}
+              pagination={false}
+              noRowsText={search ? 'Aucun lieu ne correspond à votre recherche' : 'Aucun lieu. Créez-en un !'}
+              className="rounded-2xl overflow-hidden"
+            />
+          </div>
         </div>
       </div>
 
-      {/* ── Tableau ─────────────────────────────────────────────────────── */}
-      <div className="flex-1 px-4 sm:px-6 lg:px-8 pb-6">
-        {loading ? (
-          <div className="text-center py-12 text-on-surface/40">
-            <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-2" />
-            Chargement...
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="text-center py-12 text-on-surface/40">
-            <MapPin className="w-12 h-12 mx-auto mb-3 opacity-30" />
-            {search ? 'Aucun lieu ne correspond à votre recherche' : 'Aucun lieu. Créez-en un !'}
-          </div>
-        ) : (
-          <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest overflow-hidden">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="border-b border-outline-variant/20 bg-surface-container-low/50">
-                  <SortHeader col="name">Nom</SortHeader>
-                  <SortHeader col="completename">Nom complet</SortHeader>
-                  <SortHeader col="building">Bâtiment</SortHeader>
-                  <SortHeader col="town">Ville</SortHeader>
-                  <SortHeader col="country">Pays</SortHeader>
-                  <SortHeader col="_count">Demandeurs</SortHeader>
-                  <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
-                    Statut
-                  </th>
-                  {canManage && <th className="px-3 py-2.5 text-right text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Actions</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {paginated.map((loc) => (
-                  <tr
-                    key={loc.id}
-                    className="group border-b border-outline-variant/10 hover:bg-amber-500/5 transition-colors cursor-pointer"
-                    onClick={() => setDetailId(loc.id)}
-                  >
-                    <td className="px-3 py-2.5">
-                      <div className="flex items-center gap-2">
-                        <div className={`p-1 rounded-md shrink-0 ${loc.isCustom ? 'bg-purple-500/10 text-purple-500' : 'bg-amber-500/10 text-amber-500'}`}>
-                          {loc.isCustom ? <Building2 className="w-3.5 h-3.5" /> : <Globe className="w-3.5 h-3.5" />}
-                        </div>
-                        <span className="text-sm font-semibold text-on-surface truncate">{loc.name}</span>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <span className="text-xs text-on-surface-variant">{loc.completename || '—'}</span>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <span className="text-xs text-on-surface-variant">{loc.building || '—'}</span>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <span className="text-xs text-on-surface-variant">{loc.town || '—'}</span>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <span className="text-xs text-on-surface-variant">{loc.country || '—'}</span>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <span className="text-xs text-on-surface-variant font-medium">
-                        {loc._count?.requesterLinks > 0 ? (
-                          <span className="flex items-center gap-1">
-                            <Mail className="w-3 h-3 text-on-surface/40" /> {loc._count.requesterLinks}
-                          </span>
-                        ) : '—'}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      {loc.isActive ? (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 font-bold">Actif</span>
-                      ) : (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-500 border border-red-500/20 font-bold">Inactif</span>
-                      )}
-                    </td>
-                    {canManage && (
-                      <td className="px-3 py-2.5">
-                        <div className="flex gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-                          <button onClick={() => openEdit(loc)} title="Modifier"
-                            className="p-1.5 rounded-lg text-on-surface/60 hover:text-amber-500 hover:bg-amber-500/10 cursor-pointer transition-colors">
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                          <button onClick={() => setDetailId(loc.id)} title="Demandeurs"
-                            className="p-1.5 rounded-lg text-on-surface/60 hover:text-blue-500 hover:bg-blue-500/10 cursor-pointer transition-colors">
-                            <Users className="w-3.5 h-3.5" />
-                          </button>
-                          <button onClick={() => handleToggleActive(loc.id, loc.isActive)}
-                            title={loc.isActive ? 'Désactiver' : 'Activer'}
-                            className="p-1.5 rounded-lg text-on-surface/60 hover:bg-surface-container-high cursor-pointer transition-colors">
-                            {loc.isActive ? <X className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
-                          </button>
-                          <button onClick={() => setPendingDelete(loc.id)} title="Supprimer"
-                            className="p-1.5 rounded-lg text-on-surface/60 hover:text-red-500 hover:bg-red-500/10 cursor-pointer transition-colors">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <Pagination page={page} totalPages={totalPages} total={filtered.length} label="lieux" onPageChange={setPage} pageSize={pageSize} onPageSizeChange={(s) => { setPageSize(s); setPage(1); }} />
-          </div>
-        )}
+      {/* ── PAGINATION ──────────────────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-4 sm:px-6 py-3 border-t border-border/20 bg-surface shrink-0">
+        <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+          <span className="font-medium tabular-nums">
+            {total > 0
+              ? `${Math.min((page - 1) * pageSize + 1, total)}–${Math.min(page * pageSize, total)} sur ${total.toLocaleString('fr-FR')}`
+              : '0 résultat'}
+          </span>
+          <div className="w-px h-3.5 bg-border/40" />
+          <select value={pageSize}
+            onChange={(e) => { const v = Number(e.target.value); setPageSize(v); localStorage.setItem('locations_page_size', String(v)); setPage(1); }}
+            className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-border/40 bg-background text-foreground cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all">
+            {[25, 50, 100, 200].map((n) => <option key={n} value={n}>{n}/page</option>)}
+          </select>
+        </div>
+        <PaginationButtons page={page} totalPages={Math.max(totalPages, 1)} onPageChange={setPage} />
       </div>
 
-      {/* ── Modals ──────────────────────────────────────────────────────── */}
+      {/* ── MODALS ─────────────────────────────────────────────────────────── */}
       <LocationModal
         open={modalOpen}
         onClose={() => { setModalOpen(false); setEditingId(null); setForm(emptyForm); }}
         onSave={handleSave}
         form={form} setForm={setForm}
         title={modalMode === 'edit' ? 'Modifier le lieu' : 'Nouveau lieu'}
+        isEdit={modalMode === 'edit'}
         saving={saving}
       />
 

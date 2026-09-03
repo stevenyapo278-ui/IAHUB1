@@ -1,17 +1,156 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   AlertTriangle, Plus, Search, RefreshCw, Filter, X, ChevronDown,
+  ChevronLeft, ChevronRight,
   Clock, CheckCircle2, Radio, AlertCircle, User, Users, Tag, Calendar,
   Link2, Eye, Flame, Info, ArrowDown, Sparkles,
 } from 'lucide-react';
+
+function PaginationButtons({ page, totalPages, onPageChange }) {
+  const [jumpValue, setJumpValue] = useState('');
+  const jumpRef = useRef(null);
+
+  const pages = useMemo(() => {
+    if (totalPages <= 7) {
+      return Array.from({ length: totalPages }, (_, i) => i + 1);
+    }
+    const result = [];
+    result.push(1);
+    if (page > 3) result.push('...');
+    const start = Math.max(2, page - 1);
+    const end = Math.min(totalPages - 1, page + 1);
+    for (let i = start; i <= end; i++) result.push(i);
+    if (page < totalPages - 2) result.push('...');
+    result.push(totalPages);
+    return result;
+  }, [page, totalPages]);
+
+  function handleKeyDown(e) {
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      onPageChange(Math.max(1, page - 1));
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      onPageChange(Math.min(totalPages, page + 1));
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      onPageChange(1);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      onPageChange(totalPages);
+    }
+  }
+
+  function handleJump(e) {
+    e.preventDefault();
+    const val = parseInt(jumpValue, 10);
+    if (!isNaN(val) && val >= 1 && val <= totalPages && val !== page) {
+      onPageChange(val);
+    }
+    setJumpValue('');
+    jumpRef.current?.blur();
+  }
+
+  const btnBase = 'h-10 min-w-[40px] flex items-center justify-center rounded-lg text-xs font-semibold transition-all duration-150 active:scale-95';
+  const btnEnabled = 'text-muted-foreground hover:bg-surface-muted hover:text-foreground';
+  const btnDisabled = 'text-muted-foreground/30 cursor-not-allowed';
+  const btnActive = 'bg-primary text-primary-foreground shadow-sm shadow-primary/20';
+
+  return (
+    <div className="flex items-center gap-2" onKeyDown={handleKeyDown} role="navigation" aria-label="Pagination">
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => onPageChange(1)}
+          disabled={page <= 1}
+          aria-label="Première page"
+          className={`${btnBase} px-1.5 ${page <= 1 ? btnDisabled : btnEnabled}`}
+        >
+          <ChevronsLeft className="w-4 h-4" />
+        </button>
+        <button
+          onClick={() => onPageChange(Math.max(1, page - 1))}
+          disabled={page <= 1}
+          aria-label="Page précédente"
+          className={`${btnBase} px-1.5 ${page <= 1 ? btnDisabled : btnEnabled}`}
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+
+        {pages.map((p, i) =>
+          p === '...' ? (
+            <span key={`dots-${i}`} className="w-8 h-10 flex items-center justify-center text-xs text-muted-foreground/40">…</span>
+          ) : (
+            <button
+              key={p}
+              onClick={() => onPageChange(p)}
+              aria-label={`Page ${p}`}
+              aria-current={p === page ? 'page' : undefined}
+              className={`${btnBase} px-1 ${p === page ? btnActive : btnEnabled}`}
+            >
+              {p}
+            </button>
+          )
+        )}
+
+        <button
+          onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+          disabled={page >= totalPages}
+          aria-label="Page suivante"
+          className={`${btnBase} px-1.5 ${page >= totalPages ? btnDisabled : btnEnabled}`}
+        >
+          <ChevronRight className="w-4 h-4" />
+        </button>
+        <button
+          onClick={() => onPageChange(totalPages)}
+          disabled={page >= totalPages}
+          aria-label="Dernière page"
+          className={`${btnBase} px-1.5 ${page >= totalPages ? btnDisabled : btnEnabled}`}
+        >
+          <ChevronsRight className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Jump-to */}
+      <form onSubmit={handleJump} className="flex items-center gap-1.5 ml-2">
+        <span className="text-[11px] text-muted-foreground">→</span>
+        <input
+          ref={jumpRef}
+          type="number"
+          min={1}
+          max={totalPages}
+          value={jumpValue}
+          onChange={(e) => setJumpValue(e.target.value)}
+          placeholder={`1–${totalPages}`}
+          className="w-16 h-8 px-2 text-[11px] text-center font-semibold bg-surface border border-border/40 rounded-lg text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-primary/30 transition-all"
+        />
+      </form>
+    </div>
+  );
+}
+
+function ChevronsLeft({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m11 17-5-5 5-5" /><path d="m18 17-5-5 5-5" />
+    </svg>
+  );
+}
+function ChevronsRight({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m6 17 5-5-5-5" /><path d="m13 17 5-5-5-5" />
+    </svg>
+  );
+}
 import api from '../api/client';
 import { hasPermission } from '../utils/permissions';
 import { useAuth } from '../context/AuthContext';
 import useSystemSettings from '../hooks/useSystemSettings';
 import ConfirmDialog from '../components/ConfirmDialog';
 import EmptyState from '../components/EmptyState';
+import DataGrid from '../components/DataGrid';
 
 const STATUS_OPTIONS = ['NEW', 'IN_PROGRESS', 'ASSIGNED', 'PLANNED', 'WAITING', 'SOLVED', 'CLOSED', 'OBSERVED'];
 const STATUS_LABELS = {
@@ -112,6 +251,10 @@ export default function Problems() {
   const [problems, setProblems] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(() => {
+    const s = localStorage.getItem('problems_page_size');
+    return s ? parseInt(s, 10) : 30;
+  });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -122,7 +265,7 @@ export default function Problems() {
 
   const loadProblems = useCallback(() => {
     setLoading(true);
-    const params = { page, limit: 30 };
+    const params = { page, limit: pageSize };
     if (search) params.search = search;
     if (statusFilter) params.status = statusFilter;
     if (priorityFilter) params.priority = priorityFilter;
@@ -131,7 +274,7 @@ export default function Problems() {
       .then(({ data }) => { setProblems(data.problems || []); setTotal(data.total || 0); })
       .catch(() => toast.error('Erreur chargement problèmes'))
       .finally(() => setLoading(false));
-  }, [page, search, statusFilter, priorityFilter]);
+  }, [page, pageSize, search, statusFilter, priorityFilter]);
 
   const loadStats = useCallback(() => {
     api.get('/problems/stats').then(({ data }) => setStats(data)).catch(() => {});
@@ -142,34 +285,32 @@ export default function Problems() {
 
   useEffect(() => { setPage(1); }, [search, statusFilter, priorityFilter]);
 
-  const totalPages = Math.ceil(total / 30);
+  const totalPages = Math.ceil(total / pageSize);
 
   return (
-    <div className="space-y-5 p-5">
+    <div className="flex flex-col h-full w-full min-w-0 gap-0">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-on-surface flex items-center gap-2">
-            <AlertTriangle className="w-6 h-6 text-amber-500" />
-            Problèmes
-          </h1>
-          <p className="text-sm text-on-surface-variant mt-0.5">
-            {total} problème(s) — causes racines et incidents récurrents
-          </p>
+      <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-border/20 bg-surface shrink-0">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+          <h1 className="text-sm font-bold text-on-surface whitespace-nowrap">Problèmes</h1>
+          <span className="text-[11px] text-on-surface-variant font-medium tabular-nums">
+            {total > 0 && `${total}`}
+          </span>
         </div>
         {canManage && (
           <button
             onClick={() => setShowCreateModal(true)}
-            className="px-4 py-2.5 rounded-xl bg-primary text-on-primary text-sm font-bold flex items-center gap-2 hover:opacity-90 cursor-pointer transition-opacity"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-bold hover:opacity-90 transition-opacity shadow-sm"
           >
-            <Plus className="w-4 h-4" />
-            Nouveau problème
+            <Plus className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Nouveau</span>
           </button>
         )}
       </div>
 
       {/* Stats cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 px-4 sm:px-6 py-3 shrink-0">
         {[
           { label: 'Total', value: stats.total, color: 'text-on-surface' },
           { label: 'Ouverts', value: stats.open, color: 'text-amber-600 dark:text-amber-400' },
@@ -184,7 +325,7 @@ export default function Problems() {
       </div>
 
       {/* Search + Filters */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 px-4 sm:px-6 py-3 shrink-0">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface/30" />
           <input
@@ -215,7 +356,7 @@ export default function Problems() {
 
       {/* Filters panel */}
       {showFilters && (
-        <div className="bg-surface-container rounded-xl p-3 flex flex-wrap gap-3 items-center">
+        <div className="bg-surface-container rounded-xl p-3 flex flex-wrap gap-3 items-center mx-4 sm:mx-6">
           <div className="flex items-center gap-2">
             <span className="text-xs text-on-surface-variant font-medium">Statut :</span>
             <select
@@ -253,64 +394,70 @@ export default function Problems() {
         </div>
       )}
 
-      {/* Table */}
-      <div className="bg-surface-container rounded-xl overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-outline-variant/40">
-              <th className="px-4 py-3 text-left text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Titre</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Statut</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Priorité</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Catégorie</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Assigné à</th>
-              <th className="px-4 py-3 text-center text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Tickets</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Créé le</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-outline-variant/20">
-            {loading ? (
-              <tr>
-                <td colSpan={7} className="px-4 py-12 text-center">
-                  <RefreshCw className="w-5 h-5 animate-spin mx-auto text-on-surface-variant" />
-                </td>
-              </tr>
-            ) : problems.length === 0 ? (
-              <tr>
-                <td colSpan={7}>
-                  <EmptyState icon={AlertTriangle} title="Aucun problème" description="Aucun problème enregistré pour le moment." />
-                </td>
-              </tr>
-            ) : (
-              problems.map((p) => (
-                <ProblemRow key={p.id} problem={p} onClick={(id) => navigate(`/problems/${id}`)} />
-              ))
-            )}
-          </tbody>
-        </table>
+      {/* ── MAIN CONTENT ── */}
+      <div className="flex-1 min-h-0 relative overflow-auto">
+        {/* ── TABLE VIEW (AG Grid — same as Tickets) ── */}
+        <div className="mx-4 sm:mx-6 lg:mx-8 mt-3.5 mb-4">
+          <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest overflow-hidden">
+            <DataGrid
+              columns={[
+                { field: 'title', headerName: 'Titre', flex: 1.5, minWidth: 200, cellRenderer: (p) => <span className="font-semibold text-sm text-on-surface group-hover:text-primary truncate max-w-[300px]">{p.value}</span> },
+                { field: 'status', headerName: 'Statut', width: 130, cellRenderer: (p) => <StatusBadge status={p.value} /> },
+                { field: 'priority', headerName: 'Priorité', width: 100, cellRenderer: (p) => <PriorityBadge priority={p.value} /> },
+                { field: 'category', headerName: 'Catégorie', width: 140, cellRenderer: (p) => <span className="text-xs text-on-surface-variant">{p.value || '—'}</span> },
+                {
+                  field: 'assignedTo', headerName: 'Assigné à', width: 160,
+                  valueGetter: (params) => params.data.assignedTo?.fullName || '',
+                  cellRenderer: (params) => params.value
+                    ? <span className="inline-flex items-center gap-1.5 text-xs text-on-surface">
+                        <span className="w-5 h-5 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[9px] font-bold">
+                          {params.value?.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase()}
+                        </span>
+                        {params.value}
+                      </span>
+                    : <span className="text-xs text-on-surface-variant italic">Non assigné</span>,
+                },
+                {
+                  field: 'ticketCount', headerName: 'Tickets', width: 90, headerClass: 'text-center',
+                  valueGetter: (params) => params.data._count?.tickets || 0,
+                  cellRenderer: (params) => <span className="inline-flex items-center gap-1 text-xs text-on-surface-variant justify-center w-full"><Link2 className="w-3 h-3" />{params.value}</span>,
+                },
+                {
+                  field: 'createdAt', headerName: 'Créé le', width: 110,
+                  cellRenderer: (params) => <span className="text-xs text-on-surface-variant whitespace-nowrap">{new Date(params.value).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}</span>,
+                  comparator: (a, b) => new Date(a).getTime() - new Date(b).getTime(),
+                },
+              ]}
+              rowData={problems}
+              loading={loading}
+              onRowClick={(data) => navigate(`/problems/${data.id}`)}
+              pagination={false}
+              noRowsText="Aucun problème enregistré pour le moment."
+              className="rounded-2xl overflow-hidden"
+            />
+          </div>
+        </div>
       </div>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-2">
-          <button
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page <= 1}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium border border-outline-variant/60 disabled:opacity-40 cursor-pointer"
-          >
-            Précédent
-          </button>
-          <span className="text-xs text-on-surface-variant">
-            Page {page} / {totalPages}
+      {/* ── PAGINATION ───────────────────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-4 sm:px-6 py-3 border-t border-border/20 bg-surface shrink-0">
+        <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+          <span className="font-medium tabular-nums">
+            {total > 0
+              ? `${Math.min((page - 1) * pageSize + 1, total)}–${Math.min(page * pageSize, total)} sur ${total.toLocaleString('fr-FR')}`
+              : '0 résultat'}
           </span>
-          <button
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium border border-outline-variant/60 disabled:opacity-40 cursor-pointer"
-          >
-            Suivant
-          </button>
+          <div className="w-px h-3.5 bg-border/40" />
+          <select value={pageSize}
+            onChange={(e) => { const v = Number(e.target.value); setPageSize(v); localStorage.setItem('problems_page_size', String(v)); setPage(1); }}
+            className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-border/40 bg-background text-foreground cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all">
+            {[25, 50, 100, 200].map((n) => <option key={n} value={n}>{n}/page</option>)}
+          </select>
         </div>
-      )}
+        <PaginationButtons page={page} totalPages={Math.max(totalPages, 1)} onPageChange={setPage} />
+      </div>
+
+
 
       {/* Create modal */}
       {showCreateModal && (

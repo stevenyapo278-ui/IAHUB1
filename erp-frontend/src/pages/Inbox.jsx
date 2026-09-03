@@ -8,6 +8,7 @@ import api from '../api/client';
 import Skeleton from '../components/Skeleton';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
+import { staggerContainer, staggerItem } from '../utils/animations';
 import { useSocket } from '../context/SocketContext';
 import { useFilterParam } from '../hooks/useFilterParam';
 import { sanitizeHtml } from '../utils/sanitize';
@@ -16,7 +17,7 @@ import {
   Paperclip, Search, X, FlaskConical, Bot, ArrowUpRight, Reply, ChevronDown,
   ChevronRight, ChevronUp, Flame, AlertTriangle, ArrowDownWideNarrow, Rows3, Rows4,
   CircleDot, Mail, CheckCheck, Send, FileText, Tag, Users, Filter, Sparkles, Plus,
-  CalendarRange, Info, FolderPlus, ArrowRight, Loader2, Folder, Settings, Trash2, Play
+  CalendarRange, Info, FolderPlus, ArrowRight, Loader2, Folder, Settings, Trash2, Play, EyeOff, Eye
 } from 'lucide-react';
 
 const STATUS_LABELS = {
@@ -35,7 +36,7 @@ const STATUS_CONFIG = {
   RETRY:   { label: 'Relance',    icon: RefreshCw,    color: 'text-amber-400',  bg: 'bg-amber-500/10',  border: 'border-amber-500/20'  },
   DEAD_LETTER: { label: 'Échec',  icon: AlertTriangle,color: 'text-red-500',    bg: 'bg-red-500/15',    border: 'border-red-500/25'    },
   SPAM:    { label: 'Spam',       icon: Ban,          color: 'text-zinc-400',   bg: 'bg-zinc-500/10',   border: 'border-zinc-500/20'   },
-  INFORMATIONAL: { label: 'Info', icon: Mail,          color: 'text-slate-400',  bg: 'bg-slate-500/10',  border: 'border-slate-500/20'  },
+  INFORMATIONAL: { label: 'Info', icon: Mail,          color: 'text-on-surface-variant',  bg: 'bg-surface-container',  border: 'border-slate-500/20'  },
   NEEDS_REVIEW: { label: 'Révision', icon: AlertTriangle, color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20' },
 };
 
@@ -135,10 +136,10 @@ const ThreadItem = memo(function ThreadItem({ thread, isSelected, isUnread, isCo
       onContextMenu={(e) => onContextMenu(e, thread)}
       className={`w-full text-left flex items-stretch gap-0 border-b border-outline-variant/15 transition-all group ${
         isSelected
-          ? 'bg-sky-500/10 ring-1 ring-inset ring-sky-500/20'
+          ? 'bg-primary/[0.06] ring-1 ring-inset ring-primary/20'
           : isUnread
-            ? 'bg-surface-container-low/40 hover:bg-surface-container'
-            : 'hover:bg-surface-container-low/60'
+            ? 'bg-surface-container-low/40 hover:bg-primary/[0.03]'
+            : 'hover:bg-primary/[0.03]'
       }`}
     >
       {/* Bande de priorité */}
@@ -156,7 +157,7 @@ const ThreadItem = memo(function ThreadItem({ thread, isSelected, isUnread, isCo
         </div>
 
         {/* Avatar */}
-        <div className={`shrink-0 rounded-full flex items-center justify-center text-[11px] font-bold text-white ring-2 ring-surface-container-lowest ${pCfg ? pCfg.bg : isUnread ? 'bg-sky-600' : 'bg-zinc-500'}`}
+        <div className={`shrink-0 rounded-xl flex items-center justify-center text-[11px] font-bold text-white ${pCfg ? pCfg.bg : isUnread ? 'bg-primary' : 'bg-zinc-500'}`}
           style={{ width: isCompact ? 30 : 34, height: isCompact ? 30 : 34 }}
         >
           {initialOf(latest.fromName, latest.fromEmail)}
@@ -171,7 +172,7 @@ const ThreadItem = memo(function ThreadItem({ thread, isSelected, isUnread, isCo
             >
               {sender}
             </span>
-            {isUnread && <CircleDot className="w-2.5 h-2.5 text-sky-400 shrink-0" />}
+            {isUnread && <CircleDot className="w-2.5 h-2.5 text-primary shrink-0" />}
             <span className="ml-auto shrink-0 text-[10px] text-on-surface-variant/70">{formatDate(latest.date)}</span>
           </div>
 
@@ -181,7 +182,7 @@ const ThreadItem = memo(function ThreadItem({ thread, isSelected, isUnread, isCo
               {latest.subject || '(sans objet)'}
             </span>
             {thread.count > 1 && (
-              <span className="shrink-0 inline-flex items-center justify-center min-w-4 px-1 py-0.5 rounded-full bg-sky-500/10 text-sky-400 text-[9px] font-bold border border-sky-500/20">
+              <span className="shrink-0 inline-flex items-center justify-center min-w-4 px-1 py-0.5 rounded-full bg-primary/10 text-primary text-[9px] font-bold border border-primary/20">
                 {thread.count}
               </span>
             )}
@@ -321,6 +322,20 @@ export default function Inbox() {
   const [selectedIds, setSelectedIds] = useState([]);
   const [bulkAction, setBulkAction] = useState(null);
   const [expandedErrors, setExpandedErrors] = useState(new Set());
+
+  // ── Dossiers masqués (persistés dans localStorage) ──────────────────
+  const [hiddenFolders, setHiddenFolders] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('inbox_hidden_folders') || '[]'); } catch { return []; }
+  });
+  const [showFolderManager, setShowFolderManager] = useState(false);
+  function toggleFolderVisibility(folderId) {
+    setHiddenFolders((prev) => {
+      const next = prev.includes(folderId) ? prev.filter((id) => id !== folderId) : [...prev, folderId];
+      localStorage.setItem('inbox_hidden_folders', JSON.stringify(next));
+      return next;
+    });
+  }
+  const visibleFolders = FOLDERS.filter((f) => !hiddenFolders.includes(f.id));
 
   // ── Dossiers custom ────────────────────────────────────────────────
   const [customFolders, setCustomFolders] = useState([]);
@@ -863,33 +878,41 @@ export default function Inbox() {
       {/* ── Corps : 3 volets (dossiers | liste | lecture) ─────────────────── */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
 
-        {/* ═══ Volets de dossiers (façon Outlook) ═══ */}
-        <aside className="hidden md:flex w-52 shrink-0 flex-col border-r border-outline-variant/30 bg-surface-container-lowest overflow-y-auto">
+        {/* ═══ Volets de dossiers (Katalyst Mail style) ═══ */}
+        <aside className="hidden md:flex w-56 shrink-0 flex-col border-r border-outline-variant/30 bg-surface-container-lowest overflow-y-auto">
           <div className="p-2 space-y-0.5">
-            {FOLDERS.map((f) => {
+            {visibleFolders.map((f) => {
               const Icon = f.icon;
               const isActive = folder === f.id;
               const c = countFor(f.id);
               return (
-                <button
-                  key={f.id}
-                  onClick={() => { setFolder(f.id); }}
-                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                    isActive
-                      ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20'
-                      : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface border border-transparent'
-                  }`}
-                >
-                  <Icon className="w-4 h-4 shrink-0" />
-                  <span className="flex-1 text-left truncate">{f.label}</span>
-                  {c != null && c > 0 && (
-                    <span className={`shrink-0 min-w-4 px-1 py-0.5 rounded-full text-center text-[9px] font-bold ${
-                      isActive ? 'bg-sky-500/20 text-sky-300' : 'bg-surface-container-high text-on-surface-variant'
-                    }`}>
-                      {c > 999 ? '999+' : c}
-                    </span>
-                  )}
-                </button>
+                <div key={f.id} className="relative group">
+                  <button
+                    onClick={() => { setFolder(f.id); }}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                      isActive
+                        ? 'bg-primary/10 text-primary border border-primary/20'
+                        : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface border border-transparent'
+                    }`}
+                  >
+                    <Icon className="w-4 h-4 shrink-0" />
+                    <span className="flex-1 text-left truncate">{f.label}</span>
+                    {c != null && c > 0 && (
+                      <span className={`shrink-0 min-w-4 px-1 py-0.5 rounded-full text-center text-[9px] font-bold ${
+                        isActive ? 'bg-sky-500/20 text-sky-300' : 'bg-surface-container-high text-on-surface-variant'
+                      }`}>
+                        {c > 999 ? '999+' : c}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); toggleFolderVisibility(f.id); }}
+                    className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-md opacity-0 group-hover:opacity-100 text-on-surface-variant/40 hover:text-red-400 hover:bg-red-400/10 transition-all cursor-pointer z-10"
+                    title="Masquer ce dossier"
+                  >
+                    <EyeOff className="w-3 h-3" />
+                  </button>
+                </div>
               );
             })}
 
@@ -912,11 +935,11 @@ export default function Inbox() {
                     <button
                       key={`folder-${f.id}`}
                       onClick={() => { setFolder(`folder-${f.id}`); }}
-                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer group ${
-                        isActive
-                          ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20'
-                          : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface border border-transparent'
-                      }`}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer group ${
+                      isActive
+                        ? 'bg-primary/10 text-primary border border-primary/20'
+                        : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface border border-transparent'
+                    }`}
                     >
                       <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: f.color || '#6b7280' }} />
                       <span className="flex-1 text-left truncate">{f.name}</span>
@@ -944,15 +967,30 @@ export default function Inbox() {
             {customFolders.length === 0 && (
               <button
                 onClick={() => setShowCreateFolder(true)}
-                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs text-on-surface-variant/50 hover:text-on-surface-variant hover:bg-surface-container transition-all cursor-pointer"
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs text-on-surface-variant/50 hover:text-on-surface-variant hover:bg-surface-container transition-all cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Créer un dossier</span>
               </button>
             )}
           </div>
-          <div className="mt-auto px-3 py-3 border-t border-outline-variant/20 text-[10px] text-on-surface-variant/70 leading-relaxed">
-            Fils de conversation triés par l'IA Gemini · rafraîchissement auto 15s
+          {/* Gérer la visibilité des dossiers */}
+          <div className="mt-auto px-2 py-2 border-t border-outline-variant/20">
+            <button
+              onClick={() => setShowFolderManager(true)}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-on-surface-variant/60 hover:text-on-surface-variant hover:bg-surface-container transition-all cursor-pointer"
+            >
+              <Settings className="w-3.5 h-3.5" />
+              <span>Gérer les dossiers</span>
+              {hiddenFolders.length > 0 && (
+                <span className="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                  {hiddenFolders.length} masqué{hiddenFolders.length > 1 ? 's' : ''}
+                </span>
+              )}
+            </button>
+          </div>
+          <div className="px-3 pb-3 text-[10px] text-on-surface-variant/50 leading-relaxed">
+            Fils de conversation triés par l'IA Gemini
           </div>
         </aside>
 
@@ -2080,6 +2118,52 @@ export default function Inbox() {
         <AnimatePresence>
           {showRulesModal && (
             <InboxRulesModal onClose={() => setShowRulesModal(false)} />
+          )}
+          {showFolderManager && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setShowFolderManager(false)}>
+              <div className="w-full max-w-md rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant/20">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
+                      <Settings className="w-4.5 h-4.5 text-primary" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-extrabold text-on-surface">Gérer les dossiers</h3>
+                      <p className="text-[11px] text-on-surface-variant">Affichez ou masquez les dossiers par défaut</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setShowFolderManager(false)} className="p-2 rounded-lg text-on-surface-variant hover:bg-surface-container transition-colors cursor-pointer">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="p-4 space-y-1 max-h-80 overflow-y-auto">
+                  {FOLDERS.map((f) => {
+                    const Icon = f.icon;
+                    const isHidden = hiddenFolders.includes(f.id);
+                    return (
+                      <div key={f.id} className={`flex items-center gap-3 p-2.5 rounded-xl transition-all ${isHidden ? 'opacity-50' : ''}`}>
+                        <Icon className="w-4 h-4 shrink-0 text-on-surface-variant" />
+                        <span className="flex-1 text-xs font-semibold text-on-surface">{f.label}</span>
+                        <button
+                          onClick={() => toggleFolderVisibility(f.id)}
+                          className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                            isHidden
+                              ? 'text-on-surface-variant/40 hover:text-on-surface-variant hover:bg-surface-container'
+                              : 'text-primary/60 hover:text-primary hover:bg-primary/5'
+                          }`}
+                          title={isHidden ? 'Afficher ce dossier' : 'Masquer ce dossier'}
+                        >
+                          {isHidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="px-6 py-3 border-t border-outline-variant/20 bg-surface-container-low/40">
+                  <p className="text-[10px] text-on-surface-variant/60">Les dossiers masqués ne disparaissent pas, vous pouvez les réafficher à tout moment.</p>
+                </div>
+              </div>
+            </div>
           )}
         </AnimatePresence>,
         document.body

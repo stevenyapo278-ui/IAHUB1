@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import io from 'socket.io-client';
 import { toast } from 'sonner';
@@ -12,6 +12,8 @@ export function SocketProvider({ children }) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [socket, setSocket] = useState(null);
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
 
   useEffect(() => {
     if (!user) {
@@ -31,6 +33,9 @@ export function SocketProvider({ children }) {
     const newSocket = io(backendUrl, {
       auth: { token },
       transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 2000,
     });
 
     newSocket.on('connect', () => {
@@ -51,7 +56,7 @@ export function SocketProvider({ children }) {
         {
           body: `#${ticket.id} — ${ticket.title}`,
           tag: `ticket-${ticket.id}`,
-          onClick: () => navigate(`/tickets/${ticket.id}`),
+          onClick: () => navigateRef.current(`/tickets/${ticket.id}`),
         }
       );
       toast(
@@ -82,7 +87,7 @@ export function SocketProvider({ children }) {
         </div>,
         {
           duration: 6000,
-          onClick: () => navigate(`/tickets/${ticket.id}`),
+          onClick: () => navigateRef.current(`/tickets/${ticket.id}`),
           style: {
             background: p1
               ? 'linear-gradient(135deg, rgba(239,68,68,0.06) 0%, rgba(239,68,68,0.01) 100%)'
@@ -103,7 +108,7 @@ export function SocketProvider({ children }) {
         {
           body: `#${data.ticketId} — ${data.title} (${methodLabel})`,
           tag: `ticket-${data.ticketId}`,
-          onClick: () => navigate(`/tickets/${data.ticketId}`),
+          onClick: () => navigateRef.current(`/tickets/${data.ticketId}`),
         }
       );
       toast(
@@ -135,7 +140,7 @@ export function SocketProvider({ children }) {
         </div>,
         {
           duration: 8000,
-          onClick: () => navigate(`/tickets/${data.ticketId}`),
+          onClick: () => navigateRef.current(`/tickets/${data.ticketId}`),
         }
       );
     });
@@ -149,7 +154,7 @@ export function SocketProvider({ children }) {
           {
             body: `#${data.id} → ${data.status}`,
             tag: `ticket-${data.id}`,
-            onClick: () => navigate(`/tickets/${data.id}`),
+            onClick: () => navigateRef.current(`/tickets/${data.id}`),
           }
         );
         toast.info(
@@ -176,7 +181,7 @@ export function SocketProvider({ children }) {
           </div>,
           {
             duration: 4000,
-            onClick: () => navigate(`/tickets/${data.id}`),
+            onClick: () => navigateRef.current(`/tickets/${data.id}`),
           }
         );
       }
@@ -187,7 +192,8 @@ export function SocketProvider({ children }) {
     return () => {
       newSocket.disconnect();
     };
-  }, [user, navigate]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   return (
     <SocketContext.Provider value={socket}>

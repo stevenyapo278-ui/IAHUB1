@@ -2,16 +2,18 @@ import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   Gauge, Timer, CheckCircle2, Star, Users, RefreshCw,
-  TrendingUp, ArrowUpDown, Clock, AlertTriangle, User,
+  TrendingUp, Clock, AlertTriangle, User,
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts';
+import { staggerContainer, staggerItem } from '../utils/animations';
 import { toast } from 'sonner';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import EmptyState from '../components/EmptyState';
+import DataGrid from '../components/DataGrid';
 
 const PERIODS = ['7 Jours', '1 Mois', '3 Mois', '6 Mois'];
 const PERIOD_DAYS = { '7 Jours': 7, '1 Mois': 30, '3 Mois': 90, '6 Mois': 180 };
@@ -46,7 +48,7 @@ export default function TechnicianStats() {
   const [activePeriod, setActivePeriod] = useState('1 Mois');
   const [data, setData] = useState({ items: [], totals: null, trend: [] });
   const [loading, setLoading] = useState(true);
-  const [sort, setSort] = useState({ key: 'resolved', dir: 'desc' });
+
 
   const periodDays = PERIOD_DAYS[activePeriod];
 
@@ -79,20 +81,7 @@ export default function TechnicianStats() {
     }
   }
 
-  const sortedItems = useMemo(() => {
-    const arr = [...(data.items || [])];
-    arr.sort((a, b) => {
-      const va = a[sort.key]; const vb = b[sort.key];
-      const na = va == null ? -1 : va; const nb = vb == null ? -1 : vb;
-      if (typeof na === 'string') return sort.dir === 'asc' ? na.localeCompare(nb) : nb.localeCompare(na);
-      return sort.dir === 'asc' ? na - nb : nb - na;
-    });
-    return arr;
-  }, [data.items, sort]);
-
-  function toggleSort(key) {
-    setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'desc' }));
-  }
+  const sortedItems = data.items || [];
 
   const chartData = useMemo(
     () => sortedItems
@@ -109,25 +98,15 @@ export default function TechnicianStats() {
     [data.trend]
   );
 
-  const columns = useMemo(() => {
-    const base = [
-      { key: 'assigned', label: 'Assignés', numeric: true },
-      { key: 'open', label: 'Ouverts', numeric: true },
-      { key: 'resolved', label: 'Résolus', numeric: true },
-      { key: 'avgResolutionHours', label: 'Délai moyen', numeric: true },
-      { key: 'avgFirstResponseHours', label: '1ère rép.', numeric: true },
-      { key: 'slaCompliancePct', label: 'SLA respecté', numeric: true },
-      { key: 'csatAvg', label: 'CSAT', numeric: true },
-      { key: 'loggedMinutes', label: 'Temps loggé', numeric: true },
-    ];
-    if (!isTechnicianOnly) {
-      base.unshift({ key: 'fullName', label: 'Technicien' }, { key: 'teamName', label: 'Équipe' });
-    }
-    return base;
-  }, [isTechnicianOnly]);
+
 
   return (
-    <div className="px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-8 space-y-6 min-h-screen">
+    <motion.div
+      variants={staggerContainer}
+      initial="hidden"
+      animate="visible"
+      className="px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-8 space-y-6 min-h-screen"
+    >
 
       {/* En-tête */}
       <div className="p-6 sm:p-8 rounded-2xl sm:rounded-3xl border border-outline-variant/30 bg-surface-container-lowest shadow-sm">
@@ -250,78 +229,42 @@ export default function TechnicianStats() {
         </div>
       </div>
 
-      {/* Tableau détaillé */}
+      {/* Tableau détaillé AG Grid */}
       <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-outline-variant/30 bg-surface-container/60">
-                {columns.map((c) => (
-                  <th key={c.key} className={`px-4 py-3 text-[11px] font-black uppercase tracking-wider text-on-surface-variant whitespace-nowrap ${c.numeric ? 'text-right' : 'text-left'}`}>
-                    <button onClick={() => toggleSort(c.key)} className="inline-flex items-center gap-1 hover:text-on-surface cursor-pointer">
-                      {c.label}
-                      <ArrowUpDown className={`w-3 h-3 ${sort.key === c.key ? 'text-orange-500' : 'opacity-40'}`} />
-                    </button>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i} className="border-b border-outline-variant/20">
-                    {columns.map((c) => (
-                      <td key={c.key} className="px-4 py-3.5">
-                        <span className="block h-3.5 w-full max-w-[80px] rounded bg-surface-container-high animate-pulse" />
-                      </td>
-                    ))}
-                  </tr>
-                ))
-              ) : sortedItems.length === 0 ? (
-                <tr><td colSpan={columns.length}><EmptyState icon="users" title="Aucun technicien" description="Aucune activité technicien détectée sur la période sélectionnée." /></td></tr>
-              ) : (
-                sortedItems.map((t, i) => (
-                  <motion.tr
-                    key={t.id}
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: Math.min(i * 0.02, 0.3) }}
-                    className="border-b border-outline-variant/20 last:border-b-0 hover:bg-surface-container/50 transition-colors"
-                  >
-                    {!isTechnicianOnly && (
-                      <>
-                        <td className="px-4 py-3">
-                          <p className="font-semibold text-on-surface whitespace-nowrap">{t.fullName}</p>
-                          <p className="text-xs text-on-surface-variant">{t.email}</p>
-                        </td>
-                        <td className="px-4 py-3 text-on-surface-variant whitespace-nowrap">{t.teamName || '—'}</td>
-                      </>
-                    )}
-                    <td className="px-4 py-3 text-right tabular-nums text-on-surface">{t.assigned}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      {t.open > 0 ? (
-                        <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold">
-                          {t.open}
-                          {t.breaches > 0 && <AlertTriangle className="w-3.5 h-3.5 text-red-500" title={`${t.breaches} dépassement(s) SLA`} />}
-                        </span>
-                      ) : '—'}
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-emerald-600 dark:text-emerald-400 font-semibold">{t.resolved}</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-on-surface">{fmtH(t.avgResolutionHours)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-on-surface-variant">{fmtH(t.avgFirstResponseHours)}</td>
-                    <td className={`px-4 py-3 text-right tabular-nums font-semibold ${slaColor(t.slaCompliancePct)}`}>
-                      {t.slaTotal ? fmtPct(t.slaCompliancePct) : '—'}
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-on-surface">{fmtCsat(t.csatAvg)}{t.csatCount > 0 && <span className="text-xs text-on-surface-variant"> ({t.csatCount})</span>}</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-on-surface-variant">{t.loggedMinutes > 0 ? fmtH(Math.round(t.loggedMinutes / 6) / 10) : '—'}</td>
-                  </motion.tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+        <DataGrid
+          columns={[
+            ...(!isTechnicianOnly ? [
+              { field: 'fullName', headerName: 'Technicien', flex: 1.5, minWidth: 160, cellRenderer: (p) => <span className="font-semibold text-sm text-on-surface">{p.value}</span> },
+              { field: 'teamName', headerName: 'Équipe', width: 130, cellRenderer: (p) => <span className="text-xs text-on-surface-variant">{p.value || '—'}</span> },
+            ] : []),
+            { field: 'assigned', headerName: 'Assignés', width: 90, cellRenderer: (p) => <span className="text-right block font-bold tabular-nums text-on-surface">{p.value}</span> },
+            { field: 'open', headerName: 'Ouverts', width: 90, cellRenderer: (p) => <span className="text-right block font-bold tabular-nums text-blue-500">{p.value}</span> },
+            { field: 'resolved', headerName: 'Résolus', width: 90, cellRenderer: (p) => <span className="text-right block font-bold tabular-nums text-emerald-500">{p.value}</span> },
+            { field: 'avgResolutionHours', headerName: 'Délai moyen', width: 110, cellRenderer: (p) => <span className="text-right block font-mono text-xs tabular-nums text-on-surface-variant">{p.value != null ? `${p.value.toFixed(1)}h` : '—'}</span> },
+            { field: 'avgFirstResponseHours', headerName: '1ère rép.', width: 100, cellRenderer: (p) => <span className="text-right block font-mono text-xs tabular-nums text-on-surface-variant">{p.value != null ? `${p.value.toFixed(1)}h` : '—'}</span> },
+            { field: 'slaCompliancePct', headerName: 'SLA respecté', width: 110, cellRenderer: (p) => p.value != null ? (
+              <div className="flex items-center gap-2 justify-end">
+                <div className="w-16 h-1.5 rounded-full bg-surface-container-high overflow-hidden"><div className="h-full rounded-full" style={{ width: `${p.value}%`, backgroundColor: p.value >= 90 ? '#10b981' : p.value >= 70 ? '#f59e0b' : '#ef4444' }} /></div>
+                <span className="text-xs font-mono tabular-nums" style={{ color: p.value >= 90 ? '#10b981' : p.value >= 70 ? '#f59e0b' : '#ef4444' }}>{p.value}%</span>
+              </div>
+            ) : <span className="text-right block text-on-surface-variant/40">—</span> },
+            { field: 'csatAvg', headerName: 'CSAT', width: 80, cellRenderer: (p) => p.value != null ? (
+              <span className="flex items-center gap-1 justify-end"><Star className="w-3 h-3 text-amber-400 fill-amber-400" /><span className="text-xs font-bold tabular-nums">{p.value.toFixed(1)}</span></span>
+            ) : <span className="text-right block text-on-surface-variant/40">—</span> },
+            { field: 'loggedMinutes', headerName: 'Temps loggé', width: 100, cellRenderer: (p) => {
+              const h = Math.floor((p.value || 0) / 60); const m = (p.value || 0) % 60;
+              return <span className="text-right block text-xs font-mono tabular-nums text-on-surface-variant">{h > 0 ? `${h}h${String(m).padStart(2, '0')}` : `${m}min`}</span>;
+            } },
+          ]}
+          rowData={sortedItems}
+          loading={loading}
+          pagination={false}
+          headerHeight={44}
+          rowHeight={44}
+          noRowsText="Aucune activité technicien détectée sur la période sélectionnée."
+        />
       </div>
-    </div>
+    </motion.div>
   );
 }
 

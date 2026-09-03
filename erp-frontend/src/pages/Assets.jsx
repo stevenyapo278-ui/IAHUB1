@@ -1,17 +1,18 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Boxes, Plus, Search, RefreshCw, Trash2, Pencil, X,
+  Boxes, Plus, Search, RefreshCw, Trash2, Pencil, X, Check,
   Monitor, Printer, Network, Package, Phone, HelpCircle,
-  AlertTriangle, Calendar, MapPin, User, Check, CheckCircle2
+  AlertTriangle, CheckCircle2, ShieldAlert, ChevronLeft, ChevronRight, Filter,
 } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import useSystemSettings from '../hooks/useSystemSettings';
 import ConfirmDialog from '../components/ConfirmDialog';
-import Pagination from '../components/Pagination';
+import DataGrid from '../components/DataGrid';
+import FormDrawer from '../components/FormDrawer';
 
 const TYPE_META = {
   COMPUTER: { label: 'Ordinateur', icon: Monitor, color: 'text-blue-400', bg: 'bg-blue-500/10' },
@@ -19,14 +20,14 @@ const TYPE_META = {
   NETWORK: { label: 'Réseau', icon: Network, color: 'text-teal-400', bg: 'bg-teal-500/10' },
   SOFTWARE: { label: 'Logiciel', icon: Package, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
   PHONE: { label: 'Téléphone', icon: Phone, color: 'text-amber-400', bg: 'bg-amber-500/10' },
-  OTHER: { label: 'Autre', icon: HelpCircle, color: 'text-slate-400', bg: 'bg-slate-500/10' },
+  OTHER: { label: 'Autre', icon: HelpCircle, color: 'text-on-surface-variant', bg: 'bg-surface-container' },
 };
 
 const STATUS_META = {
   IN_USE: { label: 'En service', color: 'text-emerald-500', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20' },
   STOCK: { label: 'En stock', color: 'text-blue-500', bg: 'bg-blue-500/10', border: 'border-blue-500/20' },
   BROKEN: { label: 'En panne', color: 'text-red-500', bg: 'bg-red-500/10', border: 'border-red-500/20' },
-  OUT_OF_SERVICE: { label: 'Hors service', color: 'text-slate-400', bg: 'bg-slate-500/10', border: 'border-slate-500/20' },
+  OUT_OF_SERVICE: { label: 'Hors service', color: 'text-on-surface-variant', bg: 'bg-surface-container', border: 'border-slate-500/20' },
 };
 
 const EMPTY_FORM = {
@@ -39,7 +40,77 @@ function fmtDate(d) {
   return new Date(d).toLocaleDateString('fr-FR');
 }
 
-const inputCls = 'w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all';
+const inputCls = 'px-3.5 py-2 rounded-xl border border-outline-variant/60 bg-surface text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all';
+
+function PaginationButtons({ page, totalPages, onPageChange }) {
+  const [jumpValue, setJumpValue] = useState('');
+  const jumpRef = useRef(null);
+
+  const pages = useMemo(() => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    const r = [1];
+    if (page > 3) r.push('...');
+    for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) r.push(i);
+    if (page < totalPages - 2) r.push('...');
+    r.push(totalPages);
+    return r;
+  }, [page, totalPages]);
+
+  function handleJump(e) {
+    e.preventDefault();
+    const val = parseInt(jumpValue, 10);
+    if (!isNaN(val) && val >= 1 && val <= totalPages && val !== page) {
+      onPageChange(val);
+    }
+    setJumpValue('');
+    jumpRef.current?.blur();
+  }
+
+  const btn = 'h-10 min-w-[40px] flex items-center justify-center rounded-lg text-xs font-semibold transition-all duration-150 active:scale-95';
+  const on = 'text-muted-foreground hover:bg-surface-muted hover:text-foreground';
+  const off = 'text-muted-foreground/30 cursor-not-allowed';
+  const active = 'bg-primary text-primary-foreground shadow-sm shadow-primary/20';
+
+  return (
+    <div className="flex items-center gap-1">
+      <button onClick={() => onPageChange(1)} disabled={page <= 1} aria-label="Première page"
+        className={`${btn} px-1.5 ${page <= 1 ? off : on}`}><ChevronsLeft className="w-4 h-4" /></button>
+      <button onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page <= 1} aria-label="Page précédente"
+        className={`${btn} px-1.5 ${page <= 1 ? off : on}`}><ChevronLeft className="w-4 h-4" /></button>
+      {pages.map((p, i) => p === '...' ? (
+        <span key={`dots-${i}`} className="w-8 h-10 flex items-center justify-center text-xs text-muted-foreground/40">…</span>
+      ) : (
+        <button key={p} onClick={() => onPageChange(p)} aria-label={`Page ${p}`} aria-current={p === page ? 'page' : undefined}
+          className={`${btn} px-1 ${p === page ? active : on}`}>{p}</button>
+      ))}
+      <button onClick={() => onPageChange(Math.min(totalPages, page + 1))} disabled={page >= totalPages} aria-label="Page suivante"
+        className={`${btn} px-1.5 ${page >= totalPages ? off : on}`}><ChevronRight className="w-4 h-4" /></button>
+      <button onClick={() => onPageChange(totalPages)} disabled={page >= totalPages} aria-label="Dernière page"
+        className={`${btn} px-1.5 ${page >= totalPages ? off : on}`}><ChevronsRight className="w-4 h-4" /></button>
+      <form onSubmit={handleJump} className="flex items-center gap-1.5 ml-2">
+        <span className="text-[11px] text-muted-foreground">→</span>
+        <input ref={jumpRef} type="number" min={1} max={totalPages} value={jumpValue}
+          onChange={(e) => setJumpValue(e.target.value)} placeholder={`1–${totalPages}`}
+          className="w-16 h-8 px-2 text-[11px] text-center font-semibold bg-surface border border-border/40 rounded-lg text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-primary/30 transition-all" />
+      </form>
+    </div>
+  );
+}
+
+function ChevronsLeft({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m11 17-5-5 5-5" /><path d="m18 17-5-5 5-5" />
+    </svg>
+  );
+}
+function ChevronsRight({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m6 17 5-5-5-5" /><path d="m13 17 5-5-5-5" />
+    </svg>
+  );
+}
 
 export default function Assets() {
   const { user } = useAuth();
@@ -61,10 +132,12 @@ export default function Assets() {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
-  const [sortBy, setSortBy] = useState('name');
-  const [sortDir, setSortDir] = useState('asc');
+  const [pageSize, setPageSize] = useState(() => {
+    const s = localStorage.getItem('assets_page_size');
+    return s ? parseInt(s, 10) : 25;
+  });
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const [showFilters, setShowFilters] = useState(false);
 
   const canManage = hasPermission(user, 'assets.manage');
 
@@ -86,6 +159,8 @@ export default function Assets() {
     api.get('/users').then(({ data }) => setUsers(Array.isArray(data) ? data : (data.users || []))).catch(() => {});
     api.get('/teams').then(({ data }) => setTeams(Array.isArray(data) ? data : (data.teams || []))).catch(() => {});
   }, [search, typeFilter, statusFilter]);
+
+  useEffect(() => { setPage(1); }, [search, typeFilter, statusFilter]);
 
   async function handleSync() {
     setSyncing(true);
@@ -196,120 +271,226 @@ export default function Assets() {
     return days >= 0 && days <= 60;
   };
 
-  function toggleSort(col) {
-    if (sortBy === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    else { setSortBy(col); setSortDir('asc'); }
-  }
+  const inService = useMemo(() => assets.filter((a) => a.status === 'IN_USE').length, [assets]);
+  const broken = useMemo(() => assets.filter((a) => a.status === 'BROKEN').length, [assets]);
+  const expiringWarranty = useMemo(() => assets.filter(isWarrantyExpiring).length, [assets]);
 
-  const filtered = useMemo(() => {
-    let list = [...assets].sort((a, b) => {
-      let va, vb;
-      switch (sortBy) {
-        case 'name': va = (a.name || '').toLowerCase(); vb = (b.name || '').toLowerCase(); break;
-        case 'assetType': va = (a.assetType || '').toLowerCase(); vb = (b.assetType || '').toLowerCase(); break;
-        case 'status': va = (a.status || '').toLowerCase(); vb = (b.status || '').toLowerCase(); break;
-        case 'manufacturer': va = (a.manufacturer || '').toLowerCase(); vb = (b.manufacturer || '').toLowerCase(); break;
-        case 'location': va = (a.glpiLocation?.name || '').toLowerCase(); vb = (b.glpiLocation?.name || '').toLowerCase(); break;
-        case 'owner': va = (a.owner?.fullName || '').toLowerCase(); vb = (b.owner?.fullName || '').toLowerCase(); break;
-        case 'warrantyEnd': va = a.warrantyEnd || ''; vb = b.warrantyEnd || ''; break;
-        default: va = (a.name || '').toLowerCase(); vb = (b.name || '').toLowerCase();
-      }
-      if (va < vb) return sortDir === 'asc' ? -1 : 1;
-      if (va > vb) return sortDir === 'asc' ? 1 : -1;
-      return 0;
-    });
-    return list;
-  }, [assets, sortBy, sortDir]);
+  const total = assets.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const paginatedAssets = assets.slice((page - 1) * pageSize, page * pageSize);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
-  useEffect(() => { setPage(1); }, [search, typeFilter, statusFilter, pageSize]);
+  const columnDefs = useMemo(() => {
+    const cols = [
+      {
+        field: 'name', headerName: 'Nom', flex: 1.5, minWidth: 180,
+        cellRenderer: (params) => {
+          const tm = typeMeta(params.data.assetType);
+          const Icon = tm.icon;
+          return (
+            <div className="flex items-center gap-2">
+              <div className={`p-1 rounded-md shrink-0 ${tm.bg} ${tm.color}`}>
+                <Icon className="w-3.5 h-3.5" />
+              </div>
+              <div className="min-w-0">
+                <span className="text-sm font-semibold text-on-surface truncate block">{params.value}</span>
+                {(params.data.serialNumber || params.data.inventoryNumber) && (
+                  <span className="text-[10px] text-on-surface/50 font-mono truncate block">{params.data.inventoryNumber || params.data.serialNumber}</span>
+                )}
+              </div>
+            </div>
+          );
+        },
+      },
+      {
+        field: 'assetType', headerName: 'Type', width: 120,
+        cellRenderer: (params) => {
+          const tm = typeMeta(params.value);
+          return <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${tm.bg} ${tm.color}`}>{tm.label}</span>;
+        },
+      },
+      {
+        field: 'status', headerName: 'Statut', width: 140,
+        cellRenderer: (params) => {
+          const sm = statusMeta(params.value);
+          const expiring = isWarrantyExpiring(params.data);
+          return (
+            <div className="flex items-center gap-1.5">
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${sm.bg} ${sm.color} border ${sm.border}`}>{sm.label}</span>
+              {expiring && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 flex items-center gap-0.5">
+                  <AlertTriangle className="w-2.5 h-2.5" /> Garantie ≤60j
+                </span>
+              )}
+            </div>
+          );
+        },
+      },
+      {
+        field: 'serialNumber', headerName: 'N° série', width: 130,
+        cellRenderer: (params) => <span className="text-xs text-on-surface-variant font-mono">{params.value || '—'}</span>,
+      },
+      {
+        field: 'manufacturer', headerName: 'Constructeur', width: 150,
+        valueGetter: (params) => [params.data.manufacturer, params.data.model].filter(Boolean).join(' ') || '—',
+        cellRenderer: (params) => <span className="text-xs text-on-surface-variant">{params.value}</span>,
+      },
+      {
+        field: 'location', headerName: 'Lieu', width: 130,
+        valueGetter: (params) => params.data.glpiLocation?.name || '',
+        cellRenderer: (params) => <span className="text-xs text-on-surface-variant truncate block max-w-[120px]">{params.value || '—'}</span>,
+      },
+      {
+        field: 'owner', headerName: 'Propriétaire', width: 130,
+        valueGetter: (params) => params.data.owner?.fullName || '',
+        cellRenderer: (params) => <span className="text-xs text-on-surface-variant truncate block max-w-[100px]">{params.value || '—'}</span>,
+      },
+      {
+        field: 'warrantyEnd', headerName: 'Garantie', width: 110,
+        cellRenderer: (params) => <span className="text-xs text-on-surface-variant font-mono">{fmtDate(params.value)}</span>,
+        comparator: (a, b) => (a || '').localeCompare(b || ''),
+      },
+    ];
 
-  function SortHeader({ col, children }) {
-    const active = sortBy === col;
-    return (
-      <th
-        onClick={() => toggleSort(col)}
-        className={`px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider cursor-pointer select-none transition-colors ${active ? 'text-blue-600' : 'text-on-surface-variant hover:text-on-surface'}`}
-      >
-        <span className="inline-flex items-center gap-1">
-          {children}
-        </span>
-      </th>
-    );
-  }
+    if (canManage) {
+      cols.push({
+        field: 'actions', headerName: '', width: 80, sortable: false, filter: false,
+        cellRenderer: (params) => (
+          <div className="flex gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+            <button onClick={(e) => { e.stopPropagation(); openEdit(params.data); }} title="Modifier"
+              className="p-1.5 rounded-lg text-on-surface/60 hover:text-blue-500 hover:bg-blue-500/10 cursor-pointer transition-colors">
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+            <button onClick={(e) => { e.stopPropagation(); handleDeleteSingle(params.data); }} title="Supprimer"
+              className="p-1.5 rounded-lg text-on-surface/60 hover:text-red-500 hover:bg-red-500/10 cursor-pointer transition-colors">
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ),
+      });
+    }
+
+    return cols;
+  }, [canManage]);
 
   return (
-    <div className="flex flex-col min-h-screen">
-      {/* ── Top Bar ─────────────────────────────────────────────────────── */}
-      <div className="sticky top-0 z-20 shrink-0 border-b border-outline-variant/30 bg-surface-container-lowest/95 backdrop-blur-sm px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-3">
-          <div className="p-1.5 bg-blue-500/10 rounded-lg">
-            <Boxes className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-          </div>
-          <div>
-            <h1 className="text-base font-bold text-on-surface">Inventaire</h1>
-            <p className="text-[11px] text-on-surface-variant font-medium">{assets.length} équipement(s)</p>
-          </div>
+    <div className="flex flex-col h-full w-full min-w-0 gap-0">
+      {/* ── HEADER ─────────────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-border/20 bg-surface shrink-0">
+        <div className="flex items-center gap-2">
+          <Boxes className="w-4 h-4 text-blue-500 shrink-0" />
+          <h1 className="text-sm font-bold text-on-surface whitespace-nowrap">Inventaire</h1>
+          <span className="text-[11px] text-on-surface-variant font-medium tabular-nums">
+            {total > 0 && `${total}`}
+          </span>
         </div>
         <div className="flex items-center gap-2">
-          {canManage && (
-            <button onClick={openCreate}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-500 text-white text-xs font-bold shadow-md hover:shadow-lg transition-all">
-              <Plus className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Nouvel équipement</span>
-            </button>
-          )}
           {!autonomousMode && canManage && (
             <button onClick={handleSync} disabled={syncing}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-outline-variant/40 text-on-surface-variant text-xs font-semibold hover:bg-surface-container transition-all disabled:opacity-50">
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-outline-variant/60 text-on-surface-variant text-xs font-semibold hover:bg-surface-container-high cursor-pointer transition-colors">
               <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">Sync GLPI</span>
             </button>
           )}
+          {canManage && (
+            <button onClick={openCreate}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-bold hover:opacity-90 transition-opacity shadow-sm cursor-pointer">
+              <Plus className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Nouvel équipement</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* ── Search + Filters ────────────────────────────────────────────── */}
-      <div className="px-4 sm:px-6 lg:px-8 py-3 flex flex-col sm:flex-row gap-2">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface/40" />
+      {/* ── STATS ──────────────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 px-4 sm:px-6 py-3 shrink-0">
+        {[
+          { label: 'Total', value: total, color: 'text-on-surface' },
+          { label: 'En service', value: inService, color: 'text-emerald-600 dark:text-emerald-400' },
+          { label: 'En panne', value: broken, color: 'text-red-600 dark:text-red-400' },
+          { label: 'Garantie ≤60j', value: expiringWarranty, color: 'text-amber-600 dark:text-amber-400' },
+        ].map((s) => (
+          <div key={s.label} className="bg-surface-container rounded-xl p-3 text-center">
+            <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
+            <p className="text-xs text-on-surface-variant">{s.label}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* ── SEARCH + FILTERS ───────────────────────────────────────────────── */}
+      <div className="flex items-center gap-2 px-4 sm:px-6 py-3 shrink-0">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface/30" />
           <input
-            value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Rechercher par nom, n° de série..."
-            className="w-full pl-9 pr-4 py-2 rounded-xl border border-outline-variant/60 bg-surface text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Rechercher un équipement..."
+            className={`${inputCls} w-full pl-9`}
           />
         </div>
-        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}
-          className="px-3 py-2 rounded-xl border border-outline-variant/60 bg-surface text-sm text-on-surface cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all">
-          <option value="">Tous les types</option>
-          {Object.entries(TYPE_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-        </select>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-3 py-2 rounded-xl border border-outline-variant/60 bg-surface text-sm text-on-surface cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all">
-          <option value="">Tous les statuts</option>
-          {Object.entries(STATUS_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-        </select>
+        <button
+          onClick={() => setShowFilters(!showFilters)}
+          className={`px-3 py-2 rounded-xl border text-sm font-medium flex items-center gap-1.5 cursor-pointer transition-colors ${
+            showFilters || typeFilter || statusFilter
+              ? 'bg-primary/10 border-primary/30 text-primary'
+              : 'border-outline-variant/60 text-on-surface-variant hover:bg-surface-container-high'
+          }`}
+        >
+          <Filter className="w-4 h-4" />
+          Filtres
+        </button>
+        <button onClick={loadAssets}
+          className="p-2 rounded-xl border border-outline-variant/60 text-on-surface-variant hover:bg-surface-container-high cursor-pointer transition-colors">
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+        </button>
       </div>
 
-      {/* ── Bulk action bar ──────────────────────────────────────────────── */}
+      {/* ── FILTERS PANEL ──────────────────────────────────────────────────── */}
+      {showFilters && (
+        <div className="bg-surface-container rounded-xl p-3 flex flex-wrap gap-3 items-center mx-4 sm:mx-6">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-on-surface-variant font-medium">Type :</span>
+            <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}
+              className={`${inputCls} py-1.5 text-xs pr-8`}>
+              <option value="">Tous</option>
+              {Object.entries(TYPE_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-on-surface-variant font-medium">Statut :</span>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+              className={`${inputCls} py-1.5 text-xs pr-8`}>
+              <option value="">Tous</option>
+              {Object.entries(STATUS_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+          </div>
+          {(typeFilter || statusFilter) && (
+            <button onClick={() => { setTypeFilter(''); setStatusFilter(''); }}
+              className="text-xs text-primary hover:underline cursor-pointer flex items-center gap-1">
+              <X className="w-3 h-3" /> Effacer
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── BULK ACTION BAR ────────────────────────────────────────────────── */}
       <AnimatePresence>
         {selectedIds.length > 0 && (
           <motion.div
             initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden border-b border-red-500/20 bg-red-500/5"
+            className="overflow-hidden mx-4 sm:mx-6 mb-3"
           >
-            <div className="px-4 sm:px-6 lg:px-8 py-2.5 flex items-center gap-3">
+            <div className="px-4 py-2.5 flex items-center gap-3 rounded-xl border border-red-500/20 bg-red-500/5">
               <span className="text-[11px] font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5">
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 {selectedIds.length} sélectionné(s)
               </span>
               <button onClick={() => setSelectedIds([])}
-                className="text-[10px] font-bold text-on-surface-variant hover:text-on-surface transition-colors">
+                className="text-[10px] font-bold text-on-surface-variant hover:text-on-surface transition-colors cursor-pointer">
                 Tout désélectionner
               </button>
               <button onClick={() => setPendingBulkDelete(true)}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 text-xs font-semibold hover:bg-red-500/15 transition-all ml-auto">
+                className="ml-auto flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-500/10 text-red-600 dark:text-red-400 text-[11px] font-bold hover:bg-red-500/20 cursor-pointer transition-colors">
                 <Trash2 className="w-3 h-3" />
                 Supprimer ({selectedIds.length})
               </button>
@@ -318,264 +499,141 @@ export default function Assets() {
         )}
       </AnimatePresence>
 
-      {/* ── Tableau ─────────────────────────────────────────────────────── */}
-      <div className="flex-1 px-4 sm:px-6 lg:px-8 pb-6">
-        {loading ? (
-          <div className="text-center py-12 text-on-surface/40">
-            <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-2" />
-            Chargement...
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="text-center py-12 text-on-surface/40">
-            <Boxes className="w-12 h-12 mx-auto mb-3 opacity-30" />
-            {search || typeFilter || statusFilter ? 'Aucun équipement ne correspond à vos critères' : 'Aucun équipement. Créez-en un ou synchronisez GLPI.'}
-          </div>
-        ) : (
+      {/* ── MAIN CONTENT ───────────────────────────────────────────────────── */}
+      <div className="flex-1 min-h-0 relative overflow-auto">
+        <div className="mx-4 sm:mx-6 lg:mx-8 mt-3.5 mb-4">
           <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest overflow-hidden">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="border-b border-outline-variant/20 bg-surface-container-low/50">
-                  {canManage && (
-                    <th className="px-3 py-2.5 w-10">
-                      <input
-                        type="checkbox"
-                        checked={filtered.length > 0 && selectedIds.length === filtered.length}
-                        onChange={() => setSelectedIds(selectedIds.length === filtered.length ? [] : filtered.map(a => a.id))}
-                        className="w-3.5 h-3.5 cursor-pointer accent-blue-600 rounded"
-                      />
-                    </th>
-                  )}
-                  <SortHeader col="name">Nom</SortHeader>
-                  <SortHeader col="assetType">Type</SortHeader>
-                  <SortHeader col="status">Statut</SortHeader>
-                  <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">N° série</th>
-                  <SortHeader col="manufacturer">Constructeur</SortHeader>
-                  <SortHeader col="location">Lieu</SortHeader>
-                  <SortHeader col="owner">Propriétaire</SortHeader>
-                  <SortHeader col="warrantyEnd">Garantie</SortHeader>
-                  {canManage && <th className="px-3 py-2.5 text-right text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Actions</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {paginated.map((asset) => {
-                  const tm = typeMeta(asset.assetType);
-                  const sm = statusMeta(asset.status);
-                  const Icon = tm.icon;
-                  const expiring = isWarrantyExpiring(asset);
-                  return (
-                    <tr
-                      key={asset.id}
-                      className="group border-b border-outline-variant/10 hover:bg-blue-500/5 transition-colors cursor-pointer"
-                      onClick={() => canManage && openEdit(asset)}
-                    >
-                      {canManage && (
-                        <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.includes(asset.id)}
-                            onChange={() => setSelectedIds(ids => ids.includes(asset.id) ? ids.filter(i => i !== asset.id) : [...ids, asset.id])}
-                            className="w-3.5 h-3.5 cursor-pointer accent-blue-600 rounded"
-                          />
-                        </td>
-                      )}
-                      <td className="px-3 py-2.5">
-                        <div className="flex items-center gap-2">
-                          <div className={`p-1 rounded-md shrink-0 ${tm.bg} ${tm.color}`}>
-                            <Icon className="w-3.5 h-3.5" />
-                          </div>
-                          <div className="min-w-0">
-                            <span className="text-sm font-semibold text-on-surface truncate block">{asset.name}</span>
-                            {(asset.serialNumber || asset.inventoryNumber) && (
-                              <span className="text-[10px] text-on-surface/50 font-mono truncate block">{asset.inventoryNumber || asset.serialNumber}</span>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${tm.bg} ${tm.color}`}>{tm.label}</span>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <div className="flex items-center gap-1.5">
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${sm.bg} ${sm.color} border ${sm.border}`}>{sm.label}</span>
-                          {expiring && (
-                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 flex items-center gap-0.5">
-                              <AlertTriangle className="w-2.5 h-2.5" /> Garantie ≤60j
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <span className="text-xs text-on-surface-variant font-mono">{asset.serialNumber || '—'}</span>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <span className="text-xs text-on-surface-variant">{[asset.manufacturer, asset.model].filter(Boolean).join(' ') || '—'}</span>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <span className="text-xs text-on-surface-variant truncate block max-w-[120px]">{asset.glpiLocation?.name || '—'}</span>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <span className="text-xs text-on-surface-variant truncate block max-w-[100px]">{asset.owner?.fullName || '—'}</span>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <span className="text-xs text-on-surface-variant font-mono">{fmtDate(asset.warrantyEnd)}</span>
-                      </td>
-                      {canManage && (
-                        <td className="px-3 py-2.5">
-                          <div className="flex gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-                            <button onClick={() => openEdit(asset)} title="Modifier"
-                              className="p-1.5 rounded-lg text-on-surface/60 hover:text-blue-500 hover:bg-blue-500/10 cursor-pointer transition-colors">
-                              <Pencil className="w-3.5 h-3.5" />
-                            </button>
-                            <button onClick={() => handleDeleteSingle(asset)} title="Supprimer"
-                              className="p-1.5 rounded-lg text-on-surface/60 hover:text-red-500 hover:bg-red-500/10 cursor-pointer transition-colors">
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </td>
-                      )}
-                    </tr>
-                  );
-                })}
-              </tbody>            </table>
-            <Pagination page={page} totalPages={totalPages} total={filtered.length} label="équipements" onPageChange={setPage} pageSize={pageSize} onPageSizeChange={(s) => { setPageSize(s); setPage(1); }} />
+            <DataGrid
+              columns={columnDefs}
+              rowData={paginatedAssets}
+              loading={loading}
+              rowSelection={canManage ? 'multiple' : undefined}
+              selectedIds={selectedIds}
+              onSelectionChange={setSelectedIds}
+              onRowClick={(data) => canManage && openEdit(data)}
+              pagination={false}
+              noRowsText={search || typeFilter || statusFilter ? 'Aucun équipement ne correspond à vos critères' : 'Aucun équipement. Créez-en un ou synchronisez GLPI.'}
+              className="rounded-2xl overflow-hidden"
+            />
           </div>
-        )}
+        </div>
       </div>
 
+      {/* ── PAGINATION ──────────────────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-4 sm:px-6 py-3 border-t border-border/20 bg-surface shrink-0">
+        <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+          <span className="font-medium tabular-nums">
+            {total > 0
+              ? `${Math.min((page - 1) * pageSize + 1, total)}–${Math.min(page * pageSize, total)} sur ${total.toLocaleString('fr-FR')}`
+              : '0 résultat'}
+          </span>
+          <div className="w-px h-3.5 bg-border/40" />
+          <select value={pageSize}
+            onChange={(e) => { const v = Number(e.target.value); setPageSize(v); localStorage.setItem('assets_page_size', String(v)); setPage(1); }}
+            className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-border/40 bg-background text-foreground cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all">
+            {[25, 50, 100, 200].map((n) => <option key={n} value={n}>{n}/page</option>)}
+          </select>
+        </div>
+        <PaginationButtons page={page} totalPages={Math.max(totalPages, 1)} onPageChange={setPage} />
+      </div>
 
-      {/* ── Modal Création / Édition ────────────────────────────────────── */}
-      <AnimatePresence>
-        {modalOpen && (
-          <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-          >
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={closeModal}
-              className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              className="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-2xl border border-outline-variant/30 bg-surface shadow-2xl"
-            >
-              {/* Header */}
-              <div className="flex items-center justify-between px-5 py-4 border-b border-outline-variant/20 sticky top-0 bg-surface z-10">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-xl bg-blue-500/10">
-                    {modalMode === 'edit' ? <Pencil className="w-4 h-4 text-blue-600 dark:text-blue-400" /> : <Plus className="w-4 h-4 text-blue-600 dark:text-blue-400" />}
-                  </div>
-                  <div>
-                    <h2 className="text-sm font-bold text-on-surface">
-                      {modalMode === 'edit' ? 'Modifier l\'équipement' : 'Nouvel équipement'}
-                    </h2>
-                    {modalMode === 'edit' && <p className="text-[11px] text-on-surface-variant">{form.name}</p>}
-                  </div>
-                </div>
-                <motion.button onClick={closeModal} whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }}
-                  className="p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all">
-                  <X className="w-4 h-4" />
-                </motion.button>
-              </div>
+      {/* ── MODALS ─────────────────────────────────────────────────────────── */}
+      <FormDrawer
+        open={modalOpen}
+        onClose={closeModal}
+        title={modalMode === 'edit' ? "Modifier l'équipement" : 'Nouvel équipement'}
+        subtitle={modalMode === 'edit' ? form.name : null}
+        icon={modalMode === 'edit' ? Pencil : Plus}
+        iconColor="text-blue-400"
+        size="lg"
+        footer={
+          <>
+            <button type="button" onClick={closeModal} className="btn-secondary">Annuler</button>
+            <button onClick={handleSave} disabled={saving || !form.name.trim()} className="btn-primary">
+              {saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+              {saving ? 'Enregistrement...' : modalMode === 'edit' ? 'Mettre à jour' : 'Créer'}
+            </button>
+          </>
+        }
+      >
+        <form onSubmit={handleSave} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="field-label">
+              <span>Nom *</span>
+              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required
+                placeholder="Nom de l'équipement" className="input-katalyst" />
+            </label>
+            <label className="field-label">
+              <span>Type</span>
+              <select value={form.assetType} onChange={(e) => setForm({ ...form, assetType: e.target.value })} className="input-katalyst">
+                {Object.entries(TYPE_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              </select>
+            </label>
+            <label className="field-label">
+              <span>Statut</span>
+              <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className="input-katalyst">
+                {Object.entries(STATUS_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              </select>
+            </label>
+            <label className="field-label">
+              <span>N° de série</span>
+              <input value={form.serialNumber} onChange={(e) => setForm({ ...form, serialNumber: e.target.value })}
+                placeholder="N° de série" className="input-katalyst" />
+            </label>
+            <label className="field-label">
+              <span>N° d'inventaire</span>
+              <input value={form.inventoryNumber} onChange={(e) => setForm({ ...form, inventoryNumber: e.target.value })}
+                placeholder="N° d'inventaire" className="input-katalyst" />
+            </label>
+            <label className="field-label">
+              <span>Constructeur</span>
+              <input value={form.manufacturer} onChange={(e) => setForm({ ...form, manufacturer: e.target.value })}
+                placeholder="Constructeur" className="input-katalyst" />
+            </label>
+            <label className="field-label">
+              <span>Modèle</span>
+              <input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })}
+                placeholder="Modèle" className="input-katalyst" />
+            </label>
+            <label className="field-label">
+              <span>Lieu</span>
+              <select value={form.locationId} onChange={(e) => setForm({ ...form, locationId: e.target.value })} className="input-katalyst">
+                <option value="">— Lieu —</option>
+                {locations.map((l) => <option key={l.id} value={l.id}>{l.completename || l.name}</option>)}
+              </select>
+            </label>
+            <label className="field-label">
+              <span>Propriétaire</span>
+              <select value={form.ownerId} onChange={(e) => setForm({ ...form, ownerId: e.target.value })} className="input-katalyst">
+                <option value="">— Propriétaire —</option>
+                {users.map((u) => <option key={u.id} value={u.id}>{u.fullName}</option>)}
+              </select>
+            </label>
+            <label className="field-label">
+              <span>Équipe</span>
+              <select value={form.teamId} onChange={(e) => setForm({ ...form, teamId: e.target.value })} className="input-katalyst">
+                <option value="">— Équipe —</option>
+                {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </label>
+            <label className="field-label">
+              <span>Date d'achat</span>
+              <input type="date" value={form.purchaseDate} onChange={(e) => setForm({ ...form, purchaseDate: e.target.value })} className="input-katalyst" />
+            </label>
+            <label className="field-label">
+              <span>Fin de garantie</span>
+              <input type="date" value={form.warrantyEnd} onChange={(e) => setForm({ ...form, warrantyEnd: e.target.value })} className="input-katalyst" />
+            </label>
+            <label className="field-label sm:col-span-2">
+              <span>Notes</span>
+              <textarea rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                placeholder="Notes" className="input-katalyst resize-none" />
+            </label>
+          </div>
+        </form>
+      </FormDrawer>
 
-              {/* Body */}
-              <form onSubmit={handleSave} className="px-5 py-5 space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Nom *</span>
-                    <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required
-                      placeholder="Nom de l'équipement" className={inputCls} />
-                  </label>
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Type</span>
-                    <select value={form.assetType} onChange={(e) => setForm({ ...form, assetType: e.target.value })} className={inputCls}>
-                      {Object.entries(TYPE_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-                    </select>
-                  </label>
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Statut</span>
-                    <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className={inputCls}>
-                      {Object.entries(STATUS_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-                    </select>
-                  </label>
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">N° de série</span>
-                    <input value={form.serialNumber} onChange={(e) => setForm({ ...form, serialNumber: e.target.value })}
-                      placeholder="N° de série" className={inputCls} />
-                  </label>
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">N° d'inventaire</span>
-                    <input value={form.inventoryNumber} onChange={(e) => setForm({ ...form, inventoryNumber: e.target.value })}
-                      placeholder="N° d'inventaire" className={inputCls} />
-                  </label>
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Constructeur</span>
-                    <input value={form.manufacturer} onChange={(e) => setForm({ ...form, manufacturer: e.target.value })}
-                      placeholder="Constructeur" className={inputCls} />
-                  </label>
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Modèle</span>
-                    <input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })}
-                      placeholder="Modèle" className={inputCls} />
-                  </label>
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Lieu</span>
-                    <select value={form.locationId} onChange={(e) => setForm({ ...form, locationId: e.target.value })} className={inputCls}>
-                      <option value="">— Lieu —</option>
-                      {locations.map((l) => <option key={l.id} value={l.id}>{l.completename || l.name}</option>)}
-                    </select>
-                  </label>
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Propriétaire</span>
-                    <select value={form.ownerId} onChange={(e) => setForm({ ...form, ownerId: e.target.value })} className={inputCls}>
-                      <option value="">— Propriétaire —</option>
-                      {users.map((u) => <option key={u.id} value={u.id}>{u.fullName}</option>)}
-                    </select>
-                  </label>
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Équipe</span>
-                    <select value={form.teamId} onChange={(e) => setForm({ ...form, teamId: e.target.value })} className={inputCls}>
-                      <option value="">— Équipe —</option>
-                      {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                    </select>
-                  </label>
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Date d'achat</span>
-                    <input type="date" value={form.purchaseDate} onChange={(e) => setForm({ ...form, purchaseDate: e.target.value })} className={inputCls} />
-                  </label>
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Fin de garantie</span>
-                    <input type="date" value={form.warrantyEnd} onChange={(e) => setForm({ ...form, warrantyEnd: e.target.value })} className={inputCls} />
-                  </label>
-                  <label className="flex flex-col gap-1.5 sm:col-span-2 lg:col-span-3">
-                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Notes</span>
-                    <textarea rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                      placeholder="Notes" className={`${inputCls} resize-none`} />
-                  </label>
-                </div>
-              </form>
-
-              {/* Footer */}
-              <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-outline-variant/20 bg-surface-container-low/40 sticky bottom-0">
-                <button type="button" onClick={closeModal}
-                  className="px-4 py-2 rounded-xl border border-outline-variant/40 text-on-surface text-xs font-semibold hover:bg-surface-container transition-colors">
-                  Annuler
-                </button>
-                <button onClick={handleSave} disabled={saving || !form.name.trim()}
-                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-500 text-white text-xs font-bold shadow-md hover:shadow-lg flex items-center gap-2 transition-all disabled:opacity-50">
-                  {saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-                  {saving ? 'Enregistrement...' : modalMode === 'edit' ? 'Mettre à jour' : 'Créer'}
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── Confirm Bulk Delete ──────────────────────────────────────────── */}
+      {/* ── CONFIRM BULK DELETE ─────────────────────────────────────────────── */}
       <ConfirmDialog
         open={pendingBulkDelete}
         title="Supprimer les équipements"

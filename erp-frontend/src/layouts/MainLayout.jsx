@@ -33,6 +33,9 @@ import {
   Gauge,
   TrendingUp,
   AlertTriangle,
+  Palette,
+  Settings2,
+  Monitor,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
@@ -42,7 +45,11 @@ import ForcePasswordChange from '../components/ForcePasswordChange';
 import ConfirmDialog from '../components/ConfirmDialog';
 import GlobalSearch from '../components/GlobalSearch';
 import NotificationPanel from '../components/NotificationPanel';
+import LayoutSettings from '../components/LayoutSettings';
+import CustomizerDrawer from '../components/CustomizerDrawer';
+import CursorGlow from '../components/CursorGlow';
 import { useNotifications } from '../context/NotificationContext';
+import { useUserPreferences } from '../context/UserPreferencesContext';
 import { saveSessionLocation } from '../utils/sessionLocation';
 
 // ChatWidget est chargé à la demande : il tire Recharts (~390 Ko) via son graphique,
@@ -51,10 +58,10 @@ const ChatWidget = lazy(() => import('../components/ChatWidget'));
 
 const platformItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, color: 'text-amber-400', end: true, permission: null },
-  { to: '/portal', label: 'Portail', icon: Ticket, color: 'text-teal-400', permission: null },
+  { to: '/portal', label: 'Portail', icon: Monitor, color: 'text-teal-400', permission: null },
   { to: '/tickets', label: 'Tickets', icon: Ticket, color: 'text-gold-400', permission: null },
-  { to: '/problems', label: 'Problèmes', icon: AlertTriangle, color: 'text-amber-400', permission: null },
-  { to: '/email-drafts', label: 'Centre de Validation', icon: ShieldCheck, color: 'text-amber-400', permission: 'emaildrafts.manage', fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
+  { to: '/problems', label: 'Problèmes', icon: AlertTriangle, color: 'text-amber-400', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE'] },
+  { to: '/email-drafts', label: 'Centre de Validation', icon: MailCheck, color: 'text-amber-400', permission: 'emaildrafts.manage', fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
   { to: '/inbox', label: 'Boîte mail', icon: Inbox, color: 'text-sky-400', permission: 'inbox.sync', fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
   { to: '/knowledge-base', label: 'Base de connaissances', icon: BookOpen, color: 'text-purple-400', permission: null },
   { to: '/ticket-evolution', label: 'Évolution tickets', icon: TrendingUp, color: 'text-cyan-400', permission: null, fallbackRoles: ['ADMIN', 'TECHNICIAN', 'HOTLINE'] },
@@ -75,7 +82,7 @@ const systemItems = [
   { to: '/ai-weekly-reports', label: 'Apprentissage IA', icon: BrainCircuit, color: 'text-purple-400', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE'] },
   { to: '/prompts', label: 'Prompts IA', icon: Terminal, color: 'text-violet-400', permission: 'prompts.manage', fallbackRoles: ['ADMIN'] },
   { to: '/permission-groups', label: 'Groupes de droits', icon: ShieldCheck, color: 'text-cyan-400', permission: 'users.manage', fallbackRoles: ['ADMIN'] },
-  { to: '/settings', label: 'Paramètres', icon: Settings, color: 'text-gray-400', permission: ['settings.ai', 'settings.email', 'settings.integrations', 'automation.manage'], fallbackRoles: ['ADMIN'] },
+  { to: '/settings', label: 'Paramètres', icon: Settings, color: 'text-on-surface-variant', permission: ['settings.ai', 'settings.email', 'settings.integrations', 'automation.manage'], fallbackRoles: ['ADMIN'] },
   { to: '/documentation', label: 'Documentation', icon: FileText, color: 'text-blue-400', permission: null },
   { to: '/logs', label: 'Journal activité', icon: History, color: 'text-rose-400', permission: null, roles: ['ADMIN', 'SUPERADMIN', 'HOTLINE', 'TECHNICIAN'] },
   { to: '/audit', label: 'Audit système', icon: Shield, color: 'text-amber-400', permission: null, fallbackRoles: ['ADMIN'] },
@@ -124,7 +131,7 @@ function getPageBreadcrumb(pathname) {
     if (pathname.startsWith('/tickets/')) {
       return { section: 'Plateforme', label: 'Détail Ticket', icon: Ticket, color: 'text-amber-400' };
     }
-    return { section: 'IA Hub', label: 'Dashboard', icon: LayoutDashboard, color: 'text-indigo-400' };
+      return { section: 'IA Hub', label: 'Dashboard', icon: LayoutDashboard, color: 'text-primary' };
   }
   let section = 'Plateforme';
   if (orgItems.some((i) => i.to === item.to)) section = 'Organisation';
@@ -158,9 +165,12 @@ export default function MainLayout() {
 
   const { unreadCount } = useNotifications();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
-  const [showAdminMenu, setShowAdminMenu] = useState(false);
+  const [showOrgMenu, setShowOrgMenu] = useState(false);
+  const [showSystemMenu, setShowSystemMenu] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showLayoutSettings, setShowLayoutSettings] = useState(false);
+  const [showCustomizer, setShowCustomizer] = useState(false);
   const [sidebarHovered, setSidebarHovered] = useState(false);
   const [sidebarPinned, setSidebarPinned] = useState(() => {
     return localStorage.getItem('sidebarPinned') === 'true';
@@ -203,7 +213,8 @@ export default function MainLayout() {
   }, []);
 
   useEffect(() => {
-    setShowAdminMenu(false);
+    setShowOrgMenu(false);
+    setShowSystemMenu(false);
     setShowUserMenu(false);
   }, [location.pathname]);
 
@@ -286,6 +297,8 @@ export default function MainLayout() {
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--color-background)' }}>
+      <a href="#main-content" className="skip-to-content">Aller au contenu principal</a>
+      <CursorGlow />
       <GlobalSearch />
 
       {/* SIDEBAR */}
@@ -293,12 +306,12 @@ export default function MainLayout() {
         ref={sidebarRef}
         className={`app-sidebar ${isSidebarExpanded ? 'expanded' : ''}`}
         onMouseEnter={() => setSidebarHovered(true)}
-        onMouseLeave={() => { setSidebarHovered(false); setShowAdminMenu(false); }}
+        onMouseLeave={() => { setSidebarHovered(false); setShowOrgMenu(false); setShowSystemMenu(false); }}
       >
         {/* Logo */}
         <div className="sidebar-logo flex items-center gap-3">
           <div className="sidebar-logo-icon">
-            <Sparkles className="w-4 h-4 text-indigo-400" />
+            <Sparkles className="w-4 h-4 text-white" />
           </div>
           <span className="sidebar-logo-text">
             IA Hub
@@ -339,9 +352,9 @@ export default function MainLayout() {
                   currentItem={currentSecondaryItem}
                   label="Organisation"
                   icon={Users}
-                  expanded={showAdminMenu}
-                  onToggle={() => setShowAdminMenu(!showAdminMenu)}
-                  onClose={() => setShowAdminMenu(false)}
+                  expanded={showOrgMenu}
+                  onToggle={() => { setShowOrgMenu(!showOrgMenu); setShowSystemMenu(false); }}
+                  onClose={() => setShowOrgMenu(false)}
                 />
               )}
             </>
@@ -361,9 +374,9 @@ export default function MainLayout() {
                   currentItem={currentSecondaryItem}
                   label="Administration"
                   icon={ShieldAlert}
-                  expanded={showAdminMenu}
-                  onToggle={() => setShowAdminMenu(!showAdminMenu)}
-                  onClose={() => setShowAdminMenu(false)}
+                  expanded={showSystemMenu}
+                  onToggle={() => { setShowSystemMenu(!showSystemMenu); setShowOrgMenu(false); }}
+                  onClose={() => setShowSystemMenu(false)}
                 />
               )}
             </>
@@ -373,10 +386,10 @@ export default function MainLayout() {
         {/* Pin toggle */}
         <button
           onClick={toggleSidebarPin}
-          className="sidebar-pin-btn hover:text-indigo-400 transition-colors"
+          className="sidebar-pin-btn hover:text-primary transition-colors"
           title={sidebarPinned ? 'Détacher la sidebar' : 'Épingler la sidebar'}
         >
-          <Pin className={`w-4 h-4 transition-transform ${sidebarPinned ? 'rotate-45 text-indigo-400' : ''}`} />
+          <Pin className={`w-4 h-4 transition-transform ${sidebarPinned ? 'rotate-45 text-primary' : ''}`} />
         </button>
 
         {/* User profile at bottom */}
@@ -413,18 +426,20 @@ export default function MainLayout() {
         style={{ marginLeft: sidebarW }}
       >
         <header
-          className="h-14 flex items-center justify-between px-6 shrink-0 border-b backdrop-blur-md sticky top-0 z-30 transition-all duration-200"
+          className="h-14 flex items-center px-6 shrink-0 border-b backdrop-blur-xl sticky top-0 z-30 transition-all duration-200"
           style={{
-            backgroundColor: 'var(--color-surface-container-lowest)',
+            backgroundColor: 'color-mix(in srgb, var(--color-surface-container-lowest) 80%, transparent)',
             borderColor: 'var(--color-outline-variant)',
+            WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
+            backdropFilter: 'blur(20px) saturate(1.4)',
           }}
         >
-          {/* Dynamic Breadcrumb Header */}
-          <div className="flex items-center gap-2 text-xs font-medium min-w-0">
-            <span className="text-slate-400 font-normal hidden sm:inline-block">
+          {/* Left: Dynamic Breadcrumb Header */}
+          <div className="flex items-center gap-2 text-xs font-medium min-w-0 flex-1">
+            <span className="text-on-surface-variant font-normal hidden sm:inline-block">
               {currentPage.section}
             </span>
-            <ChevronRight className="w-3.5 h-3.5 text-slate-500 shrink-0 hidden sm:inline-block" />
+            <ChevronRight className="w-3.5 h-3.5 text-on-surface-variant shrink-0 hidden sm:inline-block" />
             <div className="flex items-center gap-2 truncate">
               {PageIcon && <PageIcon className={`w-4 h-4 shrink-0 ${currentPage.color || 'text-indigo-400'}`} />}
               <span className="font-bold text-slate-900 dark:text-slate-100 text-sm tracking-tight truncate">
@@ -433,18 +448,22 @@ export default function MainLayout() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          {/* Center: Pinned shortcuts — quick access pills (always same position) */}
+          <PinnedShortcuts />
+
+          {/* Right: Actions */}
+          <div className="flex items-center gap-3 shrink-0">
             {/* Search trigger */}
             <button
               onClick={triggerGlobalSearch}
-              className="flex items-center gap-2 h-9 px-3.5 rounded-xl text-xs font-medium transition-all hover:border-indigo-500/50 hover:shadow-sm group"
+              className="flex items-center gap-2 h-9 px-3.5 rounded-xl text-xs font-medium transition-all hover:border-primary/50 hover:shadow-sm group"
               style={{
                 backgroundColor: 'var(--color-surface-container)',
                 color: 'var(--color-on-surface-variant)',
                 border: '1px solid var(--color-outline-variant)',
               }}
             >
-              <Search className="w-3.5 h-3.5 text-on-surface-variant group-hover:text-indigo-400 transition-colors" />
+              <Search className="w-3.5 h-3.5 text-on-surface-variant group-hover:text-primary transition-colors" />
               <span className="hidden md:inline">Rechercher dans l'IA Hub...</span>
               <span className="md:hidden">Rechercher...</span>
               <kbd className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-surface-container-high border border-outline-variant/60 font-mono font-semibold opacity-75 group-hover:opacity-100">
@@ -456,10 +475,10 @@ export default function MainLayout() {
             <div className="relative" ref={notifBtnRef}>
               <button
                 onClick={toggleNotifications}
-                className="relative w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:bg-surface-container-high hover:border-indigo-500/40 border border-outline-variant/60 group"
+                className="relative w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:bg-surface-container-high hover:border-primary/40 border border-outline-variant/60 group"
                 title={`Alertes${unreadCount > 0 ? ` (${unreadCount} non lues)` : ''}`}
               >
-                <Bell className="w-4 h-4 text-on-surface-variant group-hover:text-indigo-400 transition-colors" />
+                <Bell className="w-4 h-4 text-on-surface-variant group-hover:text-primary transition-colors" />
                 {unreadCount > 0 && (
                   <span
                     className="absolute -top-1 -right-1 flex items-center justify-center min-w-[17px] h-[17px] px-1 rounded-full text-[9.5px] font-bold text-white shadow-md animate-pulse"
@@ -472,10 +491,28 @@ export default function MainLayout() {
               <NotificationPanel open={showNotifications} onClose={() => setShowNotifications(false)} />
             </div>
 
+            {/* Layout settings — Skin & Layout panel */}
+            <button
+              onClick={() => setShowLayoutSettings(true)}
+              className="w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:bg-surface-container-high hover:border-primary/40 border border-outline-variant/60 group"
+              title="Personnaliser l'apparence"
+            >
+              <Palette className="w-4 h-4 text-on-surface-variant group-hover:text-primary transition-colors" />
+            </button>
+
+            {/* Customizer — Dashboard widgets, tables & shortcuts */}
+            <button
+              onClick={() => setShowCustomizer(true)}
+              className="w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:bg-surface-container-high hover:border-primary/40 border border-outline-variant/60 group"
+              title="Personnaliser le dashboard & les tables"
+            >
+              <Settings2 className="w-4 h-4 text-on-surface-variant group-hover:text-primary transition-colors" />
+            </button>
+
             {/* Theme toggle — Soleil ↔ Lune avec rotation premium */}
             <button
               onClick={toggleTheme}
-              className="theme-toggle-btn w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:bg-surface-container-high hover:border-indigo-500/40 border border-outline-variant/60 active:scale-90"
+              className="theme-toggle-btn w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:bg-surface-container-high hover:border-primary/40 border border-outline-variant/60 active:scale-90"
               title={theme === 'dark' ? 'Basculer en Mode clair' : 'Basculer en Mode sombre'}
               aria-label={theme === 'dark' ? 'Basculer en Mode clair' : 'Basculer en Mode sombre'}
             >
@@ -490,6 +527,7 @@ export default function MainLayout() {
         </header>
 
         <main
+          id="main-content"
           className="flex-1 min-w-0 relative bg-inherit overflow-y-auto overflow-x-hidden"
           style={{ backgroundColor: 'var(--color-background)' }}
         >
@@ -513,6 +551,9 @@ export default function MainLayout() {
       <Suspense fallback={null}>
         <ChatWidget />
       </Suspense>
+
+      <LayoutSettings open={showLayoutSettings} onClose={() => setShowLayoutSettings(false)} />
+      <CustomizerDrawer open={showCustomizer} onClose={() => setShowCustomizer(false)} />
     </div>
   );
 }
@@ -527,7 +568,7 @@ function CompactSectionButton({ items, isActive, currentItem, label, icon: Icon,
         style={{ justifyContent: 'center' }}
       >
         <span className="sidebar-item-icon">
-          <Icon className="w-[18px] h-[18px] text-white/50" />
+          <Icon className="w-[18px] h-[18px]" />
         </span>
         <span className="sidebar-item-label">
           {currentItem?.label || label}
@@ -557,6 +598,64 @@ function CompactSectionButton({ items, isActive, currentItem, label, icon: Icon,
   );
 }
 
+// ── Pinned Shortcuts (header quick-access pills) ─────────────────────────
+const SHORTCUT_LABELS = {
+  '/tickets': 'Tickets',
+  '/tickets?new=1': 'Nouveau ticket',
+  '/inbox': 'Inbox',
+  '/email-drafts': 'Validation',
+  '/assets': 'Assets',
+  '/knowledge-base': 'KB',
+  '/dashboard': 'Dashboard',
+  '/users': 'Utilisateurs',
+  '/teams': 'Équipes',
+  '/categories': 'Catégories',
+  '/locations': 'Lieux',
+  '/activity-logs': 'Journaux',
+  '/technician-stats': 'Stats',
+  '/settings': 'Paramètres',
+};
+const SHORTCUT_ICONS = {
+  '/tickets': '🎫',
+  '/tickets?new=1': '➕',
+  '/inbox': '📥',
+  '/email-drafts': '✅',
+  '/assets': '💻',
+  '/knowledge-base': '📚',
+  '/dashboard': '📊',
+  '/users': '👥',
+  '/teams': '🏢',
+  '/categories': '📁',
+  '/locations': '📍',
+  '/activity-logs': '📋',
+  '/technician-stats': '📈',
+  '/settings': '⚙️',
+};
+
+function PinnedShortcuts() {
+  const { pinnedShortcuts } = useUserPreferences();
+  const navigate = useNavigate();
+  if (!pinnedShortcuts || pinnedShortcuts.length === 0) return null;
+  return (
+    <div className="hidden lg:flex items-center gap-1 ml-3 pl-3 border-l border-outline-variant/40 shrink-0">
+      {pinnedShortcuts.map((path) => (
+        <button
+          key={path}
+          onClick={() => navigate(path)}
+          className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold
+            text-on-surface-variant hover:text-primary hover:bg-primary/8
+            border border-transparent hover:border-primary/20
+            transition-all duration-150 shrink-0 cursor-pointer"
+          title={SHORTCUT_LABELS[path] || path}
+        >
+          <span className="text-xs" role="img" aria-hidden>{SHORTCUT_ICONS[path] || '📄'}</span>
+          <span className="hidden xl:inline truncate max-w-[80px]">{SHORTCUT_LABELS[path] || path}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function SidebarItem({ item, user, isSidebarExpanded, count }) {
   if (item.permission !== null) {
     const keys = Array.isArray(item.permission) ? item.permission : [item.permission];
@@ -575,14 +674,14 @@ function SidebarItem({ item, user, isSidebarExpanded, count }) {
       }
     >
       <span className="sidebar-item-icon relative">
-        <Icon className="w-[18px] h-[18px] text-white/50" style={item.active ? {} : {}} />
+        <Icon className="w-[18px] h-[18px]" />
         {!isSidebarExpanded && count > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
+          <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
         )}
       </span>
       <span className="sidebar-item-label flex-1 truncate">{item.label}</span>
       {isSidebarExpanded && count > 0 && (
-        <span className="ml-auto px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-indigo-500/15 text-indigo-300 shrink-0">
+        <span className="ml-auto px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 shrink-0">
           {count > 99 ? '99+' : count}
         </span>
       )}

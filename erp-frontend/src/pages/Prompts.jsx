@@ -101,7 +101,7 @@ export default function Prompts() {
               whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
               onClick={save}
               disabled={saving || draft === selected.template}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white text-xs font-bold shadow-md shadow-purple-500/20 disabled:opacity-50 transition-all"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl btn-primary text-xs font-bold shadow-md disabled:opacity-50 transition-all"
             >
               <Save className="w-3.5 h-3.5" />
               <span>{saving ? 'Enregistrement...' : 'Enregistrer'}</span>

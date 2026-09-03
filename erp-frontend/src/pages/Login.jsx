@@ -118,7 +118,7 @@ export default function Login() {
             transition={{ duration: 0.6, delay: 0.1 }}
             className="flex items-center gap-3 text-white"
           >
-            <div className="p-2.5 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-purple-600 shadow-lg shadow-blue-500/25">
+            <div className="p-2.5 rounded-2xl logo-gradient shadow-lg">
               <Sparkles className="w-6 h-6 text-white" />
             </div>
             <div>
@@ -219,7 +219,7 @@ export default function Login() {
               transition={{ duration: 0.4, type: 'spring', bounce: 0.4 }}
               className="flex items-center gap-2.5 lg:hidden mb-2 text-on-surface"
             >
-              <div className="p-2 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white shadow-md">
+              <div className="p-2 rounded-xl bg-primary text-on-primary shadow-md">
                 <Sparkles className="w-5 h-5" />
               </div>
               <span className="font-black text-xl tracking-tight">ERP ITSM</span>
@@ -335,7 +335,7 @@ export default function Login() {
                   whileTap={{ scale: 0.98 }}
                   type="submit"
                   disabled={loading}
-                  className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-extrabold text-xs shadow-lg shadow-blue-500/25 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                  className="w-full py-3 rounded-xl btn-primary font-extrabold text-xs shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   {loading ? (
                     <>

@@ -11,6 +11,7 @@ import { AuthProvider } from './context/AuthContext'
 import { ThemeProvider } from './context/ThemeContext'
 import { SocketProvider } from './context/SocketContext'
 import { NotificationProvider } from './context/NotificationContext'
+import { UserPreferencesProvider } from './context/UserPreferencesContext'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
@@ -19,8 +20,10 @@ createRoot(document.getElementById('root')).render(
         <AuthProvider>
           <SocketProvider>
             <NotificationProvider>
-              <App />
-              <Toaster />
+              <UserPreferencesProvider>
+                  <App />
+                <Toaster />
+              </UserPreferencesProvider>
             </NotificationProvider>
           </SocketProvider>
         </AuthProvider>

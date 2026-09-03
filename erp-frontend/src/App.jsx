@@ -81,8 +81,8 @@ export default function App() {
               }
             />
             <Route path="tickets/:id" element={<TicketDetail />} />
-            <Route path="problems" element={<Problems />} />
-            <Route path="problems/:id" element={<ProblemDetail />} />
+            <Route path="problems" element={<ProtectedRoute roles={['ADMIN', 'HOTLINE', 'SUPERADMIN']}><Problems /></ProtectedRoute>} />
+            <Route path="problems/:id" element={<ProtectedRoute roles={['ADMIN', 'HOTLINE', 'SUPERADMIN']}><ProblemDetail /></ProtectedRoute>} />
             <Route path="teams" element={<Teams />} />
             <Route path="knowledge-base" element={<KnowledgeBase />} />
             <Route path="inbox" element={<Inbox />} />

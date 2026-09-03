@@ -11,6 +11,7 @@ import { useTheme } from '../context/ThemeContext';
 import { playApproval, playRejection, playError } from '../utils/sounds';
 import SearchableSelect from '../components/SearchableSelect';
 import RemoteUserSelect from '../components/RemoteUserSelect';
+import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
 import SlaBadge from '../components/SlaBadge';
 import { flattenCategoryTree } from '../utils/categoryTree';
 import {
@@ -20,7 +21,7 @@ import {
   Flame, Radio, Info, ArrowDown, UserCheck, HelpCircle, Layers, History,
   TrendingUp, Lock, Link2, Merge, Plus, GitBranch, Timer, Play, Square, ListChecks, Boxes,
   ChevronDown, Inbox, Pencil, Save, Search,
-  ChevronsLeft, ChevronLeft, ChevronsRight, Eye
+  ChevronsLeft, ChevronLeft, ChevronsRight, Eye, Copy, ShieldAlert, ShieldOff, Loader2
 } from 'lucide-react';
 import {
   STATUS_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS,
@@ -84,7 +85,7 @@ function InfoTile({ icon: Icon, label, value, tone = 'primary', title }) {
     emerald: 'text-emerald-500',
     amber: 'text-amber-500',
     violet: 'text-violet-500',
-    slate: 'text-slate-400',
+    slate: 'text-on-surface-variant',
   }[tone] || 'text-primary';
 
   return (
@@ -221,6 +222,7 @@ export default function TicketDetail() {
   const canAssign = hasPermission(user, 'tickets.assign') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN';
   const canApprove = hasPermission(user, 'tickets.approve') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN';
   const canDelete = hasPermission(user, 'tickets.delete') || user?.role === 'SUPERADMIN';
+  const canManageProblems = hasPermission(user, 'problems.manage') || user?.role === 'SUPERADMIN';
   const canEdit = hasPermission(user, 'tickets.edit') || user?.role === 'ADMIN' || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN';
 
   const followupContainerRef = useRef(null);
@@ -528,12 +530,19 @@ export default function TicketDetail() {
 
   // ── Liaison Problème ──────────────────────────────────────────────
   async function searchLinkableProblems(q) {
-    if (!q.trim()) { setProblemLinkResults([]); return; }
     setProblemLinkLoading(true);
     try {
-      const { data } = await api.get('/problems', { params: { search: q, limit: 8 } });
+      const params = { limit: 10, page: 1 };
+      if (q && q.trim()) params.search = q.trim();
+      const { data } = await api.get('/problems', { params });
       setProblemLinkResults(data.problems || []);
     } catch { setProblemLinkResults([]); } finally { setProblemLinkLoading(false); }
+  }
+  const problemSearchTimerRef = useRef(null);
+  function handleProblemLinkSearch(q) {
+    setProblemLinkSearch(q);
+    if (problemSearchTimerRef.current) clearTimeout(problemSearchTimerRef.current);
+    problemSearchTimerRef.current = setTimeout(() => searchLinkableProblems(q), 300);
   }
 
   async function linkProblem(problemId) {
@@ -561,12 +570,19 @@ export default function TicketDetail() {
   }
 
   async function searchLinkableTickets(q) {
-    if (!q.trim()) { setLinkResults([]); return; }
     setLinkLoading(true);
     try {
-      const { data } = await api.get('/tickets', { params: { search: q, limit: 8 } });
+      const params = { limit: 10, page: 1, status: 'NOT_CLOSED' };
+      if (q && q.trim()) params.search = q.trim();
+      const { data } = await api.get('/tickets', { params });
       setLinkResults((data.items || []).filter((t) => t.id !== Number(id)));
     } catch { setLinkResults([]); } finally { setLinkLoading(false); }
+  }
+  const linkSearchTimerRef = useRef(null);
+  function handleLinkSearch(q) {
+    setLinkSearch(q);
+    if (linkSearchTimerRef.current) clearTimeout(linkSearchTimerRef.current);
+    linkSearchTimerRef.current = setTimeout(() => searchLinkableTickets(q), 300);
   }
 
   async function addLink(targetTicketId) {
@@ -626,6 +642,16 @@ export default function TicketDetail() {
     const t = setInterval(() => setElapsedSec(Math.floor((Date.now() - new Date(activeTimer.startedAt)) / 1000)), 1000);
     return () => clearInterval(t);
   }, [activeTimer]);
+
+  // Charger la liste des tickets quand la modale de liaison s'ouvre
+  useEffect(() => {
+    if (linkModalOpen) searchLinkableTickets('');
+  }, [linkModalOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Charger la liste des problèmes quand la modale de liaison problème s'ouvre
+  useEffect(() => {
+    if (problemLinkModalOpen) searchLinkableProblems('');
+  }, [problemLinkModalOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function startTimer() {
     try {
@@ -1132,12 +1158,12 @@ export default function TicketDetail() {
         </div>
       )}
 
-      {/* Grid Layout */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-          {/* Left Column: Main Ticket Content & Timeline */}
-        <div className="xl:col-span-8 flex flex-col gap-6">
+      {/* Command Center Layout (Katalyst style) */}
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-5">
+        {/* ── LEFT COLUMN: Properties & Metadata ────────────────────────── */}
+        <div className="flex flex-col gap-5 order-2 xl:order-1">
           {/* Main Ticket Card */}
-          <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest shadow-sm overflow-hidden">
+          <div className="bento-card overflow-hidden">
             {/* Barre d'accent selon le statut */}
             <div className={`h-1.5 w-full ${STATUS_ACCENT[ticket.status] || 'bg-primary'}`} />
             <div className="p-6 space-y-5">
@@ -1213,7 +1239,7 @@ export default function TicketDetail() {
             {/* Attachments */}
             {ticket.attachments?.length > 0 && (
               <div className="border-t border-outline-variant/30 pt-4 mt-4">
-                <h4 className="text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-3 flex items-center gap-1.5">
+                <h4 className="text-[11px] font-extrabold uppercase tracking-wider text-on-surface mb-3 flex items-center gap-1.5">
                   <Paperclip className="w-3.5 h-3.5 text-primary" />
                   Pièces jointes ({(ticket?.attachments || []).length})
                 </h4>
@@ -1255,7 +1281,7 @@ export default function TicketDetail() {
           </div>
 
           {/* Tickets liés */}
-          <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm">
+          <div className="bento-card p-5">
             <div className="flex items-center justify-between gap-3 pb-3 border-b border-outline-variant/20 mb-4">
               <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
                 <Link2 className="w-4 h-4 text-primary" />
@@ -1331,7 +1357,8 @@ export default function TicketDetail() {
           </div>
 
           {/* Problèmes liés */}
-          <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm">
+          {canManageProblems && (
+          <div className="bento-card p-5">
             <div className="flex items-center justify-between gap-3 pb-3 border-b border-outline-variant/20 mb-4">
               <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-amber-500" />
@@ -1342,7 +1369,6 @@ export default function TicketDetail() {
                   </span>
                 )}
               </h3>
-              {canAssign && (
                 <button
                   onClick={() => setProblemLinkModalOpen(true)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 text-white text-[11px] font-bold hover:bg-amber-600 transition-colors cursor-pointer"
@@ -1350,7 +1376,6 @@ export default function TicketDetail() {
                   <Plus className="w-3.5 h-3.5" />
                   Lier un problème
                 </button>
-              )}
             </div>
             {linkedProblems.length === 0 ? (
               <p className="text-xs text-on-surface-variant/70 italic py-2">
@@ -1381,7 +1406,7 @@ export default function TicketDetail() {
                         </span>
                       </div>
                     </div>
-                    {canAssign && (
+                    {canManageProblems && (
                       <button
                         onClick={() => unlinkProblem(p.id)}
                         className="p-1.5 rounded-lg text-on-surface-variant hover:text-error hover:bg-error/5 transition-colors cursor-pointer"
@@ -1395,9 +1420,10 @@ export default function TicketDetail() {
               </div>
             )}
           </div>
+          )}
 
           {/* Sous-tickets (parent/enfant) */}
-          <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm">
+          <div className="bento-card p-5">
             <div className="flex items-center justify-between gap-3 pb-3 border-b border-outline-variant/20 mb-4">
               <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
                 <GitBranch className="w-4 h-4 text-primary" />
@@ -1491,7 +1517,7 @@ export default function TicketDetail() {
           </div>
 
           {/* Follow-up / Timeline Card */}
-          <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-6">
+          <div className="bento-card p-6 space-y-6">
             <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface border-b border-outline-variant/20 pb-3 flex items-center gap-2">
               <span className="w-8 h-8 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
                 <MessageSquare className="w-4 h-4" />
@@ -1816,7 +1842,7 @@ export default function TicketDetail() {
                 <button
                   type="submit"
                   disabled={!followup.trim() && pastedImages.length === 0}
-                  className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-bold shadow-md shadow-blue-500/20 disabled:opacity-40 hover:brightness-110 transition-all cursor-pointer"
+                  className="flex items-center gap-1.5 px-5 py-2 rounded-xl btn-primary text-xs font-bold disabled:opacity-40 transition-all cursor-pointer"
                 >
                   <Send className="w-3.5 h-3.5" />
                   <span>Envoyer{pastedImages.length > 0 ? ` (${pastedImages.length} img.)` : ''}</span>
@@ -1825,123 +1851,19 @@ export default function TicketDetail() {
             </form>
           </div>
 
-          {/* Temps passé (timesheet) */}
-          {canTimesheet && (
-            <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-4">
-              <div className="flex items-center justify-between gap-3 border-b border-outline-variant/20 pb-3">
-                <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
-                  <Timer className="w-4 h-4 text-primary" />
-                  Temps passé
-                  {timeTotal > 0 && (
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
-                      {fmtMinutes(timeTotal)}
-                    </span>
-                  )}
-                </h3>
-                {activeTimer && (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/30 text-[11px] font-bold font-mono">
-                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                    {fmtElapsed(elapsedSec)}
-                  </span>
-                )}
-              </div>
 
-              {/* Timer + saisie manuelle */}
-              <div className="flex items-center gap-2 flex-wrap">
-                {activeTimer ? (
-                  <button
-                    onClick={stopTimer}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30 text-xs font-bold hover:bg-red-500/25 transition-colors cursor-pointer"
-                  >
-                    <Square className="w-3.5 h-3.5" />
-                    Arrêter le minuteur
-                  </button>
-                ) : (
-                  <button
-                    onClick={startTimer}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-xs font-bold hover:bg-emerald-500/25 transition-colors cursor-pointer"
-                  >
-                    <Play className="w-3.5 h-3.5" />
-                    Démarrer le minuteur
-                  </button>
-                )}
-                <form onSubmit={addManualTime} className="flex items-center gap-2 flex-1 min-w-[260px]">
-                  <input
-                    type="number"
-                    min="1"
-                    max="1440"
-                    value={manualMinutes}
-                    onChange={(e) => setManualMinutes(e.target.value)}
-                    placeholder="Minutes"
-                    className="w-20 px-2.5 py-2 rounded-xl border border-outline-variant/60 bg-surface text-on-surface text-xs font-bold focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none"
-                  />
-                  <input
-                    type="text"
-                    value={manualDesc}
-                    onChange={(e) => setManualDesc(e.target.value)}
-                    placeholder="Description (optionnel)"
-                    className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-outline-variant/60 bg-surface text-on-surface text-xs font-semibold focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none"
-                  />
-                  <button
-                    type="submit"
-                    disabled={savingTime || !manualMinutes}
-                    className="flex items-center gap-1 px-3 py-2 rounded-xl bg-primary text-on-primary text-xs font-bold hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Ajouter
-                  </button>
-                </form>
-              </div>
-
-              {/* Liste des entrées */}
-              {timeEntries.length === 0 ? (
-                <p className="text-xs text-on-surface-variant/70 italic py-2">
-                  Aucun temps saisi sur ce ticket.
-                </p>
-              ) : (
-                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                  {timeEntries.map((e) => (
-                    <div key={e.id} className="flex items-center gap-3 p-3 rounded-xl border border-outline-variant/30 bg-surface-container-low/40">
-                      <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[10px] font-bold border border-primary/20 shrink-0">
-                        {initials(e.user?.fullName)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-bold text-on-surface truncate">{e.user?.fullName || 'Technicien'}</span>
-                          <span className="text-[10px] font-mono text-on-surface-variant bg-surface-container border border-outline-variant/30 px-2 py-0.5 rounded-full shrink-0">
-                            {new Date(e.entryDate).toLocaleString('fr-FR')}
-                          </span>
-                        </div>
-                        {e.description && <p className="text-[11px] text-on-surface-variant truncate mt-0.5">{e.description}</p>}
-                      </div>
-                      <span className="text-xs font-black text-on-surface shrink-0">{fmtMinutes(e.minutes)}</span>
-                      {(e.userId === user?.id || user?.role === 'SUPERADMIN' || user?.role === 'ADMIN') && (
-                        <button
-                          onClick={() => deleteTimeEntry(e.id)}
-                          className="p-1.5 rounded-lg text-on-surface-variant hover:text-error hover:bg-error/5 transition-colors cursor-pointer shrink-0"
-                          title="Supprimer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
-        {/* Right Column: Properties Sidebar */}
-        <div className="xl:col-span-4 flex flex-col gap-6">
+        {/* ── RIGHT COLUMN: Actions, AI, Approvals ──────────────────────── */}
+        <div className="flex flex-col gap-5 order-3">
           {/* Source Email Details */}
           {ticket.sourceEmail && (
-            <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-3">
-              <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2 border-b border-outline-variant/20 pb-3">
-                <span className="w-7 h-7 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
-                  <Mail className="w-4 h-4" />
-                </span>
-                Email d'origine
+            <div className="bento-card p-5 space-y-3">
+              <h3 className="bento-card-header -mx-5 -mt-5 mb-0" style={{ borderTopLeftRadius: 'inherit', borderTopRightRadius: 'inherit' }}>
+                <div className="flex items-center gap-2">
+                  <Mail className="w-4 h-4" style={{ color: 'var(--color-info)' }} />
+                  <span className="text-xs font-semibold" style={{ color: 'var(--color-foreground)' }}>Email d'origine</span>
+                </div>
               </h3>
               <dl className="space-y-2 text-xs">
                 <div className="flex justify-between gap-2">
@@ -1962,8 +1884,8 @@ export default function TicketDetail() {
 
           {/* AI Suggestions */}
           {ticket.aiSuggestions?.length > 0 && (
-            <div className="rounded-3xl border border-purple-500/20 bg-purple-500/5 p-6 shadow-sm space-y-3">
-              <h3 className="text-xs font-extrabold uppercase tracking-wider text-purple-700 dark:text-purple-400 flex items-center gap-2 border-b border-purple-500/20 pb-3">
+            <div className="bento-card p-5 space-y-3" style={{ borderColor: 'color-mix(in srgb, #8b5cf6 20%, var(--color-border))', backgroundColor: 'color-mix(in srgb, #8b5cf6 3%, var(--color-card))' }}>
+              <h3 className="text-xs font-semibold flex items-center gap-2 pb-3 border-b" style={{ color: '#8b5cf6', borderColor: 'color-mix(in srgb, #8b5cf6 15%, var(--color-border))' }}>
                 <Sparkles className="w-4 h-4 text-purple-600 dark:text-purple-400" />
                 Suggestions IA
               </h3>
@@ -1991,8 +1913,8 @@ export default function TicketDetail() {
 
           {/* Approval Workflow Card */}
           {ticket.approvalStatus !== 'NOT_REQUIRED' && (
-            <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-4">
-              <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2 border-b border-outline-variant/20 pb-3">
+            <div className="bento-card p-5 space-y-4">
+              <h3 className="text-xs font-semibold flex items-center gap-2 pb-3 border-b" style={{ color: 'var(--color-foreground)', borderColor: 'var(--color-border)' }}>
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                 Approbation
               </h3>
@@ -2043,7 +1965,7 @@ export default function TicketDetail() {
           )}
 
           {/* Properties Card */}
-          <div className="rounded-3xl border border-outline-variant/20 dark:border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm space-y-4">
+          <div className="bento-card p-5 space-y-4">
             <div className="flex items-center justify-between border-b border-outline-variant/15 dark:border-outline-variant/8 pb-3">
               <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
                 <span className="w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
@@ -2060,11 +1982,11 @@ export default function TicketDetail() {
               {/* Zone 1 — Informations générales (grille 2 colonnes) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div>
-                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface mb-1">
                   Type
                 </label>
                 <select
-                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                   value={ticket.type}
                   disabled={!canAssign || savingField === 'type'}
                   onChange={(e) => updateField('type', e.target.value)}
@@ -2076,12 +1998,12 @@ export default function TicketDetail() {
               </div>
 
               <div>
-                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface mb-1">
                   Catégorie
                 </label>
                 {canAssign ? (
                   <select
-                    className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                    className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                     value={ticket.category || ''}
                     disabled={savingField === 'category'}
                     onChange={(e) => updateField('category', e.target.value)}
@@ -2092,18 +2014,18 @@ export default function TicketDetail() {
                     ))}
                   </select>
                 ) : (
-                  <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/15 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                  <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/15 rounded-xl px-3 py-2 text-xs font-semibold text-on-surface">
                     {ticket.category || '-'}
                   </div>
                 )}
               </div>
 
               <div>
-                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface mb-1">
                   Statut
                 </label>
                 <select
-                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                   value={ticket.status}
                   disabled={!canAssign || savingField === 'status'}
                   onChange={(e) => updateField('status', e.target.value)}
@@ -2115,11 +2037,11 @@ export default function TicketDetail() {
               </div>
 
               <div>
-                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface mb-1">
                   Source de la demande
                 </label>
                 <select
-                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                   value={ticket.source || ''}
                   disabled={!canAssign || savingField === 'source'}
                   onChange={(e) => updateField('source', e.target.value)}
@@ -2132,11 +2054,11 @@ export default function TicketDetail() {
               </div>
 
               <div>
-                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface mb-1">
                   Urgence
                 </label>
                 <select
-                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                   value={ticket.urgency}
                   disabled={!canAssign || savingField === 'urgency'}
                   onChange={(e) => updateField('urgency', e.target.value)}
@@ -2148,11 +2070,11 @@ export default function TicketDetail() {
               </div>
 
               <div>
-                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface mb-1">
                   Impact
                 </label>
                 <select
-                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                   value={ticket.impact}
                   disabled={!canAssign || savingField === 'impact'}
                   onChange={(e) => updateField('impact', e.target.value)}
@@ -2164,11 +2086,11 @@ export default function TicketDetail() {
               </div>
 
               <div>
-                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface mb-1">
                   Priorité
                 </label>
                 <select
-                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                   value={ticket.priority}
                   disabled={!canAssign || savingField === 'priority'}
                   onChange={(e) => updateField('priority', e.target.value)}
@@ -2180,11 +2102,11 @@ export default function TicketDetail() {
               </div>
 
               <div>
-                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface mb-1">
                   ID externe
                 </label>
                 <input
-                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
                   defaultValue={ticket.externalId || ''}
                   disabled={!canAssign}
                   onBlur={(e) => updateField('externalId', e.target.value)}
@@ -2194,53 +2116,30 @@ export default function TicketDetail() {
 
               {/* Zone 2 — Assignation & suivi */}
               <div className="border-t border-outline-variant/15 pt-4 space-y-3.5">
-              <div>
-                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
-                  <Clock className="w-3 h-3 text-primary" />
-                  Échéance manuelle
-                </label>
-                {canAssign ? (
-                  <div className="flex gap-2">
-                    <input
-                      type="datetime-local"
-                      className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-                      defaultValue={ticket.dueDate ? new Date(ticket.dueDate).toISOString().slice(0, 16) : ''}
-                      disabled={savingField === 'dueDate'}
-                      onBlur={(e) => {
-                        const v = e.target.value;
-                        if (v) updateField('dueDate', new Date(v).toISOString());
-                      }}
-                    />
-                    {ticket.dueDate && (
-                      <button
-                        type="button"
-                        onClick={() => updateField('dueDate', null)}
-                        disabled={savingField === 'dueDate'}
-                        className="px-2.5 rounded-xl border border-red-500/25 bg-red-500/5 text-red-600 dark:text-red-400 hover:bg-red-500/15 text-[10px] font-bold transition-colors cursor-pointer shrink-0"
-                        title="Retirer l'échéance"
-                      >
-                        Effacer
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2">
-                    <Clock className="w-3.5 h-3.5 text-primary shrink-0" />
-                    {ticket.dueDate ? new Date(ticket.dueDate).toLocaleString('fr-FR') : <span className="text-slate-500 italic font-normal">Aucune</span>}
-                  </div>
-                )}
-              </div>
 
               <div>
-                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface mb-1">
                   Équipe
                 </label>
                 {canAssign ? (
                   <select
-                    className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                    className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                     value={ticket.teamId || ''}
                     disabled={savingField === 'teamId'}
-                    onChange={(e) => updateField('teamId', e.target.value ? Number(e.target.value) : null)}
+                    onChange={async (e) => {
+                      const teamIdVal = e.target.value ? Number(e.target.value) : null;
+                      await updateField('teamId', teamIdVal);
+                      if (teamIdVal) {
+                        const selectedTeam = teams.find((t) => t.id === teamIdVal);
+                        const teamObserverIds = (selectedTeam?.defaultObservers || []).map((o) => o.id);
+                        if (teamObserverIds.length > 0) {
+                          try {
+                            await api.patch(`/tickets/${id}`, { observerIds: teamObserverIds });
+                            load();
+                          } catch {}
+                        }
+                      }
+                    }}
                   >
                     <option value="">Aucune</option>
                     {teams.map((t) => (
@@ -2248,14 +2147,14 @@ export default function TicketDetail() {
                     ))}
                   </select>
                 ) : (
-                  <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/15 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                  <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/15 rounded-xl px-3 py-2 text-xs font-semibold text-on-surface">
                     {ticket.team?.name || 'Non assignée'}
                   </div>
                 )}
               </div>
 
               <div>
-                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface mb-1">
                   Attribué à
                 </label>
                 {canAssign ? (
@@ -2268,7 +2167,7 @@ export default function TicketDetail() {
                     searchPlaceholder="Rechercher un technicien..."
                   />
                 ) : (
-                  <div className="w-full flex items-center gap-2 bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/15 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                  <div className="w-full flex items-center gap-2 bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/15 rounded-xl px-3 py-2 text-xs font-semibold text-on-surface">
                     {ticket.assignedTo ? (
                       <>
                         <div className="w-5 h-5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center text-[9px] font-bold border border-blue-500/20">
@@ -2277,30 +2176,55 @@ export default function TicketDetail() {
                         {ticket.assignedTo.fullName}
                       </>
                     ) : (
-                      <span className="text-slate-500 italic">Non assigné</span>
+                      <span className="text-on-surface-variant italic">Non assigné</span>
                     )}
                   </div>
                 )}
               </div>
 
-              {ticket.observers?.length > 0 && (
-                <div>
-                  <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
-                    Observateur(s) ({ticket.observers.length})
-                  </label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {(ticket.observers || []).map((o) => (
-                      <span key={o.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/25 text-[11px] font-semibold text-amber-700 dark:text-amber-400">
-                        <Eye className="w-2.5 h-2.5" />
-                        {o.fullName || o.email}
-                      </span>
-                    ))}
+              <div>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface mb-1 flex items-center gap-1">
+                  <Eye className="w-3 h-3 text-amber-500" />
+                  Observateur(s) {ticket.observers?.length > 0 && `(${ticket.observers.length})`}
+                </label>
+                {canAssign ? (
+                  <RemoteUserMultiSelect
+                    value={(ticket.observers || []).map((o) => o.id)}
+                    onChange={async (vals) => {
+                      try {
+                        setSavingField('observerIds');
+                        await api.patch(`/tickets/${id}`, { observerIds: vals });
+                        toast.success('Observateurs mis à jour');
+                        load();
+                      } catch (err) {
+                        toast.error(err.response?.data?.error || 'Échec de la mise à jour');
+                      } finally {
+                        setSavingField(null);
+                      }
+                    }}
+                    users={allUsers}
+                    glpiUsers={glpiUsers}
+                    placeholder="Rechercher un observateur..."
+                    disabled={savingField === 'observerIds'}
+                  />
+                ) : (
+                  <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-semibold text-on-surface flex items-center gap-2 flex-wrap">
+                    <Eye className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                    {(ticket.observers || []).length > 0 ? (
+                      (ticket.observers || []).map((o) => (
+                        <span key={o.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-500/10 border border-purple-500/25 text-[11px] font-semibold text-purple-700 dark:text-purple-400">
+                          {o.fullName || o.email}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-on-surface-variant italic font-normal">Aucun observateur</span>
+                    )}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
 
               <div>
-                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface mb-1 flex items-center gap-1">
                   <MapPin className="w-3 h-3 text-primary" />
                   Lieu
                 </label>
@@ -2336,27 +2260,14 @@ export default function TicketDetail() {
                     icon={MapPin}
                   />
                 ) : (
-                  <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                  <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-semibold text-on-surface flex items-center gap-2">
                     <MapPin className="w-3.5 h-3.5 text-primary shrink-0" />
-                    {ticket.glpiLocationName || <span className="text-slate-500 italic font-normal">Non déterminé</span>}
+                    {ticket.glpiLocationName || <span className="text-on-surface-variant italic font-normal">Non déterminé</span>}
                   </div>
                 )}
               </div>
 
-              {!autonomousMode && (
-                <div>
-                  <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
-                    Ticket GLPI ID
-                  </label>
-                  <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-bold font-mono text-slate-800 dark:text-slate-200">
-                    {ticket.glpiTicketId ? (
-                      <span className="text-blue-600 dark:text-blue-400 font-bold">#{ticket.glpiTicketId}</span>
-                    ) : (
-                      <span className="text-slate-500 italic font-sans font-medium">Non lié GLPI</span>
-                    )}
-                  </div>
-                </div>
-              )}
+
               </div>
             </div>
           </div>
@@ -2534,7 +2445,7 @@ export default function TicketDetail() {
                             : asset.status === 'STOCK'
                               ? 'bg-blue-500/10 text-blue-500'
                               : asset.status === 'OUT_OF_SERVICE'
-                                ? 'bg-slate-500/10 text-slate-400'
+                                ? 'bg-surface-container text-on-surface-variant'
                                 : 'bg-emerald-500/10 text-emerald-500'
                         }`}>{asset.status.replace(/_/g, ' ')}</span>
                       )}
@@ -2689,7 +2600,7 @@ export default function TicketDetail() {
                 type="button"
                 disabled={approving}
                 onClick={handleApproveConfirm}
-                className="px-5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-500/20 hover:brightness-110 disabled:opacity-50 transition-all flex items-center gap-1.5"
+                className="px-5 py-2 rounded-xl text-xs font-bold btn-primary shadow-md disabled:opacity-50 transition-all flex items-center gap-1.5"
               >
                 {approving ? (
                   <>
@@ -2761,60 +2672,115 @@ export default function TicketDetail() {
 
       {/* Modal : Lier un ticket */}
       {linkModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-2xl p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
-                <Link2 className="w-4 h-4 text-primary" />
-                Lier un ticket à #{id}
-              </h3>
-              <button onClick={() => setLinkModalOpen(false)} className="p-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container transition-colors cursor-pointer">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setLinkModalOpen(false)}>
+          <div className="w-full max-w-lg rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant/20">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
+                  <Link2 className="w-4.5 h-4.5 text-primary" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-on-surface">Lier un ticket</h3>
+                  <p className="text-[11px] text-on-surface-variant">Choisissez un type de lien puis recherchez le ticket cible</p>
+                </div>
+              </div>
+              <button onClick={() => setLinkModalOpen(false)} className="p-2 rounded-lg text-on-surface-variant hover:bg-surface-container transition-colors cursor-pointer">
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <select
-              value={linkType}
-              onChange={(e) => setLinkType(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-outline-variant/60 bg-surface text-on-surface text-xs font-semibold cursor-pointer"
-            >
-              <option value="RELATED">Lié (relation générale)</option>
-              <option value="DUPLICATE_OF">Doublon de ce ticket</option>
-              <option value="BLOCKS">Bloque ce ticket</option>
-              <option value="BLOCKED_BY">Bloqué par ce ticket</option>
-              <option value="PARENT">Parent de ce ticket (ce ticket devient enfant)</option>
-              <option value="CHILD">Enfant de ce ticket (sous-ticket)</option>
-            </select>
+            <div className="p-5 space-y-4">
+              {/* Type de lien */}
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-on-surface-variant mb-1.5">Type de lien</label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {[
+                    { value: 'RELATED', label: 'Lié', icon: Link2, color: 'text-blue-500' },
+                    { value: 'DUPLICATE_OF', label: 'Doublon', icon: Copy, color: 'text-orange-500' },
+                    { value: 'BLOCKS', label: 'Bloque', icon: ShieldAlert, color: 'text-red-500' },
+                    { value: 'BLOCKED_BY', label: 'Bloqué par', icon: ShieldOff, color: 'text-amber-500' },
+                    { value: 'PARENT', label: 'Parent', icon: ArrowDown, color: 'text-indigo-500' },
+                    { value: 'CHILD', label: 'Sous-ticket', icon: GitBranch, color: 'text-emerald-500' },
+                  ].map(({ value, label, icon: Icon, color }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setLinkType(value)}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+                        linkType === value
+                          ? 'border-primary bg-primary/5 text-primary shadow-sm'
+                          : 'border-outline-variant/40 text-on-surface-variant hover:border-primary/30 hover:bg-surface-container'
+                      }`}
+                    >
+                      <Icon className={`w-3.5 h-3.5 ${linkType === value ? 'text-primary' : color}`} />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-            <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
-              <input
-                type="text"
-                value={linkSearch}
-                onChange={(e) => { setLinkSearch(e.target.value); searchLinkableTickets(e.target.value); }}
-                placeholder="Rechercher par titre, n° ticket..."
-                className="w-full pl-9 pr-3 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface text-xs focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none"
-              />
-            </div>
+              {/* Recherche */}
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-on-surface-variant mb-1.5">Rechercher un ticket</label>
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50" />
+                  <input
+                    type="text"
+                    value={linkSearch}
+                    onChange={(e) => handleLinkSearch(e.target.value)}
+                    placeholder="Titre, n° de ticket, catégorie…"
+                    className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-outline-variant/60 bg-surface text-on-surface text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none placeholder:text-on-surface-variant/40"
+                    autoFocus
+                  />
+                  {linkLoading && <Loader2 className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-primary animate-spin" />}
+                </div>
+              </div>
 
-            <div className="max-h-60 overflow-y-auto space-y-1.5">
-              {linkLoading && <p className="text-xs text-on-surface-variant text-center py-3">Recherche…</p>}
-              {!linkLoading && linkResults.length === 0 && (
-                <p className="text-xs text-on-surface-variant/70 italic text-center py-3">
-                  {linkSearch ? 'Aucun résultat' : 'Tapez pour rechercher un ticket'}
-                </p>
+              {/* Résultats */}
+              <div className="max-h-72 overflow-y-auto -mx-1 px-1 space-y-1">
+                {!linkLoading && linkResults.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-6 text-on-surface-variant/50">
+                    <Search className="w-8 h-8 mb-2 opacity-30" />
+                    <p className="text-xs font-medium">{linkSearch ? 'Aucun résultat pour "' + linkSearch + '"' : 'Tapez pour rechercher un ticket'}</p>
+                  </div>
+                )}
+                {linkResults.map((t) => {
+                  const prioColor = { P1: 'text-red-500 bg-red-500/10', P2: 'text-orange-500 bg-orange-500/10', P3: 'text-blue-500 bg-blue-500/10', P4: 'text-slate-500 bg-slate-500/10' };
+                  const statusColor = {
+                    NEW: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
+                    OPEN: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
+                    PENDING: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+                    SOLVED: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+                    CLOSED: 'bg-slate-500/10 text-slate-600 dark:text-slate-400',
+                  };
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => addLink(t.id)}
+                      className="w-full flex items-start gap-3 p-3 rounded-xl border border-outline-variant/20 hover:border-primary/40 hover:bg-primary/5 transition-all cursor-pointer text-left group"
+                    >
+                      <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                        <span className="font-mono text-[10px] font-bold text-primary">#{t.id}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-on-surface truncate group-hover:text-primary transition-colors">{t.title}</p>
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${statusColor[t.status] || 'bg-slate-500/10 text-slate-500'}`}>{STATUS_CONFIG[t.status]?.label || t.status}</span>
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${prioColor[t.priority] || 'bg-slate-500/10 text-slate-500'}`}>{t.priority}</span>
+                          {t.requester?.fullName && <span className="text-[10px] text-on-surface-variant">par {t.requester.fullName}</span>}
+                          {t.team?.name && <span className="text-[10px] text-on-surface-variant/60">· {t.team.name}</span>}
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-semibold text-primary opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-1">Lier →</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {linkResults.length > 0 && (
+                <p className="text-[10px] text-on-surface-variant/50 text-center">{linkResults.length} ticket(s) affiché(s) — cliquez pour lier</p>
               )}
-              {linkResults.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => addLink(t.id)}
-                  className="w-full flex items-center gap-3 p-2.5 rounded-xl border border-outline-variant/30 hover:border-primary/50 hover:bg-surface-container transition-all cursor-pointer text-left"
-                >
-                  <span className="font-mono text-[10px] font-bold text-primary shrink-0">#{t.id}</span>
-                  <span className="flex-1 min-w-0 text-xs font-semibold text-on-surface truncate">{t.title}</span>
-                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-surface-container-high text-on-surface-variant shrink-0">{t.status}</span>
-                </button>
-              ))}
             </div>
           </div>
         </div>
@@ -2822,50 +2788,88 @@ export default function TicketDetail() {
 
       {/* Modal : Lier à un problème */}
       {problemLinkModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-2xl p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-500" />
-                Lier à un problème
-              </h3>
-              <button onClick={() => setProblemLinkModalOpen(false)} className="p-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container transition-colors cursor-pointer">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setProblemLinkModalOpen(false)}>
+          <div className="w-full max-w-lg rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant/20">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/10 flex items-center justify-center">
+                  <AlertTriangle className="w-4.5 h-4.5 text-amber-500" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-on-surface">Lier à un problème</h3>
+                  <p className="text-[11px] text-on-surface-variant">Associez ce ticket à un problème racine existant</p>
+                </div>
+              </div>
+              <button onClick={() => setProblemLinkModalOpen(false)} className="p-2 rounded-lg text-on-surface-variant hover:bg-surface-container transition-colors cursor-pointer">
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
-              <input
-                type="text"
-                value={problemLinkSearch}
-                onChange={(e) => { setProblemLinkSearch(e.target.value); searchLinkableProblems(e.target.value); }}
-                placeholder="Rechercher un problème par titre ou n°..."
-                className="w-full pl-9 pr-3 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface text-xs focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 focus:outline-none"
-                autoFocus
-              />
-            </div>
+            <div className="p-5 space-y-4">
+              {/* Recherche */}
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-on-surface-variant mb-1.5">Rechercher un problème</label>
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50" />
+                  <input
+                    type="text"
+                    value={problemLinkSearch}
+                    onChange={(e) => handleProblemLinkSearch(e.target.value)}
+                    placeholder="Titre, n° de problème…"
+                    className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-outline-variant/60 bg-surface text-on-surface text-sm focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 focus:outline-none placeholder:text-on-surface-variant/40"
+                    autoFocus
+                  />
+                  {problemLinkLoading && <Loader2 className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-amber-500 animate-spin" />}
+                </div>
+              </div>
 
-            <div className="max-h-60 overflow-y-auto space-y-1.5">
-              {problemLinkLoading && <p className="text-xs text-on-surface-variant text-center py-3">Recherche…</p>}
-              {!problemLinkLoading && problemLinkResults.length === 0 && (
-                <p className="text-xs text-on-surface-variant/70 italic text-center py-3">
-                  {problemLinkSearch ? 'Aucun résultat' : 'Tapez pour rechercher un problème'}
-                </p>
+              {/* Résultats */}
+              <div className="max-h-72 overflow-y-auto -mx-1 px-1 space-y-1">
+                {!problemLinkLoading && problemLinkResults.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-6 text-on-surface-variant/50">
+                    <AlertTriangle className="w-8 h-8 mb-2 opacity-30" />
+                    <p className="text-xs font-medium">{problemLinkSearch ? 'Aucun résultat pour "' + problemLinkSearch + '"' : 'Tapez pour rechercher un problème'}</p>
+                  </div>
+                )}
+                {problemLinkResults.map((p) => {
+                  const statusColor = {
+                    NEW: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
+                    IN_PROGRESS: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400',
+                    SOLVED: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+                    CLOSED: 'bg-slate-500/10 text-slate-600 dark:text-slate-400',
+                  };
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => linkProblem(p.id)}
+                      disabled={linkingProblem === p.id}
+                      className="w-full flex items-start gap-3 p-3 rounded-xl border border-outline-variant/20 hover:border-amber-400/40 hover:bg-amber-500/5 transition-all cursor-pointer text-left group disabled:opacity-50"
+                    >
+                      <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center shrink-0 mt-0.5">
+                        <span className="font-mono text-[10px] font-bold text-amber-600 dark:text-amber-400">P#{p.id}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-on-surface truncate group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">{p.title}</p>
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${statusColor[p.status] || 'bg-slate-500/10 text-slate-500'}`}>{p.status}</span>
+                          {p.requester?.fullName && <span className="text-[10px] text-on-surface-variant">par {p.requester.fullName}</span>}
+                          {p._count?.tickets > 0 && <span className="text-[10px] text-on-surface-variant/60">· {p._count.tickets} ticket(s)</span>}
+                        </div>
+                      </div>
+                      {linkingProblem === p.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin text-amber-500 shrink-0 mt-1" />
+                      ) : (
+                        <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-1">Lier →</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {problemLinkResults.length > 0 && (
+                <p className="text-[10px] text-on-surface-variant/50 text-center">{problemLinkResults.length} problème(s) affiché(s) — cliquez pour lier</p>
               )}
-              {problemLinkResults.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => linkProblem(p.id)}
-                  disabled={linkingProblem === p.id}
-                  className="w-full flex items-center gap-3 p-2.5 rounded-xl border border-outline-variant/30 hover:border-amber-500/50 hover:bg-amber-50/30 dark:hover:bg-amber-500/5 transition-all cursor-pointer text-left disabled:opacity-50"
-                >
-                  <span className="font-mono text-[10px] font-bold text-amber-600 dark:text-amber-400 shrink-0">P#{p.id}</span>
-                  <span className="flex-1 min-w-0 text-xs font-semibold text-on-surface truncate">{p.title}</span>
-                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-surface-container-high text-on-surface-variant shrink-0">{p.status}</span>
-                  {linkingProblem === p.id && <RefreshCw className="w-3 h-3 animate-spin text-amber-500 shrink-0" />}
-                </button>
-              ))}
             </div>
           </div>
         </div>
@@ -2873,81 +2877,107 @@ export default function TicketDetail() {
 
       {/* Modal : Créer un sous-ticket */}
       {childModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-2xl p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
-                <GitBranch className="w-4 h-4 text-primary" />
-                Créer un sous-ticket de #{id}
-              </h3>
-              <button onClick={() => setChildModalOpen(false)} className="p-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container transition-colors cursor-pointer">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setChildModalOpen(false)}>
+          <div className="w-full max-w-lg rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant/20">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
+                  <GitBranch className="w-4.5 h-4.5 text-primary" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-on-surface">Créer un sous-ticket</h3>
+                  <p className="text-[11px] text-on-surface-variant">Hérite automatiquement des propriétés du parent</p>
+                </div>
+              </div>
+              <button onClick={() => setChildModalOpen(false)} className="p-2 rounded-lg text-on-surface-variant hover:bg-surface-container transition-colors cursor-pointer">
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <p className="text-[11px] text-on-surface-variant leading-relaxed border-b border-outline-variant/20 pb-3">
-              Le sous-ticket hérite de la <b>catégorie</b>, de l'<b>équipe</b>, du <b>demandeur</b>, de la
-              <b> priorité</b> et du <b>lieu</b> de ce ticket. {ticket.priority && <>Priorité actuelle : <b>{ticket.priority}</b>.</>}
-            </p>
+            <div className="p-5 space-y-4">
+              {/* Carte d'information du parent */}
+              <div className="flex items-start gap-3 p-3 rounded-xl bg-primary/5 border border-primary/15">
+                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                  <span className="font-mono text-[10px] font-bold text-primary">#{id}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-on-surface truncate">Ticket parent</p>
+                  <p className="text-[11px] text-on-surface-variant truncate mt-0.5">{ticket.title}</p>
+                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                    {ticket.priority && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-primary/10 text-primary">{ticket.priority}</span>}
+                    {ticket.team?.name && <span className="text-[10px] text-on-surface-variant">· {ticket.team.name}</span>}
+                    {ticket.requester?.fullName && <span className="text-[10px] text-on-surface-variant/60">· {ticket.requester.fullName}</span>}
+                  </div>
+                </div>
+              </div>
 
-            <form onSubmit={createChild} className="space-y-4">
-              <div>
-                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface-variant mb-1">
-                  Titre *
-                </label>
-                <input
-                  type="text"
-                  value={childForm.title}
-                  onChange={(e) => setChildForm({ ...childForm, title: e.target.value })}
-                  required
-                  placeholder="Ex. : Remplacer l'écran de l'utilisateur"
-                  className="w-full px-3 py-2 rounded-xl border border-outline-variant/60 bg-surface text-on-surface text-xs font-semibold focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface-variant mb-1">
-                  Description
-                </label>
-                <textarea
-                  value={childForm.content}
-                  onChange={(e) => setChildForm({ ...childForm, content: e.target.value })}
-                  rows={3}
-                  placeholder="Détails de la sous-tâche..."
-                  className="w-full px-3 py-2 rounded-xl border border-outline-variant/60 bg-surface text-on-surface text-xs font-semibold focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none resize-none"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface-variant mb-1">
-                  Priorité
-                </label>
-                <select
-                  value={childForm.priority}
-                  onChange={(e) => setChildForm({ ...childForm, priority: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl border border-outline-variant/60 bg-surface text-on-surface text-xs font-semibold cursor-pointer"
-                >
-                  {PRIORITY_OPTIONS.map((p) => (
-                    <option key={p} value={p}>{p}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex justify-end gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setChildModalOpen(false)}
-                  className="px-4 py-2 rounded-xl border border-outline-variant/60 text-on-surface-variant text-xs font-bold hover:bg-surface-container transition-colors cursor-pointer"
-                >
-                  Annuler
-                </button>
-                <button
-                  type="submit"
-                  disabled={creatingChild || !childForm.title.trim()}
-                  className="px-4 py-2 rounded-xl bg-primary text-on-primary text-xs font-bold hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
-                >
-                  <GitBranch className="w-3.5 h-3.5" />
-                  {creatingChild ? 'Création…' : 'Créer le sous-ticket'}
-                </button>
-              </div>
-            </form>
+              {/* Champs du formulaire */}
+              <form onSubmit={createChild} className="space-y-3">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-on-surface-variant mb-1.5">Titre *</label>
+                  <input
+                    type="text"
+                    value={childForm.title}
+                    onChange={(e) => setChildForm({ ...childForm, title: e.target.value })}
+                    required
+                    placeholder="Ex. : Remplacer l'écran de l'utilisateur"
+                    className="w-full px-3 py-2.5 rounded-xl border border-outline-variant/60 bg-surface text-on-surface text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none placeholder:text-on-surface-variant/40"
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-on-surface-variant mb-1.5">Description</label>
+                  <textarea
+                    value={childForm.content}
+                    onChange={(e) => setChildForm({ ...childForm, content: e.target.value })}
+                    rows={3}
+                    placeholder="Détails de la sous-tâche..."
+                    className="w-full px-3 py-2.5 rounded-xl border border-outline-variant/60 bg-surface text-on-surface text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none resize-none placeholder:text-on-surface-variant/40"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-on-surface-variant mb-1.5">Priorité</label>
+                  <div className="flex gap-2">
+                    {PRIORITY_OPTIONS.map((p) => {
+                      const pColor = { P1: 'border-red-400 text-red-500 bg-red-500/5', P2: 'border-orange-400 text-orange-500 bg-orange-500/5', P3: 'border-blue-400 text-blue-500 bg-blue-500/5', P4: 'border-slate-400 text-slate-500 bg-slate-500/5' };
+                      const pActive = { P1: 'border-red-500 bg-red-500/10 text-red-600 shadow-sm', P2: 'border-orange-500 bg-orange-500/10 text-orange-600 shadow-sm', P3: 'border-blue-500 bg-blue-500/10 text-blue-600 shadow-sm', P4: 'border-slate-500 bg-slate-500/10 text-slate-600 shadow-sm' };
+                      return (
+                        <button
+                          key={p}
+                          type="button"
+                          onClick={() => setChildForm({ ...childForm, priority: p })}
+                          className={`flex-1 py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                            childForm.priority === p ? (pActive[p] || '') : (pColor[p] || 'border-outline-variant/40 text-on-surface-variant')
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setChildModalOpen(false)}
+                    className="px-4 py-2.5 rounded-xl border border-outline-variant/60 text-on-surface-variant text-xs font-bold hover:bg-surface-container transition-colors cursor-pointer"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={creatingChild || !childForm.title.trim()}
+                    className="px-5 py-2.5 rounded-xl bg-primary text-on-primary text-xs font-bold hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                  >
+                    {creatingChild ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <GitBranch className="w-3.5 h-3.5" />}
+                    {creatingChild ? 'Création…' : 'Créer le sous-ticket'}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       )}
@@ -3023,7 +3053,7 @@ export default function TicketDetail() {
                 type="button"
                 disabled={mergeSelected.length === 0 || merging}
                 onClick={confirmMerge}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-orange-500 to-red-600 text-white shadow-md shadow-orange-500/20 hover:brightness-110 disabled:opacity-50 transition-all flex items-center gap-1.5 cursor-pointer"
+                className="px-4 py-2 rounded-xl text-xs font-bold btn-danger shadow-md disabled:opacity-50 transition-all flex items-center gap-1.5 cursor-pointer"
               >
                 <Merge className="w-3.5 h-3.5" />
                 {merging ? 'Fusion…' : `Fusionner (${mergeSelected.length})`}
@@ -3074,7 +3104,7 @@ export default function TicketDetail() {
                 type="button"
                 disabled={!newLocationName.trim()}
                 onClick={handleSaveNewLocation}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/20 hover:brightness-110 disabled:opacity-50 transition-all flex items-center gap-1.5 cursor-pointer"
+                className="px-4 py-2 rounded-xl text-xs font-bold btn-primary shadow-md disabled:opacity-50 transition-all flex items-center gap-1.5 cursor-pointer"
               >
                 <MapPin className="w-3.5 h-3.5" />
                 Enregistrer le lieu

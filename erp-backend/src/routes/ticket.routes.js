@@ -99,7 +99,12 @@ router.get('/', async (req, res) => {
         { observers: { some: { id: req.user.sub } } },
       ];
     } else {
-      where.assignedToId = req.user.sub;
+      // Admin/Superadmin/Hotline : voient leurs assignés ET leurs demandés ET ceux qu'ils observent
+      where.OR = [
+        { assignedToId: req.user.sub },
+        { requesterId: req.user.sub },
+        { observers: { some: { id: req.user.sub } } },
+      ];
     }
   }
 
@@ -159,6 +164,7 @@ router.get('/', async (req, res) => {
         requester: { select: { id: true, fullName: true, email: true } },
         assignedTo: { select: { id: true, fullName: true, email: true } },
         team: { select: { id: true, name: true } },
+        observers: { select: { id: true, fullName: true } },
       },
       orderBy,
     }),

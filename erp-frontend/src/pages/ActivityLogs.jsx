@@ -5,6 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import api from '../api/client';
 import { useTheme } from '../context/ThemeContext';
 import { useFilterParam } from '../hooks/useFilterParam';
+import PageShell from '../components/PageShell';
+import Pagination from '../components/Pagination';
 import {
   Activity, Search, Filter, Calendar, RefreshCw, ChevronDown,
   Sparkles, Mail, Send, CheckCircle2, AlertTriangle, XCircle, Clock,
@@ -115,48 +117,19 @@ export default function ActivityLogs() {
   const hasActiveFilters = typeFilter || actorFilter || searchFilter || startDate || endDate;
 
   return (
-    <div className="flex flex-col min-h-screen">
-      {/* ── Top Bar ─────────────────────────────────────────────────────── */}
-      <div className="sticky top-0 z-20 shrink-0 border-b border-outline-variant/30 bg-surface-container-lowest/95 backdrop-blur-sm px-4 sm:px-6 lg:px-8 py-3 flex items-center gap-4 flex-wrap">
-        {/* Title */}
-        <div className="flex items-center gap-3">
-          <div className="p-1.5 bg-blue-500/10 rounded-lg">
-            <Activity className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-          </div>
-          <div>
-            <h1 className="text-base font-bold text-on-surface">Journal d'activité</h1>
-            <p className="text-[11px] text-on-surface-variant font-medium">
-              {pagination.total} événement{pagination.total !== 1 ? 's' : ''} enregistrés
-            </p>
-          </div>
-        </div>
-
-        {/* Search */}
-        <div className="relative flex-1 max-w-xs hidden sm:block">
-          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50" />
-          <input
-            type="text"
-            placeholder="Rechercher par ticket, titre, contenu..."
-            value={searchFilter}
-            onChange={(e) => setSearchFilter(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') applyFilters(); }}
-            className="w-full bg-surface border border-outline-variant/60 rounded-xl pl-8 pr-8 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-          />
-          {searchFilter && (
-            <button onClick={() => { setSearchFilter(''); load(1); }} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant/50 hover:text-on-surface">
-              <X className="w-3 h-3" />
-            </button>
-          )}
-        </div>
-
-        {/* Filter Toggle */}
-        <div className="flex items-center gap-2 ml-auto">
+    <PageShell
+      icon={Activity}
+      iconColor="text-blue-400"
+      title="Journal d'activité"
+      subtitle={`${pagination.total} événement${pagination.total !== 1 ? 's' : ''} enregistrés`}
+      actions={
+        <div className="flex items-center gap-2">
           <button
             onClick={() => setShowFilters(!showFilters)}
             className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition-all ${
               showFilters || hasActiveFilters
                 ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20'
-                : 'border-outline-variant/30 text-on-surface-variant hover:bg-surface-container'
+                : 'btn-secondary'
             }`}
           >
             <Filter className="w-3.5 h-3.5" />
@@ -166,9 +139,22 @@ export default function ActivityLogs() {
             )}
           </button>
         </div>
-      </div>
+      }
+    >
 
-      {/* ── Advanced Filters Strip ────────────────────────────────────────── */}
+      {/* ── Advanced Filters Strip ───────────────────────────────────────────── */}
+      {/* Inline search (mobile) */}
+      <div className="relative flex-1 max-w-xs sm:hidden mb-2">
+        <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50" />
+        <input
+          type="text"
+          placeholder="Rechercher..."
+          value={searchFilter}
+          onChange={(e) => setSearchFilter(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') applyFilters(); }}
+          className="input-katalyst pl-8 pr-8 py-2 text-xs"
+        />
+      </div>
       <AnimatePresence>
         {showFilters && (
           <motion.div
@@ -176,16 +162,16 @@ export default function ActivityLogs() {
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.22 }}
-            className="overflow-hidden border-b border-outline-variant/20 bg-surface-container-low/40"
+            className="overflow-hidden rounded-xl border border-outline-variant/20 bg-surface-container-low/40 mb-4"
           >
-            <div className="px-4 sm:px-6 lg:px-8 py-3 space-y-3">
+            <div className="px-4 py-3 space-y-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-                <label className="flex flex-col gap-1">
-                  <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Type d'événement</span>
+                <label className="field-label">
+                  <span>Type d'événement</span>
                   <select
                     value={typeFilter}
                     onChange={(e) => setTypeFilter(e.target.value)}
-                    className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                    className="input-katalyst"
                   >
                     <option value="">Tous les types</option>
                     {TYPE_OPTIONS.map((t) => (
@@ -194,34 +180,34 @@ export default function ActivityLogs() {
                   </select>
                 </label>
 
-                <label className="flex flex-col gap-1">
-                  <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Acteur</span>
+                <label className="field-label">
+                  <span>Acteur</span>
                   <input
                     type="text"
                     value={actorFilter}
                     onChange={(e) => setActorFilter(e.target.value)}
                     placeholder="SYSTEM, AI, email..."
-                    className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                    className="input-katalyst"
                   />
                 </label>
 
-                <label className="flex flex-col gap-1">
-                  <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Du</span>
+                <label className="field-label">
+                  <span>Du</span>
                   <input
                     type="date"
                     value={startDate}
                     onChange={(e) => setStartDate(e.target.value)}
-                    className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                    className="input-katalyst"
                   />
                 </label>
 
-                <label className="flex flex-col gap-1">
-                  <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Au</span>
+                <label className="field-label">
+                  <span>Au</span>
                   <input
                     type="date"
                     value={endDate}
                     onChange={(e) => setEndDate(e.target.value)}
-                    className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                    className="input-katalyst"
                   />
                 </label>
               </div>
@@ -233,10 +219,7 @@ export default function ActivityLogs() {
                 >
                   Réinitialiser les filtres
                 </button>
-                <button
-                  onClick={applyFilters}
-                  className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-bold shadow-md shadow-blue-500/20"
-                >
+                <button onClick={applyFilters} className="btn-primary" style={{ padding: '0.375rem 0.875rem' }}>
                   Appliquer
                 </button>
               </div>
@@ -373,31 +356,17 @@ export default function ActivityLogs() {
 
           {/* Pagination */}
           {pagination.totalPages > 1 && (
-            <div className="flex items-center justify-between px-4 py-2.5 border-t border-outline-variant/20 bg-surface-container-low/20">
-              <span className="text-[11px] text-on-surface-variant font-medium">
-                Page <strong>{pagination.page}</strong> / <strong>{pagination.totalPages}</strong> ({pagination.total} événements)
-              </span>
-              <div className="flex items-center gap-1">
-                <button
-                  disabled={pagination.page <= 1}
-                  onClick={() => load(pagination.page - 1)}
-                  className="px-3 py-1.5 rounded-lg border border-outline-variant/30 text-[11px] font-semibold text-on-surface-variant disabled:opacity-30 hover:bg-surface-container transition-colors"
-                >
-                  ← Préc.
-                </button>
-                <span className="text-[11px] font-mono text-on-surface-variant px-2">{pagination.page}/{pagination.totalPages}</span>
-                <button
-                  disabled={pagination.page >= pagination.totalPages}
-                  onClick={() => load(pagination.page + 1)}
-                  className="px-3 py-1.5 rounded-lg border border-outline-variant/30 text-[11px] font-semibold text-on-surface-variant disabled:opacity-30 hover:bg-surface-container transition-colors"
-                >
-                  Suiv. →
-                </button>
-              </div>
+            <div className="px-4 py-3 border-t border-outline-variant/20">
+              <Pagination
+                page={pagination.page}
+                totalPages={pagination.totalPages}
+                total={pagination.total}
+                onPage={load}
+              />
             </div>
           )}
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

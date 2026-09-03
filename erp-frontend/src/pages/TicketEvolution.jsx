@@ -1,14 +1,15 @@
-import { useState, useEffect, useMemo } from 'react';
-import { motion } from 'framer-motion';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { createPortal } from 'react-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, PieChart, Pie, Cell,
 } from 'recharts';
 import {
-  TrendingUp, TrendingDown, Calendar, Filter, RefreshCw,
+  TrendingUp, TrendingDown, RefreshCw, Eye, X,
   AlertTriangle, Clock, CheckCircle2, XCircle, BarChart3,
-  SlidersHorizontal, ChevronDown, ChevronUp, Download,
+  SlidersHorizontal, Download,
 } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -26,10 +27,18 @@ const PRIORITY_COLORS = {
   P1: '#ef4444', P2: '#f97316', P3: '#3b82f6', P4: '#6b7280',
 };
 
-function StatCard({ icon: Icon, label, value, color, sub }) {
+const PRESETS = [
+  { label: '7j', days: 7 },
+  { label: '30j', days: 30 },
+  { label: '90j', days: 90 },
+  { label: '12 mois', days: 365 },
+];
+
+function StatCard({ icon: Icon, label, value, color, sub, onClick }) {
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-      className="bg-surface-container-lowest border border-outline-variant/20 rounded-2xl p-4">
+      onClick={onClick}
+      className={`bg-surface-container-lowest border border-outline-variant/20 rounded-2xl p-4 transition-all ${onClick ? 'cursor-pointer hover:border-primary/30 hover:shadow-sm' : ''}`}>
       <div className="flex items-center gap-3">
         <div className={`p-2 rounded-xl ${color || 'bg-primary/10 text-primary'}`}>
           <Icon className="w-4 h-4" />
@@ -65,9 +74,8 @@ export default function TicketEvolution() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [showFilters, setShowFilters] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
-  // Filtres
   const [startDate, setStartDate] = useState(() => {
     const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10);
   });
@@ -75,12 +83,17 @@ export default function TicketEvolution() {
   const [statusFilter, setStatusFilter] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('');
   const [groupBy, setGroupBy] = useState('day');
-  const [chartType, setChartType] = useState('area'); // area | bar | line
+  const [chartType, setChartType] = useState('area');
 
-  // Lists pour filtres
   const [teams, setTeams] = useState([]);
   const [teamFilter, setTeamFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
+
+  // Drill-down modal
+  const [drillDown, setDrillDown] = useState(null);
+  const [drillTickets, setDrillTickets] = useState([]);
+  const [drillLoading, setDrillLoading] = useState(false);
+  const [drillTotal, setDrillTotal] = useState(0);
 
   useEffect(() => {
     api.get('/teams').then(({ data }) => setTeams(data)).catch(() => {});
@@ -106,11 +119,51 @@ export default function TicketEvolution() {
 
   useEffect(() => { fetchData(); }, [startDate, endDate, statusFilter, priorityFilter, groupBy, teamFilter, sourceFilter]);
 
+  const applyPreset = useCallback((days) => {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(end.getDate() - days);
+    setStartDate(start.toISOString().slice(0, 10));
+    setEndDate(end.toISOString().slice(0, 10));
+  }, []);
+
+  const activeFilters = useMemo(() => {
+    const f = [];
+    if (statusFilter) f.push({ label: STATUS_CONFIG[statusFilter]?.label || statusFilter, clear: () => setStatusFilter('') });
+    if (priorityFilter) f.push({ label: priorityFilter, clear: () => setPriorityFilter('') });
+    if (teamFilter) {
+      const t = teams.find(t => String(t.id) === String(teamFilter));
+      f.push({ label: t?.name || teamFilter, clear: () => setTeamFilter('') });
+    }
+    if (sourceFilter) f.push({ label: SOURCE_LABELS[sourceFilter] || sourceFilter, clear: () => setSourceFilter('') });
+    return f;
+  }, [statusFilter, priorityFilter, teamFilter, sourceFilter, teams]);
+
+  const buildDrillParams = useCallback(() => {
+    const p = { startDate, endDate };
+    if (statusFilter) p.status = statusFilter;
+    if (priorityFilter) p.priority = priorityFilter;
+    if (teamFilter) p.teamId = teamFilter;
+    if (sourceFilter) p.source = sourceFilter;
+    return p;
+  }, [startDate, endDate, statusFilter, priorityFilter, teamFilter, sourceFilter]);
+
+  const openDrillDown = useCallback((title, extraParams) => {
+    const params = { ...buildDrillParams(), ...extraParams };
+    setDrillDown({ title, params });
+    setDrillLoading(true);
+    setDrillTickets([]);
+    const qs = new URLSearchParams({ page: '1', limit: '100', sortBy: 'createdAt', sortOrder: 'desc', ...params });
+    api.get(`/tickets?${qs}`)
+      .then(({ data }) => { setDrillTickets(data.items || []); setDrillTotal(data.total || 0); })
+      .catch(() => setDrillTickets([]))
+      .finally(() => setDrillLoading(false));
+  }, [buildDrillParams]);
+
   const series = data?.series || [];
   const totals = data?.totals || {};
   const breakdown = data?.breakdown || {};
 
-  // Données pour les graphiques de répartition
   const statusPieData = useMemo(() =>
     (breakdown.status || []).map((s) => ({
       name: STATUS_CONFIG[s.status]?.label || s.status,
@@ -138,94 +191,144 @@ export default function TicketEvolution() {
   }
 
   return (
-    <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-on-surface flex items-center gap-2">
-            <TrendingUp className="w-6 h-6 text-primary" /> Évolution des tickets
-          </h1>
-          <p className="text-sm text-on-surface/50 mt-1">
-            Suivi temporel des tickets — création, résolution, SLA
-          </p>
+    <div className="px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-8 space-y-5 min-h-screen">
+      {/* ── HERO HEADER ──────────────────────────────────────────────────── */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+        className="p-6 sm:p-8 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest shadow-sm"
+      >
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-3 mb-1.5">
+              <div className="p-2 rounded-xl bg-primary/10">
+                <TrendingUp className="w-5 h-5 text-primary" />
+              </div>
+              <h1 className="text-xl sm:text-2xl font-bold text-on-surface tracking-tight">Évolution des tickets</h1>
+            </div>
+            <p className="text-sm text-on-surface-variant">Suivi temporel des tickets — création, résolution, SLA</p>
+          </div>
+          <div className="flex items-center gap-2.5">
+            <button onClick={exportCSV}
+              className="px-3.5 py-2 rounded-xl border border-outline-variant/40 text-on-surface/60 hover:bg-surface-container-high text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors">
+              <Download className="w-3.5 h-3.5" /> CSV
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={exportCSV}
-            className="px-3 py-2 rounded-xl border border-outline-variant/40 text-on-surface/60 hover:bg-surface-container-high text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors">
-            <Download className="w-3.5 h-3.5" /> CSV
+      </motion.div>
+
+      {/* ── FILTER BAR (compact, always visible) ────────────────────────── */}
+      <div className="bg-surface-container-lowest border border-outline-variant/20 rounded-2xl p-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Period presets */}
+          <div className="flex items-center gap-1">
+            {PRESETS.map((p) => (
+              <button key={p.days} onClick={() => applyPreset(p.days)}
+                className={`px-3 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer transition-all ${
+                  startDate === new Date(Date.now() - p.days * 86400000).toISOString().slice(0, 10)
+                    ? 'bg-primary/10 text-primary border border-primary/30'
+                    : 'text-on-surface-variant hover:bg-surface-container-high border border-transparent'
+                }`}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="w-px h-6 bg-outline-variant/30" />
+
+          {/* Date inputs */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-bold text-on-surface/40 uppercase">Du</span>
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
+              className="bg-surface border border-outline-variant/60 rounded-lg px-2 py-1 text-[11px] text-on-surface focus:outline-none focus:ring-1 focus:ring-primary/20 w-[120px]" />
+            <span className="text-[10px] font-bold text-on-surface/40 uppercase">Au</span>
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
+              className="bg-surface border border-outline-variant/60 rounded-lg px-2 py-1 text-[11px] text-on-surface focus:outline-none focus:ring-1 focus:ring-primary/20 w-[120px]" />
+          </div>
+
+          <div className="w-px h-6 bg-outline-variant/30" />
+
+          {/* Quick filters */}
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+            className="bg-surface border border-outline-variant/60 rounded-lg px-2 py-1 text-[11px] text-on-surface focus:outline-none focus:ring-1 focus:ring-primary/20 appearance-none cursor-pointer">
+            <option value="">Tous statuts</option>
+            {Object.entries(STATUS_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          </select>
+          <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)}
+            className="bg-surface border border-outline-variant/60 rounded-lg px-2 py-1 text-[11px] text-on-surface focus:outline-none focus:ring-1 focus:ring-primary/20 appearance-none cursor-pointer">
+            <option value="">Toutes priorités</option>
+            {Object.keys(PRIORITY_CONFIG).map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+
+          {/* Advanced toggle */}
+          <button onClick={() => setShowAdvanced(!showAdvanced)}
+            className={`ml-auto flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer transition-all ${showAdvanced ? 'bg-primary/10 text-primary' : 'text-on-surface-variant hover:bg-surface-container-high'}`}>
+            <SlidersHorizontal className="w-3 h-3" /> Avancé
           </button>
-          <button onClick={() => setShowFilters(!showFilters)}
-            className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${showFilters ? 'bg-primary/10 text-primary border border-primary/30' : 'border border-outline-variant/40 text-on-surface/60 hover:bg-surface-container-high'}`}>
-            <SlidersHorizontal className="w-3.5 h-3.5" /> Filtres
-            {showFilters ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-          </button>
+
+          {/* GroupBy + ChartType inline */}
+          <div className="flex items-center gap-1">
+            {[['day', 'J'], ['week', 'S'], ['month', 'M']].map(([v, l]) => (
+              <button key={v} onClick={() => setGroupBy(v)}
+                className={`w-7 h-7 rounded-lg text-[10px] font-bold cursor-pointer transition-all flex items-center justify-center ${groupBy === v ? 'bg-primary/10 text-primary border border-primary/30' : 'text-on-surface/40 hover:bg-surface-container-high border border-transparent'}`}>
+                {l}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1">
+            {[['area', '〜'], ['bar', '▮'], ['line', '〜']].map(([v, l], idx) => (
+              <button key={v} onClick={() => setChartType(v)}
+                className={`w-7 h-7 rounded-lg text-[10px] font-bold cursor-pointer transition-all flex items-center justify-center ${chartType === v ? 'bg-primary/10 text-primary border border-primary/30' : 'text-on-surface/40 hover:bg-surface-container-high border border-transparent'}`}
+                title={['Aires', 'Barres', 'Lignes'][idx]}>
+                {l}
+              </button>
+            ))}
+          </div>
         </div>
+
+        {/* Advanced filters row */}
+        <AnimatePresence>
+          {showAdvanced && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="overflow-hidden"
+            >
+              <div className="flex flex-wrap items-center gap-3 pt-3 mt-3 border-t border-outline-variant/15">
+                <select value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)}
+                  className="bg-surface border border-outline-variant/60 rounded-lg px-2 py-1 text-[11px] text-on-surface focus:outline-none focus:ring-1 focus:ring-primary/20 appearance-none cursor-pointer">
+                  <option value="">Toutes équipes</option>
+                  {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+                <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}
+                  className="bg-surface border border-outline-variant/60 rounded-lg px-2 py-1 text-[11px] text-on-surface focus:outline-none focus:ring-1 focus:ring-primary/20 appearance-none cursor-pointer">
+                  <option value="">Toutes sources</option>
+                  {Object.entries(SOURCE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Active filter chips */}
+        {activeFilters.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 pt-2 mt-2 border-t border-outline-variant/15">
+            <span className="text-[10px] font-bold text-on-surface/40 uppercase mr-1">Filtres actifs :</span>
+            {activeFilters.map((f, i) => (
+              <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-bold">
+                {f.label}
+                <button onClick={f.clear} className="hover:bg-primary/20 rounded-full p-0.5"><X className="w-2.5 h-2.5" /></button>
+              </span>
+            ))}
+            <button onClick={() => { setStatusFilter(''); setPriorityFilter(''); setTeamFilter(''); setSourceFilter(''); }}
+              className="text-[10px] text-on-surface/40 hover:text-on-surface underline ml-1">Tout effacer</button>
+          </div>
+        )}
       </div>
 
-      {/* Filtres */}
-      {showFilters && (
-        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
-          exit={{ opacity: 0, height: 0 }}
-          className="bg-surface-container-lowest border border-outline-variant/20 rounded-2xl p-4 space-y-3">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            <div>
-              <label className="block text-[10px] font-semibold text-on-surface/40 uppercase mb-1">Du</label>
-              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className={selectCls} />
-            </div>
-            <div>
-              <label className="block text-[10px] font-semibold text-on-surface/40 uppercase mb-1">Au</label>
-              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className={selectCls} />
-            </div>
-            <div>
-              <label className="block text-[10px] font-semibold text-on-surface/40 uppercase mb-1">Statut</label>
-              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={selectCls}>
-                <option value="">Tous</option>
-                {Object.entries(STATUS_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[10px] font-semibold text-on-surface/40 uppercase mb-1">Priorité</label>
-              <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)} className={selectCls}>
-                <option value="">Toutes</option>
-                {Object.keys(PRIORITY_CONFIG).map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[10px] font-semibold text-on-surface/40 uppercase mb-1">Équipe</label>
-              <select value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)} className={selectCls}>
-                <option value="">Toutes</option>
-                {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[10px] font-semibold text-on-surface/40 uppercase mb-1">Source</label>
-              <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className={selectCls}>
-                <option value="">Toutes</option>
-                {Object.entries(SOURCE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-              </select>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <label className="text-[10px] font-semibold text-on-surface/40 uppercase">Grouper par</label>
-            {[['day', 'Jour'], ['week', 'Semaine'], ['month', 'Mois']].map(([v, l]) => (
-              <button key={v} onClick={() => setGroupBy(v)}
-                className={`px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-all ${groupBy === v ? 'bg-primary/10 text-primary border border-primary/30' : 'border border-outline-variant/30 text-on-surface/50 hover:bg-surface-container-high'}`}>
-                {l}
-              </button>
-            ))}
-            <span className="ml-auto" />
-            <label className="text-[10px] font-semibold text-on-surface/40 uppercase">Graphique</label>
-            {[['area', 'Aires'], ['bar', 'Barres'], ['line', 'Lignes']].map(([v, l]) => (
-              <button key={v} onClick={() => setChartType(v)}
-                className={`px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-all ${chartType === v ? 'bg-primary/10 text-primary border border-primary/30' : 'border border-outline-variant/30 text-on-surface/50 hover:bg-surface-container-high'}`}>
-                {l}
-              </button>
-            ))}
-          </div>
-        </motion.div>
-      )}
-
-      {/* Loading / Error */}
+      {/* ── Loading / Error ──────────────────────────────────────────────── */}
       {loading && (
         <div className="text-center py-12 text-on-surface/40">
           <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-2" />
@@ -239,14 +342,18 @@ export default function TicketEvolution() {
         </div>
       )}
 
-      {/* Stats globales */}
+      {/* ── Stats + Charts ──────────────────────────────────────────────── */}
       {data && !loading && (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            <StatCard icon={BarChart3} label="Créés" value={totals.created} color="bg-blue-500/10 text-blue-500" />
-            <StatCard icon={CheckCircle2} label="Résolus" value={totals.resolved} color="bg-emerald-500/10 text-emerald-500" />
-            <StatCard icon={AlertTriangle} label="P1 critiques" value={totals.p1} color="bg-red-500/10 text-red-500" />
-            <StatCard icon={XCircle} label="SLA dépassés" value={totals.slaBreached} color="bg-orange-500/10 text-orange-500" />
+            <StatCard icon={BarChart3} label="Créés" value={totals.created} color="bg-blue-500/10 text-blue-500"
+              onClick={() => openDrillDown('Tickets créés', {})} />
+            <StatCard icon={CheckCircle2} label="Résolus" value={totals.resolved} color="bg-emerald-500/10 text-emerald-500"
+              onClick={() => openDrillDown('Tickets résolus', { status: 'SOLVED' })} />
+            <StatCard icon={AlertTriangle} label="P1 critiques" value={totals.p1} color="bg-red-500/10 text-red-500"
+              onClick={() => openDrillDown('Tickets P1 critiques', { priority: 'P1' })} />
+            <StatCard icon={XCircle} label="SLA dépassés" value={totals.slaBreached} color="bg-orange-500/10 text-orange-500"
+              onClick={() => openDrillDown('SLA dépassés', { due: 'overdue' })} />
             <StatCard icon={Clock} label="Jours résol." value={totals.avgResolutionDays} color="bg-violet-500/10 text-violet-500" sub="moyen" />
             <StatCard icon={TrendingUp} label="Taux réponse" value={`${totals.responseRate || 0}%`} color="bg-teal-500/10 text-teal-500" />
           </div>
@@ -292,9 +399,8 @@ export default function TicketEvolution() {
             </motion.div>
           )}
 
-          {/* Deuxième rangée : Priorités + SLA breach */}
+          {/* Deuxième rangée : Priorités + SLA breach + Statut */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {/* Répartition par priorité (barres) */}
             {priorityBarData.length > 0 && (
               <div className="bg-surface-container-lowest border border-outline-variant/20 rounded-2xl p-4">
                 <h3 className="text-sm font-bold text-on-surface mb-3">Par priorité</h3>
@@ -311,7 +417,6 @@ export default function TicketEvolution() {
               </div>
             )}
 
-            {/* SLA breach dans le temps */}
             {series.length > 0 && (
               <div className="bg-surface-container-lowest border border-outline-variant/20 rounded-2xl p-4">
                 <h3 className="text-sm font-bold text-on-surface mb-3">SLA dépassés</h3>
@@ -327,7 +432,6 @@ export default function TicketEvolution() {
               </div>
             )}
 
-            {/* Répartition par statut (pie) */}
             {statusPieData.length > 0 && (
               <div className="bg-surface-container-lowest border border-outline-variant/20 rounded-2xl p-4">
                 <h3 className="text-sm font-bold text-on-surface mb-3">Par statut</h3>
@@ -365,6 +469,89 @@ export default function TicketEvolution() {
             </motion.div>
           )}
         </>
+      )}
+
+      {/* ── Drill-down Modal ──────────────────────────────────────────── */}
+      {createPortal(
+        <AnimatePresence>
+          {drillDown && (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                onClick={() => setDrillDown(null)}
+                className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer"
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 16 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 16 }}
+                transition={{ type: 'spring', duration: 0.35, bounce: 0.12 }}
+                className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[80vh] flex flex-col overflow-hidden"
+              >
+                <div className="flex items-center gap-3 px-5 py-4 border-b border-outline-variant/30">
+                  <div className="p-1.5 rounded-lg bg-primary/10">
+                    <Eye className="w-4 h-4 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-on-surface">{drillDown.title}</h3>
+                    <p className="text-[10px] text-on-surface-variant">{drillTotal} ticket(s) — filtré par les filtres actifs</p>
+                  </div>
+                  <motion.button
+                    onClick={() => setDrillDown(null)}
+                    whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }}
+                    className="ml-auto p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"
+                  ><X className="w-4 h-4" /></motion.button>
+                </div>
+                <div className="overflow-y-auto flex-1">
+                  {drillLoading ? (
+                    <div className="flex items-center justify-center py-12 gap-2 text-on-surface-variant">
+                      <RefreshCw className="w-5 h-5 animate-spin text-primary" />
+                      <span className="text-sm">Chargement...</span>
+                    </div>
+                  ) : drillTickets.length === 0 ? (
+                    <div className="text-center py-12 text-on-surface-variant text-sm">Aucun ticket trouvé</div>
+                  ) : (
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-outline-variant/20 bg-surface-container-low/40 text-[10px] font-black uppercase tracking-widest text-on-surface-variant">
+                          <th className="px-4 py-2.5 text-left">#</th>
+                          <th className="px-4 py-2.5 text-left">Titre</th>
+                          <th className="px-4 py-2.5 text-left">Statut</th>
+                          <th className="px-4 py-2.5 text-left">Priorité</th>
+                          <th className="px-4 py-2.5 text-left">Demandeur</th>
+                          <th className="px-4 py-2.5 text-left">Équipe</th>
+                          <th className="px-4 py-2.5 text-left">Créé le</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-outline-variant/10">
+                        {drillTickets.map((t) => (
+                          <tr key={t.id} className="hover:bg-surface-container-low/50 transition-colors">
+                            <td className="px-4 py-2.5 font-mono font-bold text-on-surface">#{t.id}</td>
+                            <td className="px-4 py-2.5 text-on-surface font-medium max-w-[220px] truncate">{t.title}</td>
+                            <td className="px-4 py-2.5">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold border ${STATUS_CONFIG[t.status]?.bg || ''}`}>
+                                {STATUS_CONFIG[t.status]?.label || t.status}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold border ${PRIORITY_CONFIG[t.priority]?.bg || ''}`}>
+                                {t.priority}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2.5 text-on-surface-variant">{t.requester?.fullName || '—'}</td>
+                            <td className="px-4 py-2.5 text-on-surface-variant">{t.team?.name || '—'}</td>
+                            <td className="px-4 py-2.5 text-on-surface-variant font-mono">{new Date(t.createdAt).toLocaleDateString('fr-FR')}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
       )}
     </div>
   );

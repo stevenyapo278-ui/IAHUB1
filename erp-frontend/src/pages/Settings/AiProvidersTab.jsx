@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../api/client';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import Toggle from '../../components/Toggle';
+import DataGrid from '../../components/DataGrid';
 
 const inputClass =
   'bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300';
@@ -245,75 +246,26 @@ function ProviderModal({ provider, onClose, onUpdate }) {
           {tab === 'models' && (
             <div className="space-y-4">
               <div className="border border-outline-variant/50 rounded-xl overflow-hidden bg-surface-container-lowest">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-surface-bright/50 border-b border-outline-variant/50">
-                      <th className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider p-3">Nom</th>
-                      <th className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider p-3">Libellé</th>
-                      <th className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider p-3 w-24">Type</th>
-                      <th className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider p-3 w-20 text-center">Par défaut</th>
-                      <th className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider p-3 w-20 text-center">Actif</th>
-                      <th className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider p-3 w-36 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="text-xs text-on-surface divide-y divide-outline-variant/30">
-                    {provider.models.map((m) => (
-                      <tr key={m.id} className="hover:bg-surface-container-low/40 transition-colors">
-                        <td className="p-3 font-semibold">{m.name}</td>
-                        <td className="p-3 text-on-surface-variant">{m.label || '-'}</td>
-                        <td className="p-3">
-                          <span className="border border-outline-variant/50 px-2 py-0.5 rounded-full text-[10px] uppercase font-semibold">
-                            {m.type === 'EMBEDDING' ? 'Embedding' : m.type === 'RERANK' ? 'Reranker' : 'Chat'}
-                          </span>
-                        </td>
-                        <td className="p-3 text-center">
-                          <input type="radio" className="accent-primary w-4 h-4 cursor-pointer"
-                            name={`modal-default-model-${provider.id}`}
-                            checked={m.isDefault}
-                            onChange={() => handleSetDefaultModel(m.id)}
-                          />
-                        </td>
-                        <td className="p-3 text-center">
-                          <input type="checkbox" className="w-4 h-4 accent-primary cursor-pointer"
-                            checked={m.isActive}
-                            onChange={(e) => handleToggleModelActive(m.id, e.target.checked)}
-                          />
-                        </td>
-                        <td className="p-3">
-                          <div className="flex items-center justify-end gap-1">
-                            {m.type === 'CHAT' && (
-                              <>
-                                <motion.button onClick={() => handleTestModel(m.id)}
-                                  disabled={testModelResults[m.id]?.loading}
-                                  whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-                                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold border border-outline-variant/30 text-on-surface-variant hover:border-primary/40 hover:text-primary disabled:opacity-50"
-                                >
-                                  {testModelResults[m.id]?.loading
-                                    ? <span className="material-symbols-outlined text-[12px] animate-spin">progress_activity</span>
-                                    : <span className="material-symbols-outlined text-[12px]">network_check</span>}
-                                </motion.button>
-                                {testModelResults[m.id] && !testModelResults[m.id].loading && (
-                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${
-                                    testModelResults[m.id].ok
-                                      ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
-                                      : 'bg-red-500/10 text-red-500 border-red-500/20'
-                                  }`}>
-                                    <span className="material-symbols-outlined text-[9px]">{testModelResults[m.id].ok ? 'check_circle' : 'cancel'}</span>
-                                    {testModelResults[m.id].ok ? `${testModelResults[m.id].latencyMs}ms` : 'Échec'}
-                                  </span>
-                                )}
-                              </>
-                            )}
-                            <DeleteButton onClick={() => setPendingDelete({ type: 'model', id: m.id })} />
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                    {provider.models.length === 0 && (
-                      <tr><td colSpan={6} className="p-6 text-center text-on-surface-variant italic">Aucun modèle configuré</td></tr>
-                    )}
-                  </tbody>
-                </table>
+                <DataGrid
+                  columns={[
+                    { field: 'name', headerName: 'Nom', flex: 1, cellRenderer: (p) => <span className="font-semibold">{p.value}</span> },
+                    { field: 'label', headerName: 'Libellé', width: 150, cellRenderer: (p) => <span className="text-on-surface-variant">{p.value || '-'}</span> },
+                    { field: 'type', headerName: 'Type', width: 100, cellRenderer: (p) => <span className="border border-outline-variant/50 px-2 py-0.5 rounded-full text-[10px] uppercase font-semibold">{p.value === 'EMBEDDING' ? 'Embedding' : p.value === 'RERANK' ? 'Reranker' : 'Chat'}</span> },
+                    { field: 'isDefault', headerName: 'Par défaut', width: 90, cellRenderer: (p) => <div className="flex justify-center"><input type="radio" className="accent-primary w-4 h-4 cursor-pointer" name={`modal-default-model-${provider.id}`} checked={p.value} onChange={() => handleSetDefaultModel(p.data.id)} /></div> },
+                    { field: 'isActive', headerName: 'Actif', width: 80, cellRenderer: (p) => <div className="flex justify-center"><input type="checkbox" className="w-4 h-4 accent-primary cursor-pointer" checked={p.value} onChange={(e) => handleToggleModelActive(p.data.id, e.target.checked)} /></div> },
+                    { field: 'actions', headerName: '', width: 140, sortable: false, filter: false, cellRenderer: (p) => (
+                      <div className="flex items-center justify-end gap-1">
+                        {p.data.type === 'CHAT' && <><motion.button onClick={() => handleTestModel(p.data.id)} disabled={testModelResults[p.data.id]?.loading} whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold border border-outline-variant/30 text-on-surface-variant hover:border-primary/40 hover:text-primary disabled:opacity-50"><span className="material-symbols-outlined text-[12px]">network_check</span></motion.button>{testModelResults[p.data.id] && !testModelResults[p.data.id].loading && <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${testModelResults[p.data.id].ok ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' : 'bg-red-500/10 text-red-500 border-red-500/20'}`}><span className="material-symbols-outlined text-[9px]">{testModelResults[p.data.id].ok ? 'check_circle' : 'cancel'}</span>{testModelResults[p.data.id].ok ? `${testModelResults[p.data.id].latencyMs}ms` : 'Échec'}</span>}</>}
+                        <DeleteButton onClick={() => setPendingDelete({ type: 'model', id: p.data.id })} />
+                      </div>
+                    ) },
+                  ]}
+                  rowData={provider.models}
+                  pagination={false}
+                  headerHeight={36}
+                  rowHeight={40}
+                  noRowsText="Aucun modèle configuré"
+                />
               </div>
 
               {/* Ajouter un modèle */}
@@ -361,67 +313,27 @@ function ProviderModal({ provider, onClose, onUpdate }) {
           {tab === 'keys' && (
             <div className="space-y-4">
               <div className="border border-outline-variant/50 rounded-xl overflow-hidden bg-surface-container-lowest">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-surface-bright/50 border-b border-outline-variant/50">
-                      <th className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider p-3">Libellé</th>
-                      <th className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider p-3">Clé</th>
-                      <th className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider p-3">Modèle</th>
-                      <th className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider p-3 w-20 text-center">Par défaut</th>
-                      <th className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider p-3 w-20 text-center">Actif</th>
-                      <th className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider p-3 w-36 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="text-xs text-on-surface divide-y divide-outline-variant/30">
-                    {provider.keys.map((k) => (
-                      <tr key={k.id} className="hover:bg-surface-container-low/40 transition-colors">
-                        <td className="p-3 font-semibold">{k.label}</td>
-                        <td className="p-3 font-mono text-on-surface-variant truncate max-w-[160px]">{k.apiKey}</td>
-                        <td className="p-3 text-on-surface-variant font-medium">{k.model?.name || 'Tous les modèles'}</td>
-                        <td className="p-3 text-center">
-                          <input type="radio" className="accent-primary w-4 h-4 cursor-pointer"
-                            name={`modal-default-key-${provider.id}`}
-                            checked={k.isDefault}
-                            onChange={() => handleSetDefaultKey(k.id)}
-                          />
-                        </td>
-                        <td className="p-3 text-center">
-                          <input type="checkbox" className="w-4 h-4 accent-primary cursor-pointer"
-                            checked={k.isActive}
-                            onChange={(e) => handleToggleKeyActive(k.id, e.target.checked)}
-                          />
-                        </td>
-                        <td className="p-3">
-                          <div className="flex items-center justify-end gap-1">
-                            <motion.button onClick={() => handleTestKey(k.id)}
-                              disabled={testResults[k.id]?.loading}
-                              whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-                              className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold border border-outline-variant/30 text-on-surface-variant hover:border-primary/40 hover:text-primary disabled:opacity-50"
-                            >
-                              {testResults[k.id]?.loading
-                                ? <span className="material-symbols-outlined text-[12px] animate-spin">progress_activity</span>
-                                : <span className="material-symbols-outlined text-[12px]">network_check</span>}
-                            </motion.button>
-                            {testResults[k.id] && !testResults[k.id].loading && (
-                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${
-                                testResults[k.id].ok
-                                  ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
-                                  : 'bg-red-500/10 text-red-500 border-red-500/20'
-                              }`}>
-                                <span className="material-symbols-outlined text-[9px]">{testResults[k.id].ok ? 'check_circle' : 'cancel'}</span>
-                                {testResults[k.id].ok ? `${testResults[k.id].latencyMs}ms` : 'Échec'}
-                              </span>
-                            )}
-                            <DeleteButton onClick={() => setPendingDelete({ type: 'key', id: k.id })} />
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                    {provider.keys.length === 0 && (
-                      <tr><td colSpan={6} className="p-6 text-center text-on-surface-variant italic">Aucune clé configurée</td></tr>
-                    )}
-                  </tbody>
-                </table>
+                <DataGrid
+                  columns={[
+                    { field: 'label', headerName: 'Libellé', flex: 1, cellRenderer: (p) => <span className="font-semibold">{p.value}</span> },
+                    { field: 'apiKey', headerName: 'Clé', width: 200, cellRenderer: (p) => <span className="font-mono text-on-surface-variant truncate max-w-[160px] block">{p.value}</span> },
+                    { field: 'modelName', headerName: 'Modèle', width: 150, valueGetter: (p) => p.data.model?.name || 'Tous les modèles', cellRenderer: (p) => <span className="text-on-surface-variant font-medium">{p.value}</span> },
+                    { field: 'isDefault', headerName: 'Par défaut', width: 90, cellRenderer: (p) => <div className="flex justify-center"><input type="radio" className="accent-primary w-4 h-4 cursor-pointer" name={`modal-default-key-${provider.id}`} checked={p.value} onChange={() => handleSetDefaultKey(p.data.id)} /></div> },
+                    { field: 'isActive', headerName: 'Actif', width: 80, cellRenderer: (p) => <div className="flex justify-center"><input type="checkbox" className="w-4 h-4 accent-primary cursor-pointer" checked={p.value} onChange={(e) => handleToggleKeyActive(p.data.id, e.target.checked)} /></div> },
+                    { field: 'actions', headerName: '', width: 140, sortable: false, filter: false, cellRenderer: (p) => (
+                      <div className="flex items-center justify-end gap-1">
+                        <motion.button onClick={() => handleTestKey(p.data.id)} disabled={testResults[p.data.id]?.loading} whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold border border-outline-variant/30 text-on-surface-variant hover:border-primary/40 hover:text-primary disabled:opacity-50"><span className="material-symbols-outlined text-[12px]">network_check</span></motion.button>
+                        {testResults[p.data.id] && !testResults[p.data.id].loading && <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${testResults[p.data.id].ok ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' : 'bg-red-500/10 text-red-500 border-red-500/20'}`}><span className="material-symbols-outlined text-[9px]">{testResults[p.data.id].ok ? 'check_circle' : 'cancel'}</span>{testResults[p.data.id].ok ? `${testResults[p.data.id].latencyMs}ms` : 'Échec'}</span>}
+                        <DeleteButton onClick={() => setPendingDelete({ type: 'key', id: p.data.id })} />
+                      </div>
+                    ) },
+                  ]}
+                  rowData={provider.keys}
+                  pagination={false}
+                  headerHeight={36}
+                  rowHeight={40}
+                  noRowsText="Aucune clé configurée"
+                />
               </div>
 
               {/* Ajouter une clé */}

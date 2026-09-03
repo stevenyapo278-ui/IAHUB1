@@ -3,9 +3,66 @@ import { flushSync } from 'react-dom';
 
 const ThemeContext = createContext(null);
 
-// ─── Réglages de la vague circulaire (View Transitions API) ──────────────────
+// ─── Wave animation settings (View Transitions API) ─────────────────────────
 const WAVE_DURATION_MS = 450;
 const WAVE_EASING = 'cubic-bezier(0.16, 1, 0.3, 1)';
+
+// ─── Available skins ────────────────────────────────────────────────────────
+export const SKINS = [
+  { id: 'default',  label: 'Default',  emoji: '🔷', primary: '#0067ff' },
+  { id: 'bento',    label: 'Bento',    emoji: '🟠', primary: '#ff5a1f' },
+  { id: 'aqua',     label: 'Aqua',     emoji: '🩵', primary: '#1597a5' },
+  { id: 'lime',     label: 'Lime',     emoji: '🟢', primary: '#9ccc1f' },
+  { id: 'lilac',    label: 'Lilac',    emoji: '🟣', primary: '#6d5ba6' },
+  { id: 'prism',    label: 'Prism',    emoji: '🌈', primary: '#6d28d9' },
+  { id: 'midnight', label: 'Midnight', emoji: '🌙', primary: '#4f5bd5' },
+  { id: 'ocean',    label: 'Ocean',    emoji: '🌊', primary: '#0a84ff' },
+  { id: 'graphite', label: 'Graphite', emoji: '⚫', primary: '#2b2b30' },
+  { id: 'emerald',  label: 'Emerald',  emoji: '💚', primary: '#059669' },
+  { id: 'amber',    label: 'Amber',    emoji: '🟡', primary: '#f59e0b' },
+  { id: 'coral',    label: 'Coral',    emoji: '🩷', primary: '#ff6b5e' },
+  { id: 'console',  label: 'Console',  emoji: '💻', primary: '#15803d' },
+];
+
+// ─── Layout presets ─────────────────────────────────────────────────────────
+export const LAYOUT_PRESETS = {
+  default: {
+    label: 'Par défaut',
+    minSidebar: false,
+    headerOnly: false,
+    fixedHeader: true,
+    compactMode: false,
+    animations: true,
+    cursorGlow: false,
+  },
+  minimal: {
+    label: 'Minimal',
+    minSidebar: true,
+    headerOnly: false,
+    fixedHeader: false,
+    compactMode: true,
+    animations: true,
+    cursorGlow: false,
+  },
+  contentFocus: {
+    label: 'Focus contenu',
+    minSidebar: true,
+    headerOnly: false,
+    fixedHeader: true,
+    compactMode: false,
+    animations: true,
+    cursorGlow: true,
+  },
+  wide: {
+    label: 'Large',
+    minSidebar: false,
+    headerOnly: false,
+    fixedHeader: true,
+    compactMode: false,
+    animations: true,
+    cursorGlow: false,
+  },
+};
 
 function prefersReducedMotion() {
   return typeof window !== 'undefined'
@@ -13,60 +70,110 @@ function prefersReducedMotion() {
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
-// Applique la classe .dark sur <html> + persiste — idempotent
+// Apply theme to DOM (idempotent)
 function applyThemeToDom(next) {
   document.documentElement.classList.toggle('dark', next === 'dark');
-  try { localStorage.setItem('theme', next); } catch { /* stockage indisponible */ }
+  try { localStorage.setItem('theme', next); } catch { /* storage unavailable */ }
+}
+
+// Apply skin to DOM (idempotent)
+function applySkinToDom(skinId) {
+  document.documentElement.setAttribute('data-skin', skinId);
+  try { localStorage.setItem('skin', skinId); } catch { /* storage unavailable */ }
+}
+
+// Apply OLED to DOM
+function applyOledToDom(oled) {
+  document.documentElement.setAttribute('data-oled', oled ? 'true' : 'false');
+  try { localStorage.setItem('oled', oled ? 'true' : 'false'); } catch { /* storage unavailable */ }
+}
+
+// Apply layout settings to DOM
+function applyLayoutToDom(settings) {
+  const el = document.documentElement;
+  el.toggleAttribute('data-min-sidebar', settings.minSidebar);
+  el.toggleAttribute('data-header-only', settings.headerOnly);
+  el.toggleAttribute('data-fixed-header', settings.fixedHeader);
+  el.toggleAttribute('data-compact-mode', settings.compactMode);
+  el.toggleAttribute('data-cursor-glow', settings.cursorGlow);
+  try { localStorage.setItem('layoutSettings', JSON.stringify(settings)); } catch { /* storage unavailable */ }
 }
 
 export function ThemeProvider({ children }) {
+  // ── Theme (dark/light) ──
   const [theme, setTheme] = useState(() => {
     try {
       const stored = localStorage.getItem('theme');
       if (stored) return stored;
-    } catch { /* stockage indisponible */ }
-    // Même logique que public/theme-init.js : préférence système, sinon sombre.
+    } catch { /* storage unavailable */ }
     if (typeof window.matchMedia === 'function') {
       return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     }
     return 'dark';
   });
 
-  // Miroir synchrone du thème pour lire la valeur courante dans le callback stable
+  // ── Skin ──
+  const [skin, setSkinState] = useState(() => {
+    try {
+      const stored = localStorage.getItem('skin');
+      if (stored && SKINS.some(s => s.id === stored)) return stored;
+    } catch { /* storage unavailable */ }
+    return 'default';
+  });
+
+  // ── OLED mode ──
+  const [oled, setOledState] = useState(() => {
+    try {
+      return localStorage.getItem('oled') === 'true';
+    } catch { /* storage unavailable */ }
+    return false;
+  });
+
+  // ── Layout settings ──
+  const [layoutSettings, setLayoutSettingsState] = useState(() => {
+    try {
+      const stored = localStorage.getItem('layoutSettings');
+      if (stored) return { ...LAYOUT_PRESETS.default, ...JSON.parse(stored) };
+    } catch { /* storage unavailable */ }
+    return { ...LAYOUT_PRESETS.default };
+  });
+
+  // ── Refs for stable access in callbacks ──
   const themeRef = useRef(theme);
-  // Verrou anti double-clic : ignore les toggles tant que la vague joue
   const animatingRef = useRef(false);
 
-  // useLayoutEffect (et non useEffect) : la classe est posée AVANT le paint →
-  // zéro flash au montage, et mutation DOM synchrone dans le callback des View
-  // Transitions quand on passe par flushSync ci-dessous.
+  // Keep themeRef in sync with state
   useLayoutEffect(() => {
-    applyThemeToDom(theme);
     themeRef.current = theme;
+    applyThemeToDom(theme);
   }, [theme]);
 
-  // Le fond critique posé en inline par theme-init.js a rempli son rôle :
-  // la feuille de style est chargée (les scripts s'exécutent après le CSS), on le
-  // retire pour laisser les transitions CSS gérer ce fond lors des bascules.
+  // Sync DOM on mount
+  useLayoutEffect(() => {
+    applySkinToDom(skin);
+    applyOledToDom(oled);
+    applyLayoutToDom(layoutSettings);
+  }, []);
+
+  // Remove inline background set by theme-init.js
   useLayoutEffect(() => {
     document.documentElement.style.removeProperty('background-color');
   }, []);
 
+  // ── Toggle dark/light ──
   const toggleTheme = useCallback((event) => {
     if (animatingRef.current) return;
 
     const next = themeRef.current === 'dark' ? 'light' : 'dark';
+    themeRef.current = next;
 
-    // Fallback (Firefox ancien / mouvement réduit) : bascule directe.
-    // La transition CSS globale des couleurs (index.css) assure quand même un fondu doux.
     const canWave = typeof document.startViewTransition === 'function' && !prefersReducedMotion();
     if (!canWave) {
       setTheme(next);
+      applyThemeToDom(next);
       return;
     }
 
-    // Origine de la vague : position réelle du clic ; clavier → centre du bouton ;
-    // programmematique → coin supérieur droit (zone du bouton dans le header).
     let x = event?.clientX;
     let y = event?.clientY;
     if (!Number.isFinite(x) || !Number.isFinite(y) || (x === 0 && y === 0)) {
@@ -79,14 +186,13 @@ export function ThemeProvider({ children }) {
     const unlock = () => { animatingRef.current = false; };
 
     try {
-      // Ajouter .theme-animating pour supprimer les transitions CSS globales
-      // pendant que la vague circulaire gère l'animation des couleurs.
       document.documentElement.classList.add('theme-animating');
 
       const viewTransition = document.startViewTransition(() => {
-        // flushSync : React commit le nouveau rendu DEHORS le snapshot « new ».
-        // Le useLayoutEffect applique la classe .dark avant le retour du callback.
-        flushSync(() => setTheme(next));
+        flushSync(() => {
+          setTheme(next);
+          applyThemeToDom(next);
+        });
       });
 
       viewTransition.ready
@@ -111,7 +217,6 @@ export function ThemeProvider({ children }) {
         })
         .catch(() => {});
 
-      // Retirer .theme-animating quand la vague est terminée
       viewTransition.finished.then(() => {
         document.documentElement.classList.remove('theme-animating');
         unlock();
@@ -122,12 +227,51 @@ export function ThemeProvider({ children }) {
     } catch {
       document.documentElement.classList.remove('theme-animating');
       setTheme(next);
+      applyThemeToDom(next);
       unlock();
     }
   }, []);
 
+  // ── Set skin ──
+  const setSkin = useCallback((skinId) => {
+    setSkinState(skinId);
+    applySkinToDom(skinId);
+  }, []);
+
+  // ── Toggle OLED ──
+  const toggleOled = useCallback(() => {
+    setOledState(prev => {
+      const next = !prev;
+      applyOledToDom(next);
+      return next;
+    });
+  }, []);
+
+  // ── Update layout settings ──
+  const setLayoutSettings = useCallback((updates) => {
+    setLayoutSettingsState(prev => {
+      const next = { ...prev, ...updates };
+      applyLayoutToDom(next);
+      return next;
+    });
+  }, []);
+
+  // ── Apply layout preset ──
+  const applyLayoutPreset = useCallback((presetKey) => {
+    const preset = LAYOUT_PRESETS[presetKey];
+    if (preset) {
+      setLayoutSettingsState(preset);
+      applyLayoutToDom(preset);
+    }
+  }, []);
+
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme }}>
+    <ThemeContext.Provider value={{
+      theme, toggleTheme,
+      skin, setSkin,
+      oled, toggleOled,
+      layoutSettings, setLayoutSettings, applyLayoutPreset,
+    }}>
       {children}
     </ThemeContext.Provider>
   );

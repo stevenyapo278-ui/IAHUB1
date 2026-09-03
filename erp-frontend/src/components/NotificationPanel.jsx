@@ -169,26 +169,26 @@ export default function NotificationPanel({ open, onClose }) {
                        rounded-2xl border shadow-xl overflow-hidden flex flex-col"
             style={{
               backgroundColor: 'var(--color-surface-container-lowest)',
-              borderColor: 'var(--efferd-border)',
+              borderColor: 'var(--color-outline-variant)',
             }}
           >
             {/* Header */}
             <div
               className="shrink-0 border-b px-4 pt-3 pb-2.5"
-              style={{ borderColor: 'var(--efferd-border)' }}
+              style={{ borderColor: 'var(--color-outline-variant)' }}
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="material-symbols-outlined" style={{ fontSize: '18px', color: 'var(--efferd-muted)' }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: '18px', color: 'var(--color-on-surface-variant)' }}>
                     notifications
                   </span>
-                  <span className="text-[14px] font-semibold" style={{ color: 'var(--efferd-text)' }}>
+                  <span className="text-[14px] font-semibold" style={{ color: 'var(--color-on-surface)' }}>
                     Notifications
                   </span>
                   {hasUnread && (
                     <span
                       className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full text-[10px] font-bold text-white"
-                      style={{ backgroundColor: 'var(--nav-active-bg)' }}
+                      style={{ backgroundColor: 'var(--color-primary)' }}
                     >
                       {unreadCount}
                     </span>
@@ -200,7 +200,7 @@ export default function NotificationPanel({ open, onClose }) {
                     <button
                       onClick={handleMarkAllRead}
                       className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium transition-colors cursor-pointer"
-                      style={{ color: 'var(--efferd-muted)' }}
+                      style={{ color: 'var(--color-on-surface-variant)' }}
                       onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--color-surface-container-high)'}
                       onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                     >
@@ -211,7 +211,7 @@ export default function NotificationPanel({ open, onClose }) {
                   <button
                     onClick={onClose}
                     className="w-7 h-7 flex items-center justify-center rounded-lg transition-colors cursor-pointer"
-                    style={{ color: 'var(--efferd-muted)' }}
+                    style={{ color: 'var(--color-on-surface-variant)' }}
                     onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--color-surface-container-high)'}
                     onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                   >
@@ -251,13 +251,13 @@ export default function NotificationPanel({ open, onClose }) {
               {groups.length === 0 ? (
                 <div className="flex flex-col items-center gap-3 py-12 px-4 text-center">
                   <div className="p-4 rounded-full bg-surface-container">
-                    <Bell className="w-7 h-7" style={{ color: 'var(--efferd-muted)', opacity: 0.5 }} />
+                    <Bell className="w-7 h-7" style={{ color: 'var(--color-on-surface-variant)', opacity: 0.5 }} />
                   </div>
                   <div>
-                    <p className="text-[13px] font-medium" style={{ color: 'var(--efferd-text)' }}>
+                    <p className="text-[13px] font-medium" style={{ color: 'var(--color-on-surface)' }}>
                       {filter === 'unread' ? 'Aucune notification non lue' : 'Aucune notification'}
                     </p>
-                    <p className="text-[11px] mt-0.5" style={{ color: 'var(--efferd-muted)' }}>
+                    <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-on-surface-variant)' }}>
                       {filter === 'unread'
                         ? 'Vous avez tout lu. Bravo !'
                         : "Les alertes de tickets et d'assignations apparaîtront ici"}
@@ -270,12 +270,12 @@ export default function NotificationPanel({ open, onClose }) {
                     <div key={key}>
                       <div
                         className="flex items-center gap-2 px-2 pb-1.5 pt-0.5"
-                        style={{ color: 'var(--efferd-muted)' }}
+                        style={{ color: 'var(--color-on-surface-variant)' }}
                       >
                         <span className="text-[10px] font-bold uppercase tracking-wider">
                           {dayLabel(items[0].createdAt)}
                         </span>
-                        <div className="flex-1 h-px" style={{ backgroundColor: 'var(--efferd-border)' }} />
+                        <div className="flex-1 h-px" style={{ backgroundColor: 'var(--color-outline-variant)' }} />
                         <span className="text-[9px] font-medium opacity-70">{items.length}</span>
                       </div>
                       <div className="space-y-0.5">
@@ -299,14 +299,14 @@ export default function NotificationPanel({ open, onClose }) {
                   <button
                     onClick={loadMore}
                     className="text-[11px] font-medium px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
-                    style={{ color: 'var(--efferd-muted)' }}
+                    style={{ color: 'var(--color-on-surface-variant)' }}
                     onMouseEnter={(e) => {
                       e.currentTarget.style.backgroundColor = 'var(--color-surface-container-high)';
-                      e.currentTarget.style.color = 'var(--efferd-text)';
+                      e.currentTarget.style.color = 'var(--color-on-surface)';
                     }}
                     onMouseLeave={(e) => {
                       e.currentTarget.style.backgroundColor = 'transparent';
-                      e.currentTarget.style.color = 'var(--efferd-muted)';
+                      e.currentTarget.style.color = 'var(--color-on-surface-variant)';
                     }}
                   >
                     Voir plus
@@ -360,7 +360,7 @@ function NotifItem({ notif, onClick, onMarkRead }) {
       {!read && (
         <div
           className="absolute left-0 top-3 bottom-3 w-[3px] rounded-full"
-          style={{ backgroundColor: 'var(--nav-active-bg)' }}
+          style={{ backgroundColor: 'var(--color-primary)' }}
         />
       )}
 
@@ -385,7 +385,7 @@ function NotifItem({ notif, onClick, onMarkRead }) {
           </div>
           <span
             className="shrink-0 text-[10px] whitespace-nowrap"
-            style={{ color: 'var(--efferd-muted)' }}
+            style={{ color: 'var(--color-on-surface-variant)' }}
           >
             {formatTimeAgo(notif.createdAt)}
           </span>
@@ -393,13 +393,13 @@ function NotifItem({ notif, onClick, onMarkRead }) {
 
         <p
           className="text-[13px] mt-1"
-          style={{ color: 'var(--efferd-text)' }}
+          style={{ color: 'var(--color-on-surface)' }}
         >
           {notif.title}
         </p>
         <p
           className="text-[12px] mt-0.5 line-clamp-2"
-          style={{ color: 'var(--efferd-muted)' }}
+          style={{ color: 'var(--color-on-surface-variant)' }}
         >
           {notif.message}
         </p>
@@ -433,9 +433,9 @@ function NotifItem({ notif, onClick, onMarkRead }) {
           onClick={(e) => onMarkRead(e, notif)}
           title="Marquer comme lue"
           className="shrink-0 w-6 h-6 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
-          style={{ color: 'var(--efferd-muted)', backgroundColor: 'var(--color-surface-container-high)' }}
-          onMouseEnter={(e) => e.currentTarget.style.color = 'var(--efferd-text)'}
-          onMouseLeave={(e) => e.currentTarget.style.color = 'var(--efferd-muted)'}
+          style={{ color: 'var(--color-on-surface-variant)', backgroundColor: 'var(--color-surface-container-high)' }}
+          onMouseEnter={(e) => e.currentTarget.style.color = 'var(--color-on-surface)'}
+          onMouseLeave={(e) => e.currentTarget.style.color = 'var(--color-on-surface-variant)'}
         >
           <Check className="w-3.5 h-3.5" />
         </button>
@@ -445,7 +445,7 @@ function NotifItem({ notif, onClick, onMarkRead }) {
       {!read && (
         <div
           className="absolute right-2.5 top-2.5 w-2 h-2 rounded-full md:hidden"
-          style={{ backgroundColor: 'var(--nav-active-bg)' }}
+          style={{ backgroundColor: 'var(--color-primary)' }}
         />
       )}
     </motion.div>

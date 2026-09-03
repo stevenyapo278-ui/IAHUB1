@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import {
   AlertTriangle, ArrowLeft, Clock, CheckCircle2, Radio, User, Users, Tag,
   Link2, Plus, X, RefreshCw, Send, Eye, Calendar, Flame, Info, ArrowDown,
-  Sparkles, Pencil, Trash2, LinkIcon, Unlink,
+  Sparkles, Pencil, Trash2, LinkIcon, Unlink, Search, Loader2,
 } from 'lucide-react';
 import api from '../api/client';
 import { hasPermission } from '../utils/permissions';
@@ -429,12 +429,22 @@ function LinkTicketModal({ problemId, onClose, onLinked }) {
   const [loading, setLoading] = useState(false);
   const [linking, setLinking] = useState(null);
 
+  // Charger les tickets au montage de la modale
   useEffect(() => {
-    if (!search.trim()) { setResults([]); return; }
+    setLoading(true);
+    api.get('/tickets', { params: { limit: 15, page: 1, status: 'NOT_CLOSED' } })
+      .then(({ data }) => setResults(data.items || []))
+      .catch(() => setResults([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  // Recherche debounce
+  useEffect(() => {
+    if (!search.trim()) return;
     const timeout = setTimeout(() => {
       setLoading(true);
-      api.get('/tickets', { params: { search, limit: 20 } })
-        .then(({ data }) => setResults(data.tickets || data || []))
+      api.get('/tickets', { params: { search, limit: 15 } })
+        .then(({ data }) => setResults(data.items || []))
         .catch(() => setResults([]))
         .finally(() => setLoading(false));
     }, 300);
@@ -455,39 +465,89 @@ function LinkTicketModal({ problemId, onClose, onLinked }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
-      <div className="bg-surface-container-lowest rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold text-on-surface">Lier un ticket</h2>
-          <button onClick={onClose} className="p-1 rounded-lg hover:bg-surface-container-high cursor-pointer"><X className="w-5 h-5" /></button>
-        </div>
-        <div className="relative">
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Rechercher un ticket par titre ou ID..."
-            className={`${inputCls} w-full`}
-            autoFocus
-          />
-        </div>
-        <div className="max-h-60 overflow-y-auto space-y-1">
-          {loading && <p className="text-xs text-on-surface-variant text-center py-4">Recherche...</p>}
-          {!loading && results.length === 0 && search.trim() && (
-            <p className="text-xs text-on-surface-variant italic text-center py-4">Aucun résultat</p>
-          )}
-          {results.map((t) => (
-            <div key={t.id} className="flex items-center justify-between p-2.5 rounded-lg hover:bg-surface-container-high group">
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-on-surface truncate">#{t.id} — {t.title}</p>
-                <p className="text-[11px] text-on-surface-variant">{STATUS_LABELS[t.status] || t.status} · {t.priority}</p>
-              </div>
-              <button onClick={() => handleLink(t.id)} disabled={linking === t.id}
-                className="px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-bold cursor-pointer hover:bg-primary/20 disabled:opacity-50">
-                {linking === t.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : 'Lier'}
-              </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant/20">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
+              <Link2 className="w-4.5 h-4.5 text-primary" />
             </div>
-          ))}
+            <div>
+              <h3 className="text-sm font-extrabold text-on-surface">Lier un ticket</h3>
+              <p className="text-[11px] text-on-surface-variant">Associez un ticket à ce problème</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-lg text-on-surface-variant hover:bg-surface-container transition-colors cursor-pointer">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {/* Recherche */}
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-on-surface-variant mb-1.5">Rechercher un ticket</label>
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Titre, n° de ticket…"
+                className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-outline-variant/60 bg-surface text-on-surface text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none placeholder:text-on-surface-variant/40"
+                autoFocus
+              />
+              {loading && <Loader2 className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-primary animate-spin" />}
+            </div>
+          </div>
+
+          {/* Résultats */}
+          <div className="max-h-72 overflow-y-auto -mx-1 px-1 space-y-1">
+            {loading && results.length === 0 && <p className="text-xs text-on-surface-variant text-center py-6">Chargement…</p>}
+            {!loading && results.length === 0 && search.trim() && (
+              <div className="flex flex-col items-center justify-center py-6 text-on-surface-variant/50">
+                <Search className="w-8 h-8 mb-2 opacity-30" />
+                <p className="text-xs font-medium">Aucun résultat pour "{search}"</p>
+              </div>
+            )}
+            {!loading && results.length === 0 && !search.trim() && (
+              <div className="flex flex-col items-center justify-center py-6 text-on-surface-variant/50">
+                <Search className="w-8 h-8 mb-2 opacity-30" />
+                <p className="text-xs font-medium">Tapez pour rechercher un ticket</p>
+              </div>
+            )}
+            {results.map((t) => {
+              const prioColor = { P1: 'text-red-500 bg-red-500/10', P2: 'text-orange-500 bg-orange-500/10', P3: 'text-blue-500 bg-blue-500/10', P4: 'text-slate-500 bg-slate-500/10' };
+              const stColor = {
+                NEW: 'bg-blue-500/10 text-blue-600', OPEN: 'bg-blue-500/10 text-blue-600',
+                PENDING: 'bg-amber-500/10 text-amber-600', SOLVED: 'bg-emerald-500/10 text-emerald-600',
+                CLOSED: 'bg-slate-500/10 text-slate-600',
+              };
+              return (
+                <div key={t.id} className="flex items-start gap-3 p-3 rounded-xl border border-outline-variant/20 hover:border-primary/40 hover:bg-primary/5 transition-all group">
+                  <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                    <span className="font-mono text-[10px] font-bold text-primary">#{t.id}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-on-surface truncate group-hover:text-primary transition-colors">{t.title}</p>
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${stColor[t.status] || 'bg-slate-500/10 text-slate-500'}`}>{STATUS_LABELS[t.status] || t.status}</span>
+                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${prioColor[t.priority] || 'bg-slate-500/10 text-slate-500'}`}>{t.priority}</span>
+                      {t.requester?.fullName && <span className="text-[10px] text-on-surface-variant">par {t.requester.fullName}</span>}
+                    </div>
+                  </div>
+                  <button onClick={() => handleLink(t.id)} disabled={linking === t.id}
+                    className="px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-bold cursor-pointer hover:bg-primary/20 disabled:opacity-50 shrink-0 mt-0.5">
+                    {linking === t.id ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Lier'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          {results.length > 0 && (
+            <p className="text-[10px] text-on-surface-variant/50 text-center">{results.length} ticket(s) affiché(s)</p>
+          )}
         </div>
       </div>
     </div>

@@ -61,7 +61,7 @@ router.get('/stats', async (req, res) => {
 // ── Créer un problème ─────────────────────────────────────────────────
 router.post(
   '/',
-  requirePermission('tickets.manage', ['ADMIN', 'HOTLINE', 'TECHNICIAN']),
+  requirePermission('problems.manage', ['ADMIN', 'HOTLINE']),
   [body('title').notEmpty().trim(), body('description').notEmpty().trim()],
   async (req, res) => {
     const errors = validationResult(req);
@@ -134,7 +134,7 @@ router.get('/:id', async (req, res) => {
 // ── Modifier un problème ──────────────────────────────────────────────
 router.patch(
   '/:id',
-  requirePermission('tickets.manage', ['ADMIN', 'HOTLINE', 'TECHNICIAN']),
+  requirePermission('problems.manage', ['ADMIN', 'HOTLINE']),
   async (req, res) => {
     const id = Number(req.params.id);
     const existing = await prisma.problem.findUnique({ where: { id } });
@@ -185,7 +185,7 @@ router.patch(
 // ── Supprimer un problème ─────────────────────────────────────────────
 router.delete(
   '/:id',
-  requirePermission('tickets.manage', ['ADMIN']),
+  requirePermission('problems.manage', ['ADMIN']),
   async (req, res) => {
     const id = Number(req.params.id);
     const existing = await prisma.problem.findUnique({ where: { id }, include: { _count: { select: { tickets: true } } } });
@@ -222,7 +222,7 @@ router.get('/:id/tickets', async (req, res) => {
 // ── Lier un ticket à un problème ──────────────────────────────────────
 router.post(
   '/:id/link-ticket',
-  requirePermission('tickets.manage', ['ADMIN', 'HOTLINE', 'TECHNICIAN']),
+  requirePermission('problems.manage', ['ADMIN', 'HOTLINE']),
   [body('ticketId').isInt()],
   async (req, res) => {
     const errors = validationResult(req);
@@ -254,7 +254,7 @@ router.post(
 // ── Délier un ticket d'un problème ────────────────────────────────────
 router.delete(
   '/:id/unlink-ticket/:ticketId',
-  requirePermission('tickets.manage', ['ADMIN', 'HOTLINE', 'TECHNICIAN']),
+  requirePermission('problems.manage', ['ADMIN', 'HOTLINE']),
   async (req, res) => {
     const problemId = Number(req.params.id);
     const ticketId = Number(req.params.ticketId);
@@ -282,7 +282,7 @@ router.get('/:id/followups', async (req, res) => {
 
 router.post(
   '/:id/followups',
-  requirePermission('tickets.manage', ['ADMIN', 'HOTLINE', 'TECHNICIAN']),
+  requirePermission('problems.manage', ['ADMIN', 'HOTLINE']),
   [body('content').notEmpty().trim()],
   async (req, res) => {
     const errors = validationResult(req);

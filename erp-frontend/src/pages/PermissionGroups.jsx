@@ -345,7 +345,7 @@ export default function PermissionGroups() {
             <motion.button
               whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
               onClick={() => { setShowForm(v => !v); setError(''); }}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white text-xs font-bold shadow-md shadow-purple-500/20"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl btn-primary text-xs font-bold shadow-md"
             >
               {showForm ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
               <span className="hidden sm:inline">{showForm ? 'Fermer' : 'Nouveau groupe'}</span>
@@ -428,8 +428,7 @@ export default function PermissionGroups() {
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting}
-                  className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white text-xs font-bold shadow-md shadow-purple-500/20 disabled:opacity-50"
+                  disabled={submitting}                   className="px-4 py-1.5 rounded-xl btn-primary text-xs font-bold shadow-md disabled:opacity-50"
                 >
                   {submitting ? 'Création…' : 'Créer le groupe'}
                 </button>
@@ -580,8 +579,7 @@ export default function PermissionGroups() {
                   <motion.button
                     whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
                     onClick={() => saveGroupDetail(openGroup)}
-                    disabled={savingDetail || (detailForm.name === openGroup.name && detailForm.description === (openGroup.description || ''))}
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white text-xs font-bold shadow-md shadow-purple-500/20 disabled:opacity-40"
+                    disabled={savingDetail || (detailForm.name === openGroup.name && detailForm.description === (openGroup.description || ''))}                     className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl btn-primary text-xs font-bold shadow-md disabled:opacity-40"
                   >
                     <Check className="w-3.5 h-3.5" />
                     {savingDetail ? 'Enregistrement...' : 'Enregistrer'}

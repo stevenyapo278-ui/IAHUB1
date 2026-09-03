@@ -7,6 +7,7 @@ import {
   Sparkles, ExternalLink, Send, ArrowRight, Shield, Check, X,
   Bell, BookOpen, Edit3, Tags, HelpCircle, TrendingUp, Search,
 } from 'lucide-react';
+import { staggerContainer, staggerItem } from '../utils/animations';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid,
 } from 'recharts';
@@ -447,7 +448,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   }
 
   const noResultsBlock = (
-    <div className="p-12 text-center rounded-3xl border border-dashed border-outline-variant/40 bg-surface-container-lowest space-y-3">
+    <div className="p-12 text-center bento-card border-dashed space-y-3">
       <Search className="w-12 h-12 text-on-surface-variant/40 mx-auto" />
       <h3 className="text-base font-bold text-on-surface">Aucun résultat pour cette recherche</h3>
       <p className="text-xs text-on-surface-variant max-w-md mx-auto">
@@ -462,7 +463,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-outline-variant/30 pb-6">
         <div className="space-y-1">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/20">
+            <div className="p-2.5 rounded-2xl bg-primary text-on-primary shadow-md">
               <ShieldCheck className="w-6 h-6" />
             </div>
             <div>
@@ -479,7 +480,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
         <button
           onClick={() => loadAllData(true)}
           disabled={refreshing}
-          className="p-2.5 rounded-2xl border border-outline-variant/40 bg-surface-container-lowest hover:bg-surface-container text-on-surface transition-all shrink-0 self-start sm:self-auto flex items-center gap-2 text-xs font-bold"
+          className="p-2.5 rounded-xl border border-outline-variant/40 bg-surface-container-lowest hover:bg-surface-container text-on-surface transition-all shrink-0 self-start sm:self-auto flex items-center gap-2 text-xs font-bold"
           title="Rafraîchir"
         >
           <RefreshCw className={`w-4 h-4 text-primary ${refreshing ? 'animate-spin' : ''}`} />
@@ -620,12 +621,12 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
           {loading ? (
             <div className="space-y-3">
               {[1, 2, 3].map((i) => (
-                <div key={i} className="h-32 rounded-3xl bg-surface-container-low animate-pulse border border-outline-variant/20" />
+                <div key={i} className="h-32 bento-card animate-pulse" />
               ))}
             </div>
           ) : filteredList.length === 0 ? (
             activeList.length === 0 ? (
-              <div className="p-12 text-center rounded-3xl border border-dashed border-outline-variant/40 bg-surface-container-lowest space-y-3">
+              <div className="p-12 text-center bento-card border-dashed space-y-3">
                 <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto" />
                 <h3 className="text-base font-bold text-on-surface">Aucun ticket en attente d'approbation</h3>
                 <p className="text-xs text-on-surface-variant max-w-md mx-auto">
@@ -640,7 +641,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
               {paginatedList.map((t) => (
                 <div
                   key={t.id}
-                  className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6 hover:border-outline-variant/60 transition-all"
+                  className="bento-card p-6 flex flex-col md:flex-row md:items-center justify-between gap-6 hover-interactive transition-all"
                 >
                   <div className="space-y-2 flex-1 min-w-0">
                     <div className="flex items-center gap-2.5 flex-wrap">
@@ -716,12 +717,12 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
           {loading ? (
             <div className="space-y-3">
               {[1, 2, 3].map((i) => (
-                <div key={i} className="h-40 rounded-3xl bg-surface-container-low animate-pulse border border-outline-variant/20" />
+                <div key={i} className="h-40 bento-card animate-pulse" />
               ))}
             </div>
           ) : filteredList.length === 0 ? (
             activeList.length === 0 ? (
-              <div className="p-12 text-center rounded-3xl border border-dashed border-outline-variant/40 bg-surface-container-lowest space-y-3">
+              <div className="p-12 text-center bento-card border-dashed space-y-3">
                 <MailCheck className="w-12 h-12 text-purple-500 mx-auto" />
                 <h3 className="text-base font-bold text-on-surface">Aucune réponse IA en attente de validation</h3>
                 <p className="text-xs text-on-surface-variant max-w-md mx-auto">
@@ -739,7 +740,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                 return (
                   <div
                     key={draft.id}
-                    className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-4 hover:border-outline-variant/60 transition-all"
+                    className="bento-card p-6 space-y-4 hover-interactive transition-all"
                   >
                     {/* Header draft avec BADGE ÉTAT GLPI */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-outline-variant/20 pb-3">
@@ -841,8 +842,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                         </button>
 
                         <button
-                          onClick={() => handleApproveDraft(draft)}
-                          className="px-4 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-md shadow-purple-500/20 transition-all flex items-center gap-1.5"
+                          onClick={() => handleApproveDraft(draft)}                           className="px-4 py-2 rounded-xl text-xs font-bold btn-primary shadow-md transition-all flex items-center gap-1.5"
                         >
                           <Send className="w-4 h-4" />
                           <span>Approuver & Envoyer</span>
@@ -863,12 +863,12 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
           {loading ? (
             <div className="space-y-3">
               {[1, 2, 3].map((i) => (
-                <div key={i} className="h-32 rounded-3xl bg-surface-container-low animate-pulse border border-outline-variant/20" />
+                <div key={i} className="h-32 bento-card animate-pulse" />
               ))}
             </div>
           ) : filteredList.length === 0 ? (
             activeList.length === 0 ? (
-              <div className="p-12 text-center rounded-3xl border border-dashed border-outline-variant/40 bg-surface-container-lowest space-y-3">
+              <div className="p-12 text-center bento-card border-dashed space-y-3">
                 <Bell className="w-12 h-12 text-amber-500 mx-auto" />
                 <h3 className="text-base font-bold text-on-surface">Aucune relance automatique en attente</h3>
                 <p className="text-xs text-on-surface-variant max-w-md mx-auto">
@@ -883,7 +883,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                 return (
                   <div
                     key={draft.id}
-                    className="rounded-3xl border border-amber-200 dark:border-amber-500/20 bg-surface-container-lowest p-6 shadow-sm space-y-4 hover:border-amber-300 dark:hover:border-amber-500/30 transition-all"
+                    className="bento-card p-6 space-y-4 hover-interactive transition-all" style={{ borderColor: 'color-mix(in srgb, var(--skin-warning) 25%, var(--color-border))' }}
                   >
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-outline-variant/20 pb-3">
                       <div className="flex items-center gap-3">
@@ -921,8 +921,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                         Ne pas envoyer
                       </button>
                       <button
-                        onClick={() => handleApproveDraft(draft)}
-                        className="px-4 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white shadow-md shadow-amber-500/20 transition-all flex items-center gap-1.5"
+                        onClick={() => handleApproveDraft(draft)}                         className="px-4 py-2 rounded-xl text-xs font-bold btn-secondary shadow-md transition-all flex items-center gap-1.5"
                       >
                         <Send className="w-4 h-4" />
                         <span>Approuver & Envoyer</span>
@@ -946,8 +945,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             </p>
             <button
               onClick={handleAnalyzeClosures}
-              disabled={analysis.running}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-cyan-600 to-teal-600 text-white shadow-md shadow-cyan-500/20 transition-all hover:brightness-110 disabled:opacity-50 cursor-pointer shrink-0"
+              disabled={analysis.running}               className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold btn-primary shadow-md transition-all disabled:opacity-50 cursor-pointer shrink-0"
               title="Analyser l'état des tickets ouverts pour détecter les clôtures à proposer"
             >
               <RefreshCw className={`w-4 h-4 ${analysis.running ? 'animate-spin' : ''}`} />
@@ -959,7 +957,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
           {analysis.results && (
             <div className="space-y-4">
               {/* Résumé rapide */}
-              <div className="rounded-3xl border border-cyan-200 dark:border-cyan-500/20 bg-surface-container-lowest p-6 shadow-sm space-y-4">
+              <div className="bento-card p-6 space-y-4" style={{ borderColor: 'color-mix(in srgb, #06b6d4 20%, var(--color-border))' }}>
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-cyan-500" />
                   <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface">
@@ -975,11 +973,11 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                     <p className="text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">À vérifier</p>
                     <p className="text-2xl font-extrabold text-amber-600 dark:text-amber-400">{analysis.results.needsReviewResults?.length || 0}</p>
                   </div>
-                  <div className="p-3 rounded-2xl border border-outline-variant/30 bg-surface-container">
+                  <div className="p-3 rounded-xl border border-outline-variant/30 bg-surface-container">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Ignorés</p>
                     <p className="text-2xl font-extrabold text-on-surface">{analysis.results.skippedResults?.length || 0}</p>
                   </div>
-                  <div className="p-3 rounded-2xl border border-outline-variant/30 bg-surface-container">
+                  <div className="p-3 rounded-xl border border-outline-variant/30 bg-surface-container">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Non résolus</p>
                     <p className="text-2xl font-extrabold text-on-surface">{analysis.results.results?.filter(r => r.action === 'SKIP_NOT_RESOLVED').length || 0}</p>
                   </div>
@@ -994,7 +992,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                     Probablement résolus — clôture suggérée ({analysis.results.suggestedResults.length})
                   </h4>
                   {analysis.results.suggestedResults.map((r) => (
-                    <div key={r.ticketId} className="rounded-2xl border border-emerald-200 dark:border-emerald-500/20 bg-surface-container-lowest p-4 shadow-sm space-y-3">
+                    <div key={r.ticketId} className="rounded-xl border bg-surface-container-lowest p-4 shadow-sm space-y-3" style={{ borderColor: 'color-mix(in srgb, #10b981 20%, var(--color-border))' }}>
                       <div className="flex items-start justify-between gap-3">
                         <div className="space-y-1 flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
@@ -1057,7 +1055,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                     À vérifier — confiance faible ou incertain ({analysis.results.needsReviewResults.length})
                   </h4>
                   {analysis.results.needsReviewResults.map((r) => (
-                    <div key={r.ticketId} className="rounded-2xl border border-amber-200 dark:border-amber-500/20 bg-surface-container-lowest p-4 shadow-sm space-y-2">
+                    <div key={r.ticketId} className="rounded-xl border bg-surface-container-lowest p-4 shadow-sm space-y-2" style={{ borderColor: 'color-mix(in srgb, #f59e0b 20%, var(--color-border))' }}>
                       <div className="flex items-start justify-between gap-3">
                         <div className="space-y-1 flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
@@ -1121,7 +1119,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
 
           {/* Suivi de l'évolution : file actuelle + tendance 30 jours */}
           {closureStats && (
-            <div className="rounded-3xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm space-y-5">
+            <div className="bento-card p-6 space-y-5">
               <div className="flex items-center gap-2">
                 <TrendingUp className="w-4 h-4 text-cyan-500" />
                 <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface">
@@ -1199,12 +1197,12 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
           {loading ? (
             <div className="space-y-3">
               {[1, 2, 3].map((i) => (
-                <div key={i} className="h-32 rounded-3xl bg-surface-container-low animate-pulse border border-outline-variant/20" />
+                <div key={i} className="h-32 bento-card animate-pulse" />
               ))}
             </div>
           ) : filteredList.length === 0 ? (
             activeList.length === 0 ? (
-              <div className="p-12 text-center rounded-3xl border border-dashed border-outline-variant/40 bg-surface-container-lowest space-y-3">
+              <div className="p-12 text-center bento-card border-dashed space-y-3">
                 <CheckCircle2 className="w-12 h-12 text-cyan-500 mx-auto" />
                 <h3 className="text-base font-bold text-on-surface">Aucune clôture suggérée en attente</h3>
                 <p className="text-xs text-on-surface-variant max-w-md mx-auto">
@@ -1218,7 +1216,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
               {paginatedList.map((t) => (
                 <div
                   key={t.id}
-                  className="rounded-3xl border border-cyan-200 dark:border-cyan-500/20 bg-surface-container-lowest p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6 hover:border-cyan-300 dark:hover:border-cyan-500/30 transition-all"
+                  className="bento-card p-6 flex flex-col md:flex-row md:items-center justify-between gap-6 hover-interactive transition-all" style={{ borderColor: 'color-mix(in srgb, #06b6d4 25%, var(--color-border))' }}
                 >
                   <div className="space-y-2 flex-1 min-w-0">
                     <div className="flex items-center gap-2.5 flex-wrap">
@@ -1300,12 +1298,12 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
           {loading ? (
             <div className="space-y-3">
               {[1, 2, 3].map((i) => (
-                <div key={i} className="h-36 rounded-3xl bg-surface-container-low animate-pulse border border-outline-variant/20" />
+                <div key={i} className="h-36 bento-card animate-pulse" />
               ))}
             </div>
           ) : filteredList.length === 0 ? (
             activeList.length === 0 ? (
-              <div className="p-12 text-center rounded-3xl border border-dashed border-outline-variant/40 bg-surface-container-lowest space-y-3">
+              <div className="p-12 text-center bento-card border-dashed space-y-3">
                 <BookOpen className="w-12 h-12 text-emerald-500 mx-auto" />
                 <h3 className="text-base font-bold text-on-surface">Aucun brouillon de connaissance en attente</h3>
                 <p className="text-xs text-on-surface-variant max-w-md mx-auto">
@@ -1320,7 +1318,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                 return (
                   <div
                     key={draft.id}
-                    className="rounded-3xl border border-emerald-200 dark:border-emerald-500/20 bg-surface-container-lowest p-6 shadow-sm space-y-4 hover:border-emerald-300 dark:hover:border-emerald-500/30 transition-all"
+                    className="bento-card p-6 space-y-4 hover-interactive transition-all" style={{ borderColor: 'color-mix(in srgb, #10b981 25%, var(--color-border))' }}
                   >
                     {/* Header */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-outline-variant/20 pb-3">
@@ -1466,8 +1464,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                             Rejeter
                           </button>
                           <button
-                            onClick={() => openKbApproveModal(draft)}
-                            className="px-4 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-md shadow-emerald-500/20 transition-all flex items-center gap-1.5"
+                            onClick={() => openKbApproveModal(draft)}                             className="px-4 py-2 rounded-xl text-xs font-bold btn-primary shadow-md transition-all flex items-center gap-1.5"
                           >
                             <CheckCircle2 className="w-4 h-4" />
                             <span>Publier dans la KB</span>
@@ -1553,8 +1550,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
               <button
                 type="button"
                 disabled={approvingKb}
-                onClick={handleKbApproveConfirm}
-                className="px-5 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-lg shadow-emerald-500/20 transition-all flex items-center gap-2"
+                onClick={handleKbApproveConfirm}                 className="px-5 py-2.5 rounded-xl text-xs font-bold btn-primary shadow-lg transition-all flex items-center gap-2"
               >
                 <CheckCircle2 className="w-4 h-4" />
                 <span>{approvingKb ? 'Publication en cours...' : 'Confirmer la publication'}</span>
@@ -1730,8 +1726,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
               <button
                 type="button"
                 disabled={approvingCombined}
-                onClick={handleConfirmCombinedApproval}
-                className="px-5 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-lg shadow-emerald-500/20 transition-all flex items-center gap-2"
+                onClick={handleConfirmCombinedApproval}                 className="px-5 py-2.5 rounded-xl text-xs font-bold btn-primary shadow-lg transition-all flex items-center gap-2"
               >
                 <CheckCircle2 className="w-4 h-4" />
                 <span>{approvingCombined ? 'Approbation en cours...' : (autonomousMode ? 'Approuver + Envoyer Réponse' : 'Approuver GLPI + Envoyer Réponse')}</span>

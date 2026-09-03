@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Search, Loader2, SearchX, ArrowUp, ArrowDown, CornerDownLeft, Ticket, User, Users } from 'lucide-react';
 import api from '../api/client';
 
 export default function GlobalSearch() {
@@ -71,9 +72,9 @@ export default function GlobalSearch() {
 
   // Résultats plats pour la navigation clavier — on garde les sections séparées pour l'affichage
   const sections = [
-    { type: 'ticket', label: 'Tickets', items: results.tickets, icon: 'confirmation_number' },
-    { type: 'user', label: 'Utilisateurs', items: results.users, icon: 'person' },
-    { type: 'team', label: 'Équipes', items: results.teams, icon: 'groups' },
+    { type: 'ticket', label: 'Tickets', items: results.tickets, icon: Ticket },
+    { type: 'user', label: 'Utilisateurs', items: results.users, icon: User },
+    { type: 'team', label: 'Équipes', items: results.teams, icon: Users },
   ];
 
   const allResults = sections.flatMap((section) =>
@@ -138,36 +139,27 @@ export default function GlobalSearch() {
               }}
             >
               {/* Input */}
-              <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: 'var(--color-outline-variant)' }}>
-                <span className="material-symbols-outlined" style={{ fontSize: '20px', color: 'var(--color-on-surface-variant)' }}>
-                  search
-                </span>
+              <div className="flex items-center gap-3 px-4 py-3.5 border-b" style={{ borderColor: 'var(--color-outline-variant)' }}>
+                <Search className="w-4.5 h-4.5 shrink-0" style={{ color: 'var(--color-on-surface-variant)' }} />
                 <input
                   ref={inputRef}
                   type="text"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder="Rechercher tickets, utilisateurs, equipes..."
-                  className="flex-1 bg-transparent border-none outline-none text-[14px] font-medium"
+                  placeholder="Rechercher tickets, utilisateurs, équipes..."
+                  className="flex-1 bg-transparent border-none outline-none text-sm font-medium"
                   style={{ color: 'var(--color-on-surface)' }}
                 />
                 {loading && (
-                  <motion.span
-                    animate={{ rotate: 360 }}
-                    transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
-                    className="material-symbols-outlined text-on-surface-variant"
-                    style={{ fontSize: '18px' }}
-                  >
-                    sync
-                  </motion.span>
+                  <Loader2 className="w-4 h-4 animate-spin" style={{ color: 'var(--color-on-surface-variant)' }} />
                 )}
                 <kbd
-                  className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium"
+                  className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-semibold"
                   style={{
-                    color: 'var(--color-on-surface-variant)',
+                    color: 'var(--color-muted-foreground)',
                     backgroundColor: 'var(--color-surface-container)',
-                    border: '1px solid var(--color-outline-variant)',
+                    border: '1px solid var(--color-border)',
                   }}
                 >
                   ESC
@@ -177,25 +169,32 @@ export default function GlobalSearch() {
               {/* Results */}
               <div className="max-h-[300px] overflow-y-auto p-2 space-y-0.5">
                 {query.trim() && allResults.length === 0 && !loading && (
-                  <div className="flex flex-col items-center gap-2 py-8 text-on-surface-variant">
-                    <span className="material-symbols-outlined text-[32px] opacity-40">search_off</span>
-                    <p className="text-[13px] font-medium">Aucun résultat trouvé</p>
-                    <p className="text-[11px] opacity-60">Essayez un autre terme de recherche</p>
+                  <div className="flex flex-col items-center gap-2 py-10">
+                    <SearchX className="w-8 h-8 opacity-30" style={{ color: 'var(--color-muted-foreground)' }} />
+                    <p className="text-[13px] font-medium" style={{ color: 'var(--color-on-surface-variant)' }}>Aucun résultat trouvé</p>
+                    <p className="text-[11px]" style={{ color: 'var(--color-muted-foreground)' }}>Essayez un autre terme de recherche</p>
                   </div>
                 )}
 
                 {!query.trim() && (
-                  <div className="py-8 text-center">
-                    <p className="text-[13px] font-medium" style={{ color: 'var(--color-on-surface-variant)' }}>
+                  <div className="py-10 text-center">
+                    <p className="text-[13px] font-medium" style={{ color: 'var(--color-muted-foreground)' }}>
                       Tapez pour rechercher...
                     </p>
-                    <div className="flex items-center justify-center gap-3 mt-3 text-[10px]" style={{ color: 'var(--color-on-surface-variant)' }}>
-                      <span className="flex items-center gap-1">
-                        <kbd className="px-1.5 py-0.5 rounded text-[9px] font-bold" style={{ backgroundColor: 'var(--color-surface-container)', border: '1px solid var(--color-outline-variant)' }}>↑↓</kbd>
+                    <div className="flex items-center justify-center gap-4 mt-3 text-[10px]" style={{ color: 'var(--color-muted-foreground)' }}>
+                      <span className="flex items-center gap-1.5">
+                        <kbd className="inline-flex items-center justify-center w-5 h-5 rounded text-[9px] font-mono font-bold" style={{ backgroundColor: 'var(--color-surface-container)', border: '1px solid var(--color-border)' }}>
+                          <ArrowUp className="w-2.5 h-2.5" />
+                        </kbd>
+                        <kbd className="inline-flex items-center justify-center w-5 h-5 rounded text-[9px] font-mono font-bold" style={{ backgroundColor: 'var(--color-surface-container)', border: '1px solid var(--color-border)' }}>
+                          <ArrowDown className="w-2.5 h-2.5" />
+                        </kbd>
                         Naviguer
                       </span>
-                      <span className="flex items-center gap-1">
-                        <kbd className="px-1.5 py-0.5 rounded text-[9px] font-bold" style={{ backgroundColor: 'var(--color-surface-container)', border: '1px solid var(--color-outline-variant)' }}>↵</kbd>
+                      <span className="flex items-center gap-1.5">
+                        <kbd className="inline-flex items-center justify-center w-5 h-5 rounded text-[9px] font-mono font-bold" style={{ backgroundColor: 'var(--color-surface-container)', border: '1px solid var(--color-border)' }}>
+                          <CornerDownLeft className="w-2.5 h-2.5" />
+                        </kbd>
                         Ouvrir
                       </span>
                     </div>
@@ -234,41 +233,44 @@ export default function GlobalSearch() {
   );
 }
 
+const SECTION_ICONS = {
+  ticket: Ticket,
+  user: User,
+  team: Users,
+};
+
 function ResultItemComponent({ item, isSelected, onSelect }) {
   if (!item) return null;
 
-  const iconMap = {
-    ticket: 'confirmation_number',
-    user: 'person',
-    team: 'groups',
-  };
+  const SectionIcon = SECTION_ICONS[item.type] || Search;
 
-  const badgeColor = item.priority === 'P1' ? 'text-red-500' 
-    : item.priority === 'P2' ? 'text-amber-500' 
-    : 'text-transparent';
+  const badgeColor = item.priority === 'P1' ? 'text-red-500 bg-red-500/10 border-red-500/20' 
+    : item.priority === 'P2' ? 'text-amber-500 bg-amber-500/10 border-amber-500/20'
+    : item.priority === 'P3' ? 'text-blue-500 bg-blue-500/10 border-blue-500/20'
+    : '';
 
   return (
     <motion.button
       initial={{ opacity: 0, y: -4 }}
       animate={{ opacity: 1, y: 0 }}
       onClick={() => onSelect(item)}
-      className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors text-[13px]"
+      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all text-[13px]"
       style={{
-        backgroundColor: isSelected ? 'var(--color-surface-container-high)' : 'transparent',
+        backgroundColor: isSelected ? 'color-mix(in srgb, var(--color-primary) 8%, transparent)' : 'transparent',
         color: 'var(--color-on-surface)',
       }}
     >
-      <span className="material-symbols-outlined shrink-0" style={{ fontSize: '16px', width: '16px', color: 'var(--color-on-surface-variant)' }}>
-        {iconMap[item.type] || 'search'}
-      </span>
+      <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: 'var(--color-surface-container)' }}>
+        <SectionIcon className="w-4 h-4" style={{ color: 'var(--color-muted-foreground)' }} />
+      </div>
       <div className="flex-1 min-w-0">
         <span className="font-medium truncate block">{item.label}</span>
         {item.sublabel && (
-          <span className="text-[11px]" style={{ color: 'var(--color-on-surface-variant)' }}>{item.sublabel}</span>
+          <span className="text-[11px]" style={{ color: 'var(--color-muted-foreground)' }}>{item.sublabel}</span>
         )}
       </div>
       {item.type === 'ticket' && item.priority && (
-        <span className={`text-[10px] font-bold uppercase ${badgeColor}`}>
+        <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-md border ${badgeColor}`}>
           {item.priority}
         </span>
       )}

@@ -43,7 +43,7 @@ export default function Toggle({ checked, onChange, disabled = false, label }) {
         />
         <X
           strokeWidth={3}
-          className={`absolute h-3 w-3 text-slate-400 transition-all duration-200 ${
+          className={`absolute h-3 w-3 text-on-surface-variant transition-all duration-200 ${
             checked ? 'scale-50 opacity-0' : 'scale-100 opacity-100'
           }`}
         />
