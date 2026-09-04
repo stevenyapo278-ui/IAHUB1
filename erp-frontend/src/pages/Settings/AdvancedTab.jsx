@@ -4,6 +4,7 @@ import api from '../../api/client';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import Toggle from '../../components/Toggle';
 import { Component } from 'react';
+import { SettingRow, IntervalRow, inputClass, itemVariants } from './SettingsComponents';
 
 // Mini ErrorBoundary pour isoler chaque section — si une section plante, les autres continuent de fonctionner
 class SectionErrorBoundary extends Component {
@@ -39,58 +40,7 @@ class SectionErrorBoundary extends Component {
   }
 }
 
-const inputClass =
-  'bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300';
 
-function SettingRow({ title, description, checked, onChange, disabled }) {
-  return (
-    <motion.div
-      variants={itemVariants}
-      whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
-      className="bento-card flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-lg p-lg"
-    >
-      <div className="min-w-0 flex-1">
-        <div className="font-headline-sm text-headline-sm text-on-surface font-semibold break-words">{title}</div>
-        <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 break-words">{description}</p>
-      </div>
-      <div className="shrink-0">
-        <Toggle checked={checked} onChange={onChange} disabled={disabled} />
-      </div>
-    </motion.div>
-  );
-}
-
-function IntervalRow({ title, description, value, onChange, disabled, max, unit }) {
-  return (
-    <motion.div
-      variants={itemVariants}
-      whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
-      className="bento-card flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-lg p-lg"
-    >
-      <div className="min-w-0 flex-1">
-        <div className="font-headline-sm text-headline-sm text-on-surface font-semibold break-words">{title}</div>
-        <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 break-words">{description}</p>
-      </div>
-      <div className="flex items-center gap-sm shrink-0">
-        <input
-          type="number"
-          min={0}
-          max={max}
-          value={value}
-          onChange={(e) => onChange(Math.max(0, Math.min(max, Number(e.target.value) || 0)))}
-          disabled={disabled}
-          className={`${inputClass} w-24 text-center disabled:opacity-50`}
-        />
-        <span className="font-body-sm text-body-sm text-on-surface-variant font-medium">{unit}</span>
-      </div>
-    </motion.div>
-  );
-}
-
-const itemVariants = {
-  hidden: { opacity: 0, y: 12 },
-  visible: { opacity: 1, y: 0 },
-};
 
 export default function AdvancedTab() {
   const [settings, setSettings] = useState(null);
@@ -486,7 +436,7 @@ export default function AdvancedTab() {
         </p>
 
         <SectionErrorBoundary label="Seuils SLA">
-          <SlaThresholdsSection saving={saving} setSaving={setSaving} setError={setError} />
+          <SlaThresholdsSection slaHours={settings?.slaHours} saving={saving} setSaving={setSaving} setError={setError} />
         </SectionErrorBoundary>
       </div>
 
@@ -756,25 +706,20 @@ const PRIORITY_LABELS = {
   P4: 'P4 — Basse',
 };
 
-function SlaThresholdsSection({ saving, setSaving, setError }) {
-  const [slaHours, setSlaHours] = useState(() => JSON.parse(JSON.stringify(DEFAULT_SLA_HOURS)));
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    api.get('/advanced-settings').then(({ data }) => {
-      const stored = data.slaHours && typeof data.slaHours === 'object' ? data.slaHours : {};
-      const merged = JSON.parse(JSON.stringify(DEFAULT_SLA_HOURS));
-      for (const p of Object.keys(DEFAULT_SLA_HOURS)) {
-        const e = stored[p];
-        if (e && typeof e === 'object') {
-          if (typeof e.response === 'number' && e.response >= 0) merged[p].response = e.response;
-          if (typeof e.resolution === 'number' && e.resolution >= 0) merged[p].resolution = e.resolution;
-        }
+function SlaThresholdsSection({ slaHours: slaHoursProp, saving, setSaving, setError }) {
+  const [slaHours, setSlaHours] = useState(() => {
+    const stored = slaHoursProp && typeof slaHoursProp === 'object' ? slaHoursProp : {};
+    const merged = JSON.parse(JSON.stringify(DEFAULT_SLA_HOURS));
+    for (const p of Object.keys(DEFAULT_SLA_HOURS)) {
+      const e = stored[p];
+      if (e && typeof e === 'object') {
+        if (typeof e.response === 'number' && e.response >= 0) merged[p].response = e.response;
+        if (typeof e.resolution === 'number' && e.resolution >= 0) merged[p].resolution = e.resolution;
       }
-      setSlaHours(merged);
-      setLoaded(true);
-    }).catch(() => {});
-  }, []);
+    }
+    return merged;
+  });
+  const [loaded] = useState(true);
 
   async function save() {
     setSaving(true);
@@ -787,8 +732,6 @@ function SlaThresholdsSection({ saving, setSaving, setError }) {
       setSaving(false);
     }
   }
-
-  if (!loaded) return null;
 
   return (
     <motion.div variants={itemVariants} className="bento-card p-lg">

@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../api/client';
-import Toggle from '../../components/Toggle';
 import {
   Mail, UserCheck, AlertTriangle, Clock, RefreshCw, CheckCircle2,
   TrendingUp, Shield, Send, Bell, Volume2, MousePointer2,
@@ -20,37 +19,7 @@ import {
   setBrowserNotifEnabled,
   requestBrowserNotifPermission,
 } from '../../utils/browserNotification';
-
-const itemVariants = {
-  hidden: { opacity: 0, y: 12 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.3, ease: [0.16, 1, 0.3, 1] } },
-};
-
-const inputClass =
-  'bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300';
-
-function SettingRow({ title, description, icon: Icon, checked, onChange, disabled }) {
-  return (
-    <motion.div
-      variants={itemVariants}
-      whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
-      className="bento-card flex items-center gap-4 p-lg"
-    >
-      {Icon && (
-        <div className="p-2 rounded-xl bg-primary/10 border border-primary/20 text-primary shrink-0">
-          <Icon className="w-5 h-5" />
-        </div>
-      )}
-      <div className="min-w-0 flex-1">
-        <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">{title}</div>
-        <p className="font-body-sm text-body-sm text-on-surface-variant mt-1 break-words">{description}</p>
-      </div>
-      <div className="shrink-0">
-        <Toggle checked={checked} onChange={onChange} disabled={disabled} />
-      </div>
-    </motion.div>
-  );
-}
+import { SettingRow, inputClass, itemVariants } from './SettingsComponents';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TOGGLES EMAILS PAR TYPE (déjà existants)

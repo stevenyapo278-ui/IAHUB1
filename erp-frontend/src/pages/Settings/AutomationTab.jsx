@@ -2,55 +2,7 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../api/client';
 import { sanitizeHtml } from '../../utils/sanitize';
-import Toggle from '../../components/Toggle';
-
-const inputClass =
-  'bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300';
-
-function SettingRow({ title, description, checked, onChange, disabled }) {
-  return (
-    <motion.div
-      variants={itemVariants}
-      whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
-      className="bento-card flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-lg p-lg"
-    >
-      <div className="min-w-0 flex-1">
-        <div className="font-headline-sm text-headline-sm text-on-surface font-semibold break-words">{title}</div>
-        <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 break-words">{description}</p>
-      </div>
-      <div className="shrink-0">
-        <Toggle checked={checked} onChange={onChange} disabled={disabled} />
-      </div>
-    </motion.div>
-  );
-}
-
-function IntervalRow({ title, description, value, onChange, disabled, max, unit }) {
-  return (
-    <motion.div
-      variants={itemVariants}
-      whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
-      className="bento-card flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-lg p-lg"
-    >
-      <div className="min-w-0 flex-1">
-        <div className="font-headline-sm text-headline-sm text-on-surface font-semibold break-words">{title}</div>
-        <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 break-words">{description}</p>
-      </div>
-      <div className="flex items-center gap-sm shrink-0">
-        <input
-          type="number"
-          min={0}
-          max={max}
-          value={value}
-          onChange={(e) => onChange(Math.max(0, Math.min(max, Number(e.target.value) || 0)))}
-          disabled={disabled}
-          className={`${inputClass} w-24 text-center disabled:opacity-50`}
-        />
-        <span className="font-body-sm text-body-sm text-on-surface-variant font-medium">{unit}</span>
-      </div>
-    </motion.div>
-  );
-}
+import { SettingRow, IntervalRow, inputClass, itemVariants } from './SettingsComponents';
 
 const DEFAULT_ACK_MESSAGE = 'Nous avons bien reçu votre demande de support et un ticket a été créé automatiquement.';
 const DEFAULT_SIGNATURE = '<p>Cordialement,<br>Support IT</p>';
@@ -74,11 +26,6 @@ function buildAckPreviewHtml(customMessage, signature, logoUrl, logoHeight) {
 <div style="margin-top:24px">${signature || DEFAULT_SIGNATURE}${logoHtml}</div>
 `.trim();
 }
-
-const itemVariants = {
-  hidden: { opacity: 0, y: 12 },
-  visible: { opacity: 1, y: 0 },
-};
 
 export default function AutomationTab() {
   const [settings, setSettings] = useState(null);
