@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../api/client';
 import Toggle from '../../components/Toggle';
 import {
-  Mail, Bot, UserCheck, AlertTriangle, Clock, RefreshCw, CheckCircle2,
+  Mail, UserCheck, AlertTriangle, Clock, RefreshCw, CheckCircle2,
   TrendingUp, Shield, Send, Bell, Volume2, MousePointer2,
 } from 'lucide-react';
 import {
@@ -75,6 +75,7 @@ const EMAIL_TOGGLES = [
 
 export default function EmailNotificationsTab() {
   const [settings, setSettings] = useState(null);
+  const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
   // ── Récapitulatif quotidien ──
@@ -89,16 +90,17 @@ export default function EmailNotificationsTab() {
   const [browserNotif, setBrowserNotif] = useState(isBrowserNotifEnabled());
 
   useEffect(() => {
-    api.get('/system-settings').then(({ data }) => setSettings(data)).catch(() => {});
+    api.get('/system-settings').then(({ data }) => setSettings(data)).catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
   }, []);
 
   async function updateSetting(key, value) {
     setSaving(true);
+    setError('');
     try {
       const { data } = await api.patch('/system-settings', { [key]: value });
       setSettings(data);
     } catch (err) {
-      console.error('Erreur sauvegarde:', err);
+      setError(err.response?.data?.error || 'Erreur lors de la mise à jour');
     } finally {
       setSaving(false);
     }
@@ -167,10 +169,32 @@ export default function EmailNotificationsTab() {
       variants={{ visible: { transition: { staggerChildren: 0.04 } } }}
       className="space-y-xl"
     >
+      <AnimatePresence>
+        {error && (
+          <motion.div
+            key="settings-error"
+            initial={{ opacity: 0, height: 0, y: -8 }}
+            animate={{ opacity: 1, height: 'auto', y: 0 }}
+            exit={{ opacity: 0, height: 0, y: -8 }}
+            transition={{ duration: 0.3 }}
+            className="border border-red-500/20 bg-red-500/5 text-red-500 p-md rounded-xl font-body-md overflow-hidden"
+          >
+            {error}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       {/* SECTION 1 : EMAILS PAR TYPE */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {categories.map((category) => (
+      <div className="space-y-md">
+        <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
+          <span className="material-symbols-outlined text-primary text-2xl">toggle_on</span>
+          <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Activer / Désactiver par type</h4>
+        </div>
+        <p className="text-xs text-on-surface-variant px-1 -mt-2">Choisissez quels emails automatiques sont envoyés. Chaque type correspond à un événement déclencheur dans le cycle de vie d'un ticket.</p>
+
+        {categories.map((category) => (
         <div key={category} className="space-y-3">
           <h3 className="text-xs font-bold uppercase tracking-wider text-on-surface-variant/60 px-1">
             {category}
@@ -190,6 +214,7 @@ export default function EmailNotificationsTab() {
           </div>
         </div>
       ))}
+      </div>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       {/* SECTION 2 : RÉCAPITULATIF QUOTIDIEN & NOTIFICATIONS EMAIL */}
