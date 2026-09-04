@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
-import { NavLink, Outlet, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import {
   LayoutDashboard,
   Ticket,
@@ -87,42 +87,6 @@ const systemItems = [
   { to: '/audit', label: 'Audit système', icon: Shield, color: 'text-amber-400', permission: null, fallbackRoles: ['ADMIN'] },
 ];
 
-const ROUTE_SEMANTICS = {
-  '/': { zone: 'main', idx: 0 },
-  '/portal': { zone: 'main', idx: 1 },
-  '/tickets': { zone: 'main', idx: 1 },
-  '/problems': { zone: 'main', idx: 2 },
-  '/email-drafts': { zone: 'main', idx: 3 },
-  '/inbox': { zone: 'main', idx: 4 },
-  '/knowledge-base': { zone: 'main', idx: 5 },
-  '/teams': { zone: 'org', idx: 0 },
-  '/users': { zone: 'org', idx: 1 },
-  '/technician-stats': { zone: 'org', idx: 2 },
-  '/skills': { zone: 'org', idx: 3 },
-  '/categories': { zone: 'org', idx: 4 },
-  '/locations': { zone: 'org', idx: 5 },
-  '/assets': { zone: 'org', idx: 6 },
-  '/supervision': { zone: 'admin', idx: 0 },
-  '/ai-weekly-reports': { zone: 'admin', idx: 1 },
-  '/prompts': { zone: 'admin', idx: 2 },
-  '/permission-groups': { zone: 'admin', idx: 3 },
-  '/settings': { zone: 'admin', idx: 4 },
-  '/documentation': { zone: 'admin', idx: 5 },
-  '/logs': { zone: 'admin', idx: 6 },
-  '/audit': { zone: 'admin', idx: 7 },
-};
-
-function resolveSemantics(pathname) {
-  if (ROUTE_SEMANTICS[pathname]) return ROUTE_SEMANTICS[pathname];
-  const match = Object.entries(ROUTE_SEMANTICS)
-    .filter(([key]) => key !== '/')
-    .sort(([a], [b]) => b.length - a.length)
-    .find(([key]) => pathname.startsWith(key));
-  return match ? match[1] : null;
-}
-
-const ZONE_ORDER = ['main', 'org', 'admin'];
-
 function getPageBreadcrumb(pathname) {
   const allItems = [...platformItems, ...orgItems, ...systemItems];
   const item = allItems.find((i) => i.to === pathname || (i.to !== '/' && pathname.startsWith(i.to)));
@@ -137,24 +101,6 @@ function getPageBreadcrumb(pathname) {
   if (systemItems.some((i) => i.to === item.to)) section = 'Administration';
   return { section, label: item.label, icon: item.icon, color: item.color };
 }
-
-const pageVariants = {
-  initial: ({ direction: dir, axis }) => ({
-    [axis]: dir > 0 ? 24 : dir < 0 ? -24 : 0,
-    opacity: 0,
-  }),
-  animate: {
-    x: 0,
-    y: 0,
-    opacity: 1,
-    transition: { duration: 0.35, ease: [0.16, 1, 0.3, 1] },
-  },
-  exit: ({ direction: dir, axis }) => ({
-    [axis]: dir > 0 ? -12 : dir < 0 ? 12 : 0,
-    opacity: 0,
-    transition: { duration: 0.2, ease: [0.4, 0, 1, 1] },
-  }),
-};
 
 export default function MainLayout() {
   const { user, logout } = useAuth();
@@ -248,8 +194,6 @@ export default function MainLayout() {
     (item) => location.pathname === item.to || location.pathname.startsWith(item.to + '/')
   );
 
-  const navigationType = useNavigationType();
-  const [transition, setTransition] = useState({ direction: 1, axis: 'y' });
   const prevPathRef = useRef(location.pathname);
 
   useEffect(() => {
@@ -259,26 +203,8 @@ export default function MainLayout() {
   }, [user, location.pathname, location.search]);
 
   useEffect(() => {
-    const prev = resolveSemantics(prevPathRef.current);
-    const curr = resolveSemantics(location.pathname);
-    let dir = 1;
-    let axis = 'y';
-    if (prev && curr) {
-      if (prev.zone === curr.zone) {
-        axis = 'y';
-        dir = navigationType === 'POP' ? (curr.idx < prev.idx ? -1 : 1) : (curr.idx > prev.idx ? 1 : -1);
-      } else {
-        axis = 'x';
-        const prevZoneIdx = ZONE_ORDER.indexOf(prev.zone);
-        const currZoneIdx = ZONE_ORDER.indexOf(curr.zone);
-        dir = navigationType === 'POP' ? (currZoneIdx < prevZoneIdx ? -1 : 1) : (currZoneIdx > prevZoneIdx ? 1 : -1);
-      }
-    } else {
-      dir = 1;
-    }
-    setTransition({ direction: dir, axis });
     prevPathRef.current = location.pathname;
-  }, [location.pathname, navigationType]);
+  }, [location.pathname]);
 
   const isSidebarExpanded = sidebarPinned || sidebarHovered;
   const sidebarW = isSidebarExpanded ? 256 : 80;
@@ -559,19 +485,15 @@ export default function MainLayout() {
           className="flex-1 flex flex-col min-h-0 min-w-0 relative bg-inherit"
           style={{ backgroundColor: 'var(--color-background)' }}
         >
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.div
-              key={location.pathname}
-              variants={pageVariants}
-              initial="initial"
-              animate="animate"
-              exit="exit"
-              custom={transition}
-              className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden"
-            >
-              <Outlet />
-            </motion.div>
-          </AnimatePresence>
+          {/* Pas d'AnimatePresence ici : mode="wait" bloquait le montage
+              de la nouvelle page jusqu'à la fin de l'animation de sortie
+              (0.2s), retardant le useEffect de chargement des données.
+              Comme Katalyst, on utilise Suspense + Suspense directement.
+              Les transitions internes (slides) restent gérées par
+              AnimatePresence dans chaque page si besoin. */}
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+            <Outlet />
+          </div>
         </main>
       </div>
 
