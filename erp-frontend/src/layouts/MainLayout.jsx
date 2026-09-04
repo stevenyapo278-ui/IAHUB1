@@ -282,7 +282,7 @@ export default function MainLayout() {
   }, [location.pathname, navigationType]);
 
   const isSidebarExpanded = sidebarPinned || sidebarHovered;
-  const sidebarW = isSidebarExpanded ? 240 : 64;
+  const sidebarW = isSidebarExpanded ? 256 : 80;
 
   function toggleSidebarPin() {
     setSidebarPinned((prev) => {
@@ -401,13 +401,39 @@ export default function MainLayout() {
           <div className="sidebar-user-avatar">
             {user?.fullName?.charAt(0)?.toUpperCase() || '?'}
           </div>
-          <div className="sidebar-user-info min-w-0">
+          <div className="sidebar-user-info min-w-0 flex-1">
             <p className="text-xs font-medium text-on-surface truncate">{user?.fullName}</p>
             <p className="text-[10px] text-on-surface-variant truncate capitalize">{user?.role?.toLowerCase()}</p>
           </div>
 
+          {isSidebarExpanded && (
+            <div className="flex items-center gap-0.5 shrink-0 sidebar-user-info">
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowUserMenu(false); navigate('/settings'); }}
+                className="rounded-lg p-1.5 text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors"
+                title="Paramètres"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowUserMenu(false); handleLogout(); }}
+                className="rounded-lg p-1.5 text-red-400/80 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                title="Déconnexion"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
           {showUserMenu && (
             <div className="sidebar-dropdown" style={{ bottom: '100%', left: 0, top: 'auto', marginBottom: 8 }}>
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowUserMenu(false); navigate('/settings'); }}
+                className="sidebar-dropdown-item flex items-center gap-2"
+              >
+                <Settings className="w-4 h-4" />
+                <span>Paramètres</span>
+              </button>
               <button
                 onClick={(e) => { e.stopPropagation(); setShowUserMenu(false); handleLogout(); }}
                 className="sidebar-dropdown-item text-red-400/80 hover:text-red-400 flex items-center gap-2"

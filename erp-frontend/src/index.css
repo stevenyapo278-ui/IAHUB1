@@ -1250,33 +1250,29 @@ html.theme-animating *::after {
   left: 0;
   bottom: 0;
   z-index: 40;
-  width: 64px;
-  background: color-mix(in srgb, var(--color-surface-container-lowest) 85%, transparent);
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  width: 80px;
+  background: var(--color-surface-container-lowest);
   border-right: 1px solid var(--color-outline-variant);
   display: flex;
   flex-direction: column;
-  transition: width 0.28s cubic-bezier(0.25, 0.1, 0.25, 1), box-shadow 0.3s ease;
+  transition: width 0.2s ease, box-shadow 0.2s ease;
   overflow: hidden;
 }
 
 .dark .app-sidebar {
-  background: color-mix(in srgb, var(--color-surface-container-lowest) 80%, transparent);
-  backdrop-filter: blur(24px) saturate(1.5);
-  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  background: var(--color-surface-container-lowest);
   border-right-color: var(--color-outline-variant);
 }
 
 .app-sidebar:hover,
 .app-sidebar.expanded {
-  width: 240px;
-  box-shadow: 4px 0 24px -4px rgba(0, 0, 0, 0.08);
+  width: 256px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
 }
 
 .dark .app-sidebar:hover,
 .dark .app-sidebar.expanded {
-  box-shadow: 4px 0 32px -4px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
 }
 
 /* ── Logo ─────────────────────────────────────────────────────────────────── */
@@ -1285,7 +1281,7 @@ html.theme-animating *::after {
   align-items: center;
   gap: 10px;
   padding: 0 14px;
-  height: 56px;
+  height: 64px;
   flex-shrink: 0;
   overflow: hidden;
   white-space: nowrap;
@@ -1296,11 +1292,11 @@ html.theme-animating *::after {
 }
 
 .sidebar-logo-icon {
-  width: 32px;
-  height: 32px;
-  min-width: 32px;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
   background: var(--color-primary);
-  border-radius: 9px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1316,7 +1312,7 @@ html.theme-animating *::after {
   opacity: 0;
   max-width: 0;
   overflow: hidden;
-  transition: opacity 0.2s ease 0.06s, max-width 0.28s cubic-bezier(0.25, 0.1, 0.25, 1);
+  transition: opacity 0.15s ease, max-width 0.2s ease;
   white-space: nowrap;
 }
 
@@ -1350,7 +1346,7 @@ html.theme-animating *::after {
   opacity: 0;
   max-width: 0;
   overflow: hidden;
-  transition: opacity 0.2s ease, max-width 0.28s cubic-bezier(0.25, 0.1, 0.25, 1);
+  transition: opacity 0.15s ease, max-width 0.2s ease;
 }
 
 .app-sidebar:hover .sidebar-group-label,
@@ -1375,6 +1371,8 @@ html.theme-animating *::after {
   white-space: nowrap;
   overflow: visible;
   height: 36px;
+  padding-left: 12px;
+  padding-right: 12px;
 }
 
 .sidebar-item:any-link,
@@ -1410,34 +1408,26 @@ html.theme-animating *::after {
   text-decoration: none;
 }
 
-/* Indicateur pill à gauche (style Katalyst) */
+/* Indicateur pill actif — fond coloré, pas de barre */
 .sidebar-item.active::before {
-  content: '';
-  position: absolute;
-  left: -6px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3px;
-  height: 16px;
-  border-radius: 0 4px 4px 0;
-  background: var(--color-primary);
+  display: none;
 }
 
 .sidebar-item-icon {
-  min-width: 44px;
-  width: 44px;
+  min-width: 40px;
+  width: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: min-width 0.28s cubic-bezier(0.25, 0.1, 0.25, 1);
+  transition: min-width 0.2s ease;
   flex-shrink: 0;
   color: var(--color-on-surface-variant);
 }
 
 .app-sidebar:hover .sidebar-item-icon,
 .app-sidebar.expanded .sidebar-item-icon {
-  min-width: 40px;
-  width: 40px;
+  min-width: 36px;
+  width: 36px;
 }
 
 .sidebar-item.active .sidebar-item-icon {
@@ -1448,7 +1438,7 @@ html.theme-animating *::after {
   opacity: 0;
   max-width: 0;
   overflow: hidden;
-  transition: opacity 0.2s ease 0.04s, max-width 0.28s cubic-bezier(0.25, 0.1, 0.25, 1);
+  transition: opacity 0.15s ease, max-width 0.2s ease;
   white-space: nowrap;
   font-size: 13px;
   font-weight: 450;
@@ -1478,16 +1468,18 @@ html.theme-animating *::after {
   background: transparent;
   color: var(--color-on-surface-variant);
   cursor: pointer;
-  transition: color 0.15s ease, opacity 0.2s ease;
-  opacity: 0;
+  transition: color 0.15s ease, opacity 0.15s ease;
+  opacity: 1;
   position: relative;
   z-index: 1;
 }
 .sidebar-pin-btn:hover {
   color: var(--color-on-surface);
 }
-.app-sidebar:hover .sidebar-pin-btn,
 .app-sidebar.expanded .sidebar-pin-btn {
+  opacity: 0;
+}
+.app-sidebar.expanded .sidebar-pin-btn:hover {
   opacity: 1;
 }
 
@@ -1511,10 +1503,10 @@ html.theme-animating *::after {
 }
 
 .sidebar-user-avatar {
-  width: 32px;
-  height: 32px;
-  min-width: 32px;
-  border-radius: 8px;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  border-radius: 50%;
   background: color-mix(in srgb, var(--color-primary) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-primary) 20%, transparent);
   display: flex;
@@ -1535,7 +1527,7 @@ html.theme-animating *::after {
   opacity: 0;
   max-width: 0;
   overflow: hidden;
-  transition: opacity 0.2s ease, max-width 0.28s cubic-bezier(0.25, 0.1, 0.25, 1);
+  transition: opacity 0.15s ease, max-width 0.2s ease;
   white-space: nowrap;
 }
 
@@ -1550,7 +1542,6 @@ html.theme-animating *::after {
   position: fixed;
   z-index: 200;
   background: var(--color-surface-container-lowest);
-  backdrop-filter: blur(8px);
   border: 1px solid var(--color-outline-variant);
   color: var(--color-on-surface);
   padding: 5px 10px;
@@ -1564,14 +1555,14 @@ html.theme-animating *::after {
 
 /* ── Content offset ───────────────────────────────────────────────────────── */
 .sidebar-layout-content {
-  padding-left: 64px;
+  padding-left: 80px;
   margin-left: 0;
-  transition: padding-left 0.28s cubic-bezier(0.25, 0.1, 0.25, 1);
+  transition: padding-left 0.2s ease;
 }
 
 .app-sidebar:hover ~ .sidebar-layout-content,
 .app-sidebar.expanded ~ .sidebar-layout-content {
-  padding-left: 240px;
+  padding-left: 256px;
 }
 
 /* ── Dropdown (sections compactes) ────────────────────────────────────────── */
@@ -1581,11 +1572,9 @@ html.theme-animating *::after {
   top: 0;
   width: 200px;
   background: var(--color-surface-container-lowest);
-  backdrop-filter: blur(20px) saturate(1.3);
-  -webkit-backdrop-filter: blur(20px) saturate(1.3);
   border: 1px solid var(--color-outline-variant);
   border-radius: 12px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
   padding: 4px;
   display: flex;
   flex-direction: column;
@@ -2155,11 +2144,11 @@ html.theme-animating *::after {
 
 /* Min sidebar: icon-only, expand on hover */
 html[data-min-sidebar] .app-sidebar {
-  width: 64px;
+  width: 80px;
 }
 html[data-min-sidebar] .app-sidebar:hover {
-  width: 240px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+  width: 256px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
 }
 html[data-min-sidebar] .app-sidebar:not(:hover) .sidebar-item-label,
 html[data-min-sidebar] .app-sidebar:not(:hover) .sidebar-group-label,
@@ -2169,10 +2158,10 @@ html[data-min-sidebar] .app-sidebar:not(:hover) .sidebar-logo-text {
   max-width: 0;
 }
 html[data-min-sidebar] .sidebar-layout-content {
-  padding-left: 64px;
+  padding-left: 80px;
 }
 html[data-min-sidebar] .app-sidebar:hover ~ .sidebar-layout-content {
-  padding-left: 240px;
+  padding-left: 256px;
 }
 
 /* Header only mode: hide sidebar */
