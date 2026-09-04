@@ -26,11 +26,11 @@ import { RefreshCw } from 'lucide-react';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
-// Thème injecté une seule fois au chargement du module (pas à chaque mount)
-if (typeof document !== 'undefined') ensureThemeInjected();
-
 // ── Thème Katalyst-inspired ────────────────────────────────────────────────
 const AG_GRID_THEME_ID = 'katalyst-datagrid-theme';
+
+// Thème injecté une seule fois au chargement du module (pas à chaque mount)
+if (typeof document !== 'undefined') ensureThemeInjected();
 
 function ensureThemeInjected() {
   if (typeof document === 'undefined') return;
