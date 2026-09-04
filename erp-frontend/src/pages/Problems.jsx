@@ -202,78 +202,40 @@ function PriorityBadge({ priority }) {
   );
 }
 
-function ProblemRow({ problem, onClick }) {
-  const countTickets = problem._count?.tickets || 0;
-  return (
-    <tr
-      onClick={() => onClick(problem.id)}
-      className="hover:bg-surface-container-high/50 cursor-pointer transition-colors group"
-    >
-      <td className="px-4 py-3 font-semibold text-sm text-on-surface group-hover:text-primary truncate max-w-[300px]">
-        {problem.title}
-      </td>
-      <td className="px-4 py-3"><StatusBadge status={problem.status} /></td>
-      <td className="px-4 py-3"><PriorityBadge priority={problem.priority} /></td>
-      <td className="px-4 py-3 text-xs text-on-surface-variant">
-        {problem.category || '—'}
-      </td>
-      <td className="px-4 py-3">
-        {problem.assignedTo ? (
-          <span className="inline-flex items-center gap-1.5 text-xs text-on-surface">
-            <span className="w-5 h-5 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[9px] font-bold">
-              {problem.assignedTo.fullName?.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase()}
-            </span>
-            {problem.assignedTo.fullName}
-          </span>
-        ) : (
-          <span className="text-xs text-on-surface-variant italic">Non assigné</span>
-        )}
-      </td>
-      <td className="px-4 py-3 text-center">
-        <span className="inline-flex items-center gap-1 text-xs text-on-surface-variant">
-          <Link2 className="w-3 h-3" />
-          {countTickets}
-        </span>
-      </td>
-      <td className="px-4 py-3 text-xs text-on-surface-variant whitespace-nowrap">
-        {new Date(problem.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
-      </td>
-    </tr>
-  );
-}
 
-const problemColumns = [
-  { field: 'title', headerName: 'TITRE', flex: 2, minWidth: 250, cellRenderer: (p) => (
-    <span className="text-sm font-semibold text-on-surface truncate">{p.value}</span>
-  ) },
-  { field: 'status', headerName: 'STATUT', width: 150, cellRenderer: (p) => <StatusBadge status={p.value} /> },
-  { field: 'priority', headerName: 'PRIORITÉ', width: 130, cellRenderer: (p) => <PriorityBadge priority={p.value} /> },
-  { field: 'category', headerName: 'CATÉGORIE', width: 140, valueFormatter: (p) => p.value || '—' },
-  { field: 'assignedTo', headerName: 'ASSIGNÉ À', width: 180, valueGetter: (p) => p.data?.assignedTo?.fullName || '', cellRenderer: (p) => (
-    p.value ? (
-      <span className="inline-flex items-center gap-1.5 text-xs text-on-surface">
-        <span className="w-5 h-5 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[9px] font-bold">
-          {p.value.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()}
-        </span>
-        {p.value}
-      </span>
-    ) : (
-      <span className="text-xs text-on-surface-variant italic">Non assigné</span>
-    )
-  ) },
-  { field: '_count', headerName: 'TICKETS', width: 90, valueGetter: (p) => p.data?._count?.tickets || 0, cellRenderer: (p) => (
-    <span className="inline-flex items-center gap-1 text-xs text-on-surface-variant justify-center w-full">
-      <Link2 className="w-3 h-3" />{p.value}
-    </span>
-  ) },
-  { field: 'createdAt', headerName: 'CRÉÉ LE', width: 120, valueFormatter: (p) => p.value ? new Date(p.value).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : '—' },
-];
 
 export default function Problems() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const settings = useSystemSettings();
   const canManage = hasPermission(user, 'tickets.manage', settings);
+
+  const problemColumns = useMemo(() => [
+    { field: 'title', headerName: 'TITRE', flex: 2, minWidth: 250, cellRenderer: (params) => (
+      <span className="text-sm font-semibold text-on-surface truncate">{params.value}</span>
+    ) },
+    { field: 'status', headerName: 'STATUT', width: 150, cellRenderer: (params) => <StatusBadge status={params.value} /> },
+    { field: 'priority', headerName: 'PRIORITÉ', width: 130, cellRenderer: (params) => <PriorityBadge priority={params.value} /> },
+    { field: 'category', headerName: 'CATÉGORIE', width: 140, valueFormatter: (params) => params.value || '—' },
+    { field: 'assignedTo', headerName: 'ASSIGNÉ À', width: 180, valueGetter: (params) => params.data?.assignedTo?.fullName || '', cellRenderer: (params) => (
+      params.value ? (
+        <span className="inline-flex items-center gap-1.5 text-xs text-on-surface">
+          <span className="w-5 h-5 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[9px] font-bold">
+            {params.value.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()}
+          </span>
+          {params.value}
+        </span>
+      ) : (
+        <span className="text-xs text-on-surface-variant italic">Non assigné</span>
+      )
+    ) },
+    { field: '_count', headerName: 'TICKETS', width: 90, valueGetter: (params) => params.data?._count?.tickets || 0, cellRenderer: (params) => (
+      <span className="inline-flex items-center gap-1 text-xs text-on-surface-variant justify-center w-full">
+        <Link2 className="w-3 h-3" />{params.value}
+      </span>
+    ) },
+    { field: 'createdAt', headerName: 'CRÉÉ LE', width: 120, valueFormatter: (params) => params.value ? new Date(params.value).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : '—' },
+  ], []);
 
   const [problems, setProblems] = useState([]);
   const [total, setTotal] = useState(0);
