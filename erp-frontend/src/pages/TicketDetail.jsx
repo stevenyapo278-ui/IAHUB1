@@ -24,7 +24,7 @@ import {
   ChevronsLeft, ChevronLeft, ChevronsRight, Eye, Copy, ShieldAlert, ShieldOff, Loader2
 } from 'lucide-react';
 import {
-  STATUS_OPTIONS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS,
+  MANUAL_STATUS_OPTIONS, STATUS_LABELS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS,
   URGENCY_IMPACT_OPTIONS, PRIORITY_CONFIG, STATUS_CONFIG, initials
 } from '../constants/tickets';
 
@@ -2063,8 +2063,8 @@ export default function TicketDetail() {
                   disabled={!canAssign || savingField === 'status'}
                   onChange={(e) => updateField('status', e.target.value)}
                 >
-                  {STATUS_OPTIONS.map((s) => (
-                    <option key={s} value={s}>{s}</option>
+                  {MANUAL_STATUS_OPTIONS.map((s) => (
+                    <option key={s} value={s}>{STATUS_LABELS[s]}</option>
                   ))}
                 </select>
               </div>

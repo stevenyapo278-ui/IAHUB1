@@ -59,7 +59,7 @@ import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
 import SlaBadge from '../components/SlaBadge';
 import DataGrid from '../components/DataGrid';
 import {
-  STATUS_OPTIONS, STATUS_LABELS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS, URGENCY_IMPACT_OPTIONS,
+  STATUS_OPTIONS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS, URGENCY_IMPACT_OPTIONS,
   STATUS_CONFIG,
 } from '../constants/tickets';
 
@@ -889,7 +889,7 @@ export default function Tickets() {
     if (e) e.stopPropagation();
     try {
       await api.patch(`/tickets/${ticketId}`, { status: newStatus });
-      toast.success(`Statut : ${newStatus}`);
+      toast.success(`Statut : ${STATUS_LABELS[newStatus] || newStatus}`);
       refreshTicketsSilently();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Échec mise à jour statut');
@@ -1014,7 +1014,7 @@ export default function Tickets() {
     handleQuickStatusChange,
     askDeleteOne,
     navigate,
-    STATUS_OPTIONS,
+    STATUS_OPTIONS: MANUAL_STATUS_OPTIONS,
     STATUS_LABELS,
   }), [debouncedSearch, canAssign, canDelete, handleQuickStatusChange, askDeleteOne, navigate]);
 
@@ -1349,7 +1349,7 @@ export default function Tickets() {
                 <select value={bulkChanges.status} onChange={(e) => setBulkChanges((b) => ({ ...b, status: e.target.value }))}
                   className="text-xs font-semibold px-2 py-1.5 rounded-lg border border-border/40 bg-background text-foreground cursor-pointer focus:outline-none">
                   <option value="">Statut…</option>
-                  {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                  {MANUAL_STATUS_OPTIONS.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
                 </select>
                 <select value={bulkChanges.priority} onChange={(e) => setBulkChanges((b) => ({ ...b, priority: e.target.value }))}
                   className="text-xs font-semibold px-2 py-1.5 rounded-lg border border-border/40 bg-background text-foreground cursor-pointer focus:outline-none">

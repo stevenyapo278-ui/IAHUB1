@@ -1,6 +1,7 @@
 import { Flame, AlertTriangle, Info, ArrowDown, Sparkles, Radio, Calendar, Clock, CheckCircle2 } from 'lucide-react';
 
 export const STATUS_OPTIONS = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'SOLVED', 'CLOSED'];
+export const MANUAL_STATUS_OPTIONS = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'SOLVED'];
 export const STATUS_LABELS = {
   NEW: 'Nouveau',
   OPEN: 'En cours',

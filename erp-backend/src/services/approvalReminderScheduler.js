@@ -8,7 +8,9 @@ async function processApprovalReminders() {
   const delayMinutes = settings.approvalReminderMinutes || 30;
   if (delayMinutes <= 0) return;
 
-  const cutoff = new Date(Date.now() - delayMinutes * 60 * 1000);
+  const MIN_INTERVAL_MS = 60 * 60 * 1000;
+  const effectiveDelayMs = Math.max(delayMinutes, 60) * 60 * 1000;
+  const cutoff = new Date(Date.now() - effectiveDelayMs);
 
   const pendingTickets = await prisma.ticket.findMany({
     where: {
