@@ -264,6 +264,7 @@ function ProviderModal({ provider, onClose, onUpdate }) {
                   pagination={false}
                   headerHeight={36}
                   rowHeight={40}
+                  height={Math.min(400, Math.max(120, (provider.models?.length || 0) * 40 + 40))}
                   noRowsText="Aucun modèle configuré"
                 />
               </div>
@@ -332,6 +333,7 @@ function ProviderModal({ provider, onClose, onUpdate }) {
                   pagination={false}
                   headerHeight={36}
                   rowHeight={40}
+                  height={Math.min(400, Math.max(120, (provider.keys?.length || 0) * 40 + 40))}
                   noRowsText="Aucune clé configurée"
                 />
               </div>
