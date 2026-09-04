@@ -1,0 +1,11 @@
+-- AlterTable: ajout des toggles d'envoi d'emails par type de notification
+ALTER TABLE "SystemSettings" ADD COLUMN "emailAcknowledgementEnabled" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "SystemSettings" ADD COLUMN "emailKnownIncidentEnabled" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "SystemSettings" ADD COLUMN "emailAssignmentEnabled" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "SystemSettings" ADD COLUMN "emailSlaBreachEnabled" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "SystemSettings" ADD COLUMN "emailDueDateBreachEnabled" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "SystemSettings" ADD COLUMN "emailStatusChangeEnabled" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "SystemSettings" ADD COLUMN "emailResolvedEnabled" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "SystemSettings" ADD COLUMN "emailEscalationEnabled" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "SystemSettings" ADD COLUMN "emailMajorIncidentResolvedEnabled" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "SystemSettings" ADD COLUMN "emailApprovalEnabled" BOOLEAN NOT NULL DEFAULT true;
