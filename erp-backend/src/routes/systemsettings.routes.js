@@ -100,6 +100,7 @@ router.patch(
     body('emailEscalationEnabled').optional().isBoolean(),
     body('emailMajorIncidentResolvedEnabled').optional().isBoolean(),
     body('emailApprovalEnabled').optional().isBoolean(),
+    body('solvedAutoCloseDays').optional().isInt({ min: 0, max: 365 }),
   ],
   async (req, res) => {
     const errors = validationResult(req);

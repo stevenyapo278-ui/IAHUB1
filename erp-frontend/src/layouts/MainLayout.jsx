@@ -171,6 +171,9 @@ export default function MainLayout() {
   const [showLayoutSettings, setShowLayoutSettings] = useState(false);
   const [showCustomizer, setShowCustomizer] = useState(false);
   const [sidebarHovered, setSidebarHovered] = useState(false);
+  const [sidebarPinned, setSidebarPinned] = useState(() => {
+    try { return localStorage.getItem('sidebarPinned') === 'true'; } catch { return false; }
+  });
   const [badgeCounts, setBadgeCounts] = useState({ tickets: 0, drafts: 0 });
   const sidebarRef = useRef(null);
   const userMenuRef = useRef(null);
@@ -277,8 +280,7 @@ export default function MainLayout() {
     prevPathRef.current = location.pathname;
   }, [location.pathname, navigationType]);
 
-  const isMinSidebar = layoutSettings.minSidebar;
-  const isSidebarExpanded = isMinSidebar ? false : sidebarHovered;
+  const isSidebarExpanded = sidebarPinned || sidebarHovered;
   const sidebarW = isSidebarExpanded ? 256 : 80;
 
   const currentPage = getPageBreadcrumb(location.pathname);
@@ -295,7 +297,7 @@ export default function MainLayout() {
         ref={sidebarRef}
         className={`app-sidebar ${isSidebarExpanded ? 'expanded' : ''}`}
         onMouseEnter={() => setSidebarHovered(true)}
-        onMouseLeave={() => { setSidebarHovered(false); setShowOrgMenu(false); setShowSystemMenu(false); }}
+        onMouseLeave={() => { if (!sidebarPinned) setSidebarHovered(false); setShowOrgMenu(false); setShowSystemMenu(false); }}
       >
         {/* Logo */}
         <div className="sidebar-logo flex items-center gap-3">
@@ -305,6 +307,26 @@ export default function MainLayout() {
           <span className="sidebar-logo-text">
             IA Hub
           </span>
+          {/* Bouton épingler/détacher la sidebar */}
+          {isSidebarExpanded && (
+            <button
+              onClick={() => {
+                const next = !sidebarPinned;
+                setSidebarPinned(next);
+                try { localStorage.setItem('sidebarPinned', String(next)); } catch {}
+              }}
+              className="ml-auto shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-colors"
+              title={sidebarPinned ? 'Détacher la barre latérale' : 'Épingler la barre latérale'}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                {sidebarPinned ? (
+                  <><line x1="12" y1="17" x2="12" y2="22" /><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" /></>
+                ) : (
+                  <><line x1="12" y1="17" x2="12" y2="22" /><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" /><line x1="3" y1="3" x2="21" y2="21" strokeOpacity="0.5" /></>
+                )}
+              </svg>
+            </button>
+          )}
         </div>
 
         {/* Navigation */}
