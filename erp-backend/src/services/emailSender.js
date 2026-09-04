@@ -224,11 +224,12 @@ ${signature || DEFAULT_EMAIL_SIGNATURE}
 
 // Envoie un accusé de réception automatique lors de la création d'un nouveau ticket
 async function sendAcknowledgement({ ticketId, glpiTicketId, toEmail, toName, originalSubject }) {
+  const settings = await getSystemSettings();
+  if (settings.emailAcknowledgementEnabled === false) return null;
   // On garde le sujet original de l'utilisateur (juste préfixé du numéro de ticket), pour ne pas
   // casser le fil de conversation côté client mail et rester reconnaissable pour l'utilisateur.
   const displayId = glpiTicketId || ticketId || 'N/A';
   const subject = `[Ticket #${displayId}] ${originalSubject}`;
-  const settings = await getSystemSettings();
   const signature = await getEmailSignature();
   const bodyHtml = buildAcknowledgementHtml({ toName, glpiTicketId, ticketId, originalSubject, customMessage: settings.acknowledgementMessage, signature });
   return sendEmail({ ticketId, to: toEmail, subject, bodyHtml, saveAsMessage: true });
@@ -278,6 +279,8 @@ ${signature || DEFAULT_EMAIL_SIGNATURE}
 
 // Envoie une notification "incident déjà connu" quand un site est rattaché à un incident existant
 async function sendKnownIncidentNotification({ ticketId, glpiTicketId, toEmail, toName, originalSubject, isMajor, impactedCount }) {
+  const settings = await getSystemSettings();
+  if (settings.emailKnownIncidentEnabled === false) return null;
   const displayId = glpiTicketId || ticketId || 'N/A';
   const subject = `[Ticket #${displayId}] ${originalSubject}`;
   const signature = await getEmailSignature();
@@ -287,6 +290,8 @@ async function sendKnownIncidentNotification({ ticketId, glpiTicketId, toEmail, 
 
 // Notifie tous les sites impactés lors de la résolution d'un incident majeur
 async function notifyMajorIncidentResolved({ ticketId, glpiTicketId, ticketTitle, impactedSites }) {
+  const settings = await getSystemSettings();
+  if (settings.emailMajorIncidentResolvedEnabled === false) return null;
   const subject = `[Ticket #${glpiTicketId}] ${ticketTitle}`;
   const signature = await getEmailSignature();
   const bodyHtml = `
@@ -310,6 +315,8 @@ ${signature}
 // Utilisé par glpiTicketCreator.js et emailPipeline.js après autoAssignTechnicianWithAI,
 // uniquement si le réglage notifyTechnicianOnAssignment est activé.
 async function sendAssignmentNotificationEmail({ ticketId, glpiTicketId, ticketTitle, priority, technicianEmail, technicianName, category }) {
+  const settings = await getSystemSettings();
+  if (settings.emailAssignmentEnabled === false) return null;
   const subject = `[Ticket #${glpiTicketId || ticketId}] Nouvelle assignation — ${ticketTitle}`;
   const signature = await getEmailSignature();
   const priorityLabel = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' }[priority] || priority;
@@ -332,6 +339,8 @@ ${signature || DEFAULT_EMAIL_SIGNATURE}
 
 // Notifie le technicien assigné qu'un ticket a dépassé son délai de réponse SLA.
 async function sendSlaBreachEmail({ ticketId, ticketTitle, priority, slaResponseDueAt, technicianEmail, technicianName }) {
+  const settings = await getSystemSettings();
+  if (settings.emailSlaBreachEnabled === false) return null;
   const subject = `[SLA] Dépassement — Ticket #${ticketId} : ${ticketTitle}`;
   const signature = await getEmailSignature();
   const priorityLabel = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' }[priority] || priority;
@@ -354,6 +363,8 @@ ${signature || DEFAULT_EMAIL_SIGNATURE}
 
 // Notifie le technicien assigné qu'un ticket a dépassé son échéance manuelle (dueDate).
 async function sendDueDateEmail({ ticketId, ticketTitle, priority, dueDate, technicianEmail, technicianName }) {
+  const settings = await getSystemSettings();
+  if (settings.emailDueDateBreachEnabled === false) return null;
   const subject = `[Échéance] Dépassement — Ticket #${ticketId} : ${ticketTitle}`;
   const signature = await getEmailSignature();
   const priorityLabel = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' }[priority] || priority;
@@ -376,6 +387,8 @@ ${signature || DEFAULT_EMAIL_SIGNATURE}
 
 // Notifie le demandeur par email du changement de statut de son ticket (portail REQUESTER + suivi).
 async function sendTicketStatusNotification({ ticketId, ticketTitle, status, priority, category, recipientEmail, recipientName }) {
+  const settings = await getSystemSettings();
+  if (settings.emailStatusChangeEnabled === false) return null;
   const STATUS_LABELS = {
     NEW: 'Nouveau',
     OPEN: 'En cours (Attribué)',
@@ -408,6 +421,8 @@ ${signature || DEFAULT_EMAIL_SIGNATURE}
 // Alerte un admin OU le technicien assigné qu'un ticket a été escaladé (automatiquement ou
 // manuellement). Lien direct vers le ticket pour une prise en charge rapide.
 async function sendEscalationEmail({ ticketId, ticketTitle, priority, reason, escalationLevel, recipientEmail, recipientName }) {
+  const settings = await getSystemSettings();
+  if (settings.emailEscalationEnabled === false) return null;
   const subject = `[Escalade Niv.${escalationLevel || 1}] Ticket #${ticketId} : ${ticketTitle}`;
   const signature = await getEmailSignature();
   const frontendUrl = resolveFrontendUrl(await getSystemSettings());
@@ -433,6 +448,8 @@ ${signature || DEFAULT_EMAIL_SIGNATURE}
 // Notifie le demandeur que sa demande a été escaladée (prise en charge prioritaire).
 // Lien vers le portail REQUESTER pour suivre sa demande.
 async function sendRequesterEscalationEmail({ ticketId, ticketTitle, priority, reason, escalationLevel, recipientEmail, recipientName }) {
+  const settings = await getSystemSettings();
+  if (settings.emailEscalationEnabled === false) return null;
   const subject = `[Ticket #${ticketId}] Votre demande a été escaladée`;
   const signature = await getEmailSignature();
   const frontendUrl = resolveFrontendUrl(await getSystemSettings());
@@ -551,7 +568,9 @@ ${signature}
 
 // Envoie un email au demandeur quand son ticket est APPROUVÉ (comme GLPI)
 async function sendApprovalNotificationEmail({ ticketId, ticketTitle, status, priority, category, assignedToName, requesterEmail, requesterName, content }) {
-  const frontendUrl = resolveFrontendUrl(await getSystemSettings());
+  const settings = await getSystemSettings();
+  if (settings.emailApprovalEnabled === false) return null;
+  const frontendUrl = resolveFrontendUrl(settings);
   const ticketLink = `${frontendUrl}/tickets/${ticketId}`;
   const signature = await getEmailSignature();
   const priorityLabel = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' }[priority] || priority;
@@ -581,7 +600,9 @@ ${signature}
 
 // Envoie un email au demandeur 10 minutes après la résolution (comme GLPI)
 async function sendResolvedNotificationEmail({ ticketId, ticketTitle, priority, category, assignedToName, requesterEmail, requesterName, content }) {
-  const frontendUrl = resolveFrontendUrl(await getSystemSettings());
+  const settings = await getSystemSettings();
+  if (settings.emailResolvedEnabled === false) return null;
+  const frontendUrl = resolveFrontendUrl(settings);
   const ticketLink = `${frontendUrl}/tickets/${ticketId}`;
   const signature = await getEmailSignature();
   const priorityLabel = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' }[priority] || priority;

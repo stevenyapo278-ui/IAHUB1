@@ -90,6 +90,16 @@ router.patch(
     body('slaHours').optional().isObject(),
     body('slaMonitorIntervalSeconds').optional().isInt({ min: 0, max: 3600 }),
     body('enableAutoCreateSkills').optional().isBoolean(),
+    body('emailAcknowledgementEnabled').optional().isBoolean(),
+    body('emailKnownIncidentEnabled').optional().isBoolean(),
+    body('emailAssignmentEnabled').optional().isBoolean(),
+    body('emailSlaBreachEnabled').optional().isBoolean(),
+    body('emailDueDateBreachEnabled').optional().isBoolean(),
+    body('emailStatusChangeEnabled').optional().isBoolean(),
+    body('emailResolvedEnabled').optional().isBoolean(),
+    body('emailEscalationEnabled').optional().isBoolean(),
+    body('emailMajorIncidentResolvedEnabled').optional().isBoolean(),
+    body('emailApprovalEnabled').optional().isBoolean(),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -114,6 +124,16 @@ router.patch(
     if (req.body.slaHours !== undefined) data.slaHours = req.body.slaHours;
     if (req.body.slaMonitorIntervalSeconds !== undefined) data.slaMonitorIntervalSeconds = req.body.slaMonitorIntervalSeconds;
     if (req.body.solvedAutoCloseDays !== undefined) data.solvedAutoCloseDays = req.body.solvedAutoCloseDays;
+    if (req.body.emailAcknowledgementEnabled !== undefined) data.emailAcknowledgementEnabled = req.body.emailAcknowledgementEnabled;
+    if (req.body.emailKnownIncidentEnabled !== undefined) data.emailKnownIncidentEnabled = req.body.emailKnownIncidentEnabled;
+    if (req.body.emailAssignmentEnabled !== undefined) data.emailAssignmentEnabled = req.body.emailAssignmentEnabled;
+    if (req.body.emailSlaBreachEnabled !== undefined) data.emailSlaBreachEnabled = req.body.emailSlaBreachEnabled;
+    if (req.body.emailDueDateBreachEnabled !== undefined) data.emailDueDateBreachEnabled = req.body.emailDueDateBreachEnabled;
+    if (req.body.emailStatusChangeEnabled !== undefined) data.emailStatusChangeEnabled = req.body.emailStatusChangeEnabled;
+    if (req.body.emailResolvedEnabled !== undefined) data.emailResolvedEnabled = req.body.emailResolvedEnabled;
+    if (req.body.emailEscalationEnabled !== undefined) data.emailEscalationEnabled = req.body.emailEscalationEnabled;
+    if (req.body.emailMajorIncidentResolvedEnabled !== undefined) data.emailMajorIncidentResolvedEnabled = req.body.emailMajorIncidentResolvedEnabled;
+    if (req.body.emailApprovalEnabled !== undefined) data.emailApprovalEnabled = req.body.emailApprovalEnabled;
 
     const updated = await prisma.systemSettings.update({ where: { id: 1 }, data });
 

@@ -683,6 +683,18 @@ model SystemSettings {
   // Relance des tickets en attente d'approbation Hotline (Paramètres > Automatisation).
   approvalReminderMinutes   Int     @default(30) // délai en minutes avant relance des tickets PENDING à la Hotline
 
+  // ── Toggles d'envoi d'emails (Paramètres > Notifications) ──────────────────
+  emailAcknowledgementEnabled     Boolean @default(true)  // accusé de réception automatique
+  emailKnownIncidentEnabled       Boolean @default(true)  // notification "incident déjà connu"
+  emailAssignmentEnabled          Boolean @default(true)  // notification d'assignation au technicien
+  emailSlaBreachEnabled           Boolean @default(true)  // alerte dépassement SLA au technicien
+  emailDueDateBreachEnabled       Boolean @default(true)  // alerte dépassement d'échéance au technicien
+  emailStatusChangeEnabled        Boolean @default(true)  // notification changement de statut au demandeur
+  emailResolvedEnabled            Boolean @default(true)  // notification résolution (différée 10 min) au demandeur
+  emailEscalationEnabled          Boolean @default(true)  // notification d'escalade (admin/tech + demandeur)
+  emailMajorIncidentResolvedEnabled Boolean @default(true) // notification résolution incident majeur aux sites impactés
+  emailApprovalEnabled            Boolean @default(true)  // notification d'approbation au demandeur
+
   updatedAt              DateTime @updatedAt
 }
 

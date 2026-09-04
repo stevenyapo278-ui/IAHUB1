@@ -10,14 +10,16 @@ import AutomationTab from './AutomationTab';
 import AdvancedTab from './AdvancedTab';
 import TemplatesTab from './TemplatesTab';
 import CustomFieldsTab from './CustomFieldsTab';
+import EmailNotificationsTab from './EmailNotificationsTab';
 import PageShell from '../../components/PageShell';
-import { Settings as SettingsIcon, Cpu, Mail, Zap, Globe, Sliders, FileText, ListChecks } from 'lucide-react';
+import { Settings as SettingsIcon, Cpu, Mail, Zap, Globe, Sliders, FileText, ListChecks, Bell } from 'lucide-react';
 
 const BASE_TABS = [
   { id: 'ai', label: 'Intelligence Artificielle', desc: 'Fournisseurs, modèles et clés API Gemini', icon: Cpu, permission: 'settings.ai' },
   { id: 'email', label: 'Comptes Emails', desc: 'Outlook, Microsoft 365, IMAP / SMTP', icon: Mail, permission: 'settings.email' },
   { id: 'other', label: 'Autres intégrations', desc: 'GLPI, Supabase et webhooks n8n', icon: Globe, permission: 'settings.integrations' },
   { id: 'automation', label: 'Automatisation', desc: 'Relances, signatures et alertes', icon: Zap, permission: 'automation.manage' },
+  { id: 'notifications', label: 'Notifications', desc: 'Activer/désactiver les emails par type', icon: Bell, permission: 'automation.manage' },
   { id: 'templates', label: 'Modèles de tickets', desc: 'Modèles réutilisables pour créer des tickets', icon: FileText, permission: 'tickets.assign' },
   { id: 'custom-fields', label: 'Champs personnalisés', desc: 'Champs dynamiques par catégorie (équivalent GLPI Forms)', icon: ListChecks, permission: 'tickets.manage' },
 ];
@@ -104,6 +106,7 @@ export default function Settings() {
                 {activeTab === 'email' && "Configurez les boîtes mail utilisées pour la réception/réponse aux tickets (Outlook / M365, IMAP/SMTP)."}
                 {activeTab === 'other' && "Gérez les autres intégrations externes (Supabase, GLPI) et connectez des webhooks n8n."}
                 {activeTab === 'automation' && "Contrôlez les automatisations IA, accusés de réception, signatures d'email et sons de notification."}
+                {activeTab === 'notifications' && "Activez ou désactivez l'envoi d'emails pour chaque type de notification (accusés de réception, assignations, SLA, résolutions…)."}
                 {activeTab === 'templates' && "Créez et gérez des modèles de tickets réutilisables par l'équipe."}
                 {activeTab === 'custom-fields' && "Définissez des champs personnalisés rendus à la création d'un ticket selon la catégorie (équivalent GLPI Forms)."}
                 {activeTab === 'advanced' && "Réglages système avancés réservés au super-administrateur (intervalles de sync, durées de rétention)."}
@@ -117,6 +120,7 @@ export default function Settings() {
             {activeTab === 'email' && <EmailAccountsTab />}
             {activeTab === 'other' && <OtherApisTab />}
             {activeTab === 'automation' && <AutomationTab />}
+            {activeTab === 'notifications' && <EmailNotificationsTab />}
             {activeTab === 'templates' && <TemplatesTab />}
             {activeTab === 'custom-fields' && <CustomFieldsTab />}
             {activeTab === 'advanced' && user?.role === 'SUPERADMIN' && <AdvancedTab />}
