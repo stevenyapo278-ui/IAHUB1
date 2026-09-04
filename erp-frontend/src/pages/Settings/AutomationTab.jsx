@@ -1,20 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../api/client';
-import {
-  isSoundsEnabled,
-  setSoundsEnabled,
-  getSoundsVolume,
-  setSoundsVolume,
-  isSoundsInteractionEnabled,
-  setSoundsInteractionEnabled,
-} from '../../utils/soundPreference';
-import { playSuccess, playClick, playApproval } from '../../utils/sounds';
-import {
-  isBrowserNotifEnabled,
-  setBrowserNotifEnabled,
-  requestBrowserNotifPermission,
-} from '../../utils/browserNotification';
 import { sanitizeHtml } from '../../utils/sanitize';
 import Toggle from '../../components/Toggle';
 
@@ -98,35 +84,11 @@ export default function AutomationTab() {
   const [settings, setSettings] = useState(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [soundsEnabled, setSoundsEnabledState] = useState(isSoundsEnabled());
-  const [soundsVolume, setSoundsVolumeState] = useState(getSoundsVolume());
-  const [soundsInteraction, setSoundsInteractionState] = useState(isSoundsInteractionEnabled());
-  const [browserNotif, setBrowserNotif] = useState(isBrowserNotifEnabled());
   const [ackMessageDraft, setAckMessageDraft] = useState('');
   const [signatureDraft, setSignatureDraft] = useState('');
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [reminderConfig, setReminderConfig] = useState(null);
   const [reminderSaving, setReminderSaving] = useState(false);
-  const [summaryRecipientInput, setSummaryRecipientInput] = useState('');
-  const [testingSummary, setTestingSummary] = useState(false);
-  const [summaryTestResult, setSummaryTestResult] = useState(null);
-
-  function toggleSounds(value) {
-    setSoundsEnabled(value);
-    setSoundsEnabledState(value);
-    if (value) playSuccess();
-  }
-
-  function changeSoundsVolume(value) {
-    setSoundsVolume(value);
-    setSoundsVolumeState(value);
-  }
-
-  function toggleInteractionSounds(value) {
-    setSoundsInteractionEnabled(value);
-    setSoundsInteractionState(value);
-    if (value) playClick();
-  }
 
   function load() {
     api.get('/system-settings').then(({ data }) => {
@@ -149,34 +111,6 @@ export default function AutomationTab() {
       setError(err.response?.data?.error || 'Erreur lors de la mise à jour');
     } finally {
       setReminderSaving(false);
-    }
-  }
-
-  function addSummaryRecipient() {
-    const value = summaryRecipientInput.trim();
-    if (!value) return;
-    const current = settings.dailySummaryRecipients || [];
-    if (!current.includes(value)) {
-      updateSetting('dailySummaryRecipients', [...current, value]);
-    }
-    setSummaryRecipientInput('');
-  }
-
-  function removeSummaryRecipient(email) {
-    updateSetting('dailySummaryRecipients', (settings.dailySummaryRecipients || []).filter((e) => e !== email));
-  }
-
-  async function testDailySummary() {
-    setTestingSummary(true);
-    setSummaryTestResult(null);
-    setError('');
-    try {
-      const { data } = await api.post('/system-settings/daily-summary/test');
-      setSummaryTestResult(data);
-    } catch (err) {
-      setError(err.response?.data?.error || "Erreur lors de l'envoi de test");
-    } finally {
-      setTestingSummary(false);
     }
   }
 
@@ -254,12 +188,12 @@ export default function AutomationTab() {
       </AnimatePresence>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* SECTION 1 : EMAILS & SIGNATURES */}
+      {/* SECTION 1 : SIGNATURES & ACCUSÉ DE RÉCEPTION */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       <div className="space-y-md">
         <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
           <span className="material-symbols-outlined text-primary text-2xl">mail</span>
-          <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Emails & Communication Client</h4>
+          <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Signatures & Accusé de réception</h4>
         </div>
 
         <motion.div variants={itemVariants} className="bento-card p-lg space-y-md">
@@ -390,7 +324,7 @@ export default function AutomationTab() {
                 <div><span className="font-semibold text-on-surface">Objet :</span> Réception de votre demande - #{ACK_PREVIEW.ticketId}</div>
               </div>
 
-              {/* Mail body styled strictly inside white container for realistic markup */}
+              {/* Mail body */}
               <div className="p-md bg-white text-gray-800 flex-1 overflow-auto font-body-sm leading-relaxed max-h-[310px] min-h-[250px]">
                 <div
                   dangerouslySetInnerHTML={{ __html: sanitizeHtml(buildAckPreviewHtml(ackMessageDraft, signatureDraft, settings.signatureLogoUrl, settings.signatureLogoHeight)) }}
@@ -527,7 +461,7 @@ export default function AutomationTab() {
           </div>
         </div>
 
-        {/* Bloc validation des brouillons : notification et lien */}
+        {/* Bloc validation des brouillons */}
         <div className="space-y-md">
           <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
             <span className="material-symbols-outlined text-primary text-2xl">rate_review</span>
@@ -563,244 +497,6 @@ export default function AutomationTab() {
                 <strong className="text-amber-600 dark:text-amber-400">Relances Auto.</strong>
               </p>
             </motion.div>
-          </div>
-        </div>
-      </div>
-
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* SECTION 4 : NOTIFICATIONS */}
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      <div className="space-y-md">
-        <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
-          <span className="material-symbols-outlined text-primary text-2xl">notifications</span>
-          <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Notifications</h4>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-lg">
-          {/* Colonne gauche : Récapitulatif quotidien + Technicien assigné */}
-          <div className="space-y-md">
-            <SettingRow
-              title="Récapitulatif quotidien"
-              description="Envoie automatiquement un email listant tous les tickets ouverts aux adresses configurées."
-              checked={settings.dailySummaryEnabled}
-              onChange={(v) => updateSetting('dailySummaryEnabled', v)}
-              disabled={saving}
-            />
-
-            <motion.div
-              variants={itemVariants}
-              whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
-              className="bento-card flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-lg p-lg"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">Heure d'envoi</div>
-                <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 font-medium break-words">Heure locale du serveur.</p>
-              </div>
-              <input
-                type="time"
-                value={settings.dailySummaryTime}
-                onChange={(e) => updateSetting('dailySummaryTime', e.target.value)}
-                disabled={saving || !settings.dailySummaryEnabled}
-                className={`${inputClass} disabled:opacity-50`}
-              />
-            </motion.div>
-
-            <motion.div
-              variants={itemVariants}
-              className="bento-card flex flex-col gap-sm p-lg"
-            >
-              <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Destinataires</span>
-              <div className="flex items-center gap-sm">
-                <input
-                  type="email"
-                  value={summaryRecipientInput}
-                  onChange={(e) => setSummaryRecipientInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      addSummaryRecipient();
-                    }
-                  }}
-                  placeholder="adresse@exemple.com"
-                  disabled={saving}
-                  className={`${inputClass} flex-1`}
-                />
-                <motion.button
-                  type="button"
-                  onClick={addSummaryRecipient}
-                  disabled={saving}
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.96 }}
-                  className="px-4 py-2 btn-gradient font-semibold rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm disabled:opacity-50 shrink-0"
-                >
-                  Ajouter
-                </motion.button>
-              </div>
-              {(settings.dailySummaryRecipients || []).length > 0 && (
-                <motion.div
-                  initial="hidden"
-                  animate="visible"
-                  variants={{ visible: { transition: { staggerChildren: 0.03 } } }}
-                  className="flex flex-wrap gap-2 mt-2"
-                >
-                  {settings.dailySummaryRecipients.map((email) => (
-                    <motion.span
-                      key={email}
-                      variants={itemVariants}
-                      layout
-                      className="inline-flex items-center gap-1.5 px-3 py-1 bg-surface-container-high border border-outline-variant/60 rounded-full text-on-surface text-xs font-semibold shadow-sm"
-                    >
-                      {email}
-                      <motion.button
-                        onClick={() => removeSummaryRecipient(email)}
-                        disabled={saving}
-                        whileHover={{ scale: 1.2 }}
-                        whileTap={{ scale: 0.9 }}
-                        className="text-on-surface-variant hover:text-error transition-colors flex items-center"
-                      >
-                        <span className="material-symbols-outlined text-[14px]">close</span>
-                      </motion.button>
-                    </motion.span>
-                  ))}
-                </motion.div>
-              )}
-            </motion.div>
-
-            <motion.div
-              variants={itemVariants}
-              className="bento-card flex flex-col gap-sm p-lg"
-            >
-              <div className="flex items-center justify-between gap-md flex-wrap md:flex-nowrap">
-                <span className="font-body-sm text-body-sm text-on-surface-variant font-medium">
-                  Envoyer un récapitulatif de test maintenant.
-                </span>
-                <motion.button
-                  type="button"
-                  onClick={testDailySummary}
-                  disabled={testingSummary || (settings.dailySummaryRecipients || []).length === 0}
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.96 }}
-                  className="px-4 py-2 border border-outline-variant/60 text-on-surface hover:bg-surface-container-high rounded-xl font-semibold text-body-sm transition-all disabled:opacity-50 shrink-0 shadow-sm"
-                >
-                  {testingSummary ? 'Envoi...' : 'Tester maintenant'}
-                </motion.button>
-              </div>
-              <AnimatePresence>
-                {summaryTestResult && (
-                  <motion.div
-                    key="summary-test-result"
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="p-md rounded-xl border border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 font-body-sm mt-2 overflow-hidden"
-                  >
-                    {summaryTestResult.sent
-                      ? `Envoyé avec succès : ${summaryTestResult.ticketCount} ticket(s) à ${summaryTestResult.recipientCount} destinataire(s).`
-                      : summaryTestResult.reason}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </motion.div>
-
-            <SettingRow
-              title="Email au technicien assigné"
-              description="Envoie un email de notification au technicien lorsqu'un ticket créé par email lui est automatiquement assigné par l'IA."
-              checked={settings.notifyTechnicianOnAssignment}
-              onChange={(v) => updateSetting('notifyTechnicianOnAssignment', v)}
-              disabled={saving}
-            />
-
-            {/* Notification email en cas d'échec de traitement */}
-            <motion.div
-              variants={itemVariants}
-              whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
-              className="bento-card flex flex-col gap-4 p-lg"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="font-headline-sm text-headline-sm text-on-surface font-semibold break-words">Email en cas d'échec IA</div>
-                <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 break-words">
-                  Adresse email de notification quand un email entrant n'a pas pu être traité par l'IA (quota dépassé, erreur provider, etc.).
-                </p>
-              </div>
-              <input
-                type="email"
-                value={settings.emailFailureNotificationEmail || ''}
-                onChange={(e) => updateSetting('emailFailureNotificationEmail', e.target.value || null)}
-                placeholder="admin@exemple.com"
-                className={inputClass}
-                disabled={saving}
-              />
-            </motion.div>
-          </div>
-
-          {/* Colonne droite : Notifications navigateur + Sons */}
-          <div className="space-y-md">
-            <SettingRow
-              title="Notifications navigateur"
-              description="Affiche une notification bureau lors des nouveaux tickets, assignations et mises à jour."
-              checked={browserNotif}
-              onChange={async (v) => {
-                if (v) {
-                  const perm = await requestBrowserNotifPermission();
-                  if (perm !== 'granted') {
-                    if (typeof window !== 'undefined' && Notification.permission === 'denied') {
-                      alert('Notifications bloquées par le navigateur. Réactivez-les dans les paramètres du site.');
-                      return;
-                    }
-                  }
-                }
-                setBrowserNotif(v);
-                setBrowserNotifEnabled(v);
-              }}
-            />
-            {browserNotif && typeof window !== 'undefined' && Notification.permission === 'denied' && (
-              <div className="bento-card p-md flex items-start gap-3" style={{ borderLeft: '3px solid #ef4444' }}>
-                <span className="material-symbols-outlined text-red-500 shrink-0" style={{ fontSize: '20px', fontVariationSettings: "'FILL' 1" }}>block</span>
-                <div>
-                  <p className="text-[13px] font-semibold text-on-surface">Notifications bloquées</p>
-                  <p className="text-[12px] text-on-surface-variant mt-0.5">
-                    Le navigateur refuse les notifications. Cliquez sur l'icône 🔒 dans la barre d'adresse et autorisez les notifications.
-                  </p>
-                </div>
-              </div>
-            )}
-            <SettingRow
-              title="Sons de notification"
-              description="Joue des sons Apple style lors des nouveaux tickets, assignations et mises à jour."
-              checked={soundsEnabled}
-              onChange={toggleSounds}
-            />
-            {soundsEnabled && (
-              <motion.div
-                variants={itemVariants}
-                whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
-                className="bento-card flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-lg p-lg"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">Volume</div>
-                  <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 font-medium break-words">
-                    Intensité des sons de notification.
-                  </p>
-                </div>
-                <div className="flex items-center gap-sm">
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={Math.round(soundsVolume * 100)}
-                    onChange={(e) => changeSoundsVolume(Number(e.target.value) / 100)}
-                    className="w-24 accent-primary"
-                  />
-                  <span className="font-body-sm text-body-sm text-on-surface-variant font-medium w-8 text-right">{Math.round(soundsVolume * 100)}%</span>
-                </div>
-              </motion.div>
-            )}
-            <SettingRow
-              title="Sons d'interaction"
-              description="Petits sons à chaque clic, validation ou action utilisateur."
-              checked={soundsInteraction}
-              onChange={toggleInteractionSounds}
-            />
           </div>
         </div>
       </div>
