@@ -26,6 +26,9 @@ import { RefreshCw } from 'lucide-react';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
+// Thème injecté une seule fois au chargement du module (pas à chaque mount)
+if (typeof document !== 'undefined') ensureThemeInjected();
+
 // ── Thème Katalyst-inspired ────────────────────────────────────────────────
 const AG_GRID_THEME_ID = 'katalyst-datagrid-theme';
 
@@ -217,21 +220,6 @@ function ensureThemeInjected() {
   document.head.appendChild(style);
 }
 
-// ── Hook for row entrance animation ────────────────────────────────────────
-function useRowAnimation() {
-  const isInitialRender = useState(true)[0];
-  const ref = useRef(null);
-  const onFirstDataRendered = useCallback(() => {
-    if (isInitialRender) return;
-    const el = ref.current;
-    if (el) {
-      el.classList.add('ag-rows-in');
-      window.setTimeout(() => el.classList.remove('ag-rows-in'), 1000);
-    }
-  }, [isInitialRender]);
-  return { ref, onFirstDataRendered };
-}
-
 // ── Composant principal ─────────────────────────────────────────────────
 export default function DataGrid({
   columns = [],
@@ -245,7 +233,7 @@ export default function DataGrid({
   pageSize = 25,
   paginationPageSizeSelector = [10, 25, 50, 100],
   loading = false,
-  animateRows = true,
+  animateRows = false,
   headerHeight = 40,
   rowHeight = 48,
   suppressRowClickSelection = false,
@@ -256,11 +244,7 @@ export default function DataGrid({
   height,
 }) {
   const gridRef = useRef(null);
-  const { ref: containerRef, onFirstDataRendered } = useRowAnimation();
-
-  useEffect(() => {
-    ensureThemeInjected();
-  }, []);
+  const containerRef = useRef(null);
 
   // Gérer la sélection externe
   useEffect(() => {
@@ -338,7 +322,6 @@ export default function DataGrid({
           getRowId={getRowId || defaultGetRowId}
           suppressCellFocus={true}
           enableCellTextSelection={true}
-          onFirstDataRendered={onFirstDataRendered}
           pinnedBottomRowData={pinnedBottomRowData}
           {...extraGridOptions}
         />

@@ -30,6 +30,17 @@ const PERIODS = [
   { key: '180d', label: '6 mois', days: 180 },
 ];
 
+const TECH_PERF_COLUMNS = [
+  { field: 'fullName', headerName: 'Technicien', flex: 1.5, cellRenderer: (p) => {
+    const i = p.node.rowIndex;
+    return (<div className="flex items-center gap-2.5"><div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-on-primary shrink-0" style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}>{p.value?.charAt(0) || '?'}</div><span className="text-xs font-medium text-on-surface truncate">{p.value || 'Inconnu'}</span></div>);
+  } },
+  { field: 'assigned', headerName: 'Assignés', width: 90, cellRenderer: (p) => <span className="text-center block text-xs font-bold text-on-surface">{p.data.assigned || 0}</span> },
+  { field: 'open', headerName: 'Ouverts', width: 90, cellRenderer: (p) => <span className="text-center block text-xs font-medium text-on-surface-variant">{p.value || 0}</span> },
+  { field: 'solved', headerName: 'Résolus', width: 90, cellRenderer: (p) => <span className="text-center block text-xs font-medium text-emerald-600 dark:text-emerald-400">{p.value || 0}</span> },
+  { field: 'rate', headerName: 'Taux', width: 80, valueGetter: (p) => { const t = p.data.assigned || 0; const s = p.data.solved || 0; return t > 0 ? Math.round((s / t) * 100) : 0; }, cellRenderer: (p) => <span className={`text-center block text-xs font-bold ${p.value >= 70 ? 'text-emerald-600 dark:text-emerald-400' : p.value >= 40 ? 'text-amber-600 dark:text-amber-400' : 'text-red-500'}`}>{p.value}%</span> },
+];
+
 /* ── MiniBarChart (Recharts — Katalyst style) ──────────────────────────────── */
 function MiniBarChart({ data, color = 'var(--skin-primary)', height = 40 }) {
   if (!data?.length) return null;
@@ -566,16 +577,7 @@ export default function Dashboard() {
             bodyClassName="p-0"
           >
             <DataGrid
-              columns={[
-                { field: 'fullName', headerName: 'Technicien', flex: 1.5, cellRenderer: (p) => {
-                  const i = p.node.rowIndex;
-                  return (<div className="flex items-center gap-2.5"><div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-on-primary shrink-0" style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}>{p.value?.charAt(0) || '?'}</div><span className="text-xs font-medium text-on-surface truncate">{p.value || 'Inconnu'}</span></div>);
-                } },
-                { field: 'assigned', headerName: 'Assignés', width: 90, cellRenderer: (p) => <span className="text-center block text-xs font-bold text-on-surface">{p.data.assigned || 0}</span> },
-                { field: 'open', headerName: 'Ouverts', width: 90, cellRenderer: (p) => <span className="text-center block text-xs font-medium text-on-surface-variant">{p.value || 0}</span> },
-                { field: 'solved', headerName: 'Résolus', width: 90, cellRenderer: (p) => <span className="text-center block text-xs font-medium text-emerald-600 dark:text-emerald-400">{p.value || 0}</span> },
-                { field: 'rate', headerName: 'Taux', width: 80, valueGetter: (p) => { const t = p.data.assigned || 0; const s = p.data.solved || 0; return t > 0 ? Math.round((s / t) * 100) : 0; }, cellRenderer: (p) => <span className={`text-center block text-xs font-bold ${p.value >= 70 ? 'text-emerald-600 dark:text-emerald-400' : p.value >= 40 ? 'text-amber-600 dark:text-amber-400' : 'text-red-500'}`}>{p.value}%</span> },
-              ]}
+              columns={TECH_PERF_COLUMNS}
               rowData={techPerformance.slice(0, 8)}
               pagination={false}
               headerHeight={36}

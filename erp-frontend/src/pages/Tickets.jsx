@@ -1338,7 +1338,6 @@ export default function Tickets() {
                 onSelectionChange={setSelectedIds}
                 pagination={false}
                 loading={false}
-                animateRows={true}
                 headerHeight={44}
                 rowHeight={60}
                 suppressRowClickSelection={!!showSelectionColumn}

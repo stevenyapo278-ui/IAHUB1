@@ -242,6 +242,33 @@ function ProblemRow({ problem, onClick }) {
   );
 }
 
+const problemColumns = [
+  { field: 'title', headerName: 'TITRE', flex: 2, minWidth: 250, cellRenderer: (p) => (
+    <span className="text-sm font-semibold text-on-surface truncate">{p.value}</span>
+  ) },
+  { field: 'status', headerName: 'STATUT', width: 150, cellRenderer: (p) => <StatusBadge status={p.value} /> },
+  { field: 'priority', headerName: 'PRIORITÉ', width: 130, cellRenderer: (p) => <PriorityBadge priority={p.value} /> },
+  { field: 'category', headerName: 'CATÉGORIE', width: 140, valueFormatter: (p) => p.value || '—' },
+  { field: 'assignedTo', headerName: 'ASSIGNÉ À', width: 180, valueGetter: (p) => p.data?.assignedTo?.fullName || '', cellRenderer: (p) => (
+    p.value ? (
+      <span className="inline-flex items-center gap-1.5 text-xs text-on-surface">
+        <span className="w-5 h-5 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[9px] font-bold">
+          {p.value.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()}
+        </span>
+        {p.value}
+      </span>
+    ) : (
+      <span className="text-xs text-on-surface-variant italic">Non assigné</span>
+    )
+  ) },
+  { field: '_count', headerName: 'TICKETS', width: 90, valueGetter: (p) => p.data?._count?.tickets || 0, cellRenderer: (p) => (
+    <span className="inline-flex items-center gap-1 text-xs text-on-surface-variant justify-center w-full">
+      <Link2 className="w-3 h-3" />{p.value}
+    </span>
+  ) },
+  { field: 'createdAt', headerName: 'CRÉÉ LE', width: 120, valueFormatter: (p) => p.value ? new Date(p.value).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : '—' },
+];
+
 export default function Problems() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -400,34 +427,7 @@ export default function Problems() {
         <div className="flex-1 min-h-0 mx-4 sm:mx-6 lg:mx-8 mt-3.5 mb-4 flex flex-col">
           <div className="flex-1 min-h-0 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest overflow-hidden flex flex-col">
             <DataGrid
-              columns={[
-                { field: 'title', headerName: 'Titre', flex: 1.5, minWidth: 200, cellRenderer: (p) => <span className="font-semibold text-sm text-on-surface group-hover:text-primary truncate max-w-[300px]">{p.value}</span> },
-                { field: 'status', headerName: 'Statut', width: 130, cellRenderer: (p) => <StatusBadge status={p.value} /> },
-                { field: 'priority', headerName: 'Priorité', width: 100, cellRenderer: (p) => <PriorityBadge priority={p.value} /> },
-                { field: 'category', headerName: 'Catégorie', width: 140, cellRenderer: (p) => <span className="text-xs text-on-surface-variant">{p.value || '—'}</span> },
-                {
-                  field: 'assignedTo', headerName: 'Assigné à', width: 160,
-                  valueGetter: (params) => params.data.assignedTo?.fullName || '',
-                  cellRenderer: (params) => params.value
-                    ? <span className="inline-flex items-center gap-1.5 text-xs text-on-surface">
-                        <span className="w-5 h-5 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[9px] font-bold">
-                          {params.value?.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase()}
-                        </span>
-                        {params.value}
-                      </span>
-                    : <span className="text-xs text-on-surface-variant italic">Non assigné</span>,
-                },
-                {
-                  field: 'ticketCount', headerName: 'Tickets', width: 90, headerClass: 'text-center',
-                  valueGetter: (params) => params.data._count?.tickets || 0,
-                  cellRenderer: (params) => <span className="inline-flex items-center gap-1 text-xs text-on-surface-variant justify-center w-full"><Link2 className="w-3 h-3" />{params.value}</span>,
-                },
-                {
-                  field: 'createdAt', headerName: 'Créé le', width: 110,
-                  cellRenderer: (params) => <span className="text-xs text-on-surface-variant whitespace-nowrap">{new Date(params.value).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}</span>,
-                  comparator: (a, b) => new Date(a).getTime() - new Date(b).getTime(),
-                },
-              ]}
+              columns={problemColumns}
               rowData={problems}
               loading={loading}
               onRowClick={(data) => navigate(`/problems/${data.id}`)}
