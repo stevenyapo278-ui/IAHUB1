@@ -28,6 +28,7 @@ export default function RemoteUserMultiSelect({
   const [labelsById, setLabelsById] = useState({});
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0, width: 0 });
   const containerRef = useRef(null);
+  const menuRef = useRef(null);
   const debounceRef = useRef(null);
   const requestSeq = useRef(0);
 
@@ -87,7 +88,8 @@ export default function RemoteUserMultiSelect({
 
   useEffect(() => {
     function handleClickOutside(e) {
-      if (containerRef.current && !containerRef.current.contains(e.target)) setOpen(false);
+      if (containerRef.current && !containerRef.current.contains(e.target) &&
+          menuRef.current && !menuRef.current.contains(e.target)) setOpen(false);
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -161,6 +163,7 @@ export default function RemoteUserMultiSelect({
       {/* Dropdown panel — rendered via Portal to escape overflow:hidden */}
       {open && createPortal(
         <div
+          ref={menuRef}
           className="fixed z-[9999] overflow-hidden rounded-xl border border-border bg-surface shadow-xl animate-fadeIn"
           style={{
             top: menuPos.top,

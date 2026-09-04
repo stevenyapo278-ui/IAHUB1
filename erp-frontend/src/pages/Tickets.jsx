@@ -39,6 +39,7 @@ import {
   GripVertical,
   Settings2,
   Eye,
+  SlidersHorizontal,
 } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -52,7 +53,6 @@ import TicketCoverflowCarousel from '../components/TicketCoverflowCarousel';
 import KanbanBoard from '../components/KanbanBoard';
 import SearchableSelect from '../components/SearchableSelect';
 import TicketFilterDrawer from '../components/TicketFilterDrawer';
-import TicketFilterBar from '../components/TicketFilterBar';
 import SearchableMultiSelect from '../components/SearchableMultiSelect';
 import RemoteUserSelect from '../components/RemoteUserSelect';
 import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
@@ -518,10 +518,11 @@ function ColumnConfigPanel({ columns, onChange }) {
 function loadColumnConfig() {
   try {
     const saved = JSON.parse(localStorage.getItem('tickets_columns'));
-    if (Array.isArray(saved) && saved.length > 0) return saved;
+    if (Array.isArray(saved) && saved.length > 0) {
+      return saved.filter((c) => c.key !== 'priority');
+    }
   } catch {}
   return [
-    { key: 'priority', label: 'Priorité', visible: true },
     { key: 'ticket', label: 'Ticket', visible: true },
     { key: 'status', label: 'Statut', visible: true },
     { key: 'assignedTo', label: 'Assigné', visible: true },
@@ -658,6 +659,8 @@ export default function Tickets() {
     mine: searchParams.get('mine') || '',
     aiProcessed: searchParams.get('aiProcessed') || '',
     closeSuggested: searchParams.get('closeSuggested') || '',
+    dateFrom: searchParams.get('dateFrom') || '',
+    dateTo: searchParams.get('dateTo') || '',
   });
 
   const [showForm, setShowForm] = useState(searchParams.get('new') === '1');
@@ -735,7 +738,7 @@ export default function Tickets() {
   }, [columns]);
 
   function clearFilters() {
-    setFilters({ status: '', priority: '', source: '', category: '', teamId: '', assignedToId: '', mine: '', aiProcessed: '', approvalStatus: '', closeSuggested: '' });
+    setFilters({ status: '', priority: '', source: '', category: '', teamId: '', assignedToId: '', mine: '', aiProcessed: '', approvalStatus: '', closeSuggested: '', dateFrom: '', dateTo: '' });
     setSearchQuery('');
     setDebouncedSearch('');
     setSortBy('createdAt');
@@ -766,6 +769,8 @@ export default function Tickets() {
     if (filters.aiProcessed) params.aiProcessed = filters.aiProcessed;
     if (filters.approvalStatus) params.approvalStatus = filters.approvalStatus;
     if (filters.closeSuggested) params.closeSuggested = filters.closeSuggested;
+    if (filters.dateFrom) params.dateFrom = filters.dateFrom;
+    if (filters.dateTo) params.dateTo = filters.dateTo;
     if (debouncedSearch) params.search = debouncedSearch;
     api.get('/tickets', { params, signal: controller.signal })
       .then(({ data }) => {
@@ -802,6 +807,8 @@ export default function Tickets() {
     if (filters.aiProcessed) params.aiProcessed = filters.aiProcessed;
     if (filters.approvalStatus) params.approvalStatus = filters.approvalStatus;
     if (filters.closeSuggested) params.closeSuggested = filters.closeSuggested;
+    if (filters.dateFrom) params.dateFrom = filters.dateFrom;
+    if (filters.dateTo) params.dateTo = filters.dateTo;
     if (debouncedSearch) params.search = debouncedSearch;
     api.get('/tickets', { params }).then(({ data }) => { setTickets(data.items); setTotalPages(data.pages); setTotalCount(data.total); if (data.stats) setServerStats(data.stats); }).catch(() => {});
   }, [page, pageSize, sortBy, sortOrder, filters, debouncedSearch]);
@@ -996,7 +1003,7 @@ export default function Tickets() {
   const activeFilterCount = [
     filters.status, filters.priority, filters.source, filters.category,
     filters.teamId, filters.assignedToId, filters.mine, filters.aiProcessed,
-    filters.approvalStatus, filters.closeSuggested,
+    filters.approvalStatus, filters.closeSuggested, filters.dateFrom, filters.dateTo,
   ].filter(Boolean).length;
 
   // ── AG Grid column definitions (Katalyst pinned style) ─────────────────────
@@ -1024,19 +1031,6 @@ export default function Tickets() {
         resizable: false,
         sortable: false,
         filter: false,
-        suppressMovable: true,
-      });
-    }
-
-    if (visibleKeys.has('priority')) {
-      cols.push({
-        field: 'priority',
-        headerName: '',
-        width: 48,
-        pinned: 'left',
-        cellRenderer: PriorityRenderer,
-        suppressMenu: true,
-        resizable: false,
         suppressMovable: true,
       });
     }
@@ -1199,6 +1193,21 @@ export default function Tickets() {
             <ColumnConfigPanel columns={columns} onChange={setColumns} />
           )}
 
+          <button onClick={() => setFilterPanelOpen(true)}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+              activeFilterCount > 0
+                ? 'bg-primary/10 text-primary border-primary/30'
+                : 'border-border/30 text-muted-foreground hover:text-foreground hover:bg-surface-muted'
+            }`}>
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Filtres</span>
+            {activeFilterCount > 0 && (
+              <span className="min-w-4 h-4 px-1 flex items-center justify-center rounded-full bg-primary text-primary-foreground text-[9px] font-bold tabular-nums">
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
+
           <button onClick={toggleForm}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-bold hover:opacity-90 transition-opacity shadow-sm">
             <Plus className="w-3.5 h-3.5" />
@@ -1222,17 +1231,8 @@ export default function Tickets() {
         ))}
       </div>
 
-      {/* ── FILTER BAR ──────────────────────────────────────────────────────── */}
-      <TicketFilterBar
-        filters={filters} onUpdate={updateFilter} onClear={clearFilters}
-        onOpenDrawer={() => setFilterPanelOpen(true)} activeFilterCount={activeFilterCount}
-        teams={teams} users={users} searchQuery={searchQuery}
-        onSearchChange={(q) => setSearchQuery(q)}
-        onClearSearch={() => { setSearchQuery(''); setDebouncedSearch(''); setPage(1); }}
-      />
-
       {/* ── MAIN CONTENT ────────────────────────────────────────────────────── */}
-      <div ref={tableContainerRef} className="flex-1 min-h-0 relative overflow-auto">
+      <div ref={tableContainerRef} className="flex-1 min-h-0 relative flex flex-col">
         {error && (
           <div className="mx-4 sm:mx-6 lg:mx-8 mt-3 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-700 dark:text-red-400 text-xs font-semibold flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 shrink-0 text-red-500" />
@@ -1311,8 +1311,8 @@ export default function Tickets() {
           </div>
         ) : (
           /* ── TABLE VIEW (AG Grid with pinned columns — Katalyst style) ── */
-          <div className="mx-4 sm:mx-6 lg:mx-8 mt-3.5 mb-4">
-            <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest overflow-hidden">
+          <div className="flex-1 min-h-0 mx-4 sm:mx-6 lg:mx-8 mt-3.5 mb-4 flex flex-col">
+            <div className="flex-1 min-h-0 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest overflow-hidden flex flex-col">
               <DataGrid
                 columns={gridColumnDefs}
                 rowData={tickets}
@@ -1322,14 +1322,13 @@ export default function Tickets() {
                 onSelectionChange={setSelectedIds}
                 pagination={false}
                 loading={false}
-                height={Math.max(250, Math.min(tickets.length * 60 + 52, 750))}
                 animateRows={true}
                 headerHeight={44}
                 rowHeight={60}
                 suppressRowClickSelection={!!showSelectionColumn}
                 onRowClick={(data) => navigate(`/tickets/${data.id}`)}
                 noRowsText="Aucun ticket trouvé"
-                className="rounded-2xl overflow-hidden"
+                className="rounded-2xl overflow-hidden flex-1"
               />
             </div>
           </div>
@@ -1404,22 +1403,19 @@ export default function Tickets() {
       </div>
 
       {/* ── DRAWER DE FILTRES ────────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {filterPanelOpen && (
-          <TicketFilterDrawer
-            key="tickets-filter-drawer"
-            onClose={() => setFilterPanelOpen(false)}
-            activeFilterCount={activeFilterCount}
-            filters={filters} onUpdate={updateFilter} onClear={clearFilters}
-            teams={teams} users={users} flatCategories={flatCategories}
-            autonomousMode={autonomousMode}
-            savedViews={savedViews} onSaveView={saveCurrentView}
-            onRestoreView={restoreView} onDeleteSavedView={deleteSavedView}
-            searchQuery={searchQuery} setSearchQuery={setSearchQuery}
-            setDebouncedSearch={setDebouncedSearch} setPage={setPage}
-          />
-        )}
-      </AnimatePresence>
+      <TicketFilterDrawer
+        key="tickets-filter-drawer"
+        open={filterPanelOpen}
+        onClose={() => setFilterPanelOpen(false)}
+        activeFilterCount={activeFilterCount}
+        filters={filters} onUpdate={updateFilter} onClear={clearFilters}
+        teams={teams} users={users} flatCategories={flatCategories}
+        autonomousMode={autonomousMode}
+        savedViews={savedViews} onSaveView={saveCurrentView}
+        onRestoreView={restoreView} onDeleteSavedView={deleteSavedView}
+        searchQuery={searchQuery} setSearchQuery={setSearchQuery}
+        setDebouncedSearch={setDebouncedSearch} setPage={setPage}
+      />
 
       {/* ── CREATE TICKET MODAL ──────────────────────────────────────────────── */}
       {createPortal(

@@ -5,7 +5,7 @@ const fs = require('fs');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
-const { notifyMajorIncidentResolved, sendTicketStatusNotification } = require('../services/emailSender');
+const { notifyMajorIncidentResolved, sendTicketStatusNotification, sendResolvedNotificationEmail } = require('../services/emailSender');
 const { approveTicket } = require('../services/ticketApproval');
 const { autoAssignTechnician } = require('../services/ticketAutoAssign');
 const { logEvent } = require('../services/ticketEvent');
@@ -41,7 +41,7 @@ function isTechnicianOnly(user) {
 router.get('/', async (req, res) => {
   const {
     status, priority, teamId, assignedToId, mine, title, search, limit, page,
-    sortBy, sortOrder, category, locationId, aiProcessed, due
+    sortBy, sortOrder, category, locationId, aiProcessed, due, dateFrom, dateTo
   } = req.query;
   const searchQuery = title || search || req.query.query;
 
@@ -121,6 +121,17 @@ router.get('/', async (req, res) => {
   // Filtrer les tickets dont la clôture a été suggérée par l'IA (en attente de validation Hotline)
   if (req.query.closeSuggested === 'true') where.closeSuggested = true;
   if (req.query.closeSuggested === 'false') where.closeSuggested = false;
+
+  // Filtrer par période de création
+  if (dateFrom || dateTo) {
+    where.createdAt = {};
+    if (dateFrom) where.createdAt.gte = new Date(dateFrom);
+    if (dateTo) {
+      const end = new Date(dateTo);
+      end.setHours(23, 59, 59, 999);
+      where.createdAt.lte = end;
+    }
+  }
 
 
 
@@ -215,6 +226,7 @@ router.get('/export', async (req, res) => {
   const {
     status, priority, teamId, assignedToId, mine, search, category, source,
     aiProcessed, closeSuggested, approvalStatus, sortBy, sortOrder, format,
+    dateFrom, dateTo,
   } = req.query;
 
   const where = {};
@@ -256,6 +268,16 @@ router.get('/export', async (req, res) => {
   if (approvalStatus) where.approvalStatus = approvalStatus;
   if (closeSuggested === 'true') where.closeSuggested = true;
   if (closeSuggested === 'false') where.closeSuggested = false;
+
+  if (dateFrom || dateTo) {
+    where.createdAt = {};
+    if (dateFrom) where.createdAt.gte = new Date(dateFrom);
+    if (dateTo) {
+      const end = new Date(dateTo);
+      end.setHours(23, 59, 59, 999);
+      where.createdAt.lte = end;
+    }
+  }
 
   if (search) {
     const numericId = parseInt(search, 10);
@@ -1173,14 +1195,20 @@ router.post('/:id/escalate', requirePermission('tickets.assign', ['ADMIN', 'TECH
 });
 
 // Notifie le demandeur par email quand le statut de son ticket change
+// + email différé 10 min quand le ticket passe en SOLVED
 async function notifyRequesterOnStatusChange(id, status) {
   if (!status) return;
   try {
     const ticket = await prisma.ticket.findUnique({
       where: { id },
-      include: { requester: { select: { email: true, fullName: true } } },
+      include: {
+        requester: { select: { email: true, fullName: true } },
+        assignedTo: { select: { fullName: true } },
+      },
     });
     if (!ticket?.requester?.email) return;
+
+    // Email immédiat de changement de statut
     await sendTicketStatusNotification({
       ticketId: ticket.id,
       ticketTitle: ticket.title,
@@ -1190,6 +1218,25 @@ async function notifyRequesterOnStatusChange(id, status) {
       recipientEmail: ticket.requester.email,
       recipientName: ticket.requester.fullName,
     });
+
+    // Email différé 10 min quand le ticket passe en SOLVED
+    if (status === 'SOLVED') {
+      const DELAY_MS = 10 * 60 * 1000; // 10 minutes
+      setTimeout(() => {
+        sendResolvedNotificationEmail({
+          ticketId: ticket.id,
+          ticketTitle: ticket.title,
+          priority: ticket.priority,
+          category: ticket.category,
+          assignedToName: ticket.assignedTo?.fullName || null,
+          requesterEmail: ticket.requester.email,
+          requesterName: ticket.requester.fullName,
+          content: ticket.content || null,
+        }).catch((err) => {
+          console.error(`[ticket.routes] Échec email résolution différé (ticket ${id}):`, err.message);
+        });
+      }, DELAY_MS);
+    }
   } catch (err) {
     console.error(`[ticket.routes] Échec notification statut au demandeur (ticket ${id}):`, err.message);
   }
@@ -1273,11 +1320,13 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
   }
 
   // Construire le contenu final : remplacer les marqueurs IMAGE_<n> par des <img> tags
+  const backendBase = (process.env.BACKEND_URL || '').replace(/\/+$/, '');
   let content = req.body.content;
   imageAttachments.forEach((img, idx) => {
+    const imgSrc = backendBase ? `${backendBase}${img.url}` : img.url;
     content = content.replace(
       `<!--IMAGE_${idx}-->`,
-      `<img src="${img.url}" alt="image collée" class="pasted-image" style="max-width:100%;border-radius:12px;margin:8px 0;border:1px solid rgba(128,128,128,0.2);" />`
+      `<img src="${imgSrc}" alt="image collée" />`
     );
   });
   // Sanitizer le HTML pour prévenir les XSS stockés

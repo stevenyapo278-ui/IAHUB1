@@ -1,4 +1,5 @@
 import { lazy, Suspense } from 'react';
+import { motion } from 'framer-motion';
 import { Routes, Route } from 'react-router-dom';
 import MainLayout from './layouts/MainLayout';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -41,11 +42,31 @@ const Problems = lazy(() => import('./pages/Problems'));
 const ProblemDetail = lazy(() => import('./pages/ProblemDetail'));
 
 // Fallback léger pendant le chargement d'un chunk (réseau ou navigation rapide)
+const EASE = [0.16, 1, 0.3, 1];
+
 function PageLoader() {
   return (
-    <div className="flex flex-col items-center justify-center h-64 gap-3" aria-busy="true">
-      <span className="w-6 h-6 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-      <p className="text-sm text-on-surface-variant">Chargement…</p>
+    <div className="flex flex-col items-center justify-center h-64 gap-4" role="status" aria-busy="true">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.4, ease: EASE }}
+        className="flex items-center gap-2"
+      >
+        <div className="w-7 h-7 rounded-xl bg-primary flex items-center justify-center">
+          <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4 text-primary-foreground">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
+        <span className="text-sm font-semibold text-on-surface">IA Hub</span>
+      </motion.div>
+      <div className="h-1 w-32 overflow-hidden rounded-full bg-surface-container-high">
+        <motion.div
+          className="h-full rounded-full bg-primary"
+          animate={{ x: ['-100%', '250%'] }}
+          transition={{ duration: 1, ease: EASE, repeat: Infinity }}
+        />
+      </div>
     </div>
   );
 }

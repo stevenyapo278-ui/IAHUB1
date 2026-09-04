@@ -153,6 +153,7 @@ export default function TicketDetail() {
   const [mergeLoading, setMergeLoading] = useState(false);
   const [merging, setMerging] = useState(false);
   const [pastedImages, setPastedImages] = useState([]);
+  const [lightboxSrc, setLightboxSrc] = useState(null);
   const [error, setError] = useState('');
   const [teams, setTeams] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -315,6 +316,38 @@ export default function TicketDetail() {
       followupBlobUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
       followupBlobUrlsRef.current = [];
     };
+  }, [ticket?.followups, ticket?.messages]);
+
+  // Convertir les URLs relatives /uploads/ en absolues pour les images de suivi
+  useEffect(() => {
+    const container = followupContainerRef.current;
+    if (!container) return;
+    container.querySelectorAll('img[src^="/uploads/"]').forEach((img) => {
+      if (img.getAttribute('data-abs-processed')) return;
+      img.setAttribute('data-abs-processed', 'true');
+      const src = img.getAttribute('src');
+      if (!src) return;
+      const absUrl = `${api.defaults.baseURL.replace(/\/api\/?$/, '')}${src}`;
+      img.src = absUrl;
+      img.style.cursor = 'pointer';
+      img.style.maxHeight = '300px';
+      img.style.objectFit = 'contain';
+    });
+  }, [ticket?.followups, ticket?.messages]);
+
+  // Lightbox : clic sur une image de suivi pour l'agrandir
+  useEffect(() => {
+    const container = followupContainerRef.current;
+    if (!container) return;
+    function handleClick(e) {
+      const img = e.target.closest('img');
+      if (img && img.src) {
+        e.preventDefault();
+        setLightboxSrc(img.src);
+      }
+    }
+    container.addEventListener('click', handleClick);
+    return () => container.removeEventListener('click', handleClick);
   }, [ticket?.followups, ticket?.messages]);
 
   async function downloadAttachment(attachment) {
@@ -3111,6 +3144,27 @@ export default function TicketDetail() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Lightbox image */}
+      {lightboxSrc && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm cursor-pointer"
+          onClick={() => setLightboxSrc(null)}
+        >
+          <img
+            src={lightboxSrc}
+            alt="Aperçu"
+            className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button
+            className="absolute top-4 right-4 text-white/80 hover:text-white transition-colors"
+            onClick={() => setLightboxSrc(null)}
+          >
+            <X className="w-8 h-8" />
+          </button>
         </div>
       )}
     </div>

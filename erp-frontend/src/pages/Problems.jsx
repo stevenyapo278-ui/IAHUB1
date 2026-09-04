@@ -395,10 +395,10 @@ export default function Problems() {
       )}
 
       {/* ── MAIN CONTENT ── */}
-      <div className="flex-1 min-h-0 relative overflow-auto">
+      <div className="flex-1 min-h-0 relative flex flex-col">
         {/* ── TABLE VIEW (AG Grid — same as Tickets) ── */}
-        <div className="mx-4 sm:mx-6 lg:mx-8 mt-3.5 mb-4">
-          <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest overflow-hidden">
+        <div className="flex-1 min-h-0 mx-4 sm:mx-6 lg:mx-8 mt-3.5 mb-4 flex flex-col">
+          <div className="flex-1 min-h-0 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest overflow-hidden flex flex-col">
             <DataGrid
               columns={[
                 { field: 'title', headerName: 'Titre', flex: 1.5, minWidth: 200, cellRenderer: (p) => <span className="font-semibold text-sm text-on-surface group-hover:text-primary truncate max-w-[300px]">{p.value}</span> },
@@ -433,7 +433,7 @@ export default function Problems() {
               onRowClick={(data) => navigate(`/problems/${data.id}`)}
               pagination={false}
               noRowsText="Aucun problème enregistré pour le moment."
-              className="rounded-2xl overflow-hidden"
+              className="rounded-2xl overflow-hidden flex-1"
             />
           </div>
         </div>

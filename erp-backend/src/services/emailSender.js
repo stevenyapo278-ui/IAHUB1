@@ -547,6 +547,68 @@ ${signature}
   return sendEmail({ to: recipientEmail, subject, bodyHtml, saveAsMessage: false });
 }
 
+// ── Notifications demandeur : Approbation & Résolution ──────────────────────
+
+// Envoie un email au demandeur quand son ticket est APPROUVÉ (comme GLPI)
+async function sendApprovalNotificationEmail({ ticketId, ticketTitle, status, priority, category, assignedToName, requesterEmail, requesterName, content }) {
+  const frontendUrl = resolveFrontendUrl(await getSystemSettings());
+  const ticketLink = `${frontendUrl}/tickets/${ticketId}`;
+  const signature = await getEmailSignature();
+  const priorityLabel = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' }[priority] || priority;
+  const priorityColor = { P1: '#dc2626', P2: '#d97706', P3: '#2563eb', P4: '#16a34a' }[priority] || '#666';
+
+  const subject = `[Ticket #${ticketId}] Approuvé — ${ticketTitle}`;
+  const bodyHtml = `
+<p>Bonjour ${requesterName || ''},</p>
+<p>Votre demande a été <strong style="color:#16a34a">approuvée</strong> et est prise en charge par notre équipe.</p>
+<table style="border-collapse:collapse;margin:16px 0">
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Ticket</td><td><strong>#${ticketId} — ${ticketTitle}</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Statut</td><td><strong style="color:#16a34a">Approuvé</strong></td></tr>
+  ${category ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Catégorie</td><td>${category}</td></tr>` : ''}
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Priorité</td><td style="color:${priorityColor};font-weight:600">${priorityLabel}</td></tr>
+  ${assignedToName ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Technicien assigné</td><td><strong>${assignedToName}</strong></td></tr>` : ''}
+  ${content ? `<tr><td style="padding:4px 12px 4px 0;color:#666;vertical-align:top">Description</td><td style="max-width:400px;white-space:pre-wrap">${content.substring(0, 500)}${content.length > 500 ? '…' : ''}</td></tr>` : ''}
+</table>
+<p>Vous pouvez suivre l'avancement de votre demande et communiquer avec le technicien directement dans le portail.</p>
+<p style="margin:20px 0">
+  <a href="${ticketLink}" style="background:#2563eb;color:#fff;padding:10px 20px;text-decoration:none;display:inline-block;border-radius:8px;font-weight:bold">Voir mon ticket</a>
+</p>
+${signature}
+`.trim();
+
+  return sendEmail({ ticketId, to: requesterEmail, subject, bodyHtml, saveAsMessage: false });
+}
+
+// Envoie un email au demandeur 10 minutes après la résolution (comme GLPI)
+async function sendResolvedNotificationEmail({ ticketId, ticketTitle, priority, category, assignedToName, requesterEmail, requesterName, content }) {
+  const frontendUrl = resolveFrontendUrl(await getSystemSettings());
+  const ticketLink = `${frontendUrl}/tickets/${ticketId}`;
+  const signature = await getEmailSignature();
+  const priorityLabel = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' }[priority] || priority;
+  const priorityColor = { P1: '#dc2626', P2: '#d97706', P3: '#2563eb', P4: '#16a34a' }[priority] || '#666';
+
+  const subject = `[Ticket #${ticketId}] Résolu — ${ticketTitle}`;
+  const bodyHtml = `
+<p>Bonjour ${requesterName || ''},</p>
+<p>Votre demande a été <strong style="color:#2563eb">résolue</strong> par notre équipe support.</p>
+<table style="border-collapse:collapse;margin:16px 0">
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Ticket</td><td><strong>#${ticketId} — ${ticketTitle}</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Statut</td><td><strong style="color:#2563eb">Résolu</strong></td></tr>
+  ${category ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Catégorie</td><td>${category}</td></tr>` : ''}
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Priorité</td><td style="color:${priorityColor};font-weight:600">${priorityLabel}</td></tr>
+  ${assignedToName ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Technicien</td><td>${assignedToName}</td></tr>` : ''}
+  ${content ? `<tr><td style="padding:4px 12px 4px 0;color:#666;vertical-align:top">Description</td><td style="max-width:400px;white-space:pre-wrap">${content.substring(0, 500)}${content.length > 500 ? '…' : ''}</td></tr>` : ''}
+</table>
+<p>Si vous pensez que le problème n'est pas entièrement résolu, vous pouvez rouvrir le ticket depuis le portail.</p>
+<p style="margin:20px 0">
+  <a href="${ticketLink}" style="background:#2563eb;color:#fff;padding:10px 20px;text-decoration:none;display:inline-block;border-radius:8px;font-weight:bold">Voir mon ticket</a>
+</p>
+${signature}
+`.trim();
+
+  return sendEmail({ ticketId, to: requesterEmail, subject, bodyHtml, saveAsMessage: false });
+}
+
 module.exports = {
   sendEmail,
   sendAcknowledgement,
@@ -563,6 +625,8 @@ module.exports = {
   sendEscalationEmail,
   sendRequesterEscalationEmail,
   sendTicketStatusNotification,
+  sendApprovalNotificationEmail,
+  sendResolvedNotificationEmail,
   buildAcknowledgementHtml,
   buildKnownIncidentNotificationHtml,
   getEmailSignature,

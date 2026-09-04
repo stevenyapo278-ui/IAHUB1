@@ -670,9 +670,9 @@ export default function Users() {
       </AnimatePresence>
 
       {/* ── MAIN CONTENT ── */}
-      <div className="flex-1 min-h-0 relative overflow-auto">
-        <div className="mx-4 sm:mx-6 lg:mx-8 mt-3.5 mb-4">
-          <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest overflow-hidden">
+      <div className="flex-1 min-h-0 relative flex flex-col">
+        <div className="flex-1 min-h-0 mx-4 sm:mx-6 lg:mx-8 mt-3.5 mb-4 flex flex-col">
+          <div className="flex-1 min-h-0 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest overflow-hidden flex flex-col">
             <DataGrid
               columns={columns}
               rowData={users}
@@ -683,8 +683,7 @@ export default function Users() {
               selectedIds={selectedIds}
               onSelectionChange={onSelectionChange}
               noRowsText="Aucun utilisateur trouvé."
-              className="rounded-2xl overflow-hidden"
-              height="calc(100vh - 380px)"
+              className="rounded-2xl overflow-hidden flex-1"
             />
           </div>
         </div>

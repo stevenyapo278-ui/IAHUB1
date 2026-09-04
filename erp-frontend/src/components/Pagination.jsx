@@ -26,7 +26,7 @@ export default function Pagination({ page, totalPages, total, label, onPageChang
   for (let i = start; i <= end; i++) pages.push(i);
 
   return (
-    <div className="flex items-center justify-between px-4 py-2.5 border-t border-outline-variant/20 bg-surface-container-low/20">
+    <div className="flex items-center justify-between px-4 py-2.5 border-t border-outline-variant/20 bg-surface-container-low/20 shrink-0">
       {/* Sélecteur lignes par page */}
       <div className="flex items-center gap-2">
         <span className="text-[11px] text-on-surface-variant font-medium">Lignes par page</span>

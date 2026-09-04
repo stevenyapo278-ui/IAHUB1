@@ -141,19 +141,19 @@ function getPageBreadcrumb(pathname) {
 
 const pageVariants = {
   initial: ({ direction: dir, axis }) => ({
-    [axis]: dir > 0 ? '40%' : dir < 0 ? '-40%' : 0,
+    [axis]: dir > 0 ? 24 : dir < 0 ? -24 : 0,
     opacity: 0,
   }),
   animate: {
     x: 0,
     y: 0,
     opacity: 1,
-    transition: { duration: 0.45, ease: [0.16, 1, 0.3, 1] },
+    transition: { duration: 0.35, ease: [0.16, 1, 0.3, 1] },
   },
   exit: ({ direction: dir, axis }) => ({
-    [axis]: dir > 0 ? '-20%' : dir < 0 ? '20%' : 0,
+    [axis]: dir > 0 ? -12 : dir < 0 ? 12 : 0,
     opacity: 0,
-    transition: { duration: 0.3, ease: [0.16, 1, 0.3, 1] },
+    transition: { duration: 0.2, ease: [0.4, 0, 1, 1] },
   }),
 };
 
@@ -402,8 +402,8 @@ export default function MainLayout() {
             {user?.fullName?.charAt(0)?.toUpperCase() || '?'}
           </div>
           <div className="sidebar-user-info min-w-0">
-            <p className="text-xs font-medium text-white/80 truncate">{user?.fullName}</p>
-            <p className="text-[10px] text-white/30 truncate capitalize">{user?.role?.toLowerCase()}</p>
+            <p className="text-xs font-medium text-on-surface truncate">{user?.fullName}</p>
+            <p className="text-[10px] text-on-surface-variant truncate capitalize">{user?.role?.toLowerCase()}</p>
           </div>
 
           {showUserMenu && (
@@ -528,10 +528,22 @@ export default function MainLayout() {
 
         <main
           id="main-content"
-          className="flex-1 min-w-0 relative bg-inherit overflow-y-auto overflow-x-hidden"
+          className="flex-1 flex flex-col min-h-0 min-w-0 relative bg-inherit"
           style={{ backgroundColor: 'var(--color-background)' }}
         >
-          <Outlet />
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={location.pathname}
+              variants={pageVariants}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              custom={transition}
+              className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden"
+            >
+              <Outlet />
+            </motion.div>
+          </AnimatePresence>
         </main>
       </div>
 

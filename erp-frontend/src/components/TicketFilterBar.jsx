@@ -42,7 +42,8 @@ export default function TicketFilterBar({
   onClearSearch,
 }) {
   return (
-    <div className="px-4 sm:px-6 py-2.5 border-b border-outline-variant/20 bg-surface-container-lowest shrink-0">
+    <div className="py-3 border-b border-outline-variant/20 bg-surface-container-lowest shrink-0">
+      <div className="mx-4 sm:mx-6 lg:mx-8">
       {/* ── Row 1 : Search + Quick toggle chips + Advanced filters ── */}
       <div className="flex items-center gap-2 flex-wrap">
         {/* Live Search Input */}
@@ -177,6 +178,7 @@ export default function TicketFilterBar({
           </button>
         </motion.div>
       )}
+      </div>
     </div>
   );
 }

@@ -253,7 +253,7 @@ export default function DataGrid({
   className = '',
   noRowsText = 'Aucune donnée',
   getRowId,
-  height = '540px',
+  height,
 }) {
   const gridRef = useRef(null);
   const { ref: containerRef, onFirstDataRendered } = useRowAnimation();
@@ -305,7 +305,7 @@ export default function DataGrid({
   }), []);
 
   return (
-    <div className={`relative ${className}`} ref={containerRef}>
+    <div className={`relative flex flex-col ${className}`} ref={containerRef}>
       {loading && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60 backdrop-blur-sm rounded-xl">
           <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-surface shadow-lg border border-border/30">
@@ -316,7 +316,7 @@ export default function DataGrid({
       )}
       <div
         className="ag-theme-katalyst-datagrid"
-        style={{ width: '100%', height }}
+        style={{ width: '100%', height: height || '100%', flex: height ? undefined : '1 1 0' }}
       >
         <AgGridReact
           ref={gridRef}

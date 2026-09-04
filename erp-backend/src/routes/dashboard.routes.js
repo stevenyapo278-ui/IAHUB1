@@ -185,7 +185,7 @@ router.get('/technician-stats', async (req, res) => {
     return res.status(403).json({ error: 'Accès réservé à l\'équipe' });
   }
   try {
-    const { startDate, endDate, teamId } = req.query;
+    const { startDate, endDate, teamId, assignedToId } = req.query;
     let since, until, days;
     if (startDate && endDate) {
       since = new Date(startDate);
@@ -209,6 +209,7 @@ router.get('/technician-stats', async (req, res) => {
         // Un technicien ne voit que ses propres stats
         ...(req.user.role === 'TECHNICIAN' ? { id: req.user.sub } : {}),
         ...(teamId ? { teamId: Number(teamId) } : {}),
+        ...(assignedToId ? { id: Number(assignedToId) } : {}),
       },
       select: { id: true, fullName: true, email: true, teamId: true },
     });

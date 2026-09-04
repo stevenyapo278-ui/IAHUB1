@@ -14,6 +14,7 @@ import {
 import { sanitizeHtml } from '../utils/sanitize';
 import api from '../api/client';
 import useSystemSettings from '../hooks/useSystemSettings';
+import { useAuth } from '../context/AuthContext';
 import { playApproval, playRejection, playError } from '../utils/sounds';
 import {
   clearClosureAnalysis,
@@ -48,6 +49,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { autonomousMode } = useSystemSettings();
+  const { user } = useAuth();
   const activeTab = searchParams.get('tab') || defaultTab;
 
   const [pendingTickets, setPendingTickets] = useState([]);
@@ -109,9 +111,12 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     if (!silent) setLoading(true);
     else setRefreshing(true);
 
+    const isTechnician = user?.role === 'TECHNICIAN';
+    const mineFilter = isTechnician ? '&mine=true' : '';
+
     Promise.all([
       api.get('/tickets?approvalStatus=PENDING&limit=100').catch(() => ({ data: { tickets: [] } })),
-      api.get('/tickets?closeSuggested=true&limit=100').catch(() => ({ data: { tickets: [] } })),
+      api.get(`/tickets?closeSuggested=true${mineFilter}&limit=100`).catch(() => ({ data: { tickets: [] } })),
       api.get('/dashboard/pending-ai-drafts').catch(() => ({ data: [] })),
       api.get('/knowledge/drafts').catch(() => ({ data: [] })),
       api.get('/dashboard/closure-stats?days=30').catch(() => null),
@@ -938,7 +943,8 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
       {/* CONTENU DE L'ONGLET CLÔTURES IA */}
       {activeTab === 'closures' && (
         <div className="space-y-4">
-          {/* Action : analyse proactive de l'état des tickets */}
+          {/* Action : analyse proactive de l'état des tickets (ADMIN/HOTLINE uniquement) */}
+          {user?.role !== 'TECHNICIAN' && (
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <p className="text-xs text-on-surface-variant">
               L'analyse scanne les tickets ouverts sans réponse utilisateur récente et détecte les résolutions probables à valider.
@@ -952,6 +958,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
               <span>{analysis.running ? 'Analyse en cours…' : 'Analyser les tickets'}</span>
             </button>
           </div>
+          )}
 
           {/* Résultats détaillés de la dernière analyse IA */}
           {analysis.results && (
@@ -1117,8 +1124,8 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             </div>
           )}
 
-          {/* Suivi de l'évolution : file actuelle + tendance 30 jours */}
-          {closureStats && (
+          {/* Suivi de l'évolution : file actuelle + tendance 30 jours (ADMIN/HOTLINE uniquement) */}
+          {closureStats && user?.role !== 'TECHNICIAN' && (
             <div className="bento-card p-6 space-y-5">
               <div className="flex items-center gap-2">
                 <TrendingUp className="w-4 h-4 text-cyan-500" />
@@ -1206,8 +1213,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                 <CheckCircle2 className="w-12 h-12 text-cyan-500 mx-auto" />
                 <h3 className="text-base font-bold text-on-surface">Aucune clôture suggérée en attente</h3>
                 <p className="text-xs text-on-surface-variant max-w-md mx-auto">
-                  L'IA ne clôt plus les tickets automatiquement : lorsqu'elle détecte un problème résolu,
-                  elle propose la clôture ici pour validation par la Hotline.
+                  {user?.role === 'TECHNICIAN'
+                    ? "Aucune clôture suggérée par l'IA sur vos tickets assignés pour le moment."
+                    : "L'IA ne clôt plus les tickets automatiquement : lorsqu'elle détecte un problème résolu, elle propose la clôture ici pour validation par la Hotline."}
                 </p>
               </div>
             ) : noResultsBlock
