@@ -1264,13 +1264,13 @@ html.theme-animating *::after {
   border-right-color: var(--color-outline-variant);
 }
 
-.app-sidebar:hover,
+/* Le width est contrôlé UNIQUEMENT par la classe .expanded (React state).
+   Pas de règle CSS :hover pour éviter le double déclenchement. */
 .app-sidebar.expanded {
   width: 256px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
 }
 
-.dark .app-sidebar:hover,
 .dark .app-sidebar.expanded {
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
 }
@@ -1316,7 +1316,6 @@ html.theme-animating *::after {
   white-space: nowrap;
 }
 
-.app-sidebar:hover .sidebar-logo-text,
 .app-sidebar.expanded .sidebar-logo-text {
   opacity: 1;
   max-width: 120px;
@@ -1349,7 +1348,6 @@ html.theme-animating *::after {
   transition: opacity 0.15s ease, max-width 0.2s ease;
 }
 
-.app-sidebar:hover .sidebar-group-label,
 .app-sidebar.expanded .sidebar-group-label {
   opacity: 0.6;
   max-width: 200px;
@@ -1424,10 +1422,9 @@ html.theme-animating *::after {
   color: var(--color-on-surface-variant);
 }
 
-.app-sidebar:hover .sidebar-item-icon,
 .app-sidebar.expanded .sidebar-item-icon {
-  min-width: 36px;
-  width: 36px;
+  min-width: 40px;
+  width: 40px;
 }
 
 .sidebar-item.active .sidebar-item-icon {
@@ -1445,7 +1442,6 @@ html.theme-animating *::after {
   letter-spacing: 0.003em;
 }
 
-.app-sidebar:hover .sidebar-item-label,
 .app-sidebar.expanded .sidebar-item-label {
   opacity: 1;
   max-width: 160px;
@@ -1505,7 +1501,6 @@ html.theme-animating *::after {
   white-space: nowrap;
 }
 
-.app-sidebar:hover .sidebar-user-info,
 .app-sidebar.expanded .sidebar-user-info {
   opacity: 1;
   max-width: 160px;
@@ -1534,7 +1529,6 @@ html.theme-animating *::after {
   transition: padding-left 0.2s ease;
 }
 
-.app-sidebar:hover ~ .sidebar-layout-content,
 .app-sidebar.expanded ~ .sidebar-layout-content {
   padding-left: 256px;
 }
@@ -2116,26 +2110,12 @@ html.theme-animating *::after {
 /* LAYOUT MODES — data-attribute driven                                        */
 /* ═══════════════════════════════════════════════════════════════════════════════ */
 
-/* Min sidebar: icon-only, expand on hover */
+/* Min sidebar: mode réduit — width géré par React via classe .expanded */
 html[data-min-sidebar] .app-sidebar {
   width: 80px;
 }
-html[data-min-sidebar] .app-sidebar:hover {
-  width: 256px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
-}
-html[data-min-sidebar] .app-sidebar:not(:hover) .sidebar-item-label,
-html[data-min-sidebar] .app-sidebar:not(:hover) .sidebar-group-label,
-html[data-min-sidebar] .app-sidebar:not(:hover) .sidebar-user-info,
-html[data-min-sidebar] .app-sidebar:not(:hover) .sidebar-logo-text {
-  opacity: 0;
-  max-width: 0;
-}
 html[data-min-sidebar] .sidebar-layout-content {
   padding-left: 80px;
-}
-html[data-min-sidebar] .app-sidebar:hover ~ .sidebar-layout-content {
-  padding-left: 256px;
 }
 
 /* Header only mode: hide sidebar */
