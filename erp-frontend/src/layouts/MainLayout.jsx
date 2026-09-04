@@ -23,7 +23,6 @@ import {
   Bell,
   Sun,
   Moon,
-  Pin,
   Bot,
   Sparkles,
   MapPin,
@@ -159,7 +158,7 @@ const pageVariants = {
 
 export default function MainLayout() {
   const { user, logout } = useAuth();
-  const { theme, toggleTheme } = useTheme();
+  const { theme, toggleTheme, layoutSettings } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -172,9 +171,6 @@ export default function MainLayout() {
   const [showLayoutSettings, setShowLayoutSettings] = useState(false);
   const [showCustomizer, setShowCustomizer] = useState(false);
   const [sidebarHovered, setSidebarHovered] = useState(false);
-  const [sidebarPinned, setSidebarPinned] = useState(() => {
-    return localStorage.getItem('sidebarPinned') === 'true';
-  });
   const [badgeCounts, setBadgeCounts] = useState({ tickets: 0, drafts: 0 });
   const sidebarRef = useRef(null);
   const userMenuRef = useRef(null);
@@ -281,16 +277,9 @@ export default function MainLayout() {
     prevPathRef.current = location.pathname;
   }, [location.pathname, navigationType]);
 
-  const isSidebarExpanded = sidebarPinned || sidebarHovered;
+  const isMinSidebar = layoutSettings.minSidebar;
+  const isSidebarExpanded = isMinSidebar ? false : sidebarHovered;
   const sidebarW = isSidebarExpanded ? 256 : 80;
-
-  function toggleSidebarPin() {
-    setSidebarPinned((prev) => {
-      const next = !prev;
-      localStorage.setItem('sidebarPinned', next);
-      return next;
-    });
-  }
 
   const currentPage = getPageBreadcrumb(location.pathname);
   const PageIcon = currentPage.icon;
@@ -382,15 +371,6 @@ export default function MainLayout() {
             </>
           )}
         </nav>
-
-        {/* Pin toggle */}
-        <button
-          onClick={toggleSidebarPin}
-          className="sidebar-pin-btn hover:text-primary transition-colors"
-          title={sidebarPinned ? 'Détacher la sidebar' : 'Épingler la sidebar'}
-        >
-          <Pin className={`w-4 h-4 transition-transform ${sidebarPinned ? 'rotate-45 text-primary' : ''}`} />
-        </button>
 
         {/* User profile at bottom */}
         <div

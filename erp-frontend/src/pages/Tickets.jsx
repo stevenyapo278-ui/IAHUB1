@@ -58,6 +58,7 @@ import RemoteUserSelect from '../components/RemoteUserSelect';
 import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
 import SlaBadge from '../components/SlaBadge';
 import DataGrid from '../components/DataGrid';
+import TicketFilterBar from '../components/TicketFilterBar';
 import {
   STATUS_OPTIONS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS, URGENCY_IMPACT_OPTIONS,
   STATUS_CONFIG,
@@ -1230,6 +1231,21 @@ export default function Tickets() {
           </div>
         ))}
       </div>
+
+      {/* ── FILTER BAR ─────────────────────────────────────────────────────── */}
+      <TicketFilterBar
+        filters={filters}
+        onUpdate={updateFilter}
+        onClear={clearFilters}
+        onOpenDrawer={() => setFilterPanelOpen(true)}
+        activeFilterCount={activeFilterCount}
+        teams={teams}
+        users={users}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        onClearSearch={() => { setSearchQuery(''); setDebouncedSearch(''); setPage(1); }}
+        searchInputRef={searchInputRef}
+      />
 
       {/* ── MAIN CONTENT ────────────────────────────────────────────────────── */}
       <div ref={tableContainerRef} className="flex-1 min-h-0 relative flex flex-col">

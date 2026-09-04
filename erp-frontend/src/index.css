@@ -1457,32 +1457,6 @@ html.theme-animating *::after {
   margin: 6px 10px;
 }
 
-/* ── Pin toggle ───────────────────────────────────────────────────────────── */
-.sidebar-pin-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 28px;
-  border: none;
-  background: transparent;
-  color: var(--color-on-surface-variant);
-  cursor: pointer;
-  transition: color 0.15s ease, opacity 0.15s ease;
-  opacity: 1;
-  position: relative;
-  z-index: 1;
-}
-.sidebar-pin-btn:hover {
-  color: var(--color-on-surface);
-}
-.app-sidebar.expanded .sidebar-pin-btn {
-  opacity: 0;
-}
-.app-sidebar.expanded .sidebar-pin-btn:hover {
-  opacity: 1;
-}
-
 /* ── User profile ─────────────────────────────────────────────────────────── */
 .sidebar-user {
   padding: 10px 8px;

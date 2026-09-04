@@ -40,6 +40,7 @@ export default function TicketFilterBar({
   searchQuery,
   onSearchChange,
   onClearSearch,
+  searchInputRef,
 }) {
   return (
     <div className="py-3 border-b border-outline-variant/20 bg-surface-container-lowest shrink-0">
@@ -50,6 +51,7 @@ export default function TicketFilterBar({
         <div className="relative shrink-0 mr-1">
           <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50" />
           <input
+            ref={searchInputRef}
             type="text"
             value={searchQuery || ''}
             onChange={(e) => onSearchChange?.(e.target.value)}
