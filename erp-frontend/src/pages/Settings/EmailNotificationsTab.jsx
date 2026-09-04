@@ -322,15 +322,6 @@ export default function EmailNotificationsTab() {
           </div>
 
           <div className="space-y-md">
-            <SettingRow
-              title="Email au technicien assigné"
-              description="Envoie un email de notification au technicien lorsqu'un ticket créé par email lui est automatiquement assigné par l'IA."
-              icon={UserCheck}
-              checked={settings.notifyTechnicianOnAssignment}
-              onChange={(v) => updateSetting('notifyTechnicianOnAssignment', v)}
-              disabled={saving}
-            />
-
             {/* Notification email en cas d'échec de traitement */}
             <motion.div
               variants={itemVariants}

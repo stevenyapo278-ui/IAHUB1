@@ -53,7 +53,7 @@ async function createTicketFromEmail({ subject, body, from, fromName, analysis, 
       const fullUser = await tx.user.findUnique({ where: { id: assigned.id } });
       if (fullUser?.email) {
         const settings = await getSystemSettings();
-        if (settings.notifyTechnicianOnAssignment) {
+        if (settings.emailAssignmentEnabled !== false) {
           await sendAssignmentNotificationEmail({
             ticketId: erpTicket.id,
             ticketTitle: erpTicket.title,
