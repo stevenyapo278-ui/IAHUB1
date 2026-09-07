@@ -317,6 +317,55 @@ router.post('/sync', requirePermission('inbox.sync', ['ADMIN', 'TECHNICIAN']), a
   }
 });
 
+// Logs de traitement des emails — derniers emails reçus avec leur statut d'analyse
+router.get('/logs', requirePermission('inbox.sync', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const offset = Number(req.query.offset) || 0;
+    const statusFilter = req.query.status || null;
+
+    const where = statusFilter ? { status: statusFilter } : {};
+
+    const [emails, total] = await Promise.all([
+      prisma.incomingEmail.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: offset,
+        take: limit,
+        select: {
+          id: true,
+          fromEmail: true,
+          fromName: true,
+          subject: true,
+          status: true,
+          aiCategory: true,
+          aiPriority: true,
+          aiTeam: true,
+          aiConfidence: true,
+          aiSummary: true,
+          aiIsSpam: true,
+          aiIntent: true,
+          error: true,
+          errorDetail: true,
+          lastError: true,
+          retryCount: true,
+          erpTicketId: true,
+          isNewTicket: true,
+          hasAttachments: true,
+          receivedAt: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      }),
+      prisma.incomingEmail.count({ where }),
+    ]);
+
+    res.json({ emails, total, limit, offset });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Test : analyse un email fictif sans créer de ticket (pour vérifier que Gemini fonctionne)
 router.post('/test-analyze', requirePermission('inbox.sync', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const { subject, body, from, fromName } = req.body;

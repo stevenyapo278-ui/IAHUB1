@@ -367,12 +367,14 @@ export default function Inbox() {
     return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
   }, [searchInput]);
 
-  // Test IA
-  const [testing, setTesting] = useState(false);
-  const [testForm, setTestForm] = useState({ subject: '', body: '', from: '', fromName: '' });
-  const [testResult, setTestResult] = useState(null);
-  const [showTestModal, setShowTestModal] = useState(false);
-  const [testError, setTestError] = useState('');
+  // Logs IA
+  const [showLogsModal, setShowLogsModal] = useState(false);
+  const [logsEmails, setLogsEmails] = useState([]);
+  const [logsTotal, setLogsTotal] = useState(0);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsFilter, setLogsFilter] = useState('');
+  const [logsPage, setLogsPage] = useState(0);
+  const LOGS_LIMIT = 30;
 
   // ── Relance groupée avec plage de dates ─────────────────────────────────
   const [showRetryModal, setShowRetryModal] = useState(false);
@@ -729,18 +731,27 @@ export default function Inbox() {
     } finally { setBulkAction(null); }
   }
 
-  async function handleTestAnalyze(e) {
-    e.preventDefault(); setTesting(true); setTestResult(null); setTestError('');
+  async function fetchLogs(filter, page) {
+    setLogsLoading(true);
     try {
-      const { data } = await api.post('/inbox/test-analyze', testForm);
-      setTestResult(data);
-    } catch (err) { setTestError(err.response?.data?.error || 'Erreur lors du test'); }
-    finally { setTesting(false); }
+      const params = { limit: LOGS_LIMIT, offset: page * LOGS_LIMIT };
+      if (filter) params.status = filter;
+      const { data } = await api.get('/inbox/logs', { params });
+      setLogsEmails(data.emails);
+      setLogsTotal(data.total);
+    } catch {
+      setLogsEmails([]);
+      setLogsTotal(0);
+    } finally {
+      setLogsLoading(false);
+    }
   }
 
-  function openTestModal() {
-    setTestForm({ subject: '', body: '', from: '', fromName: '' });
-    setTestResult(null); setTestError(''); setShowTestModal(true);
+  function openLogsModal() {
+    setLogsFilter('');
+    setLogsPage(0);
+    setShowLogsModal(true);
+    fetchLogs('', 0);
   }
 
   function keyOfEmail(email) {
@@ -834,11 +845,11 @@ export default function Inbox() {
           )}
           {canSync && (
             <button
-              onClick={openTestModal}
+              onClick={openLogsModal}
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/50 bg-surface-container text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high text-xs font-semibold transition-all cursor-pointer"
             >
               <FlaskConical className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Test IA</span>
+              <span className="hidden sm:inline">Logs IA</span>
             </button>
           )}
           <button
@@ -1545,14 +1556,14 @@ export default function Inbox() {
         </AnimatePresence>
       </div>
 
-      {/* ── Modale Test IA ───────────────────────────────────────────────── */}
+      {/* ── Modale Logs IA ───────────────────────────────────────────────── */}
       {canSync && createPortal(
         <AnimatePresence>
-          {showTestModal && (
+          {showLogsModal && (
             <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
               <motion.div
                 initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                onClick={() => setShowTestModal(false)}
+                onClick={() => setShowLogsModal(false)}
                 className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer"
               />
               <motion.div
@@ -1560,100 +1571,171 @@ export default function Inbox() {
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 16 }}
                 transition={{ type: 'spring', duration: 0.35, bounce: 0.15 }}
-                className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl max-w-md w-full p-6 card-shadow flex flex-col gap-5 overflow-hidden max-h-[90vh]"
+                className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl max-w-4xl w-full p-6 card-shadow flex flex-col gap-4 overflow-hidden max-h-[90vh]"
               >
                 <div className="flex justify-between items-center pb-3 border-b border-outline-variant/30">
                   <h3 className="text-base font-bold text-on-surface flex items-center gap-2">
                     <div className="p-1.5 rounded-lg bg-purple-500/10">
-                      <Bot className="w-4 h-4 text-purple-400" />
+                      <FlaskConical className="w-4 h-4 text-purple-400" />
                     </div>
-                    Test analyse IA
+                    Logs de traitement IA
+                    <span className="text-xs font-normal text-on-surface-variant">({logsTotal} emails)</span>
                   </h3>
-                  <motion.button onClick={() => setShowTestModal(false)} whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }} className="p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer">
+                  <motion.button onClick={() => setShowLogsModal(false)} whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }} className="p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer">
                     <X className="w-4 h-4" />
                   </motion.button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto space-y-4">
-                  <p className="text-xs text-on-surface-variant leading-relaxed">
-                    Simulez l'analyse d'un e-mail par Gemini sans créer de ticket réel dans le système.
-                  </p>
+                {/* Filtres par statut */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  {[
+                    { value: '', label: 'Tous' },
+                    { value: 'PROCESSING', label: 'Traitement' },
+                    { value: 'DONE', label: 'Traité' },
+                    { value: 'ERROR', label: 'Erreur' },
+                    { value: 'RETRY', label: 'Relance' },
+                    { value: 'DEAD_LETTER', label: 'Échec' },
+                    { value: 'SPAM', label: 'Spam' },
+                  ].map((f) => (
+                    <button
+                      key={f.value}
+                      onClick={() => { setLogsFilter(f.value); setLogsPage(0); fetchLogs(f.value, 0); }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                        logsFilter === f.value
+                          ? 'bg-purple-500 text-white shadow-md'
+                          : 'bg-surface-container text-on-surface-variant hover:bg-surface-container-high'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
 
-                  {testError && (
-                    <div className="border border-red-500/20 bg-red-500/5 rounded-xl overflow-hidden">
-                      <div className="flex items-center gap-2 px-3 py-2 bg-red-500/10 border-b border-red-500/20 text-red-400 text-xs font-bold">
-                        <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                        Analyse impossible
-                      </div>
-                      <div className="p-3 text-xs text-red-300/90 leading-relaxed max-h-64 overflow-y-auto whitespace-pre-wrap break-words font-mono">
-                        {testError}
-                      </div>
+                {/* Contenu */}
+                <div className="flex-1 overflow-y-auto min-h-0">
+                  {logsLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                      <RefreshCw className="w-5 h-5 text-purple-400 animate-spin" />
+                      <span className="ml-2 text-sm text-on-surface-variant">Chargement...</span>
+                    </div>
+                  ) : logsEmails.length === 0 ? (
+                    <div className="text-center py-12 text-on-surface-variant/60">
+                      <FlaskConical className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                      <p className="text-sm">Aucun email trouvé</p>
+                    </div>
+                  ) : (
+                    <div className="border border-outline-variant/30 rounded-xl overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-surface-container-high border-b border-outline-variant/30">
+                            <th className="text-left px-3 py-2.5 font-bold text-on-surface-variant uppercase tracking-wider">Statut</th>
+                            <th className="text-left px-3 py-2.5 font-bold text-on-surface-variant uppercase tracking-wider">Expéditeur</th>
+                            <th className="text-left px-3 py-2.5 font-bold text-on-surface-variant uppercase tracking-wider">Sujet</th>
+                            <th className="text-left px-3 py-2.5 font-bold text-on-surface-variant uppercase tracking-wider">Catégorie</th>
+                            <th className="text-left px-3 py-2.5 font-bold text-on-surface-variant uppercase tracking-wider">Priorité</th>
+                            <th className="text-left px-3 py-2.5 font-bold text-on-surface-variant uppercase tracking-wider">Équipe</th>
+                            <th className="text-left px-3 py-2.5 font-bold text-on-surface-variant uppercase tracking-wider">Ticket</th>
+                            <th className="text-left px-3 py-2.5 font-bold text-on-surface-variant uppercase tracking-wider">Date</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-outline-variant/20">
+                          {logsEmails.map((email) => {
+                            const cfg = STATUS_CONFIG[email.status] || STATUS_CONFIG.PENDING;
+                            const StatusIcon = cfg.icon;
+                            return (
+                              <tr key={email.id} className="hover:bg-surface-container/50 transition-colors">
+                                <td className="px-3 py-2">
+                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold ${cfg.bg} ${cfg.color} border ${cfg.border}`}>
+                                    <StatusIcon className={`w-3 h-3 ${email.status === 'PROCESSING' ? 'animate-spin' : ''}`} />
+                                    {cfg.label}
+                                  </span>
+                                  {email.retryCount > 0 && (
+                                    <span className="ml-1 text-[10px] text-amber-400">×{email.retryCount}</span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 text-on-surface truncate max-w-[140px]" title={email.fromEmail}>
+                                  {email.fromName || email.fromEmail}
+                                </td>
+                                <td className="px-3 py-2 text-on-surface truncate max-w-[200px]" title={email.subject}>
+                                  {email.subject}
+                                </td>
+                                <td className="px-3 py-2">
+                                  {email.aiCategory && (
+                                    <span className="inline-block px-2 py-0.5 rounded-md bg-surface-container text-on-surface-variant text-[10px] font-medium">
+                                      {email.aiCategory}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2">
+                                  {email.aiPriority && (
+                                    <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-bold text-white ${PRIORITY_CONFIG[email.aiPriority]?.bg || 'bg-zinc-500'}`}>
+                                      {email.aiPriority}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 text-on-surface-variant truncate max-w-[120px]">
+                                  {email.aiTeam || '—'}
+                                </td>
+                                <td className="px-3 py-2">
+                                  {email.erpTicketId ? (
+                                    <span className="inline-flex items-center gap-1 text-emerald-400 text-[10px] font-bold">
+                                      <CheckCircle2 className="w-3 h-3" />
+                                      #{email.erpTicketId}
+                                    </span>
+                                  ) : (
+                                    <span className="text-on-surface-variant/40 text-[10px]">—</span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 text-on-surface-variant whitespace-nowrap" title={new Date(email.receivedAt).toLocaleString()}>
+                                  {new Date(email.receivedAt).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   )}
+                </div>
 
-                  <form onSubmit={handleTestAnalyze} className="space-y-4">
-                    {[
-                      { label: 'Sujet *', key: 'subject', type: 'text', placeholder: 'ex: Mon VPN ne fonctionne plus', required: true },
-                      { label: 'Email expéditeur', key: 'from', type: 'email', placeholder: 'user@example.com' },
-                    ].map(f => (
-                      <label key={f.key} className="flex flex-col gap-1.5">
-                        <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">{f.label}</span>
-                        <input
-                          type={f.type}
-                          required={f.required}
-                          placeholder={f.placeholder}
-                          value={testForm[f.key]}
-                          onChange={e => setTestForm({ ...testForm, [f.key]: e.target.value })}
-                          className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-                        />
-                      </label>
-                    ))}
-                    <label className="flex flex-col gap-1.5">
-                      <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Corps *</span>
-                      <textarea
-                        rows={4} required
-                        placeholder="Bonjour, depuis ce matin je ne peux plus me connecter au VPN..."
-                        value={testForm.body}
-                        onChange={e => setTestForm({ ...testForm, body: e.target.value })}
-                        className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-none"
-                      />
-                    </label>
-
-                    <div className="pt-3 border-t border-outline-variant/30 flex justify-end gap-2">
-                      <button type="button" onClick={() => setShowTestModal(false)}
-                        className="px-4 py-2.5 rounded-xl border border-outline-variant text-on-surface text-sm font-medium hover:bg-surface-container transition-colors cursor-pointer">
-                        Annuler
+                {/* Pagination */}
+                {logsTotal > LOGS_LIMIT && (
+                  <div className="flex items-center justify-between pt-3 border-t border-outline-variant/30">
+                    <span className="text-xs text-on-surface-variant">
+                      {logsPage * LOGS_LIMIT + 1}–{Math.min((logsPage + 1) * LOGS_LIMIT, logsTotal)} sur {logsTotal}
+                    </span>
+                    <div className="flex gap-2">
+                      <button
+                        disabled={logsPage === 0}
+                        onClick={() => { const p = logsPage - 1; setLogsPage(p); fetchLogs(logsFilter, p); }}
+                        className="px-3 py-1.5 rounded-lg border border-outline-variant text-on-surface text-xs font-medium hover:bg-surface-container transition-colors cursor-pointer disabled:opacity-40"
+                      >
+                        Précédent
                       </button>
-                      <button type="submit" disabled={testing}
-                        className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-500 to-violet-500 text-white text-sm font-bold shadow-md shadow-purple-500/20 transition-all hover:brightness-110 cursor-pointer disabled:opacity-60 flex items-center gap-2">
-                        {testing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                        {testing ? 'Analyse...' : 'Analyser'}
+                      <button
+                        disabled={(logsPage + 1) * LOGS_LIMIT >= logsTotal}
+                        onClick={() => { const p = logsPage + 1; setLogsPage(p); fetchLogs(logsFilter, p); }}
+                        className="px-3 py-1.5 rounded-lg border border-outline-variant text-on-surface text-xs font-medium hover:bg-surface-container transition-colors cursor-pointer disabled:opacity-40"
+                      >
+                        Suivant
                       </button>
                     </div>
-                  </form>
+                  </div>
+                )}
 
-                  <AnimatePresence>
-                    {testResult && (
-                      <motion.div
-                        key="result"
-                        initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-                        transition={{ type: 'spring', stiffness: 200, damping: 22 }}
-                        className="border border-purple-500/20 bg-purple-500/5 rounded-xl p-4 space-y-2 overflow-hidden"
-                      >
-                        <p className="text-sm font-bold text-purple-400 flex items-center gap-2">
-                          <CheckCircle2 className="w-4 h-4" />
-                          Résultat Gemini
-                        </p>
-                        {Object.entries(testResult).map(([k, v]) => (
-                          <div key={k} className="flex justify-between gap-3 text-xs border-b border-outline-variant/15 pb-1.5 last:border-0 last:pb-0">
-                            <span className="text-on-surface-variant capitalize">{k}</span>
-                            <span className="text-on-surface font-medium text-right">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>
-                          </div>
-                        ))}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
+                {/* Détails erreurs en bas */}
+                {logsEmails.some(e => e.error) && (
+                  <div className="pt-3 border-t border-outline-variant/30">
+                    <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-2">Dernières erreurs</p>
+                    <div className="space-y-1 max-h-24 overflow-y-auto">
+                      {logsEmails.filter(e => e.error).slice(0, 5).map((e) => (
+                        <div key={e.id} className="text-[10px] text-red-400 bg-red-500/5 border border-red-500/15 rounded-lg px-2 py-1.5 font-mono leading-relaxed">
+                          <span className="font-bold text-red-300">#{e.id}</span> {e.subject} — {e.error}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </motion.div>
             </div>
           )}
