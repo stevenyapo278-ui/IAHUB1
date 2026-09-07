@@ -111,16 +111,20 @@ export default function SearchableSelect({
     if (!containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
-    const menuHeight = Math.min(320, visibleOptions.length * 44 + 80);
+    const menuHeight = Math.min(340, visibleOptions.length * 48 + 80);
     const openUp = spaceBelow < menuHeight && rect.top > spaceBelow;
+
+    const targetWidth = Math.max(rect.width, Math.min(window.innerWidth - 32, 420));
+    const leftPos = Math.max(12, Math.min(rect.left, window.innerWidth - targetWidth - 16));
 
     setMenuStyle({
       position: 'fixed',
-      left: rect.left,
-      width: rect.width,
+      left: leftPos,
+      width: targetWidth,
+      maxWidth: 'calc(100vw - 24px)',
       ...(openUp
-        ? { bottom: window.innerHeight - rect.top + 6, maxHeight: Math.min(spaceBelow - 8, 320) }
-        : { top: rect.bottom + 6, maxHeight: Math.min(spaceBelow - 8, 320) }
+        ? { bottom: window.innerHeight - rect.top + 6, maxHeight: Math.min(rect.top - 12, 340) }
+        : { top: rect.bottom + 6, maxHeight: Math.min(spaceBelow - 12, 340) }
       ),
     });
   }
@@ -209,9 +213,13 @@ export default function SearchableSelect({
                   }`}
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium text-sm">{opt[labelKey]}</p>
+                    <p className="font-semibold text-xs leading-relaxed text-left break-words" title={opt[labelKey]}>
+                      {opt[labelKey]}
+                    </p>
                     {subLabelKey && opt[subLabelKey] && (
-                      <p className="text-xs text-muted-foreground truncate">{opt[subLabelKey]}</p>
+                      <p className="text-[11px] text-muted-foreground leading-snug break-words mt-0.5" title={opt[subLabelKey]}>
+                        {opt[subLabelKey]}
+                      </p>
                     )}
                   </div>
                   {isSelected && <Check className="w-4 h-4 text-primary shrink-0" />}
@@ -251,10 +259,10 @@ export default function SearchableSelect({
         <div className="flex items-center gap-2 truncate min-w-0">
           {Icon && <Icon className="w-4 h-4 text-muted-foreground shrink-0" />}
           {selectedOption ? (
-            <span className="truncate font-medium text-sm">
+            <span className="truncate font-medium text-xs text-left" title={selectedOption[labelKey]}>
               {selectedOption[labelKey]}
               {subLabelKey && selectedOption[subLabelKey] && (
-                <span className="ml-1.5 text-xs text-muted-foreground font-normal">({selectedOption[subLabelKey]})</span>
+                <span className="ml-1.5 text-[11px] text-muted-foreground font-normal">({selectedOption[subLabelKey]})</span>
               )}
             </span>
           ) : (

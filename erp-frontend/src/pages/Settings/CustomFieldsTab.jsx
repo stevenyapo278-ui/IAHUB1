@@ -35,7 +35,7 @@ export default function CustomFieldsTab() {
 
   useEffect(() => {
     load();
-    api.get('/glpi/categories').then(({ data }) => setCategories(data)).catch(() => {});
+    api.get('/categories').then(({ data }) => setCategories(data)).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

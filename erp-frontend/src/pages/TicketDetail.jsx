@@ -417,7 +417,7 @@ export default function TicketDetail() {
   }
 
   useEffect(() => {
-    api.get('/glpi/categories').then(({ data }) => setCategories(data)).catch(() => {});
+    api.get('/categories').then(({ data }) => setCategories(data)).catch(() => {});
     api.get('/locations').then(({ data }) => setLocations(data)).catch(() => {});
     api.get('/glpi/users').then(({ data }) => setGlpiUsers(data)).catch(() => {});
     api.get('/users').then(({ data }) => setAllUsers(Array.isArray(data) ? data : (data?.users || []))).catch(() => {});
@@ -1768,9 +1768,9 @@ export default function TicketDetail() {
                 </label>
               )}
               <textarea
-                className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-none"
+                className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-y min-h-[140px]"
                 placeholder="Ajouter un commentaire ou suivi... (Ctrl+Entrée pour envoyer)"
-                rows={3}
+                rows={5}
                 value={followup}
                 onChange={(e) => setFollowup(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleAddFollowup(e); } }}
@@ -1970,6 +1970,9 @@ export default function TicketDetail() {
                     onChange={(e) => updateField('category', e.target.value)}
                   >
                     <option value="">-----</option>
+                    {ticket.category && !flatCategories.some((o) => o.name === ticket.category) && (
+                      <option value={ticket.category}>{ticket.category}</option>
+                    )}
                     {flatCategories.map((o) => (
                       <option key={o.id} value={o.name}>{o.label}</option>
                     ))}

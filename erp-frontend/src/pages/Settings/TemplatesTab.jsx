@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Pencil, Trash2, FileText, X, Check } from 'lucide-react';
 import api from '../../api/client';
+import SearchableSelect from '../../components/SearchableSelect';
 import { PRIORITY_OPTIONS, TYPE_OPTIONS, URGENCY_IMPACT_OPTIONS, SOURCE_OPTIONS, SOURCE_LABELS } from '../../constants/tickets';
 
 const EMPTY_FORM = {
@@ -35,6 +36,24 @@ export default function TemplatesTab() {
     api.get('/users').then(({ data }) => setUsers(data)).catch(() => {});
     api.get('/locations').then(({ data }) => setLocations(data)).catch(() => {});
   }, []);
+
+  const locationOptions = useMemo(
+    () => locations.map((l) => ({
+      value: String(l.id),
+      label: l.completename || l.name,
+      subLabel: [l.town, l.address].filter(Boolean).join(' — '),
+    })),
+    [locations]
+  );
+
+  const userOptions = useMemo(
+    () => users.filter((u) => u.isActive !== false).map((u) => ({
+      value: String(u.id),
+      label: u.fullName || u.email,
+      subLabel: u.role || undefined,
+    })),
+    [users]
+  );
 
   function startEdit(template) {
     setEditing(template.id);
@@ -179,23 +198,29 @@ export default function TemplatesTab() {
                 {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
             </label>
-            <label className="flex flex-col gap-1">
+            <div className="flex flex-col gap-1">
               <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Assigné à</span>
-              <select className={inputCls} value={form.assignedToId} onChange={(e) => setForm({ ...form, assignedToId: e.target.value })}>
-                <option value="">—</option>
-                {users.map((u) => <option key={u.id} value={u.id}>{u.fullName || u.email}</option>)}
-              </select>
-            </label>
+              <SearchableSelect
+                options={userOptions}
+                value={form.assignedToId ? String(form.assignedToId) : ''}
+                onChange={(val) => setForm({ ...form, assignedToId: val })}
+                placeholder="— Non assigné —"
+                searchPlaceholder="Rechercher par nom..."
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            <label className="flex flex-col gap-1">
+            <div className="flex flex-col gap-1">
               <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Lieu</span>
-              <select className={inputCls} value={form.locationId} onChange={(e) => setForm({ ...form, locationId: e.target.value })}>
-                <option value="">—</option>
-                {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-              </select>
-            </label>
+              <SearchableSelect
+                options={locationOptions}
+                value={form.locationId ? String(form.locationId) : ''}
+                onChange={(val) => setForm({ ...form, locationId: val })}
+                placeholder="— Aucun lieu —"
+                searchPlaceholder="Rechercher un lieu..."
+              />
+            </div>
             <label className="flex flex-col gap-1">
               <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Échéance</span>
               <input type="date" className={inputCls} value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
