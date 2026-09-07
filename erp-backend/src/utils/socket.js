@@ -2,6 +2,7 @@ const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const { logger } = require('./logger');
 const prisma = require('../prismaClient');
+const { getUserPermissions } = require('../middleware/permissions');
 
 let io = null;
 
@@ -18,8 +19,8 @@ function initSocket(server) {
   });
 
   // Authentification via JWT et jointure de room par user.
-  // Le rôle est RELU en base (comme le middleware REST) : un changement de rôle appliqué par un
-  // admin prend effet immédiatement, même pour une session déjà connectée.
+  // Le rôle ET les permissions sont RELUS en base à chaque connexion socket : un changement
+  // de rôle ou de groupe de droits appliqué par un admin prend effet immédiatement.
   io.use((socket, next) => {
     const token = socket.handshake.auth?.token;
     if (!token) return next(new Error('Token manquant'));
@@ -33,13 +34,17 @@ function initSocket(server) {
 
     prisma.user
       .findUnique({ where: { id: decoded.sub }, select: { id: true, role: true, isActive: true } })
-      .then((user) => {
+      .then(async (user) => {
         if (!user || !user.isActive) return next(new Error('Compte inactif ou supprimé'));
         socket.userId = user.id;
         socket.userRole = user.role;
+        // SUPERADMIN bypass, sinon charger les permissions du groupe
+        socket.userPermissions = user.role === 'SUPERADMIN'
+          ? new Set(['*'])
+          : await getUserPermissions(user.id);
         next();
       })
-      .catch(() => next(new Error('Erreur d’authentification')));
+      .catch(() => next(new Error('Erreur d\u2019authentification')));
   });
 
   io.on('connection', (socket) => {
@@ -48,10 +53,19 @@ function initSocket(server) {
     // Rejoindre une room personnelle pour recevoir ses notifications
     socket.join(`user:${socket.userId}`);
 
-    // Les admins/techniciens rejoignent la room des assignations
-    if (['ADMIN', 'TECHNICIAN', 'SUPERADMIN'].includes(socket.userRole)) {
-      socket.join('assignments');
-      socket.join('notifications');
+    // Rejoindre les rooms broadcast selon la visibilité RÉELLE des tickets (permissions + rôle).
+    // - Seuls les comptes dont la vue tickets est GLOBALE (ADMIN/HOTLINE/SUPERADMIN — pas de filtre
+    //   backend isRequesterOnly/isTechnicianOnly) ET qui ont la permission 'tickets.view' reçoivent
+    //   les événements concernant TOUS les tickets (ticket_created, ticket_updated, sla_breached,
+    //   ticket_escalated...). Un ADMIN sans permission 'tickets.view' ne reçoit donc rien.
+    // - TECHNICIAN/REQUESTER ont une vue SCOPÉE (uniquement leurs tickets) : ils sont notifiés
+    //   individuellement via leur room personnelle (assigné/demandeur/observateur), jamais via les
+    //   rooms broadcast — sinon ils recevraient des alertes sur des tickets qu'ils ne peuvent pas ouvrir.
+    const isGlobalTicketView = ['ADMIN', 'HOTLINE', 'SUPERADMIN'].includes(socket.userRole);
+    const perms = socket.userPermissions;
+    if (isGlobalTicketView && (perms.has('*') || perms.has('tickets.view'))) {
+      socket.join('assignments');    // ticket_updated, ticket_assigned, sla_breached, ticket_escalated
+      socket.join('notifications');  // ticket_created
     }
 
     socket.on('disconnect', () => {
@@ -323,4 +337,14 @@ function emitTicketEscalated(ticket, { reason, escalationLevel, targetTeamName }
   }
 }
 
-module.exports = { initSocket, getIO, emitUserUpdated, persistNotification, emitTicketCreated, emitTicketUpdated, emitTicketAssigned, emitSlaBreach, emitTicketEscalated };
+// Vérifie si un utilisateur connecté a une permission donnée (utilisé par les services
+// qui émettent des notifications ciblées, par ex. emailPipeline).
+async function userHasPermission(userId, permissionKey) {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+  if (!user) return false;
+  if (user.role === 'SUPERADMIN') return true;
+  const perms = await getUserPermissions(userId);
+  return perms.has(permissionKey);
+}
+
+module.exports = { initSocket, getIO, emitUserUpdated, persistNotification, emitTicketCreated, emitTicketUpdated, emitTicketAssigned, emitSlaBreach, emitTicketEscalated, userHasPermission };

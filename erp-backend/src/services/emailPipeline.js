@@ -13,7 +13,7 @@ const { processIncomingAttachments } = require('./emailAttachmentProcessor');
 const { stripSignature } = require('./signatureStripper');
 const { logEvent } = require('./ticketEvent');
 const { getSystemSettings } = require('./systemSettings');
-const { emitTicketCreated, emitTicketAssigned, persistNotification } = require('../utils/socket');
+const { emitTicketCreated, emitTicketAssigned, persistNotification, userHasPermission } = require('../utils/socket');
 const { tryHandleReminderReply } = require('./draftReplyApproval');
 const { getBreaker } = require('../utils/circuitBreaker');
 const { htmlToText } = require('../utils/htmlToText');
@@ -33,6 +33,15 @@ async function notifyAdminsEmailFailed({ incomingId, subject, fromEmail, error, 
     });
     if (!admins.length) return;
 
+    // Filtrer : seuls les admins avec la permission 'inbox.sync' reçoivent la notification
+    const eligibleAdmins = [];
+    for (const admin of admins) {
+      if (await userHasPermission(admin.id, 'inbox.sync')) {
+        eligibleAdmins.push(admin);
+      }
+    }
+    if (!eligibleAdmins.length) return;
+
     const isDeadLetter = phase === 'dead_letter';
     const title = isDeadLetter
       ? `❌ Analyse email échouée — email en attente manuelle`
@@ -43,8 +52,8 @@ async function notifyAdminsEmailFailed({ incomingId, subject, fromEmail, error, 
     const message = `${retryInfo}Email de « ${fromEmail || 'inconnu' }` +
       ` » — Objet : « ${subject} `.trim() + `»\nErreur : ${error}`;
 
-    // Notification persistée pour chaque admin
-    for (const admin of admins) {
+    // Notification persistée pour chaque admin éligible (avec la permission 'inbox.sync')
+    for (const admin of eligibleAdmins) {
       await persistNotification({
         userId: admin.id,
         type: isDeadLetter ? 'EMAIL_FAILED' : 'EMAIL_RETRY',
@@ -55,10 +64,12 @@ async function notifyAdminsEmailFailed({ incomingId, subject, fromEmail, error, 
       });
     }
 
-    // Événement socket pour alerte temps réel
+    // Événement socket pour alerte temps réel — ciblé sur la room personnelle des seuls admins
+    // éligibles (jamais la room broadcast 'notifications', qui contient tous les comptes avec
+    // 'tickets.view' mais pas forcément la permission 'inbox.sync').
     const io = getIO();
     if (io) {
-      io.to('notifications').emit('email_analysis_failed', {
+      const payload = {
         incomingId,
         subject,
         fromEmail,
@@ -68,7 +79,10 @@ async function notifyAdminsEmailFailed({ incomingId, subject, fromEmail, error, 
         maxRetries,
         phase,
         nextRetryAt,
-      });
+      };
+      for (const admin of eligibleAdmins) {
+        io.to(`user:${admin.id}`).emit('email_analysis_failed', payload);
+      }
     }
 
     // ── Email de notification à l'adresse configurée ──────────────────
