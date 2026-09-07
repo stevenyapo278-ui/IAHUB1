@@ -344,6 +344,29 @@ export default function AdvancedTab() {
       </SectionErrorBoundary>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* SECTION FRESH START — DEPLOIEMENT PRODUCTION */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      <SectionErrorBoundary label="Fresh Start">
+        <FreshStartSection
+          onDone={(result) => {
+            api.get('/advanced-settings').then(({ data }) => setSettings(data)).catch(() => {});
+          }}
+        />
+      </SectionErrorBoundary>
+
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* SECTION PAUSE / REPRISE */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      <SectionErrorBoundary label="Pause">
+        <PauseSection
+          isPaused={settings.autonomousMode === true}
+          onToggle={(data) => {
+            setSettings((prev) => ({ ...prev, autonomousMode: data.autonomousMode }));
+          }}
+        />
+      </SectionErrorBoundary>
+
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
       {/* SECTION 4bis : GESTION DU CACHE */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       <SectionErrorBoundary label="Gestion du cache">
@@ -542,6 +565,7 @@ function TicketPurgeSection({ autonomousMode = false, ticketsSyncInterval = 0, o
             <span className="material-symbols-outlined text-[18px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>task_alt</span>
             <span>
               <strong>{result.ticketsDeleted}</strong> ticket(s) supprimé(s)
+              {result.sequencesReset?.length > 0 && <> · séquences réinitialisées : {result.sequencesReset.length}</>}
               {result.orphans && Object.keys(result.orphans).length > 0 && (
                 <> · orphelins nettoyés : {Object.entries(result.orphans).map(([m, c]) => `${m} (${c})`).join(', ')}</>
               )}
@@ -565,6 +589,240 @@ function TicketPurgeSection({ autonomousMode = false, ticketsSyncInterval = 0, o
         danger
         loading={purging}
         onConfirm={handlePurge}
+        onCancel={() => setConfirmOpen(false)}
+      />
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FRESH START — purge complète pour déploiement prod
+// ═══════════════════════════════════════════════════════════════════════════
+function FreshStartSection({ onDone }) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [password, setPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState(null);
+
+  async function handleFreshStart() {
+    if (password !== 'JeMarqueLeDebut') {
+      setPasswordError('Mot de passe incorrect');
+      return;
+    }
+    setPasswordError('');
+    setRunning(true);
+    try {
+      const { data } = await api.post('/advanced-settings/fresh-start', { password });
+      setResult(data);
+      setConfirmOpen(false);
+      onDone?.(data);
+    } catch (err) {
+      setPasswordError(err.response?.data?.error || 'Erreur lors du fresh start');
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className="space-y-md">
+      <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
+        <span className="material-symbols-outlined text-orange-500 text-2xl">factory</span>
+        <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Fresh Start — Déploiement production</h4>
+      </div>
+
+      <motion.div
+        variants={itemVariants}
+        className="bento-card p-lg border border-orange-500/20 bg-orange-500/5 flex items-start justify-between gap-lg flex-wrap"
+      >
+        <div className="space-y-2 max-w-2xl">
+          <div className="font-headline-sm text-headline-sm text-on-surface font-semibold flex items-center gap-2">
+            <span className="material-symbols-outlined text-[20px] text-orange-500">rocket_launch</span>
+            Marquer le départ en production
+          </div>
+          <p className="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
+            Purge <strong>toutes les données de test</strong> : tickets, emails entrants, conversations chat,
+            notifications, logs d'audit, brouillons IA, centre de validation, base de connaissances.
+            Les données de référence sont <strong>conservées</strong> : utilisateurs, équipes, catégories,
+            lieux, providers IA, permissions, comptes email. Le compteur de tickets est <strong>remis à 1</strong>.
+          </p>
+          <p className="font-body-xs text-body-xs text-orange-500 font-bold flex items-center gap-1">
+            <span className="material-symbols-outlined text-[14px]">lock</span>
+            Réservé au SUPERADMIN — Mot de passe requis
+          </p>
+        </div>
+
+        <div className="flex flex-col items-end gap-sm shrink-0">
+          <motion.button
+            onClick={() => { setPassword(''); setPasswordError(''); setResult(null); setConfirmOpen(true); }}
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.97 }}
+            className="px-5 py-2.5 bg-orange-500/10 text-orange-500 border border-orange-500/30 hover:bg-orange-500/20 rounded-xl font-semibold text-body-sm transition-all flex items-center gap-2"
+          >
+            <span className="material-symbols-outlined text-[18px]">rocket_launch</span>
+            Marquer le départ
+          </motion.button>
+        </div>
+      </motion.div>
+
+      <AnimatePresence>
+        {result && (
+          <motion.div
+            key="fresh-result"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[13px] text-emerald-600 dark:text-emerald-400 flex items-center gap-2"
+          >
+            <span className="material-symbols-outlined text-[18px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>task_alt</span>
+            <span>
+              Fresh start terminé — {result.tickets?.ticketsDeleted || 0} ticket(s) supprimé(s)
+              {result.sequencesReset?.length > 0 && <> · séquences réinitialisées</>}
+              {result.seedRan && <> · seed relancé</>}
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Marquer le départ en production ?"
+        message={
+          <div className="space-y-3">
+            <p>
+              Cette action va <strong>supprimer TOUTES les données de test</strong> (tickets, emails, conversations,
+              notifications, logs, brouillons, validations, connaissances) et <strong>remettre le compteur de tickets à 1</strong>.
+            </p>
+            <p className="text-orange-500 font-bold">Cette action est irréversible.</p>
+            <div>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant block mb-1">Mot de passe</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => { setPassword(e.target.value); setPasswordError(''); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleFreshStart(); }}
+                placeholder="Entrez le mot de passe"
+                className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
+                autoFocus
+              />
+              {passwordError && <p className="text-xs text-red-500 mt-1">{passwordError}</p>}
+            </div>
+          </div>
+        }
+        confirmLabel="Oui, marquer le départ"
+        cancelLabel="Annuler"
+        danger
+        loading={running}
+        onConfirm={handleFreshStart}
+        onCancel={() => setConfirmOpen(false)}
+      />
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PAUSE — mettre en pause / reprendre le système
+// ═══════════════════════════════════════════════════════════════════════════
+function PauseSection({ isPaused, onToggle }) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [password, setPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [running, setRunning] = useState(false);
+
+  async function handleToggle() {
+    if (password !== 'JeMarqueLeDebut') {
+      setPasswordError('Mot de passe incorrect');
+      return;
+    }
+    setPasswordError('');
+    setRunning(true);
+    try {
+      const action = isPaused ? 'resume' : 'pause';
+      const { data } = await api.post('/advanced-settings/pause', { password, action });
+      setConfirmOpen(false);
+      onToggle?.(data);
+    } catch (err) {
+      setPasswordError(err.response?.data?.error || 'Erreur');
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className="space-y-md">
+      <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
+        <span className="material-symbols-outlined text-blue-500 text-2xl">pause_circle</span>
+        <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Pause / Reprise</h4>
+      </div>
+
+      <motion.div
+        variants={itemVariants}
+        className={`bento-card p-lg border flex items-start justify-between gap-lg flex-wrap ${
+          isPaused
+            ? 'border-blue-500/20 bg-blue-500/5'
+            : 'border-outline-variant/40 bg-surface-container-lowest'
+        }`}
+      >
+        <div className="space-y-2 max-w-2xl">
+          <div className="font-headline-sm text-headline-sm text-on-surface font-semibold flex items-center gap-2">
+            <span className={`material-symbols-outlined text-[20px] ${isPaused ? 'text-blue-500' : 'text-on-surface-variant'}`}>
+              {isPaused ? 'play_circle' : 'pause_circle'}
+            </span>
+            {isPaused ? 'Système en pause' : 'Mettre en pause'}
+          </div>
+          <p className="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
+            {isPaused
+              ? 'Le système est actuellement en pause. Le traitement des emails et les synchronisations sont suspendus. Cliquez sur "Reprendre" pour relancer.'
+              : 'Suspend le traitement des emails et les synchronisations. Utile avant un déploiement ou une maintenance.'}
+          </p>
+        </div>
+
+        <div className="flex flex-col items-end gap-sm shrink-0">
+          <motion.button
+            onClick={() => { setPassword(''); setPasswordError(''); setConfirmOpen(true); }}
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.97 }}
+            className={`px-5 py-2.5 rounded-xl font-semibold text-body-sm transition-all flex items-center gap-2 ${
+              isPaused
+                ? 'bg-blue-500/10 text-blue-500 border border-blue-500/30 hover:bg-blue-500/20'
+                : 'bg-surface-container text-on-surface-variant border border-outline-variant/50 hover:bg-surface-container-high'
+            }`}
+          >
+            <span className="material-symbols-outlined text-[18px]">{isPaused ? 'play_arrow' : 'pause'}</span>
+            {isPaused ? 'Reprendre' : 'Mettre en pause'}
+          </motion.button>
+        </div>
+      </motion.div>
+
+      <ConfirmDialog
+        open={confirmOpen}
+        title={isPaused ? 'Reprendre le système ?' : 'Mettre en pause ?'}
+        message={
+          <div className="space-y-3">
+            <p>
+              {isPaused
+                ? 'Le système va reprendre le traitement des emails et les synchronisations.'
+                : 'Le traitement des emails et les synchronisations seront suspendus.'}
+            </p>
+            <div>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant block mb-1">Mot de passe</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => { setPassword(e.target.value); setPasswordError(''); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleToggle(); }}
+                placeholder="Entrez le mot de passe"
+                className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                autoFocus
+              />
+              {passwordError && <p className="text-xs text-red-500 mt-1">{passwordError}</p>}
+            </div>
+          </div>
+        }
+        confirmLabel={isPaused ? 'Oui, reprendre' : 'Oui, mettre en pause'}
+        cancelLabel="Annuler"
+        loading={running}
+        onConfirm={handleToggle}
         onCancel={() => setConfirmOpen(false)}
       />
     </div>

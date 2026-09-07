@@ -11,9 +11,6 @@ const path = require('path');
 const prisma = require('../prismaClient');
 
 // Modèles dont la FK vers Ticket est SET NULL ou absente → orphelins à purger explicitement.
-// - optional : la colonne ticketId est nullable (AiEmailDraft, KnowledgeDraft, TicketMapping)
-// - required : ticketId est obligatoire et le modèle est intégralement lié aux tickets
-//   (ReassignmentLog, TicketSimilarityIndex → purge totale lors d'une purge complète)
 const ORPHAN_MODELS = [
   { model: 'AiEmailDraft', optional: true },
   { model: 'KnowledgeDraft', optional: true },
@@ -22,7 +19,33 @@ const ORPHAN_MODELS = [
   { model: 'TicketSimilarityIndex', optional: false },
 ];
 
-// Supprime les fichiers locaux des pièces jointes (dont les lignes seront supprimées par cascade).
+// Tables avec séquences auto-incrémentées à réinitialiser après purge complète
+const SEQUENCES_TO_RESET = [
+  { table: 'Ticket', column: 'id' },
+  { table: 'TicketMessage', column: 'id' },
+  { table: 'TicketEvent', column: 'id' },
+  { table: 'TicketAttachment', column: 'id' },
+  { table: 'Followup', column: 'id' },
+  { table: 'TicketTimeEntry', column: 'id' },
+  { table: 'TicketFieldCorrection', column: 'id' },
+  { table: 'TicketLink', column: 'id' },
+  { table: 'AiTicketSuggestion', column: 'id' },
+  { table: 'AssetTicket', column: 'id' },
+  { table: 'IncomingEmail', column: 'id' },
+  { table: 'AiEmailDraft', column: 'id' },
+  { table: 'EmailApprovalToken', column: 'id' },
+  { table: 'MailEvent', column: 'id' },
+  { table: 'MailError', column: 'id' },
+  { table: 'Conversation', column: 'id' },
+  { table: 'ChatMessage', column: 'id' },
+  { table: 'Notification', column: 'id' },
+  { table: 'AuditLog', column: 'id' },
+  { table: 'SyncRetry', column: 'id' },
+  { table: 'SchedulerHealth', column: 'id' },
+  { table: 'AiWeeklyPatternReport', column: 'id' },
+];
+
+// Supprime les fichiers locaux des pièces jointes
 async function removeAttachmentFiles(ticketIds) {
   let removed = 0;
   try {
@@ -36,20 +59,26 @@ async function removeAttachmentFiles(ticketIds) {
         ? a.localFilepath
         : path.join(__dirname, '..', '..', a.localFilepath);
       try {
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-          removed++;
-        }
-      } catch { /* fichier déjà absent — on continue */ }
+        if (fs.existsSync(filePath)) { fs.unlinkSync(filePath); removed++; }
+      } catch { /* fichier déjà absent */ }
     }
-  } catch { /* accès impossible — on laisse la purge se poursuivre */ }
+  } catch { /* accès impossible */ }
   return removed;
 }
 
-// Purge les tickets (tous, ou uniquement ceux de ticketIds) + le contenu lié par cascades DB
-// (followups, messages, pièces jointes, événements, temps passé, corrections, liens,
-// suggestions IA, AssetTicket) + les orphelins sans FK + les fichiers locaux de pièces jointes.
-// Retourne un résumé { ticketsDeleted, orphans, attachmentsFilesRemoved }.
+// Réinitialise les séquences PostgreSQL à 1
+async function resetSequences() {
+  const reset = [];
+  for (const { table, column } of SEQUENCES_TO_RESET) {
+    try {
+      await prisma.$executeRawUnsafe(`SELECT setval('"${table}_${column}_seq"', 1, false)`);
+      reset.push(table);
+    } catch { /* séquence inexistante — ignorée */ }
+  }
+  return reset;
+}
+
+// Purge les tickets (tous, ou uniquement ceux de ticketIds)
 async function purgeTickets({ ticketIds = [] } = {}) {
   const orphans = {};
   for (const { model, optional } of ORPHAN_MODELS) {
@@ -60,7 +89,7 @@ async function purgeTickets({ ticketIds = [] } = {}) {
       else where = {};
       const { count } = await prisma[model].deleteMany({ where });
       if (count > 0) orphans[model] = count;
-    } catch { /* modèle absent de la base (migration non appliquée) — ignoré */ }
+    } catch { /* modèle absent */ }
   }
 
   const attachmentsFilesRemoved = await removeAttachmentFiles(ticketIds);
@@ -69,7 +98,73 @@ async function purgeTickets({ ticketIds = [] } = {}) {
     ? await prisma.ticket.deleteMany({ where: { id: { in: ticketIds } } })
     : await prisma.ticket.deleteMany({});
 
-  return { ticketsDeleted, orphans, attachmentsFilesRemoved };
+  // Reset les séquences si purge complète
+  const sequencesReset = ticketIds.length === 0 ? await resetSequences() : [];
+
+  return { ticketsDeleted, orphans, attachmentsFilesRemoved, sequencesReset };
 }
 
-module.exports = { purgeTickets, ORPHAN_MODELS };
+// ═══════════════════════════════════════════════════════════════════════════
+// FRESH START — purge complète pour le déploiement prod
+// Supprime TOUT sauf les données de référence et de seed.
+// Conserve : User, Team, TicketCategory, Location, Skill, AiProvider, AiModel,
+//            AiKey, PermissionGroup, EmailAccount, SystemSettings, ApiConfig,
+//            PromptTemplate, TriageRule, SupportTeam
+// ═══════════════════════════════════════════════════════════════════════════
+const TABLES_TO_PURGE = [
+  // Tickets + contenu
+  'TicketTimeEntry', 'TicketAttachment', 'Followup', 'TicketMessage',
+  'TicketEvent', 'TicketLink', 'TicketFieldCorrection', 'AiTicketSuggestion',
+  'AssetTicket', 'Ticket', 'ProblemTicket', 'ProblemFollowup', 'ProblemEvent',
+  'ProblemLink', 'Problem',
+  // Emails
+  'IncomingEmail', 'AiEmailDraft', 'EmailApprovalToken', 'MailEvent', 'MailError',
+  'InboxRule', 'InboxFolder',
+  // Chat
+  'ChatMessage', 'Conversation',
+  // Notifications & logs
+  'Notification', 'AuditLog', 'SchedulerHealth', 'SyncRetry',
+  // IA
+  'TicketSimilarityIndex', 'ReassignmentLog', 'TicketMapping',
+  'AiWeeklyPatternReport',
+  // Connaissances (optionnel — garder si tu veux préserver la base)
+  'KnowledgeFeedback', 'KnowledgeChunk', 'KnowledgeDocument',
+  // Dashboards
+  'DashboardWidget', 'Dashboard',
+  // Automatisations
+  'N8nWorkflow',
+  // Demandeurs
+  'RequesterLocation', 'SenderReputation',
+];
+
+async function freshStart() {
+  const results = {};
+
+  // 1. Purge tickets d'abord (pour les fichiers attachés + orphelins)
+  const ticketResult = await purgeTickets();
+  results.tickets = ticketResult;
+
+  // 2. Purge toutes les autres tables
+  for (const table of TABLES_TO_PURGE) {
+    try {
+      const { count } = await prisma[table].deleteMany({});
+      if (count > 0) results[table] = count;
+    } catch { /* table inexistante — ignorée */ }
+  }
+
+  // 3. Reset toutes les séquences
+  results.sequencesReset = await resetSequences();
+
+  // 4. Ré-exécuter le seed pour recréer les données de base
+  try {
+    const { execSync } = require('child_process');
+    execSync('node prisma/seed.js', { cwd: path.join(__dirname, '..', '..'), timeout: 30000 });
+    results.seedRan = true;
+  } catch {
+    results.seedRan = false;
+  }
+
+  return results;
+}
+
+module.exports = { purgeTickets, freshStart, ORPHAN_MODELS };
