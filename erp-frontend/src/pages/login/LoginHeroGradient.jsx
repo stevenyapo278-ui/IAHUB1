@@ -24,7 +24,7 @@ function HeroPanel() {
         {[
           { icon: ShieldCheck, label: 'Approbation Hotline centralisée' },
           { icon: Zap, label: 'Réponses IA suggérées en un clic' },
-          { icon: RefreshCw, label: 'Synchronisation GLPI continue' },
+          { icon: RefreshCw, label: 'Traçabilité & suivis en temps réel' },
         ].map((item) => {
           const Icon = item.icon;
           return (

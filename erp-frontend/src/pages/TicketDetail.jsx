@@ -1564,7 +1564,8 @@ export default function TicketDetail() {
                         {editingFollowupId === item.data.id ? (
                           <div className="space-y-2">
                             <textarea
-                              className="w-full min-h-[80px] p-2.5 rounded-xl border border-primary/40 bg-surface text-xs text-on-surface leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-primary/30"
+                              className="w-full min-h-[150px] p-3 rounded-xl border border-primary/40 bg-surface text-sm text-on-surface leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-primary/30"
+                              rows={6}
                               value={editingFollowupContent}
                               onChange={(e) => setEditingFollowupContent(e.target.value)}
                               onKeyDown={(e) => {
@@ -1811,9 +1812,9 @@ export default function TicketDetail() {
                 </label>
               )}
               <textarea
-                className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-y min-h-[140px]"
+                className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-4 py-3 text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-y min-h-[220px]"
                 placeholder="Ajouter un commentaire ou suivi... (Ctrl+Entrée pour envoyer)"
-                rows={5}
+                rows={8}
                 value={followup}
                 onChange={(e) => setFollowup(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleAddFollowup(e); } }}
@@ -2649,7 +2650,7 @@ export default function TicketDetail() {
       <ConfirmDialog
         open={showDeleteConfirm}
         title="Supprimer le ticket"
-        message={`Supprimer définitivement le ticket #${id} ? Cette action est irréversible et supprime aussi le ticket GLPI lié.`}
+        message={`Supprimer définitivement le ticket #${id} ? Cette action est irréversible.`}
         confirmLabel="Supprimer"
         danger
         loading={deleting}

@@ -177,10 +177,84 @@ router.delete('/:id/members/:userId', requirePermission('teams.manage', ['ADMIN'
     data: { teamId: null },
   });
 
-  cacheStore.clear('GET /api/teams');
-  cacheStore.clear('GET /api/users');
-  auditLog('TEAM_MEMBER_REMOVED', { actor: req.user, targetType: 'Team', targetId: team.id, targetLabel: team.name, metadata: { userId: user.id, userName: user.fullName } }).catch(() => {});
   return res.json({ message: `${user.fullName} retiré de l'équipe ${team.name}` });
+});
+
+// ── Basculer les membres demandeurs de TOUTES les équipes en techniciens ──
+router.post('/convert-all-requesters', requirePermission('teams.manage', ['ADMIN', 'HOTLINE', 'SUPERADMIN']), async (req, res) => {
+  try {
+    const requesters = await prisma.user.findMany({
+      where: { teamId: { not: null }, role: 'REQUESTER' },
+      select: { id: true, fullName: true },
+    });
+
+    if (requesters.length === 0) {
+      return res.json({ count: 0, message: 'Aucun membre demandeur à basculer en technicien' });
+    }
+
+    const ids = requesters.map((u) => u.id);
+    await prisma.user.updateMany({
+      where: { id: { in: ids } },
+      data: { role: 'TECHNICIAN' },
+    });
+
+    cacheStore.clear('GET /api/teams');
+    cacheStore.clear('GET /api/users');
+    auditLog('TEAMS_CONVERT_ALL_REQUESTERS', {
+      actor: req.user,
+      targetType: 'Team',
+      metadata: { count: requesters.length, userIds: ids },
+    }).catch(() => {});
+
+    return res.json({
+      count: requesters.length,
+      message: `${requesters.length} demandeur(s) basculé(s) en technicien(s)`,
+    });
+  } catch (err) {
+    console.error('[team.routes] Erreur convert-all-requesters:', err);
+    return res.status(500).json({ error: 'Erreur interne' });
+  }
+});
+
+// ── Basculer les membres demandeurs d'UNE équipe en techniciens ─────────
+router.post('/:id/convert-requesters', requirePermission('teams.manage', ['ADMIN', 'HOTLINE', 'SUPERADMIN']), async (req, res) => {
+  try {
+    const teamId = Number(req.params.id);
+    const team = await prisma.team.findUnique({
+      where: { id: teamId },
+      include: { members: { select: { id: true, fullName: true, role: true } } },
+    });
+    if (!team) return res.status(404).json({ error: 'Équipe introuvable' });
+
+    const requesters = team.members.filter((m) => m.role === 'REQUESTER');
+    if (requesters.length === 0) {
+      return res.json({ count: 0, message: 'Aucun membre demandeur dans cette équipe' });
+    }
+
+    const ids = requesters.map((m) => m.id);
+    await prisma.user.updateMany({
+      where: { id: { in: ids } },
+      data: { role: 'TECHNICIAN' },
+    });
+
+    cacheStore.clear('GET /api/teams');
+    cacheStore.clear('GET /api/users');
+    auditLog('TEAM_CONVERT_REQUESTERS', {
+      actor: req.user,
+      targetType: 'Team',
+      targetId: team.id,
+      targetLabel: team.name,
+      metadata: { count: requesters.length, userIds: ids },
+    }).catch(() => {});
+
+    return res.json({
+      count: requesters.length,
+      message: `${requesters.length} demandeur(s) de l'équipe ${team.name} basculé(s) en technicien(s)`,
+    });
+  } catch (err) {
+    console.error('[team.routes] Erreur convert-requesters:', err);
+    return res.status(500).json({ error: 'Erreur interne' });
+  }
 });
 
 module.exports = router;

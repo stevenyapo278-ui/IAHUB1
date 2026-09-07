@@ -411,7 +411,7 @@ export default function Supervision() {
         <StatusChip label="Daemon" ok={systemHealth.daemon} />
         <StatusChip label="Gemini IA" ok={systemHealth.ai} />
         <StatusChip label="Boîtes mail" ok={systemHealth.mail} />
-        <StatusChip label="GLPI Sync" ok={systemHealth.glpi} />
+        <StatusChip label="Intégrations" ok={systemHealth.glpi} />
       </div>
 
       {/* ═══ KPI GRID ═══ */}

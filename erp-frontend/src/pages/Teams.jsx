@@ -7,7 +7,7 @@ import { hasPermission } from '../utils/permissions';
 import ConfirmDialog from '../components/ConfirmDialog';
 import UserAvatar from '../components/UserAvatar';
 import { useTheme } from '../context/ThemeContext';
-import { Users, ShieldCheck, Ticket, Plus, RefreshCw, Trash2, X, AlertTriangle, Mail, Check, Layers, Save, ChevronDown } from 'lucide-react';
+import { Users, ShieldCheck, Ticket, Plus, RefreshCw, Trash2, X, AlertTriangle, Mail, Check, Layers, Save, ChevronDown, UserCheck } from 'lucide-react';
 import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
 import PageShell from '../components/PageShell';
 import KpiRow from '../components/KpiRow';
@@ -23,6 +23,43 @@ export default function Teams() {
   const [error, setError] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [convertingRequesters, setConvertingRequesters] = useState(false);
+
+  // ── Basculer tous les demandeurs des équipes en techniciens ──
+  async function handleConvertAllRequesters() {
+    setConvertingRequesters(true);
+    try {
+      const { data } = await api.post('/teams/convert-all-requesters');
+      toast.success(data.message || 'Demandeurs basculés en techniciens');
+      load();
+      if (detailModal) {
+        const { data: updated } = await api.get(`/teams/${detailModal.id}`);
+        setDetailModal(updated);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de la conversion');
+    } finally {
+      setConvertingRequesters(false);
+    }
+  }
+
+  // ── Basculer les demandeurs d'une équipe spécifique ──
+  async function handleConvertTeamRequesters(teamId) {
+    setConvertingRequesters(true);
+    try {
+      const { data } = await api.post(`/teams/${teamId}/convert-requesters`);
+      toast.success(data.message || 'Demandeurs de l\'équipe basculés en techniciens');
+      load();
+      if (detailModal && detailModal.id === teamId) {
+        const { data: updated } = await api.get(`/teams/${teamId}`);
+        setDetailModal(updated);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de la conversion');
+    } finally {
+      setConvertingRequesters(false);
+    }
+  }
 
   const [categories, setCategories] = useState([]);
 
@@ -236,13 +273,24 @@ export default function Teams() {
       subtitle={`${teams.length} équipes · ${totalMembers} membres · ${totalTickets} tickets ouverts`}
       actions={
         canManageTeams && (
-          <button
-            onClick={() => { setShowCreateModal(true); setCreateError(''); }}
-            className="btn-primary"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Nouvelle équipe</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleConvertAllRequesters}
+              disabled={convertingRequesters}
+              className="btn-secondary"
+              title="Basculer tous les membres demandeurs des équipes en techniciens"
+            >
+              <UserCheck className={`w-3.5 h-3.5 ${convertingRequesters ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">Basculer demandeurs en techniciens</span>
+            </button>
+            <button
+              onClick={() => { setShowCreateModal(true); setCreateError(''); }}
+              className="btn-primary"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Nouvelle équipe</span>
+            </button>
+          </div>
         )
       }
     >
@@ -261,7 +309,7 @@ export default function Teams() {
       {/* ── Stats KPI ────────────────────────────────────────────────────── */}
       <KpiRow cards={kpiCards} />
 
-      {/* ── Sélecteur d'équipe ──────────────────────────────────────────── */}
+      {/* ── Liste des équipes ──────────────────────────────────────────── */}
       <div className="pb-6">
         {loading ? (
           <div className="text-center py-12 text-on-surface/40">
@@ -275,28 +323,6 @@ export default function Teams() {
           </div>
         ) : (
           <div className="max-w-2xl mx-auto space-y-4">
-            {/* Sélecteur équipe */}
-            <div className="field-label">
-              <span className="flex items-center gap-1.5">
-                <Layers className="w-3.5 h-3.5 text-blue-500" />
-                Sélectionner une équipe
-              </span>
-              <div className="relative">
-                <select
-                  value=""
-                  onChange={(e) => { if (e.target.value) openDetail(Number(e.target.value)); }}
-                  className="input-katalyst cursor-pointer text-sm font-semibold py-3"
-                >
-                  <option value="" disabled>— Choisir une équipe ({teams.length} disponibles) —</option>
-                  {teams.sort((a, b) => a.name.localeCompare(b.name)).map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}{t.category ? ` · ${t.category}` : ''} — {t.members.length} membre{t.members.length > 1 ? 's' : ''} · {t._count.tickets} ticket{t._count.tickets > 1 ? 's' : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
             {/* Liste de toutes les équipes */}
             <div className="space-y-2 pt-2">
               <span className="field-label"><span>Toutes les équipes</span></span>
@@ -403,12 +429,26 @@ export default function Teams() {
 
             {/* Membres */}
             <div>
-              <span className="field-label mb-2">
-                <span className="flex items-center gap-1.5">
-                  <Users className="w-3.5 h-3.5 text-blue-500" />
-                  Membres ({detailModal.members?.length || 0})
+              <div className="flex items-center justify-between mb-2">
+                <span className="field-label mb-0">
+                  <span className="flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-blue-500" />
+                    Membres ({detailModal.members?.length || 0})
+                  </span>
                 </span>
-              </span>
+                {canManageTeams && detailModal.members?.some(m => m.role === 'REQUESTER') && (
+                  <button
+                    type="button"
+                    onClick={() => handleConvertTeamRequesters(detailModal.id)}
+                    disabled={convertingRequesters}
+                    className="text-xs text-primary font-bold hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    title="Convertir les membres demandeurs de cette équipe en techniciens"
+                  >
+                    <UserCheck className={`w-3.5 h-3.5 ${convertingRequesters ? 'animate-spin' : ''}`} />
+                    Basculer demandeurs en techniciens
+                  </button>
+                )}
+              </div>
 
               {canManageTeams && (
                 <div className="mb-3">
@@ -449,7 +489,18 @@ export default function Teams() {
                   <div key={m.id} className="flex items-center gap-2.5 p-2.5 rounded-xl bg-surface border border-outline-variant/30 group">
                     <UserAvatar user={m} size="md" colorClass="bg-blue-500/10 text-blue-500" />
                     <div className="min-w-0 flex-1">
-                      <p className="text-xs font-semibold text-on-surface truncate">{m.fullName}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs font-semibold text-on-surface truncate">{m.fullName}</p>
+                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md border ${
+                          m.role === 'REQUESTER'
+                            ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+                            : m.role === 'TECHNICIAN'
+                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                            : 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20'
+                        }`}>
+                          {m.role === 'REQUESTER' ? 'Demandeur' : m.role === 'TECHNICIAN' ? 'Technicien' : m.role}
+                        </span>
+                      </div>
                       <p className="text-[10px] text-on-surface-variant font-mono truncate">{m.email}</p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">

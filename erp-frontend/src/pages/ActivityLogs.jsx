@@ -30,7 +30,7 @@ const EVENT_META = {
   ESCALATED:                    { icon: AlertTriangle,    color: 'text-red-600 dark:text-red-400',    bg: 'bg-red-500/10',    border: 'border-red-500/20',    label: 'Escalade' },
   REMINDER_SENT:                { icon: Clock,            color: 'text-yellow-600 dark:text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/20', label: 'Relance envoyée' },
   CLOSED_AUTO:                  { icon: CheckCircle2,     color: 'text-slate-600 dark:text-zinc-400',   bg: 'bg-slate-500/10',   border: 'border-slate-500/20',   label: 'Fermeture auto' },
-  GLPI_SYNC_FAILED:             { icon: XCircle,          color: 'text-red-600 dark:text-red-400',    bg: 'bg-red-500/10',    border: 'border-red-500/20',    label: 'Sync GLPI échouée' },
+  GLPI_SYNC_FAILED:             { icon: XCircle,          color: 'text-red-600 dark:text-red-400',    bg: 'bg-red-500/10',    border: 'border-red-500/20',    label: 'Sync échouée' },
   APPROVED:                     { icon: CheckCircle2,     color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', label: 'Approuvé' },
   REJECTED:                     { icon: XCircle,          color: 'text-red-600 dark:text-red-400',    bg: 'bg-red-500/10',    border: 'border-red-500/20',    label: 'Rejeté' },
   NEEDS_HUMAN_REVIEW:           { icon: AlertTriangle,    color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-500/10',  border: 'border-amber-500/20',  label: 'Revue humaine nécessaire' },
@@ -51,7 +51,7 @@ const CATEGORY_OPTIONS = [
   { value: 'EMAILS', label: '📧 Emails' },
   { value: 'IA', label: '🤖 Intelligence artificielle' },
   { value: 'RELANCES', label: '⏰ Relances, escalades & SLA' },
-  { value: 'GLPI', label: '🔄 Sync GLPI' },
+  { value: 'GLPI', label: '🔄 Synchronisations' },
   { value: 'CONNAISSANCES', label: '📚 Base de connaissances' },
 ];
 
@@ -440,7 +440,7 @@ export default function ActivityLogs({ embedded = false } = {}) {
                           <div className="text-xs space-y-2">
                             <div className="flex flex-wrap gap-4 text-[11px] text-on-surface-variant font-medium">
                               <div><strong className="text-on-surface">Date exacte :</strong> {formatDate(event.createdAt)}</div>
-                              {event.glpiTicketId && <div><strong className="text-on-surface">GLPI Ticket :</strong> #{event.glpiTicketId}</div>}
+                              {event.glpiTicketId && <div><strong className="text-on-surface">Ticket Externe :</strong> #{event.glpiTicketId}</div>}
                             </div>
 
                             {event.payload && (

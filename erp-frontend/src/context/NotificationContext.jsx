@@ -13,6 +13,7 @@ export function NotificationProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [hasMore, setHasMore] = useState(false);
   const isFetchingRef = useRef(false);
+  const lastFetchTimeRef = useRef(0);
 
   // ── Chargement initial des notifications (uniquement si authentifié) ────
   const loadNotifications = useCallback(async (offset = 0, append = false) => {
@@ -22,14 +23,16 @@ export function NotificationProvider({ children }) {
       return;
     }
 
-    if (isFetchingRef.current) return;
+    const now = Date.now();
+    if (isFetchingRef.current || (!append && offset === 0 && now - lastFetchTimeRef.current < 10000)) return;
     isFetchingRef.current = true;
+    lastFetchTimeRef.current = now;
 
     try {
       const res = await api.get(`/notifications?limit=20&offset=${offset}`);
       const data = res.data;
 
-      if (!data.ok) return;
+      if (!data?.ok) return;
 
       if (append) {
         setNotifications((prev) => [...prev, ...data.notifications]);
@@ -39,7 +42,9 @@ export function NotificationProvider({ children }) {
       setUnreadCount(data.unreadCount);
       setHasMore(data.hasMore);
     } catch (err) {
-      console.error('[NotificationContext] Erreur chargement:', err.message);
+      if (err.response?.status !== 429) {
+        console.error('[NotificationContext] Erreur chargement:', err.message);
+      }
     } finally {
       setLoading(false);
       isFetchingRef.current = false;

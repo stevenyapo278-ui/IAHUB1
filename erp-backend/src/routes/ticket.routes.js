@@ -777,7 +777,9 @@ router.post(
         ...(finalStatus === 'SOLVED' ? { solvedAt: new Date() } : {}),
         ...(finalStatus === 'CLOSED' ? { closedAt: new Date() } : {}),
         ...(openedAt ? { createdAt: new Date(openedAt) } : {}),
-        approvalStatus: 'PENDING',
+        // Les tickets créés manuellement sont directement approuvés — seuls les tickets
+        // créés par email/IA (createTicketFromEmail, aiProcessed=true) passent par la validation Hotline.
+        approvalStatus: 'APPROVED',
         type: type || 'INCIDENT',
         urgency: urgency || 'MEDIUM',
         impact: impact || 'MEDIUM',
@@ -878,23 +880,8 @@ router.post(
       }
     }
 
-    // Auto-approbation des tickets créés MANUELLEMENT (formulaire interne / portail) quand le
-    // réglage autoApproveManualTickets est activé. Les tickets créés par email/IA passent par
-    // createTicketFromEmail (aiProcessed=true) et restent soumis à validation Hotline.
-    const creationSettings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
-    if (creationSettings?.autoApproveManualTickets === true && finalTicket) {
-      try {
-        await approveTicket(finalTicket.id, {
-          approvedById: req.user.sub,
-          approvedByEmail: req.user.email || 'HOTLINE',
-        });
-        // Recharger le ticket pour refléter l'approbation
-        finalTicket = await prisma.ticket.findUnique({ where: { id: ticket.id } });
-      } catch (err) {
-        console.error('[ticket.routes] Auto-approbation échouée:', err.message);
-        await logEvent(ticket.id, 'AUTO_APPROVE_FAILED', 'SYSTEM', { action: 'auto-approve', error: err.message }).catch(() => {});
-      }
-    }
+    // Les tickets manuels sont directement approuvés (voir approvalStatus: 'APPROVED' à la création).
+    // Pas d'auto-approbation supplémentaire nécessaire.
 
     if (finalTicket) {
       emitTicketCreated(finalTicket);

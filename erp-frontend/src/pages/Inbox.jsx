@@ -1443,7 +1443,7 @@ export default function Inbox() {
                                     )}
                                     {msg.glpiTicketId && (
                                       <div className="bg-surface-container/40 rounded-xl p-3">
-                                        <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Ticket GLPI</p>
+                                        <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Ticket Externe</p>
                                         <p className="text-sm font-semibold text-on-surface">#{msg.glpiTicketId}</p>
                                       </div>
                                     )}

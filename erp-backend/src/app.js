@@ -50,10 +50,9 @@ const { apiCache } = require('./middleware/apiCache');
 
 const app = express();
 
-// Si l'app est derrière un reverse proxy (Traefik/Nginx/Dokploy avec domaine),
-// activer trust proxy pour que req.protocol retourne 'https' correctement.
-// En accès direct IP:port, cette option n'est pas nécessaire.
-if (process.env.TRUST_PROXY === '1') {
+// Si l'app est derrière un reverse proxy (Traefik/Nginx/Dokploy avec domaine ou IP),
+// activer trust proxy par défaut pour que req.ip et req.protocol soient corrects.
+if (process.env.TRUST_PROXY !== '0') {
   app.set('trust proxy', 1);
 }
 
@@ -102,19 +101,6 @@ app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 
 // ── Limiteur global de l'API — clé par UTILISATEUR authentifié, pas par IP ──
-// BUG CORRIGÉ : l'ancien limiteur (500 req/15 min PAR IP) faisait partager un SEUL
-// bucket à tous les utilisateurs derrière un même NAT/proxy (sans TRUST_PROXY=1,
-// req.ip = IP du proxy pour toute l'entreprise). Le polling légitime de l'app
-// (listes de tickets toutes les 15 s, badges sidebar toutes les 30 s, /auth/me
-// toutes les 2 min ≈ 130-150 req/15 min PAR ONGLET) épuisait le quota en quelques
-// minutes après plusieurs créations de tickets (bursts socket → refresh chez tous
-// les clients). Ensuite TOUT répondait 429 — y compris /api/auth/login, monté
-// après ce limiteur — et AuthContext déconnectait sur l'échec /auth/me : plus
-// aucune reconnexion possible pendant 15 min (« l'application a crashé »).
-// Désormais : chaque utilisateur authentifié (JWT décodé, sans accès DB) a son
-// PROPRE quota ; les anonymes (écran de login) ont un bucket par IP ; et la
-// route /auth/login est EXCLUE du bucket global (elle a ses propres limiteurs
-// dédiés, échecs uniquement) — un utilisateur peut donc TOUJOURS se reconnecter.
 function getAuthSub(req) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
@@ -129,47 +115,37 @@ function getAuthSub(req) {
 
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  // Utilisateur authentifié : 2000 req/15 min (le polling multi-onglets légitime
-  // tourne autour de 150-300 ; large marge). Anonyme : 300 par IP.
-  max: (req) => (getAuthSub(req) ? 2000 : 300),
+  // Utilisateur authentifié : 5000 req/15 min. Anonyme / IP : 1500 req/15 min.
+  max: (req) => (getAuthSub(req) ? 5000 : 1500),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Trop de requêtes. Réessayez dans quelques minutes.' },
   keyGenerator: (req) => {
     const sub = getAuthSub(req);
-    return sub ? `user:${sub}` : `ip:${ipKeyGenerator(req.ip)}`;
+    return sub ? `user:${sub}` : `ip:${ipKeyGenerator(req.ip || req.socket.remoteAddress || '127.0.0.1')}`;
   },
-  // Le login ne doit JAMAIS être bloqué par le bucket global (sinon « plus de
-  // reconnexion possible ») : il est protégé par ses propres limiteurs ci-dessous.
-  skip: (req) => req.path === '/auth/login',
+  // Les routes d'authentification publiques et de santé ne consomment pas le quota global
+  skip: (req) => ['/auth/login', '/auth/login-theme', '/health'].includes(req.path),
 });
 app.use('/api', globalLimiter);
 
 // ── Limiteurs de connexion à deux niveaux ────────────────────────────────────
-// Derrière un reverse proxy (Dokploy/Traefik), toutes les requêtes partagent la
-// même IP interne : compter par IP seul verrouillait toute l'entreprise après
-// quelques échecs d'UN utilisateur. D'où :
-//  - Par COMPTE  : 8 échecs / 15 min sur l'email tenté — seules les tentatives
-//    ÉCHOUÉES comptent, les connexions normales ne consomment jamais le quota.
-//  - Par RÉSEAU  : 60 échecs / 15 min par IP réelle (nécessite TRUST_PROXY=1
-//    derrière le proxy) — ralentit un balayage massif sans gêner un bureau.
 const loginAccountLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: 20,
   skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Trop de tentatives pour ce compte. Réessayez dans 15 minutes.' },
   keyGenerator: (req) => {
     const id = String(req.body?.email || req.body?.username || '').toLowerCase().trim();
-    return id ? `acct:${id}` : `ip:${ipKeyGenerator(req)}`;
+    return id ? `acct:${id}` : `ip:${ipKeyGenerator(req.ip || req.socket.remoteAddress || '127.0.0.1')}`;
   },
 });
 
-
 const loginNetworkLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 30,
+  max: 100,
   skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,

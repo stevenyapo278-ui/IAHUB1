@@ -107,7 +107,7 @@ export default function LoginClassic() {
 
           <span className="px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold flex items-center gap-1.5 backdrop-blur-md">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            Services IA & GLPI Opérationnels
+            Services IA Opérationnels
           </span>
         </div>
 
@@ -122,13 +122,13 @@ export default function LoginClassic() {
               Gestion IT Nouvelle Génération & IA
             </h2>
             <p className="text-zinc-400 text-sm leading-relaxed font-normal">
-              Plateforme d'assistance unifiée avec qualification Hotline différée, prédictions d'apprentissage IA et synchronisation GLPI en temps réel.
+              Plateforme d'assistance unifiée avec qualification Hotline différée, prédictions d'apprentissage IA et traitement en temps réel.
             </p>
           </div>
 
           <div className="space-y-3 pt-2">
             {[
-              { icon: ShieldCheck, title: 'Validation Hotline GLPI', desc: 'Contrôle complet avant création officielle dans GLPI' },
+              { icon: ShieldCheck, title: 'Validation Hotline', desc: 'Contrôle complet avant validation officielle' },
               { icon: Zap,          title: 'IA & Réponses Automatiques', desc: 'Brouillons intelligents Gemini et suggestions de triage' },
               { icon: RefreshCw,    title: 'Synchro Bi-directionnelle', desc: 'Mise à jour en temps réel des tickets et pièces jointes' },
             ].map((item, idx) => {

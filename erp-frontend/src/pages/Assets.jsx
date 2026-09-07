@@ -166,10 +166,10 @@ export default function Assets() {
     setSyncing(true);
     try {
       const { data } = await api.post('/assets/sync-glpi');
-      toast.success(`${data.synced} équipement(s) synchronisé(s) depuis GLPI`);
+      toast.success(`${data.synced} équipement(s) synchronisé(s)`);
       loadAssets();
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Erreur sync GLPI');
+      toast.error(err.response?.data?.error || 'Erreur de synchronisation');
     } finally {
       setSyncing(false);
     }
@@ -388,7 +388,7 @@ export default function Assets() {
             <button onClick={handleSync} disabled={syncing}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-outline-variant/60 text-on-surface-variant text-xs font-semibold hover:bg-surface-container-high cursor-pointer transition-colors">
               <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">Sync GLPI</span>
+              <span className="hidden sm:inline">Synchroniser</span>
             </button>
           )}
           {canManage && (
@@ -512,7 +512,7 @@ export default function Assets() {
               onSelectionChange={setSelectedIds}
               onRowClick={(data) => canManage && openEdit(data)}
               pagination={false}
-              noRowsText={search || typeFilter || statusFilter ? 'Aucun équipement ne correspond à vos critères' : 'Aucun équipement. Créez-en un ou synchronisez GLPI.'}
+              noRowsText={search || typeFilter || statusFilter ? 'Aucun équipement ne correspond à vos critères' : 'Aucun équipement disponible.'}
               className="rounded-2xl overflow-hidden flex-1"
             />
           </div>
