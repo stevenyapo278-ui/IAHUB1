@@ -181,7 +181,7 @@ function LocationDetailModal({ open, onClose, locationId, locations, canManage, 
     if (!selectedEmail.trim()) return;
     setAdding(true);
     try {
-      await api.post('/locations/requesters', { email: selectedEmail.trim(), glpiLocationId: locationId });
+      await api.post('/locations/requesters', { email: selectedEmail.trim(), locationId: locationId });
       toast.success(`« ${selectedLabel || selectedEmail} » associé au lieu`);
       setSelectedEmail('');
       setSelectedLabel('');

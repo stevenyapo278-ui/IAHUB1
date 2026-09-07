@@ -6,8 +6,8 @@ const { applySla } = require('./slaService');
 const { scheduleEscalation } = require('./escalationService');
 
 // Crée un ticket ERP à partir d'un email entrant analysé par l'IA.
-// Retourne { erpTicketId } — glpiTicketId a été retiré (plus d'intégration GLPI).
-async function createTicketFromEmail({ subject, body, from, fromName, analysis, emailAccountId, locationId, lowTrustSender = false, tx = prisma, escalateMinutes = null, triageRuleId = null }) {
+// Retourne { erpTicketId }.
+async function createTicketFromEmail({ subject, body, from, fromName, analysis, emailAccountId, locationId, locationName, lowTrustSender = false, tx = prisma, escalateMinutes = null, triageRuleId = null }) {
   const title = analysis.suggestedTitle || subject;
 
   const erpTicket = await tx.ticket.create({
@@ -25,6 +25,8 @@ async function createTicketFromEmail({ subject, body, from, fromName, analysis, 
       aiProcessed: true,
       aiSummary: analysis.summary || null,
       lowTrustSender,
+      locationId: locationId || null,
+      locationName: locationName || null,
     },
   });
 

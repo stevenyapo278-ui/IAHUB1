@@ -113,7 +113,7 @@ function TicketSlide({ ticket, isDark }) {
           </div>
           <div className="flex items-center gap-2 truncate">
             <MapPin className="size-4 text-emerald-400 shrink-0" />
-            <span className="truncate">{ticket.glpiLocationName || 'Prosuma'}</span>
+            <span className="truncate">{ticket.locationName || 'Prosuma'}</span>
           </div>
           <div className="flex items-center gap-2">
             <Clock className="size-4 text-amber-400 shrink-0" />

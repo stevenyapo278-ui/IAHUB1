@@ -194,13 +194,13 @@ function TicketInfoRenderer({ data, context }) {
         )}
       </div>
       {/* Row 2: Category · Location */}
-      {(data.category || data.glpiLocationName) && (
+      {(data.category || data.locationName) && (
         <div className="flex items-center gap-2 mt-0.5 text-[11px] text-on-surface-variant font-medium min-w-0 w-full overflow-hidden truncate">
           {data.category && <span className="truncate max-w-[140px]">{data.category}</span>}
-          {data.glpiLocationName && (
+          {data.locationName && (
             <span className="flex items-center gap-0.5 truncate max-w-[140px]">
               <MapPin className="w-3 h-3 shrink-0 text-amber-500/70" />
-              {data.glpiLocationName}
+              {data.locationName}
             </span>
           )}
         </div>
@@ -254,11 +254,11 @@ function RequesterRenderer({ data }) {
 
 function LocationRenderer({ data }) {
   if (!data) return null;
-  if (!data.glpiLocationName) return <span className="text-sm text-muted-foreground/60 italic">—</span>;
+  if (!data.locationName) return <span className="text-sm text-muted-foreground/60 italic">—</span>;
   return (
     <div className="flex h-full items-center gap-2">
       <MapPin className="w-3.5 h-3.5 shrink-0 text-amber-500/60" />
-      <span className="text-sm font-medium text-foreground truncate">{data.glpiLocationName}</span>
+      <span className="text-sm font-medium text-foreground truncate">{data.locationName}</span>
     </div>
   );
 }
@@ -1158,7 +1158,7 @@ export default function Tickets() {
         headerName: 'LIEU',
         width: 160,
         cellRenderer: LocationRenderer,
-        valueGetter: (p) => p.data?.glpiLocationName || '',
+        valueGetter: (p) => p.data?.locationName || '',
       });
     }
 
@@ -1439,7 +1439,7 @@ export default function Tickets() {
                   </div>
                   <div className="flex items-center justify-between gap-2 mt-auto">
                     <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                      {t.glpiLocationName && <><MapPin className="w-3 h-3 shrink-0" /><span className="truncate max-w-[100px]">{t.glpiLocationName}</span></>}
+                      {t.locationName && <><MapPin className="w-3 h-3 shrink-0" /><span className="truncate max-w-[100px]">{t.locationName}</span></>}
                     </div>
                     {t.assignedTo ? (
                       <div className="flex items-center gap-1.5">

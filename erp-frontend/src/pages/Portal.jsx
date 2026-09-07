@@ -223,9 +223,9 @@ export default function Portal() {
                     </div>
                     <p className="font-bold text-body-sm text-on-surface truncate">{t.title}</p>
                     <div className="flex items-center gap-2 mt-0.5">
-                      {t.glpiLocationName && (
+                      {t.locationName && (
                         <span className="text-[11px] text-on-surface-variant flex items-center gap-0.5">
-                          <MapPin className="w-2.5 h-2.5" />{t.glpiLocationName}
+                          <MapPin className="w-2.5 h-2.5" />{t.locationName}
                         </span>
                       )}
                       <SlaBadge ticket={t} />

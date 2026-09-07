@@ -570,13 +570,27 @@ async function processMessage(message, account) {
       return updated;
     }
 
-    // Résoudre le lieu : 1) fallback RequesterLocation (historique du demandeur), 2) suggestion IA
+    // Résoudre le lieu : 1) suggestion IA (prioritaire), 2) fallback RequesterLocation (historique)
+    // RÈGLE STRICTE : un lieu n'est assigné QUE s'il existe dans la table Location.
     let locationId = null;
-    let resolvedLocationName = null; // nom du lieu finalement retenu (pour cohérence du titre)
+    let resolvedLocationName = null;
 
-    // 1. Fallback RequesterLocation — si on a déjà associé cet email à un lieu, l'utiliser
-    //    Cela évite de devoir deviner le lieu à chaque fois pour un demandeur connu.
-    if (!locationId && fromEmail) {
+    if (analysis.location) {
+      // L'IA a proposé un lieu → vérifier qu'il existe en DB
+      const loc = await prisma.location.findFirst({
+        where: { completename: analysis.location },
+        select: { id: true, name: true, completename: true },
+      });
+      if (loc) {
+        locationId = loc.id;
+        resolvedLocationName = loc.name || loc.completename;
+        console.log(`[emailPipeline] Lieu IA résolu : "${resolvedLocationName}" pour ${fromEmail}`);
+      } else {
+        // Lieu IA inexistant en DB → aucun lieu assigné, même si le demandeur a un historique
+        console.log(`[emailPipeline] Lieu IA "${analysis.location}" introuvable en DB → aucun lieu assigné`);
+      }
+    } else if (fromEmail) {
+      // Pas de lieu IA → fallback historique du demandeur uniquement si pas de lieu explicite dans le mail
       const knownLocation = await prisma.requesterLocation.findFirst({
         where: { email: fromEmail.toLowerCase().trim() },
         orderBy: { lastUsedAt: 'desc' },
@@ -585,30 +599,11 @@ async function processMessage(message, account) {
       if (knownLocation?.location) {
         locationId = knownLocation.location.id;
         resolvedLocationName = knownLocation.location.name || knownLocation.location.completename;
-        // Mettre à jour le compteur et la date de dernière utilisation
         await prisma.requesterLocation.updateMany({
           where: { email: fromEmail.toLowerCase().trim() },
           data: { lastUsedAt: new Date(), assignmentCount: { increment: 1 } },
         }).catch(() => {});
         console.log(`[emailPipeline] Lieu résolu via historique demandeur : "${resolvedLocationName}" pour ${fromEmail}`);
-      }
-    }
-
-    // 2. Suggestion IA (peut override l'historique du demandeur si l'IA trouve mieux)
-    if (analysis.location) {
-      const loc = await prisma.location.findFirst({
-        where: { completename: analysis.location },
-        select: { id: true, name: true, completename: true },
-      });
-      if (loc) {
-        // Si l'IA a trouvé un lieu différent de l'historique, on le note mais on garde l'historique
-        // (l'historique est plus fiable que la devinette IA)
-        if (locationId && locationId !== loc.id) {
-          console.log(`[emailPipeline] Lieu IA "${loc.completename}" ignoré — lieu historique "${resolvedLocationName}" conservé`);
-        } else {
-          locationId = loc.id;
-          resolvedLocationName = loc.name || loc.completename;
-        }
       }
     }
 
@@ -641,7 +636,7 @@ async function processMessage(message, account) {
 
     const { erpTicketId, ticketMessageId } = await prisma.$transaction(async (tx) => {
       const created = await createTicketFromEmail({
-        subject, body: bodyPreview, from: fromEmail, fromName, analysis, emailAccountId: account.id, locationId, lowTrustSender, tx,
+        subject, body: bodyPreview, from: fromEmail, fromName, analysis, emailAccountId: account.id, locationId, locationName: resolvedLocationName, lowTrustSender, tx,
         escalateMinutes: ruleMatch?.autoEscalateMinutes || null,
         triageRuleId: ruleMatch?.id || null,
       });

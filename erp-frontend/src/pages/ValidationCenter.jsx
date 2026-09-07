@@ -750,9 +750,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                       <span className="px-2 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface-variant">
                         {t.type === 'REQUEST' ? 'Demande' : 'Incident'} · U: {LEVEL_LABELS[t.urgency] || t.urgency} · I: {LEVEL_LABELS[t.impact] || t.impact}
                       </span>
-                      {t.glpiLocationName && (
+                      {t.locationName && (
                         <span className="px-2 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface-variant flex items-center gap-1">
-                          <MapPin className="w-3 h-3" /> {t.glpiLocationName}
+                          <MapPin className="w-3 h-3" /> {t.locationName}
                         </span>
                       )}
                       {t.impactedSites?.length > 0 && (
@@ -1925,9 +1925,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                     {detailTicket.category}
                   </span>
                 )}
-                {detailTicket.glpiLocationName && (
+                {detailTicket.locationName && (
                   <span className="px-2.5 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface-variant flex items-center gap-1">
-                    <MapPin className="w-3 h-3" /> {detailTicket.glpiLocationName}
+                    <MapPin className="w-3 h-3" /> {detailTicket.locationName}
                   </span>
                 )}
                 {detailTicket.impactedSites?.length > 0 && (

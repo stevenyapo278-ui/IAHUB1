@@ -274,7 +274,7 @@ export default function ProblemDetail() {
             <span>Urgence: <strong>{URGENCY_IMPACT_OPTIONS.find((o) => o.value === problem.urgency)?.label || problem.urgency}</strong></span>
             <span>Impact: <strong>{URGENCY_IMPACT_OPTIONS.find((o) => o.value === problem.impact)?.label || problem.impact}</strong></span>
             {problem.requester && <span>Demandeur: <strong>{problem.requester.fullName}</strong></span>}
-            {problem.glpiLocationName && <span>Lieu: <strong>{problem.glpiLocationName}</strong></span>}
+            {problem.locationName && <span>Lieu: <strong>{problem.locationName}</strong></span>}
           </div>
         </div>
       )}
