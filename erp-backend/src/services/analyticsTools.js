@@ -315,6 +315,7 @@ async function getTeamDistribution({ period } = {}) {
     chartData: sorted.map((t) => ({
       name: t.teamName,
       Total: t.total,
+      Tickets: t.total,
       Urgents: t.urgent,
       Non_assignés: t.teamName === 'Non assigné' ? t.total : 0,
     })),

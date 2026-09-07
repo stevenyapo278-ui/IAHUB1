@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip } from 'recharts';
 import { Download, BarChart2, Send, Paperclip, MessageSquare, Users, TrendingUp, AlertTriangle, Timer, BarChart3, HelpCircle, PlusCircle, X } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
@@ -22,6 +23,13 @@ const QUICK_ACTIONS = [
 
 function WidgetRenderer({ widget }) {
   if (!widget || !widget.data || widget.data.length === 0) return null;
+
+  const normalizedData = widget.data.map((item) => ({
+    ...item,
+    Tickets: item.Tickets ?? item.Total ?? item.valeur ?? 0,
+    Urgents: item.Urgents ?? item.urgent ?? 0,
+  }));
+
   function exportCsv() {
     const headers = Object.keys(widget.data[0]).join(',');
     const rows = widget.data.map((row) => Object.values(row).join(','));
@@ -35,7 +43,7 @@ function WidgetRenderer({ widget }) {
     document.body.removeChild(link);
   }
   return (
-    <div className="mt-3 p-3 rounded-xl bg-surface border border-outline-variant/40 space-y-2">
+    <div className="mt-3 p-3 rounded-xl bg-surface border border-outline-variant/40 space-y-2 shadow-sm">
       <div className="flex items-center justify-between border-b border-outline-variant/30 pb-1.5">
         <h4 className="text-[11px] font-bold text-on-surface flex items-center gap-1.5">
           <BarChart2 className="w-3.5 h-3.5 text-primary" />
@@ -48,12 +56,12 @@ function WidgetRenderer({ widget }) {
       </div>
       <div className="h-36 w-full pt-2">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={widget.data} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+          <BarChart data={normalizedData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
             <XAxis dataKey="name" tick={{ fontSize: 9 }} />
-            <YAxis tick={{ fontSize: 9 }} />
-            <RechartsTooltip contentStyle={{ fontSize: '11px', borderRadius: '8px', backgroundColor: 'var(--color-surface, #fff)' }} />
-            <Bar dataKey="Tickets" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-            <Bar dataKey="Urgents" fill="#ef4444" radius={[4, 4, 0, 0]} />
+            <YAxis tick={{ fontSize: 9 }} allowDecimals={false} />
+            <RechartsTooltip contentStyle={{ fontSize: '11px', borderRadius: '8px', backgroundColor: 'var(--color-surface, #fff)', border: '1px solid rgba(150,150,150,0.2)' }} />
+            <Bar dataKey="Tickets" fill="#3b82f6" radius={[4, 4, 0, 0]} name="Tickets" />
+            <Bar dataKey="Urgents" fill="#ef4444" radius={[4, 4, 0, 0]} name="Urgents" />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -61,14 +69,30 @@ function WidgetRenderer({ widget }) {
   );
 }
 
+function preprocessMarkdown(content) {
+  if (!content || typeof content !== 'string') return '';
+  let formatted = content.replace(/#(\d{2,6})\b/g, '[#$1](/tickets/$1)');
+  
+  // Corriger les doubles pipes sans saut de ligne (ex: "Urgents || :--- |" ou "| 0 || **Équipe**")
+  formatted = formatted.replace(/\|[ \t]*\|/g, '|\n|');
+  
+  // S'assurer qu'il y a un saut de ligne propre avant et après les tableaux markdown
+  formatted = formatted.replace(/([^\n])\n(\|[^\n]+\|)/g, '$1\n\n$2');
+  formatted = formatted.replace(/(\|[^\n]+\|)\n([^\n\|])/g, '$1\n\n$2');
+  
+  return formatted;
+}
+
 function MarkdownContent({ content }) {
-  const formattedContent = (content || '').replace(/#(\d{2,6})\b/g, '[#$1](/tickets/$1)');
+  const formattedContent = preprocessMarkdown(content);
   return (
     <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
       components={{
         strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
         em: ({ children }) => <em className="italic">{children}</em>,
         ul: ({ children }) => <ul className="my-1 space-y-0.5">{children}</ul>,
+        ol: ({ children }) => <ol className="my-1 ml-4 space-y-0.5 list-decimal">{children}</ol>,
         li: ({ children }) => <li className="ml-4 list-disc text-[13px]">{children}</li>,
         a: ({ href, children }) => (
           <a href={href} target={href?.startsWith('http') ? '_blank' : '_self'} rel="noreferrer" className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-primary/10 text-primary font-bold hover:underline transition-colors text-[11px]">
@@ -79,7 +103,31 @@ function MarkdownContent({ content }) {
           if (className) return <code className={`${className} bg-surface-container-high px-1 rounded text-[12px]`}>{children}</code>;
           return <code className="bg-surface-container-high px-1 rounded text-[12px]">{children}</code>;
         },
-        p: ({ children }) => <p className="mb-1 last:mb-0">{children}</p>,
+        p: ({ children }) => <p className="mb-1.5 last:mb-0 leading-relaxed">{children}</p>,
+        h1: ({ children }) => <h1 className="text-base font-bold mt-3 mb-1.5">{children}</h1>,
+        h2: ({ children }) => <h2 className="text-sm font-bold mt-2 mb-1">{children}</h2>,
+        h3: ({ children }) => <h3 className="text-xs font-bold mt-1.5 mb-1">{children}</h3>,
+        blockquote: ({ children }) => <blockquote className="border-l-2 border-primary/50 pl-2.5 italic text-on-surface-variant my-1 text-[12.5px]">{children}</blockquote>,
+        table: ({ children }) => (
+          <div className="overflow-x-auto my-2 rounded-xl border border-outline-variant/40 bg-surface-container/30 p-1 shadow-sm">
+            <table className="w-full text-[11.5px] text-left border-collapse">{children}</table>
+          </div>
+        ),
+        thead: ({ children }) => (
+          <thead className="bg-surface-container-high text-on-surface font-semibold border-b border-outline-variant/50">{children}</thead>
+        ),
+        tbody: ({ children }) => (
+          <tbody className="divide-y divide-outline-variant/20">{children}</tbody>
+        ),
+        tr: ({ children }) => (
+          <tr className="hover:bg-surface-container-high/40 transition-colors">{children}</tr>
+        ),
+        th: ({ children }) => (
+          <th className="px-2.5 py-1.5 font-bold text-on-surface border-r border-outline-variant/30 last:border-r-0 text-[11px] uppercase tracking-wider">{children}</th>
+        ),
+        td: ({ children }) => (
+          <td className="px-2.5 py-1.5 text-on-surface border-r border-outline-variant/20 last:border-r-0">{children}</td>
+        ),
       }}
     >
       {formattedContent}

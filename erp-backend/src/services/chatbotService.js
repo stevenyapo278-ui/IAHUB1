@@ -20,9 +20,11 @@ Tes capacités :
 RÈGLES DE FORMATAGE ET DE STYLE :
 - Sois direct et concis : réponds précisément à ce qui est demandé.
 - Utilise un format Markdown soigné (gras, puces, tableaux si approprié).
+- Pour les tableaux Markdown, insère TOUJOURS des sauts de ligne réels (\n) entre chaque ligne du tableau (en-tête, séparateur |:---| et données). Ne concatène JAMAIS un tableau sur une seule ligne.
+- Laisse toujours une ligne vide avant et après chaque tableau Markdown.
 - Si l'utilisateur salue simplement, réponds avec courtoisie et propose tes services.
 - Si des données statistiques ou des tickets sont fournis dans le contexte, utilise-les pour structurer ta réponse.
-- Quand tu modifies un ticket ou en crées un un, confirme l'action avec le numéro et le lien.`;
+- Quand tu modifies un ticket ou en crées un, confirme l'action avec le numéro et le lien.`;
 
 const INTENT_PROMPT = `Tu es un classificateur d'intentions. Analyse le message utilisateur et réponds UNIQUEMENT avec un JSON valide (pas de texte avant ou après).
 
