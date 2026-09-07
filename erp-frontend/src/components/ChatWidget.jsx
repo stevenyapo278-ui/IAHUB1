@@ -162,6 +162,11 @@ export default function ChatWidget() {
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
 
+  // Conversation management
+  const [conversationId, setConversationId] = useState(null);
+  const [conversations, setConversations] = useState([]);
+  const [showConversationList, setShowConversationList] = useState(false);
+
   const isOnChatPage = location.pathname === '/chat';
 
   const scrollToBottom = useCallback(() => {
@@ -192,12 +197,21 @@ export default function ChatWidget() {
     return () => window.removeEventListener('chatwidget:position-changed', onPositionChanged);
   }, []);
 
+  // Charger la liste des conversations
+  function loadConversations() {
+    api.get('/chat/conversations').then(({ data }) => setConversations(data)).catch(() => {});
+  }
+
   // Charger l'historique
   useEffect(() => {
     if (isOpen && !historyLoaded && user) {
+      loadConversations();
       api.get('/chat/history').then(({ data }) => {
         if (data.length > 0) {
-          setMessages([WELCOME_MESSAGE, ...data.map((m) => ({ id: m.id, role: m.role, content: m.content, sources: m.sources, rating: m.rating, widget: m.widget }))]);
+          setMessages([WELCOME_MESSAGE, ...data.map((m) => ({ id: m.id, role: m.role, content: m.content, sources: m.sources, rating: m.rating, widget: m.widget, conversationId: m.conversationId }))]);
+          // Récupérer la conversationId du dernier message
+          const lastConvId = data[data.length - 1]?.conversationId;
+          if (lastConvId) setConversationId(lastConvId);
         }
         setHistoryLoaded(true);
       }).catch(() => setHistoryLoaded(true));
@@ -248,12 +262,34 @@ export default function ChatWidget() {
   async function handleNewConversation() {
     if (clearing || loading) return;
     setClearing(true);
-    try { await api.delete('/chat/history'); } catch {}
-    setMessages([WELCOME_MESSAGE]);
-    setReplyTo(null);
-    removeAttachment();
-    setInput('');
+    try {
+      // Créer une nouvelle conversation vide
+      const { data } = await api.post('/chat/conversations', { title: 'Nouvelle conversation' });
+      setConversationId(data.id);
+      setConversations((prev) => [data, ...prev]);
+      setMessages([WELCOME_MESSAGE]);
+      setReplyTo(null);
+      removeAttachment();
+      setInput('');
+      setShowConversationList(false);
+    } catch {}
     setClearing(false);
+    inputRef.current?.focus();
+  }
+
+  async function selectConversation(convId) {
+    if (loading) return;
+    setConversationId(convId);
+    setShowConversationList(false);
+    setLoading(true);
+    setMessages([WELCOME_MESSAGE]);
+    try {
+      const { data } = await api.get(`/chat/history?conversationId=${convId}`);
+      if (data.length > 0) {
+        setMessages([WELCOME_MESSAGE, ...data.map((m) => ({ id: m.id, role: m.role, content: m.content, sources: m.sources, rating: m.rating, widget: m.widget }))]);
+      }
+    } catch {}
+    setLoading(false);
     inputRef.current?.focus();
   }
 
@@ -284,17 +320,23 @@ export default function ChatWidget() {
     setLoading(true);
     try {
       const history = [...messages, newUserMsg].slice(-10).map((m) => ({ role: m.role, content: m.content }));
+      let data;
       if (attachment) {
         const formData = new FormData();
         formData.append('message', userMessage);
         formData.append('history', JSON.stringify(history));
+        if (conversationId) formData.append('conversationId', conversationId);
         formData.append('attachment', attachment);
-        const { data } = await api.post('/chat', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-        setMessages((prev) => [...prev, { role: 'assistant', content: data.reply, sources: data.sources, action: data.action, widget: data.widget }]);
+        ({ data } = await api.post('/chat', formData, { headers: { 'Content-Type': 'multipart/form-data' } }));
       } else {
-        const { data } = await api.post('/chat', { message: userMessage, history });
-        setMessages((prev) => [...prev, { role: 'assistant', content: data.reply, sources: data.sources, action: data.action, widget: data.widget }]);
+        ({ data } = await api.post('/chat', { message: userMessage, history, conversationId: conversationId || undefined }));
       }
+      // Mettre à jour la conversationId si une nouvelle conversation a été créée
+      if (data.conversationId && !conversationId) {
+        setConversationId(data.conversationId);
+        loadConversations();
+      }
+      setMessages((prev) => [...prev, { role: 'assistant', content: data.reply, sources: data.sources, action: data.action, widget: data.widget }]);
       removeAttachment();
     } catch {
       setMessages((prev) => [...prev, { role: 'assistant', content: "Désolé, une erreur est survenue. Réessayez." }]);
@@ -363,15 +405,39 @@ export default function ChatWidget() {
                 </div>
               </div>
               <div className="flex items-center gap-1">
+                <button onClick={() => setShowConversationList(!showConversationList)} className="p-1 px-2.5 rounded-lg hover:bg-white/20 transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-semibold bg-white/10" title="Mes conversations">
+                  <span className="material-symbols-outlined text-[15px]">forum</span>
+                  <span>{conversations.length || 0}</span>
+                </button>
                 <button onClick={handleNewConversation} disabled={clearing} className="p-1 px-2.5 rounded-lg hover:bg-white/20 transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-semibold bg-white/10" title="Nouvelle conversation">
                   <span className="material-symbols-outlined text-[15px]">add_comment</span>
-                  <span>Nouveau</span>
                 </button>
                 <button onClick={() => setIsOpen(false)} className="p-1 rounded-lg hover:bg-white/20 transition-colors cursor-pointer" aria-label="Fermer">
                   <span className="material-symbols-outlined text-[18px]">close</span>
                 </button>
               </div>
             </div>
+
+            {/* Liste des conversations */}
+            {showConversationList && (
+              <div className="border-b border-outline-variant/40 max-h-48 overflow-y-auto bg-surface-container-lowest">
+                {conversations.length === 0 ? (
+                  <p className="p-3 text-[11px] text-on-surface-variant italic text-center">Aucune conversation</p>
+                ) : conversations.map((conv) => (
+                  <button
+                    key={conv.id}
+                    onClick={() => selectConversation(conv.id)}
+                    className={`w-full text-left px-4 py-2.5 hover:bg-surface-container-high transition-colors cursor-pointer border-b border-outline-variant/20 last:border-b-0 ${conversationId === conv.id ? 'bg-primary/10' : ''}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {conv.pinned && <span className="material-symbols-outlined text-[12px] text-amber-500">push_pin</span>}
+                      <span className="text-[12px] text-on-surface truncate font-medium">{conv.title || 'Sans titre'}</span>
+                    </div>
+                    <p className="text-[10px] text-on-surface-variant mt-0.5">{new Date(conv.updatedAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>
+                  </button>
+                ))}
+              </div>
+            )}
 
             {/* Messages */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
