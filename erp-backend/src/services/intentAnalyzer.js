@@ -206,7 +206,7 @@ async function applyIntentActions(ticketId, { intent, confidence, newIssueSummar
 
     const splitCount = ticket?.splitCount || 0;
     if (newIssueSummary && fromEmail && splitCount < MAX_SPLITS_PER_TICKET) {
-      const { erpTicketId, glpiTicketId } = await createTicketFromEmail({
+      const { erpTicketId } = await createTicketFromEmail({
         subject: originalSubject || `Nouveau sujet détecté dans le suivi du ticket #${ticketId}`,
         body: originalBody || newIssueSummary,
         from: fromEmail,
@@ -215,7 +215,7 @@ async function applyIntentActions(ticketId, { intent, confidence, newIssueSummar
         emailAccountId,
       });
       updates.splitCount = splitCount + 1;
-      await logEvent(ticketId, 'SPLIT_NEW_ISSUE', actor, { newTicketId: erpTicketId, newGlpiTicketId: glpiTicketId, newIssueSummary });
+      await logEvent(ticketId, 'SPLIT_NEW_ISSUE', actor, { newTicketId: erpTicketId, newIssueSummary });
       await logEvent(erpTicketId, 'CREATED_FROM_SPLIT', actor, { originTicketId: ticketId });
     } else if (newIssueSummary && splitCount >= MAX_SPLITS_PER_TICKET) {
       // Trop de scissions déjà faites depuis ce ticket : probablement une mauvaise classification répétée.

@@ -213,7 +213,6 @@ function buildAcknowledgementHtml({ toName, glpiTicketId, ticketId, originalSubj
 <p>Bonjour ${toName || ''},</p>
 <p>${introMessage}</p>
 <table style="border-collapse:collapse;margin:16px 0">
-  <tr><td style="padding:4px 12px 4px 0;color:#666">Numéro de ticket</td><td><strong>#${displayId}</strong></td></tr>
   <tr><td style="padding:4px 12px 4px 0;color:#666">Sujet</td><td>${originalSubject}</td></tr>
 </table>
 <p>Notre équipe va analyser votre demande et vous contactera dans les meilleurs délais.</p>
@@ -226,13 +225,16 @@ ${signature || DEFAULT_EMAIL_SIGNATURE}
 async function sendAcknowledgement({ ticketId, glpiTicketId, toEmail, toName, originalSubject }) {
   const settings = await getSystemSettings();
   if (settings.emailAcknowledgementEnabled === false) return null;
-  // On garde le sujet original de l'utilisateur (juste préfixé du numéro de ticket), pour ne pas
-  // casser le fil de conversation côté client mail et rester reconnaissable pour l'utilisateur.
   const displayId = glpiTicketId || ticketId || 'N/A';
   const subject = `[Ticket #${displayId}] ${originalSubject}`;
   const signature = await getEmailSignature();
   const bodyHtml = buildAcknowledgementHtml({ toName, glpiTicketId, ticketId, originalSubject, customMessage: settings.acknowledgementMessage, signature });
-  return sendEmail({ ticketId, to: toEmail, subject, bodyHtml, saveAsMessage: true });
+  // Envoi direct : on ajoute le numéro de ticket dans le HTML (absent du template par défaut pour les brouillons)
+  const bodyHtmlWithId = bodyHtml.replace(
+    '<td style="padding:4px 12px 4px 0;color:#666">Sujet</td>',
+    `<td style="padding:4px 12px 4px 0;color:#666">Numéro de ticket</td><td><strong>#${displayId}</strong></td></tr>\n  <tr><td style="padding:4px 12px 4px 0;color:#666">Sujet</td>`
+  );
+  return sendEmail({ ticketId, to: toEmail, subject, bodyHtml: bodyHtmlWithId, saveAsMessage: true });
 }
 
 // Envoie une relance automatique pour un ticket en attente de réponse utilisateur
@@ -258,7 +260,6 @@ ${signature}`;
 
 // Génère le HTML de la notification "incident déjà connu" (fonction pure, sans envoi)
 function buildKnownIncidentNotificationHtml({ toName, glpiTicketId, ticketId, originalSubject, isMajor, impactedCount, signature }) {
-  const displayId = glpiTicketId || ticketId || 'N/A';
   const majorNote = isMajor
     ? `<p>⚠️ Cet incident a été promu en <strong>incident majeur</strong> (${impactedCount} sites impactés). Notre équipe est mobilisée en priorité.</p>`
     : '';
@@ -267,7 +268,6 @@ function buildKnownIncidentNotificationHtml({ toName, glpiTicketId, ticketId, or
 <p>Votre demande a bien été prise en compte.</p>
 <p>Un incident déjà identifié est actuellement en cours d'investigation par nos équipes :</p>
 <table style="border-collapse:collapse;margin:16px 0">
-  <tr><td style="padding:4px 12px 4px 0;color:#666">Numéro de ticket</td><td><strong>#${displayId}</strong></td></tr>
   <tr><td style="padding:4px 12px 4px 0;color:#666">Sujet</td><td>${originalSubject}</td></tr>
   <tr><td style="padding:4px 12px 4px 0;color:#666">Sites impactés</td><td>${impactedCount}</td></tr>
 </table>
@@ -285,7 +285,12 @@ async function sendKnownIncidentNotification({ ticketId, glpiTicketId, toEmail, 
   const subject = `[Ticket #${displayId}] ${originalSubject}`;
   const signature = await getEmailSignature();
   const bodyHtml = buildKnownIncidentNotificationHtml({ toName, glpiTicketId, ticketId, originalSubject, isMajor, impactedCount, signature });
-  return sendEmail({ ticketId, to: toEmail, subject, bodyHtml, saveAsMessage: true });
+  // Envoi direct : on ajoute le numéro de ticket dans le HTML (absent du template par défaut pour les brouillons)
+  const bodyHtmlWithId = bodyHtml.replace(
+    '<td style="padding:4px 12px 4px 0;color:#666">Sujet</td>',
+    `<td style="padding:4px 12px 4px 0;color:#666">Numéro de ticket</td><td><strong>#${displayId}</strong></td></tr>\n  <tr><td style="padding:4px 12px 4px 0;color:#666">Sujet</td>`
+  );
+  return sendEmail({ ticketId, to: toEmail, subject, bodyHtml: bodyHtmlWithId, saveAsMessage: true });
 }
 
 // Notifie tous les sites impactés lors de la résolution d'un incident majeur

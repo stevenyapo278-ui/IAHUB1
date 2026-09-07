@@ -111,13 +111,18 @@ router.post('/:id/approve', requirePermission('emaildrafts.manage', ['ADMIN', 'T
   const finalRecipient = recipientEmail !== undefined ? recipientEmail : draft.recipientEmail;
   const finalCc = Array.isArray(ccRecipients) ? ccRecipients : draft.ccRecipients;
 
+  // Remplacer le placeholder #EN_ATTENTE par le vrai numéro de ticket
+  const displayId = draft.ticketId || 'N/A';
+  const resolvedContent = finalContent.replaceAll('#EN_ATTENTE', `#${displayId}`);
+  const resolvedSubject = (draft.subject || '').replaceAll('#EN_ATTENTE', `#${displayId}`);
+
   try {
     await sendEmail({
       ticketId: draft.ticketId,
       to: finalRecipient,
       cc: finalCc,
-      subject: draft.subject,
-      bodyHtml: finalContent,
+      subject: resolvedSubject,
+      bodyHtml: resolvedContent,
       saveAsMessage: true,
       inReplyToGraphMessageId: draft.inReplyToGraphMessageId,
       conversationId: draft.outlookConversationId,
@@ -130,7 +135,8 @@ router.post('/:id/approve', requirePermission('emaildrafts.manage', ['ADMIN', 'T
     where: { id },
     data: {
       status: 'APPROVED',
-      proposedContent: finalContent,
+      proposedContent: resolvedContent,
+      subject: resolvedSubject,
       recipientEmail: finalRecipient,
       ccRecipients: finalCc,
       reviewedById: req.user.sub,

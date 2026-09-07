@@ -731,7 +731,6 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                           {t.category}
                         </span>
                       )}
-                      <span className="text-[11px] text-on-surface-variant font-mono">#{t.id}</span>
                     </div>
 
                     {/* Titre + résumé */}
@@ -855,7 +854,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                         </div>
                         <div>
                           <h3 className="text-sm font-bold text-on-surface">
-                            Réponse pour : {ticketObj?.title || (draft.ticketId ? `Ticket #${draft.ticketId}` : 'Ticket sans numéro')}
+                            Réponse pour : {ticketObj?.title || (draft.ticketId ? `Ticket #EN_ATTENTE` : 'Ticket sans numéro')}
                           </h3>
                           <p className="text-[11px] text-on-surface-variant">
                             Demandeur : <strong className="text-on-surface">{ticketObj?.requester?.fullName || draft.recipientEmail || 'Inconnu'}</strong>
@@ -1006,7 +1005,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                         </div>
                         <div>
                           <h3 className="text-sm font-bold text-on-surface">
-                            Relance pour : {ticketObj?.title || (draft.ticketId ? `Ticket #${draft.ticketId}` : 'Ticket sans numéro')}
+                            Relance pour : {ticketObj?.title || (draft.ticketId ? `Ticket #EN_ATTENTE` : 'Ticket sans numéro')}
                           </h3>
                           <p className="text-[11px] text-on-surface-variant">
                             Destinataire : <strong className="text-on-surface">{draft.recipientName || draft.recipientEmail}</strong>
