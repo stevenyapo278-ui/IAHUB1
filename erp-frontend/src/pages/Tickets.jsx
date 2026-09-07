@@ -87,6 +87,7 @@ const EMPTY_FORM = {  title: '',
   locationId: '',
   teamId: '',
   assignedToId: '',
+  assigneeIds: [],
   requesterId: '',
   observerIds: [],
   assetIds: [],
@@ -230,12 +231,27 @@ function StatusRenderer({ data, context }) {
 
 function AssigneeRenderer({ data }) {
   if (!data) return null;
-  const assignee = data.assignedTo;
-  if (!assignee) return <span className="text-sm text-muted-foreground/60 italic">Non assigné</span>;
+  const assignees = (data.assignees && data.assignees.length > 0) ? data.assignees : (data.assignedTo ? [data.assignedTo] : []);
+  if (assignees.length === 0) return <span className="text-sm text-muted-foreground/60 italic">Non assigné</span>;
+  if (assignees.length === 1) {
+    const assignee = assignees[0];
+    return (
+      <div className="flex h-full items-center gap-2.5">
+        <Avatar user={assignee} name={assignee.fullName} />
+        <span className="text-sm font-medium text-foreground truncate">{assignee.fullName}</span>
+      </div>
+    );
+  }
   return (
-    <div className="flex h-full items-center gap-2.5">
-      <Avatar user={assignee} name={assignee.fullName} />
-      <span className="text-sm font-medium text-foreground truncate">{assignee.fullName}</span>
+    <div className="flex h-full items-center gap-1.5">
+      <div className="flex -space-x-1.5 overflow-hidden">
+        {assignees.slice(0, 3).map((a) => (
+          <Avatar key={a.id} user={a} name={a.fullName} />
+        ))}
+      </div>
+      <span className="text-xs font-semibold text-foreground truncate">
+        {assignees.map((a) => a.fullName.split(' ')[0]).join(', ')}
+      </span>
     </div>
   );
 }
@@ -1157,6 +1173,7 @@ export default function Tickets() {
 
       const payload = new FormData();
       Object.entries({ ...form, locationId: finalLocationId }).forEach(([key, value]) => {
+        if (key === 'assigneeIds') { if (value && value.length > 0) payload.append('assigneeIds', JSON.stringify(value)); return; }
         if (key === 'observerIds') { if (value.length > 0) payload.append('observerIds', JSON.stringify(value)); return; }
         if (key === 'assetIds') { if (value.length > 0) payload.append('assetIds', JSON.stringify(value)); return; }
         if (value !== '' && value !== undefined && value !== null) payload.append(key, value);
@@ -1291,7 +1308,7 @@ export default function Tickets() {
         headerName: 'ASSIGNÉ',
         width: 180,
         cellRenderer: AssigneeRenderer,
-        valueGetter: (p) => p.data?.assignedTo?.fullName || '',
+        valueGetter: (p) => (p.data?.assignees && p.data.assignees.length > 0) ? p.data.assignees.map((a) => a.fullName).join(', ') : (p.data?.assignedTo?.fullName || ''),
       });
     }
 
@@ -1891,18 +1908,13 @@ export default function Tickets() {
                     )}
                     {canAssign && (
                       <FormField label="Assigné à">
-                        <SearchableSelect
-                          ariaLabel="Technicien assigné"
-                          options={users.filter((u) => u.isActive && u.role !== 'REQUESTER').map((u) => ({
-                            value: String(u.id),
-                            label: u.fullName,
-                            subLabel: u.role || undefined,
-                          }))}
-                          value={form.assignedToId ? String(form.assignedToId) : ''}
-                          onChange={(val) => setForm({ ...form, assignedToId: val })}
-                          disabled={users.filter((u) => u.isActive && u.role !== 'REQUESTER').length === 0}
-                          placeholder="Rechercher un technicien..."
-                          searchPlaceholder="Rechercher par nom..." />
+                        <RemoteUserMultiSelect
+                          value={form.assigneeIds || (form.assignedToId ? [Number(form.assignedToId)] : [])}
+                          onChange={(vals) => setForm({ ...form, assigneeIds: vals, assignedToId: vals[0] ? String(vals[0]) : '' })}
+                          users={users}
+                          glpiUsers={glpiUsers}
+                          placeholder="Rechercher des techniciens..."
+                        />
                       </FormField>
                     )}
                   </div>

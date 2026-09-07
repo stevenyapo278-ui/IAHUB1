@@ -2187,30 +2187,41 @@ export default function TicketDetail() {
               </div>
 
               <div>
-                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface mb-1">
-                  Attribué à
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface mb-1 flex items-center gap-1">
+                  <UserCheck className="w-3 h-3 text-blue-500" />
+                  Attribué à {ticket.assignees?.length > 0 && `(${ticket.assignees.length})`}
                 </label>
                 {canAssign ? (
-                  <RemoteUserSelect
-                    value={ticket.assignedToId || ''}
-                    valueLabel={ticket.assignedTo?.fullName}
-                    disabled={savingField === 'assignedToId'}
-                    onlyStaff={true}
-                    onChange={(val) => updateField('assignedToId', val ? Number(val) : null)}
-                    placeholder="Non assigné"
-                    searchPlaceholder="Rechercher un technicien..."
+                  <RemoteUserMultiSelect
+                    value={(ticket.assignees && ticket.assignees.length > 0) ? ticket.assignees.map((a) => a.id) : (ticket.assignedToId ? [ticket.assignedToId] : [])}
+                    onChange={async (vals) => {
+                      try {
+                        setSavingField('assigneeIds');
+                        await api.patch(`/tickets/${id}`, { assigneeIds: vals });
+                        toast.success('Techniciens assignés mis à jour');
+                        load();
+                      } catch (err) {
+                        toast.error(err.response?.data?.error || 'Échec de la mise à jour');
+                      } finally {
+                        setSavingField(null);
+                      }
+                    }}
+                    placeholder="Rechercher des techniciens..."
+                    disabled={savingField === 'assigneeIds'}
                   />
                 ) : (
-                  <div className="w-full flex items-center gap-2 bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/15 rounded-xl px-3 py-2 text-xs font-semibold text-on-surface">
-                    {ticket.assignedTo ? (
-                      <>
-                        <div className="w-5 h-5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center text-[9px] font-bold border border-blue-500/20">
-                          {initials(ticket.assignedTo.fullName)}
-                        </div>
-                        {ticket.assignedTo.fullName}
-                      </>
+                  <div className="w-full flex items-center gap-1.5 bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/15 rounded-xl px-3 py-2 text-xs font-semibold text-on-surface flex-wrap">
+                    {((ticket.assignees && ticket.assignees.length > 0) ? ticket.assignees : (ticket.assignedTo ? [ticket.assignedTo] : [])).length > 0 ? (
+                      ((ticket.assignees && ticket.assignees.length > 0) ? ticket.assignees : [ticket.assignedTo]).map((tech) => (
+                        <span key={tech.id} className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-[11px] font-semibold text-blue-700 dark:text-blue-400">
+                          <div className="w-4 h-4 rounded-full bg-blue-500/20 flex items-center justify-center text-[8px] font-bold">
+                            {initials(tech.fullName)}
+                          </div>
+                          {tech.fullName}
+                        </span>
+                      ))
                     ) : (
-                      <span className="text-on-surface-variant italic">Non assigné</span>
+                      <span className="text-on-surface-variant italic font-normal">Non assigné</span>
                     )}
                   </div>
                 )}
@@ -2543,7 +2554,11 @@ export default function TicketDetail() {
                 </div>
                 <div>
                   <span className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant block mb-0.5">Assigné à</span>
-                  <span className="font-semibold text-on-surface">{ticket.assignedTo?.fullName || 'Non assigné'}</span>
+                  <span className="font-semibold text-on-surface">
+                    {(ticket.assignees && ticket.assignees.length > 0)
+                      ? ticket.assignees.map((a) => a.fullName).join(', ')
+                      : (ticket.assignedTo?.fullName || 'Non assigné')}
+                  </span>
                 </div>
                 <div>
                   <span className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface-variant block mb-0.5">Lieu</span>

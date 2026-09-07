@@ -100,7 +100,11 @@ async function autoAssignTechnician(ticketId, category) {
 
   await prisma.ticket.update({
     where: { id: ticketId },
-    data: { assignedToId: technician.id, teamId: team?.id || null },
+    data: {
+      assignedToId: technician.id,
+      assignees: { set: [{ id: technician.id }] },
+      teamId: team?.id || null,
+    },
   });
 
   return technician;
@@ -113,7 +117,11 @@ async function autoAssignTechnicianWithAI(ticketId, category, aiCategory) {
 
   await prisma.ticket.update({
     where: { id: ticketId },
-    data: { assignedToId: technician.id, teamId: team?.id || null },
+    data: {
+      assignedToId: technician.id,
+      assignees: { set: [{ id: technician.id }] },
+      teamId: team?.id || null,
+    },
   });
 
   // Journaliser l'assignation automatique pour le suivi de précision

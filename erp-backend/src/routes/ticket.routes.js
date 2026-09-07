@@ -78,6 +78,7 @@ router.get('/', async (req, res) => {
     // Le technicien voit ses tickets assignés, ceux qu'il a ouverts, et ceux qu'il observe
     where.OR = [
       { assignedToId: req.user.sub },
+      { assignees: { some: { id: req.user.sub } } },
       { requesterId: req.user.sub },
       { observers: { some: { id: req.user.sub } } },
     ];
@@ -88,9 +89,6 @@ router.get('/', async (req, res) => {
     } else if (status === 'CLOSED_GROUP') {
       where.status = { in: ['SOLVED', 'CLOSED'] };
     } else if (status === 'NOT_CLOSED') {
-      // Vue par défaut, fonctionnement GLPI : « actifs » = tous les tickets non résolus
-      // et non clôturés. Un ticket résolu disparaît donc de la vue par défaut (il reste
-      // visible via le filtre « Résolus » ou le groupe CLOSED_GROUP).
       where.status = { notIn: ['SOLVED', 'CLOSED'] };
     } else if (status === 'SOLVED_GROUP') {
       where.status = 'SOLVED';
@@ -100,8 +98,16 @@ router.get('/', async (req, res) => {
   }
   if (priority) where.priority = priority;
   if (teamId) where.teamId = Number(teamId);
-  if (assignedToId === 'none') where.assignedToId = null;
-  else if (assignedToId) where.assignedToId = Number(assignedToId);
+  if (assignedToId === 'none') {
+    where.assignedToId = null;
+    where.assignees = { none: {} };
+  } else if (assignedToId) {
+    const techId = Number(assignedToId);
+    where.OR = [
+      { assignedToId: techId },
+      { assignees: { some: { id: techId } } },
+    ];
+  }
   if (category) where.category = category;
 
   if (aiProcessed === 'true') where.aiProcessed = true;
@@ -112,17 +118,10 @@ router.get('/', async (req, res) => {
         { requesterId: req.user.sub },
         { observers: { some: { id: req.user.sub } } },
       ];
-    } else if (req.user.role === 'TECHNICIAN') {
-      // Le technicien voit ses tickets assignés, ceux qu'il a ouverts, et ceux qu'il observe
-      where.OR = [
-        { assignedToId: req.user.sub },
-        { requesterId: req.user.sub },
-        { observers: { some: { id: req.user.sub } } },
-      ];
     } else {
-      // Admin/Superadmin/Hotline : voient leurs assignés ET leurs demandés ET ceux qu'ils observent
       where.OR = [
         { assignedToId: req.user.sub },
+        { assignees: { some: { id: req.user.sub } } },
         { requesterId: req.user.sub },
         { observers: { some: { id: req.user.sub } } },
       ];
@@ -195,6 +194,7 @@ router.get('/', async (req, res) => {
       include: {
         requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
         assignedTo: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+        assignees: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
         team: { select: { id: true, name: true } },
         observers: { select: { id: true, fullName: true, avatarUrl: true } },
       },
@@ -332,6 +332,7 @@ router.get('/export', async (req, res) => {
       slaResponseDueAt: true, slaResolutionDueAt: true, slaBreachedAt: true, firstResponseAt: true,
       aiProcessed: true, approvalStatus: true, requester: { select: { email: true, fullName: true, avatarUrl: true } },
       assignedTo: { select: { email: true, fullName: true, avatarUrl: true } },
+      assignees: { select: { id: true, email: true, fullName: true, avatarUrl: true } },
       team: { select: { name: true } },
       observers: { select: { id: true, fullName: true, avatarUrl: true } },
     },
@@ -593,6 +594,7 @@ router.get('/:id', async (req, res) => {
     include: {
       requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
       assignedTo: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+      assignees: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
       lastModifiedBy: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
       observers: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
       team: { select: { id: true, name: true } },
@@ -619,6 +621,7 @@ router.get('/:id', async (req, res) => {
 
   // Un technicien ne consulte que ses tickets assignés, ceux qu'il a ouverts, ou ceux qu'il observe
   if (isTechnicianOnly(req.user) && ticket.assignedToId !== req.user.sub &&
+      !ticket.assignees?.some(a => a.id === req.user.sub) &&
       ticket.requesterId !== req.user.sub &&
       !ticket.observers?.some(o => o.id === req.user.sub)) {
     return res.status(404).json({ error: 'Ticket introuvable' });
@@ -703,6 +706,20 @@ router.post(
       }
     }
 
+    // assigneeIds (plusieurs techniciens assignés) — tolérance JSON/multipart
+    let assigneeIds = [];
+    if (req.body.assigneeIds) {
+      try {
+        assigneeIds = Array.isArray(req.body.assigneeIds) ? req.body.assigneeIds : JSON.parse(req.body.assigneeIds);
+      } catch {
+        assigneeIds = [];
+      }
+    }
+    if (assignedToId && !assigneeIds.includes(Number(assignedToId))) {
+      assigneeIds.push(Number(assignedToId));
+    }
+    const finalAssignedToId = assignedToId ? Number(assignedToId) : (assigneeIds.length > 0 ? Number(assigneeIds[0]) : null);
+
     // Si aucune liste d'observateurs explicite n'est fournie, hériter des observateurs par défaut de l'équipe
     if (teamId && observerIds.length === 0) {
       const team = await prisma.team.findUnique({
@@ -771,7 +788,7 @@ router.post(
         priority: priority || 'P3',
         category: category || null,
         teamId: teamId ? Number(teamId) : null,
-        assignedToId: assignedToId ? Number(assignedToId) : null,
+        assignedToId: finalAssignedToId,
         requesterId: finalRequesterId,
         status: finalStatus,
         ...(finalStatus === 'SOLVED' ? { solvedAt: new Date() } : {}),
@@ -789,6 +806,7 @@ router.post(
         locationId: finalLocationId,
         locationName: finalLocationName,
         ...(customFields ? { customFields } : {}),
+        ...(assigneeIds.length > 0 ? { assignees: { connect: assigneeIds.map((id) => ({ id: Number(id) })) } } : {}),
         ...(observerIds.length > 0 ? { observers: { connect: observerIds.map((id) => ({ id: Number(id) })) } } : {}),
         ...(assetIds.length > 0 ? { assets: { create: assetIds.map((assetId) => ({ assetId: Number(assetId) })) } } : {}),
       },
@@ -902,8 +920,8 @@ router.post(
 router.patch('/:id', forbidTechnicianTicketEdits, requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const id = Number(req.params.id);
   // Whitelist : seuls ces champs acceptent la mise à jour (protection mass assignment)
-  const allowed = ['title', 'content', 'status', 'priority', 'category', 'teamId', 'assignedToId', 'requesterId', 'sourceName', 'sourceEmail', 'type', 'urgency', 'impact', 'source', 'externalId', 'dueDate', 'assetIds', 'observerIds', 'approvalStatus', 'isMajorIncident', 'impactedSites', 'closeSuggested', 'locationId'];
-  const { title, content, status, priority, category, teamId, assignedToId, requesterId, sourceName, sourceEmail, type, urgency, impact, source, externalId, dueDate, assetIds, locationId } = req.body;
+  const allowed = ['title', 'content', 'status', 'priority', 'category', 'teamId', 'assignedToId', 'assigneeIds', 'requesterId', 'sourceName', 'sourceEmail', 'type', 'urgency', 'impact', 'source', 'externalId', 'dueDate', 'assetIds', 'observerIds', 'approvalStatus', 'isMajorIncident', 'impactedSites', 'closeSuggested', 'locationId'];
+  const { title, content, status, priority, category, teamId, assignedToId, assigneeIds, requesterId, sourceName, sourceEmail, type, urgency, impact, source, externalId, dueDate, assetIds, locationId } = req.body;
 
   // Rejecter les champs non autorisés
   for (const key of Object.keys(req.body)) {
@@ -919,7 +937,24 @@ router.patch('/:id', forbidTechnicianTicketEdits, requirePermission('tickets.ass
   if (priority !== undefined) data.priority = priority;
   if (category !== undefined) data.category = category;
   if (teamId !== undefined) data.teamId = teamId;
-  if (assignedToId !== undefined) data.assignedToId = assignedToId;
+  
+  if (assigneeIds !== undefined) {
+    const ids = Array.isArray(assigneeIds) ? assigneeIds.map((a) => Number(a)) : [];
+    data.assignees = { set: ids.map((id) => ({ id })) };
+    if (assignedToId === undefined) {
+      data.assignedToId = ids.length > 0 ? ids[0] : null;
+    } else {
+      data.assignedToId = assignedToId ? Number(assignedToId) : null;
+    }
+  } else if (assignedToId !== undefined) {
+    const singleId = assignedToId ? Number(assignedToId) : null;
+    data.assignedToId = singleId;
+    if (singleId) {
+      data.assignees = { set: [{ id: singleId }] };
+    } else {
+      data.assignees = { set: [] };
+    }
+  }
 
   if (requesterId !== undefined) {
     const reqId = requesterId ? Number(requesterId) : null;
