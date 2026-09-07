@@ -188,8 +188,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   }
 
   // ── Onglets filtrés par droits (cohérent avec les gates backend) ─────────────
-  // Chaque onglet correspond à des endpoints gated côté serveur : un technicien sans
-  // le droit ne doit ni voir l'onglet ni pouvoir y accéder via l'URL (?tab=drafts).
+  // Les techniciens n'ont accès QU'AU seul onglet Clôtures IA.
   const TAB_PERMISSIONS = {
     tickets: 'tickets.approve', // POST /tickets/:id/approve|reject|validate-close
     drafts: 'emaildrafts.manage', // PATCH/POST /ai-email-drafts/:id/approve|reject
@@ -197,7 +196,11 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     closures: 'tickets.approve', // POST /tickets/:id/validate-close
     knowledge: 'knowledge.manage', // POST /knowledge/drafts/:id/approve|reject
   };
-  const tabAllowed = (tab) => !TAB_PERMISSIONS[tab] || hasPermission(user, TAB_PERMISSIONS[tab]);
+  const isTechnician = user?.role === 'TECHNICIAN';
+  const tabAllowed = (tab) => {
+    if (isTechnician) return tab === 'closures';
+    return !TAB_PERMISSIONS[tab] || hasPermission(user, TAB_PERMISSIONS[tab]);
+  };
 
   // Si l'URL pointe un onglet non autorisé (ou inconnu), retomber sur le 1er autorisé.
   const firstAllowedTab = ['tickets', 'drafts', 'reminders', 'closures', 'knowledge'].find(tabAllowed) || 'tickets';
