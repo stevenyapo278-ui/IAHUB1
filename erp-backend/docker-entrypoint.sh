@@ -16,13 +16,16 @@ echo "Résolution des éventuelles migrations en échec..."
 npx prisma migrate resolve --rolled-back 20260727000000_add_missing_columns 2>/dev/null || true
 npx prisma migrate resolve --rolled-back 20260727000100_add_remaining_missing_columns 2>/dev/null || true
 npx prisma migrate resolve --rolled-back 20260820110000_enforce_single_permission_group_per_user 2>/dev/null || true
-# Migration login theme : ne marquer comme "applied" QUE si la colonne existe déjà
+# Migration login theme : si la colonne existe déjà, marquer comme "applied" pour éviter un crash.
+# Si elle est absente mais Prisma la croit appliquée (drift DB d'un entrypoint précédent),
+# la marquer "rolled-back" pour que migrate deploy la ré-applique.
 COLONNE=$(PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -t -A -c "SELECT 1 FROM information_schema.columns WHERE table_name='SystemSettings' AND column_name='loginThemeMode'" 2>/dev/null || true)
 if [ "$COLONNE" = "1" ]; then
   echo "Colonne loginThemeMode existe déjà — marquage de la migration comme appliquée."
   npx prisma migrate resolve --applied "20260906000000_add_login_theme_config" 2>/dev/null || true
 else
-  echo "Colonne loginThemeMode absente — la migration sera appliquée par migrate deploy."
+  echo "Colonne loginThemeMode absente — forçage du rollback pour que migrate deploy la ré-applique."
+  npx prisma migrate resolve --rolled-back "20260906000000_add_login_theme_config" 2>/dev/null || true
 fi
 
 echo "Migration de la base de données..."
