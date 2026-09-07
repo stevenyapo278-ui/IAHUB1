@@ -1,9 +1,13 @@
 const express = require('express');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/permissions');
 
 const router = express.Router();
 router.use(authenticate);
+
+// Tous les endpoints dashboard nécessitent au minimum tickets.view
+router.use(requirePermission('tickets.view'));
 
 router.get('/stats', async (req, res) => {
   const { startDate, endDate } = req.query;
@@ -112,7 +116,7 @@ router.get('/pending-ai-drafts', async (req, res) => {
 });
 
 // Statut des intégrations (GLPI, n8n, IA)
-router.get('/integrations', async (req, res) => {
+router.get('/integrations', requirePermission('settings.integrations'), async (req, res) => {
   const [apiConfigs, n8nWorkflows, aiProviders] = await Promise.all([
     prisma.apiConfig.findMany({ select: { id: true, serviceName: true, baseUrl: true, isActive: true } }),
     prisma.n8nWorkflow.findMany({ select: { id: true, name: true, isActive: true, lastRunAt: true, lastStatus: true } }),
@@ -156,7 +160,7 @@ router.get('/integrations', async (req, res) => {
 });
 
 // Performance par technicien
-router.get('/technician-performance', async (req, res) => {
+router.get('/technician-performance', requirePermission('tickets.assign'), async (req, res) => {
   const { startDate, endDate } = req.query;
   const dateFilter = {};
   if (startDate) dateFilter.gte = new Date(startDate);
@@ -389,7 +393,7 @@ router.get('/activity-trend', async (req, res) => {
 });
 
 // Export rapport CSV
- router.get('/report', async (req, res) => {
+ router.get('/report', requirePermission('tickets.assign'), async (req, res) => {
    try {
      const { startDate, endDate } = req.query;
      const format = req.query.format === 'pdf' ? 'pdf' : 'csv';
@@ -542,10 +546,7 @@ router.get('/activity-trend', async (req, res) => {
 });
 
 // ── Pilotage SLA : respect des échéances, temps de réponse/résolution, CSAT ──
-router.get('/sla-analytics', async (req, res) => {
-  if (!['SUPERADMIN', 'ADMIN', 'TECHNICIAN', 'HOTLINE'].includes(req.user.role)) {
-    return res.status(403).json({ error: 'Accès réservé à l\'équipe' });
-  }
+router.get('/sla-analytics', requirePermission('tickets.assign'), async (req, res) => {
   try {
     const days = Math.min(parseInt(req.query.days) || 30, 365);
     const since = new Date();

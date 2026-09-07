@@ -96,7 +96,7 @@ const userSelect = {
   createdAt: true,
 };
 
-router.get('/', async (req, res) => {
+router.get('/', authorizeAdmin, async (req, res) => {
   const { search, limit, page, role, teamId, isActive, all } = req.query;
   const where = {};
   if (search && search.trim()) {

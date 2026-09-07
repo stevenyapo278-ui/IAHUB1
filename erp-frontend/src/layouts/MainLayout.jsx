@@ -259,7 +259,7 @@ export default function MainLayout() {
     if (!isPathAllowed(location.pathname)) {
       navigate(getFirstAllowedPath(), { replace: true });
     }
-  }, [location.pathname, navConfig, user?.role, systemSettings]);
+  }, [location.pathname, navConfig, user?.role, JSON.stringify(user?.permissions), systemSettings]);
 
   const isSidebarExpanded = sidebarPinned || sidebarHovered;
   const sidebarW = isSidebarExpanded ? 256 : 80;

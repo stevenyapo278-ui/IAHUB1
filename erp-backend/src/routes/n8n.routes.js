@@ -9,7 +9,7 @@ const router = express.Router();
 router.use(authenticate);
 
 // List workflows
-router.get('/', async (req, res) => {
+router.get('/', requirePermission('automation.manage'), async (req, res) => {
   const workflows = await prisma.n8nWorkflow.findMany({ orderBy: { name: 'asc' } });
   return res.json(workflows);
 });

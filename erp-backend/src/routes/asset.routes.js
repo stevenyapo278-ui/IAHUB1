@@ -24,7 +24,7 @@ const ASSET_TYPES = ['COMPUTER', 'PRINTER', 'NETWORK', 'SOFTWARE', 'PHONE', 'OTH
 const ASSET_STATUSES = ['IN_USE', 'STOCK', 'BROKEN', 'OUT_OF_SERVICE'];
 
 // Liste + recherche + filtres + pagination
-router.get('/', async (req, res) => {
+router.get('/', requirePermission('tickets.view'), async (req, res) => {
   const { q, assetType, status, locationId, ownerId, ticketId, page = 1, pageSize = 25 } = req.query;
   const where = {};
 
@@ -66,7 +66,7 @@ router.get('/', async (req, res) => {
 });
 
 // Autocomplétion légère pour le sélecteur d'assets du formulaire de ticket
-router.get('/search', async (req, res) => {
+router.get('/search', requirePermission('tickets.view'), async (req, res) => {
   const { q, ticketId } = req.query;
   const where = {};
   if (q) {

@@ -14,7 +14,7 @@ const FIELD_TYPES = ['TEXT', 'NUMBER', 'SELECT', 'DATE', 'TEXTAREA', 'CHECKBOX']
 
 // Liste des définitions. ?categoryId=X → champs de cette catégorie + champs globaux
 // (categoryId null). Sans filtre → toutes les définitions.
-router.get('/', async (req, res) => {
+router.get('/', requirePermission('tickets.view'), async (req, res) => {
   const categoryId = req.query.categoryId ? Number(req.query.categoryId) : undefined;
   const where = categoryId ? { OR: [{ categoryId }, { categoryId: null }] } : {};
   const fields = await prisma.customFieldDefinition.findMany({

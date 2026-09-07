@@ -136,7 +136,7 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
-            <Route path="tickets" element={<Tickets />} />
+            <Route path="tickets" element={<ProtectedRoute permission="tickets.view"><Tickets /></ProtectedRoute>} />
             <Route
               path="ticket-evolution"
               element={
@@ -145,13 +145,13 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
-            <Route path="tickets/:id" element={<TicketDetail />} />
+            <Route path="tickets/:id" element={<ProtectedRoute permission="tickets.view"><TicketDetail /></ProtectedRoute>} />
             <Route path="problems" element={<ProtectedRoute roles={['ADMIN', 'HOTLINE', 'SUPERADMIN']}><Problems /></ProtectedRoute>} />
             <Route path="problems/:id" element={<ProtectedRoute roles={['ADMIN', 'HOTLINE', 'SUPERADMIN']}><ProblemDetail /></ProtectedRoute>} />
-            <Route path="teams" element={<Teams />} />
+            <Route path="teams" element={<ProtectedRoute permission="teams.manage"><Teams /></ProtectedRoute>} />
             <Route path="knowledge-base" element={<KnowledgeBase />} />
-            <Route path="inbox" element={<Inbox />} />
-            <Route path="email-drafts" element={<ValidationCenter defaultTab="drafts" />} />
+            <Route path="inbox" element={<ProtectedRoute permission="inbox.sync"><Inbox /></ProtectedRoute>} />
+            <Route path="email-drafts" element={<ProtectedRoute permission="emaildrafts.manage"><ValidationCenter defaultTab="drafts" /></ProtectedRoute>} />
 
             <Route
               path="technician-stats"
