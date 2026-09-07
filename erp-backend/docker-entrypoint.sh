@@ -22,10 +22,18 @@ npx prisma migrate resolve --rolled-back 20260820110000_enforce_single_permissio
 COLONNE=$(PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -t -A -c "SELECT 1 FROM information_schema.columns WHERE table_name='SystemSettings' AND column_name='loginThemeMode'" 2>/dev/null || true)
 if [ "$COLONNE" != "1" ]; then
   echo "Colonne loginThemeMode absente — application directe du SQL..."
-  PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -c 'ALTER TABLE "SystemSettings" ADD COLUMN IF NOT EXISTS "loginThemeMode" TEXT NOT NULL DEFAULT '\''daily_rotation'\'';' 2>/dev/null || true
-  PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -c 'ALTER TABLE "SystemSettings" ADD COLUMN IF NOT EXISTS "loginThemeFixedVariant" TEXT NOT NULL DEFAULT '\''classic'\'';' 2>/dev/null || true
-  PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -c 'ALTER TABLE "SystemSettings" ADD COLUMN IF NOT EXISTS "loginThemeEnabledVariants" TEXT[] NOT NULL DEFAULT ARRAY['\''classic'\'','\''split'\'','\''hero'\'','\''minimal'\'']::TEXT[];' 2>/dev/null || true
-  echo "Colonnes loginTheme ajoutées."
+  set +e
+  PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -c "ALTER TABLE \"SystemSettings\" ADD COLUMN IF NOT EXISTS \"loginThemeMode\" TEXT NOT NULL DEFAULT 'daily_rotation';"
+  PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -c "ALTER TABLE \"SystemSettings\" ADD COLUMN IF NOT EXISTS \"loginThemeFixedVariant\" TEXT NOT NULL DEFAULT 'classic';"
+  PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -c "ALTER TABLE \"SystemSettings\" ADD COLUMN IF NOT EXISTS \"loginThemeEnabledVariants\" TEXT[] NOT NULL DEFAULT ARRAY['classic','split','hero','minimal']::TEXT[];"
+  set -e
+  # Vérification
+  COLONNE_APRES=$(PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -t -A -c "SELECT 1 FROM information_schema.columns WHERE table_name='SystemSettings' AND column_name='loginThemeMode'" 2>/dev/null || true)
+  if [ "$COLONNE_APRES" = "1" ]; then
+    echo "Colonnes loginTheme ajoutées avec succès."
+  else
+    echo "ERREUR: les colonnes loginTheme n'ont pas pu être ajoutées!"
+  fi
 else
   echo "Colonne loginThemeMode déjà présente — rien à faire."
 fi
