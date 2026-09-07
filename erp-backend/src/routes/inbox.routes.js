@@ -297,26 +297,6 @@ router.get('/thread', async (req, res) => {
   res.json(thread);
 });
 
-// Détail d'un email reçu
-router.get('/:id', async (req, res) => {
-  const scope = await buildEmailScope(req.user);
-  const item = await prisma.incomingEmail.findFirst({
-    where: { id: Number(req.params.id), ...(scope || {}) },
-  });
-  if (!item) return res.status(404).json({ error: 'Email introuvable' });
-  res.json(item);
-});
-
-// Déclenche manuellement un cycle de polling + pipeline IA (ADMIN/TECHNICIAN)
-router.post('/sync', requirePermission('inbox.sync', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
-  try {
-    const results = await runEmailPipeline();
-    res.json({ processed: results.length, results });
-  } catch (err) {
-    res.status(502).json({ error: err.message, errorDetail: err.errorDetail || null });
-  }
-});
-
 // Logs de traitement des emails — derniers emails reçus avec leur statut d'analyse
 router.get('/logs', requirePermission('inbox.sync', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   try {
@@ -363,6 +343,26 @@ router.get('/logs', requirePermission('inbox.sync', ['ADMIN', 'TECHNICIAN']), as
     res.json({ emails, total, limit, offset });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Détail d'un email reçu
+router.get('/:id', async (req, res) => {
+  const scope = await buildEmailScope(req.user);
+  const item = await prisma.incomingEmail.findFirst({
+    where: { id: Number(req.params.id), ...(scope || {}) },
+  });
+  if (!item) return res.status(404).json({ error: 'Email introuvable' });
+  res.json(item);
+});
+
+// Déclenche manuellement un cycle de polling + pipeline IA (ADMIN/TECHNICIAN)
+router.post('/sync', requirePermission('inbox.sync', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+  try {
+    const results = await runEmailPipeline();
+    res.json({ processed: results.length, results });
+  } catch (err) {
+    res.status(502).json({ error: err.message, errorDetail: err.errorDetail || null });
   }
 });
 
