@@ -455,7 +455,7 @@ export default function TicketDetail() {
       setSavingField('requester');
       const payload = selectedRequesterId
         ? { requesterId: Number(selectedRequesterId) }
-        : { requesterId: null, sourceName: customSourceName, sourceEmail: customSourceEmail };
+        : { requesterId: null };
       await api.patch(`/tickets/${id}`, payload);
       toast.success('Demandeur mis à jour');
       setEditingRequester(false);
@@ -2332,54 +2332,14 @@ export default function TicketDetail() {
 
             {editingRequester ? (
               <div className="space-y-3 pt-1">
-                <div>
-                  <label className="block text-[11px] font-semibold text-on-surface-variant mb-1">
-                    Sélectionner un utilisateur :
-                  </label>
-                  <RemoteUserSelect
-                    value={selectedRequesterId}
-                    onChange={(val) => {
-                      setSelectedRequesterId(val);
-                      if (val) {
-                        const found = allUsers.find(u => String(u.id) === val) || glpiUsers.find(u => String(u.id) === val);
-                        if (found) {
-                          setCustomSourceName(found.fullName || '');
-                          setCustomSourceEmail(found.email || '');
-                        }
-                      }
-                    }}
-                    hideEmail={true}
-                    placeholder="— Expéditeur externe (Nom / Email) —"
-                    searchPlaceholder="Rechercher un demandeur..."
-                  />
-                </div>
-
-                {!selectedRequesterId && (
-                  <div className="space-y-2 pt-1 border-t border-outline-variant/20">
-                    <div>
-                      <label className="block text-[10px] font-semibold text-on-surface-variant mb-1">Nom de l'expéditeur :</label>
-                      <input
-                        type="text"
-                        value={customSourceName}
-                        onChange={(e) => setCustomSourceName(e.target.value)}
-                        placeholder="ex: Jean Dupont"
-                        className="w-full text-xs font-medium px-3 py-1.5 rounded-lg border border-outline-variant/60 bg-surface text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-semibold text-on-surface-variant mb-1">Email de l'expéditeur :</label>
-                      <input
-                        type="email"
-                        value={customSourceEmail}
-                        onChange={(e) => setCustomSourceEmail(e.target.value)}
-                        placeholder="ex: jean.dupont@entreprise.com"
-                        className="w-full text-xs font-medium px-3 py-1.5 rounded-lg border border-outline-variant/60 bg-surface text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex items-center gap-2 pt-2 justify-end">
+                <RemoteUserSelect
+                  value={selectedRequesterId}
+                  onChange={(val) => setSelectedRequesterId(val)}
+                  hideEmail={true}
+                  placeholder="Rechercher un demandeur..."
+                  searchPlaceholder="Rechercher par nom..."
+                />
+                <div className="flex items-center gap-2 pt-1 justify-end">
                   <button
                     onClick={() => setEditingRequester(false)}
                     className="px-3 py-1.5 rounded-xl border border-outline-variant/40 text-xs font-semibold text-on-surface-variant hover:bg-surface-container transition-colors cursor-pointer"
