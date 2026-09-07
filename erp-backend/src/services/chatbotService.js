@@ -218,7 +218,24 @@ async function callAI(messages) {
 
   const formattedMessages = messages.map((m) => `${m.role === 'user' ? 'Utilisateur' : 'Assistant'} : ${m.content}`).join('\n\n');
   const prompt = `${SYSTEM_PROMPT}\n\n---\n\n${formattedMessages}`;
-  return callProviderWithFallback(providers, prompt);
+
+  const MAX_RETRIES = 2;
+  const RETRY_DELAYS = [2000, 5000]; // 2s, 5s
+  let lastError;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      return await callProviderWithFallback(providers, prompt);
+    } catch (err) {
+      lastError = err;
+      if (attempt < MAX_RETRIES) {
+        const delay = RETRY_DELAYS[attempt] || RETRY_DELAYS[RETRY_DELAYS.length - 1];
+        console.warn(`[chatbot] Tentative ${attempt + 1}/${MAX_RETRIES + 1} échouée, retry dans ${delay}ms: ${err.message}`);
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+  }
+  throw lastError;
 }
 
 async function callIntentAI(message) {
