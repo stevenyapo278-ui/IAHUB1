@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import api from '../api/client';
 import Skeleton from '../components/Skeleton';
 import { useTheme } from '../context/ThemeContext';
-import { Bot, Save, RotateCcw, Sparkles, AlertTriangle, Terminal, FileCode, X } from 'lucide-react';
+import { Bot, Save, RotateCcw, Sparkles, AlertTriangle, Terminal, FileCode, X, Download } from 'lucide-react';
 
 export default function Prompts() {
   const { theme } = useTheme();
@@ -65,6 +65,20 @@ export default function Prompts() {
     }
   }
 
+  function downloadPrompt() {
+    if (!selected) return;
+    const blob = new Blob([draft], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${selected.key}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast.success('Fichier téléchargé');
+  }
+
   const selected = prompts.find((p) => p.key === selectedKey);
   const customizedCount = prompts.filter(p => p.isCustomized).length;
 
@@ -95,6 +109,15 @@ export default function Prompts() {
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Réinitialiser</span>
+            </motion.button>
+
+            <motion.button
+              whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+              onClick={downloadPrompt}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/40 text-on-surface-variant hover:text-on-surface hover:bg-surface-container text-xs font-semibold transition-all"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Télécharger</span>
             </motion.button>
 
             <motion.button

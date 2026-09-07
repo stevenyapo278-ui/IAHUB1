@@ -110,7 +110,7 @@ export default function FormDrawer({
                 <div className="min-w-0">
                   <h2
                     className="text-sm font-bold truncate"
-                    style={{ color: 'var(--color-on-surface)', fontFamily: 'Inter, sans-serif' }}
+                    style={{ color: 'var(--color-on-surface)', fontFamily: 'var(--user-font), Ubuntu, sans-serif' }}
                   >
                     {title}
                   </h2>

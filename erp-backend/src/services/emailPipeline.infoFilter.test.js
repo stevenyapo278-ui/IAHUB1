@@ -15,6 +15,16 @@ jest.mock('../prismaClient', () => ({
   },
   requesterLocation: {
     findMany: jest.fn().mockResolvedValue([]),
+    findFirst: jest.fn().mockResolvedValue(null),
+    updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+    upsert: jest.fn().mockResolvedValue({}),
+  },
+  glpiLocation: {
+    findFirst: jest.fn().mockResolvedValue(null),
+  },
+  // Résolution de l'expéditeur (couche 3) : aucun utilisateur connu par défaut
+  user: {
+    findUnique: jest.fn().mockResolvedValue(null),
   },
 }));
 
@@ -22,9 +32,8 @@ jest.mock('./emailPoller', () => ({ pollAllAccounts: jest.fn() }));
 const mockAnalyzeEmail = jest.fn();
 jest.mock('./mailAnalyzer', () => ({ analyzeEmail: (...args) => mockAnalyzeEmail(...args) }));
 const mockCreateTicketFromEmail = jest.fn();
-jest.mock('./glpiTicketCreator', () => ({
+jest.mock('./ticketCreator', () => ({
   createTicketFromEmail: (...args) => mockCreateTicketFromEmail(...args),
-  addGlpiFollowup: jest.fn(),
 }));
 
 jest.mock('./conversationMatcher', () => ({ findExistingTicket: jest.fn().mockResolvedValue(null) }));

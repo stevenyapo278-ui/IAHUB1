@@ -61,23 +61,61 @@ const ACTION_META = {
 
 const ACTION_OPTIONS = Object.keys(ACTION_META).sort();
 
-export default function AuditLogs() {
+// Domaines métier pour le filtre par famille d'actions
+const DOMAIN_OPTIONS = [
+  { value: 'UTILISATEURS', label: '👤 Utilisateurs & connexions' },
+  { value: 'EQUIPES', label: '👥 Équipes' },
+  { value: 'LIEUX', label: '📍 Lieux' },
+  { value: 'DROITS', label: '🔐 Groupes de droits' },
+  { value: 'SYSTEME', label: '⚙️ Paramètres système' },
+  { value: 'EMAIL_IA', label: '🤖 Email & IA' },
+  { value: 'CONNAISSANCES', label: '📚 Base de connaissances' },
+  { value: 'GLPI', label: '🔄 Synchronisations GLPI' },
+];
+
+// Types de cible les plus courants (détectés dynamiquement dans les logs)
+const TARGET_TYPE_OPTIONS = ['User', 'Team', 'PermissionGroup', 'Location', 'Ticket', 'SystemSettings', 'EmailAccount', 'AiProvider', 'KnowledgeDocument', 'PromptTemplate', 'N8nWorkflow'];
+
+const QUICK_RANGES = [
+  { value: '1', label: '24h' },
+  { value: '7', label: '7 jours' },
+  { value: '30', label: '30 jours' },
+  { value: '90', label: '90 jours' },
+];
+
+function rangeToStartDate(days) {
+  const d = new Date();
+  d.setDate(d.getDate() - Number(days));
+  return d.toISOString().slice(0, 10);
+}
+
+export default function AuditLogs({ embedded = false } = {}) {
   const [logs, setLogs] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 50, total: 0, totalPages: 0 });
   const [loading, setLoading] = useState(false);
   const [actionFilter, setActionFilter] = useFilterParam('action');
+  const [domainFilter, setDomainFilter] = useFilterParam('domain');
+  const [targetTypeFilter, setTargetTypeFilter] = useFilterParam('targetType');
+  const [targetIdFilter, setTargetIdFilter] = useFilterParam('targetId');
   const [actorFilter, setActorFilter] = useFilterParam('actor');
   const [searchFilter, setSearchFilter] = useFilterParam('search');
   const [startDate, setStartDate] = useFilterParam('startDate');
   const [endDate, setEndDate] = useFilterParam('endDate');
+  const [orderFilter, setOrderFilter] = useFilterParam('order', 'desc');
+  const [pageSize, setPageSize] = useFilterParam('pageSize', '50');
+  const [quickRange, setQuickRange] = useState('');
   const [expandedId, setExpandedId] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
   function load(page = 1) {
     setLoading(true);
-    const params = { page, pageSize: 50 };
+    const pageSizeNum = parseInt(pageSize, 10) || 50;
+    const params = { page, pageSize: pageSizeNum, order: orderFilter };
     if (actionFilter) params.action = actionFilter;
+    if (domainFilter) params.domain = domainFilter;
+    if (targetTypeFilter) params.targetType = targetTypeFilter;
+    if (targetIdFilter) params.targetId = targetIdFilter;
     if (actorFilter) params.actor = actorFilter;
     if (searchFilter) params.search = searchFilter;
     if (startDate) params.startDate = startDate;
@@ -92,15 +130,27 @@ export default function AuditLogs() {
       .finally(() => setLoading(false));
   }
 
-  useEffect(() => { load(); }, [actionFilter, actorFilter, searchFilter, startDate, endDate]);
+  useEffect(() => { load(); }, [actionFilter, domainFilter, targetTypeFilter, targetIdFilter, actorFilter, searchFilter, startDate, endDate, orderFilter, pageSize]);
 
   function applyFilters() { load(1); }
 
   function resetFilters() {
     setActionFilter('');
+    setDomainFilter('');
+    setTargetTypeFilter('');
+    setTargetIdFilter('');
     setActorFilter('');
     setSearchFilter('');
     setStartDate('');
+    setEndDate('');
+    setOrderFilter('desc');
+    setPageSize('50');
+    setQuickRange('');
+  }
+
+  function applyQuickRange(days) {
+    setQuickRange(days);
+    setStartDate(days ? rangeToStartDate(days) : '');
     setEndDate('');
   }
 
@@ -124,10 +174,12 @@ export default function AuditLogs() {
     return formatDate(iso);
   }
 
-  const hasActiveFilters = actionFilter || actorFilter || searchFilter || startDate || endDate;
+  const hasActiveFilters = actionFilter || domainFilter || targetTypeFilter || targetIdFilter || actorFilter || searchFilter || startDate || endDate || orderFilter === 'asc';
 
-  return (
+  const view = (
     <PageShell
+      hideHeader={embedded}
+      fill={embedded}
       icon={Shield}
       iconColor="text-amber-400"
       title="Audit système"
@@ -153,6 +205,37 @@ export default function AuditLogs() {
     >
 
       {/* ── Filters Strip ──────────────────────────────────────────────── */}
+      {/* Barre outils inline — indispensable en mode embarqué (hub) où l'en-tête PageShell
+          est masqué : sans elle, ni la recherche ni le bouton Filtres ne seraient accessibles. */}
+      {embedded && (
+        <div className="flex items-center gap-2 mb-3 flex-wrap px-4 sm:px-6 lg:px-8 pt-4">
+          <div className="relative flex-1 min-w-[200px] max-w-md">
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50" />
+            <input
+              type="text"
+              placeholder="Rechercher (cible, acteur, action)..."
+              value={searchFilter}
+              onChange={(e) => setSearchFilter(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') applyFilters(); }}
+              className="input-katalyst pl-8 pr-8 py-2 text-xs w-full"
+            />
+          </div>
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+              showFilters || hasActiveFilters
+                ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+                : 'btn-secondary'
+            }`}
+          >
+            <Filter className="w-3.5 h-3.5" />
+            <span>Filtres</span>
+            {hasActiveFilters && (
+              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+            )}
+          </button>
+        </div>
+      )}
       <AnimatePresence>
         {showFilters && (
           <motion.div
@@ -160,15 +243,45 @@ export default function AuditLogs() {
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.22 }}
-            className="overflow-hidden rounded-xl border border-outline-variant/20 bg-surface-container-low/40 mb-4"
+            className="overflow-hidden rounded-xl border border-outline-variant/20 bg-surface-container-low/40 mb-4 shrink-0"
           >
             <div className="px-4 py-3 space-y-3">
+              {/* Périodes rapides */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider mr-1">Période :</span>
+                {QUICK_RANGES.map(({ value, label }) => (
+                  <button key={value} onClick={() => applyQuickRange(quickRange === value ? '' : value)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all cursor-pointer ${
+                      quickRange === value
+                        ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                        : 'border-outline-variant/30 text-on-surface-variant hover:text-on-surface hover:border-outline-variant/50'
+                    }`}>
+                    {label}
+                  </button>
+                ))}
+                <span className="text-[10px] text-on-surface-variant/50 ml-1">(ou dates personnalisées ci-dessous)</span>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                 <label className="field-label">
-                  <span>Action</span>
+                  <span>Domaine</span>
+                  <select
+                    value={domainFilter}
+                    onChange={(e) => { setDomainFilter(e.target.value); setActionFilter(''); }}
+                    className="input-katalyst"
+                  >
+                    <option value="">Tous domaines</option>
+                    {DOMAIN_OPTIONS.map((d) => (
+                      <option key={d.value} value={d.value}>{d.label}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="field-label">
+                  <span>Action précise</span>
                   <select
                     value={actionFilter}
-                    onChange={(e) => setActionFilter(e.target.value)}
+                    onChange={(e) => { setActionFilter(e.target.value); setDomainFilter(''); }}
                     className="input-katalyst"
                   >
                     <option value="">Toutes les actions</option>
@@ -176,6 +289,32 @@ export default function AuditLogs() {
                       <option key={a} value={a}>{ACTION_META[a]?.label || a}</option>
                     ))}
                   </select>
+                </label>
+
+                <label className="field-label">
+                  <span>Type de cible</span>
+                  <select
+                    value={targetTypeFilter}
+                    onChange={(e) => setTargetTypeFilter(e.target.value)}
+                    className="input-katalyst"
+                  >
+                    <option value="">Tous les types</option>
+                    {TARGET_TYPE_OPTIONS.map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="field-label">
+                  <span>N° de cible</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={targetIdFilter}
+                    onChange={(e) => setTargetIdFilter(e.target.value.replace(/\D/g, ''))}
+                    placeholder="ex : 12"
+                    className="input-katalyst"
+                  />
                 </label>
 
                 <label className="field-label">
@@ -190,11 +329,23 @@ export default function AuditLogs() {
                 </label>
 
                 <label className="field-label">
+                  <span>Ordre</span>
+                  <select
+                    value={orderFilter}
+                    onChange={(e) => setOrderFilter(e.target.value)}
+                    className="input-katalyst"
+                  >
+                    <option value="desc">Plus récents d'abord</option>
+                    <option value="asc">Plus anciens d'abord</option>
+                  </select>
+                </label>
+
+                <label className="field-label">
                   <span>Du</span>
                   <input
                     type="date"
                     value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
+                    onChange={(e) => { setStartDate(e.target.value); setQuickRange(''); }}
                     className="input-katalyst"
                   />
                 </label>
@@ -224,8 +375,8 @@ export default function AuditLogs() {
       </AnimatePresence>
 
       {/* ── Main Stream List ────────────────────────────────────────────── */}
-      <div className="flex-1 px-4 sm:px-6 lg:px-8 py-6 space-y-4">
-        <div className="rounded-2xl border border-outline-variant/30 overflow-hidden bg-surface-container-lowest">
+      <div className="flex-1 min-h-0 flex flex-col px-4 sm:px-6 lg:px-8 py-6">
+        <div className="rounded-2xl border border-outline-variant/30 overflow-hidden bg-surface-container-lowest flex flex-col flex-1 min-h-0 min-w-0">
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-outline-variant/20 bg-surface-container-low/40">
             <span className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">
               Flux d'audit ({pagination.total})
@@ -243,7 +394,7 @@ export default function AuditLogs() {
               <p className="text-sm italic">Aucune action trouvée.</p>
             </div>
           ) : (
-            <div className="divide-y divide-outline-variant/10">
+            <div className="divide-y divide-outline-variant/10 overflow-y-auto flex-1 min-h-0">
               {logs.map((entry) => {
                 const meta = ACTION_META[entry.action] || { icon: Activity, color: 'text-slate-600', label: entry.action };
                 const IconComponent = meta.icon;
@@ -320,18 +471,27 @@ export default function AuditLogs() {
             </div>
           )}
 
-          {pagination.totalPages > 1 && (
-            <div className="px-4 py-3 border-t border-outline-variant/20">
-              <Pagination
-                page={pagination.page}
-                totalPages={pagination.totalPages}
-                total={pagination.total}
-                onPage={load}
-              />
-            </div>
+          {/* Pagination — fixe en bas du conteneur (même disposition que le tableau des tickets) */}
+          {pagination.total > 0 && (
+            <Pagination
+              page={pagination.page}
+              totalPages={pagination.totalPages}
+              total={pagination.total}
+              label="actions"
+              onPageChange={(p) => load(p)}
+              pageSize={parseInt(pageSize, 10) || 50}
+              onPageSizeChange={(s) => { setPageSize(String(s)); }}
+              className="shrink-0"
+            />
           )}
         </div>
       </div>
     </PageShell>
   );
+
+  // Mode embarqué (hub Journal & Audit) : la page fournit déjà le padding et l'en-tête
+  if (embedded) {
+    return <div className="flex-1 min-h-0 flex flex-col overflow-y-auto">{view}</div>;
+  }
+  return view;
 }

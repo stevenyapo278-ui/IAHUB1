@@ -30,10 +30,8 @@ jest.mock('../prismaClient', () => ({
 
 jest.mock('./emailPoller', () => ({ pollAllAccounts: jest.fn() }));
 jest.mock('./mailAnalyzer', () => ({ analyzeEmail: jest.fn(), getActiveProvider: jest.fn(), callProvider: jest.fn() }));
-jest.mock('./glpiTicketCreator', () => ({
+jest.mock('./ticketCreator', () => ({
   createTicketFromEmail: jest.fn(),
-  addGlpiFollowup: jest.fn().mockResolvedValue(undefined),
-  updateGlpiTicket: jest.fn().mockResolvedValue(undefined),
 }));
 
 const mockFindExistingTicket = jest.fn();

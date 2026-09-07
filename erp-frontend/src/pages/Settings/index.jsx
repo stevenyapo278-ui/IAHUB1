@@ -11,8 +11,10 @@ import AdvancedTab from './AdvancedTab';
 import TemplatesTab from './TemplatesTab';
 import CustomFieldsTab from './CustomFieldsTab';
 import EmailNotificationsTab from './EmailNotificationsTab';
+import NavigationTab from './NavigationTab';
 import PageShell from '../../components/PageShell';
-import { Settings as SettingsIcon, Cpu, Mail, Zap, Globe, Sliders, FileText, ListChecks, Bell } from 'lucide-react';
+import { Settings as SettingsIcon, Cpu, Mail, Zap, Globe, Sliders, FileText, ListChecks, Bell, LayoutGrid, Palette } from 'lucide-react';
+import AppearanceTab from './AppearanceTab';
 
 const BASE_TABS = [
   { id: 'ai', label: 'Intelligence Artificielle', desc: 'Fournisseurs, modèles et clés API Gemini', icon: Cpu, permission: 'settings.ai' },
@@ -32,7 +34,7 @@ export default function Settings() {
   const visibleBaseTabs = BASE_TABS.filter((tab) => hasPermission(user, tab.permission, ['ADMIN']));
   const TABS =
     user?.role === 'SUPERADMIN'
-      ? [...visibleBaseTabs, { id: 'advanced', label: 'Avancé', desc: 'Configuration système & fréquences', icon: Sliders }]
+      ? [...visibleBaseTabs, { id: 'appearance', label: 'Apparence', desc: 'Thème de la page de connexion', icon: Palette }, { id: 'navigation', label: 'Navigation', desc: 'Visibilité de la barre latérale par rôle', icon: LayoutGrid }, { id: 'advanced', label: 'Avancé', desc: 'Configuration système & fréquences', icon: Sliders }]
       : visibleBaseTabs;
   const TAB_IDS = TABS.map((t) => t.id);
 
@@ -57,26 +59,51 @@ export default function Settings() {
       title="Paramètres Système"
       subtitle="Configuration globale, automatisations & clés d'intégrations"
       actions={
-        <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-surface-container border border-outline-variant/30 overflow-x-auto no-scrollbar">
-          {TABS.map((tab) => {
-            const isActive = activeTab === tab.id;
-            const IconComp = tab.icon;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-                  isActive
-                    ? 'btn-primary'
-                    : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
-                }`}
-                style={isActive ? { padding: '0.375rem 0.75rem' } : undefined}
-              >
-                <IconComp className="w-3.5 h-3.5" />
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
+        <div className="flex flex-col items-center gap-1.5">
+          <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-surface-container border border-outline-variant/30 overflow-x-auto no-scrollbar">
+            {visibleBaseTabs.map((tab) => {
+              const isActive = activeTab === tab.id;
+              const IconComp = tab.icon;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                    isActive
+                      ? 'btn-primary'
+                      : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
+                  }`}
+                  style={isActive ? { padding: '0.375rem 0.75rem' } : undefined}
+                >
+                  <IconComp className="w-3.5 h-3.5" />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          {user?.role === 'SUPERADMIN' && (
+            <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-surface-container border border-outline-variant/30 overflow-x-auto no-scrollbar">
+              {TABS.slice(visibleBaseTabs.length).map((tab) => {
+                const isActive = activeTab === tab.id;
+                const IconComp = tab.icon;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                      isActive
+                        ? 'btn-primary'
+                        : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
+                    }`}
+                    style={isActive ? { padding: '0.375rem 0.75rem' } : undefined}
+                  >
+                    <IconComp className="w-3.5 h-3.5" />
+                    <span>{tab.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       }
     >
@@ -109,6 +136,8 @@ export default function Settings() {
                 {activeTab === 'notifications' && "Gérez tous les canaux de notification : toggles par type d'email, récapitulatif quotidien, notifications navigateur et sons d'alerte."}
                 {activeTab === 'templates' && "Créez et gérez des modèles de tickets réutilisables par l'équipe."}
                 {activeTab === 'custom-fields' && "Définissez des champs personnalisés rendus à la création d'un ticket selon la catégorie (équivalent GLPI Forms)."}
+                {activeTab === 'appearance' && "Gérez l'apparence de la page de connexion : rotation quotidienne, thème fixe ou aléatoire (réservé SUPERADMIN)."}
+                {activeTab === 'navigation' && "Configurez quels éléments de navigation chaque rôle peut voir dans la barre latérale."}
                 {activeTab === 'advanced' && "Réglages système avancés réservés au super-administrateur (intervalles de sync, durées de rétention)."}
               </p>
             </div>
@@ -123,6 +152,8 @@ export default function Settings() {
             {activeTab === 'notifications' && <EmailNotificationsTab />}
             {activeTab === 'templates' && <TemplatesTab />}
             {activeTab === 'custom-fields' && <CustomFieldsTab />}
+            {activeTab === 'appearance' && user?.role === 'SUPERADMIN' && <AppearanceTab />}
+            {activeTab === 'navigation' && user?.role === 'SUPERADMIN' && <NavigationTab />}
             {activeTab === 'advanced' && user?.role === 'SUPERADMIN' && <AdvancedTab />}
           </div>
         </motion.div>

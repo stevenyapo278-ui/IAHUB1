@@ -3,7 +3,6 @@
  *
  * Accessible via une icône d'engrenage dans le Header.
  * Gère :
- *   - Widgets du dashboard (afficher/masquer, réordonner)
  *   - Densité des tables (compact/comfortable)
  *   - Raccourcis épinglés (ajouter/supprimer/réordonner)
  *   - Notifications sonores
@@ -28,35 +27,21 @@ import {
   Volume2,
   VolumeX,
   RotateCcw,
-  LayoutDashboard,
   Table2,
   Pin,
-  BarChart3,
-  TrendingUp,
-  Activity,
-  Sparkles,
-  Users,
-  Clock,
-  PieChart,
-  Link2,
+  MessageCircle,
+  Move,
 } from 'lucide-react';
-import { useUserPreferences, DASHBOARD_WIDGETS } from '../context/UserPreferencesContext';
+import { useUserPreferences } from '../context/UserPreferencesContext';
+import { useAuth } from '../context/AuthContext';
+import useSystemSettings from '../hooks/useSystemSettings';
+import { hasPermission } from '../utils/permissions';
 
 const TABS = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'tables', label: 'Tables', icon: Table2 },
   { id: 'shortcuts', label: 'Raccourcis', icon: Pin },
+  { id: 'chat', label: 'Chat', icon: MessageCircle },
 ];
-
-const ICON_MAP = {
-  BarChart3,
-  TrendingUp,
-  Activity,
-  Sparkles,
-  Users,
-  Clock,
-  PieChart,
-};
 
 const DENSITY_OPTIONS = [
   { id: 'compact', label: 'Compact', description: 'Lignes serrées, moins d\'espace' },
@@ -70,7 +55,6 @@ const COMMON_SHORTCUTS = [
   { path: '/email-drafts', label: 'Validation', icon: '✅' },
   { path: '/assets', label: 'Assets', icon: '💻' },
   { path: '/knowledge-base', label: 'Base connaissances', icon: '📚' },
-  { path: '/dashboard', label: 'Dashboard', icon: '📊' },
   { path: '/users', label: 'Utilisateurs', icon: '👥' },
   { path: '/teams', label: 'Équipes', icon: '🏢' },
   { path: '/categories', label: 'Catégories', icon: '📁' },
@@ -81,7 +65,7 @@ const COMMON_SHORTCUTS = [
 ];
 
 export default function CustomizerDrawer({ open, onClose }) {
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState('tables');
 
   return (
     <AnimatePresence>
@@ -112,7 +96,7 @@ export default function CustomizerDrawer({ open, onClose }) {
                 </div>
                 <div>
                   <h2 className="text-sm font-bold text-foreground">Personnalisation</h2>
-                  <p className="text-[11px] text-muted-foreground">Widgets, tables & raccourcis</p>
+                  <p className="text-[11px] text-muted-foreground">Tables, raccourcis & notifications</p>
                 </div>
               </div>
               <button
@@ -124,7 +108,7 @@ export default function CustomizerDrawer({ open, onClose }) {
             </div>
 
             {/* Tabs */}
-            <div className="flex gap-1 px-4 py-2 shrink-0 border-b border-border">
+            <div className="flex gap-1 px-4 py-2 shrink-0 border-b border-border overflow-x-auto scrollbar-none">
               {TABS.map((tab) => {
                 const TabIcon = tab.icon;
                 const isActive = activeTab === tab.id;
@@ -132,7 +116,7 @@ export default function CustomizerDrawer({ open, onClose }) {
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all whitespace-nowrap shrink-0 ${
                       isActive
                         ? 'bg-primary text-primary-foreground'
                         : 'text-muted-foreground hover:text-foreground hover:bg-surface-muted'
@@ -147,125 +131,14 @@ export default function CustomizerDrawer({ open, onClose }) {
 
             {/* Content */}
             <div className="flex-1 overflow-y-auto px-5 py-4">
-              {activeTab === 'dashboard' && <DashboardTab />}
               {activeTab === 'tables' && <TablesTab />}
               {activeTab === 'shortcuts' && <ShortcutsTab />}
+              {activeTab === 'chat' && <ChatTab />}
             </div>
           </motion.div>
         </>
       )}
     </AnimatePresence>
-  );
-}
-
-// ── Dashboard Tab ─────────────────────────────────────────────────────────
-function DashboardTab() {
-  const {
-    dashboardLayout, toggleWidget, reorderWidgets,
-    setWidgetSpan, setKpiOrder, setDashboardLayout,
-  } = useUserPreferences();
-
-  return (
-    <div className="space-y-5">
-      {/* Widget visibility */}
-      <div>
-        <label className="text-xs font-semibold mb-2 block text-foreground">
-          Widgets du tableau de bord
-        </label>
-        <p className="text-[10px] text-muted-foreground mb-3">
-          Affichez ou masquez les widgets de votre dashboard.
-        </p>
-
-        <Reorder.Group
-          axis="y"
-          values={dashboardLayout.visibleWidgets}
-          onReorder={(newOrder) => {
-            // Reorder: update visibleWidgets with new order
-            setDashboardLayout({ visibleWidgets: newOrder });
-          }}
-          className="space-y-1.5"
-        >
-          {DASHBOARD_WIDGETS.map((widget) => {
-            const isVisible = dashboardLayout.visibleWidgets.includes(widget.id);
-            const IconComp = ICON_MAP[widget.icon] || BarChart3;
-            return (
-              <Reorder.Item
-                key={widget.id}
-                value={widget.id}
-                className={`flex items-center gap-2.5 p-2.5 rounded-xl border transition-all ${
-                  isVisible
-                    ? 'bg-surface-container border-border'
-                    : 'bg-surface border-border/50 opacity-60'
-                }`}
-              >
-                <GripVertical className="w-3.5 h-3.5 text-muted-foreground/50 cursor-grab shrink-0" />
-                <IconComp className="w-4 h-4 text-muted-foreground shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <span className="text-xs font-semibold text-foreground block">{widget.label}</span>
-                  <span className="text-[10px] text-muted-foreground block truncate">{widget.description}</span>
-                </div>
-                <button
-                  onClick={() => toggleWidget(widget.id)}
-                  className={`shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
-                    isVisible
-                      ? 'bg-primary/10 text-primary'
-                      : 'bg-surface-muted text-muted-foreground'
-                  }`}
-                  title={isVisible ? 'Masquer' : 'Afficher'}
-                >
-                  {isVisible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                </button>
-              </Reorder.Item>
-            );
-          })}
-        </Reorder.Group>
-      </div>
-
-      {/* KPI order */}
-      <div>
-        <label className="text-xs font-semibold mb-2 block text-foreground">
-          Ordre des KPI
-        </label>
-        <div className="space-y-1">
-          {dashboardLayout.kpiOrder.map((kpiId, index) => (
-            <div key={kpiId} className="flex items-center gap-2 p-2 rounded-lg bg-surface-container border border-border">
-              <span className="w-5 h-5 rounded bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center">
-                {index + 1}
-              </span>
-              <span className="text-xs font-medium text-foreground flex-1">
-                {formatKpiLabel(kpiId)}
-              </span>
-              <div className="flex gap-0.5">
-                <button
-                  onClick={() => {
-                    if (index === 0) return;
-                    const newOrder = [...dashboardLayout.kpiOrder];
-                    [newOrder[index - 1], newOrder[index]] = [newOrder[index], newOrder[index - 1]];
-                    setKpiOrder(newOrder);
-                  }}
-                  disabled={index === 0}
-                  className="w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-30"
-                >
-                  <ArrowUp className="w-3 h-3" />
-                </button>
-                <button
-                  onClick={() => {
-                    if (index === dashboardLayout.kpiOrder.length - 1) return;
-                    const newOrder = [...dashboardLayout.kpiOrder];
-                    [newOrder[index], newOrder[index + 1]] = [newOrder[index + 1], newOrder[index]];
-                    setKpiOrder(newOrder);
-                  }}
-                  disabled={index === dashboardLayout.kpiOrder.length - 1}
-                  className="w-5 h-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-30"
-                >
-                  <ArrowDown className="w-3 h-3" />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -336,6 +209,64 @@ function TablesTab() {
 // ── Shortcuts Tab ──────────────────────────────────────────────────────────
 function ShortcutsTab() {
   const { pinnedShortcuts, toggleShortcut, reorderShortcuts } = useUserPreferences();
+  const { user } = useAuth();
+  const { settings: systemSettings } = useSystemSettings();
+
+  const navConfig = systemSettings?.navigationConfig;
+
+  // All items pour vérification des permissions (doit correspondre à MainLayout.jsx)
+  const ALL_NAV_ITEMS = [
+    { to: '/', permission: null },
+    { to: '/portal', permission: null },
+    { to: '/tickets', permission: null },
+    { to: '/problems', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE'] },
+    { to: '/email-drafts', permission: 'emaildrafts.manage', fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
+    { to: '/inbox', permission: 'inbox.sync', fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
+    { to: '/knowledge-base', permission: null },
+    { to: '/ticket-evolution', permission: null, fallbackRoles: ['ADMIN', 'TECHNICIAN', 'HOTLINE'] },
+    { to: '/teams', permission: 'teams.manage', fallbackRoles: ['ADMIN'] },
+    { to: '/users', permission: 'users.manage', fallbackRoles: ['ADMIN'] },
+    { to: '/technician-stats', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
+    { to: '/skills', permission: null, fallbackRoles: ['ADMIN'] },
+    { to: '/categories', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
+    { to: '/locations', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE'] },
+    { to: '/assets', permission: null },
+    { to: '/ai-weekly-reports', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE'] },
+    { to: '/prompts', permission: 'prompts.manage', fallbackRoles: ['ADMIN'] },
+    { to: '/permission-groups', permission: 'users.manage', fallbackRoles: ['ADMIN'] },
+    { to: '/settings', permission: ['settings.ai', 'settings.email', 'settings.integrations', 'automation.manage'], fallbackRoles: ['ADMIN'] },
+    { to: '/documentation', permission: null },
+    { to: '/logs', permission: null, roles: ['ADMIN', 'SUPERADMIN', 'HOTLINE', 'TECHNICIAN'] },
+    { to: '/audit', permission: null, fallbackRoles: ['ADMIN'] },
+  ];
+
+  function isPathAllowed(path) {
+    if (user?.role === 'SUPERADMIN') return true;
+    const basePath = path.split('?')[0];
+    if (navConfig && navConfig[basePath]) {
+      return navConfig[basePath].includes(user?.role);
+    }
+    const item = ALL_NAV_ITEMS.find((i) => i.to === basePath);
+    if (!item) return true;
+    if (item.permission !== null) {
+      const keys = Array.isArray(item.permission) ? item.permission : [item.permission];
+      return keys.some((key) => hasPermission(user, key));
+    }
+    if (item.fallbackRoles || item.roles) {
+      const allowed = item.roles || item.fallbackRoles;
+      return allowed.includes(user?.role);
+    }
+    return true;
+  }
+
+  // Filtrer les raccourcis disponibles selon les permissions
+  const allowedShortcuts = COMMON_SHORTCUTS.filter((s) => isPathAllowed(s.path));
+  const allowedPinned = pinnedShortcuts.filter(isPathAllowed);
+
+  // Auto-nettoyer les raccourcis épinglés devenus inaccessibles
+  if (allowedPinned.length < pinnedShortcuts.length) {
+    pinnedShortcuts.filter((p) => !isPathAllowed(p)).forEach((p) => toggleShortcut(p));
+  }
 
   return (
     <div className="space-y-5">
@@ -348,7 +279,7 @@ function ShortcutsTab() {
           Apparaissent dans le header pour un accès rapide.
         </p>
 
-        {pinnedShortcuts.length === 0 ? (
+        {allowedPinned.length === 0 ? (
           <div className="text-center py-6 text-muted-foreground/60">
             <Pin className="w-8 h-8 mx-auto mb-2 opacity-40" />
             <p className="text-xs">Aucun raccourci épinglé</p>
@@ -357,11 +288,15 @@ function ShortcutsTab() {
         ) : (
           <Reorder.Group
             axis="y"
-            values={pinnedShortcuts}
-            onReorder={reorderShortcuts}
+            values={allowedPinned}
+            onReorder={(newOrder) => {
+              // Réordonner uniquement les éléments autorisés
+              const others = pinnedShortcuts.filter((p) => !isPathAllowed(p));
+              reorderShortcuts([...others, ...newOrder]);
+            }}
             className="space-y-1.5"
           >
-            {pinnedShortcuts.map((path) => {
+            {allowedPinned.map((path) => {
               const shortcut = COMMON_SHORTCUTS.find((s) => s.path === path);
               return (
                 <Reorder.Item
@@ -395,7 +330,7 @@ function ShortcutsTab() {
           Ajouter un raccourci
         </label>
         <div className="space-y-1">
-          {COMMON_SHORTCUTS.filter((s) => !pinnedShortcuts.includes(s.path)).map((shortcut) => (
+          {allowedShortcuts.filter((s) => !pinnedShortcuts.includes(s.path)).map((shortcut) => (
             <button
               key={shortcut.path}
               onClick={() => toggleShortcut(shortcut.path)}
@@ -444,6 +379,124 @@ function SoundToggle() {
           }`}
         />
       </button>
+    </div>
+  );
+}
+
+// ── Chat Tab ──────────────────────────────────────────────────────────────
+function ChatTab() {
+  const [posX, setPosX] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('chatwidget_position'))?.right ?? 24; } catch { return 24; }
+  });
+  const [posY, setPosY] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('chatwidget_position'))?.bottom ?? 24; } catch { return 24; }
+  });
+
+  function updatePosition(x, y) {
+    setPosX(x);
+    setPosY(y);
+    localStorage.setItem('chatwidget_position', JSON.stringify({ right: x, bottom: y }));
+    window.dispatchEvent(new CustomEvent('chatwidget:position-changed'));
+  }
+
+  function resetPosition() {
+    updatePosition(24, 24);
+  }
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <label className="text-xs font-semibold mb-2 block text-foreground">
+          Position du chat flottant
+        </label>
+        <p className="text-[10px] text-muted-foreground mb-3">
+          Ajustez la position X (droite) et Y (bas) en pixels.
+        </p>
+
+        {/* Aperçu live */}
+        <div className="relative w-full h-40 border border-border rounded-xl bg-surface-container mb-4 overflow-hidden">
+          {/* Contenu simulé */}
+          <div className="absolute inset-3 border border-dashed border-border/40 rounded-lg" />
+          <div className="absolute top-3 left-3 text-[9px] text-muted-foreground/50 font-mono">viewport</div>
+
+          {/* Bulle simulée */}
+          <div
+            className="absolute w-8 h-8 rounded-full bg-gradient-to-br from-primary to-blue-700 flex items-center justify-center shadow-md transition-all duration-150"
+            style={{ right: `${Math.min(posX, 280)}px`, bottom: `${Math.min(posY, 120)}px` }}
+          >
+            <span className="material-symbols-outlined text-[14px] text-white">smart_toy</span>
+          </div>
+
+          {/* Axes */}
+          <div className="absolute bottom-1 right-1 flex items-center gap-1 text-[8px] text-muted-foreground/60 font-mono">
+            <span>x:{posX}</span>
+            <span>y:{posY}</span>
+          </div>
+        </div>
+
+        {/* Slider X */}
+        <div className="space-y-1.5 mb-3">
+          <div className="flex items-center justify-between">
+            <label className="text-[11px] font-semibold text-foreground">Position X (droite)</label>
+            <span className="text-[11px] font-mono text-primary font-bold">{posX}px</span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={400}
+            value={posX}
+            onChange={(e) => updatePosition(Number(e.target.value), posY)}
+            className="w-full h-1.5 rounded-full bg-border appearance-none cursor-pointer accent-primary"
+          />
+          <div className="flex justify-between text-[9px] text-muted-foreground/50">
+            <span>0</span>
+            <span>400</span>
+          </div>
+        </div>
+
+        {/* Slider Y */}
+        <div className="space-y-1.5 mb-3">
+          <div className="flex items-center justify-between">
+            <label className="text-[11px] font-semibold text-foreground">Position Y (bas)</label>
+            <span className="text-[11px] font-mono text-primary font-bold">{posY}px</span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={400}
+            value={posY}
+            onChange={(e) => updatePosition(posX, Number(e.target.value))}
+            className="w-full h-1.5 rounded-full bg-border appearance-none cursor-pointer accent-primary"
+          />
+          <div className="flex justify-between text-[9px] text-muted-foreground/50">
+            <span>0</span>
+            <span>400</span>
+          </div>
+        </div>
+
+        {/* Reset */}
+        <button
+          onClick={resetPosition}
+          className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-border bg-surface-container hover:bg-surface-muted transition-colors text-[11px] font-semibold text-muted-foreground cursor-pointer"
+        >
+          <RotateCcw className="w-3 h-3" />
+          Réinitialiser la position
+        </button>
+      </div>
+
+      {/* Raccourci clavier */}
+      <div className="p-3 rounded-xl border border-border bg-surface-container">
+        <div className="flex items-center gap-2.5">
+          <Move className="w-4 h-4 text-muted-foreground" />
+          <div>
+            <span className="text-xs font-semibold text-foreground">Raccourci clavier</span>
+            <p className="text-[10px] text-muted-foreground">
+              <kbd className="px-1.5 py-0.5 rounded bg-surface border border-border text-[10px] font-mono">Ctrl+I</kbd> ou{' '}
+              <kbd className="px-1.5 py-0.5 rounded bg-surface border border-border text-[10px] font-mono">⌘I</kbd> pour ouvrir/fermer
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

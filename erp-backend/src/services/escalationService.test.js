@@ -1,9 +1,10 @@
 jest.mock('../prismaClient', () => ({
   ticket: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn() },
-  user: { findMany: jest.fn() },
+  user: { findMany: jest.fn(), findFirst: jest.fn() },
+  team: { findUnique: jest.fn() },
 }));
 jest.mock('./ticketEvent', () => ({ logEvent: jest.fn() }));
-jest.mock('../utils/socket', () => ({ emitTicketEscalated: jest.fn() }));
+jest.mock('../utils/socket', () => ({ emitTicketEscalated: jest.fn(), emitTicketAssigned: jest.fn() }));
 jest.mock('./emailSender', () => ({
   sendEscalationEmail: jest.fn(() => Promise.resolve()),
   sendRequesterEscalationEmail: jest.fn(() => Promise.resolve()),
@@ -18,7 +19,6 @@ const { scheduleEscalation, escalateTicket, runEscalationMonitor } = require('./
 function mockTicket(overrides = {}) {
   prisma.ticket.findUnique = jest.fn(async () => overrides);
   prisma.ticket.update = jest.fn(async ({ data }) => ({ ...(overrides || {}), ...data }));
-  prisma.user.findMany = jest.fn(async () => []);
 }
 
 describe('scheduleEscalation — planification d\'une escalade', () => {
@@ -45,7 +45,7 @@ describe('scheduleEscalation — planification d\'une escalade', () => {
   });
 });
 
-describe('escalateTicket — escalade réelle', () => {
+describe('escalateTicket — escalade = transfert à une équipe responsable', () => {
   const ticket = {
     id: 10,
     title: 'Impression KO',
@@ -56,45 +56,111 @@ describe('escalateTicket — escalade réelle', () => {
     team: { id: 3, name: 'Support' },
   };
 
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.user.findMany = jest.fn(async () => []);
+    prisma.user.findFirst = jest.fn(async () => null);
+    prisma.team.findUnique = jest.fn(async () => null);
+  });
 
-  it('incrémente le niveau, trace l\'événement, notifie socket et alerte les admins', async () => {
+  it('sans équipe cible : alerte l\'équipe courante + admins, ne touche ni teamId ni assignedToId', async () => {
     mockTicket(ticket);
-    prisma.user.findMany = jest.fn(async () => [
-      { email: 'admin1@prosuma.ci', fullName: 'Admin 1' },
-      { email: 'admin2@prosuma.ci', fullName: 'Admin 2' },
-    ]);
+    // 1er appel = membres de l'équipe cible (ici l'équipe courante), 2e = admins
+    prisma.user.findMany = jest.fn()
+      .mockResolvedValueOnce([{ email: 'mate@prosuma.ci', fullName: 'Mate' }])
+      .mockResolvedValueOnce([{ email: 'admin1@prosuma.ci', fullName: 'Admin 1' }]);
 
     const updated = await escalateTicket(10, { reason: 'Panne totale', actor: 'jdoe@prosuma.ci', source: 'manual' });
 
+    // Pas de changement d'équipe ni de technicien
+    expect(prisma.team.findUnique).not.toHaveBeenCalled();
+    expect(updated.teamId).toBeUndefined();
+    expect(updated.assignedToId).toBeUndefined();
+    // Le compteur suit les relances successives (traçabilité), sans notion de « niveau »
     expect(updated.escalationLevel).toBe(2);
-    expect(updated.escalatedAt).toBeInstanceOf(Date);
     expect(updated.escalateAt).toBeNull();
-    expect(prisma.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 10 },
-      data: { escalationLevel: 2, escalatedAt: expect.any(Date), escalateAt: null },
+    expect(logEvent).toHaveBeenCalledWith(10, 'ESCALATED', 'jdoe@prosuma.ci', expect.objectContaining({
+      source: 'manual',
+      reason: 'Panne totale',
+      fromTeam: { id: 3, name: 'Support' },
+      toTeam: null,
     }));
-    expect(logEvent).toHaveBeenCalledWith(10, 'ESCALATED', 'jdoe@prosuma.ci', {
-      source: 'manual', reason: 'Panne totale', escalationLevel: 2,
-    });
-    expect(emitTicketEscalated).toHaveBeenCalledWith(expect.objectContaining({ id: 10 }), {
-      reason: 'Panne totale', escalationLevel: 2,
-    });
-    // 2 admins + 1 technicien assigné
-    expect(sendEscalationEmail).toHaveBeenCalledTimes(3);
-    expect(sendEscalationEmail.mock.calls[0][0].recipientEmail).toBe('admin1@prosuma.ci');
-    expect(sendEscalationEmail.mock.calls[2][0].recipientEmail).toBe('tech@prosuma.ci');
-    // Le demandeur est notifié avec le template dédié
+    // Membre de l'équipe + admin alertés ; le demandeur reçoit le template dédié
+    const recipients = sendEscalationEmail.mock.calls.map((c) => c[0].recipientEmail);
+    expect(recipients).toEqual(expect.arrayContaining(['mate@prosuma.ci', 'admin1@prosuma.ci']));
     expect(sendRequesterEscalationEmail).toHaveBeenCalledTimes(1);
     expect(sendRequesterEscalationEmail.mock.calls[0][0].recipientEmail).toBe('req@prosuma.ci');
   });
 
-  it('notifie le demandeur même sans admin ni technicien assigné (niveau 0)', async () => {
+  it('avec équipe cible : transfère teamId, alerte l\'équipe cible (groupe + membres) et l\'ancien technicien', async () => {
+    mockTicket(ticket);
+    prisma.team.findUnique = jest.fn(async () => ({ id: 9, name: 'Sécurité', groupEmail: 'securite@prosuma.ci' }));
+    // 1er appel = membres équipe cible, 2e = admins
+    prisma.user.findMany = jest.fn()
+      .mockResolvedValueOnce([{ email: 'sec1@prosuma.ci', fullName: 'Sec 1' }])
+      .mockResolvedValueOnce([{ email: 'admin1@prosuma.ci', fullName: 'Admin 1' }]);
+
+    const updated = await escalateTicket(10, { reason: 'Ouverture de port validée — à exécuter', targetTeamId: 9 });
+
+    expect(updated.teamId).toBe(9);
+    expect(logEvent).toHaveBeenCalledWith(10, 'ESCALATED', 'SYSTEM', expect.objectContaining({
+      fromTeam: { id: 3, name: 'Support' },
+      toTeam: { id: 9, name: 'Sécurité' },
+    }));
+    const recipients = sendEscalationEmail.mock.calls.map((c) => c[0].recipientEmail.toLowerCase());
+    // Adresse de groupe + membre de l'équipe cible + admin + technicien sortant (il perd la main)
+    expect(recipients).toEqual(expect.arrayContaining(['securite@prosuma.ci', 'sec1@prosuma.ci', 'admin1@prosuma.ci', 'tech@prosuma.ci']));
+    // Le mail de l'équipe cible mentionne le transfert
+    const groupMail = sendEscalationEmail.mock.calls.find((c) => c[0].recipientEmail === 'securite@prosuma.ci');
+    expect(groupMail[0].targetTeamName).toBe('Sécurité');
+  });
+
+  it('avec technicien cible : l\'assigne et vérifie son appartenance à l\'équipe cible', async () => {
+    mockTicket(ticket);
+    prisma.team.findUnique = jest.fn(async () => ({ id: 9, name: 'Sécurité', groupEmail: null }));
+    prisma.user.findFirst = jest.fn(async () => ({ id: 55, email: 'tech9@prosuma.ci', fullName: 'Tech 9', teamId: 9 }));
+
+    const updated = await escalateTicket(10, { targetTeamId: 9, assignedToId: 55 });
+
+    expect(updated.teamId).toBe(9);
+    expect(updated.assignedToId).toBe(55);
+    expect(prisma.user.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 55, role: 'TECHNICIAN', isActive: true }),
+    }));
+  });
+
+  it('refuse un technicien qui n\'a pas le rôle TECHNICIAN ou est inactif', async () => {
+    mockTicket(ticket);
+    prisma.user.findFirst = jest.fn(async () => null);
+
+    await expect(escalateTicket(10, { targetTeamId: 9, assignedToId: 55 }))
+      .rejects.toThrow(/rôle technique|introuvable|n'a pas le rôle/i);
+    expect(prisma.ticket.update).not.toHaveBeenCalled();
+  });
+
+  it('refuse un technicien qui n\'appartient pas à l\'équipe cible', async () => {
+    mockTicket(ticket);
+    prisma.team.findUnique = jest.fn(async () => ({ id: 9, name: 'Sécurité', groupEmail: null }));
+    prisma.user.findFirst = jest.fn(async () => ({ id: 55, email: 'x@prosuma.ci', fullName: 'X', teamId: 5 }));
+
+    await expect(escalateTicket(10, { targetTeamId: 9, assignedToId: 55 }))
+      .rejects.toThrow(/n'appartient pas à l'équipe cible/);
+    expect(prisma.ticket.update).not.toHaveBeenCalled();
+  });
+
+  it('refuse une équipe cible inconnue', async () => {
+    mockTicket(ticket);
+    prisma.team.findUnique = jest.fn(async () => null);
+
+    await expect(escalateTicket(10, { targetTeamId: 999 })).rejects.toThrow('Équipe cible introuvable');
+    expect(prisma.ticket.update).not.toHaveBeenCalled();
+  });
+
+  it('notifie le demandeur même sans admin ni technicien assigné', async () => {
     mockTicket({ ...ticket, escalationLevel: 0, assignedTo: null });
 
-    const updated = await escalateTicket(10, {});
+    await escalateTicket(10, {});
 
-    expect(updated.escalationLevel).toBe(1);
     expect(sendEscalationEmail).not.toHaveBeenCalled();
     expect(sendRequesterEscalationEmail).toHaveBeenCalledTimes(1);
     expect(sendRequesterEscalationEmail.mock.calls[0][0].recipientEmail).toBe('req@prosuma.ci');
@@ -119,18 +185,17 @@ describe('escalateTicket — escalade réelle', () => {
     }));
   });
 
-  it('déduplique les emails (technicien déjà admin → un seul mail)', async () => {
-    mockTicket({ ...ticket, assignedTo: { id: 5, email: 'tech@prosuma.ci', fullName: 'Tech' } });
-    prisma.user.findMany = jest.fn(async () => [
-      { email: 'tech@prosuma.ci', fullName: 'Tech' },
-      { email: 'admin2@prosuma.ci', fullName: 'Admin 2' },
-    ]);
+  it('déduplique les emails (membre déjà alerté via adresse de groupe → un seul mail)', async () => {
+    mockTicket(ticket);
+    prisma.team.findUnique = jest.fn(async () => ({ id: 9, name: 'Sécurité', groupEmail: 'sec1@prosuma.ci' }));
+    prisma.user.findMany = jest.fn()
+      .mockResolvedValueOnce([{ email: 'sec1@prosuma.ci', fullName: 'Sec 1' }])
+      .mockResolvedValueOnce([]);
 
-    await escalateTicket(10, {});
+    await escalateTicket(10, { targetTeamId: 9 });
 
     const emails = sendEscalationEmail.mock.calls.map((c) => c[0].recipientEmail.toLowerCase());
-    expect(emails).toEqual(expect.arrayContaining(['tech@prosuma.ci', 'admin2@prosuma.ci']));
-    expect(emails.filter((e) => e === 'tech@prosuma.ci')).toHaveLength(1);
+    expect(emails.filter((e) => e === 'sec1@prosuma.ci')).toHaveLength(1);
     expect(sendRequesterEscalationEmail).toHaveBeenCalledTimes(1);
   });
 

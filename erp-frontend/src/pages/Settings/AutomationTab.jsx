@@ -357,33 +357,6 @@ export default function AutomationTab() {
                 disabled={reminderSaving}
               />
               <IntervalRow
-                title="Première relance"
-                description="Délai après le dernier message avant la 1ère relance."
-                value={reminderConfig.firstReminderDays}
-                onChange={(v) => updateReminderConfig({ firstReminderDays: v })}
-                disabled={reminderSaving || !reminderConfig.isActive}
-                max={60}
-                unit="jours"
-              />
-              <IntervalRow
-                title="Deuxième relance"
-                description="Délai avant la 2ème relance si aucune réponse."
-                value={reminderConfig.secondReminderDays}
-                onChange={(v) => updateReminderConfig({ secondReminderDays: v })}
-                disabled={reminderSaving || !reminderConfig.isActive}
-                max={60}
-                unit="jours"
-              />
-              <IntervalRow
-                title="Avertissement avant clôture"
-                description="Préviens le demandeur que le ticket sera clôturé automatiquement."
-                value={reminderConfig.preCloseDays}
-                onChange={(v) => updateReminderConfig({ preCloseDays: v })}
-                disabled={reminderSaving || !reminderConfig.isActive}
-                max={90}
-                unit="jours"
-              />
-              <IntervalRow
                 title="Clôture automatique"
                 description="Délai avant clôture définitive d'un ticket sans réponse."
                 value={reminderConfig.autoCloseDays}

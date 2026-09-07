@@ -12,8 +12,9 @@ const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
  * @param {number} pageSize - Nombre d'éléments par page
  * @param {function} onPageSizeChange - Callback (newSize) => void
  * @param {number} [maxVisible=5] - Nombre max de boutons de pages visibles
+ * @param {string} [className] - Classes additionnelles (ex: 'shrink-0' pour un footer fixe)
  */
-export default function Pagination({ page, totalPages, total, label, onPageChange, pageSize = 25, onPageSizeChange, maxVisible = 5 }) {
+export default function Pagination({ page, totalPages, total, label, onPageChange, pageSize = 25, onPageSizeChange, maxVisible = 5, className = '' }) {
   if (total <= 0) return null;
 
   // Générer les numéros de page visibles
@@ -26,7 +27,7 @@ export default function Pagination({ page, totalPages, total, label, onPageChang
   for (let i = start; i <= end; i++) pages.push(i);
 
   return (
-    <div className="flex items-center justify-between px-4 py-2.5 border-t border-outline-variant/20 bg-surface-container-low/20 shrink-0">
+    <div className={`flex items-center justify-between px-4 py-2.5 border-t border-outline-variant/20 bg-surface-container-low/20 shrink-0 ${className}`}>
       {/* Sélecteur lignes par page */}
       <div className="flex items-center gap-2">
         <span className="text-[11px] text-on-surface-variant font-medium">Lignes par page</span>

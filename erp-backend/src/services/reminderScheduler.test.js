@@ -7,7 +7,6 @@ jest.mock('../prismaClient', () => ({
 }));
 jest.mock('./emailSender', () => ({ sendReminder: jest.fn() }));
 jest.mock('./ticketEvent', () => ({ logEvent: jest.fn() }));
-jest.mock('./glpiTicketCreator', () => ({ updateGlpiTicket: jest.fn() }));
 
 const { runReminderScheduler } = require('./reminderScheduler');
 

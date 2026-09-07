@@ -85,6 +85,9 @@ router.patch(
     body('dailySummaryTime').optional().matches(/^([01]\d|2[0-3]):([0-5]\d)$/),
     body('dailySummaryRecipients').optional().isArray(),
     body('dailySummaryRecipients.*').optional().isEmail(),
+    body('ticketCreationEmailEnabled').optional().isBoolean(),
+    body('ticketCreationEmailRecipients').optional().isArray(),
+    body('ticketCreationEmailRecipients.*').optional().isEmail(),
     body('notifyTechnicianOnAssignment').optional().isBoolean(),
     body('emailFailureNotificationEmail').optional({ nullable: true }).isEmail(),
     body('slaHours').optional().isObject(),
@@ -119,6 +122,8 @@ router.patch(
     if (req.body.dailySummaryEnabled !== undefined) data.dailySummaryEnabled = req.body.dailySummaryEnabled;
     if (req.body.dailySummaryTime !== undefined) data.dailySummaryTime = req.body.dailySummaryTime;
     if (req.body.dailySummaryRecipients !== undefined) data.dailySummaryRecipients = req.body.dailySummaryRecipients;
+    if (req.body.ticketCreationEmailEnabled !== undefined) data.ticketCreationEmailEnabled = req.body.ticketCreationEmailEnabled;
+    if (req.body.ticketCreationEmailRecipients !== undefined) data.ticketCreationEmailRecipients = req.body.ticketCreationEmailRecipients;
     if (req.body.notifyTechnicianOnAssignment !== undefined) data.notifyTechnicianOnAssignment = req.body.notifyTechnicianOnAssignment;
     if (req.body.emailFailureNotificationEmail !== undefined) data.emailFailureNotificationEmail = req.body.emailFailureNotificationEmail || null;
     if (req.body.enableAutoCreateSkills !== undefined) data.enableAutoCreateSkills = req.body.enableAutoCreateSkills;

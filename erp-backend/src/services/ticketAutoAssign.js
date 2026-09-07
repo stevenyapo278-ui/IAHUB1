@@ -16,7 +16,7 @@ async function findBestTechnician(category, aiCategory) {
       skill: { name: { equals: skillName, mode: 'insensitive' } },
       user: { isActive: true, role: { in: ['TECHNICIAN', 'ADMIN', 'SUPERADMIN'] } },
     },
-    include: { user: { select: { id: true, glpiId: true, fullName: true } } },
+    include: { user: { select: { id: true, fullName: true } } },
     orderBy: { level: 'desc' },
   });
 
@@ -47,7 +47,7 @@ async function findBestTechnician(category, aiCategory) {
           skill: { name: { contains: word, mode: 'insensitive' } },
           user: { isActive: true, role: { in: ['TECHNICIAN', 'ADMIN', 'SUPERADMIN'] } },
         },
-        include: { user: { select: { id: true, glpiId: true, fullName: true } } },
+        include: { user: { select: { id: true, fullName: true } } },
         orderBy: { level: 'desc' },
       });
 
@@ -71,7 +71,7 @@ async function findBestTechnician(category, aiCategory) {
   // Étape 2 : fallback sur l'assignation par équipe (comportement existant)
   const team = await prisma.team.findFirst({
     where: { name: { equals: category, mode: 'insensitive' } },
-    include: { members: { where: { role: { in: ['TECHNICIAN', 'ADMIN', 'SUPERADMIN'] }, isActive: true }, select: { id: true, glpiId: true, fullName: true } } },
+    include: { members: { where: { role: { in: ['TECHNICIAN', 'ADMIN', 'SUPERADMIN'] }, isActive: true }, select: { id: true, fullName: true } } },
   });
   if (!team || team.members.length === 0) return { team: null, technician: null };
 

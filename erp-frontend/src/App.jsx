@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { motion } from 'framer-motion';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import MainLayout from './layouts/MainLayout';
 import ProtectedRoute from './components/ProtectedRoute';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -11,7 +11,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 // ~1,2 Mo à quelques centaines de Ko, ce qui divise le temps de premier
 // affichage, surtout sur mobile et connexions lentes.
 const Login = lazy(() => import('./pages/Login'));
-const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Dashboard = lazy(() => import('./dashboard/DashboardPage'));
 const Tickets = lazy(() => import('./pages/Tickets'));
 const TicketDetail = lazy(() => import('./pages/TicketDetail'));
 const Teams = lazy(() => import('./pages/Teams'));
@@ -26,12 +26,12 @@ const Prompts = lazy(() => import('./pages/Prompts'));
 const ApprovalPage = lazy(() => import('./pages/ApprovalPage'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
-const Supervision = lazy(() => import('./pages/Supervision'));
 const TechnicianStats = lazy(() => import('./pages/TechnicianStats'));
 const Documentation = lazy(() => import('./pages/Documentation'));
 const SkillsManagement = lazy(() => import('./pages/SkillsManagement'));
 const ActivityLogs = lazy(() => import('./pages/ActivityLogs'));
 const AuditLogs = lazy(() => import('./pages/AuditLogs'));
+const LogsHub = lazy(() => import('./pages/LogsHub'));
 const AiWeeklyReports = lazy(() => import('./pages/AiWeeklyReports'));
 const Locations = lazy(() => import('./pages/Locations'));
 const Categories = lazy(() => import('./pages/Categories'));
@@ -40,31 +40,66 @@ const Portal = lazy(() => import('./pages/Portal'));
 const TicketEvolution = lazy(() => import('./pages/TicketEvolution'));
 const Problems = lazy(() => import('./pages/Problems'));
 const ProblemDetail = lazy(() => import('./pages/ProblemDetail'));
+const ChatPage = lazy(() => import('./pages/ChatPage'));
+const ChatMonitor = lazy(() => import('./pages/ChatMonitor'));
 
-// Fallback léger pendant le chargement d'un chunk (réseau ou navigation rapide)
+// Écran de chargement plein écran, centré — affiché pendant le chargement d'un chunk
+// (navigation) et le premier montage React. Même visuel que le boot loader d'index.html.
 const EASE = [0.16, 1, 0.3, 1];
 
 function PageLoader() {
   return (
-    <div className="flex flex-col items-center justify-center h-64 gap-4" role="status" aria-busy="true">
-      <motion.div
-        initial={{ opacity: 0, scale: 0.9 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.4, ease: EASE }}
-        className="flex items-center gap-2"
-      >
-        <div className="w-7 h-7 rounded-xl bg-primary flex items-center justify-center">
-          <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4 text-primary-foreground">
+    <div
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-5 bg-background/85 backdrop-blur-sm"
+      role="status"
+      aria-busy="true"
+      aria-label="Chargement de la plateforme"
+    >
+      {/* Logo animé : halo pulsant + pastille dégradée */}
+      <div className="relative flex items-center justify-center">
+        <motion.span
+          className="absolute w-20 h-20 rounded-full border-2 border-primary/40"
+          animate={{ scale: [1, 1.45], opacity: [0.6, 0] }}
+          transition={{ duration: 1.6, repeat: Infinity, ease: 'easeOut' }}
+        />
+        <motion.span
+          className="absolute w-20 h-20 rounded-full border-2 border-primary/25"
+          animate={{ scale: [1, 1.45], opacity: [0.6, 0] }}
+          transition={{ duration: 1.6, repeat: Infinity, ease: 'easeOut', delay: 0.8 }}
+        />
+        <motion.div
+          initial={{ opacity: 0, scale: 0.85 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.35, ease: EASE }}
+          className="relative w-14 h-14 rounded-2xl bg-gradient-to-br from-primary to-primary/70 shadow-xl shadow-primary/25 flex items-center justify-center"
+        >
+          <svg viewBox="0 0 24 24" fill="none" className="w-7 h-7 text-primary-foreground">
             <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
+        </motion.div>
+      </div>
+
+      {/* Nom + points bondissants */}
+      <div className="flex flex-col items-center gap-2.5">
+        <span className="text-sm font-bold tracking-wide text-on-surface">ERP ITSM</span>
+        <div className="flex items-center gap-1.5">
+          {[0, 1, 2].map((i) => (
+            <motion.span
+              key={i}
+              className="w-1.5 h-1.5 rounded-full bg-primary"
+              animate={{ y: [0, -5, 0], opacity: [0.35, 1, 0.35] }}
+              transition={{ duration: 0.9, repeat: Infinity, delay: i * 0.15, ease: 'easeInOut' }}
+            />
+          ))}
         </div>
-        <span className="text-sm font-semibold text-on-surface">IA Hub</span>
-      </motion.div>
-      <div className="h-1 w-32 overflow-hidden rounded-full bg-surface-container-high">
+      </div>
+
+      {/* Barre de progression fine */}
+      <div className="h-0.5 w-40 overflow-hidden rounded-full bg-surface-container-high">
         <motion.div
-          className="h-full rounded-full bg-primary"
-          animate={{ x: ['-100%', '250%'] }}
-          transition={{ duration: 1, ease: EASE, repeat: Infinity }}
+          className="h-full w-1/3 rounded-full bg-primary"
+          animate={{ x: ['-100%', '300%'] }}
+          transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
         />
       </div>
     </div>
@@ -92,6 +127,15 @@ export default function App() {
           >
             <Route index element={<Dashboard />} />
             <Route path="portal" element={<Portal />} />
+            <Route path="chat" element={<ChatPage />} />
+            <Route
+              path="chat-monitor"
+              element={
+                <ProtectedRoute roles={['SUPERADMIN']}>
+                  <ChatMonitor />
+                </ProtectedRoute>
+              }
+            />
             <Route path="tickets" element={<Tickets />} />
             <Route
               path="ticket-evolution"
@@ -107,15 +151,8 @@ export default function App() {
             <Route path="teams" element={<Teams />} />
             <Route path="knowledge-base" element={<KnowledgeBase />} />
             <Route path="inbox" element={<Inbox />} />
-            <Route path="email-drafts" element={<ValidationCenter />} />
-            <Route
-              path="supervision"
-              element={
-                <ProtectedRoute roles={['ADMIN', 'TECHNICIAN']}>
-                  <Supervision />
-                </ProtectedRoute>
-              }
-            />
+            <Route path="email-drafts" element={<ValidationCenter defaultTab="drafts" />} />
+
             <Route
               path="technician-stats"
               element={
@@ -172,15 +209,16 @@ export default function App() {
               path="logs"
               element={
                 <ProtectedRoute roles={['ADMIN', 'TECHNICIAN', 'HOTLINE']}>
-                  <ActivityLogs />
+                  <LogsHub />
                 </ProtectedRoute>
               }
             />
+            {/* Compat : /audit redirige vers l'onglet Audit de la vue unifiée */}
             <Route
               path="audit"
               element={
                 <ProtectedRoute roles={['ADMIN']}>
-                  <AuditLogs />
+                  <Navigate to="/logs?tab=audit" replace />
                 </ProtectedRoute>
               }
             />

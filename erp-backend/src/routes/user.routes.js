@@ -90,7 +90,7 @@ const userSelect = {
   teamId: true,
   isActive: true,
   receiveDraftAlerts: true,
-  glpiId: true,
+  avatarUrl: true,
   team: { select: { id: true, name: true } },
   permissionGroups: { select: { id: true, name: true } }, // permet d'afficher le groupe actuel d'un utilisateur (groupes exclusifs)
   createdAt: true,
@@ -106,10 +106,6 @@ router.get('/', async (req, res) => {
       { email: { contains: trimmed, mode: 'insensitive' } },
       { team: { name: { contains: trimmed, mode: 'insensitive' } } },
     ];
-    const matchGlpi = trimmed.match(/#?(\d+)/);
-    if (matchGlpi) {
-      searchConditions.push({ glpiId: parseInt(matchGlpi[1], 10) });
-    }
     where.OR = searchConditions;
   }
   if (role) where.role = role;
@@ -229,8 +225,8 @@ router.get('/purge-preview', async (req, res) => {
         id: true,
         fullName: true,
         email: true,
-        glpiId: true,
         isActive: true,
+        avatarUrl: true,
         createdAt: true,
         _count: {
           select: {
@@ -248,7 +244,7 @@ router.get('/purge-preview', async (req, res) => {
     for (const u of nonAdminUsers) {
       const ticketCount = (u._count?.ticketsCreated || 0) + (u._count?.ticketsAssigned || 0);
       if (ticketCount === 0) {
-        deletableOrphans.push({ id: u.id, fullName: u.fullName, email: u.email, glpiId: u.glpiId });
+        deletableOrphans.push({ id: u.id, fullName: u.fullName, email: u.email });
       } else if (!u.isActive) {
         inactivesWithTickets.push({ id: u.id, fullName: u.fullName, email: u.email, ticketCount });
       } else {
@@ -347,7 +343,6 @@ router.delete('/purge-imported', async (req, res) => {
   try {
     const deleted = await prisma.user.deleteMany({
       where: {
-        glpiId: { not: null },
         role: { notIn: ADMIN_LIKE_ROLES },
       },
     });
@@ -649,10 +644,7 @@ router.post('/import-csv', upload.single('file'), async (req, res) => {
     for (const r of rows) {
       try {
         let existing = null;
-        if (r.glpiId) {
-          existing = await prisma.user.findUnique({ where: { glpiId: r.glpiId } });
-        }
-        if (!existing && r.email) {
+        if (r.email) {
           existing = await prisma.user.findUnique({ where: { email: r.email } });
         }
 
@@ -661,7 +653,6 @@ router.post('/import-csv', upload.single('file'), async (req, res) => {
             where: { id: existing.id },
             data: {
               fullName: r.fullName || existing.fullName,
-              glpiId: r.glpiId || existing.glpiId,
               isActive: r.isActive !== undefined ? r.isActive : existing.isActive,
             },
           });
@@ -674,7 +665,6 @@ router.post('/import-csv', upload.single('file'), async (req, res) => {
               passwordHash,
               fullName: r.fullName,
               role: 'REQUESTER',
-              glpiId: r.glpiId || null,
               isActive: r.isActive !== undefined ? r.isActive : true,
               mustChangePassword: true,
             },
@@ -682,7 +672,7 @@ router.post('/import-csv', upload.single('file'), async (req, res) => {
           imported++;
         }
       } catch (err) {
-        errors.push({ email: r.email, glpiId: r.glpiId, reason: err.message });
+        errors.push({ email: r.email, reason: err.message });
       }
     }
 
@@ -699,7 +689,7 @@ router.post('/import-csv', upload.single('file'), async (req, res) => {
 });
 
 router.delete('/:id', async (req, res) => {
-  const target = await prisma.user.findUnique({ where: { id: Number(req.params.id) }, select: { id: true, fullName: true, email: true, role: true } });
+  const target = await prisma.user.findUnique({ where: { id: Number(req.params.id) }, select: { id: true, fullName: true, email: true, role: true, avatarUrl: true } });
   if (!target) return res.status(404).json({ error: 'Utilisateur introuvable' });
   if (!canActOnTarget(req.user.role, target.role)) {
     return res.status(403).json({ error: 'Vous ne pouvez pas supprimer un compte administrateur ou super-administrateur' });

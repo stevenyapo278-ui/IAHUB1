@@ -129,7 +129,9 @@ export default function TicketDetail() {
   const [followupPrivate, setFollowupPrivate] = useState(false);
   const [events, setEvents] = useState([]);
 
-  // Tickets liés + fusion
+  // Tickets liés + fusion + modale « Relations » (tickets liés, problèmes racines, sous-tickets)
+  const [relationsModalOpen, setRelationsModalOpen] = useState(false);
+  const [relationsTab, setRelationsTab] = useState('tickets');
   const [linkModalOpen, setLinkModalOpen] = useState(false);
   const [childModalOpen, setChildModalOpen] = useState(false);
   const [childForm, setChildForm] = useState({ title: '', content: '', priority: 'P3' });
@@ -186,17 +188,58 @@ export default function TicketDetail() {
   const [problemLinkLoading, setProblemLinkLoading] = useState(false);
   const [linkingProblem, setLinkingProblem] = useState(null);
   const [escalating, setEscalating] = useState(false);
+  const [escalateModalOpen, setEscalateModalOpen] = useState(false);
+  const [escalateTargetTeamId, setEscalateTargetTeamId] = useState('');
+  const [escalateTargetUserId, setEscalateTargetUserId] = useState('');
+  const [escalateReason, setEscalateReason] = useState('');
+  const [escalateTeams, setEscalateTeams] = useState([]);
   const [expandedEmails, setExpandedEmails] = useState(new Set());
   const [editingTitle, setEditingTitle] = useState(false);
   const [editingTitleValue, setEditingTitleValue] = useState('');
   const [showSaveLocationModal, setShowSaveLocationModal] = useState(false);
   const [newLocationName, setNewLocationName] = useState('');
+  const [editingFollowupId, setEditingFollowupId] = useState(null);
+  const [editingFollowupContent, setEditingFollowupContent] = useState('');
+  const [savingFollowupEdit, setSavingFollowupEdit] = useState(false);
+
+  const openEscalateModal = async () => {
+    setEscalateTargetTeamId('');
+    setEscalateTargetUserId('');
+    setEscalateReason('');
+    setEscalateModalOpen(true);
+    try {
+      const { data } = await api.get('/teams');
+      setEscalateTeams(Array.isArray(data) ? data : data.items || []);
+    } catch {
+      setEscalateTeams([]);
+    }
+  };
+
+  // Membres de l'équipe cible choisie dans la modale d'escalade (choix du technicien)
+  // — seuls les TECHNICIENS actifs de l'équipe peuvent se voir attribuer un ticket.
+  const targetTeamMembers = useMemo(() => {
+    const team = escalateTeams.find((t) => String(t.id) === String(escalateTargetTeamId));
+    return (team?.members || []).filter((m) => m.role === 'TECHNICIAN' && m.isActive !== false);
+  }, [escalateTeams, escalateTargetTeamId]);
 
   const handleEscalate = async () => {
     setEscalating(true);
     try {
-      const { data } = await api.post(`/tickets/${id}/escalate`, { reason: 'Escalade manuelle' });
-      toast.success(`Ticket escaladé (niveau ${data.escalationLevel})`);
+      const body = { reason: escalateReason.trim() || 'Escalade manuelle' };
+      if (escalateTargetTeamId) body.targetTeamId = Number(escalateTargetTeamId);
+      if (escalateTargetUserId) body.assignedToId = Number(escalateTargetUserId);
+      const { data } = await api.post(`/tickets/${id}/escalate`, body);
+      const parts = [];
+      if (escalateTargetTeamId) {
+        const team = escalateTeams.find((t) => String(t.id) === String(escalateTargetTeamId));
+        parts.push(`équipe ${team?.name || escalateTargetTeamId}`);
+      }
+      if (escalateTargetUserId) {
+        const tech = targetTeamMembers.find((m) => String(m.id) === String(escalateTargetUserId));
+        parts.push(`technicien ${tech?.fullName || ''}`);
+      }
+      toast.success(parts.length > 0 ? `Ticket transféré (${parts.join(' → ')})` : 'Ticket escaladé');
+      setEscalateModalOpen(false);
       load();
     } catch (err) {
       toast.error(err.response?.data?.error || "Échec de l'escalade");
@@ -222,6 +265,9 @@ export default function TicketDetail() {
 
   const canAssign = hasPermission(user, 'tickets.assign') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN';
   const canApprove = hasPermission(user, 'tickets.approve') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN';
+  // Escalade = transfert d'équipe : droit tickets.assign restreint aux acteurs support désignés
+  // (l'ADMIN peut l'avoir retiré de son groupe de droits — la hotline l'a par défaut côté serveur).
+  const canEscalate = ['ADMIN', 'SUPERADMIN', 'HOTLINE'].includes(user?.role) && hasPermission(user, 'tickets.assign');
   const canDelete = hasPermission(user, 'tickets.delete') || user?.role === 'SUPERADMIN';
   const canManageProblems = hasPermission(user, 'problems.manage') || user?.role === 'SUPERADMIN';
   const canEdit = hasPermission(user, 'tickets.edit') || user?.role === 'ADMIN' || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN';
@@ -544,6 +590,32 @@ export default function TicketDetail() {
     }
   }
 
+  function startEditFollowup(f) {
+    setEditingFollowupId(f.id);
+    setEditingFollowupContent(f.content || '');
+  }
+
+  function cancelEditFollowup() {
+    setEditingFollowupId(null);
+    setEditingFollowupContent('');
+  }
+
+  async function saveEditFollowup(followupId) {
+    if (!editingFollowupContent.trim()) return;
+    setSavingFollowupEdit(true);
+    try {
+      await api.patch(`/tickets/${id}/followups/${followupId}`, { content: editingFollowupContent });
+      toast.success('Commentaire modifié');
+      setEditingFollowupId(null);
+      setEditingFollowupContent('');
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || "Erreur lors de la modification du commentaire");
+    } finally {
+      setSavingFollowupEdit(false);
+    }
+  }
+
   const linkedTickets = useMemo(() => [
     ...(ticket?.linksA || []).map((l) => ({ ...l, otherTicket: l.ticketB })),
     ...(ticket?.linksB || []).map((l) => ({ ...l, otherTicket: l.ticketA })),
@@ -560,6 +632,9 @@ export default function TicketDetail() {
     }), [linkedTickets, ticket?.linksA]);
   const parentTicket = subTickets.find((s) => s.isParent)?.otherTicket || null;
   const children = subTickets.filter((s) => s.isChild);
+
+  // Nombre total d'éléments liés (tickets + problèmes + sous-tickets/parent) pour le bouton Relations
+  const relationsCount = linkedTickets.length + linkedProblems.length + children.length + (parentTicket ? 1 : 0);
 
   // ── Liaison Problème ──────────────────────────────────────────────
   async function searchLinkableProblems(q) {
@@ -1070,15 +1145,17 @@ export default function TicketDetail() {
                     Niv. escalade {ticket.escalationLevel}
                   </span>
                 )}
-                <button
-                  onClick={handleEscalate}
-                  disabled={escalating}
-                  className="px-3 py-1.5 rounded-xl border border-orange-500/30 bg-orange-500/10 text-orange-600 dark:text-orange-300 hover:bg-orange-500/20 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
-                  title="Escalader ce ticket : alerte les admins et monte le niveau de prise en charge"
-                >
-                  <TrendingUp className="w-3.5 h-3.5" />
-                  {escalating ? 'Escalade...' : 'Escalader'}
-                </button>
+                {canEscalate && (
+                  <button
+                    onClick={openEscalateModal}
+                    disabled={escalating}
+                    className="px-3 py-1.5 rounded-xl border border-orange-500/30 bg-orange-500/10 text-orange-600 dark:text-orange-300 hover:bg-orange-500/20 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
+                    title="Escalader ce ticket : transférer à l'équipe qui doit le gérer, choisir le technicien et alerter les responsables"
+                  >
+                    <TrendingUp className="w-3.5 h-3.5" />
+                    {escalating ? 'Escalade...' : 'Escalader'}
+                  </button>
+                )}
                 <button
                   onClick={async () => {
                     try {
@@ -1313,241 +1390,48 @@ export default function TicketDetail() {
             )}
           </div>
 
-          {/* Tickets liés */}
-          <div className="bento-card p-5">
-            <div className="flex items-center justify-between gap-3 pb-3 border-b border-outline-variant/20 mb-4">
-              <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
-                <Link2 className="w-4 h-4 text-primary" />
-                Tickets liés
-                {linkedTickets.length > 0 && (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
-                    {linkedTickets.length}
-                  </span>
-                )}
-              </h3>
-              {canAssign && (
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setMergeModalOpen(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-orange-500/30 text-orange-600 dark:text-orange-400 text-[11px] font-bold hover:bg-orange-500/5 transition-colors cursor-pointer"
-                  >
-                    <Merge className="w-3.5 h-3.5" />
-                    Fusionner…
-                  </button>
-                  <button
-                    onClick={() => setLinkModalOpen(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-[11px] font-bold hover:opacity-90 transition-opacity cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Lier un ticket
-                  </button>
-                </div>
+          {/* Tickets liés / Problèmes racines / Sous-tickets — regroupés dans une modale,
+              ouverte depuis le bouton « Relations » (plus aucune carte encombrante par défaut) */}
+          <button
+            onClick={() => setRelationsModalOpen(true)}
+            className="w-full bento-card p-4 flex items-center justify-between gap-3 hover-interactive transition-all group cursor-pointer"
+          >
+            <span className="flex items-center gap-2.5 min-w-0">
+              <span className="w-8 h-8 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                <Link2 className="w-4 h-4" />
+              </span>
+              <span className="text-left min-w-0">
+                <span className="block text-xs font-extrabold uppercase tracking-wider text-on-surface">Tickets liés, Problèmes racines & Sous-tickets</span>
+                <span className="block text-[11px] text-on-surface-variant mt-0.5">
+                  {relationsCount > 0
+                    ? `${relationsCount} élément${relationsCount > 1 ? 's' : ''} lié${relationsCount > 1 ? 's' : ''}`
+                    : 'Aucun élément lié'}
+                </span>
+              </span>
+            </span>
+            <span className="flex items-center gap-1.5 shrink-0">
+              {linkedTickets.length > 0 && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                  {linkedTickets.length} lié{linkedTickets.length > 1 ? 's' : ''}
+                </span>
               )}
-            </div>
-
-            {linkedTickets.length === 0 ? (
-              <p className="text-xs text-on-surface-variant/70 italic py-2">
-                Aucun ticket lié. Liez les tickets liés (doublons, incidents liés…) pour garder la trace.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {linkedTickets.map((l) => (
-                  <div key={l.id} className="flex items-center gap-3 p-3 rounded-xl border border-outline-variant/30 bg-surface-container-low/40 hover:border-primary/40 transition-colors">
-                    <Link2 className="w-3.5 h-3.5 text-on-surface-variant shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <Link
-                        to={`/tickets/${l.otherTicket.id}`}
-                        className="text-xs font-bold text-on-surface hover:text-primary transition-colors line-clamp-1"
-                      >
-                        #{l.otherTicket.id} — {l.otherTicket.title}
-                      </Link>
-                      <div className="flex items-center gap-1.5 mt-1">
-                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-surface-container-high text-on-surface-variant uppercase tracking-wider">
-                          {l.type}
-                        </span>
-                        <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
-                          l.otherTicket.status === 'SOLVED' || l.otherTicket.status === 'CLOSED'
-                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                            : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
-                        }`}>
-                          {l.otherTicket.status}
-                        </span>
-                      </div>
-                    </div>
-                    {canAssign && (
-                      <button
-                        onClick={() => removeLink(l)}
-                        className="p-1.5 rounded-lg text-on-surface-variant hover:text-error hover:bg-error/5 transition-colors cursor-pointer"
-                        title="Supprimer le lien"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Problèmes liés */}
-          {canManageProblems && (
-          <div className="bento-card p-5">
-            <div className="flex items-center justify-between gap-3 pb-3 border-b border-outline-variant/20 mb-4">
-              <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-500" />
-                Problèmes racines
-                {linkedProblems.length > 0 && (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                    {linkedProblems.length}
-                  </span>
-                )}
-              </h3>
-                <button
-                  onClick={() => setProblemLinkModalOpen(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 text-white text-[11px] font-bold hover:bg-amber-600 transition-colors cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Lier un problème
-                </button>
-            </div>
-            {linkedProblems.length === 0 ? (
-              <p className="text-xs text-on-surface-variant/70 italic py-2">
-                Aucun problème lié. Liez ce ticket à un problème racine pour regrouper les incidents similaires.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {linkedProblems.map((p) => (
-                  <div key={p.id} className="flex items-center gap-3 p-3 rounded-xl border border-amber-200/40 dark:border-amber-500/20 bg-amber-50/30 dark:bg-amber-500/5 hover:border-amber-400/60 transition-colors">
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <button
-                        onClick={() => navigate(`/problems/${p.id}`)}
-                        className="text-xs font-bold text-on-surface hover:text-amber-600 dark:hover:text-amber-400 transition-colors line-clamp-1 text-left cursor-pointer"
-                      >
-                        #{p.id} — {p.title}
-                      </button>
-                      <div className="flex items-center gap-1.5 mt-1">
-                        <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
-                          p.status === 'SOLVED' || p.status === 'CLOSED'
-                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                            : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-                        }`}>
-                          {p.status}
-                        </span>
-                        <span className="text-[9px] font-semibold text-on-surface-variant">
-                          {p._count?.tickets || 0} ticket(s) lié(s)
-                        </span>
-                      </div>
-                    </div>
-                    {canManageProblems && (
-                      <button
-                        onClick={() => unlinkProblem(p.id)}
-                        className="p-1.5 rounded-lg text-on-surface-variant hover:text-error hover:bg-error/5 transition-colors cursor-pointer"
-                        title="Détacher le problème"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          )}
-
-          {/* Sous-tickets (parent/enfant) */}
-          <div className="bento-card p-5">
-            <div className="flex items-center justify-between gap-3 pb-3 border-b border-outline-variant/20 mb-4">
-              <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
-                <GitBranch className="w-4 h-4 text-primary" />
-                Sous-tickets
-                {(children.length > 0 || parentTicket) && (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
-                    {children.length}
-                  </span>
-                )}
-              </h3>
-              {canAssign && (
-                <button
-                  onClick={() => setChildModalOpen(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-[11px] font-bold hover:opacity-90 transition-opacity cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Créer un sous-ticket
-                </button>
+              {linkedProblems.length > 0 && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                  {linkedProblems.length} probl.
+                </span>
               )}
-            </div>
+              {(children.length > 0 || parentTicket) && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
+                  {children.length + (parentTicket ? 1 : 0)} sous
+                </span>
+              )}
+              <ChevronRight className="w-4 h-4 text-on-surface-variant group-hover:text-primary transition-colors" />
+            </span>
+          </button>
 
-            {!parentTicket && children.length === 0 ? (
-              <p className="text-xs text-on-surface-variant/70 italic py-2">
-                Aucun sous-ticket. Créez des sous-tickets pour découper un incident complexe en sous-tâches.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {parentTicket && (
-                  <div className="flex items-center gap-3 p-3 rounded-xl border border-indigo-500/25 bg-indigo-500/5">
-                    <GitBranch className="w-3.5 h-3.5 text-indigo-500 shrink-0 rotate-180" />
-                    <div className="flex-1 min-w-0">
-                      <Link
-                        to={`/tickets/${parentTicket.id}`}
-                        className="text-xs font-bold text-on-surface hover:text-primary transition-colors line-clamp-1"
-                      >
-                        #{parentTicket.id} — {parentTicket.title}
-                      </Link>
-                      <div className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mt-0.5">
-                        Ticket parent
-                      </div>
-                    </div>
-                    <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
-                      parentTicket.status === 'SOLVED' || parentTicket.status === 'CLOSED'
-                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                        : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
-                    }`}>
-                      {parentTicket.status}
-                    </span>
-                  </div>
-                )}
-
-                {children.length > 0 && (
-                  <div className="border-l-2 border-outline-variant/40 ml-4 pl-4 space-y-2">
-                    {children.map((c) => (
-                      <div key={c.id} className="flex items-center gap-3 p-3 rounded-xl border border-outline-variant/30 bg-surface-container-low/40 hover:border-primary/40 transition-colors">
-                        <GitBranch className="w-3.5 h-3.5 text-on-surface-variant shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <Link
-                            to={`/tickets/${c.otherTicket.id}`}
-                            className="text-xs font-bold text-on-surface hover:text-primary transition-colors line-clamp-1"
-                          >
-                            #{c.otherTicket.id} — {c.otherTicket.title}
-                          </Link>
-                          <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mt-0.5">
-                            Sous-ticket
-                          </div>
-                        </div>
-                        <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
-                          c.otherTicket.status === 'SOLVED' || c.otherTicket.status === 'CLOSED'
-                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                            : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
-                        }`}>
-                          {c.otherTicket.status}
-                        </span>
-                        {canAssign && (
-                          <button
-                            onClick={() => removeLink(c)}
-                            className="p-1.5 rounded-lg text-on-surface-variant hover:text-error hover:bg-error/5 transition-colors cursor-pointer"
-                            title="Retirer le lien parent/enfant"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-            </div>
           </div>
+
+          {/* (Problèmes racines et Sous-tickets déplacés dans la modale Relations) */}
 
           {/* Follow-up / Timeline Card */}
           <div className="bento-card p-6 space-y-6">
@@ -1612,12 +1496,55 @@ export default function TicketDetail() {
                                 <Lock className="w-3 h-3" />
                               </button>
                             )}
+                            {canAssign && item.data.source !== 'glpi' && item.data.authorId === user?.id && editingFollowupId !== item.data.id && (
+                              <button
+                                onClick={() => startEditFollowup(item.data)}
+                                title="Modifier"
+                                className="p-1 rounded-md border border-outline-variant/40 bg-surface-container text-on-surface-variant hover:text-on-surface hover:border-outline transition-colors cursor-pointer"
+                              >
+                                <Pencil className="w-3 h-3" />
+                              </button>
+                            )}
                           </div>
                           <time className="text-[10px] font-mono text-on-surface-variant bg-surface-container border border-outline-variant/30 px-2 py-0.5 rounded-full">
                             {new Date(item.data.createdAt).toLocaleString('fr-FR')}
+                            {item.data.updatedAt && (
+                              <span className="text-on-surface-variant/60 ml-1">(modifié)</span>
+                            )}
                           </time>
                         </div>
-                        {item.data.content && (item.data.content.includes('<') || item.data.content.includes('&#') || item.data.content.includes('&lt;')) ? (
+                        {editingFollowupId === item.data.id ? (
+                          <div className="space-y-2">
+                            <textarea
+                              className="w-full min-h-[80px] p-2.5 rounded-xl border border-primary/40 bg-surface text-xs text-on-surface leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-primary/30"
+                              value={editingFollowupContent}
+                              onChange={(e) => setEditingFollowupContent(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Escape') cancelEditFollowup();
+                                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') saveEditFollowup(item.data.id);
+                              }}
+                              autoFocus
+                            />
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => saveEditFollowup(item.data.id)}
+                                disabled={savingFollowupEdit || !editingFollowupContent.trim()}
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary text-on-primary text-[10px] font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 cursor-pointer"
+                              >
+                                {savingFollowupEdit ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                                Enregistrer
+                              </button>
+                              <button
+                                onClick={cancelEditFollowup}
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-outline-variant/40 bg-surface-container text-on-surface-variant text-[10px] font-semibold hover:bg-surface-container-high transition-colors cursor-pointer"
+                              >
+                                <X className="w-3 h-3" />
+                                Annuler
+                              </button>
+                              <span className="text-[9px] text-on-surface-variant/50 ml-1">Ctrl+Entrée pour sauvegarder · Échap pour annuler</span>
+                            </div>
+                          </div>
+                        ) : item.data.content && (item.data.content.includes('<') || item.data.content.includes('&#') || item.data.content.includes('&lt;')) ? (
                           <div
                             className="leading-relaxed text-xs text-on-surface [&_img]:max-w-full [&_img]:rounded-lg [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-2 [&_a]:text-blue-600 [&_a]:underline [&_p]:mb-1.5 [&_p]:last:mb-0 [&_h1]:text-sm [&_h1]:font-bold [&_h1]:mt-3 [&_h1]:mb-1.5 [&_h2]:text-xs [&_h2]:font-bold [&_h2]:mt-2.5 [&_h2]:mb-1 [&_h3]:text-xs [&_h3]:font-bold [&_h3]:mt-2 [&_h3]:mb-0.5 [&_div]:mb-1 [&_b]:font-semibold"
                             dangerouslySetInnerHTML={{ __html: sanitizeHtml(item.data.content) }}
@@ -1970,18 +1897,14 @@ export default function TicketDetail() {
                 </p>
               )}
 
-              {(canApprove && ticket.approvalStatus === 'PENDING') || (canApprove && ticket.approvalStatus === 'APPROVED' && !ticket.glpiTicketId) ? (
+              {canApprove && ticket.approvalStatus === 'PENDING' ? (
                 <div className="flex gap-2 pt-2">
                   <button
                     onClick={handleApprove}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold shadow-md cursor-pointer transition-all ${
-                      ticket.approvalStatus === 'APPROVED' && !ticket.glpiTicketId
-                        ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 shadow-amber-500/20 hover:brightness-110'
-                        : 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-emerald-500/20 hover:brightness-110'
-                    }`}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold shadow-md cursor-pointer transition-all bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-emerald-500/20 hover:brightness-110"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
-                    {!autonomousMode && ticket.approvalStatus === 'APPROVED' && !ticket.glpiTicketId ? 'Réessayer synchro GLPI' : 'Approuver'}
+                    Approuver
                   </button>
                   {ticket.approvalStatus === 'PENDING' && (
                     <button
@@ -2703,6 +2626,95 @@ export default function TicketDetail() {
         onCancel={() => setShowDeleteConfirm(false)}
       />
 
+      {/* MODALE ESCALADE : transfert vers une autre équipe + choix du technicien */}
+      {escalateModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fadeIn">
+          <div className="bg-surface border border-outline-variant/40 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-orange-600 dark:text-orange-400">
+              <TrendingUp className="w-6 h-6" />
+              <div>
+                <h3 className="text-base font-bold">Escalader le ticket #{id}</h3>
+                <p className="text-xs text-on-surface-variant">Transférer le ticket à l'équipe qui doit le gérer</p>
+              </div>
+            </div>
+
+            <label className="block space-y-1.5">                <span className="text-xs font-bold text-on-surface">Équipe cible *</span>
+                <select
+                  value={escalateTargetTeamId}
+                  onChange={(e) => { setEscalateTargetTeamId(e.target.value); setEscalateTargetUserId(''); }}
+                  className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                >
+                  <option value="">— Choisir une équipe —</option>
+                  {escalateTeams
+                    .filter((t) => !ticket.team || t.id !== ticket.team.id)
+                    .map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} · {(t.members || []).filter((m) => m.isActive !== false).length} membre(s) · {typeof t._count?.tickets === 'number' ? `${t._count.tickets} ticket(s) actif(s)` : ''}
+                      </option>
+                    ))}
+                </select>
+                <span className="text-[10px] text-on-surface-variant">
+                  Le ticket est transféré à cette équipe, qui devient responsable de sa prise en charge.
+                </span>
+            </label>
+
+            {escalateTargetTeamId && (
+              <label className="block space-y-1.5">
+                <span className="text-xs font-bold text-on-surface">Technicien</span>
+                <select
+                  value={escalateTargetUserId}
+                  onChange={(e) => setEscalateTargetUserId(e.target.value)}
+                  className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                >
+                  <option value="">— Non assigné (à la charge de l'équipe) —</option>
+                  {targetTeamMembers.map((m) => (
+                    <option key={m.id} value={m.id}>{m.fullName}</option>
+                  ))}
+                </select>
+                <span className="text-[10px] text-on-surface-variant">
+                  Optionnel — seuls les techniciens de l'équipe cible sont proposés. Sans choix, le ticket reste au pool de l'équipe.
+                </span>
+              </label>
+            )}
+
+            <label className="block space-y-1.5">
+              <span className="text-xs font-bold text-on-surface">Motif</span>
+              <textarea
+                rows={2}
+                placeholder="Ex : nécessite une expertise réseau, surcharge de l'équipe actuelle..."
+                className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-none"
+                value={escalateReason}
+                onChange={(e) => setEscalateReason(e.target.value)}
+              />
+            </label>
+
+            <p className="text-[10px] text-on-surface-variant flex items-start gap-1.5">
+              <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5 text-orange-500" />
+              L'équipe cible, le technicien choisi et les responsables seront notifiés (application + email).
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setEscalateModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold border border-outline-variant/40 hover:bg-surface-container text-on-surface transition-all"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                disabled={!escalateTargetTeamId || escalating}
+                onClick={handleEscalate}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-orange-600 text-white shadow-md shadow-orange-500/20 hover:brightness-110 disabled:opacity-50 transition-all flex items-center gap-1.5"
+              >
+                <TrendingUp className="w-4 h-4" />
+                {escalating ? 'Transfert en cours...' : 'Transférer le ticket'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal : Lier un ticket */}
       {linkModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setLinkModalOpen(false)}>
@@ -3010,6 +3022,249 @@ export default function TicketDetail() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ MODALE RELATIONS : tickets liés · problèmes racines · sous-tickets ═══ */}
+      {relationsModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fadeIn" onClick={() => setRelationsModalOpen(false)}>
+          <div className="w-full max-w-2xl max-h-[85vh] flex flex-col rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            {/* Header + onglets */}
+            <div className="shrink-0 px-5 pt-4 pb-3 border-b border-outline-variant/20 bg-surface-container-low/40">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <h3 className="text-sm font-extrabold text-on-surface flex items-center gap-2">
+                  <Link2 className="w-4 h-4 text-primary" />
+                  Relations du ticket #{id}
+                </h3>
+                <button
+                  onClick={() => setRelationsModalOpen(false)}
+                  className="p-1.5 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer"
+                  title="Fermer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex items-center gap-1 p-0.5 rounded-xl border border-outline-variant/30 bg-surface-muted w-fit">
+                {[
+                  { key: 'tickets', label: `Tickets liés (${linkedTickets.length})`, show: true },
+                  { key: 'problems', label: `Problèmes racines (${linkedProblems.length})`, show: canManageProblems },
+                  { key: 'children', label: `Sous-tickets (${children.length + (parentTicket ? 1 : 0)})`, show: true },
+                ].filter((t) => t.show).map((t) => (
+                  <button
+                    key={t.key}
+                    onClick={() => setRelationsTab(t.key)}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                      relationsTab === t.key
+                        ? 'bg-surface text-on-surface shadow-sm border border-outline-variant/30'
+                        : 'text-on-surface-variant hover:text-on-surface'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Corps — contenu de l'onglet actif */}
+            <div className="flex-1 min-h-0 overflow-y-auto p-5">
+              {relationsTab === 'tickets' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-on-surface-variant italic">
+                      {linkedTickets.length === 0 ? 'Aucun ticket lié (doublons, incidents liés…).' : `${linkedTickets.length} ticket(s) lié(s)`}
+                    </p>
+                    {canAssign && (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => setMergeModalOpen(true)}
+                          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-orange-500/30 text-orange-600 dark:text-orange-400 text-[11px] font-bold hover:bg-orange-500/5 transition-colors cursor-pointer"
+                        >
+                          <Merge className="w-3.5 h-3.5" />
+                          Fusionner…
+                        </button>
+                        <button
+                          onClick={() => setLinkModalOpen(true)}
+                          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-primary text-on-primary text-[11px] font-bold hover:opacity-90 transition-opacity cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          Lier un ticket
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  {linkedTickets.map((l) => (
+                    <div key={l.id} className="flex items-center gap-3 p-3 rounded-xl border border-outline-variant/30 bg-surface-container-low/40 hover:border-primary/40 transition-colors">
+                      <Link2 className="w-3.5 h-3.5 text-on-surface-variant shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <Link
+                          to={`/tickets/${l.otherTicket.id}`}
+                          onClick={() => setRelationsModalOpen(false)}
+                          className="text-xs font-bold text-on-surface hover:text-primary transition-colors line-clamp-1"
+                        >
+                          #{l.otherTicket.id} — {l.otherTicket.title}
+                        </Link>
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-surface-container-high text-on-surface-variant uppercase tracking-wider">
+                            {l.type}
+                          </span>
+                          <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
+                            l.otherTicket.status === 'SOLVED' || l.otherTicket.status === 'CLOSED'
+                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                              : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                          }`}>
+                            {l.otherTicket.status}
+                          </span>
+                        </div>
+                      </div>
+                      {canAssign && (
+                        <button
+                          onClick={() => removeLink(l)}
+                          className="p-1.5 rounded-lg text-on-surface-variant hover:text-error hover:bg-error/5 transition-colors cursor-pointer"
+                          title="Supprimer le lien"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {relationsTab === 'problems' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-on-surface-variant italic">
+                      {linkedProblems.length === 0 ? 'Aucun problème racine lié. Regroupez les incidents similaires.' : `${linkedProblems.length} problème(s) racine(s)`}
+                    </p>
+                    {canManageProblems && (
+                      <button
+                        onClick={() => setProblemLinkModalOpen(true)}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500 text-white text-[11px] font-bold hover:bg-amber-600 transition-colors cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Lier un problème
+                      </button>
+                    )}
+                  </div>
+                  {linkedProblems.map((p) => (
+                    <div key={p.id} className="flex items-center gap-3 p-3 rounded-xl border border-amber-200/40 dark:border-amber-500/20 bg-amber-50/30 dark:bg-amber-500/5 hover:border-amber-400/60 transition-colors">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <button
+                          onClick={() => { setRelationsModalOpen(false); navigate(`/problems/${p.id}`); }}
+                          className="text-xs font-bold text-on-surface hover:text-amber-600 dark:hover:text-amber-400 transition-colors line-clamp-1 text-left cursor-pointer"
+                        >
+                          #{p.id} — {p.title}
+                        </button>
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
+                            p.status === 'SOLVED' || p.status === 'CLOSED'
+                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                              : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                          }`}>
+                            {p.status}
+                          </span>
+                          <span className="text-[9px] font-semibold text-on-surface-variant">
+                            {p._count?.tickets || 0} ticket(s) lié(s)
+                          </span>
+                        </div>
+                      </div>
+                      {canManageProblems && (
+                        <button
+                          onClick={() => unlinkProblem(p.id)}
+                          className="p-1.5 rounded-lg text-on-surface-variant hover:text-error hover:bg-error/5 transition-colors cursor-pointer"
+                          title="Détacher le problème"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {relationsTab === 'children' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-on-surface-variant italic">
+                      {!parentTicket && children.length === 0 ? 'Aucun sous-ticket. Découpez un incident complexe en sous-tâches.' : `${children.length} sous-ticket(s)${parentTicket ? ' · ticket parent lié' : ''}`}
+                    </p>
+                    {canAssign && (
+                      <button
+                        onClick={() => setChildModalOpen(true)}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-primary text-on-primary text-[11px] font-bold hover:opacity-90 transition-opacity cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Créer un sous-ticket
+                      </button>
+                    )}
+                  </div>
+                  {parentTicket && (
+                    <div className="flex items-center gap-3 p-3 rounded-xl border border-indigo-500/25 bg-indigo-500/5">
+                      <GitBranch className="w-3.5 h-3.5 text-indigo-500 shrink-0 rotate-180" />
+                      <div className="flex-1 min-w-0">
+                        <Link
+                          to={`/tickets/${parentTicket.id}`}
+                          onClick={() => setRelationsModalOpen(false)}
+                          className="text-xs font-bold text-on-surface hover:text-primary transition-colors line-clamp-1"
+                        >
+                          #{parentTicket.id} — {parentTicket.title}
+                        </Link>
+                        <div className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mt-0.5">
+                          Ticket parent
+                        </div>
+                      </div>
+                      <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
+                        parentTicket.status === 'SOLVED' || parentTicket.status === 'CLOSED'
+                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                          : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                      }`}>
+                        {parentTicket.status}
+                      </span>
+                    </div>
+                  )}
+
+                  {children.length > 0 && (
+                    <div className="border-l-2 border-outline-variant/40 ml-4 pl-4 space-y-2">
+                      {children.map((c) => (
+                        <div key={c.id} className="flex items-center gap-3 p-3 rounded-xl border border-outline-variant/30 bg-surface-container-low/40 hover:border-primary/40 transition-colors">
+                          <GitBranch className="w-3.5 h-3.5 text-on-surface-variant shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <Link
+                              to={`/tickets/${c.otherTicket.id}`}
+                              onClick={() => setRelationsModalOpen(false)}
+                              className="text-xs font-bold text-on-surface hover:text-primary transition-colors line-clamp-1"
+                            >
+                              #{c.otherTicket.id} — {c.otherTicket.title}
+                            </Link>
+                            <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mt-0.5">
+                              Sous-ticket
+                            </div>
+                          </div>
+                          <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
+                            c.otherTicket.status === 'SOLVED' || c.otherTicket.status === 'CLOSED'
+                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                              : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                          }`}>
+                            {c.otherTicket.status}
+                          </span>
+                          {canAssign && (
+                            <button
+                              onClick={() => removeLink(c)}
+                              className="p-1.5 rounded-lg text-on-surface-variant hover:text-error hover:bg-error/5 transition-colors cursor-pointer"
+                              title="Retirer le lien parent/enfant"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -1,10 +1,9 @@
 const { validateAndCleanAnalysis } = require('./emailAnalysisValidator');
-
 describe('emailAnalysisValidator', () => {
   const availableSkills = [{ name: 'PORT USB' }, { name: 'VPN' }];
   const availableLocations = [{ completename: 'Siège > MONOP COCODY' }, { completename: 'CENTRALE D ACHATS' }];
 
-  test('devrait calculer la priorité et valider les entités BDD pour une analyse valide', () => {
+  test('devrait calculer la priorité et valider les entités BDD pour une analyse valide', async () => {
     const raw = {
       ticketDecision: 'CREATE',
       decisionReason: 'INCIDENT',
@@ -18,7 +17,7 @@ describe('emailAnalysisValidator', () => {
       confidence: 0.95,
     };
 
-    const cleaned = validateAndCleanAnalysis(raw, availableSkills, availableLocations);
+    const cleaned = await validateAndCleanAnalysis(raw, availableSkills, availableLocations);
 
     expect(cleaned.ticketDecision).toBe('CREATE');
     expect(cleaned.priority).toBe('P2'); // HIGH x HIGH -> P2
@@ -26,7 +25,7 @@ describe('emailAnalysisValidator', () => {
     expect(cleaned.location).toBe('Siège > MONOP COCODY');
   });
 
-  test('devrait basculer ticketDecision à DO_NOT_CREATE si l\'email est de l\'information ou un spam', () => {
+  test('devrait basculer ticketDecision à DO_NOT_CREATE si l\'email est de l\'information ou un spam', async () => {
     const raw = {
       ticketDecision: 'CREATE',
       isInformational: true,
@@ -34,13 +33,13 @@ describe('emailAnalysisValidator', () => {
       confidence: 0.99,
     };
 
-    const cleaned = validateAndCleanAnalysis(raw, availableSkills, availableLocations);
+    const cleaned = await validateAndCleanAnalysis(raw, availableSkills, availableLocations);
 
     expect(cleaned.ticketDecision).toBe('DO_NOT_CREATE');
     expect(cleaned.decisionReason).toBe('INFORMATION');
   });
 
-  test('devrait basculer ticketDecision à NEEDS_REVIEW si la confiance est < 0.70', () => {
+  test('devrait basculer ticketDecision à NEEDS_REVIEW si la confiance est < 0.70', async () => {
     const raw = {
       ticketDecision: 'CREATE',
       decisionReason: 'INCIDENT',
@@ -48,13 +47,13 @@ describe('emailAnalysisValidator', () => {
       confidence: 0.50, // Faible confiance
     };
 
-    const cleaned = validateAndCleanAnalysis(raw, availableSkills, availableLocations);
+    const cleaned = await validateAndCleanAnalysis(raw, availableSkills, availableLocations);
 
     expect(cleaned.ticketDecision).toBe('NEEDS_REVIEW');
     expect(cleaned.decisionReason).toBe('AMBIGUOUS');
   });
 
-  test('devrait effacer la compétence ou le lieu si non présent en BDD', () => {
+  test('devrait effacer la compétence ou le lieu si non présent en BDD', async () => {
     const raw = {
       ticketDecision: 'CREATE',
       suggestedSkill: 'COMPETENCE_INEXISTANTE',
@@ -62,7 +61,7 @@ describe('emailAnalysisValidator', () => {
       confidence: 0.9,
     };
 
-    const cleaned = validateAndCleanAnalysis(raw, availableSkills, availableLocations);
+    const cleaned = await validateAndCleanAnalysis(raw, availableSkills, availableLocations);
 
     expect(cleaned.suggestedSkill).toBeNull();
     expect(cleaned.location).toBeNull();

@@ -3,16 +3,19 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Pencil, Trash2, FileText, X, Check } from 'lucide-react';
 import api from '../../api/client';
-import { PRIORITY_OPTIONS, TYPE_OPTIONS, URGENCY_IMPACT_OPTIONS } from '../../constants/tickets';
+import { PRIORITY_OPTIONS, TYPE_OPTIONS, URGENCY_IMPACT_OPTIONS, SOURCE_OPTIONS, SOURCE_LABELS } from '../../constants/tickets';
 
 const EMPTY_FORM = {
   name: '', description: '', title: '', content: '',
-  priority: 'P3', category: '', type: 'INCIDENT', urgency: 'MEDIUM', impact: 'MEDIUM',
+  priority: 'P3', category: '', type: 'INCIDENT', source: '', urgency: 'MEDIUM', impact: 'MEDIUM',
+  locationId: '', teamId: '', assignedToId: '', dueDate: '', requiresApproval: false,
 };
 
 export default function TemplatesTab() {
   const [templates, setTemplates] = useState([]);
-  const [categories, setCategories] = useState([]);
+  const [teams, setTeams] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [locations, setLocations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null); // null = liste, 'new' = création, id = édition
   const [form, setForm] = useState(EMPTY_FORM);
@@ -28,8 +31,9 @@ export default function TemplatesTab() {
 
   useEffect(() => {
     load();
-    // GLPI supprimé : catégories gérées en interne
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    api.get('/teams').then(({ data }) => setTeams(data)).catch(() => {});
+    api.get('/users').then(({ data }) => setUsers(data)).catch(() => {});
+    api.get('/locations').then(({ data }) => setLocations(data)).catch(() => {});
   }, []);
 
   function startEdit(template) {
@@ -37,7 +41,9 @@ export default function TemplatesTab() {
     setForm({
       name: template.name, description: template.description || '', title: template.title, content: template.content,
       priority: template.priority || 'P3', category: template.category || '', type: template.type || 'INCIDENT',
-      urgency: template.urgency || 'MEDIUM', impact: template.impact || 'MEDIUM',
+      source: template.source || '', urgency: template.urgency || 'MEDIUM', impact: template.impact || 'MEDIUM',
+      locationId: template.locationId || '', teamId: template.teamId || '', assignedToId: template.assignedToId || '',
+      dueDate: template.dueDate ? template.dueDate.substring(0, 10) : '', requiresApproval: template.requiresApproval || false,
     });
   }
 
@@ -46,11 +52,18 @@ export default function TemplatesTab() {
     if (!form.name.trim() || !form.title.trim() || !form.content.trim()) return toast.error('Nom, titre et contenu sont obligatoires');
     setSaving(true);
     try {
+      const payload = {
+        ...form,
+        locationId: form.locationId ? Number(form.locationId) : null,
+        teamId: form.teamId ? Number(form.teamId) : null,
+        assignedToId: form.assignedToId ? Number(form.assignedToId) : null,
+        dueDate: form.dueDate || null,
+      };
       if (editing === 'new') {
-        await api.post('/ticket-templates', form);
+        await api.post('/ticket-templates', payload);
         toast.success('Modèle créé');
       } else {
-        await api.patch(`/ticket-templates/${editing}`, form);
+        await api.patch(`/ticket-templates/${editing}`, payload);
         toast.success('Modèle mis à jour');
       }
       setEditing(null);
@@ -151,12 +164,54 @@ export default function TemplatesTab() {
             </label>
           </div>
 
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Source</span>
+              <select className={inputCls} value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })}>
+                <option value="">—</option>
+                {SOURCE_OPTIONS.map((s) => <option key={s} value={s}>{SOURCE_LABELS[s] || s}</option>)}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Équipe assignée</span>
+              <select className={inputCls} value={form.teamId} onChange={(e) => setForm({ ...form, teamId: e.target.value })}>
+                <option value="">—</option>
+                {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Assigné à</span>
+              <select className={inputCls} value={form.assignedToId} onChange={(e) => setForm({ ...form, assignedToId: e.target.value })}>
+                <option value="">—</option>
+                {users.map((u) => <option key={u.id} value={u.id}>{u.fullName || u.email}</option>)}
+              </select>
+            </label>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Lieu</span>
+              <select className={inputCls} value={form.locationId} onChange={(e) => setForm({ ...form, locationId: e.target.value })}>
+                <option value="">—</option>
+                {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Échéance</span>
+              <input type="date" className={inputCls} value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Approbation</span>
+              <select className={inputCls} value={form.requiresApproval ? 'true' : 'false'} onChange={(e) => setForm({ ...form, requiresApproval: e.target.value === 'true' })}>
+                <option value="false">Non requis</option>
+                <option value="true">Requise (Hotline)</option>
+              </select>
+            </label>
+          </div>
+
           <label className="flex flex-col gap-1">
             <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Catégorie</span>
-            <select className={inputCls} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
-              <option value="">Sans catégorie</option>
-              {(categories || []).map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
+            <input className={inputCls} placeholder="Catégorie (optionnel)" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
           </label>
 
           <div className="flex items-center justify-end gap-2 pt-1">
@@ -188,6 +243,19 @@ export default function TemplatesTab() {
                     )}
                     {t.category && (
                       <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant">{t.category}</span>
+                    )}
+                    {t.teamId && (
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400">
+                        {teams.find((tm) => tm.id === t.teamId)?.name || `Équipe #${t.teamId}`}
+                      </span>
+                    )}
+                    {t.assignedToId && (
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                        {users.find((u) => u.id === t.assignedToId)?.fullName || `User #${t.assignedToId}`}
+                      </span>
+                    )}
+                    {t.requiresApproval && (
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400">Approbation</span>
                     )}
                     {!t.isActive && <span className="text-[9px] font-bold text-on-surface-variant uppercase">Inactif</span>}
                   </div>

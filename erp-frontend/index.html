@@ -6,12 +6,42 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400;1,500&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@300;400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Roboto:wght@400;500;700&family=Open+Sans:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700&family=Lato:wght@400;700&family=Ubuntu+Mono:wght@400;700&display=swap" rel="stylesheet" />
     <title>ERP ITSM</title>
     <script src="/theme-init.js"></script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      {/* Boot loader — plein écran centré, remplacé au montage React. Styles inline :
+          aucune dépendance au bundle CSS (affiché avant son chargement). */}
+      <div id="boot-loader" style="position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;background:var(--boot-bg,#F8FAFC);font-family:var(--user-font,Ubuntu),system-ui,sans-serif;">
+        <div style="position:relative;display:flex;align-items:center;justify-content:center;width:80px;height:80px;">
+          <span style="position:absolute;inset:0;border:2px solid var(--boot-primary-40,rgba(37,99,235,.4));border-radius:9999px;animation:bootHalo 1.6s ease-out infinite;"></span>
+          <span style="position:absolute;inset:0;border:2px solid var(--boot-primary-25,rgba(37,99,235,.25));border-radius:9999px;animation:bootHalo 1.6s ease-out .8s infinite;"></span>
+          <div style="position:relative;width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,var(--boot-primary,#2563eb),var(--boot-primary-dark,#1d4ed8));box-shadow:0 12px 24px var(--boot-primary-25,rgba(37,99,235,.25));display:flex;align-items:center;justify-content:center;">
+            <svg viewBox="0 0 24 24" fill="none" style="width:28px;height:28px;color:#fff;">
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:10px;">
+          <span style="font-size:14px;font-weight:700;color:var(--boot-text,#0f172a);letter-spacing:.02em;">ERP ITSM</span>
+          <div style="display:flex;gap:6px;">
+            <span style="width:6px;height:6px;border-radius:9999px;background:var(--boot-primary,#2563eb);animation:bootDot .9s ease-in-out infinite;"></span>
+            <span style="width:6px;height:6px;border-radius:9999px;background:var(--boot-primary,#2563eb);animation:bootDot .9s ease-in-out .15s infinite;"></span>
+            <span style="width:6px;height:6px;border-radius:9999px;background:var(--boot-primary,#2563eb);animation:bootDot .9s ease-in-out .3s infinite;"></span>
+          </div>
+        </div>
+        <div style="height:2px;width:160px;border-radius:9999px;background:var(--boot-track,#e2e8f0);overflow:hidden;">
+          <div style="height:100%;width:33%;border-radius:9999px;background:var(--boot-primary,#2563eb);animation:bootBar 1.2s ease-in-out infinite;"></div>
+        </div>
+      </div>
+      <style>
+        @keyframes bootHalo { 0% { transform:scale(1);opacity:.6 } 100% { transform:scale(1.45);opacity:0 } }
+        @keyframes bootDot { 0%,100% { transform:translateY(0);opacity:.35 } 50% { transform:translateY(-5px);opacity:1 } }
+        @keyframes bootBar { 0% { transform:translateX(-100%) } 100% { transform:translateX(300%) } }
+      </style>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

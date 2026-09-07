@@ -27,6 +27,7 @@ import {
   MapPin,
   Tag,
   Trash2,
+  ArchiveRestore,
   ChevronLeft,
   ChevronRight,
   ArrowUpDown,
@@ -47,6 +48,7 @@ import { useTheme } from '../context/ThemeContext';
 import { hasPermission } from '../utils/permissions';
 import useSystemSettings from '../hooks/useSystemSettings';
 import ConfirmDialog from '../components/ConfirmDialog';
+import UserAvatar from '../components/UserAvatar';
 import { flattenCategoryTree } from '../utils/categoryTree';
 import EmptyState from '../components/EmptyState';
 import TicketCoverflowCarousel from '../components/TicketCoverflowCarousel';
@@ -148,13 +150,9 @@ function StatusPill({ status }) {
   );
 }
 
-function Avatar({ name, colorClass = 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/20' }) {
-  if (!name) return null;
-  return (
-    <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full border text-[10px] font-bold shrink-0 ${colorClass}`}>
-      {name.charAt(0).toUpperCase()}
-    </span>
-  );
+function Avatar({ user, name, colorClass = 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/20' }) {
+  if (!user && !name) return null;
+  return <UserAvatar user={user} name={name} size="sm" colorClass={colorClass} />;
 }
 
 // ── AG Grid cell renderers ───────────────────────────────────────────────────
@@ -236,7 +234,7 @@ function AssigneeRenderer({ data }) {
   if (!assignee) return <span className="text-sm text-muted-foreground/60 italic">Non assigné</span>;
   return (
     <div className="flex h-full items-center gap-2.5">
-      <Avatar name={assignee.fullName} />
+      <Avatar user={assignee} name={assignee.fullName} />
       <span className="text-sm font-medium text-foreground truncate">{assignee.fullName}</span>
     </div>
   );
@@ -248,7 +246,7 @@ function RequesterRenderer({ data }) {
   if (!reqName) return <span className="text-sm text-muted-foreground/60 italic">—</span>;
   return (
     <div className="flex h-full items-center gap-2.5">
-      <Avatar name={reqName} colorClass="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20" />
+      <Avatar user={data.requester} name={reqName} colorClass="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20" />
       <span className="text-sm font-medium text-foreground truncate">{reqName}</span>
     </div>
   );
@@ -609,6 +607,9 @@ export default function Tickets() {
 
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('tickets_view_mode') || 'table');
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const [showTrash, setShowTrash] = useState(false);
+  const [trashItems, setTrashItems] = useState([]);
+  const [trashLoading, setTrashLoading] = useState(false);
 
   const [sortBy, setSortBy] = useState(() => searchParams.get('sortBy') || 'createdAt');
   const [sortOrder, setSortOrder] = useState(() => searchParams.get('sortOrder') || 'desc');
@@ -747,7 +748,57 @@ export default function Tickets() {
     setPage(1);
   }
 
+  const loadTrash = useCallback(async function loadTrash() {
+    setTrashLoading(true);
+    try {
+      const { data } = await api.get('/tickets/trash/list');
+      setTrashItems(data.items || []);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur chargement corbeille');
+    } finally {
+      setTrashLoading(false);
+    }
+  }, []);
+
+  function openTrash() {
+    setShowTrash(true);
+    loadTrash();
+  }
+
+  async function restoreFromTrash(id) {
+    try {
+      await api.post(`/tickets/${id}/restore`);
+      toast.success(`Ticket #${id} restauré`);
+      setTrashItems((prev) => prev.filter((t) => t.id !== id));
+      loadTickets();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de la restauration');
+    }
+  }
+
+  async function permanentDelete(id) {
+    setConfirmDelete({ mode: 'permanent', id });
+  }
+
+  async function confirmPermanentDeleteAction() {
+    if (!confirmDelete || confirmDelete.mode !== 'permanent') return;
+    setDeleting(true);
+    try {
+      await api.delete(`/tickets/${confirmDelete.id}?permanent=true`);
+      toast.success(`Ticket #${confirmDelete.id} définitivement supprimé`);
+      setTrashItems((prev) => prev.filter((t) => t.id !== confirmDelete.id));
+      setConfirmDelete(null);
+    } catch (err) {
+      const msg = err.response?.data?.error || 'Erreur lors de la suppression définitive';
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   const loadTickets = useCallback(function loadTickets(isManualRefresh = false) {
+    if (showTrash) return; // pas de polling pendant la vue corbeille
     if (abortRef.current) abortRef.current.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -814,13 +865,14 @@ export default function Tickets() {
     api.get('/tickets', { params }).then(({ data }) => { setTickets(data.items); setTotalPages(data.pages); setTotalCount(data.total); if (data.stats) setServerStats(data.stats); }).catch(() => {});
   }, [page, pageSize, sortBy, sortOrder, filters, debouncedSearch]);
 
-  useEffect(() => { loadTickets(); }, [filters, page, pageSize, debouncedSearch, sortBy, sortOrder]);
+  useEffect(() => { loadTickets(); }, [filters, page, pageSize, debouncedSearch, sortBy, sortOrder, showTrash]);
   useEffect(() => {
+    if (showTrash) return undefined; // fige le polling pendant la corbeille
     const intervalId = setInterval(() => {
       if (document.visibilityState === 'visible') refreshTicketsSilently();
     }, 15000);
     return () => clearInterval(intervalId);
-  }, [filters, debouncedSearch, sortBy, sortOrder]);
+  }, [filters, debouncedSearch, sortBy, sortOrder, showTrash]);
 
   const tableContainerRef = useRef(null);
   const abortRef = useRef(null);
@@ -908,13 +960,22 @@ export default function Tickets() {
       if (confirmDelete.mode === 'one') {
         await api.delete(`/tickets/${confirmDelete.id}`);
         toast.success('Ticket supprimé');
+        loadTickets();
       } else {
-        await api.post('/tickets/bulk-delete', { ids: selectedIds });
-        toast.success(`${selectedIds.length} ticket(s) supprimé(s)`);
+        const { data } = await api.post('/tickets/bulk-delete', { ids: selectedIds });
+        toast.success(`${data?.deleted ?? selectedIds.length} ticket(s) supprimé(s)`);
+        // Vide la sélection AVANT le rechargement : sinon la barre reste
+        // affichée avec des tickets qui n'existent plus.
+        setSelectedIds([]);
+        setBulkChanges({ status: '', priority: '', assignedToId: '' });
+        loadTickets();
       }
-      loadTickets(); setConfirmDelete(null);
+      setConfirmDelete(null);
     } catch (err) {
-      setError(err.response?.data?.error || 'Erreur lors de la suppression');
+      // Affiché DANS la dialog (la bannière page serait cachée derrière la modale)
+      const msg = err.response?.data?.error || 'Erreur lors de la suppression';
+      setError(msg);
+      toast.error(msg);
     } finally {
       setDeleting(false);
     }
@@ -990,7 +1051,22 @@ export default function Tickets() {
     if (!templateId) return;
     const t = templates.find((x) => String(x.id) === String(templateId));
     if (!t) return;
-    setForm((prev) => ({ ...prev, title: t.title || prev.title, content: t.content || prev.content, priority: t.priority || prev.priority, category: t.category || prev.category, type: t.type || prev.type, urgency: t.urgency || prev.urgency, impact: t.impact || prev.impact }));
+    setForm((prev) => ({
+      ...prev,
+      title: t.title || prev.title,
+      content: t.content || prev.content,
+      priority: t.priority || prev.priority,
+      category: t.category || prev.category,
+      type: t.type || prev.type,
+      source: t.source || prev.source,
+      urgency: t.urgency || prev.urgency,
+      impact: t.impact || prev.impact,
+      locationId: t.locationId || prev.locationId,
+      teamId: t.teamId || prev.teamId,
+      assignedToId: t.assignedToId || prev.assignedToId,
+      dueDate: t.dueDate || prev.dueDate,
+      requiresApproval: t.requiresApproval ?? prev.requiresApproval,
+    }));
     toast.success(`Modèle « ${t.name} » appliqué`);
   }
 
@@ -1190,7 +1266,17 @@ export default function Tickets() {
             ))}
           </div>
 
-          {viewMode === 'table' && (
+          {canBulkDelete && (
+            <button onClick={openTrash}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+                showTrash ? 'bg-amber-500/10 text-amber-600 border-amber-500/30' : 'border-border/30 text-muted-foreground hover:text-foreground hover:bg-surface-muted'
+              }`} title="Corbeille — tickets supprimés (restaurables)">
+              <Trash2 className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Corbeille</span>
+            </button>
+          )}
+
+          {viewMode === 'table' && !showTrash && (
             <ColumnConfigPanel columns={columns} onChange={setColumns} />
           )}
 
@@ -1267,6 +1353,54 @@ export default function Tickets() {
 
         {loading ? (
           <TableSkeleton />
+        ) : showTrash ? (
+          /* ── CORBEILLE (soft delete + rollback) ── */
+          <div className="flex-1 min-h-0 flex flex-col gap-3 px-4 sm:px-6 lg:px-8 py-3">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <h3 className="text-sm font-bold text-on-surface flex items-center gap-2">
+                <Trash2 className="w-4 h-4 text-amber-500" />
+                Corbeille — {trashItems.length} ticket(s) supprimé(s)
+              </h3>
+              <button onClick={() => setShowTrash(false)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-border/30 text-muted-foreground hover:text-foreground hover:bg-surface-muted transition-all">
+                <X className="w-3.5 h-3.5" /> Fermer
+              </button>
+            </div>
+            <p className="text-[11px] text-muted-foreground -mt-1">
+              Les tickets ici ne sont plus visibles dans les vues principales et exclus des exports/statistiques. Restaurez-les ou supprimez-les définitivement.
+            </p>
+            {trashLoading ? (
+              <div className="flex items-center justify-center py-10 text-muted-foreground text-xs gap-2">
+                <RefreshCw className="w-4 h-4 animate-spin" /> Chargement...
+              </div>
+            ) : trashItems.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center text-muted-foreground/50 text-sm italic">La corbeille est vide</div>
+            ) : (
+              <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+                {trashItems.map((t) => (
+                  <div key={t.id} className="flex flex-wrap items-center gap-3 p-3 rounded-xl border border-border/20 bg-surface hover:border-border/40 transition-all">
+                    <span className="text-xs font-mono font-bold text-muted-foreground w-12 shrink-0">#{t.id}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold text-on-surface truncate">{t.title}</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        Supprimé {t.deletedAt ? new Date(t.deletedAt).toLocaleString('fr-FR') : ''}
+                        {t.deletedBy?.fullName ? ` par ${t.deletedBy.fullName}` : ''}
+                        {t.requester ? ` · demandeur ${t.requester.fullName}` : ''}
+                      </p>
+                    </div>
+                    <button onClick={() => restoreFromTrash(t.id)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold hover:bg-emerald-500/20 transition-colors cursor-pointer">
+                      <ArchiveRestore className="w-3.5 h-3.5" /> Restaurer
+                    </button>
+                    <button onClick={() => permanentDelete(t.id)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/30 text-red-500 text-xs font-semibold hover:bg-red-500/10 transition-colors cursor-pointer">
+                      <Trash2 className="w-3.5 h-3.5" /> Définitif
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         ) : viewMode === 'carousel' ? (
           <TicketCoverflowCarousel tickets={tickets} isDark={isDark} />
         ) : viewMode === 'kanban' ? (
@@ -1309,7 +1443,7 @@ export default function Tickets() {
                     </div>
                     {t.assignedTo ? (
                       <div className="flex items-center gap-1.5">
-                        <Avatar name={t.assignedTo.fullName} />
+                        <Avatar user={t.assignedTo} name={t.assignedTo.fullName} />
                         <span className="text-[11px] font-medium text-foreground truncate max-w-[80px]">{t.assignedTo.fullName}</span>
                       </div>
                     ) : (
@@ -1353,9 +1487,10 @@ export default function Tickets() {
       {/* ── BULK ACTIONS BAR ──────────────────────────────────────────────── */}
       <AnimatePresence>
         {selectedIds.length > 0 && (
+          <div className="fixed bottom-4 sm:bottom-6 inset-x-0 z-50 flex justify-center px-3 pointer-events-none">
           <motion.div initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 80, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 400, damping: 40 }}
-            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-border/30 bg-surface shadow-2xl shadow-black/20">
+            className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border border-border/30 bg-surface shadow-2xl shadow-black/20 max-w-full">
             <span className="text-xs font-bold text-muted-foreground pr-2 border-r border-border/30 mr-1">
               {selectedIds.length} sélectionné{selectedIds.length > 1 ? 's' : ''}
             </span>
@@ -1396,6 +1531,7 @@ export default function Tickets() {
               <X className="w-3.5 h-3.5" />
             </button>
           </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
@@ -1626,12 +1762,22 @@ export default function Tickets() {
       {/* ── CONFIRM DELETE ───────────────────────────────────────────────────── */}
       {confirmDelete && (
         <ConfirmDialog
-          title={confirmDelete.mode === 'one' ? 'Supprimer ce ticket ?' : `Supprimer ${selectedIds.length} ticket(s) ?`}
-          message="Cette action est irréversible."
+          open={!!confirmDelete}
+          title={
+            confirmDelete.mode === 'one' ? 'Mettre ce ticket à la corbeille ?' :
+            confirmDelete.mode === 'permanent' ? `Supprimer définitivement le ticket #${confirmDelete.id} ?` :
+            `Mettre ${selectedIds.length} ticket(s) à la corbeille ?`
+          }
+          message={
+            confirmDelete.mode === 'permanent'
+              ? 'Cette action est IRRÉVERSIBLE. Le ticket et toutes ses données (suivis, pièces jointes, liens) seront détruits.'
+              : 'Le ticket sera déplacé dans la corbeille — vous pourrez le restaurer à tout moment.'
+          }
           confirmLabel="Supprimer"
-          onConfirm={confirmDeleteAction}
-          onCancel={() => setConfirmDelete(null)}
+          onConfirm={confirmDelete.mode === 'permanent' ? confirmPermanentDeleteAction : confirmDeleteAction}
+          onCancel={() => { setConfirmDelete(null); setError(''); }}
           loading={deleting}
+          error={error || null}
           danger
         />
       )}

@@ -1,6 +1,10 @@
 import { installChunkReloadGuard } from './utils/chunkReload'
 installChunkReloadGuard();
 
+// Retire le boot loader HTML dès que React est prêt à monter
+const bootLoader = document.getElementById('boot-loader');
+if (bootLoader) bootLoader.remove();
+
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'

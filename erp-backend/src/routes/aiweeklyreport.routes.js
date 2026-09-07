@@ -9,7 +9,7 @@ router.use(authenticate);
 
 router.get('/', requirePermission('aiweeklyreports.manage', ['ADMIN', 'SUPERADMIN', 'HOTLINE']), async (req, res) => {
   const reports = await prisma.aiWeeklyPatternReport.findMany({
-    include: { reviewedBy: { select: { id: true, fullName: true, email: true } } },
+    include: { reviewedBy: { select: { id: true, fullName: true, email: true, avatarUrl: true } } },
     orderBy: { createdAt: 'desc' },
   });
   return res.json(reports);
@@ -18,7 +18,7 @@ router.get('/', requirePermission('aiweeklyreports.manage', ['ADMIN', 'SUPERADMI
 router.get('/:id', requirePermission('aiweeklyreports.manage', ['ADMIN', 'SUPERADMIN', 'HOTLINE']), async (req, res) => {
   const report = await prisma.aiWeeklyPatternReport.findUnique({
     where: { id: Number(req.params.id) },
-    include: { reviewedBy: { select: { id: true, fullName: true, email: true } } },
+    include: { reviewedBy: { select: { id: true, fullName: true, email: true, avatarUrl: true } } },
   });
   if (!report) return res.status(404).json({ error: 'Rapport introuvable' });
   return res.json(report);

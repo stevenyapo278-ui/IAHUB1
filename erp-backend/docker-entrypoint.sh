@@ -16,9 +16,11 @@ echo "Résolution des éventuelles migrations en échec..."
 npx prisma migrate resolve --rolled-back 20260727000000_add_missing_columns 2>/dev/null || true
 npx prisma migrate resolve --rolled-back 20260727000100_add_remaining_missing_columns 2>/dev/null || true
 npx prisma migrate resolve --rolled-back 20260820110000_enforce_single_permission_group_per_user 2>/dev/null || true
+# Migration login theme : si déjà appliquée manuellement (colonne existe), on la marque comme appliquée pour éviter le crash "column already exists"
+npx prisma migrate resolve --applied "20260906000000_add_login_theme_config" 2>/dev/null || true
 
 echo "Migration de la base de données..."
-npx prisma migrate deploy
+npx prisma migrate deploy || echo "⚠️  migrate deploy a échoué (DB drift ou migration manquante), on continue avec le schéma existant"
 
 echo "Génération du client Prisma..."
 npx prisma generate

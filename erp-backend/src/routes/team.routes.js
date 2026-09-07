@@ -22,8 +22,8 @@ router.get('/', async (req, res) => {
     where,
     take: limit ? Number(limit) : undefined,
     include: {
-      members: { select: { id: true, fullName: true, email: true, role: true } },
-      defaultObservers: { select: { id: true, fullName: true, email: true, role: true } },
+      members: { select: { id: true, fullName: true, email: true, role: true, avatarUrl: true } },
+      defaultObservers: { select: { id: true, fullName: true, email: true, role: true, avatarUrl: true } },
       _count: { select: { tickets: { where: { status: { notIn: ['SOLVED', 'CLOSED'] } } } } },
     },
     orderBy: { name: 'asc' },
@@ -39,8 +39,8 @@ router.get('/:id', async (req, res) => {
   const team = await prisma.team.findUnique({
     where: { id: Number(req.params.id) },
     include: {
-      members: { select: { id: true, fullName: true, email: true, role: true } },
-      defaultObservers: { select: { id: true, fullName: true, email: true, role: true } },
+      members: { select: { id: true, fullName: true, email: true, role: true, avatarUrl: true } },
+      defaultObservers: { select: { id: true, fullName: true, email: true, role: true, avatarUrl: true } },
     },
   });
   if (!team) return res.status(404).json({ error: 'Équipe introuvable' });
@@ -77,8 +77,8 @@ router.post('/', requirePermission('teams.manage', ['ADMIN', 'HOTLINE']), [body(
       ...(ids.length > 0 ? { defaultObservers: { connect: ids.map((id) => ({ id })) } } : {}),
     },
     include: {
-      members: { select: { id: true, fullName: true, email: true, role: true } },
-      defaultObservers: { select: { id: true, fullName: true, email: true, role: true } },
+      members: { select: { id: true, fullName: true, email: true, role: true, avatarUrl: true } },
+      defaultObservers: { select: { id: true, fullName: true, email: true, role: true, avatarUrl: true } },
     },
   });
   cacheStore.clear('GET /api/teams');
@@ -102,8 +102,8 @@ router.patch('/:id', requirePermission('teams.manage', ['ADMIN', 'HOTLINE']), as
       where: { id: Number(req.params.id) },
       data,
       include: {
-        members: { select: { id: true, fullName: true, email: true, role: true } },
-        defaultObservers: { select: { id: true, fullName: true, email: true, role: true } },
+        members: { select: { id: true, fullName: true, email: true, role: true, avatarUrl: true } },
+        defaultObservers: { select: { id: true, fullName: true, email: true, role: true, avatarUrl: true } },
       },
     });
     cacheStore.clear('GET /api/teams');
@@ -154,7 +154,7 @@ router.post('/:id/members', requirePermission('teams.manage', ['ADMIN', 'HOTLINE
   const updated = await prisma.user.update({
     where: { id: Number(userId) },
     data: { teamId: team.id },
-    select: { id: true, fullName: true, email: true, role: true, teamId: true },
+    select: { id: true, fullName: true, email: true, role: true, teamId: true, avatarUrl: true },
   });
 
   cacheStore.clear('GET /api/teams');

@@ -103,13 +103,13 @@ router.post('/reminders/run', requirePermission('automation.manage', ['ADMIN']),
 // qu'il a précédemment désactivée, au lieu d'en recréer une nouvelle qui écraserait ses délais personnalisés.
 router.get('/reminders/config', requirePermission('automation.manage', ['ADMIN']), async (req, res) => {
   const config = await prisma.reminderConfig.findFirst();
-  res.json(config || { firstReminderDays: 2, secondReminderDays: 5, preCloseDays: 10, autoCloseDays: 15, isActive: true });
+  res.json(config || { autoCloseDays: 15, isActive: true });
 });
 
 router.put('/reminders/config', requirePermission('automation.manage', ['ADMIN']), async (req, res) => {
-  const { firstReminderDays, secondReminderDays, preCloseDays, autoCloseDays, isActive } = req.body;
+  const { autoCloseDays, isActive } = req.body;
   const existing = await prisma.reminderConfig.findFirst();
-  const data = { firstReminderDays, secondReminderDays, preCloseDays, autoCloseDays };
+  const data = { autoCloseDays };
   if (isActive !== undefined) data.isActive = isActive;
   const config = existing
     ? await prisma.reminderConfig.update({ where: { id: existing.id }, data })

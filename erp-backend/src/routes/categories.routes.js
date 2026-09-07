@@ -20,7 +20,7 @@ router.get('/', async (req, res) => {
     orderBy: { name: 'asc' },
     include: {
       children: { orderBy: { name: 'asc' } },
-      createdBy: { select: { id: true, fullName: true } },
+      createdBy: { select: { id: true, fullName: true, avatarUrl: true } },
       _count: { select: { customFields: true } },
     },
   });

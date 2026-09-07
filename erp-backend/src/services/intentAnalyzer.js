@@ -235,16 +235,6 @@ async function applyIntentActions(ticketId, { intent, confidence, newIssueSummar
     if (updates.status === 'WAITING_FOR_USER') {
       await logEvent(ticketId, 'NEEDS_HUMAN_REVIEW', actor, { intent, confidence, reason: 'low_confidence_or_split_limit' });
     }
-
-    // Tant qu'une clôture suggérée est en attente de validation, on ne touche pas au
-    // statut GLPI : la synchro SOLVED n'aura lieu qu'à la validation humaine.
-    if (updates.status && !updates.closeSuggested && updated.glpiTicketId) {
-      try {
-        await updateGlpiTicket(updated.glpiTicketId, { status: updates.status });
-      } catch (err) {
-        console.error('[intentAnalyzer] Échec synchro statut GLPI:', err.message);
-      }
-    }
   }
 
   return intent;

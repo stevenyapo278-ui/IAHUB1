@@ -26,6 +26,9 @@ export function AuthProvider({ children }) {
     }
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    // Purge le cache des réglages système : le prochain utilisateur sur ce navigateur
+    // doit charger SA configuration de navigation, pas celle de l'utilisateur précédent.
+    localStorage.removeItem('system_settings_cache');
     setUser(null);
   }
 
@@ -61,7 +64,7 @@ export function AuthProvider({ children }) {
       api.get('/auth/me')
         .then(({ data }) => {
           if (cancelled) return;
-          const refreshed = { id: data.id, email: data.email, fullName: data.fullName, role: data.role, teamId: data.teamId, permissions: data.permissions, mustChangePassword: data.mustChangePassword };
+          const refreshed = { id: data.id, email: data.email, fullName: data.fullName, role: data.role, teamId: data.teamId, permissions: data.permissions, mustChangePassword: data.mustChangePassword, avatarUrl: data.avatarUrl };
           localStorage.setItem('user', JSON.stringify(refreshed));
           setUser(refreshed);
         })
@@ -90,6 +93,17 @@ export function AuthProvider({ children }) {
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('app:user-updated', onUserUpdated);
     };
+  }, []);
+
+  // Mise à jour locale du profil (photo de profil) sans attendre le prochain refresh /auth/me
+  useEffect(() => {
+    const onAvatarUpdated = (e) => {
+      const updated = e.detail;
+      if (!updated?.id) return;
+      setUser((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev));
+    };
+    window.addEventListener('auth:user-updated', onAvatarUpdated);
+    return () => window.removeEventListener('auth:user-updated', onAvatarUpdated);
   }, []);
 
   return (

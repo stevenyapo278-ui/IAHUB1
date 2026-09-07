@@ -2,24 +2,30 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip } from 'recharts';
-import { Download, BarChart2, Sparkles } from 'lucide-react';
+import { Download, BarChart2, Send, Paperclip, MessageSquare, Users, TrendingUp, AlertTriangle, Timer, BarChart3, HelpCircle, PlusCircle, X } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
 
+const STORAGE_KEY = 'chatwidget_position';
+
 const QUICK_ACTIONS = [
-  { label: '📊 Top Magasins', icon: 'bar_chart', message: 'Quel est le magasin qui a eu le plus de problèmes ?' },
-  { label: '🔍 Incidents Asten', icon: 'store', message: 'Montre-moi les statistiques et incidents du magasin Asten' },
-  { label: '⚡ Temps de résolution', icon: 'timer', message: 'Quel est le temps moyen de résolution des tickets ?' },
-  { label: 'Aide & Commandes', icon: 'help', message: 'Que peux-tu faire ?' },
+  { label: 'Répartition équipe', icon: Users, message: 'Répartition des tickets ouverts par équipe', color: 'text-emerald-500', roles: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'] },
+  { label: 'Top Magasins', icon: TrendingUp, message: 'Quel est le magasin qui a eu le plus de problèmes ?', color: 'text-amber-500', roles: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'] },
+  { label: 'Incidents Asten', icon: AlertTriangle, message: 'Montre-moi les statistiques et incidents du magasin Asten', color: 'text-orange-500', roles: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'] },
+  { label: 'Temps de résolution', icon: Timer, message: 'Quel est le temps moyen de résolution des tickets ?', color: 'text-cyan-500', roles: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'] },
+  { label: 'Rapport ouverts', icon: BarChart3, message: 'Rapport des tickets ouverts', color: 'text-blue-500', roles: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'] },
+  { label: 'Aide & Commandes', icon: HelpCircle, message: 'Que peux-tu faire ?', color: 'text-on-surface-variant', roles: null },
+  { label: 'Mes tickets', icon: MessageSquare, message: 'Liste de mes tickets', color: 'text-blue-500', roles: ['REQUESTER'] },
+  { label: 'Signaler un problème', icon: PlusCircle, message: 'Je veux signaler un problème', color: 'text-emerald-500', roles: ['REQUESTER'] },
 ];
 
 function WidgetRenderer({ widget }) {
   if (!widget || !widget.data || widget.data.length === 0) return null;
-
   function exportCsv() {
     const headers = Object.keys(widget.data[0]).join(',');
     const rows = widget.data.map((row) => Object.values(row).join(','));
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers, ...rows].join('\n');
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers, ...rows].join(',');
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
@@ -28,7 +34,6 @@ function WidgetRenderer({ widget }) {
     link.click();
     document.body.removeChild(link);
   }
-
   return (
     <div className="mt-3 p-3 rounded-xl bg-surface border border-outline-variant/40 space-y-2">
       <div className="flex items-center justify-between border-b border-outline-variant/30 pb-1.5">
@@ -36,16 +41,11 @@ function WidgetRenderer({ widget }) {
           <BarChart2 className="w-3.5 h-3.5 text-primary" />
           {widget.title}
         </h4>
-        <button
-          onClick={exportCsv}
-          className="px-2 py-0.5 rounded-lg bg-surface-container-high hover:bg-surface-container text-on-surface text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer"
-          title="Télécharger les données sous format CSV"
-        >
+        <button onClick={exportCsv} className="px-2 py-0.5 rounded-lg bg-surface-container-high hover:bg-surface-container text-on-surface text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer" title="Télécharger CSV">
           <Download className="w-3 h-3 text-primary" />
           <span>CSV</span>
         </button>
       </div>
-
       <div className="h-36 w-full pt-2">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={widget.data} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
@@ -62,9 +62,7 @@ function WidgetRenderer({ widget }) {
 }
 
 function MarkdownContent({ content }) {
-  // Remplace les mentions de tickets du type #12345 par des liens cliquables [ #12345 ](/tickets/12345)
   const formattedContent = (content || '').replace(/#(\d{2,6})\b/g, '[#$1](/tickets/$1)');
-
   return (
     <ReactMarkdown
       components={{
@@ -73,12 +71,7 @@ function MarkdownContent({ content }) {
         ul: ({ children }) => <ul className="my-1 space-y-0.5">{children}</ul>,
         li: ({ children }) => <li className="ml-4 list-disc text-[13px]">{children}</li>,
         a: ({ href, children }) => (
-          <a
-            href={href}
-            target={href?.startsWith('http') ? '_blank' : '_self'}
-            rel="noreferrer"
-            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-primary/10 text-primary font-bold hover:underline transition-colors text-[11px]"
-          >
+          <a href={href} target={href?.startsWith('http') ? '_blank' : '_self'} rel="noreferrer" className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-primary/10 text-primary font-bold hover:underline transition-colors text-[11px]">
             {children}
           </a>
         ),
@@ -94,22 +87,18 @@ function MarkdownContent({ content }) {
   );
 }
 
-function MessageActions({ msg, onReply, onCopy }) {
+function MessageActions({ msg, onReply }) {
   const [copied, setCopied] = useState(false);
-
   function handleCopy() {
     navigator.clipboard.writeText(msg.content);
     setCopied(true);
-    onCopy?.();
     setTimeout(() => setCopied(false), 1500);
   }
-
   if (msg.role !== 'assistant') return null;
-
   return (
     <div className="flex items-center gap-1 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-      <button onClick={handleCopy} className="p-0.5 rounded hover:bg-surface-container-high transition-colors cursor-pointer" title="Copier le texte">
-        <span className="material-symbols-outlined text-[12px] text-on-surface-variant">{copied ? 'check' : 'content_copy'}</span>
+      <button onClick={handleCopy} className="p-0.5 rounded hover:bg-surface-container-high transition-colors cursor-pointer" title="Copier">
+        {copied ? <span className="material-symbols-outlined text-[12px] text-emerald-500">check</span> : <span className="material-symbols-outlined text-[12px] text-on-surface-variant">content_copy</span>}
       </button>
       <button onClick={() => onReply?.(msg.content)} className="p-0.5 rounded hover:bg-surface-container-high transition-colors cursor-pointer" title="Répondre">
         <span className="material-symbols-outlined text-[12px] text-on-surface-variant">reply</span>
@@ -129,9 +118,7 @@ function MessageActions({ msg, onReply, onCopy }) {
 }
 
 async function rateMessage(messageId, rating) {
-  try {
-    await api.post('/chat/feedback', { messageId, rating });
-  } catch {}
+  try { await api.post('/chat/feedback', { messageId, rating }); } catch {}
 }
 
 const WELCOME_MESSAGE = {
@@ -139,8 +126,25 @@ const WELCOME_MESSAGE = {
   content: "Bonjour ! Je suis votre Assistant IA & Analyste Helpdesk IT. Posez-moi des questions sur vos tickets ou des demandes de statistiques sur vos magasins/lieux !",
 };
 
+function getDefaultPosition() {
+  return { bottom: 24, right: 24 };
+}
+
+function loadPosition() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) return JSON.parse(saved);
+  } catch {}
+  return getDefaultPosition();
+}
+
+function savePosition(pos) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(pos)); } catch {}
+}
+
 export default function ChatWidget() {
   const { user } = useAuth();
+  const location = useLocation();
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState([WELCOME_MESSAGE]);
   const [input, setInput] = useState('');
@@ -150,9 +154,15 @@ export default function ChatWidget() {
   const [replyTo, setReplyTo] = useState(null);
   const [attachment, setAttachment] = useState(null);
   const [attachmentPreview, setAttachmentPreview] = useState(null);
+  const [position, setPosition] = useState(loadPosition);
+  const [dragging, setDragging] = useState(false);
+  const dragRef = useRef(null);
+  const dragStart = useRef({ x: 0, y: 0, pos: { bottom: 0, right: 0 } });
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
+
+  const isOnChatPage = location.pathname === '/chat';
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -161,7 +171,7 @@ export default function ChatWidget() {
   useEffect(scrollToBottom, [messages, loading, scrollToBottom]);
   useEffect(() => { if (isOpen) inputRef.current?.focus(); }, [isOpen]);
 
-  // Raccourci clavier Ctrl+I / Cmd+I pour ouvrir l'Assistant IA
+  // Ctrl+I
   useEffect(() => {
     function handleKeyDown(e) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') {
@@ -173,27 +183,72 @@ export default function ChatWidget() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Charger l'historique au premier ouverture
+  // Écouter les changements de position depuis le CustomizerDrawer
+  useEffect(() => {
+    function onPositionChanged() {
+      setPosition(loadPosition());
+    }
+    window.addEventListener('chatwidget:position-changed', onPositionChanged);
+    return () => window.removeEventListener('chatwidget:position-changed', onPositionChanged);
+  }, []);
+
+  // Charger l'historique
   useEffect(() => {
     if (isOpen && !historyLoaded && user) {
       api.get('/chat/history').then(({ data }) => {
         if (data.length > 0) {
-          setMessages([
-            WELCOME_MESSAGE,
-            ...data.map((m) => ({ id: m.id, role: m.role, content: m.content, sources: m.sources, rating: m.rating, widget: m.widget })),
-          ]);
+          setMessages([WELCOME_MESSAGE, ...data.map((m) => ({ id: m.id, role: m.role, content: m.content, sources: m.sources, rating: m.rating, widget: m.widget }))]);
         }
         setHistoryLoaded(true);
       }).catch(() => setHistoryLoaded(true));
     }
   }, [isOpen, historyLoaded, user]);
 
+  // Drag handlers
+  function onDragStart(e) {
+    e.preventDefault();
+    setDragging(true);
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    dragStart.current = { x: clientX, y: clientY, pos: { ...position } };
+  }
+
+  useEffect(() => {
+    if (!dragging) return;
+    function onMove(e) {
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      const dx = dragStart.current.x - clientX;
+      const dy = clientY - dragStart.current.y;
+      const newPos = {
+        bottom: Math.max(0, Math.min(window.innerHeight - 80, dragStart.current.pos.bottom + dy)),
+        right: Math.max(0, Math.min(window.innerWidth - 80, dragStart.current.pos.right + dx)),
+      };
+      setPosition(newPos);
+    }
+    function onUp() {
+      setDragging(false);
+      savePosition(position);
+    }
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('touchend', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onUp);
+    };
+  }, [dragging, position]);
+
+  // Sauvegarder position au changement
+  useEffect(() => { if (!dragging) savePosition(position); }, [position, dragging]);
+
   async function handleNewConversation() {
     if (clearing || loading) return;
     setClearing(true);
-    try {
-      await api.delete('/chat/history');
-    } catch {}
+    try { await api.delete('/chat/history'); } catch {}
     setMessages([WELCOME_MESSAGE]);
     setReplyTo(null);
     removeAttachment();
@@ -210,9 +265,7 @@ export default function ChatWidget() {
       const reader = new FileReader();
       reader.onload = (ev) => setAttachmentPreview(ev.target.result);
       reader.readAsDataURL(file);
-    } else {
-      setAttachmentPreview(null);
-    }
+    } else { setAttachmentPreview(null); }
   }
 
   function removeAttachment() {
@@ -224,16 +277,13 @@ export default function ChatWidget() {
   async function sendMessage(text) {
     const userMessage = text || input.trim();
     if (!userMessage || loading) return;
-
     const newUserMsg = { role: 'user', content: userMessage };
     setMessages((prev) => [...prev, newUserMsg]);
     setInput('');
     setReplyTo(null);
     setLoading(true);
-
     try {
       const history = [...messages, newUserMsg].slice(-10).map((m) => ({ role: m.role, content: m.content }));
-
       if (attachment) {
         const formData = new FormData();
         formData.append('message', userMessage);
@@ -246,25 +296,24 @@ export default function ChatWidget() {
         setMessages((prev) => [...prev, { role: 'assistant', content: data.reply, sources: data.sources, action: data.action, widget: data.widget }]);
       }
       removeAttachment();
-    } catch (err) {
+    } catch {
       setMessages((prev) => [...prev, { role: 'assistant', content: "Désolé, une erreur est survenue. Réessayez." }]);
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }
 
   function handleKeyDown(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   }
 
   function handleReply(content) {
-    const preview = content.substring(0, 150) + (content.length > 150 ? '...' : '');
-    setReplyTo(preview);
+    setReplyTo(content.substring(0, 150) + (content.length > 150 ? '...' : ''));
     inputRef.current?.focus();
   }
+
+  // Masquer si sur /chat
+  if (isOnChatPage) return null;
+
+  const filteredActions = QUICK_ACTIONS.filter(a => !a.roles || a.roles.includes(user?.role));
 
   return (
     <>
@@ -278,7 +327,8 @@ export default function ChatWidget() {
             whileHover={{ scale: 1.08 }}
             whileTap={{ scale: 0.92 }}
             onClick={() => setIsOpen(true)}
-            className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full bg-gradient-to-br from-primary to-blue-700 text-white shadow-lg shadow-primary/30 flex items-center justify-center hover:shadow-xl hover:shadow-primary/40 transition-shadow cursor-pointer"
+            style={{ bottom: position.bottom, right: position.right }}
+            className="fixed z-50 w-14 h-14 rounded-full bg-gradient-to-br from-primary to-blue-700 text-white shadow-lg shadow-primary/30 flex items-center justify-center hover:shadow-xl hover:shadow-primary/40 transition-shadow cursor-pointer"
             aria-label="Ouvrir l'assistant IA"
           >
             <span className="material-symbols-outlined text-[26px]">smart_toy</span>
@@ -294,10 +344,17 @@ export default function ChatWidget() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="fixed bottom-6 right-6 z-50 w-[400px] max-w-[calc(100vw-2rem)] h-[560px] max-h-[calc(100vh-3rem)] bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+            style={{ bottom: position.bottom, right: position.right }}
+            className="fixed z-50 w-[400px] max-w-[calc(100vw-2rem)] h-[560px] max-h-[calc(100vh-3rem)] bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
           >
-            {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-primary to-blue-700 text-white shrink-0">
+            {/* Header — draggable */}
+            <div
+              ref={dragRef}
+              onMouseDown={onDragStart}
+              onTouchStart={onDragStart}
+              className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-primary to-blue-700 text-white shrink-0 select-none"
+              style={{ cursor: dragging ? 'grabbing' : 'grab' }}
+            >
               <div className="flex items-center gap-2">
                 <span className="material-symbols-outlined text-[20px]">smart_toy</span>
                 <div>
@@ -306,12 +363,7 @@ export default function ChatWidget() {
                 </div>
               </div>
               <div className="flex items-center gap-1">
-                <button
-                  onClick={handleNewConversation}
-                  disabled={clearing}
-                  className="p-1 px-2.5 rounded-lg hover:bg-white/20 transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-semibold bg-white/10"
-                  title="Démarrer une nouvelle conversation"
-                >
+                <button onClick={handleNewConversation} disabled={clearing} className="p-1 px-2.5 rounded-lg hover:bg-white/20 transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-semibold bg-white/10" title="Nouvelle conversation">
                   <span className="material-symbols-outlined text-[15px]">add_comment</span>
                   <span>Nouveau</span>
                 </button>
@@ -325,17 +377,9 @@ export default function ChatWidget() {
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {messages.map((msg, i) => (
                 <div key={msg.id || i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} group`}>
-                  <div
-                    className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed ${
-                      msg.role === 'user'
-                        ? 'bg-primary text-white rounded-br-md'
-                        : 'bg-surface-container border border-outline-variant/40 text-on-surface rounded-bl-md'
-                    }`}
-                  >
+                  <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed ${msg.role === 'user' ? 'bg-primary text-white rounded-br-md' : 'bg-surface-container border border-outline-variant/40 text-on-surface rounded-bl-md'}`}>
                     {msg.role === 'assistant' ? <MarkdownContent content={msg.content} /> : msg.content}
-
                     {msg.widget && <WidgetRenderer widget={msg.widget} />}
-
                     {msg.sources && msg.sources.length > 0 && (
                       <div className="mt-2 pt-2 border-t border-outline-variant/30">
                         <p className="text-[10px] opacity-60 flex items-center gap-1">
@@ -344,7 +388,6 @@ export default function ChatWidget() {
                         </p>
                       </div>
                     )}
-
                     {msg.action?.type === 'ticket_created' && (
                       <div className="mt-2 pt-2 border-t border-outline-variant/30">
                         <a href={`/tickets/${msg.action.ticketId}`} className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline">
@@ -353,7 +396,6 @@ export default function ChatWidget() {
                         </a>
                       </div>
                     )}
-
                     {msg.action?.type === 'escalation' && (
                       <div className="mt-2 pt-2 border-t border-outline-variant/30">
                         <a href={`/tickets/${msg.action.ticketId}`} className="inline-flex items-center gap-1 text-[11px] font-semibold text-orange-500 hover:underline">
@@ -362,12 +404,10 @@ export default function ChatWidget() {
                         </a>
                       </div>
                     )}
-
                     <MessageActions msg={msg} onReply={handleReply} />
                   </div>
                 </div>
               ))}
-
               {loading && (
                 <div className="flex justify-start">
                   <div className="bg-surface-container border border-outline-variant/40 rounded-2xl rounded-bl-md px-4 py-3 flex items-center gap-1.5">
@@ -377,20 +417,15 @@ export default function ChatWidget() {
                   </div>
                 </div>
               )}
-
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Quick actions */}
+            {/* Quick actions — filtrées par rôle */}
             {messages.length <= 1 && (
               <div className="px-4 pb-2 flex flex-wrap gap-1.5 shrink-0">
-                {QUICK_ACTIONS.map((action) => (
-                  <button
-                    key={action.label}
-                    onClick={() => sendMessage(action.message)}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-full border border-primary/30 text-primary text-[11px] font-medium hover:bg-primary/5 transition-colors cursor-pointer"
-                  >
-                    <span className="material-symbols-outlined text-[14px]">{action.icon}</span>
+                {filteredActions.map((action) => (
+                  <button key={action.label} onClick={() => sendMessage(action.message)} className="flex items-center gap-1 px-3 py-1.5 rounded-full border border-primary/30 text-primary text-[11px] font-medium hover:bg-primary/5 transition-colors cursor-pointer">
+                    <action.icon className={`w-3 h-3 ${action.color}`} />
                     {action.label}
                   </button>
                 ))}
@@ -439,12 +474,7 @@ export default function ChatWidget() {
                   disabled={loading}
                   className="flex-1 bg-transparent text-[13px] text-on-surface placeholder-on-surface-variant/50 focus:outline-none disabled:opacity-50"
                 />
-                <button
-                  onClick={() => sendMessage()}
-                  disabled={!input.trim() || loading}
-                  className="p-1.5 rounded-lg bg-primary text-white disabled:opacity-40 hover:bg-primary/90 transition-colors cursor-pointer disabled:cursor-not-allowed"
-                  aria-label="Envoyer"
-                >
+                <button onClick={() => sendMessage()} disabled={!input.trim() || loading} className="p-1.5 rounded-lg bg-primary text-white disabled:opacity-40 hover:bg-primary/90 transition-colors cursor-pointer disabled:cursor-not-allowed" aria-label="Envoyer">
                   <span className="material-symbols-outlined text-[16px]">send</span>
                 </button>
               </div>

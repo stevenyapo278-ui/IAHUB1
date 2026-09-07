@@ -39,7 +39,7 @@ router.get('/', async (req, res) => {
   }
   if (assetType) where.assetType = assetType;
   if (status) where.status = status;
-  if (locationId) where.glpiLocationId = Number(locationId);
+  if (locationId) where.locationId = Number(locationId);
   if (ownerId) where.ownerId = Number(ownerId);
   if (ticketId) where.tickets = { some: { ticketId: Number(ticketId) } };
 
@@ -53,8 +53,8 @@ router.get('/', async (req, res) => {
       skip,
       take,
       include: {
-        glpiLocation: { select: { id: true, name: true, completename: true } },
-        owner: { select: { id: true, fullName: true, email: true } },
+        location: { select: { id: true, name: true, completename: true } },
+        owner: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
         team: { select: { id: true, name: true } },
         _count: { select: { tickets: true } },
       },
@@ -87,7 +87,7 @@ router.get('/search', async (req, res) => {
     orderBy: [{ assetType: 'asc' }, { name: 'asc' }],
     take: 50,
     include: {
-      glpiLocation: { select: { name: true, completename: true } },
+      location: { select: { name: true, completename: true } },
     },
   });
   res.json(assets);
@@ -113,7 +113,7 @@ router.post(
         status: ASSET_STATUSES.includes(status) ? status : 'IN_USE',
         manufacturer: manufacturer || null,
         model: model || null,
-        glpiLocationId: locationId ? Number(locationId) : null,
+        locationId: locationId ? Number(locationId) : null,
         ownerId: ownerId ? Number(ownerId) : null,
         teamId: teamId ? Number(teamId) : null,
         purchaseDate: purchaseDate ? new Date(purchaseDate) : null,
@@ -121,8 +121,8 @@ router.post(
         notes: notes || null,
       },
       include: {
-        glpiLocation: { select: { id: true, name: true, completename: true } },
-        owner: { select: { id: true, fullName: true, email: true } },
+        location: { select: { id: true, name: true, completename: true } },
+        owner: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
         team: { select: { id: true, name: true } },
       },
     });
@@ -146,7 +146,7 @@ router.patch('/:id', requirePermission('assets.manage'), async (req, res) => {
   if (status !== undefined) data.status = status;
   if (manufacturer !== undefined) data.manufacturer = manufacturer;
   if (model !== undefined) data.model = model;
-  if (locationId !== undefined) data.glpiLocationId = locationId ? Number(locationId) : null;
+  if (locationId !== undefined) data.locationId = locationId ? Number(locationId) : null;
   if (ownerId !== undefined) data.ownerId = ownerId ? Number(ownerId) : null;
   if (teamId !== undefined) data.teamId = teamId ? Number(teamId) : null;
   if (purchaseDate !== undefined) data.purchaseDate = purchaseDate ? new Date(purchaseDate) : null;
@@ -157,8 +157,8 @@ router.patch('/:id', requirePermission('assets.manage'), async (req, res) => {
     where: { id },
     data,
     include: {
-      glpiLocation: { select: { id: true, name: true, completename: true } },
-      owner: { select: { id: true, fullName: true, email: true } },
+      location: { select: { id: true, name: true, completename: true } },
+      owner: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
       team: { select: { id: true, name: true } },
     },
   });

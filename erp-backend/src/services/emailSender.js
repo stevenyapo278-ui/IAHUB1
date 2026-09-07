@@ -418,22 +418,28 @@ ${signature || DEFAULT_EMAIL_SIGNATURE}
   return sendEmail({ ticketId, to: recipientEmail, subject, bodyHtml, saveAsMessage: false });
 }
 
-// Alerte un admin OU le technicien assigné qu'un ticket a été escaladé (automatiquement ou
-// manuellement). Lien direct vers le ticket pour une prise en charge rapide.
-async function sendEscalationEmail({ ticketId, ticketTitle, priority, reason, escalationLevel, recipientEmail, recipientName }) {
+// Alerte un destinataire interne (équipe cible, admin, technicien sortant) qu'un ticket a été
+// escaladé — c'est-à-dire TRANSFÉRÉ à une autre équipe responsable (ou signalé comme prioritaire
+// quand l'escalade se fait au sein de la même équipe). Lien direct vers le ticket.
+async function sendEscalationEmail({ ticketId, ticketTitle, priority, reason, escalationLevel, targetTeamName, recipientEmail, recipientName }) {
   const settings = await getSystemSettings();
   if (settings.emailEscalationEnabled === false) return null;
-  const subject = `[Escalade Niv.${escalationLevel || 1}] Ticket #${ticketId} : ${ticketTitle}`;
+  const subject = targetTeamName
+    ? `[Transfert] Ticket #${ticketId} : ${ticketTitle}`
+    : `[Escalade] Ticket #${ticketId} : ${ticketTitle}`;
   const signature = await getEmailSignature();
   const frontendUrl = resolveFrontendUrl(await getSystemSettings());
   const ticketLink = `${frontendUrl}/tickets/${ticketId}`;
   const priorityLabel = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' }[priority] || priority;
+  const transferLine = targetTeamName
+    ? `<p>Le ticket <strong>#${ticketId} — ${ticketTitle}</strong> vient d'être <strong>transféré à l'équipe ${targetTeamName}</strong>, désormais responsable de sa prise en charge.</p>`
+    : `<p>Le ticket <strong>#${ticketId} — ${ticketTitle}</strong> a été <strong>escaladé</strong> : une prise en charge prioritaire est requise.</p>`;
   const bodyHtml = `
 <p>Bonjour ${recipientName || ''},</p>
-<p>Le ticket <strong>#${ticketId} — ${ticketTitle}</strong> vient d'être <strong>escaladé au niveau ${escalationLevel || 1}</strong>. Une prise en charge prioritaire est requise.</p>
+${transferLine}
 <table style="border-collapse:collapse;margin:16px 0">
   <tr><td style="padding:4px 12px 4px 0;color:#666">Ticket</td><td><strong>#${ticketId} — ${ticketTitle}</strong></td></tr>
-  <tr><td style="padding:4px 12px 4px 0;color:#666">Niveau d'escalade</td><td><strong>${escalationLevel || 1}</strong></td></tr>
+  ${targetTeamName ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Équipe responsable</td><td><strong>${targetTeamName}</strong></td></tr>` : ''}
   <tr><td style="padding:4px 12px 4px 0;color:#666">Priorité</td><td><strong>${priorityLabel} (${priority})</strong></td></tr>
   ${reason ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Motif</td><td>${reason}</td></tr>` : ''}
 </table>
@@ -445,22 +451,27 @@ ${signature || DEFAULT_EMAIL_SIGNATURE}
   return sendEmail({ ticketId, to: recipientEmail, subject, bodyHtml, saveAsMessage: false });
 }
 
-// Notifie le demandeur que sa demande a été escaladée (prise en charge prioritaire).
-// Lien vers le portail REQUESTER pour suivre sa demande.
-async function sendRequesterEscalationEmail({ ticketId, ticketTitle, priority, reason, escalationLevel, recipientEmail, recipientName }) {
+// Notifie le demandeur que sa demande a été transférée à l'équipe en charge du sujet
+// (ou signalée comme prioritaire). Lien vers le portail REQUESTER pour suivre sa demande.
+async function sendRequesterEscalationEmail({ ticketId, ticketTitle, priority, reason, escalationLevel, targetTeamName, recipientEmail, recipientName }) {
   const settings = await getSystemSettings();
   if (settings.emailEscalationEnabled === false) return null;
-  const subject = `[Ticket #${ticketId}] Votre demande a été escaladée`;
+  const subject = targetTeamName
+    ? `[Ticket #${ticketId}] Votre demande a été transmise à l'équipe ${targetTeamName}`
+    : `[Ticket #${ticketId}] Votre demande a été escaladée`;
   const signature = await getEmailSignature();
   const frontendUrl = resolveFrontendUrl(await getSystemSettings());
   const portalLink = `${frontendUrl}/portal`;
   const priorityLabel = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' }[priority] || priority;
+  const transferLine = targetTeamName
+    ? `<p>Votre demande <strong>#${ticketId} — ${ticketTitle}</strong> a été <strong>transmise à l'équipe ${targetTeamName}</strong>, spécialisée dans ce type de demande : elle est désormais prise en charge par leurs soins.</p>`
+    : `<p>Votre demande <strong>#${ticketId} — ${ticketTitle}</strong> a été <strong>escaladée</strong> : elle est désormais prise en charge de façon prioritaire par nos équipes.</p>`;
   const bodyHtml = `
 <p>Bonjour ${recipientName || ''},</p>
-<p>Votre demande <strong>#${ticketId} — ${ticketTitle}</strong> a été <strong>escaladée au niveau ${escalationLevel || 1}</strong> : elle est désormais prise en charge de façon prioritaire par nos équipes.</p>
+${transferLine}
 <table style="border-collapse:collapse;margin:16px 0">
   <tr><td style="padding:4px 12px 4px 0;color:#666">Votre demande</td><td><strong>#${ticketId} — ${ticketTitle}</strong></td></tr>
-  <tr><td style="padding:4px 12px 4px 0;color:#666">Niveau d'escalade</td><td><strong>${escalationLevel || 1}</strong></td></tr>
+  ${targetTeamName ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Équipe en charge</td><td><strong>${targetTeamName}</strong></td></tr>` : ''}
   <tr><td style="padding:4px 12px 4px 0;color:#666">Priorité</td><td><strong>${priorityLabel} (${priority})</strong></td></tr>
   ${reason ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Motif</td><td>${reason}</td></tr>` : ''}
 </table>
@@ -630,6 +641,57 @@ ${signature}
   return sendEmail({ ticketId, to: requesterEmail, subject, bodyHtml, saveAsMessage: false });
 }
 
+// Notifie les boîtes mail configurées (SystemSettings.ticketCreationEmailRecipients) quand un
+// ticket est créé par un demandeur. Désactivable via ticketCreationEmailEnabled ; best-effort :
+// un échec d'envoi ne doit jamais faire échouer la création du ticket.
+async function sendTicketCreationNotification(ticket) {
+  try {
+    const settings = await getSystemSettings();
+    if (settings.ticketCreationEmailEnabled === false) return null;
+
+    const recipients = (settings.ticketCreationEmailRecipients || []).filter(Boolean);
+    if (recipients.length === 0) return null;
+
+    const requester = ticket.requester
+      ? ticket.requester
+      : ticket.requesterId
+        ? await prisma.user.findUnique({ where: { id: ticket.requesterId }, select: { fullName: true, email: true } })
+        : null;
+
+    const displayId = ticket.glpiTicketId || ticket.id || 'N/A';
+    const subject = `[Ticket #${displayId}] ${ticket.title || 'Nouveau ticket'}`;
+    const signature = await getEmailSignature();
+    const frontendUrl = resolveFrontendUrl(settings);
+    const ticketLink = `${frontendUrl}/tickets/${ticket.id}`;
+
+    const PRIORITY_LABEL = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' };
+    const content = (ticket.content || '').replace(/<[^>]+>/g, ' ').trim();
+
+    const bodyHtml = `
+<p>Bonjour,</p>
+<p>Un nouveau ticket vient d'être créé par un demandeur.</p>
+<table style="border-collapse:collapse;margin:16px 0">
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Ticket</td><td><strong>#${displayId} — ${ticket.title || ''}</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Demandeur</td><td>${requester?.fullName || 'Inconnu'}${requester?.email ? ` (${requester.email})` : ''}</td></tr>
+  ${ticket.category ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Catégorie</td><td>${ticket.category}</td></tr>` : ''}
+  ${ticket.priority ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Priorité</td><td>${PRIORITY_LABEL[ticket.priority] || ticket.priority}</td></tr>` : ''}
+  ${ticket.glpiLocationName ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Lieu</td><td>${ticket.glpiLocationName}</td></tr>` : ''}
+  ${content ? `<tr><td style="padding:4px 12px 4px 0;color:#666;vertical-align:top">Description</td><td style="max-width:400px;white-space:pre-wrap">${content.substring(0, 500)}${content.length > 500 ? '…' : ''}</td></tr>` : ''}
+</table>
+<p style="margin:20px 0">
+  <a href="${ticketLink}" style="background:#0b1c30;color:#fff;padding:10px 20px;text-decoration:none;display:inline-block">Voir le ticket</a>
+</p>
+${signature}
+`.trim();
+
+    await sendEmail({ ticketId: ticket.id, to: recipients, subject, bodyHtml, saveAsMessage: false });
+    return { sent: true, recipients };
+  } catch (err) {
+    console.error('[emailSender] Notification création ticket échouée:', err.message);
+    return null;
+  }
+}
+
 module.exports = {
   sendEmail,
   sendAcknowledgement,
@@ -648,6 +710,7 @@ module.exports = {
   sendTicketStatusNotification,
   sendApprovalNotificationEmail,
   sendResolvedNotificationEmail,
+  sendTicketCreationNotification,
   buildAcknowledgementHtml,
   buildKnownIncidentNotificationHtml,
   getEmailSignature,

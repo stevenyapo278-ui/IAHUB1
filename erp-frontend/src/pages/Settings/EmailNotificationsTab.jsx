@@ -19,6 +19,7 @@ import {
   setBrowserNotifEnabled,
   requestBrowserNotifPermission,
 } from '../../utils/browserNotification';
+import Toggle from '../../components/Toggle';
 import { SettingRow, inputClass, itemVariants } from './SettingsComponents';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -26,16 +27,16 @@ import { SettingRow, inputClass, itemVariants } from './SettingsComponents';
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const EMAIL_TOGGLES = [
-  { key: 'emailAcknowledgementEnabled', label: 'Accusé de réception', description: "Email automatique envoyé au demandeur lors de la création d'un ticket par email.", icon: Mail, category: 'Automatiques (pipeline email)' },
-  { key: 'emailKnownIncidentEnabled', label: 'Incident déjà connu', description: 'Notification quand un email correspond à un incident existant (le demandeur est rattaché au ticket existant).', icon: AlertTriangle, category: 'Automatiques (pipeline email)' },
-  { key: 'emailAssignmentEnabled', label: 'Assignation technicien', description: "Email envoyé au technicien quand l'IA lui attribue automatiquement un ticket.", icon: UserCheck, category: 'Automatiques (pipeline email)' },
-  { key: 'emailSlaBreachEnabled', label: 'Dépassement SLA', description: 'Alerte envoyée au technicien assigné quand le SLA de réponse est dépassé.', icon: Clock, category: 'Automatiques (schedulers)' },
-  { key: 'emailDueDateBreachEnabled', label: "Dépassement d'échéance", description: "Alerte envoyée au technicien assigné quand la date d'échéance manuelle est dépassée.", icon: Clock, category: 'Automatiques (schedulers)' },
-  { key: 'emailStatusChangeEnabled', label: 'Changement de statut', description: 'Notification envoyée au demandeur à chaque changement de statut du ticket.', icon: RefreshCw, category: 'Manuelles (actions utilisateur)' },
-  { key: 'emailResolvedEnabled', label: 'Résolution (différé 10 min)', description: 'Email de résolution envoyé au demandeur 10 minutes après le passage en "Résolu" (laisse un délai de correction).', icon: CheckCircle2, category: 'Manuelles (actions utilisateur)' },
-  { key: 'emailEscalationEnabled', label: 'Escalade', description: "Notification envoyée aux admins/techniciens et au demandeur lors d'une escalade de ticket.", icon: TrendingUp, category: 'Manuelles (actions utilisateur)' },
-  { key: 'emailMajorIncidentResolvedEnabled', label: 'Résolution incident majeur', description: 'Notification envoyée aux emails des sites impactés quand un incident majeur est résolu.', icon: Shield, category: 'Manuelles (actions utilisateur)' },
-  { key: 'emailApprovalEnabled', label: 'Approbation ticket', description: 'Notification envoyée au demandeur quand son ticket est approuvé par la Hotline.', icon: Send, category: 'Manuelles (actions utilisateur)' },
+  { key: 'emailAcknowledgementEnabled', label: 'Accusé de réception', description: "Email automatique envoyé au demandeur lors de la création d'un ticket par email.", icon: Mail, category: 'Automatiques (pipeline email)', subjects: ['[Ticket #ID] Objet du ticket'] },
+  { key: 'emailKnownIncidentEnabled', label: 'Incident déjà connu', description: 'Notification quand un email correspond à un incident existant (le demandeur est rattaché au ticket existant).', icon: AlertTriangle, category: 'Automatiques (pipeline email)', subjects: ['[Ticket #ID] Objet du ticket'] },
+  { key: 'emailAssignmentEnabled', label: 'Assignation technicien', description: "Email envoyé au technicien quand l'IA lui attribue automatiquement un ticket.", icon: UserCheck, category: 'Automatiques (pipeline email)', subjects: ['[Ticket #ID] Nouvelle assignation — Titre du ticket'] },
+  { key: 'emailSlaBreachEnabled', label: 'Dépassement SLA', description: 'Alerte envoyée au technicien assigné quand le SLA de réponse est dépassé.', icon: Clock, category: 'Automatiques (schedulers)', subjects: ['[SLA] Dépassement — Ticket #ID : Titre du ticket'] },
+  { key: 'emailDueDateBreachEnabled', label: "Dépassement d'échéance", description: "Alerte envoyée au technicien assigné quand la date d'échéance manuelle est dépassée.", icon: Clock, category: 'Automatiques (schedulers)', subjects: ['[Échéance] Dépassement — Ticket #ID : Titre du ticket'] },
+  { key: 'emailStatusChangeEnabled', label: 'Changement de statut', description: 'Notification envoyée au demandeur à chaque changement de statut du ticket.', icon: RefreshCw, category: 'Manuelles (actions utilisateur)', subjects: ['[Ticket #ID] Statut — Titre du ticket'] },
+  { key: 'emailResolvedEnabled', label: 'Résolution (différé 10 min)', description: 'Email de résolution envoyé au demandeur 10 minutes après le passage en "Résolu" (laisse un délai de correction).', icon: CheckCircle2, category: 'Manuelles (actions utilisateur)', subjects: ['[Ticket #ID] Résolu — Titre du ticket'] },
+  { key: 'emailEscalationEnabled', label: 'Escalade', description: "Notification envoyée aux admins/techniciens et au demandeur lors d'une escalade de ticket.", icon: TrendingUp, category: 'Manuelles (actions utilisateur)', subjects: ['[Escalade Niv.1] Ticket #ID : Titre du ticket', '[Ticket #ID] Votre demande a été escaladée'] },
+  { key: 'emailMajorIncidentResolvedEnabled', label: 'Résolution incident majeur', description: 'Notification envoyée aux emails des sites impactés quand un incident majeur est résolu.', icon: Shield, category: 'Manuelles (actions utilisateur)', subjects: ['[Ticket #ID] Titre du ticket'] },
+  { key: 'emailApprovalEnabled', label: 'Approbation ticket', description: 'Notification envoyée au demandeur quand son ticket est approuvé par la Hotline.', icon: Send, category: 'Manuelles (actions utilisateur)', subjects: ['[Ticket #ID] Approuvé — Titre du ticket'] },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -51,6 +52,9 @@ export default function EmailNotificationsTab() {
   const [summaryRecipientInput, setSummaryRecipientInput] = useState('');
   const [testingSummary, setTestingSummary] = useState(false);
   const [summaryTestResult, setSummaryTestResult] = useState(null);
+
+  // ── Notification création de ticket ──
+  const [ticketCreationRecipientInput, setTicketCreationRecipientInput] = useState('');
 
   // ── Sons & notifications navigateur ──
   const [soundsEnabled, setSoundsEnabledState] = useState(isSoundsEnabled());
@@ -88,6 +92,21 @@ export default function EmailNotificationsTab() {
 
   function removeSummaryRecipient(email) {
     updateSetting('dailySummaryRecipients', (settings.dailySummaryRecipients || []).filter((e) => e !== email));
+  }
+
+  // ── Notification création de ticket ──
+  function addTicketCreationRecipient() {
+    const value = ticketCreationRecipientInput.trim();
+    if (!value) return;
+    const current = settings.ticketCreationEmailRecipients || [];
+    if (!current.includes(value)) {
+      updateSetting('ticketCreationEmailRecipients', [...current, value]);
+    }
+    setTicketCreationRecipientInput('');
+  }
+
+  function removeTicketCreationRecipient(email) {
+    updateSetting('ticketCreationEmailRecipients', (settings.ticketCreationEmailRecipients || []).filter((e) => e !== email));
   }
 
   async function testDailySummary() {
@@ -170,15 +189,37 @@ export default function EmailNotificationsTab() {
           </h3>
           <div className="space-y-2">
             {EMAIL_TOGGLES.filter((t) => t.category === category).map((toggle) => (
-              <SettingRow
+              <motion.div
                 key={toggle.key}
-                title={toggle.label}
-                description={toggle.description}
-                icon={toggle.icon}
-                checked={settings[toggle.key] ?? true}
-                onChange={(v) => updateSetting(toggle.key, v)}
-                disabled={saving}
-              />
+                variants={itemVariants}
+                whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
+                className="bento-card flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-lg p-lg"
+              >
+                <div className="min-w-0 flex-1 flex items-center gap-4">
+                  {toggle.icon && (
+                    <div className="p-2 rounded-xl bg-primary/10 border border-primary/20 text-primary shrink-0">
+                      <toggle.icon className="w-5 h-5" />
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="font-headline-sm text-headline-sm text-on-surface font-semibold break-words">{toggle.label}</div>
+                    <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 break-words">{toggle.description}</p>
+                    {toggle.subjects && (
+                      <div className="mt-2 space-y-1">
+                        {toggle.subjects.map((subject, i) => (
+                          <div key={i} className="flex items-start gap-1.5 text-xs text-on-surface-variant/70 font-mono">
+                            <span className="shrink-0 mt-0.5">✉</span>
+                            <span className="break-all">{subject}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="shrink-0">
+                  <Toggle checked={settings[toggle.key] ?? true} onChange={(v) => updateSetting(toggle.key, v)} disabled={saving} />
+                </div>
+              </motion.div>
             ))}
           </div>
         </div>
@@ -196,6 +237,80 @@ export default function EmailNotificationsTab() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-lg">
           <div className="space-y-md">
+            {/* Notification à chaque création de ticket par un demandeur */}
+            <SettingRow
+              title="Notification création de ticket"
+              description="Envoie un email aux boîtes configurées dès qu'un demandeur crée un ticket (formulaire, portail, chatbot)."
+              icon={Mail}
+              checked={settings.ticketCreationEmailEnabled ?? false}
+              onChange={(v) => updateSetting('ticketCreationEmailEnabled', v)}
+              disabled={saving}
+            />
+
+            <motion.div
+              variants={itemVariants}
+              className="bento-card flex flex-col gap-sm p-lg"
+            >
+              <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Boîtes mail à notifier</span>
+              <div className="flex items-center gap-sm">
+                <input
+                  type="email"
+                  value={ticketCreationRecipientInput}
+                  onChange={(e) => setTicketCreationRecipientInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      addTicketCreationRecipient();
+                    }
+                  }}
+                  placeholder="adresse@exemple.com"
+                  disabled={saving}
+                  className={`${inputClass} flex-1`}
+                />
+                <motion.button
+                  type="button"
+                  onClick={addTicketCreationRecipient}
+                  disabled={saving}
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.96 }}
+                  className="px-4 py-2 btn-gradient font-semibold rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm disabled:opacity-50 shrink-0"
+                >
+                  Ajouter
+                </motion.button>
+              </div>
+              {(settings.ticketCreationEmailRecipients || []).length > 0 && (
+                <motion.div
+                  initial="hidden"
+                  animate="visible"
+                  variants={{ visible: { transition: { staggerChildren: 0.03 } } }}
+                  className="flex flex-wrap gap-2 mt-2"
+                >
+                  {settings.ticketCreationEmailRecipients.map((email) => (
+                    <motion.span
+                      key={email}
+                      variants={itemVariants}
+                      layout
+                      className="inline-flex items-center gap-1.5 px-3 py-1 bg-surface-container-high border border-outline-variant/60 rounded-full text-on-surface text-xs font-semibold shadow-sm"
+                    >
+                      {email}
+                      <motion.button
+                        onClick={() => removeTicketCreationRecipient(email)}
+                        disabled={saving}
+                        whileHover={{ scale: 1.2 }}
+                        whileTap={{ scale: 0.9 }}
+                        className="text-on-surface-variant hover:text-error transition-colors flex items-center"
+                      >
+                        <span className="material-symbols-outlined text-[14px]">close</span>
+                      </motion.button>
+                    </motion.span>
+                  ))}
+                </motion.div>
+              )}
+              {(settings.ticketCreationEmailRecipients || []).length === 0 && (
+                <p className="text-xs text-on-surface-variant/70 mt-1">Aucune boîte configurée — la notification restera inactive même si le toggle est activé.</p>
+              )}
+            </motion.div>
+
             <SettingRow
               title="Récapitulatif quotidien"
               description="Envoie automatiquement un email listant tous les tickets ouverts aux adresses configurées."

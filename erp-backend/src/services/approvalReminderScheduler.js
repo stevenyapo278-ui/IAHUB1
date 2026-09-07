@@ -16,6 +16,7 @@ async function processApprovalReminders() {
     where: {
       approvalStatus: 'PENDING',
       createdAt: { lte: cutoff },
+      reminderCount: { lt: 2 },
       OR: [
         { reminderSentAt: null },
         { reminderSentAt: { lte: cutoff } },
@@ -44,8 +45,11 @@ async function processApprovalReminders() {
   if (hotlineUsers.length === 0) return;
 
   for (const ticket of pendingTickets) {
+    const currentCount = ticket.reminderCount || 0;
+    if (currentCount >= 2) continue;
+
     const minutesWaiting = Math.round((Date.now() - new Date(ticket.createdAt).getTime()) / (60 * 1000));
-    const nextReminderCount = (ticket.reminderCount || 0) + 1;
+    const nextReminderCount = currentCount + 1;
 
     for (const hotlineUser of hotlineUsers) {
       if (!hotlineUser.email) continue;

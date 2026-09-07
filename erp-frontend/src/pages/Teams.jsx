@@ -5,6 +5,7 @@ import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import ConfirmDialog from '../components/ConfirmDialog';
+import UserAvatar from '../components/UserAvatar';
 import { useTheme } from '../context/ThemeContext';
 import { Users, ShieldCheck, Ticket, Plus, RefreshCw, Trash2, X, AlertTriangle, Mail, Check, Layers, Save, ChevronDown } from 'lucide-react';
 import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
@@ -429,9 +430,7 @@ export default function Teams() {
                             disabled={addingMember}
                             className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-surface-container text-left transition-colors cursor-pointer disabled:opacity-50"
                           >
-                            <div className="w-7 h-7 rounded-full bg-emerald-500/10 text-emerald-600 font-bold text-[10px] flex items-center justify-center shrink-0">
-                              {u.fullName?.charAt(0)?.toUpperCase()}
-                            </div>
+                            <UserAvatar user={u} size="md" colorClass="bg-emerald-500/10 text-emerald-600" />
                             <div className="min-w-0 flex-1">
                               <p className="text-xs font-semibold text-on-surface truncate">{u.fullName}</p>
                               <p className="text-[10px] text-on-surface-variant truncate">{u.email}</p>
@@ -448,9 +447,7 @@ export default function Teams() {
               <div className="space-y-1.5">
                 {detailModal.members?.map(m => (
                   <div key={m.id} className="flex items-center gap-2.5 p-2.5 rounded-xl bg-surface border border-outline-variant/30 group">
-                    <div className="w-8 h-8 rounded-full bg-blue-500/10 text-blue-500 font-bold text-[11px] flex items-center justify-center shrink-0">
-                      {m.fullName?.charAt(0)?.toUpperCase()}
-                    </div>
+                    <UserAvatar user={m} size="md" colorClass="bg-blue-500/10 text-blue-500" />
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-semibold text-on-surface truncate">{m.fullName}</p>
                       <p className="text-[10px] text-on-surface-variant font-mono truncate">{m.email}</p>

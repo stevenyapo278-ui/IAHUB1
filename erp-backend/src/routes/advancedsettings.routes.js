@@ -66,6 +66,11 @@ router.patch(
     body('slaMonitorIntervalSeconds').optional().isInt({ min: 0, max: 3600 }),
     body('dueDateMonitorIntervalSeconds').optional().isInt({ min: 0, max: 3600 }).withMessage('dueDateMonitorIntervalSeconds doit être entre 0 et 3600'),
     body('closeChildrenWithParent').optional().isBoolean().withMessage('closeChildrenWithParent doit être un booléen'),
+    body('navigationConfig').optional({ nullable: true }).isObject().withMessage('navigationConfig doit être un objet JSON'),
+    body('loginThemeMode').optional().isString().isIn(['daily_rotation', 'fixed', 'random']).withMessage('loginThemeMode doit être daily_rotation, fixed ou random'),
+    body('loginThemeFixedVariant').optional().isString().isIn(['classic', 'split', 'hero', 'minimal']).withMessage('Variante invalide'),
+    body('loginThemeEnabledVariants').optional().isArray({ min: 1, max: 4 }).withMessage('Au moins une variante requise (max 4)'),
+    body('loginThemeEnabledVariants.*').optional().isString().isIn(['classic', 'split', 'hero', 'minimal']).withMessage('Variante invalide'),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -98,6 +103,14 @@ router.patch(
     if (req.body.slaMonitorIntervalSeconds !== undefined) data.slaMonitorIntervalSeconds = req.body.slaMonitorIntervalSeconds;
     if (req.body.dueDateMonitorIntervalSeconds !== undefined) data.dueDateMonitorIntervalSeconds = req.body.dueDateMonitorIntervalSeconds;
     if (req.body.closeChildrenWithParent !== undefined) data.closeChildrenWithParent = req.body.closeChildrenWithParent;
+    if (req.body.navigationConfig !== undefined) data.navigationConfig = req.body.navigationConfig;
+    if (req.body.loginThemeMode !== undefined) data.loginThemeMode = req.body.loginThemeMode;
+    if (req.body.loginThemeFixedVariant !== undefined) data.loginThemeFixedVariant = req.body.loginThemeFixedVariant;
+    if (req.body.loginThemeEnabledVariants !== undefined) {
+      const arr = [...new Set(req.body.loginThemeEnabledVariants.filter((v) => ['classic', 'split', 'hero', 'minimal'].includes(v)))];
+      if (arr.length === 0) return res.status(400).json({ error: 'Au moins une variante doit rester activée' });
+      data.loginThemeEnabledVariants = arr;
+    }
 
     const updated = await prisma.systemSettings.update({ where: { id: 1 }, data });
     return res.json(updated);

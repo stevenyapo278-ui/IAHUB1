@@ -2,7 +2,7 @@
  * KpiRow + KpiCard — Rangée de cartes métriques KPI pour les pages métier.
  *
  * Utilise les variables CSS du skin actif → réagit automatiquement aux 13 skins Katalyst.
- * La valeur s'affiche en JetBrains Mono si prop mono=true.
+ * La valeur s'affiche en Ubuntu Mono si prop mono=true.
  *
  * Usage :
  *   <KpiRow cards={[
@@ -123,7 +123,7 @@ export function KpiCard({
             className={`text-2xl font-bold leading-none block ${mono ? 'font-mono' : ''}`}
             style={{
               color: 'var(--color-on-surface)',
-              fontFamily: mono ? "'JetBrains Mono', monospace" : 'Inter, sans-serif',
+              fontFamily: mono ? "'Ubuntu Mono', monospace" : 'var(--user-font), Ubuntu, sans-serif',
             }}
           >
             {value ?? '—'}

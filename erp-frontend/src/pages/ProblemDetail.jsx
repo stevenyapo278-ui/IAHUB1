@@ -414,7 +414,7 @@ export default function ProblemDetail() {
       {/* Delete confirm */}
       <ConfirmDialog
         open={showDeleteConfirm}
-        onClose={() => setShowDeleteConfirm(false)}
+        onCancel={() => setShowDeleteConfirm(false)}
         onConfirm={handleDelete}
         title="Supprimer ce problème"
         message="Êtes-vous sûr de vouloir supprimer ce problème ? Cette action est irréversible."

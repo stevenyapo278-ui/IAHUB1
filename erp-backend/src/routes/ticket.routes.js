@@ -5,7 +5,7 @@ const fs = require('fs');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
-const { notifyMajorIncidentResolved, sendTicketStatusNotification, sendResolvedNotificationEmail } = require('../services/emailSender');
+const { notifyMajorIncidentResolved, sendTicketStatusNotification, sendResolvedNotificationEmail, sendTicketCreationNotification } = require('../services/emailSender');
 const { approveTicket } = require('../services/ticketApproval');
 const { autoAssignTechnician } = require('../services/ticketAutoAssign');
 const { logEvent } = require('../services/ticketEvent');
@@ -50,6 +50,12 @@ router.get('/', async (req, res) => {
   const skip = (pageNum - 1) * pageSize;
 
   const where = {};
+  // Soft delete : la corbeille n'apparaît plus dans les vues principales
+  where.deletedAt = null;
+  // Fonctionnement GLPI : les tickets en attente d'approbation Hotline ne sont pas encore
+  // de « vrais » tickets — ils restent dans le Centre de Validation et sont exclus de la
+  // vue Tickets, des exports et des stats. (Approuver → devient un ticket normal.)
+  where.approvalStatus = { not: 'PENDING' };
   if (isRequesterOnly(req.user)) {
     // Le demandeur ne voit que les tickets qu'il a ouverts ou dont il est observateur
     where.OR = [
@@ -70,9 +76,12 @@ router.get('/', async (req, res) => {
     } else if (status === 'CLOSED_GROUP') {
       where.status = { in: ['SOLVED', 'CLOSED'] };
     } else if (status === 'NOT_CLOSED') {
-      // Vue par défaut : tout sauf les clôturés — les résolus
-      // restent visibles tant qu'ils n'ont pas été fermés (auto-clôture 3 j).
-      where.status = { notIn: ['CLOSED'] };
+      // Vue par défaut, fonctionnement GLPI : « actifs » = tous les tickets non résolus
+      // et non clôturés. Un ticket résolu disparaît donc de la vue par défaut (il reste
+      // visible via le filtre « Résolus » ou le groupe CLOSED_GROUP).
+      where.status = { notIn: ['SOLVED', 'CLOSED'] };
+    } else if (status === 'SOLVED_GROUP') {
+      where.status = 'SOLVED';
     } else {
       where.status = status;
     }
@@ -172,10 +181,10 @@ router.get('/', async (req, res) => {
       skip,
       take: pageSize,
       include: {
-        requester: { select: { id: true, fullName: true, email: true } },
-        assignedTo: { select: { id: true, fullName: true, email: true } },
+        requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+        assignedTo: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
         team: { select: { id: true, name: true } },
-        observers: { select: { id: true, fullName: true } },
+        observers: { select: { id: true, fullName: true, avatarUrl: true } },
       },
       orderBy,
     }),
@@ -230,6 +239,9 @@ router.get('/export', async (req, res) => {
   } = req.query;
 
   const where = {};
+  where.deletedAt = null; // l'export exclut aussi la corbeille
+  // Idem liste : l'export exclut les tickets en attente d'approbation (Centre de Validation)
+  where.approvalStatus = { not: 'PENDING' };
   if (isRequesterOnly(req.user)) {
     // Le demandeur n'exporte que ses propres tickets ou ceux qu'il observe
     where.OR = [
@@ -247,7 +259,8 @@ router.get('/export', async (req, res) => {
   if (status) {
     if (status === 'OPEN_GROUP') where.status = { in: ['NEW', 'OPEN', 'PLANNED', 'PENDING'] };
     else if (status === 'CLOSED_GROUP') where.status = { in: ['SOLVED', 'CLOSED'] };
-    else if (status === 'NOT_CLOSED') where.status = { notIn: ['CLOSED'] };
+    else if (status === 'NOT_CLOSED') where.status = { notIn: ['SOLVED', 'CLOSED'] };
+    else if (status === 'SOLVED_GROUP') where.status = 'SOLVED';
     else where.status = status;
   }
   if (priority) where.priority = priority;
@@ -305,10 +318,10 @@ router.get('/export', async (req, res) => {
       source: true, requesterId: true, assignedToId: true, teamId: true,
       createdAt: true, solvedAt: true, closedAt: true,
       slaResponseDueAt: true, slaResolutionDueAt: true, slaBreachedAt: true, firstResponseAt: true,
-      aiProcessed: true, approvalStatus: true, requester: { select: { email: true, fullName: true } },
-      assignedTo: { select: { email: true, fullName: true } },
+      aiProcessed: true, approvalStatus: true, requester: { select: { email: true, fullName: true, avatarUrl: true } },
+      assignedTo: { select: { email: true, fullName: true, avatarUrl: true } },
       team: { select: { name: true } },
-      observers: { select: { id: true, fullName: true } },
+      observers: { select: { id: true, fullName: true, avatarUrl: true } },
     },
   });
 
@@ -516,17 +529,63 @@ router.get('/:id/adjacent', async (req, res) => {
 });
 
 // Get single ticket with followups
+// Liste des tickets dans la corbeille — AVANT '/:id' sinon '/trash/list' serait capturé par '/:id'
+router.get('/trash/list', async (req, res) => {
+  if (!req.user || !['SUPERADMIN', 'ADMIN'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Accès refusé' });
+  }
+  const items = await prisma.ticket.findMany({
+    where: { deletedAt: { not: null } },
+    orderBy: { deletedAt: 'desc' },
+    take: 200,
+    include: {
+      requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+      assignedTo: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+      deletedBy: { select: { id: true, fullName: true } },
+    },
+  });
+  return res.json({ items });
+});
+
+router.get('/pending-approval', async (req, res) => {
+  if (!req.user || !['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Accès refusé' });
+  }
+  const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 100));
+  const where = { approvalStatus: 'PENDING', deletedAt: null };
+  if (req.user.role === 'TECHNICIAN') {
+    // Un technicien ne traite que les tickets qu'il a ouverts (workflow GLPI : le validateur
+    // voit sa file, pas celle des autres) — Hotline/Admin voient tout.
+    where.OR = [{ requesterId: req.user.sub }, { assignedToId: req.user.sub }];
+  }
+  const items = await prisma.ticket.findMany({
+    where,
+    orderBy: [{ lowTrustSender: 'desc' }, { createdAt: 'desc' }],
+    take: limit,
+    select: {
+      id: true, title: true, content: true, status: true, priority: true,
+      category: true, type: true, source: true, sourceName: true, sourceEmail: true,
+      urgency: true, impact: true, isMajorIncident: true, impactedSites: true,
+      locationName: true, lowTrustSender: true, aiProcessed: true, aiSummary: true,
+      approvalNote: true, approvalStatus: true,
+      createdAt: true, requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+    },
+  });
+  return res.json({ items, total: items.length });
+});
+
 router.get('/:id', async (req, res) => {
   const ticket = await prisma.ticket.findUnique({
     where: { id: Number(req.params.id) },
+    // NB : pas de filtre deletedAt ici — la corbeille doit pouvoir afficher un ticket supprimé
     include: {
-      requester: { select: { id: true, fullName: true, email: true } },
-      assignedTo: { select: { id: true, fullName: true, email: true } },
-      lastModifiedBy: { select: { id: true, fullName: true, email: true } },
-      observers: { select: { id: true, fullName: true, email: true } },
+      requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+      assignedTo: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+      lastModifiedBy: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+      observers: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
       team: { select: { id: true, name: true } },
-      approvedBy: { select: { id: true, fullName: true, email: true } },
-      followups: { include: { author: { select: { id: true, fullName: true } } }, orderBy: { createdAt: 'asc' } },
+      approvedBy: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+      followups: { include: { author: { select: { id: true, fullName: true, avatarUrl: true } } }, orderBy: { createdAt: 'asc' } },
       messages: { orderBy: { timestamp: 'asc' } },
       attachments: true,
       aiSuggestions: { orderBy: { createdAt: 'desc' } },
@@ -709,7 +768,6 @@ router.post(
         await autoAssignTechnician(ticket.id, ticket.category);
       } catch (err) {
         console.error('[ticket.routes] Auto-assignation échouée:', err.message);
-        await logEvent(ticket.id, 'AUTO_ASSIGN_FAILED', 'SYSTEM', { action: 'auto-assign', error: err.message });
       }
     }
 
@@ -774,6 +832,10 @@ router.post(
       if (finalTicket.assignedToId) {
         emitTicketAssigned(finalTicket.id, finalTicket.title, finalTicket.assignedToId, finalTicket.category ? 'by_category' : 'manual');
       }
+      // Notification email aux boîtes configurées dans les Paramètres (best-effort, non bloquant)
+      sendTicketCreationNotification(finalTicket).catch((err) =>
+        console.error('[ticket.routes] Notification création échouée:', err.message)
+      );
     }
 
     return res.status(201).json(finalTicket);
@@ -784,8 +846,8 @@ router.post(
 router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const id = Number(req.params.id);
   // Whitelist : seuls ces champs acceptent la mise à jour (protection mass assignment)
-  const allowed = ['title', 'content', 'status', 'priority', 'category', 'teamId', 'assignedToId', 'requesterId', 'sourceName', 'sourceEmail', 'type', 'urgency', 'impact', 'source', 'externalId', 'dueDate', 'assetIds', 'observerIds', 'approvalStatus', 'isMajorIncident', 'impactedSites', 'closeSuggested'];
-  const { title, content, status, priority, category, teamId, assignedToId, requesterId, sourceName, sourceEmail, type, urgency, impact, source, externalId, dueDate, assetIds } = req.body;
+  const allowed = ['title', 'content', 'status', 'priority', 'category', 'teamId', 'assignedToId', 'requesterId', 'sourceName', 'sourceEmail', 'type', 'urgency', 'impact', 'source', 'externalId', 'dueDate', 'assetIds', 'observerIds', 'approvalStatus', 'isMajorIncident', 'impactedSites', 'closeSuggested', 'locationId'];
+  const { title, content, status, priority, category, teamId, assignedToId, requesterId, sourceName, sourceEmail, type, urgency, impact, source, externalId, dueDate, assetIds, locationId } = req.body;
 
   // Rejecter les champs non autorisés
   for (const key of Object.keys(req.body)) {
@@ -806,7 +868,7 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
     const reqId = requesterId ? Number(requesterId) : null;
     data.requesterId = reqId;
     if (reqId) {
-      const reqUser = await prisma.user.findUnique({ where: { id: reqId }, select: { fullName: true, email: true } });
+      const reqUser = await prisma.user.findUnique({ where: { id: reqId }, select: { fullName: true, email: true, avatarUrl: true } });
       if (reqUser) {
         data.sourceName = reqUser.fullName;
         data.sourceEmail = reqUser.email;
@@ -833,6 +895,17 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
   if (impact !== undefined) data.impact = impact;
   if (source !== undefined) data.source = source;
   if (externalId !== undefined) data.externalId = externalId;
+
+  // locationId du frontend
+  if (locationId !== undefined) {
+    data.locationId = locationId ? Number(locationId) : null;
+    if (locationId) {
+      const loc = await prisma.location.findUnique({ where: { id: Number(locationId) }, select: { name: true, completename: true } });
+      if (loc)         data.locationName = loc.completename || loc.name;
+    } else {
+      data.locationName = null;
+    }
+  }
 
   if (status !== undefined) {
     data.status = status;
@@ -973,7 +1046,7 @@ router.get('/:id/corrections', async (req, res) => {
   }
   const corrections = await prisma.ticketFieldCorrection.findMany({
     where: { ticketId: id },
-    include: { correctedBy: { select: { id: true, fullName: true, email: true } } },
+    include: { correctedBy: { select: { id: true, fullName: true, email: true, avatarUrl: true } } },
     orderBy: { createdAt: 'desc' },
   });
   return res.json(corrections);
@@ -1177,18 +1250,29 @@ router.patch('/:id/reassign', requirePermission('tickets.assign', ['ADMIN', 'TEC
 });
 
 // Escalade manuelle d'un ticket (prise en charge prioritaire par les admins)
-router.post('/:id/escalate', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+// Body optionnel : { reason, targetTeamId, assignedToId }
+// - targetTeamId  : réaffecte le ticket à une autre équipe (le technicien actuel est remplacé)
+// - assignedToId  : technicien choisi dans l'équipe cible (optionnel — sinon ticket d'équipe non assigné)
+// Droit requis : tickets.assign — réservé aux ADMIN/SUPERADMIN/HOTLINE via les groupes de droits.
+router.post('/:id/escalate', requirePermission('tickets.assign', ['ADMIN', 'HOTLINE']), async (req, res) => {
   const id = Number(req.params.id);
-  const { reason } = req.body || {};
+  const { reason, targetTeamId, assignedToId } = req.body || {};
   try {
+    // Escalade = TRANSFERT à une équipe responsable (ex : la sécurité valide,
+    // le Système exécute) — toute la logique (transfert, traçabilité, notifications)
+    // vit dans le service ; la validation des erreurs métier renvoie 400.
     const escalated = await escalateTicket(id, {
       reason: reason || 'Escalade manuelle',
       actor: `user:${req.user.sub}`,
       source: 'manual',
+      targetTeamId: targetTeamId ?? null,
+      assignedToId: assignedToId ?? undefined,
     });
     return res.json(escalated);
   } catch (err) {
     if (err.message === 'Ticket introuvable') return res.status(404).json({ error: err.message });
+    if (err.message === 'Équipe cible introuvable'
+      || err.message.includes('technicien')) return res.status(400).json({ error: err.message });
     console.error('[ticket.routes] Erreur escalade ticket:', err.message);
     return res.status(500).json({ error: 'Erreur lors de l\'escalade' });
   }
@@ -1202,8 +1286,8 @@ async function notifyRequesterOnStatusChange(id, status) {
     const ticket = await prisma.ticket.findUnique({
       where: { id },
       include: {
-        requester: { select: { email: true, fullName: true } },
-        assignedTo: { select: { fullName: true } },
+        requester: { select: { email: true, fullName: true, avatarUrl: true } },
+        assignedTo: { select: { fullName: true, avatarUrl: true } },
       },
     });
     if (!ticket?.requester?.email) return;
@@ -1303,11 +1387,13 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
         fs.unlinkSync(file.path);
       }
 
+      const localFilepath = path.join('uploads', 'followup-images', safeFilename);
       const attachment = await prisma.ticketAttachment.create({
         data: {
           ticketId,
           filename: file.originalname || safeFilename,
           mimeType: file.mimetype || 'image/png',
+          localFilepath,
         },
       });
 
@@ -1339,7 +1425,7 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
       content,
       isPrivate: req.body.isPrivate === 'true' || req.body.isPrivate === true,
     },
-    include: { author: { select: { id: true, fullName: true } } },
+    include: { author: { select: { id: true, fullName: true, avatarUrl: true } } },
   });
 
   // Le temps de première réponse est fixé au premier suivi d'un technicien/hotline/admin
@@ -1359,7 +1445,7 @@ router.patch('/:id/followups/:followupId/visibility', requirePermission('tickets
 
   const followup = await prisma.followup.findFirst({
     where: { id: followupId, ticketId },
-    include: { author: { select: { id: true, fullName: true } } },
+    include: { author: { select: { id: true, fullName: true, avatarUrl: true } } },
   });
   if (!followup) return res.status(404).json({ error: 'Commentaire introuvable' });
 
@@ -1367,13 +1453,54 @@ router.patch('/:id/followups/:followupId/visibility', requirePermission('tickets
   const updated = await prisma.followup.update({
     where: { id: followupId },
     data: { isPrivate },
-    include: { author: { select: { id: true, fullName: true } } },
+    include: { author: { select: { id: true, fullName: true, avatarUrl: true } } },
   });
 
   try {
     await logEvent(ticketId, isPrivate ? 'FOLLOWUP_MADE_PRIVATE' : 'FOLLOWUP_MADE_PUBLIC', req.user.sub, { followupId });
   } catch (err) {
     console.error('[ticket.routes] Log visibilité commentaire échoué:', err.message);
+  }
+
+  return res.json({ followup: updated });
+});
+
+// Modifier le contenu d'un commentaire
+router.patch('/:id/followups/:followupId', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+  const ticketId = Number(req.params.id);
+  const followupId = Number(req.params.followupId);
+  const { content } = req.body;
+
+  if (!content || !content.trim()) {
+    return res.status(400).json({ error: 'Le contenu ne peut pas être vide' });
+  }
+
+  const followup = await prisma.followup.findFirst({
+    where: { id: followupId, ticketId },
+    include: { author: { select: { id: true, fullName: true, avatarUrl: true } } },
+  });
+  if (!followup) return res.status(404).json({ error: 'Commentaire introuvable' });
+
+  if (followup.source === 'glpi') {
+    return res.status(403).json({ error: 'Impossible de modifier un commentaire synchronisé depuis GLPI' });
+  }
+
+  const isAdmin = ['ADMIN', 'SUPERADMIN'].includes(req.user.role);
+  if (!isAdmin && followup.authorId !== req.user.sub) {
+    return res.status(403).json({ error: 'Vous ne pouvez modifier que vos propres commentaires' });
+  }
+
+  const sanitized = sanitizeTicketHtml(content.trim());
+  const updated = await prisma.followup.update({
+    where: { id: followupId },
+    data: { content: sanitized, updatedAt: new Date() },
+    include: { author: { select: { id: true, fullName: true, avatarUrl: true } } },
+  });
+
+  try {
+    await logEvent(ticketId, 'FOLLOWUP_EDITED', req.user.sub, { followupId });
+  } catch (err) {
+    console.error('[ticket.routes] Log édition commentaire échoué:', err.message);
   }
 
   return res.json({ followup: updated });
@@ -1534,20 +1661,47 @@ router.post('/:id/csat', async (req, res) => {
   return res.json(updated);
 });
 
-// Delete ticket
+// ── Corbeille (soft delete) ─────────────────────────────────────────────────
+// DELETE /:id → met à la corbeille (restaurable). Suppression définitive : DELETE /:id?permanent=true
 router.delete('/:id', requirePermission('tickets.delete', ['ADMIN']), async (req, res) => {
   const id = Number(req.params.id);
   try {
-    const ticket = await prisma.ticket.findUnique({ where: { id }, select: { id: true } });
+    const ticket = await prisma.ticket.findUnique({ where: { id }, select: { id: true, deletedAt: true } });
     if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
 
-    await prisma.ticket.delete({ where: { id } });
+    // Suppression définitive explicite (depuis la corbeille)
+    if (req.query.permanent === 'true') {
+      await prisma.ticket.delete({ where: { id } });
+      await auditLog('TICKET_DELETED_PERMANENTLY', { actor: req.user, targetType: 'Ticket', targetId: id, metadata: { ticketId: id } });
+      return res.status(204).send();
+    }
+
+    if (ticket.deletedAt) {
+      return res.status(400).json({ error: 'Ticket déjà dans la corbeille' });
+    }
+
+    await prisma.ticket.update({ where: { id }, data: { deletedAt: new Date(), deletedById: req.user.sub } });
+    await logEvent(id, 'DELETED', req.user.email || 'SYSTEM');
+    await auditLog('TICKET_SOFT_DELETED', { actor: req.user, targetType: 'Ticket', targetId: id, metadata: { ticketId: id } });
     return res.status(204).send();
   } catch (err) {
     if (err.code === 'P2025') return res.status(404).json({ error: 'Ticket introuvable' });
     console.error('[ticket.routes] Erreur suppression ticket:', err);
     return res.status(500).json({ error: 'Erreur interne' });
   }
+});
+
+// Restaure un ticket depuis la corbeille
+router.post('/:id/restore', requirePermission('tickets.delete', ['ADMIN']), async (req, res) => {
+  const id = Number(req.params.id);
+  const ticket = await prisma.ticket.findUnique({ where: { id }, select: { id: true, deletedAt: true } });
+  if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
+  if (!ticket.deletedAt) return res.status(400).json({ error: "Ce ticket n'est pas supprimé" });
+
+  await prisma.ticket.update({ where: { id }, data: { deletedAt: null, deletedById: null } });
+  await logEvent(id, 'RESTORED', req.user.email || 'SYSTEM');
+  await auditLog('TICKET_RESTORED', { actor: req.user, targetType: 'Ticket', targetId: id, metadata: { ticketId: id } });
+  return res.json({ ok: true, id });
 });
 
 // Delete tickets in bulk — body: { ids: [1, 2, 3] }
@@ -1557,8 +1711,21 @@ router.post('/bulk-delete', requirePermission('tickets.bulkDelete', ['ADMIN']), 
 
   const ids = req.body.ids.map(Number).filter((n) => !Number.isNaN(n));
   if (ids.length === 0) return res.status(400).json({ error: 'Aucun identifiant valide fourni' });
+  if (req.body.permanent === true) {
+    const result = await prisma.ticket.deleteMany({ where: { id: { in: ids }, deletedAt: { not: null } } });
+    await auditLog('TICKETS_DELETED_PERMANENTLY', { actor: req.user, targetType: 'Ticket', metadata: { count: result.count, ids } });
+    return res.json({ deleted: result.count, permanent: true });
+  }
 
-  const result = await prisma.ticket.deleteMany({ where: { id: { in: ids } } });
+  // Soft delete groupé — uniquement des tickets non déjà supprimés
+  const result = await prisma.ticket.updateMany({
+    where: { id: { in: ids }, deletedAt: null },
+    data: { deletedAt: new Date(), deletedById: req.user.sub },
+  });
+  for (const id of ids) {
+    await logEvent(id, 'DELETED', req.user.email || 'SYSTEM').catch(() => {});
+  }
+  await auditLog('TICKETS_SOFT_DELETED', { actor: req.user, targetType: 'Ticket', metadata: { count: result.count, ids } });
   return res.json({ deleted: result.count });
 });
 

@@ -245,7 +245,7 @@ async function getAllSkills() {
 // Récupère tous les lieux disponibles
 async function getAllLocations() {
   try {
-    return await prisma.glpiLocation.findMany({ select: { completename: true }, orderBy: { completename: 'asc' } });
+    return await prisma.location.findMany({ select: { completename: true }, orderBy: { completename: 'asc' } });
   } catch (err) {
     console.error('[mailAnalyzer] Échec récupération lieux:', err.message);
     return [];
@@ -310,16 +310,12 @@ function guessSkillFromText(subject, body, skills) {
 
 // Analyse un email brut via les providers IA configurés (avec fallback automatique)
 // et retourne les métadonnées ITSM structurées.
-async function analyzeEmail({ subject, body, from, fromName }) {
+async function analyzeEmail({ subject, body, from, fromName, senderRole, senderTeams, senderSkills }) {
   const providers = await getActiveProviders();
   if (providers.length === 0) throw new Error('Aucun provider IA configuré (Paramètres → Intelligence Artificielle)');
 
   const { getSystemSettings } = require('./systemSettings');
   const settings = await getSystemSettings();
-  let fewShotExamples = '';
-  if (settings?.enableFewShotTriage) {
-    fewShotExamples = await getFewShotExamples(subject, body);
-  }
 
   const skills = await getAllSkills();
   const availableSkills = formatSkillsForPrompt(skills);
@@ -333,7 +329,9 @@ async function analyzeEmail({ subject, body, from, fromName }) {
     from,
     subject,
     body: body?.substring(0, 8000) || '',
-    fewShotExamples,
+    senderRole: senderRole || 'inconnu',
+    senderTeams: senderTeams || 'aucune',
+    senderSkills: senderSkills || 'aucune',
     availableSkills,
     availableLocations,
   });
@@ -347,7 +345,7 @@ async function analyzeEmail({ subject, body, from, fromName }) {
 
   // Validation, nettoyage, matrice déterministe et vérification d'existence en BDD
   const { validateAndCleanAnalysis } = require('./emailAnalysisValidator');
-  const result = validateAndCleanAnalysis(rawResult, skills, locations, { body: body || '', enableAutoCreateSkills: !!settings?.enableAutoCreateSkills });
+  const result = await validateAndCleanAnalysis(rawResult, skills, locations, { body: body || '', enableAutoCreateSkills: !!settings?.enableAutoCreateSkills });
 
   // Fallback : si le LLM n'a pas retourné suggestedSkill (ou a retourné null),
   // on tente une correspondance par mot-clé sur le texte brut de l'email.

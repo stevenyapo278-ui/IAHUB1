@@ -35,8 +35,8 @@ router.get('/', async (req, res) => {
       take: pageSize,
       orderBy: { createdAt: 'desc' },
       include: {
-        requester: { select: { id: true, fullName: true, email: true } },
-        assignedTo: { select: { id: true, fullName: true, email: true } },
+        requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+        assignedTo: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
         team: { select: { id: true, name: true } },
         _count: { select: { tickets: true, followups: true } },
       },
@@ -67,7 +67,7 @@ router.post(
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const { title, description, priority, urgency, impact, category, glpiLocationId, glpiLocationName, dueDate, requesterId, assignedToId, teamId } = req.body;
+    const { title, description, priority, urgency, impact, category, locationId, locationName, dueDate, requesterId, assignedToId, teamId } = req.body;
 
     const problem = await prisma.problem.create({
       data: {
@@ -77,16 +77,16 @@ router.post(
         urgency: urgency || 'MEDIUM',
         impact: impact || 'MEDIUM',
         category: category || null,
-        glpiLocationId: glpiLocationId || null,
-        glpiLocationName: glpiLocationName || null,
+        locationId: locationId || null,
+        locationName: locationName || null,
         dueDate: dueDate ? new Date(dueDate) : null,
         requesterId: requesterId || null,
         assignedToId: assignedToId || null,
         teamId: teamId || null,
       },
       include: {
-        requester: { select: { id: true, fullName: true, email: true } },
-        assignedTo: { select: { id: true, fullName: true, email: true } },
+        requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+        assignedTo: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
         team: { select: { id: true, name: true } },
       },
     });
@@ -107,23 +107,23 @@ router.get('/:id', async (req, res) => {
   const problem = await prisma.problem.findUnique({
     where: { id },
     include: {
-      requester: { select: { id: true, fullName: true, email: true } },
-      assignedTo: { select: { id: true, fullName: true, email: true } },
+      requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+      assignedTo: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
       team: { select: { id: true, name: true } },
       tickets: {
         include: {
           ticket: {
-            select: { id: true, title: true, status: true, priority: true, category: true, createdAt: true, requester: { select: { id: true, fullName: true } } },
+            select: { id: true, title: true, status: true, priority: true, category: true, createdAt: true, requester: { select: { id: true, fullName: true, avatarUrl: true } } },
           },
         },
         orderBy: { createdAt: 'desc' },
       },
       followups: {
-        include: { author: { select: { id: true, fullName: true, email: true } } },
+        include: { author: { select: { id: true, fullName: true, email: true, avatarUrl: true } } },
         orderBy: { createdAt: 'asc' },
       },
       events: { orderBy: { createdAt: 'desc' }, take: 50 },
-      observers: { select: { id: true, fullName: true, email: true } },
+      observers: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
     },
   });
 
@@ -140,7 +140,7 @@ router.patch(
     const existing = await prisma.problem.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ error: 'Problème introuvable' });
 
-    const allowed = ['title', 'description', 'status', 'priority', 'urgency', 'impact', 'category', 'glpiLocationId', 'glpiLocationName', 'dueDate', 'requesterId', 'assignedToId', 'teamId'];
+    const allowed = ['title', 'description', 'status', 'priority', 'urgency', 'impact', 'category', 'locationId', 'locationName', 'dueDate', 'requesterId', 'assignedToId', 'teamId'];
     const data = {};
     const events = [];
 
@@ -208,8 +208,8 @@ router.get('/:id/tickets', async (req, res) => {
     include: {
       ticket: {
         include: {
-          requester: { select: { id: true, fullName: true, email: true } },
-          assignedTo: { select: { id: true, fullName: true, email: true } },
+          requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+          assignedTo: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
           team: { select: { id: true, name: true } },
         },
       },
@@ -274,7 +274,7 @@ router.get('/:id/followups', async (req, res) => {
   const id = Number(req.params.id);
   const followups = await prisma.problemFollowup.findMany({
     where: { problemId: id },
-    include: { author: { select: { id: true, fullName: true, email: true } } },
+    include: { author: { select: { id: true, fullName: true, email: true, avatarUrl: true } } },
     orderBy: { createdAt: 'asc' },
   });
   res.json(followups);
@@ -295,7 +295,7 @@ router.post(
     const { content, isPrivate } = req.body;
     const followup = await prisma.problemFollowup.create({
       data: { problemId, authorId: req.user.sub, content, isPrivate: isPrivate || false },
-      include: { author: { select: { id: true, fullName: true, email: true } } },
+      include: { author: { select: { id: true, fullName: true, email: true, avatarUrl: true } } },
     });
 
     await prisma.problemEvent.create({

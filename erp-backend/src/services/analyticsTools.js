@@ -261,9 +261,104 @@ async function analyzeRootCause({ locationName, filterKeyword, limit = 15 }) {
   };
 }
 
+/**
+ * 5. Répartition des tickets ouverts par équipe (pour réunions hebdo)
+ */
+async function getTeamDistribution({ period } = {}) {
+  const startDate = parsePeriod(period);
+
+  const where = { status: { notIn: ['CLOSED'] } };
+  if (startDate) where.createdAt = { gte: startDate };
+
+  const tickets = await prisma.ticket.findMany({
+    where,
+    select: {
+      id: true,
+      priority: true,
+      status: true,
+      teamId: true,
+      team: { select: { name: true } },
+    },
+  });
+
+  const teamMap = new Map();
+  let unassignedCount = 0;
+
+  for (const t of tickets) {
+    const teamName = t.team?.name || 'Non assigné';
+
+    if (!t.teamId) {
+      unassignedCount++;
+    }
+
+    if (!teamMap.has(teamName)) {
+      teamMap.set(teamName, {
+        teamName,
+        total: 0,
+        urgent: 0,
+        byStatus: { NEW: 0, OPEN: 0, PENDING: 0, SOLVED: 0 },
+      });
+    }
+
+    const item = teamMap.get(teamName);
+    item.total += 1;
+    if (t.priority === 'P1') item.urgent += 1;
+    if (item.byStatus[t.status] !== undefined) item.byStatus[t.status] += 1;
+  }
+
+  const sorted = Array.from(teamMap.values()).sort((a, b) => b.total - a.total);
+
+  return {
+    totalOpen: tickets.length,
+    unassignedCount,
+    teams: sorted,
+    chartData: sorted.map((t) => ({
+      name: t.teamName,
+      Total: t.total,
+      Urgents: t.urgent,
+      Non_assignés: t.teamName === 'Non assigné' ? t.total : 0,
+    })),
+  };
+}
+
+/**
+ * 6. Détail des tickets ouverts par équipe (liste)
+ */
+async function getOpenTicketsByTeam({ teamName, limit = 20 } = {}) {
+  const where = { status: { notIn: ['CLOSED'] } };
+
+  if (teamName) {
+    where.team = { name: { contains: teamName, mode: 'insensitive' } };
+  }
+
+  const tickets = await prisma.ticket.findMany({
+    where,
+    take: limit,
+    orderBy: [{ priority: 'asc' }, { createdAt: 'desc' }],
+    include: {
+      requester: { select: { fullName: true } },
+      assignedTo: { select: { fullName: true } },
+      team: { select: { name: true } },
+    },
+  });
+
+  return tickets.map((t) => ({
+    id: t.id,
+    title: t.title,
+    priority: t.priority,
+    status: t.status,
+    team: t.team?.name || 'Non assigné',
+    requester: t.requester?.fullName || 'Inconnu',
+    assignedTo: t.assignedTo?.fullName || 'Non assigné',
+    createdAt: t.createdAt,
+  }));
+}
+
 module.exports = {
   getTopLocationsStats,
   getCategoryDistribution,
   getPerformanceMetrics,
   analyzeRootCause,
+  getTeamDistribution,
+  getOpenTicketsByTeam,
 };

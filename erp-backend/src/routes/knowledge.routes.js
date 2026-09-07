@@ -340,10 +340,10 @@ router.get('/drafts', async (req, res) => {
         select: {
           id: true,
           title: true,
-          requester: { select: { fullName: true, email: true } },
+          requester: { select: { fullName: true, email: true, avatarUrl: true } },
         },
       },
-      reviewedBy: { select: { fullName: true, email: true } },
+      reviewedBy: { select: { fullName: true, email: true, avatarUrl: true } },
     },
     orderBy: { createdAt: 'desc' },
   });

@@ -66,7 +66,7 @@ router.get('/', async (req, res) => {
     where,
     include: {
       ticket: { select: { id: true, title: true } },
-      reviewedBy: { select: { id: true, fullName: true, email: true } },
+      reviewedBy: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
     },
     orderBy: { createdAt: 'desc' },
   });

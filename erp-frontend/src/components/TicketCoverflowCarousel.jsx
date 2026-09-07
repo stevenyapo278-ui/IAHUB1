@@ -6,6 +6,7 @@
  * Each slide is a full ticket card
  */
 import React, { useState, useEffect, useCallback } from 'react';
+import UserAvatar from './UserAvatar';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -123,9 +124,7 @@ function TicketSlide({ ticket, isDark }) {
         {/* Footer */}
         <div className="pt-4 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="size-8 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-xs font-bold text-primary">
-              {ticket.assignedTo?.fullName?.charAt(0) || '?'}
-            </div>
+            <UserAvatar user={ticket.assignedTo} name={ticket.assignedTo?.fullName} size="md" colorClass="bg-primary/10 text-primary" />
             <span className="text-xs text-on-surface-variant font-medium truncate max-w-[200px]">
               {ticket.assignedTo?.fullName || 'Non assigné'}
             </span>

@@ -13,13 +13,17 @@ import {
   Sun,
   Moon,
   Zap,
+  CaseSensitive,
 } from 'lucide-react';
 import { useTheme, SKINS, LAYOUT_PRESETS } from '../context/ThemeContext';
+import { useUserPreferences } from '../context/UserPreferencesContext';
+import { FONT_STACKS, getFontFamily } from '../config/fonts';
 
 const TABS = [
   { id: 'skins', label: 'Skins', icon: Palette },
   { id: 'layout', label: 'Disposition', icon: LayoutTemplate },
   { id: 'effects', label: 'Effets', icon: Sparkles },
+  { id: 'fonts', label: 'Police', icon: CaseSensitive },
 ];
 
 export default function LayoutSettings({ open, onClose }) {
@@ -29,6 +33,7 @@ export default function LayoutSettings({ open, onClose }) {
     oled, toggleOled,
     layoutSettings, setLayoutSettings, applyLayoutPreset,
   } = useTheme();
+  const { fontFamily, setFontFamily } = useUserPreferences();
   const [activeTab, setActiveTab] = useState('skins');
 
   if (!open) return null;
@@ -136,6 +141,12 @@ export default function LayoutSettings({ open, onClose }) {
                 <EffectsTab
                   layoutSettings={layoutSettings}
                   setLayoutSettings={setLayoutSettings}
+                />
+              )}
+              {activeTab === 'fonts' && (
+                <FontsTab
+                  fontFamily={fontFamily}
+                  setFontFamily={setFontFamily}
                 />
               )}
             </div>
@@ -253,6 +264,89 @@ function SkinsTab({ skin, setSkin, theme, toggleTheme, oled, toggleOled }) {
             );
           })}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Fonts Tab ────────────────────────────────────────────────────────────────
+function FontsTab({ fontFamily, setFontFamily }) {
+  return (
+    <div className="space-y-5">
+      {/* Choix de la police */}
+      <div>
+        <label className="text-xs font-semibold mb-2 block" style={{ color: 'var(--color-on-surface)' }}>
+          Police principale
+        </label>
+        <p className="text-[10px] mb-3" style={{ color: 'var(--color-on-surface-variant)' }}>
+          Chaque bouton est affiché dans sa propre police — la préférence est enregistrée par utilisateur.
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          {Object.entries(FONT_STACKS).map(([key, font]) => {
+            const isActive = fontFamily === key;
+            return (
+              <button
+                key={key}
+                onClick={() => setFontFamily(key)}
+                className="relative flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium transition-all border"
+                style={{
+                  fontFamily: font.family,
+                  backgroundColor: isActive ? 'var(--color-primary)' : 'var(--color-surface-container)',
+                  color: isActive ? 'var(--color-on-primary)' : 'var(--color-on-surface)',
+                  borderColor: isActive ? 'var(--color-primary)' : 'var(--color-outline-variant)',
+                }}
+              >
+                {isActive && (
+                  <span
+                    className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full flex items-center justify-center"
+                    style={{ backgroundColor: 'var(--color-primary)', color: 'var(--color-on-primary)' }}
+                  >
+                    <Check className="w-2.5 h-2.5" />
+                  </span>
+                )}
+                <span
+                  className="text-base font-bold"
+                  style={{ fontFamily: font.family, fontWeight: 700 }}
+                >
+                  Ag
+                </span>
+                <span className="text-[11px]">{font.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Aperçu */}
+      <div
+        className="rounded-xl p-4 border"
+        style={{
+          backgroundColor: 'var(--color-surface-container)',
+          borderColor: 'var(--color-outline-variant)',
+        }}
+      >
+        <p className="text-xs font-semibold mb-2" style={{ color: 'var(--color-on-surface)' }}>
+          Aperçu
+        </p>
+        <p
+          className="text-[13px] leading-relaxed"
+          style={{
+            color: 'var(--color-on-surface)',
+            fontFamily: getFontFamily(fontFamily),
+          }}
+        >
+          Ticket #1024 — Impression réseau en panne. Une réponse automatique générée par l'IA
+          attend votre validation avant envoi au demandeur.
+        </p>
+        <p
+          className="text-[10px] mt-2"
+          style={{ color: 'var(--color-on-surface-variant)', fontFamily: getFontFamily(fontFamily) }}
+        >
+          Demandeur : Marie K. — Créé le 05/09/2026 à 14:32 · P2 · Réseau
+        </p>
+        <p className="font-mono text-[10px] mt-2" style={{ color: 'var(--color-on-surface-variant)' }}>
+          Les identifiants et données techniques restent en Ubuntu Mono.
+        </p>
       </div>
     </div>
   );

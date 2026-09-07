@@ -22,7 +22,7 @@ router.get('/', async (req, res) => {
     orderBy: { name: 'asc' },
     include: {
       userSkills: {
-        include: { user: { select: { id: true, fullName: true, email: true, role: true } } },
+        include: { user: { select: { id: true, fullName: true, email: true, role: true, avatarUrl: true } } },
         orderBy: { level: 'desc' },
       },
     },

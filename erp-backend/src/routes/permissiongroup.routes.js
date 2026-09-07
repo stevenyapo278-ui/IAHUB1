@@ -22,7 +22,7 @@ function invalidKeys(permissions) {
 router.get('/', async (req, res) => {
   const groups = await prisma.permissionGroup.findMany({
     include: {
-      members: { select: { id: true, fullName: true, email: true, role: true } },
+      members: { select: { id: true, fullName: true, email: true, role: true, avatarUrl: true } },
       _count: { select: { members: true } },
     },
     orderBy: { name: 'asc' },
@@ -33,7 +33,7 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   const group = await prisma.permissionGroup.findUnique({
     where: { id: Number(req.params.id) },
-    include: { members: { select: { id: true, fullName: true, email: true, role: true } } },
+    include: { members: { select: { id: true, fullName: true, email: true, role: true, avatarUrl: true } } },
   });
   if (!group) return res.status(404).json({ error: 'Groupe introuvable' });
   return res.json(group);
@@ -73,8 +73,14 @@ router.patch('/:id', requireSuperAdmin, async (req, res) => {
 
   try {
     const group = await prisma.permissionGroup.update({ where: { id: Number(req.params.id) }, data });
-    return res.json(group);
+    // Journalisation (était du code mort avant le return — jamais exécuté)
     auditLog('PERMISSION_GROUP_UPDATED', { actor: req.user, targetType: 'PermissionGroup', targetId: group.id, targetLabel: group.name, metadata: { changedFields: Object.keys(data) } }).catch(() => {});
+    // Notifier en temps réel les membres du groupe : leurs menus/permissions côté frontend
+    // se mettent à jour instantanément via l'event auth:user-updated (retirer un droit lié
+    // à un menu fait disparaître ce menu sans reconnexion).
+    const members = await prisma.permissionGroup.findUnique({ where: { id: group.id }, select: { members: { select: { id: true } } } });
+    for (const m of (members?.members || [])) emitUserUpdated(m.id);
+    return res.json(group);
   } catch (err) {
     return res.status(404).json({ error: 'Groupe introuvable' });
   }
@@ -133,7 +139,7 @@ router.post('/:id/assign', [body('userIds').isArray({ min: 1 })], async (req, re
 
       return tx.permissionGroup.findUnique({
         where: { id: groupId },
-        include: { members: { select: { id: true, fullName: true, email: true, role: true } } },
+        include: { members: { select: { id: true, fullName: true, email: true, role: true, avatarUrl: true } } },
       });
     });
 
@@ -157,7 +163,7 @@ router.post('/:id/unassign', [body('userIds').isArray({ min: 1 })], async (req, 
     const group = await prisma.permissionGroup.update({
       where: { id: Number(req.params.id) },
       data: { members: { disconnect: userIds.map((id) => ({ id })) } },
-      include: { members: { select: { id: true, fullName: true, email: true, role: true } } },
+      include: { members: { select: { id: true, fullName: true, email: true, role: true, avatarUrl: true } } },
     });
     for (const uid of userIds) emitUserUpdated(uid); // permissions instantanées côté utilisateur concerné
     return res.json(group);

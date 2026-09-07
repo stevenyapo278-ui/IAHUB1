@@ -21,7 +21,7 @@ router.get('/', async (req, res) => {
     ];
   }
 
-  const locations = await prisma.glpiLocation.findMany({
+  const locations = await prisma.location.findMany({
     where,
     orderBy: [{ isCustom: 'asc' }, { completename: 'asc' }],
     include: {
@@ -42,12 +42,12 @@ router.post(
 
     const { name, completename, address, postcode, town, country, building, room } = req.body;
 
-    const existing = await prisma.glpiLocation.findFirst({
+    const existing = await prisma.location.findFirst({
       where: { name: { equals: name, mode: 'insensitive' } },
     });
     if (existing) return res.status(409).json({ error: 'Un lieu avec ce nom existe déjà' });
 
-    const location = await prisma.glpiLocation.create({
+    const location = await prisma.location.create({
       data: {
         name,
         completename: completename || name,
@@ -74,7 +74,7 @@ router.patch(
     const id = Number(req.params.id);
     const { name, completename, address, postcode, town, country, building, room, isActive } = req.body;
 
-    const existing = await prisma.glpiLocation.findUnique({ where: { id } });
+    const existing = await prisma.location.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ error: 'Lieu introuvable' });
 
     const data = {};
@@ -88,7 +88,7 @@ router.patch(
     if (room !== undefined) data.room = room;
     if (isActive !== undefined) data.isActive = isActive;
 
-    const location = await prisma.glpiLocation.update({ where: { id }, data });
+    const location = await prisma.location.update({ where: { id }, data });
     res.json(location);
     auditLog('LOCATION_UPDATED', { actor: req.user, targetType: 'GlpiLocation', targetId: id, targetLabel: existing.name, metadata: { changedFields: Object.keys(data) } }).catch(() => {});
   }
@@ -113,7 +113,7 @@ router.get('/potential-requesters', async (req, res) => {
   } : {};
   const users = await prisma.user.findMany({
     where: userWhere,
-    select: { id: true, fullName: true, email: true, role: true },
+    select: { id: true, fullName: true, email: true, role: true, avatarUrl: true },
     orderBy: { fullName: 'asc' },
     take: 50,
   });
@@ -178,8 +178,8 @@ router.get('/requesters', async (req, res) => {
   const links = await prisma.requesterLocation.findMany({
     where,
     include: {
-      glpiLocation: { select: { id: true, name: true, completename: true, town: true } },
-      assignedBy: { select: { id: true, fullName: true, email: true } },
+      location: { select: { id: true, name: true, completename: true, town: true } },
+      assignedBy: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
     },
     orderBy: { lastUsedAt: 'desc' },
   });
@@ -189,13 +189,13 @@ router.get('/requesters', async (req, res) => {
 // Liste les demandeurs d'un lieu spécifique
 router.get('/:id/requesters', async (req, res) => {
   const locationId = Number(req.params.id);
-  const location = await prisma.glpiLocation.findUnique({ where: { id: locationId }, select: { id: true, name: true } });
+  const location = await prisma.location.findUnique({ where: { id: locationId }, select: { id: true, name: true } });
   if (!location) return res.status(404).json({ error: 'Lieu introuvable' });
 
   const links = await prisma.requesterLocation.findMany({
-    where: { glpiLocationId: locationId },
+    where: { locationId: locationId },
     include: {
-      assignedBy: { select: { id: true, fullName: true, email: true } },
+      assignedBy: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
     },
     orderBy: [{ assignmentCount: 'desc' }, { lastUsedAt: 'desc' }],
   });
@@ -206,19 +206,19 @@ router.get('/:id/requesters', async (req, res) => {
 router.post(
   '/requesters',
   requirePermission('locations.manage', ['ADMIN', 'HOTLINE']),
-  [body('email').isEmail().normalizeEmail(), body('glpiLocationId').isInt()],
+  [body('email').isEmail().normalizeEmail(), body('locationId').isInt()],
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const email = req.body.email.toLowerCase().trim();
-    const glpiLocationId = Number(req.body.glpiLocationId);
+    const locationId = Number(req.body.locationId);
 
-    const location = await prisma.glpiLocation.findUnique({ where: { id: glpiLocationId } });
+    const location = await prisma.location.findUnique({ where: { id: locationId } });
     if (!location) return res.status(404).json({ error: 'Lieu introuvable' });
 
     const link = await prisma.requesterLocation.upsert({
-      where: { email_glpiLocationId: { email, glpiLocationId } },
+      where: { email_locationId: { email, locationId } },
       update: {
         assignmentCount: { increment: 1 },
         lastUsedAt: new Date(),
@@ -226,11 +226,11 @@ router.post(
       },
       create: {
         email,
-        glpiLocationId,
+        locationId,
         assignedById: req.user.sub,
       },
       include: {
-        glpiLocation: { select: { id: true, name: true, completename: true } },
+        location: { select: { id: true, name: true, completename: true } },
       },
     });
 
@@ -254,25 +254,25 @@ router.post('/:id/reassign', requirePermission('locations.manage', ['ADMIN']), a
     return res.status(400).json({ error: 'Lieu cible invalide' });
   }
 
-  const source = await prisma.glpiLocation.findUnique({ where: { id: sourceId } });
+  const source = await prisma.location.findUnique({ where: { id: sourceId } });
   if (!source) return res.status(404).json({ error: 'Lieu source introuvable' });
 
-  const target = await prisma.glpiLocation.findUnique({ where: { id: Number(targetLocationId) } });
+  const target = await prisma.location.findUnique({ where: { id: Number(targetLocationId) } });
   if (!target) return res.status(404).json({ error: 'Lieu cible introuvable' });
 
   // Déplacer toutes les associations du lieu source vers le lieu cible
-  const requesters = await prisma.requesterLocation.findMany({ where: { glpiLocationId: sourceId } });
+  const requesters = await prisma.requesterLocation.findMany({ where: { locationId: sourceId } });
   let moved = 0;
   let skipped = 0;
 
   for (const r of requesters) {
     try {
       await prisma.requesterLocation.upsert({
-        where: { email_glpiLocationId: { email: r.email, glpiLocationId: Number(targetLocationId) } },
+        where: { email_locationId: { email: r.email, locationId: Number(targetLocationId) } },
         update: { assignmentCount: { increment: r.assignmentCount }, lastUsedAt: r.lastUsedAt },
         create: {
           email: r.email,
-          glpiLocationId: Number(targetLocationId),
+          locationId: Number(targetLocationId),
           assignedById: req.user.sub,
           assignmentCount: r.assignmentCount,
           lastUsedAt: r.lastUsedAt,
@@ -289,8 +289,8 @@ router.post('/:id/reassign', requirePermission('locations.manage', ['ADMIN']), a
 
   // Aussi mettre à jour les tickets existants qui pointent vers ce lieu
   const ticketsUpdated = await prisma.ticket.updateMany({
-    where: { glpiLocationId: sourceId },
-    data: { glpiLocationId: Number(targetLocationId) },
+    where: { locationId: sourceId },
+    data: { locationId: Number(targetLocationId) },
   });
 
   res.json({ moved, skipped, ticketsUpdated: ticketsUpdated.count, source: source.name, target: target.name });
@@ -303,7 +303,7 @@ router.post('/:id/reassign', requirePermission('locations.manage', ['ADMIN']), a
 // Supprimer définitivement un lieu (après réassignation)
 router.delete('/:id', requirePermission('locations.manage', ['ADMIN']), async (req, res) => {
   const id = Number(req.params.id);
-  const existing = await prisma.glpiLocation.findUnique({ where: { id }, include: { _count: { select: { requesterLinks: true } } } });
+  const existing = await prisma.location.findUnique({ where: { id }, include: { _count: { select: { requesterLinks: true } } } });
   if (!existing) return res.status(404).json({ error: 'Lieu introuvable' });
 
   // S'il reste des demandeurs associés, refuser la suppression
@@ -314,7 +314,7 @@ router.delete('/:id', requirePermission('locations.manage', ['ADMIN']), async (r
     });
   }
 
-  await prisma.glpiLocation.delete({ where: { id } });
+  await prisma.location.delete({ where: { id } });
   await auditLog('LOCATION_DELETED', { actor: req.user, targetType: 'GlpiLocation', targetId: id, targetLabel: existing.name });
   res.status(204).send();
 });

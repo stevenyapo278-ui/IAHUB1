@@ -8,6 +8,9 @@ router.use(authenticate);
 router.get('/stats', async (req, res) => {
   const { startDate, endDate } = req.query;
   const where = {};
+  // Les tickets en attente d'approbation restent dans le Centre de Validation :
+  // ils ne comptent pas dans les statistiques tant qu'ils ne sont pas approuvés.
+  where.approvalStatus = { not: 'PENDING' };
   if (startDate || endDate) {
     where.createdAt = {};
     if (startDate) where.createdAt.gte = new Date(startDate);
@@ -18,10 +21,11 @@ router.get('/stats', async (req, res) => {
     }
   }
 
-  const [byStatus, byPriority, byTeam, total, openCount] = await Promise.all([
+  const [byStatus, byPriority, byTeam, byCategory, total, openCount] = await Promise.all([
     prisma.ticket.groupBy({ by: ['status'], where, _count: { _all: true } }),
     prisma.ticket.groupBy({ by: ['priority'], where, _count: { _all: true } }),
     prisma.ticket.groupBy({ by: ['teamId'], where, _count: { _all: true } }),
+    prisma.ticket.groupBy({ by: ['category'], where, _count: { _all: true } }),
     prisma.ticket.count({ where }),
     prisma.ticket.count({ where: { ...where, status: { in: ['NEW', 'OPEN', 'PENDING'] } } }),
   ]);
@@ -38,6 +42,9 @@ router.get('/stats', async (req, res) => {
     open: openCount,
     byStatus: byStatus.map((s) => ({ status: s.status, count: s._count._all })),
     byPriority: byPriority.map((p) => ({ priority: p.priority, count: p._count._all })),
+    byCategory: byCategory
+      .map((c) => ({ category: c.category || 'Sans catégorie', count: c._count._all }))
+      .sort((a, b) => b.count - a.count),
     byTeam: byTeam.map((t) => ({
       teamId: t.teamId,
       teamName: t.teamId ? teamNameById[t.teamId] || 'Inconnue' : 'Non assignée',
@@ -51,7 +58,7 @@ router.get('/pending-approvals', async (req, res) => {
   const tickets = await prisma.ticket.findMany({
     where: { approvalStatus: 'PENDING' },
     include: {
-      requester: { select: { id: true, fullName: true, email: true } },
+      requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
       team: { select: { id: true, name: true } },
     },
     orderBy: { createdAt: 'asc' },
@@ -64,8 +71,8 @@ router.get('/pending-approvals', async (req, res) => {
 router.get('/recent-activity', async (req, res) => {
   const tickets = await prisma.ticket.findMany({
     include: {
-      requester: { select: { id: true, fullName: true, email: true } },
-      assignedTo: { select: { id: true, fullName: true, email: true } },
+      requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+      assignedTo: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
       team: { select: { id: true, name: true } },
     },
     orderBy: { updatedAt: 'desc' },
@@ -83,7 +90,7 @@ router.get('/needs-human-review', async (req, res) => {
     take: 20,
     distinct: ['ticketId'],
     include: {
-      ticket: { select: { id: true, title: true, status: true, glpiTicketId: true } },
+      ticket: { select: { id: true, title: true, status: true } },
     },
   });
 
@@ -162,7 +169,7 @@ router.get('/technician-performance', async (req, res) => {
 
   const technicians = await prisma.user.findMany({
     where: { role: { in: ['TECHNICIAN', 'ADMIN'] }, isActive: true },
-    select: { id: true, fullName: true, email: true },
+    select: { id: true, fullName: true, email: true, avatarUrl: true },
   });
 
   const results = await Promise.all(
@@ -211,7 +218,7 @@ router.get('/technician-stats', async (req, res) => {
         ...(teamId ? { teamId: Number(teamId) } : {}),
         ...(assignedToId ? { id: Number(assignedToId) } : {}),
       },
-      select: { id: true, fullName: true, email: true, teamId: true },
+      select: { id: true, fullName: true, email: true, teamId: true, avatarUrl: true },
     });
     const techIds = technicians.map((t) => t.id);
 
@@ -407,15 +414,15 @@ router.get('/activity-trend', async (req, res) => {
       prisma.ticket.findMany({
         where: { createdAt: { gte: since, lte: until } },
         include: {
-          requester: { select: { fullName: true, email: true } },
-          assignedTo: { select: { fullName: true } },
+          requester: { select: { fullName: true, email: true, avatarUrl: true } },
+          assignedTo: { select: { fullName: true, avatarUrl: true } },
           team: { select: { name: true } },
         },
         orderBy: { createdAt: 'desc' },
       }),
       prisma.user.findMany({
         where: { role: { in: ['TECHNICIAN', 'ADMIN'] }, isActive: true },
-        select: { fullName: true, email: true },
+        select: { fullName: true, email: true, avatarUrl: true },
       }),
       prisma.aiEmailDraft.count({ where: { status: 'APPROVED', createdAt: { gte: since, lte: until } } }),
     ]);
@@ -594,7 +601,7 @@ router.get('/sla-analytics', async (req, res) => {
         slaResolutionDueAt: { not: null, lt: new Date() },
         slaBreachedAt: null,
       },
-      select: { id: true, title: true, priority: true, status: true, slaResolutionDueAt: true, assignedTo: { select: { fullName: true } } },
+      select: { id: true, title: true, priority: true, status: true, slaResolutionDueAt: true, assignedTo: { select: { fullName: true, avatarUrl: true } } },
       orderBy: { slaResolutionDueAt: 'asc' },
       take: 50,
     });
@@ -677,6 +684,62 @@ router.get('/closure-stats', async (req, res) => {
     lowTrust: await prisma.senderReputation.count({ where: { closureStatus: 'LOW_TRUST_CLOSURE' } }),
     series: [...byDay.values()],
   });
+});
+
+// ── Heatmap activité tickets (jour de la semaine × semaine) ──────────────
+router.get('/ticket-heatmap', async (req, res) => {
+  try {
+    const maxWeeks = Math.min(parseInt(req.query.weeks) || 20, 52);
+    const since = new Date();
+    // Calculer le lundi de début selon le nombre de semaines demandé
+    const startDate = new Date();
+    const dayOfWeek = startDate.getDay(); // 0=dim, 1=lun...
+    const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    startDate.setDate(startDate.getDate() + mondayOffset);
+    // Reculer de maxWeeks-1 semaines pour afficher les dernières semaines complètes
+    startDate.setDate(startDate.getDate() - (maxWeeks - 1) * 7);
+
+    const tickets = await prisma.ticket.findMany({
+      where: { createdAt: { gte: startDate } },
+      select: { createdAt: true },
+    });
+
+    // Grille 7 lignes (lun-dim) × maxWeeks colonnes
+    const grid = Array.from({ length: 7 }, () => []);
+
+    const weeks = [];
+    const cursor = new Date(startDate);
+
+    for (let w = 0; w < maxWeeks; w++) {
+      const weekLabel = `S${w + 1}`;
+      weeks.push(weekLabel);
+      for (let day = 0; day < 7; day++) {
+        grid[day].push({ week: weekLabel, date: cursor.toISOString().slice(0, 10), count: 0 });
+        cursor.setDate(cursor.getDate() + 1);
+      }
+    }
+
+    // Remplir les compteurs
+    for (const t of tickets) {
+      const d = new Date(t.createdAt);
+      const dayIdx = d.getDay() === 0 ? 6 : d.getDay() - 1; // 0=lun, 6=dim
+      const diffDays = Math.floor((d - startDate) / (1000 * 60 * 60 * 24));
+      const weekIdx = Math.floor(diffDays / 7);
+
+      if (weekIdx >= 0 && weekIdx < maxWeeks && dayIdx >= 0 && dayIdx < 7) {
+        grid[dayIdx][weekIdx].count += 1;
+      }
+    }
+
+    return res.json({
+      weeks,
+      days: ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'],
+      grid: grid.map((row) => row.map((cell) => cell.count)),
+      total: tickets.length,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // ── Évolution des tickets dans le temps ────────────────────────────────────

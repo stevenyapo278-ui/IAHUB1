@@ -5,7 +5,7 @@ import {
   ShieldCheck, Ticket, MailCheck, Clock, CheckCircle2,
   XCircle, AlertTriangle, RefreshCw, ChevronRight, User,
   Sparkles, ExternalLink, Send, ArrowRight, Shield, Check, X,
-  Bell, BookOpen, Edit3, Tags, HelpCircle, TrendingUp, Search,
+  Bell, BookOpen, Edit3, Tags, HelpCircle, TrendingUp, Search, Eye,
 } from 'lucide-react';
 import { staggerContainer, staggerItem } from '../utils/animations';
 import {
@@ -15,13 +15,32 @@ import { sanitizeHtml } from '../utils/sanitize';
 import api from '../api/client';
 import useSystemSettings from '../hooks/useSystemSettings';
 import { useAuth } from '../context/AuthContext';
+import { hasPermission } from '../utils/permissions';
 import { playApproval, playRejection, playError } from '../utils/sounds';
+import UserAvatar from '../components/UserAvatar';
+import Pagination from '../components/Pagination';
+import {
+  MapPin, Layers, Flame, Bot, AlertOctagon,
+} from 'lucide-react';
 import {
   clearClosureAnalysis,
   getClosureAnalysisState,
   startClosureAnalysis,
   subscribeClosureAnalysis,
 } from '../stores/closureAnalysisStore';
+
+// Badges de priorité (échelle GLPI P1–P4) et libellés d'urgence/impact (VERY_LOW → MAJOR)
+const PRIORITY_BADGES = {
+  P1: 'bg-red-600/20 text-red-700 dark:text-red-300 border-red-600/40',
+  P2: 'bg-orange-500/15 text-orange-600 dark:text-orange-400 border-orange-500/30',
+  P3: 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30',
+  P4: 'bg-teal-500/15 text-teal-600 dark:text-teal-400 border-teal-500/30',
+};
+const PRIORITY_LABELS = { P1: 'P1 · Critique', P2: 'P2 · Haute', P3: 'P3 · Moyenne', P4: 'P4 · Basse' };
+const LEVEL_LABELS = {
+  MAJOR: 'Majeure', VERY_HIGH: 'Très haute', HIGH: 'Haute',
+  MEDIUM: 'Moyenne', LOW: 'Basse', VERY_LOW: 'Très basse',
+};
 
 function matchesSearch(item, tab, q) {
   let fields = [];
@@ -50,7 +69,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const { autonomousMode } = useSystemSettings();
   const { user } = useAuth();
-  const activeTab = searchParams.get('tab') || defaultTab;
+  const rawTab = searchParams.get('tab') || defaultTab;
 
   const [pendingTickets, setPendingTickets] = useState([]);
   const [pendingDrafts, setPendingDrafts] = useState([]);
@@ -86,6 +105,15 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   const [editBody, setEditBody] = useState('');
   const [savingDraft, setSavingDraft] = useState(false);
 
+  // Modale détail brouillon (réponse IA & relances)
+  const [detailDraft, setDetailDraft] = useState(null);
+
+  // Modale détail ticket (onglets Tickets & Clôtures IA)
+  const [detailTicket, setDetailTicket] = useState(null);
+
+  // Modale détail brouillon de connaissance
+  const [detailKb, setDetailKb] = useState(null);
+
   // Modale d'approbation connaissance
   const [showKbApproveModal, setShowKbApproveModal] = useState(false);
   const [kbDraftToApprove, setKbDraftToApprove] = useState(null);
@@ -115,7 +143,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     const mineFilter = isTechnician ? '&mine=true' : '';
 
     Promise.all([
-      api.get('/tickets?approvalStatus=PENDING&limit=100').catch(() => ({ data: { tickets: [] } })),
+      api.get('/tickets/pending-approval?limit=200').catch(() => ({ data: { items: [] } })),
       api.get(`/tickets?closeSuggested=true${mineFilter}&limit=100`).catch(() => ({ data: { tickets: [] } })),
       api.get('/dashboard/pending-ai-drafts').catch(() => ({ data: [] })),
       api.get('/knowledge/drafts').catch(() => ({ data: [] })),
@@ -125,8 +153,6 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
         const ticketList = Array.isArray(ticketsRes.data)
           ? ticketsRes.data
           : ticketsRes.data?.items || [];
-        // Les tickets d'expéditeurs à risque passent en tête de file pour la revue Hotline
-        ticketList.sort((a, b) => (b.lowTrustSender ? 1 : 0) - (a.lowTrustSender ? 1 : 0));
         setPendingTickets(ticketList);
 
         const closureList = Array.isArray(closuresRes.data)
@@ -161,6 +187,26 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     setCurrentPage(1);
   }
 
+  // ── Onglets filtrés par droits (cohérent avec les gates backend) ─────────────
+  // Chaque onglet correspond à des endpoints gated côté serveur : un technicien sans
+  // le droit ne doit ni voir l'onglet ni pouvoir y accéder via l'URL (?tab=drafts).
+  const TAB_PERMISSIONS = {
+    tickets: 'tickets.approve', // POST /tickets/:id/approve|reject|validate-close
+    drafts: 'emaildrafts.manage', // PATCH/POST /ai-email-drafts/:id/approve|reject
+    reminders: 'automation.manage', // POST /reminders/run + config
+    closures: 'tickets.approve', // POST /tickets/:id/validate-close
+    knowledge: 'knowledge.manage', // POST /knowledge/drafts/:id/approve|reject
+  };
+  const tabAllowed = (tab) => !TAB_PERMISSIONS[tab] || hasPermission(user, TAB_PERMISSIONS[tab]);
+
+  // Si l'URL pointe un onglet non autorisé (ou inconnu), retomber sur le 1er autorisé.
+  const firstAllowedTab = ['tickets', 'drafts', 'reminders', 'closures', 'knowledge'].find(tabAllowed) || 'tickets';
+  const activeTab = tabAllowed(rawTab) ? rawTab : firstAllowedTab;
+  const needsTabFix = activeTab !== rawTab;
+  useEffect(() => {
+    if (needsTabFix) setSearchParams({ tab: activeTab }, { replace: true });
+  }, [needsTabFix, activeTab]);
+
   const activeList = {
     tickets: pendingTickets,
     drafts: pendingDrafts,
@@ -192,11 +238,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     try {
       const res = await api.post(`/tickets/${ticketId}/approve`);
       playApproval();
-      toast.success(
-        autonomousMode
-          ? `Ticket #${ticketId} approuvé !`
-          : `Ticket #${ticketId} approuvé ! GLPI #${res.data.glpiTicketId || ''}`
-      );
+      toast.success(`Ticket #${ticketId} approuvé !`);
       loadAllData(true);
     } catch (err) {
       playError();
@@ -340,11 +382,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
       // Step 2: Approuver et envoyer le brouillon de réponse
       await api.post(`/ai-email-drafts/${combinedDraft.id}/approve`);
 
-      toast.success(
-        autonomousMode
-          ? 'Ticket approuvé ET Réponse IA envoyée avec succès !'
-          : 'Ticket GLPI créé ET Réponse IA envoyée avec succès !'
-      );
+      toast.success('Ticket créé ET Réponse IA envoyée avec succès !');
       setShowCombinedModal(false);
       setCombinedDraft(null);
       loadAllData(true);
@@ -463,7 +501,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   );
 
   return (
-    <div className="p-6 sm:p-8 max-w-7xl mx-auto space-y-8 animate-fadeIn">
+    <div className="flex flex-col h-[calc(100vh-4rem)] p-6 sm:p-8 max-w-7xl mx-auto animate-fadeIn">
+      {/* ── EN-TÊTE + ONGLETS + RECHERCHE (fixes, non scrollables) ── */}
+      <div className="shrink-0 space-y-6">
       {/* En-tête de la page */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-outline-variant/30 pb-6">
         <div className="space-y-1">
@@ -474,9 +514,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             <div>
               <h1 className="text-2xl font-black text-on-surface tracking-tight">Centre de Validation & Approbations</h1>
               <p className="text-xs text-on-surface-variant font-medium">
-                {autonomousMode
-                  ? "Hub unifié Hotline & Techniciens pour valider la création des tickets et l'envoi des réponses IA."
-                  : "Hub unifié Hotline & Techniciens pour valider la création GLPI des tickets et l'envoi des réponses IA."}
+                Hub unifié Hotline &amp; Techniciens pour valider la création des tickets et l'envoi des réponses IA.
               </p>
             </div>
           </div>
@@ -493,8 +531,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
         </button>
       </div>
 
-      {/* Barre d'onglets Principale */}
+      {/* Barre d'onglets Principale — seuls les onglets autorisés par les droits sont affichés */}
       <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-surface-container border border-outline-variant/30 w-full">
+        {tabAllowed('tickets') && (
         <button
           onClick={() => handleTabChange('tickets')}
           className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
@@ -504,14 +543,16 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
           }`}
         >
           <Ticket className="w-4 h-4" />
-          <span className="whitespace-nowrap">{autonomousMode ? 'Tickets en attente' : 'Tickets en attente GLPI'}</span>
+          <span className="whitespace-nowrap">Tickets en attente</span>
           <span className={`px-2 py-0.5 rounded-full text-[10px] font-black whitespace-nowrap ${
             activeTab === 'tickets' ? 'bg-white/20 text-white' : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
           }`}>
             {pendingTickets.length}
           </span>
         </button>
+        )}
 
+        {tabAllowed('drafts') && (
         <button
           onClick={() => handleTabChange('drafts')}
           className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
@@ -528,7 +569,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             {pendingDrafts.length}
           </span>
         </button>
+        )}
 
+        {tabAllowed('reminders') && (
         <button
           onClick={() => handleTabChange('reminders')}
           className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
@@ -545,7 +588,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             {reminderDrafts.length}
           </span>
         </button>
+        )}
 
+        {tabAllowed('closures') && (
         <button
           onClick={() => handleTabChange('closures')}
           className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
@@ -562,7 +607,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             {pendingClosures.length}
           </span>
         </button>
+        )}
 
+        {tabAllowed('knowledge') && (
         <button
           onClick={() => handleTabChange('knowledge')}
           className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
@@ -579,6 +626,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             {pendingKnowledgeDrafts.length}
           </span>
         </button>
+        )}
       </div>
 
       {/* Barre de recherche + nombre d'affichage par page */}
@@ -619,6 +667,10 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
           </select>
         </div>
       </div>
+      </div>{/* fin shrink-0 */}
+
+      {/* ── CONTENU SCROLLABLE ── */}
+      <div className="flex-1 overflow-y-auto min-h-0 space-y-6 pt-2">
 
       {/* CONTENU DE L'ONGLET 1 : TICKETS EN ATTENTE GLPI */}
       {activeTab === 'tickets' && (
@@ -635,30 +687,43 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                 <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto" />
                 <h3 className="text-base font-bold text-on-surface">Aucun ticket en attente d'approbation</h3>
                 <p className="text-xs text-on-surface-variant max-w-md mx-auto">
-                  {autonomousMode
-                    ? 'Tous les tickets créés ont été validés.'
-                    : 'Tous les tickets créés ont été validés et transmis à GLPI.'}
+                  Tous les tickets créés ont été validés et transmis.
                 </p>
               </div>
             ) : noResultsBlock
           ) : (
             <div className="space-y-4">
-              {paginatedList.map((t) => (
+              {paginatedList.map((t) => {
+                const prioClass = PRIORITY_BADGES[t.priority] || PRIORITY_BADGES.MEDIUM;
+                return (
                 <div
                   key={t.id}
-                  className="bento-card p-6 flex flex-col md:flex-row md:items-center justify-between gap-6 hover-interactive transition-all"
+                  className={`bento-card p-5 flex flex-col lg:flex-row lg:items-start justify-between gap-5 hover-interactive transition-all ${
+                    t.lowTrustSender ? 'border-red-500/40 ring-1 ring-red-500/20' : ''
+                  }`}
                 >
-                  <div className="space-y-2 flex-1 min-w-0">
-                    <div className="flex items-center gap-2.5 flex-wrap">
+                  <div className="space-y-2.5 flex-1 min-w-0">
+                    {/* Ligne 1 : badges d'état */}
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="px-2.5 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-400 text-[10px] font-extrabold border border-amber-500/30 uppercase tracking-wider">
                         🛡️ En attente Hotline
                       </span>
+                      {t.isMajorIncident && (
+                        <span className="px-2.5 py-0.5 rounded-md bg-red-600/20 text-red-700 dark:text-red-300 text-[10px] font-extrabold border border-red-600/40 uppercase tracking-wider flex items-center gap-1">
+                          <Flame className="w-3 h-3" /> Incident majeur
+                        </span>
+                      )}
                       {t.lowTrustSender && (
                         <span
                           className="px-2.5 py-0.5 rounded-md bg-red-500/15 text-red-600 dark:text-red-400 text-[10px] font-extrabold border border-red-500/40 uppercase tracking-wider"
                           title="Cet expéditeur a un taux de rejets élevé par la Hotline : sa suggestion IA est à vérifier avec une attention particulière"
                         >
                           ⚠️ Expéditeur à risque
+                        </span>
+                      )}
+                      {t.aiProcessed && (
+                        <span className="px-2.5 py-0.5 rounded-md bg-violet-500/15 text-violet-600 dark:text-violet-400 text-[10px] font-extrabold border border-violet-500/30 uppercase tracking-wider flex items-center gap-1" title="Ticket créé/traité par l'agent IA de triage">
+                          <Bot className="w-3 h-3" /> IA
                         </span>
                       )}
                       {t.category && (
@@ -669,13 +734,47 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                       <span className="text-[11px] text-on-surface-variant font-mono">#{t.id}</span>
                     </div>
 
-                    <h3 className="text-base font-bold text-on-surface truncate">{t.title}</h3>
-                    <p className="text-xs text-on-surface-variant line-clamp-2">{t.content}</p>
+                    {/* Titre + résumé */}
+                    <h3 className="text-base font-bold text-on-surface" style={{ overflowWrap: 'anywhere' }}>{t.title}</h3>
+                    {t.aiSummary && (
+                      <p className="text-[11px] text-violet-700 dark:text-violet-300 bg-violet-500/8 rounded-lg px-3 py-1.5 border border-violet-500/15 italic line-clamp-2">
+                        <Bot className="w-3 h-3 inline mr-1 -mt-0.5" />{t.aiSummary}
+                      </p>
+                    )}
+                    <p className="text-xs text-on-surface-variant line-clamp-3" style={{ whiteSpace: 'pre-line', overflowWrap: 'anywhere' }}>{t.content}</p>
 
-                    <div className="flex items-center gap-4 text-[11px] text-on-surface-variant pt-1 flex-wrap">
-                      <span className="flex items-center gap-1">
-                        <User className="w-3.5 h-3.5 text-primary" />
-                        {t.requester?.fullName || t.sourceName || t.sourceEmail || 'Demandeur anonyme'}
+                    {/* Attributs GLPI : type, priorité, urgence, impact, lieu, source */}
+                    <div className="flex items-center gap-1.5 flex-wrap text-[10px] font-bold">
+                      <span className={`px-2 py-0.5 rounded-md border ${prioClass}`}>
+                        {PRIORITY_LABELS[t.priority] || t.priority}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface-variant">
+                        {t.type === 'REQUEST' ? 'Demande' : 'Incident'} · U: {LEVEL_LABELS[t.urgency] || t.urgency} · I: {LEVEL_LABELS[t.impact] || t.impact}
+                      </span>
+                      {t.glpiLocationName && (
+                        <span className="px-2 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface-variant flex items-center gap-1">
+                          <MapPin className="w-3 h-3" /> {t.glpiLocationName}
+                        </span>
+                      )}
+                      {t.impactedSites?.length > 0 && (
+                        <span className="px-2 py-0.5 rounded-md bg-orange-500/10 border border-orange-500/25 text-orange-600 dark:text-orange-400 flex items-center gap-1" title={t.impactedSites.join(', ')}>
+                          <Layers className="w-3 h-3" /> {t.impactedSites.length} site(s)
+                        </span>
+                      )}
+                      {(t.source || t.sourceEmail) && (
+                        <span className="px-2 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface-variant truncate max-w-[260px]" title={t.sourceEmail || t.source}>
+                          {t.source || 'Email'}{t.sourceEmail ? ` · ${t.sourceEmail}` : ''}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Demandeur avec photo + date */}
+                    <div className="flex items-center gap-4 text-[11px] text-on-surface-variant pt-0.5 flex-wrap">
+                      <span className="flex items-center gap-1.5 min-w-0">
+                        <UserAvatar user={t.requester} name={t.sourceName} size="xs" />
+                        <span className="truncate max-w-[220px]">
+                          {t.requester?.fullName || t.sourceName || t.sourceEmail || 'Demandeur anonyme'}
+                        </span>
                       </span>
                       <span className="flex items-center gap-1">
                         <Clock className="w-3.5 h-3.5 text-primary" />
@@ -685,9 +784,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                   </div>
 
                   {/* Actions directes Hotline */}
-                  <div className="flex items-center gap-2 shrink-0 border-t md:border-t-0 pt-4 md:pt-0 border-outline-variant/20">
+                  <div className="flex items-center gap-2 shrink-0 border-t lg:border-t-0 pt-4 lg:pt-0 border-outline-variant/20">
                     <button
-                      onClick={() => navigate(`/tickets/${t.id}`)}
+                      onClick={() => setDetailTicket(t)}
                       className="px-3.5 py-2 rounded-xl text-xs font-semibold border border-outline-variant/40 hover:bg-surface-container text-on-surface transition-all flex items-center gap-1"
                     >
                       <span>Détails</span>
@@ -706,11 +805,12 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                       className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-500/20 transition-all flex items-center gap-1.5"
                     >
                       <Check className="w-4 h-4" />
-                      <span>{autonomousMode ? 'Approuver' : 'Approuver GLPI'}</span>
+                      <span>Approuver</span>
                     </button>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -771,12 +871,12 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                         {glpiId ? (
                           <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-500/30 flex items-center gap-1.5">
                             <CheckCircle2 className="w-3.5 h-3.5" />
-                            🔗 Créé dans GLPI (#{glpiId})
+                            🔗 Créé (#{glpiId})
                           </span>
                         ) : isTicketPending ? (
                           <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 dark:bg-amber-500/15 dark:text-amber-400 border border-amber-300 dark:border-amber-500/30 flex items-center gap-1.5">
                             <Shield className="w-3.5 h-3.5" />
-                            {autonomousMode ? '🛡️ Ticket en attente d\'approbation' : '🛡️ Ticket non créé GLPI (En attente)'}
+                            {autonomousMode ? '🛡️ Ticket en attente d\'approbation' : '🛡️ Ticket non créé (En attente)'}
                           </span>
                         ) : (
                           <span className="px-3 py-1 rounded-full text-xs font-bold bg-surface-container text-on-surface-variant border border-outline-variant/30">
@@ -822,21 +922,30 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                           </div>
                         </div>
                       ) : (
-                        <div className="text-xs text-on-surface leading-relaxed font-serif prose prose-sm dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: sanitizeHtml((draft.proposedContent || '').replace(/#null\b/g, `#${draft.glpiTicketId || draft.ticketId || 'N/A'}`)) }} />
+                        <div className="text-xs text-on-surface leading-relaxed prose prose-sm dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: sanitizeHtml((draft.proposedContent || '').replace(/#null\b/g, `#${draft.glpiTicketId || draft.ticketId || 'N/A'}`)) }} />
                       )}
                     </div>
 
                     {/* Actions sur le brouillon */}
                     <div className="flex items-center justify-between gap-4 pt-2">
-                      <button
-                        onClick={() => {
-                          setEditingDraftId(draft.id);
-                          setEditBody(draft.proposedContent);
-                        }}
-                        className="text-xs text-purple-600 dark:text-purple-400 font-bold hover:underline"
-                      >
-                        Éditer le texte de la réponse
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setDetailDraft(draft)}
+                          className="px-3 py-1.5 rounded-xl text-xs font-bold border border-purple-500/30 text-purple-600 dark:text-purple-400 hover:bg-purple-500/10 transition-all flex items-center gap-1.5"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          Détails
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEditingDraftId(draft.id);
+                            setEditBody(draft.proposedContent);
+                          }}
+                          className="text-xs text-purple-600 dark:text-purple-400 font-bold hover:underline"
+                        >
+                          Éditer le texte de la réponse
+                        </button>
+                      </div>
 
                       <div className="flex items-center gap-2">
                         <button
@@ -915,10 +1024,17 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
 
                     <div className="p-4 rounded-2xl bg-surface-container-low/40 border border-outline-variant/20">
                       <div className="text-[11px] font-bold text-on-surface-variant mb-2">Contenu de la relance</div>
-                      <div className="text-xs text-on-surface leading-relaxed font-serif prose prose-sm dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: sanitizeHtml((draft.proposedContent || '').replace(/#null\b/g, `#${draft.glpiTicketId || draft.ticketId || 'N/A'}`)) }} />
+                      <div className="text-xs text-on-surface leading-relaxed prose prose-sm dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: sanitizeHtml((draft.proposedContent || '').replace(/#null\b/g, `#${draft.glpiTicketId || draft.ticketId || 'N/A'}`)) }} />
                     </div>
 
                     <div className="flex items-center justify-end gap-2 pt-2">
+                      <button
+                        onClick={() => setDetailDraft(draft)}
+                        className="px-3.5 py-2 rounded-xl text-xs font-bold border border-purple-500/30 text-purple-600 dark:text-purple-400 hover:bg-purple-500/10 transition-all flex items-center gap-1.5"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        Détails
+                      </button>
                       <button
                         onClick={() => handleRejectDraft(draft.id)}
                         className="px-3.5 py-2 rounded-xl text-xs font-bold border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-all"
@@ -1270,7 +1386,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                   {/* Actions Hotline */}
                   <div className="flex items-center gap-2 shrink-0 border-t md:border-t-0 pt-4 md:pt-0 border-outline-variant/20">
                     <button
-                      onClick={() => navigate(`/tickets/${t.id}`)}
+                      onClick={() => setDetailTicket(t)}
                       className="px-3.5 py-2 rounded-xl text-xs font-semibold border border-outline-variant/40 hover:bg-surface-container text-on-surface transition-all flex items-center gap-1"
                     >
                       <span>Détails</span>
@@ -1438,13 +1554,22 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
 
                     {/* Actions */}
                     <div className="flex items-center justify-between gap-4 pt-2 border-t border-outline-variant/20">
-                      <button
-                        onClick={() => isEditing ? null : startKbEdit(draft)}
-                        className="text-xs text-emerald-600 dark:text-emerald-400 font-bold hover:underline flex items-center gap-1"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                        {isEditing ? 'Modification en cours...' : 'Modifier le brouillon'}
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setDetailKb(draft)}
+                          className="px-3 py-1.5 rounded-xl text-xs font-bold border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-all flex items-center gap-1.5"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          Détails
+                        </button>
+                        <button
+                          onClick={() => isEditing ? null : startKbEdit(draft)}
+                          className="text-xs text-emerald-600 dark:text-emerald-400 font-bold hover:underline flex items-center gap-1"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                          {isEditing ? 'Modification en cours...' : 'Modifier le brouillon'}
+                        </button>
+                      </div>
 
                       {isEditing ? (
                         <div className="flex items-center gap-2">
@@ -1488,31 +1613,20 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
         </div>
       )}
 
-      {/* PAGINATION (onglet actif) */}
+      </div>{/* fin scrollable */}
+
+      {/* ── PAGINATION (fixe en bas) ── */}
       {!loading && filteredList.length > 0 && (
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
-          <p className="text-xs text-on-surface-variant">
-            {rangeStart}–{rangeEnd} sur {filteredList.length} élément{filteredList.length > 1 ? 's' : ''}
-          </p>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              disabled={safePage <= 1}
-              className="px-3.5 py-2 rounded-xl text-xs font-bold border border-outline-variant/40 bg-surface-container-lowest hover:bg-surface-container text-on-surface transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Précédent
-            </button>
-            <span className="text-xs font-bold text-on-surface px-2 whitespace-nowrap">
-              Page {safePage} / {totalPages}
-            </span>
-            <button
-              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-              disabled={safePage >= totalPages}
-              className="px-3.5 py-2 rounded-xl text-xs font-bold border border-outline-variant/40 bg-surface-container-lowest hover:bg-surface-container text-on-surface transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Suivant
-            </button>
-          </div>
+        <div className="shrink-0 rounded-2xl border border-outline-variant/20 overflow-hidden mt-2">
+          <Pagination
+            page={safePage}
+            totalPages={totalPages}
+            total={filteredList.length}
+            label="éléments"
+            onPageChange={(p) => setCurrentPage(p)}
+            pageSize={pageSize}
+            onPageSizeChange={(s) => { setPageSize(s); setCurrentPage(1); }}
+          />
         </div>
       )}
 
@@ -1607,6 +1721,395 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
         </div>
       )}
 
+      {/* MODALE DÉTAIL BROUILLON */}
+      {detailDraft && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fadeIn" onClick={() => setDetailDraft(null)}>
+          <div className="bg-surface border border-outline-variant/40 rounded-3xl max-w-2xl w-full max-h-[85vh] shadow-2xl flex flex-col" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between p-6 pb-4 border-b border-outline-variant/20">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-on-surface">
+                    {detailDraft.draftKind === 'REMINDER' ? 'Détail de la relance' : 'Détail de la réponse IA'}
+                  </h3>
+                  <p className="text-[11px] text-on-surface-variant">
+                    {detailDraft.draftKind === 'REMINDER' ? 'Relance ' : 'Brouillon '}#{detailDraft.id}
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setDetailDraft(null)} className="p-2 rounded-xl hover:bg-surface-container-high text-on-surface-variant transition-all">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Body scrollable */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-5">
+              {/* Ticket associé */}
+              <div className="p-4 rounded-2xl bg-surface-container-low/40 border border-outline-variant/20 space-y-2">
+                <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Ticket associé</span>
+                <div className="flex items-center gap-2">
+                  <Ticket className="w-4 h-4 text-blue-500" />
+                  <span className="text-sm font-bold text-on-surface">{detailDraft.ticket?.title || `Ticket #${detailDraft.ticketId}`}</span>
+                </div>
+                {detailDraft.ticket?.requester?.fullName && (
+                  <p className="text-xs text-on-surface-variant">Demandeur : <strong className="text-on-surface">{detailDraft.ticket.requester.fullName}</strong></p>
+                )}
+                {detailDraft.ticket?.approvalStatus && (
+                  <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    detailDraft.ticket.approvalStatus === 'PENDING' ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400'
+                  }`}>
+                    {detailDraft.ticket.approvalStatus}
+                  </span>
+                )}
+              </div>
+
+              {/* Destinataire */}
+              <div className="p-4 rounded-2xl bg-surface-container-low/40 border border-outline-variant/20 space-y-2">
+                <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Destinataire</span>
+                <div className="flex items-center gap-2">
+                  <User className="w-4 h-4 text-blue-500" />
+                  <div>
+                    <p className="text-sm font-bold text-on-surface">{detailDraft.recipientName || 'Inconnu'}</p>
+                    <p className="text-xs text-on-surface-variant">{detailDraft.recipientEmail}</p>
+                  </div>
+                </div>
+                {detailDraft.ccRecipients?.length > 0 && (
+                  <p className="text-xs text-on-surface-variant">CC : {detailDraft.ccRecipients.join(', ')}</p>
+                )}
+              </div>
+
+              {/* Objet */}
+              <div className="p-4 rounded-2xl bg-surface-container-low/40 border border-outline-variant/20 space-y-2">
+                <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Objet</span>
+                <p className="text-sm font-bold text-on-surface">{detailDraft.subject || '(sans objet)'}</p>
+              </div>
+
+              {/* Métadonnées */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 rounded-xl bg-surface-container-low/40 border border-outline-variant/20 space-y-1">
+                  <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Type</span>
+                  <p className="text-xs font-semibold text-on-surface">{detailDraft.draftKind || 'N/A'}</p>
+                </div>
+                <div className="p-3 rounded-xl bg-surface-container-low/40 border border-outline-variant/20 space-y-1">
+                  <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Statut</span>
+                  <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    detailDraft.status === 'PENDING' ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400'
+                    : detailDraft.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400'
+                    : 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400'
+                  }`}>
+                    {detailDraft.status}
+                  </span>
+                </div>
+                {detailDraft.aiConfidence != null && (
+                  <div className="p-3 rounded-xl bg-surface-container-low/40 border border-outline-variant/20 space-y-1">
+                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Confiance IA</span>
+                    <p className="text-xs font-semibold text-purple-600 dark:text-purple-400 font-mono">{Math.round(detailDraft.aiConfidence * 100)}%</p>
+                  </div>
+                )}
+                {detailDraft.exchangeTurn != null && (
+                  <div className="p-3 rounded-xl bg-surface-container-low/40 border border-outline-variant/20 space-y-1">
+                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Tour d'échange</span>
+                    <p className="text-xs font-semibold text-on-surface">#{detailDraft.exchangeTurn}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Dates */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 rounded-xl bg-surface-container-low/40 border border-outline-variant/20 space-y-1">
+                  <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Créé le</span>
+                  <p className="text-xs text-on-surface">{new Date(detailDraft.createdAt).toLocaleString('fr-FR')}</p>
+                </div>
+                {detailDraft.reviewedAt && (
+                  <div className="p-3 rounded-xl bg-surface-container-low/40 border border-outline-variant/20 space-y-1">
+                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Examiné le</span>
+                    <p className="text-xs text-on-surface">{new Date(detailDraft.reviewedAt).toLocaleString('fr-FR')}</p>
+                  </div>
+                )}
+                {detailDraft.sentAt && (
+                  <div className="p-3 rounded-xl bg-surface-container-low/40 border border-outline-variant/20 space-y-1">
+                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Envoyé le</span>
+                    <p className="text-xs text-on-surface">{new Date(detailDraft.sentAt).toLocaleString('fr-FR')}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Contenu */}
+              <div className="p-4 rounded-2xl bg-surface-container-low/40 border border-outline-variant/20 space-y-2">
+                <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Contenu proposé</span>
+                <div className="text-xs text-on-surface leading-relaxed prose prose-sm dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: sanitizeHtml((detailDraft.proposedContent || '').replace(/#null\b/g, `#${detailDraft.glpiTicketId || detailDraft.ticketId || 'N/A'}`)) }} />
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-outline-variant/20 flex items-center justify-end gap-2">
+              <button onClick={() => setDetailDraft(null)} className="px-4 py-2 rounded-xl text-xs font-semibold border border-outline-variant/40 hover:bg-surface-container text-on-surface transition-all">
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODALE DÉTAIL TICKET (onglets Tickets & Clôtures IA) */}
+      {detailTicket && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fadeIn" onClick={() => setDetailTicket(null)}>
+          <div className="bg-surface border border-outline-variant/40 rounded-3xl max-w-3xl w-full max-h-[85vh] shadow-2xl flex flex-col" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between p-6 pb-4 border-b border-outline-variant/20">
+              <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-xl ${activeTab === 'closures' ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400' : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'}`}>
+                  {activeTab === 'closures'
+                    ? <CheckCircle2 className="w-5 h-5" />
+                    : <Ticket className="w-5 h-5" />}
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-on-surface">
+                    {activeTab === 'closures' ? 'Détail de la clôture suggérée' : 'Détail du ticket en attente'}
+                  </h3>
+                  <p className="text-[11px] text-on-surface-variant">Ticket #{detailTicket.id}</p>
+                </div>
+              </div>
+              <button onClick={() => setDetailTicket(null)} className="p-2 rounded-xl hover:bg-surface-container-high text-on-surface-variant transition-all">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Body scrollable */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-5">
+              {/* Badges d'état */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {activeTab === 'closures' ? (
+                  <span className="px-2.5 py-0.5 rounded-md bg-cyan-500/15 text-cyan-700 dark:text-cyan-400 text-[10px] font-extrabold border border-cyan-500/30 uppercase tracking-wider">
+                    🤖 Clôture suggérée par l'IA
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-400 text-[10px] font-extrabold border border-amber-500/30 uppercase tracking-wider">
+                    🛡️ En attente Hotline
+                  </span>
+                )}
+                {detailTicket.priority && (
+                  <span className={`px-2 py-0.5 rounded-md border ${PRIORITY_BADGES[detailTicket.priority] || PRIORITY_BADGES.P3}`}>
+                    {PRIORITY_LABELS[detailTicket.priority] || detailTicket.priority}
+                  </span>
+                )}
+                {detailTicket.type && (
+                  <span className="px-2 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface-variant">
+                    {detailTicket.type === 'REQUEST' ? 'Demande' : 'Incident'} · U: {LEVEL_LABELS[detailTicket.urgency] || detailTicket.urgency} · I: {LEVEL_LABELS[detailTicket.impact] || detailTicket.impact}
+                  </span>
+                )}
+                {detailTicket.isMajorIncident && (
+                  <span className="px-2.5 py-0.5 rounded-md bg-red-600/20 text-red-700 dark:text-red-300 text-[10px] font-extrabold border border-red-600/40 uppercase tracking-wider flex items-center gap-1">
+                    <Flame className="w-3 h-3" /> Incident majeur
+                  </span>
+                )}
+                {detailTicket.lowTrustSender && (
+                  <span className="px-2.5 py-0.5 rounded-md bg-red-500/15 text-red-600 dark:text-red-400 text-[10px] font-extrabold border border-red-500/40 uppercase tracking-wider" title="Cet expéditeur a un taux de rejets élevé par la Hotline : cette suggestion IA est à vérifier avec attention">
+                    ⚠️ Expéditeur à risque
+                  </span>
+                )}
+                {detailTicket.lowTrustClosureSender && (
+                  <span className="px-2.5 py-0.5 rounded-md bg-red-500/15 text-red-600 dark:text-red-400 text-[10px] font-extrabold border border-red-500/40 uppercase tracking-wider" title="Les suggestions de clôture de cet expéditeur ont déjà été rejetées plusieurs fois par la Hotline : vérifiez avant de valider.">
+                    ⚠️ Clôtures souvent injustifiées
+                  </span>
+                )}
+                {detailTicket.aiProcessed && (
+                  <span className="px-2.5 py-0.5 rounded-md bg-violet-500/15 text-violet-600 dark:text-violet-400 text-[10px] font-extrabold border border-violet-500/30 uppercase tracking-wider flex items-center gap-1" title="Ticket créé/traité par l'agent IA de triage">
+                    <Bot className="w-3 h-3" /> IA
+                  </span>
+                )}
+                {detailTicket.category && (
+                  <span className="px-2.5 py-0.5 rounded-md bg-surface-container text-on-surface-variant text-[10px] font-bold border border-outline-variant/30">
+                    {detailTicket.category}
+                  </span>
+                )}
+                {detailTicket.glpiLocationName && (
+                  <span className="px-2.5 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface-variant flex items-center gap-1">
+                    <MapPin className="w-3 h-3" /> {detailTicket.glpiLocationName}
+                  </span>
+                )}
+                {detailTicket.impactedSites?.length > 0 && (
+                  <span className="px-2.5 py-0.5 rounded-md bg-orange-500/10 border border-orange-500/25 text-orange-600 dark:text-orange-400 flex items-center gap-1" title={detailTicket.impactedSites.join(', ')}>
+                    <Layers className="w-3 h-3" /> {detailTicket.impactedSites.length} site(s)
+                  </span>
+                )}
+                {typeof detailTicket.closeSuggestionConfidence === 'number' && (
+                  <span className="px-2.5 py-0.5 rounded-md bg-surface-container text-on-surface-variant text-[10px] font-bold border border-outline-variant/30">
+                    Confiance : {Math.round(detailTicket.closeSuggestionConfidence * 100)}%
+                  </span>
+                )}
+              </div>
+
+              {/* Titre + résumé IA */}
+              <h2 className="text-lg font-bold text-on-surface" style={{ overflowWrap: 'anywhere' }}>{detailTicket.title}</h2>
+              {detailTicket.aiSummary && (
+                <p className="text-xs text-violet-700 dark:text-violet-300 bg-violet-500/8 rounded-lg px-3 py-2 border border-violet-500/15 italic">
+                  <Bot className="w-3.5 h-3.5 inline mr-1 -mt-0.5" />{detailTicket.aiSummary}
+                </p>
+              )}
+
+              {/* Contenu complet */}
+              <div className="p-4 rounded-2xl bg-surface-container-low/40 border border-outline-variant/20 space-y-2">
+                <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Contenu du ticket</span>
+                <p className="text-sm text-on-surface leading-relaxed whitespace-pre-line" style={{ overflowWrap: 'anywhere' }}>{detailTicket.content}</p>
+              </div>
+
+              {/* Métadonnées */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 rounded-xl bg-surface-container-low/40 border border-outline-variant/20 space-y-1">
+                  <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Demandeur</span>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <UserAvatar user={detailTicket.requester} name={detailTicket.sourceName} size="xs" />
+                    <p className="text-xs text-on-surface truncate">{detailTicket.requester?.fullName || detailTicket.sourceName || detailTicket.sourceEmail || 'Demandeur anonyme'}</p>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-surface-container-low/40 border border-outline-variant/20 space-y-1">
+                  <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Source</span>
+                  <p className="text-xs text-on-surface">{detailTicket.source || 'Email'}{detailTicket.sourceEmail ? ` · ${detailTicket.sourceEmail}` : ''}</p>
+                </div>
+
+                {detailTicket.createdAt && (
+                  <div className="p-3 rounded-xl bg-surface-container-low/40 border border-outline-variant/20 space-y-1">
+                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Créé le</span>
+                    <p className="text-xs text-on-surface">{new Date(detailTicket.createdAt).toLocaleString('fr-FR')}</p>
+                  </div>
+                )}
+
+                {activeTab === 'closures' && detailTicket.closeSuggestedAt && (
+                  <div className="p-3 rounded-xl bg-surface-container-low/40 border border-outline-variant/20 space-y-1">
+                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Clôture suggérée le</span>
+                    <p className="text-xs text-on-surface">{new Date(detailTicket.closeSuggestedAt).toLocaleString('fr-FR')}</p>
+                  </div>
+                )}
+              </div>
+              </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-outline-variant/20 flex items-center justify-end gap-2">
+              <button
+                onClick={() => navigate(`/tickets/${detailTicket.id}`)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold border border-outline-variant/40 hover:bg-surface-container text-on-surface transition-all flex items-center gap-1.5"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                Ouvrir le ticket complet
+              </button>
+              <button onClick={() => setDetailTicket(null)} className="px-4 py-2 rounded-xl text-xs font-semibold bg-surface-container hover:bg-surface-container-high text-on-surface transition-all">
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODALE DÉTAIL BROUILLON CONNAISSANCE */}
+      {detailKb && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fadeIn" onClick={() => setDetailKb(null)}>
+          <div className="bg-surface border border-outline-variant/40 rounded-3xl max-w-3xl w-full max-h-[85vh] shadow-2xl flex flex-col" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between p-6 pb-4 border-b border-outline-variant/20">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                  <BookOpen className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-on-surface">Détail du brouillon de connaissance</h3>
+                  <p className="text-[11px] text-on-surface-variant">Brouillon #{detailKb.id}</p>
+                </div>
+              </div>
+              <button onClick={() => setDetailKb(null)} className="p-2 rounded-xl hover:bg-surface-container-high text-on-surface-variant transition-all">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Body scrollable */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-5">
+              {/* Ticket associé */}
+              <div className="p-4 rounded-2xl bg-surface-container-low/40 border border-outline-variant/20 space-y-2">
+                <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Ticket associé</span>
+                {detailKb.ticket ? (
+                  <div className="flex items-center gap-2">
+                    <Ticket className="w-4 h-4 text-blue-500" />
+                    <span className="text-sm font-bold text-on-surface">#{detailKb.ticket.id} — {detailKb.ticket.title}</span>
+                  </div>
+                ) : (
+                  <p className="text-xs italic text-on-surface-variant">Aucun ticket associé</p>
+                )}
+              </div>
+
+              {/* Catégorie + mots-clés */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {detailKb.category && (
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-500/30">
+                    {detailKb.category}
+                  </span>
+                )}
+                {detailKb.keywords?.length > 0 && (
+                  <span className="text-[10px] text-on-surface-variant font-mono">
+                    {detailKb.keywords.slice(0, 6).join(', ')}{detailKb.keywords.length > 6 ? '...' : ''}
+                  </span>
+                )}
+              </div>
+
+              {/* Titre */}
+              <h2 className="text-lg font-bold text-on-surface" style={{ overflowWrap: 'anywhere' }}>{detailKb.title}</h2>
+
+              {/* Problème / Cause / Solution */}
+              <div className="space-y-4">
+                <div className="p-4 rounded-2xl bg-surface-container-low/40 border border-red-500/20 space-y-2">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-red-600 dark:text-red-400 flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3" /> Problème
+                  </span>
+                  <p className="text-sm text-on-surface leading-relaxed whitespace-pre-wrap" style={{ overflowWrap: 'anywhere' }}>{detailKb.problem || '—'}</p>
+                </div>
+                <div className="p-4 rounded-2xl bg-surface-container-low/40 border border-amber-500/20 space-y-2">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                    <HelpCircle className="w-3 h-3" /> Cause
+                  </span>
+                  <p className="text-sm text-on-surface leading-relaxed whitespace-pre-wrap" style={{ overflowWrap: 'anywhere' }}>{detailKb.cause || '—'}</p>
+                </div>
+                <div className="p-4 rounded-2xl bg-surface-container-low/40 border border-emerald-500/20 space-y-2">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3" /> Solution
+                  </span>
+                  <p className="text-sm text-on-surface leading-relaxed whitespace-pre-wrap" style={{ overflowWrap: 'anywhere' }}>{detailKb.solution || '—'}</p>
+                </div>
+              </div>
+
+              {/* Tags */}
+              {detailKb.tags?.length > 0 && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Tags className="w-3 h-3 text-on-surface-variant" />
+                  {detailKb.tags.map((tag) => (
+                    <span key={tag} className="px-2 py-0.5 rounded-full bg-surface-container text-on-surface-variant border border-outline-variant/30 text-[10px] font-medium">
+                      #{tag}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Métadonnées */}
+              {detailKb.createdAt && (
+                <div className="p-3 rounded-xl bg-surface-container-low/40 border border-outline-variant/20 space-y-1">
+                  <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Créé le</span>
+                  <p className="text-xs text-on-surface">{new Date(detailKb.createdAt).toLocaleString('fr-FR')}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-outline-variant/20 flex items-center justify-end gap-2">
+              <button onClick={() => setDetailKb(null)} className="px-4 py-2 rounded-xl text-xs font-semibold bg-surface-container hover:bg-surface-container-high text-on-surface transition-all">
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODALE REJET TICKET */}
       {showRejectModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fadeIn">
@@ -1692,7 +2195,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
               <Shield className="w-7 h-7 shrink-0" />
               <div>
                 <h3 className="text-base font-bold">
-                  {autonomousMode ? 'Ticket en attente d\'approbation' : 'Ticket non encore créé dans GLPI'}
+                  {autonomousMode ? 'Ticket en attente d\'approbation' : 'Ticket non encore créé'}
                 </h3>
                 <p className="text-xs text-on-surface-variant">
                   Ce ticket est actuellement en attente d'approbation Hotline dans l'ERP.
@@ -1713,11 +2216,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             </div>
 
             <p className="text-xs text-on-surface font-medium leading-relaxed">
-              {autonomousMode ? (
-                <>Souhaitez-vous <strong>approuver le ticket</strong> ET <strong>envoyer la réponse IA par email</strong> en une seule opération ?</>
-              ) : (
-                <>Souhaitez-vous <strong>approuver la création du ticket dans GLPI</strong> ET <strong>envoyer la réponse IA par email</strong> en une seule opération ?</>
-              )}
+              <>Souhaitez-vous <strong>approuver la création du ticket</strong> ET <strong>envoyer la réponse IA par email</strong> en une seule opération ?</>
             </p>
 
             <div className="flex items-center justify-end gap-3 pt-2">
@@ -1737,7 +2236,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                 onClick={handleConfirmCombinedApproval}                 className="px-5 py-2.5 rounded-xl text-xs font-bold btn-primary shadow-lg transition-all flex items-center gap-2"
               >
                 <CheckCircle2 className="w-4 h-4" />
-                <span>{approvingCombined ? 'Approbation en cours...' : (autonomousMode ? 'Approuver + Envoyer Réponse' : 'Approuver GLPI + Envoyer Réponse')}</span>
+                <span>{approvingCombined ? 'Approbation en cours...' : 'Approuver + Envoyer Réponse'}</span>
               </button>
             </div>
           </div>

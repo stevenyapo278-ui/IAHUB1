@@ -44,20 +44,48 @@ const EVENT_META = {
 };
 
 const TYPE_OPTIONS = Object.keys(EVENT_META);
-const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 
-export default function ActivityLogs() {
+// Familles d'événements pour le filtre par catégorie
+const CATEGORY_OPTIONS = [
+  { value: 'TICKETS', label: '🎫 Tickets (cycle de vie)' },
+  { value: 'EMAILS', label: '📧 Emails' },
+  { value: 'IA', label: '🤖 Intelligence artificielle' },
+  { value: 'RELANCES', label: '⏰ Relances, escalades & SLA' },
+  { value: 'GLPI', label: '🔄 Sync GLPI' },
+  { value: 'CONNAISSANCES', label: '📚 Base de connaissances' },
+];
+
+// Périodes rapides (jours en arrière)
+const QUICK_RANGES = [
+  { value: '1', label: '24h' },
+  { value: '7', label: '7 jours' },
+  { value: '30', label: '30 jours' },
+  { value: '90', label: '90 jours' },
+];
+
+// Calcule startDate depuis une période rapide
+function rangeToStartDate(days) {
+  const d = new Date();
+  d.setDate(d.getDate() - Number(days));
+  return d.toISOString().slice(0, 10);
+}
+
+export default function ActivityLogs({ embedded = false } = {}) {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
   const [events, setEvents] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 50, total: 0, totalPages: 0 });
   const [loading, setLoading] = useState(false);
   const [typeFilter, setTypeFilter] = useFilterParam('type');
+  const [categoryFilter, setCategoryFilter] = useFilterParam('category');
+  const [ticketIdFilter, setTicketIdFilter] = useFilterParam('ticketId');
   const [actorFilter, setActorFilter] = useFilterParam('actor');
   const [searchFilter, setSearchFilter] = useFilterParam('search');
   const [startDate, setStartDate] = useFilterParam('startDate');
   const [endDate, setEndDate] = useFilterParam('endDate');
+  const [orderFilter, setOrderFilter] = useFilterParam('order', 'desc');
   const [pageSize, setPageSize] = useFilterParam('pageSize', '50');
+  const [quickRange, setQuickRange] = useState('');
   const [expandedId, setExpandedId] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -65,8 +93,10 @@ export default function ActivityLogs() {
   function load(page = 1) {
     setLoading(true);
     const pageSizeNum = parseInt(pageSize, 10) || 50;
-    const params = { page, pageSize: pageSizeNum };
+    const params = { page, pageSize: pageSizeNum, order: orderFilter };
     if (typeFilter) params.type = typeFilter;
+    if (categoryFilter) params.category = categoryFilter;
+    if (ticketIdFilter) params.ticketId = ticketIdFilter;
     if (actorFilter) params.actor = actorFilter;
     if (searchFilter) params.search = searchFilter;
     if (startDate) params.startDate = startDate;
@@ -81,17 +111,27 @@ export default function ActivityLogs() {
       .finally(() => setLoading(false));
   }
 
-  useEffect(() => { load(); }, [typeFilter, actorFilter, searchFilter, startDate, endDate, pageSize]);
+  useEffect(() => { load(); }, [typeFilter, categoryFilter, ticketIdFilter, actorFilter, searchFilter, startDate, endDate, orderFilter, pageSize]);
 
   function applyFilters() { load(1); }
 
   function resetFilters() {
     setTypeFilter('');
+    setCategoryFilter('');
+    setTicketIdFilter('');
     setActorFilter('');
     setSearchFilter('');
     setStartDate('');
     setEndDate('');
+    setOrderFilter('desc');
     setPageSize('50');
+    setQuickRange('');
+  }
+
+  function applyQuickRange(days) {
+    setQuickRange(days);
+    setStartDate(days ? rangeToStartDate(days) : '');
+    setEndDate('');
   }
 
   function formatDate(iso) {
@@ -114,10 +154,12 @@ export default function ActivityLogs() {
     return formatDate(iso);
   }
 
-  const hasActiveFilters = typeFilter || actorFilter || searchFilter || startDate || endDate;
+  const hasActiveFilters = typeFilter || categoryFilter || ticketIdFilter || actorFilter || searchFilter || startDate || endDate || orderFilter === 'asc';
 
-  return (
+  const view = (
     <PageShell
+      hideHeader={embedded}
+      fill={embedded}
       icon={Activity}
       iconColor="text-blue-400"
       title="Journal d'activité"
@@ -143,18 +185,37 @@ export default function ActivityLogs() {
     >
 
       {/* ── Advanced Filters Strip ───────────────────────────────────────────── */}
-      {/* Inline search (mobile) */}
-      <div className="relative flex-1 max-w-xs sm:hidden mb-2">
-        <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50" />
-        <input
-          type="text"
-          placeholder="Rechercher..."
-          value={searchFilter}
-          onChange={(e) => setSearchFilter(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') applyFilters(); }}
-          className="input-katalyst pl-8 pr-8 py-2 text-xs"
-        />
-      </div>
+      {/* Barre outils inline — indispensable en mode embarqué (hub) où l'en-tête PageShell
+          est masqué : sans elle, ni la recherche ni le bouton Filtres ne seraient accessibles. */}
+      {embedded && (
+        <div className="flex items-center gap-2 mb-3 flex-wrap px-4 sm:px-6 lg:px-8 pt-4">
+          <div className="relative flex-1 min-w-[200px] max-w-md">
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50" />
+            <input
+              type="text"
+              placeholder="Rechercher (titre, n° ticket, acteur)..."
+              value={searchFilter}
+              onChange={(e) => setSearchFilter(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') applyFilters(); }}
+              className="input-katalyst pl-8 pr-8 py-2 text-xs w-full"
+            />
+          </div>
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+              showFilters || hasActiveFilters
+                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20'
+                : 'btn-secondary'
+            }`}
+          >
+            <Filter className="w-3.5 h-3.5" />
+            <span>Filtres</span>
+            {hasActiveFilters && (
+              <span className="w-2 h-2 rounded-full bg-blue-500 dark:bg-blue-400 animate-pulse" />
+            )}
+          </button>
+        </div>
+      )}
       <AnimatePresence>
         {showFilters && (
           <motion.div
@@ -162,15 +223,46 @@ export default function ActivityLogs() {
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.22 }}
-            className="overflow-hidden rounded-xl border border-outline-variant/20 bg-surface-container-low/40 mb-4"
+            className="overflow-hidden rounded-xl border border-outline-variant/20 bg-surface-container-low/40 mb-4 shrink-0"
           >
             <div className="px-4 py-3 space-y-3">
+              {/* Périodes rapides */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider mr-1">Période :</span>
+                {QUICK_RANGES.map(({ value, label }) => (
+                  <button key={value} onClick={() => applyQuickRange(quickRange === value ? '' : value)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all cursor-pointer ${
+                      quickRange === value
+                        ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30'
+                        : 'border-outline-variant/30 text-on-surface-variant hover:text-on-surface hover:border-outline-variant/50'
+                    }`}>
+                    {label}
+                  </button>
+                ))}
+                <span className="text-[10px] text-on-surface-variant/50 ml-1">(ou dates personnalisées ci-dessous)</span>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                {/* Ligne 1 : catégorie + type précis */}
+                <label className="field-label">
+                  <span>Catégorie</span>
+                  <select
+                    value={categoryFilter}
+                    onChange={(e) => { setCategoryFilter(e.target.value); setTypeFilter(''); }}
+                    className="input-katalyst"
+                  >
+                    <option value="">Toutes catégories</option>
+                    {CATEGORY_OPTIONS.map((c) => (
+                      <option key={c.value} value={c.value}>{c.label}</option>
+                    ))}
+                  </select>
+                </label>
+
                 <label className="field-label">
                   <span>Type d'événement</span>
                   <select
                     value={typeFilter}
-                    onChange={(e) => setTypeFilter(e.target.value)}
+                    onChange={(e) => { setTypeFilter(e.target.value); setCategoryFilter(''); }}
                     className="input-katalyst"
                   >
                     <option value="">Tous les types</option>
@@ -178,6 +270,18 @@ export default function ActivityLogs() {
                       <option key={t} value={t}>{EVENT_META[t]?.label || t}</option>
                     ))}
                   </select>
+                </label>
+
+                <label className="field-label">
+                  <span>N° de ticket</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={ticketIdFilter}
+                    onChange={(e) => setTicketIdFilter(e.target.value.replace(/\D/g, ''))}
+                    placeholder="ex : 42"
+                    className="input-katalyst"
+                  />
                 </label>
 
                 <label className="field-label">
@@ -196,7 +300,7 @@ export default function ActivityLogs() {
                   <input
                     type="date"
                     value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
+                    onChange={(e) => { setStartDate(e.target.value); setQuickRange(''); }}
                     className="input-katalyst"
                   />
                 </label>
@@ -209,6 +313,18 @@ export default function ActivityLogs() {
                     onChange={(e) => setEndDate(e.target.value)}
                     className="input-katalyst"
                   />
+                </label>
+
+                <label className="field-label">
+                  <span>Ordre</span>
+                  <select
+                    value={orderFilter}
+                    onChange={(e) => setOrderFilter(e.target.value)}
+                    className="input-katalyst"
+                  >
+                    <option value="desc">Plus récents d'abord</option>
+                    <option value="asc">Plus anciens d'abord</option>
+                  </select>
                 </label>
               </div>
 
@@ -229,28 +345,21 @@ export default function ActivityLogs() {
       </AnimatePresence>
 
       {/* ── Main Stream List ──────────────────────────────────────────────── */}
-      <div className="flex-1 px-4 sm:px-6 lg:px-8 py-6 space-y-4">
-        <div className="rounded-2xl border border-outline-variant/30 overflow-hidden bg-surface-container-lowest">
+      <div className="flex-1 min-h-0 flex flex-col px-4 sm:px-6 lg:px-8 py-6">
+        <div className="rounded-2xl border border-outline-variant/30 overflow-hidden bg-surface-container-lowest flex flex-col flex-1 min-h-0 min-w-0">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-outline-variant/20 bg-surface-container-low/40">
             <span className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">
               Flux d'événements ({pagination.total})
             </span>
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold text-on-surface-variant uppercase">Lignes :</span>
-              <select
-                value={pageSize}
-                onChange={(e) => setPageSize(e.target.value)}
-                className="bg-surface border border-outline-variant/30 rounded-lg px-2 py-0.5 text-[10px] text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-              >
-                {PAGE_SIZE_OPTIONS.map((s) => (
-                  <option key={s} value={String(s)}>{s}</option>
-                ))}
-              </select>
+              <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${orderFilter === 'asc' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' : 'text-on-surface-variant'}`}>
+                {orderFilter === 'asc' ? '↑ Anciens d\'abord' : '↓ Récents d\'abord'}
+              </span>
             </div>
           </div>
 
-          {/* Rows Stream */}
+          {/* Rows Stream — défilement interne : la pagination reste fixée en bas comme dans la vue Tickets */}
           {loading ? (
             <div className="flex flex-col items-center justify-center py-20 gap-3 text-on-surface-variant">
               <RefreshCw className="w-6 h-6 text-blue-600 dark:text-blue-400 animate-spin" />
@@ -262,7 +371,7 @@ export default function ActivityLogs() {
               <p className="text-sm italic">Aucun événement trouvé.</p>
             </div>
           ) : (
-            <div className="divide-y divide-outline-variant/10">
+            <div className="divide-y divide-outline-variant/10 overflow-y-auto flex-1 min-h-0">
               {events.map((event) => {
                 const meta = EVENT_META[event.type] || { icon: Activity, color: 'text-slate-600 dark:text-zinc-400', bg: 'bg-slate-500/10', border: 'border-slate-500/20', label: event.type };
                 const IconComponent = meta.icon;
@@ -354,19 +463,27 @@ export default function ActivityLogs() {
             </div>
           )}
 
-          {/* Pagination */}
-          {pagination.totalPages > 1 && (
-            <div className="px-4 py-3 border-t border-outline-variant/20">
-              <Pagination
-                page={pagination.page}
-                totalPages={pagination.totalPages}
-                total={pagination.total}
-                onPage={load}
-              />
-            </div>
+          {/* Pagination — fixe en bas du conteneur (même disposition que le tableau des tickets) */}
+          {pagination.total > 0 && (
+            <Pagination
+              page={pagination.page}
+              totalPages={pagination.totalPages}
+              total={pagination.total}
+              label="événements"
+              onPageChange={(p) => load(p)}
+              pageSize={parseInt(pageSize, 10) || 50}
+              onPageSizeChange={(s) => setPageSize(String(s))}
+              className="shrink-0"
+            />
           )}
         </div>
       </div>
     </PageShell>
   );
+
+  // Mode embarqué (hub Journal & Audit) : la page fournit déjà le padding et l'en-tête
+  if (embedded) {
+    return <div className="flex-1 min-h-0 flex flex-col overflow-y-auto">{view}</div>;
+  }
+  return view;
 }

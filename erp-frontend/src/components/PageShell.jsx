@@ -12,7 +12,10 @@
  *   subtitle    : string | ReactNode
  *   actions     : ReactNode — boutons et contrôles en haut à droite
  *   children    : ReactNode — contenu principal de la page
+ *   hideHeader  : bool — masque l'en-tête (mode embarqué, ex : onglets du hub Journal & Audit)
  *   noPadding   : bool — retire le padding du contenu (pour DataGrids plein-largeur)
+ *   fill        : bool — occupe exactement la hauteur du parent (page clampée, scroll interne,
+ *                 pour un footer/pagination fixe comme la vue Tickets) au lieu de min-h-screen
  *   className   : string — classes additionnelles sur le conteneur enfant
  */
 export default function PageShell({
@@ -23,16 +26,18 @@ export default function PageShell({
   subtitle,
   actions,
   children,
+  hideHeader = false,
   noPadding = false,
+  fill = false,
   className = '',
 }) {
   // Auto-calcule le bg de la bulle depuis la couleur d'icône si non fourni
   const bubbleBg = iconBg || deriveBubbleBg(iconColor);
 
   return (
-    <div className="flex flex-col min-h-screen">
+    <div className={fill ? 'flex flex-col flex-1 min-h-0' : 'flex flex-col min-h-screen'}>
       {/* ── Sticky Top Header ─────────────────────────────────────────── */}
-      <div
+      {!hideHeader && <div
         className="sticky top-0 z-20 shrink-0 border-b backdrop-blur-sm px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between gap-4 flex-wrap"
         style={{
           backgroundColor: 'color-mix(in srgb, var(--color-surface-container-lowest) 95%, transparent)',
@@ -47,7 +52,7 @@ export default function PageShell({
             </div>
           )}
           <div className="min-w-0">
-            <h1 className="text-base font-bold truncate" style={{ color: 'var(--color-on-surface)', fontFamily: 'Inter, sans-serif' }}>
+            <h1 className="text-base font-bold truncate" style={{ color: 'var(--color-on-surface)', fontFamily: 'var(--user-font), Ubuntu, sans-serif' }}>
               {title}
             </h1>
             {subtitle && (
@@ -64,11 +69,11 @@ export default function PageShell({
             {actions}
           </div>
         )}
-      </div>
+      </div>}
 
       {/* ── Contenu Principal ─────────────────────────────────────────── */}
       <div
-        className={`flex-1 ${noPadding ? '' : 'px-4 sm:px-6 lg:px-8 py-6'} ${className}`}
+        className={`flex-1 min-h-0 ${fill ? 'flex flex-col' : ''} ${noPadding ? '' : 'px-4 sm:px-6 lg:px-8 py-6'} ${className}`}
       >
         {children}
       </div>

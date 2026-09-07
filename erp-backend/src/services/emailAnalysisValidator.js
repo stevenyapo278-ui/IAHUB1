@@ -2,8 +2,8 @@ const { calculatePriority } = require('./emailPriorityMatrix');
 const prisma = require('../prismaClient');
 
 const TICKET_DECISIONS = ['CREATE', 'DO_NOT_CREATE', 'NEEDS_REVIEW'];
-const DECISION_REASONS = ['INCIDENT', 'SERVICE_REQUEST', 'INFORMATION', 'SPAM', 'AUTOMATED', 'DUPLICATE', 'AMBIGUOUS'];
-const EMAIL_TYPES = ['HUMAN_REQUEST', 'AUTOMATED_REPLY', 'OUT_OF_OFFICE', 'BOUNCE', 'NEWSLETTER', 'SYSTEM_NOTIFICATION', 'INFORMATION', 'SPAM'];
+const DECISION_REASONS = ['INCIDENT', 'SERVICE_REQUEST', 'INFORMATION', 'SPAM', 'AUTOMATED', 'DUPLICATE', 'AMBIGUOUS', 'TECHNICIAN_UPDATE', 'INTERNAL_NOTE', 'OUT_OF_OFFICE'];
+const EMAIL_TYPES = ['HUMAN_REQUEST', 'AUTOMATED_REPLY', 'OUT_OF_OFFICE', 'BOUNCE', 'NEWSLETTER', 'SYSTEM_NOTIFICATION', 'INFORMATION', 'SPAM', 'TECHNICIAN_COMMUNICATION'];
 const REQUEST_TYPES = ['INCIDENT', 'SERVICE_REQUEST', 'INFORMATION', 'ACCESS_REQUEST'];
 const IMPACT_LEVELS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 const URGENCY_LEVELS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
@@ -18,9 +18,9 @@ const CONFIDENCE_THRESHOLD_CREATE = 0.70;
  * @param {Array<Object>} [availableSkills] - Liste des compétences BDD [{ name: string }]
  * @param {Array<Object>} [availableLocations] - Liste des lieux BDD [{ completename: string }]
  * @param {Object} [options] - Options supplémentaires (ex: { body: string })
- * @returns {Object} Analyse nettoyée, validée et sécurisée
+ * @returns {Promise<Object>} Analyse nettoyée, validée et sécurisée
  */
-function validateAndCleanAnalysis(rawAnalysis = {}, availableSkills = [], availableLocations = [], options = {}) {
+async function validateAndCleanAnalysis(rawAnalysis = {}, availableSkills = [], availableLocations = [], options = {}) {
   const analysis = { ...rawAnalysis };
   const rawBody = options.body || '';
 
@@ -58,7 +58,8 @@ function validateAndCleanAnalysis(rawAnalysis = {}, availableSkills = [], availa
   analysis.emailType = emailType;
 
   let requestType = (analysis.requestType || '').toUpperCase().trim();
-  if (!REQUEST_TYPES.includes(requestType)) {
+  if (requestType === 'NULL' || requestType === '' || requestType === 'NONE') requestType = null;
+  if (requestType !== null && !REQUEST_TYPES.includes(requestType)) {
     requestType = emailType === 'INFORMATION' ? 'INFORMATION' : 'INCIDENT';
   }
   analysis.requestType = requestType;
@@ -91,10 +92,10 @@ function validateAndCleanAnalysis(rawAnalysis = {}, availableSkills = [], availa
     analysis.isSpam ||
     analysis.isInformational === true ||
     analysis.requiresAction === false ||
-    ['AUTOMATED_REPLY', 'OUT_OF_OFFICE', 'BOUNCE', 'NEWSLETTER', 'SYSTEM_NOTIFICATION', 'INFORMATION', 'SPAM'].includes(emailType)
+    ['AUTOMATED_REPLY', 'OUT_OF_OFFICE', 'BOUNCE', 'NEWSLETTER', 'SYSTEM_NOTIFICATION', 'INFORMATION', 'SPAM', 'TECHNICIAN_COMMUNICATION'].includes(emailType)
   ) {
     ticketDecision = 'DO_NOT_CREATE';
-    if (!['SPAM', 'INFORMATION', 'AUTOMATED'].includes(decisionReason)) {
+    if (!['SPAM', 'INFORMATION', 'AUTOMATED', 'TECHNICIAN_UPDATE', 'INTERNAL_NOTE', 'OUT_OF_OFFICE'].includes(decisionReason)) {
       decisionReason = analysis.isSpam ? 'SPAM' : 'INFORMATION';
     }
   }
@@ -109,12 +110,18 @@ function validateAndCleanAnalysis(rawAnalysis = {}, availableSkills = [], availa
   analysis.decisionReason = decisionReason;
 
   // 4. Calcul déterministe de la priorité via la matrice Impact x Urgence
-  let impact = (analysis.impact || 'MEDIUM').toUpperCase().trim();
-  if (!IMPACT_LEVELS.includes(impact)) impact = 'MEDIUM';
+  let rawImpact = (analysis.impact || '').toUpperCase().trim();
+  if (rawImpact === 'NULL' || rawImpact === '' || rawImpact === 'NONE') rawImpact = null;
+  let impact = rawImpact;
+  if (impact !== null && !IMPACT_LEVELS.includes(impact)) impact = 'MEDIUM';
+  if (impact === null && ticketDecision === 'CREATE') impact = 'MEDIUM';
   analysis.impact = impact;
 
-  let urgency = (analysis.urgency || 'MEDIUM').toUpperCase().trim();
-  if (!URGENCY_LEVELS.includes(urgency)) urgency = 'MEDIUM';
+  let rawUrgency = (analysis.urgency || '').toUpperCase().trim();
+  if (rawUrgency === 'NULL' || rawUrgency === '' || rawUrgency === 'NONE') rawUrgency = null;
+  let urgency = rawUrgency;
+  if (urgency !== null && !URGENCY_LEVELS.includes(urgency)) urgency = 'MEDIUM';
+  if (urgency === null && ticketDecision === 'CREATE') urgency = 'MEDIUM';
   analysis.urgency = urgency;
 
   // Priorité calculée par le code (et non laissée au libre arbitre du LLM)

@@ -21,19 +21,44 @@ async function auditLog(action, options = {}) {
 async function getAuditLogs(filters = {}) {
   const {
     action,
+    domain,
     actor,
     targetType,
     targetId,
     search,
     startDate,
     endDate,
+    order,
     page = 1,
     pageSize = 50,
   } = filters;
 
   const where = {};
 
+  // Regroupements métier des actions d'audit par domaine
+  const ACTION_DOMAINS = {
+    UTILISATEURS: ['USER_CREATED', 'USER_UPDATED', 'USER_DELETED', 'USER_PASSWORD_RESET', 'USER_REGISTERED', 'USER_LOGIN'],
+    EQUIPES: ['TEAM_CREATED', 'TEAM_UPDATED', 'TEAM_DELETED', 'TEAMS_SYNCED_FROM_GLPI'],
+    LIEUX: ['LOCATION_CREATED', 'LOCATION_UPDATED', 'LOCATION_DEACTIVATED', 'LOCATION_PUSHED_TO_GLPI', 'LOCATIONS_SYNCED_FROM_GLPI'],
+    DROITS: ['PERMISSION_GROUP_CREATED', 'PERMISSION_GROUP_UPDATED', 'PERMISSION_GROUP_DELETED', 'PERMISSION_GROUP_ASSIGNED'],
+    SYSTEME: ['SYSTEM_SETTINGS_UPDATED', 'ADVANCED_SETTINGS_UPDATED', 'PROMPT_TEMPLATE_UPDATED'],
+    EMAIL_IA: ['EMAIL_ACCOUNT_CREATED', 'EMAIL_ACCOUNT_DELETED', 'AI_PROVIDER_CREATED', 'AI_PROVIDER_DELETED', 'AI_MODEL_CREATED', 'AI_KEY_CREATED'],
+    CONNAISSANCES: ['KNOWLEDGE_DOCUMENT_UPLOADED', 'KNOWLEDGE_DOCUMENT_DELETED'],
+    GLPI: ['GLPI_TICKETS_SYNCED', 'GLPI_LOCATIONS_SYNCED', 'GLPI_USERS_SYNCED', 'TEAMS_SYNCED_FROM_GLPI', 'LOCATIONS_SYNCED_FROM_GLPI'],
+  };
+
   if (action) where.action = action;
+  if (domain && ACTION_DOMAINS[domain]) {
+    where.action = where.action || {};
+    // Combinaison domain + action explicite : l'action précise reste prioritaire
+    if (typeof where.action === 'string') {
+      // garder l'action précise
+    } else {
+      where.action = { in: ACTION_DOMAINS[domain] };
+    }
+  }
+  if (targetType) where.targetType = targetType;
+  if (targetId && !Number.isNaN(Number(targetId))) where.targetId = Number(targetId);
   if (actor) where.actorEmail = { contains: actor, mode: 'insensitive' };
   if (targetType) where.targetType = targetType;
   if (targetId) where.targetId = Number(targetId);
@@ -61,7 +86,7 @@ async function getAuditLogs(filters = {}) {
   const [logs, total] = await Promise.all([
     prisma.auditLog.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: order === 'asc' ? 'asc' : 'desc' },
       skip,
       take: size,
     }),

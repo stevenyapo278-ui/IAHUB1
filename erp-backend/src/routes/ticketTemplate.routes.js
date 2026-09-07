@@ -17,7 +17,8 @@ router.use((req, res, next) => {
 
 const templateSelect = {
   id: true, name: true, description: true, title: true, content: true,
-  priority: true, category: true, type: true, urgency: true, impact: true,
+  priority: true, category: true, type: true, source: true, urgency: true, impact: true,
+  locationId: true, teamId: true, assignedToId: true, dueDate: true, requiresApproval: true,
   isActive: true, createdAt: true, updatedAt: true,
 };
 
@@ -38,7 +39,7 @@ router.post(
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const { name, description, title, content, priority, category, type, urgency, impact } = req.body;
+    const { name, description, title, content, priority, category, type, source, urgency, impact, locationId, teamId, assignedToId, dueDate, requiresApproval } = req.body;
     const template = await prisma.ticketTemplate.create({
       data: {
         name: String(name).trim(),
@@ -48,8 +49,14 @@ router.post(
         priority: priority || null,
         category: category || null,
         type: type || null,
+        source: source || null,
         urgency: urgency || null,
         impact: impact || null,
+        locationId: locationId || null,
+        teamId: teamId || null,
+        assignedToId: assignedToId || null,
+        dueDate: dueDate || null,
+        requiresApproval: !!requiresApproval,
         createdById: req.user.sub,
       },
       select: templateSelect,
@@ -64,7 +71,7 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
   const existing = await prisma.ticketTemplate.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: 'Modèle introuvable' });
 
-  const { name, description, title, content, priority, category, type, urgency, impact, isActive } = req.body;
+  const { name, description, title, content, priority, category, type, source, urgency, impact, locationId, teamId, assignedToId, dueDate, requiresApproval, isActive } = req.body;
   const data = {};
   if (name !== undefined) data.name = String(name).trim();
   if (description !== undefined) data.description = description || null;
@@ -73,8 +80,14 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
   if (priority !== undefined) data.priority = priority || null;
   if (category !== undefined) data.category = category || null;
   if (type !== undefined) data.type = type || null;
+  if (source !== undefined) data.source = source || null;
   if (urgency !== undefined) data.urgency = urgency || null;
   if (impact !== undefined) data.impact = impact || null;
+  if (locationId !== undefined) data.locationId = locationId || null;
+  if (teamId !== undefined) data.teamId = teamId || null;
+  if (assignedToId !== undefined) data.assignedToId = assignedToId || null;
+  if (dueDate !== undefined) data.dueDate = dueDate || null;
+  if (requiresApproval !== undefined) data.requiresApproval = !!requiresApproval;
   if (isActive !== undefined) data.isActive = !!isActive;
 
   const template = await prisma.ticketTemplate.update({ where: { id }, data, select: templateSelect });

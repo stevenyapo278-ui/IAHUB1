@@ -53,7 +53,7 @@ enum TicketEventType {
   AI_LIFETIME_EXCEEDED
   AI_SPLIT_LIMIT_REACHED
   NEEDS_HUMAN_REVIEW
-  GLPI_SYNC_FAILED
+  GLPI_SYNC_FAILED // conservé : les valeurs d'enum ne peuvent pas être supprimées en PostgreSQL
   AI_CONVERSATION_ESCALATED
   AI_FOLLOWUP_DRAFT_GENERATED
   AI_LOW_TRUST_SENDER
@@ -72,6 +72,8 @@ enum TicketEventType {
   UNLINKED
   DUE_DATE_BREACHED
   DUE_DATE_UPDATED
+  DELETED
+  RESTORED
 }
 
 enum TicketPriority {
@@ -123,94 +125,96 @@ enum ApprovalStatus {
 }
 
 model User {
-  id            Int      @id @default(autoincrement())
-  email         String   @unique
-  passwordHash  String
-  fullName      String
-  role          Role     @default(REQUESTER)
-  team          Team?    @relation(fields: [teamId], references: [id])
-  teamId        Int?
-  isActive      Boolean  @default(true)
-  glpiId        Int?     @unique // identifiant de l'utilisateur correspondant dans GLPI
-  receiveDraftAlerts Boolean @default(false) // reçoit l'email de relance quand un AiEmailDraft attend trop longtemps une validation humaine (opt-in, activé par un admin)
-  mustChangePassword Boolean @default(false) // force l'affichage de l'écran de changement de mot de passe à la prochaine connexion (ex: après réinitialisation par un admin)
-  authProvider     String   @default("local") // "local" ou "ldap" — les comptes LDAP se connectent via l'Active Directory, pas avec un mot de passe local
+  // Photo de profil : URL absolue servie par /uploads/avatar/<fichier> (upload self-service via /auth/avatar)
+  avatarUrl           String?
+  id                  Int                  @id @default(autoincrement())
+  email               String               @unique
+  passwordHash        String
+  fullName            String
+  role                Role                 @default(REQUESTER)
+  team                Team?                @relation(fields: [teamId], references: [id])
+  teamId              Int?
+  isActive            Boolean              @default(true)
+  receiveDraftAlerts  Boolean              @default(false) // reçoit l'email de relance quand un AiEmailDraft attend trop longtemps une validation humaine (opt-in, activé par un admin)
+  mustChangePassword  Boolean              @default(false) // force l'affichage de l'écran de changement de mot de passe à la prochaine connexion (ex: après réinitialisation par un admin)
+  authProvider        String               @default("local") // "local" ou "ldap" — les comptes LDAP se connectent via l'Active Directory, pas avec un mot de passe local
   passwordResetTokens PasswordResetToken[]
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
 
-  ticketsCreated  Ticket[] @relation("TicketRequester")
-  ticketsAssigned Ticket[] @relation("TicketAssignee")
-  ticketsApproved Ticket[] @relation("TicketApprover")
-  ticketsModified Ticket[] @relation("TicketLastModifier")
-  ticketsObserved Ticket[] @relation("TicketObservers")
-  followups       Followup[]
-  aiEmailDraftsReviewed AiEmailDraft[]
-  knowledgeDraftsReviewed KnowledgeDraft[]
-  skills          UserSkill[]
-  chatMessages    ChatMessage[]
-  permissionGroups PermissionGroup[] @relation("UserPermissionGroups")
-  fieldCorrections TicketFieldCorrection[]
+  ticketsCreated               Ticket[]                @relation("TicketRequester")
+  ticketsAssigned              Ticket[]                @relation("TicketAssignee")
+  ticketsApproved              Ticket[]                @relation("TicketApprover")
+  ticketsModified              Ticket[]                @relation("TicketLastModifier")
+  ticketsDeleted               Ticket[]                @relation("TicketDeletedBy")
+  ticketsObserved              Ticket[]                @relation("TicketObservers")
+  followups                    Followup[]
+  aiEmailDraftsReviewed        AiEmailDraft[]
+  knowledgeDraftsReviewed      KnowledgeDraft[]
+  skills                       UserSkill[]
+  chatMessages                 ChatMessage[]
+  conversations                Conversation[]
+  permissionGroups             PermissionGroup[]       @relation("UserPermissionGroups")
+  fieldCorrections             TicketFieldCorrection[]
   weeklyPatternReportsReviewed AiWeeklyPatternReport[]
-  observedTeams Team[] @relation("TeamDefaultObservers")
-  requesterAssignments RequesterLocation[] @relation("RequesterAssignment")
-  createdCategories TicketCategory[] @relation("CategoryCreator")
-  timeEntries TicketTimeEntry[]
-  ownedAssets Asset[] @relation("AssetOwner")
-  inboxFolders InboxFolder[]
-  inboxRules   InboxRule[]
-  problemsCreated  Problem[] @relation("ProblemRequester")
-  problemsAssigned Problem[] @relation("ProblemAssignee")
-  problemsObserved Problem[] @relation("ProblemObservers")
-  problemFollowups ProblemFollowup[]
+  observedTeams                Team[]                  @relation("TeamDefaultObservers")
+  requesterAssignments         RequesterLocation[]     @relation("RequesterAssignment")
+  createdCategories            TicketCategory[]        @relation("CategoryCreator")
+  timeEntries                  TicketTimeEntry[]
+  ownedAssets                  Asset[]                 @relation("AssetOwner")
+  inboxFolders                 InboxFolder[]
+  inboxRules                   InboxRule[]
+  problemsCreated              Problem[]               @relation("ProblemRequester")
+  problemsAssigned             Problem[]               @relation("ProblemAssignee")
+  problemsObserved             Problem[]               @relation("ProblemObservers")
+  problemFollowups             ProblemFollowup[]
+  dashboards                   Dashboard[]
 
   @@index([teamId])
 }
 
-// Équipements / actifs IT (module "Inventaire" de GLPI). Peuvent être créés localement ou
-// importés depuis GLPI (glpiAssetId unique). Un asset peut être lié à plusieurs tickets
+// Équipements / actifs IT (inventaire). Un asset peut être lié à plusieurs tickets
 // via la table de liaison AssetTicket.
 model Asset {
-  id             Int      @id @default(autoincrement())
-  name           String
-  assetType      String   @default("COMPUTER") // COMPUTER | PRINTER | NETWORK | SOFTWARE | PHONE | OTHER
-  serialNumber   String?
-  inventoryNumber String? // numéro d'inventaire (otherserial GLPI)
-  status         String   @default("IN_USE") // IN_USE | STOCK | BROKEN | OUT_OF_SERVICE
-  manufacturer   String?
-  model          String?
-  glpiLocationId Int?
-  glpiLocation   GlpiLocation? @relation(fields: [glpiLocationId], references: [glpiLocationId])
-  ownerId        Int?
-  owner          User?     @relation("AssetOwner", fields: [ownerId], references: [id])
-  teamId         Int?
-  team           Team?     @relation(fields: [teamId], references: [id])
-  purchaseDate   DateTime?
-  warrantyEnd    DateTime?
-  notes          String?
-  glpiAssetId    Int?      @unique // id GLPI d'origine (si importé)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  tickets        AssetTicket[]
+  id              Int           @id @default(autoincrement())
+  name            String
+  assetType       String        @default("COMPUTER") // COMPUTER | PRINTER | NETWORK | SOFTWARE | PHONE | OTHER
+  serialNumber    String?
+  inventoryNumber String? // numéro d'inventaire interne
+  status          String        @default("IN_USE") // IN_USE | STOCK | BROKEN | OUT_OF_SERVICE
+  manufacturer    String?
+  model           String?
+  locationId      Int?
+  location        Location?     @relation(fields: [locationId], references: [id])
+  ownerId         Int?
+  owner           User?         @relation("AssetOwner", fields: [ownerId], references: [id])
+  teamId          Int?
+  team            Team?         @relation(fields: [teamId], references: [id])
+  purchaseDate    DateTime?
+  warrantyEnd     DateTime?
+  notes           String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  tickets         AssetTicket[]
 
   @@index([assetType])
   @@index([status])
-  @@index([glpiLocationId])
+  @@index([locationId])
   @@index([ownerId])
 }
 
 // Table de liaison Asset ↔ Ticket (un ticket peut référencer plusieurs équipements)
 model AssetTicket {
-  assetId   Int
-  asset     Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade)
-  ticketId  Int
-  ticket    Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  assetId  Int
+  asset    Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  ticketId Int
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   @@id([assetId, ticketId])
   @@index([ticketId])
 }
 
-// Temps passé sur un ticket (module « Plan » de GLPI) : saisie manuelle ou
+// Temps passé sur un ticket : saisie manuelle ou
 // entrée générée par le timer (start/stop) d'un technicien.
 model TicketTimeEntry {
   id          Int      @id @default(autoincrement())
@@ -239,140 +243,135 @@ model PermissionGroup {
 }
 
 model Team {
-  id        Int      @id @default(autoincrement())
-  name      String   @unique
-  category  String?
-  glpiGroupId Int?   @unique // identifiant du groupe correspondant dans GLPI
-  groupEmail  String? // adresse email de groupe (ex: reseau@entreprise.com), destinataire du récapitulatif quotidien des tickets de cette équipe
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         Int      @id @default(autoincrement())
+  name       String   @unique
+  category   String?
+  groupEmail String? // adresse email de groupe (ex: reseau@entreprise.com), destinataire du récapitulatif quotidien des tickets de cette équipe
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  members User[]
-  tickets Ticket[]
-  defaultObservers User[] @relation("TeamDefaultObservers")
-  assets Asset[]
-  problems Problem[]
+  members          User[]
+  tickets          Ticket[]
+  defaultObservers User[]    @relation("TeamDefaultObservers")
+  assets           Asset[]
+  problems         Problem[]
 }
 
-// Catégories de tickets. La plateforme peut fonctionner en autonomie (mode autonome) : dans ce
-// cas les catégories sont créées localement (glpiCategoryId = null, isCustom = true), sans dépendre
-// d'une synchronisation GLPI. Quand GLPI est connecté, syncCategoriesFromGlpi remplit glpiCategoryId
-// (ITILCategory de GLPI) et met à jour les noms.
+// Catégories de tickets (arborescence avec sous-catégories).
 model TicketCategory {
-  id              Int      @id @default(autoincrement())
-  name            String   @unique
-  glpiCategoryId  Int?     @unique // null si catégorie créée localement (mode autonome)
-  isCustom        Boolean  @default(false) // true si créée manuellement dans l'ERP
-  parentId        Int?     // catégorie parente (sous-catégories, ex: Matériel > Impression)
-  parent          TicketCategory? @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
-  children        TicketCategory[] @relation("CategoryTree")
-  customFields    CustomFieldDefinition[]
-  createdById     Int?     // utilisateur ayant créé la catégorie (null si sync GLPI)
-  createdBy       User?    @relation("CategoryCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id           Int                     @id @default(autoincrement())
+  name         String                  @unique
+  isCustom     Boolean                 @default(false) // true si créée manuellement dans l'ERP
+  parentId     Int? // catégorie parente (sous-catégories, ex: Matériel > Impression)
+  parent       TicketCategory?         @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children     TicketCategory[]        @relation("CategoryTree")
+  customFields CustomFieldDefinition[]
+  createdById  Int? // utilisateur ayant créé la catégorie (null = seed initial)
+  createdBy    User?                   @relation("CategoryCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
 
   @@index([parentId])
   @@index([createdById])
 }
 
-// Définition d'un champ personnalisé (équivalent du plugin GLPI Forms) : rendu dynamique
-// dans le formulaire de création de ticket selon la catégorie choisie. categoryId = null
+// Définition d'un champ personnalisé : rendu dynamique dans le formulaire de création de
+// ticket selon la catégorie choisie. categoryId = null
 // signifie « applicable à toutes les catégories ».
 model CustomFieldDefinition {
-  id         Int      @id @default(autoincrement())
+  id         Int             @id @default(autoincrement())
   label      String
-  type       String   // TEXT | NUMBER | SELECT | DATE | TEXTAREA | CHECKBOX
-  options    Json?    // pour SELECT : liste de {value, label} (ou string[] simples)
-  required   Boolean  @default(false)
-  categoryId Int?     // null = toutes les catégories
+  type       String // TEXT | NUMBER | SELECT | DATE | TEXTAREA | CHECKBOX
+  options    Json? // pour SELECT : liste de {value, label} (ou string[] simples)
+  required   Boolean         @default(false)
+  categoryId Int? // null = toutes les catégories
   category   TicketCategory? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  position   Int      @default(0)
-  isActive   Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  position   Int             @default(0)
+  isActive   Boolean         @default(true)
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
 
   @@index([categoryId])
 }
 
-// Lieux synchronisés depuis les Location de GLPI ("Lieu" / "Locations" dans le formulaire
-// de ticket). Le glpiLocationId est stocké sur le Ticket pour conserver la référence exacte.
-// isCustom=true pour les lieux créés manuellement dans l'ERP (pas encore poussés vers GLPI).
-model GlpiLocation {
-  id              Int      @id @default(autoincrement())
-  name            String   // nom simple ("Bâtiment A")
-  completename    String?  // nom complet hiérarchique ("Siège > Bâtiment A > Salle 201")
-  glpiLocationId  Int?     @unique // null si lieu custom pas encore pushé vers GLPI
-  isCustom        Boolean  @default(false)
-  isActive        Boolean  @default(true)
-  address         String?
-  postcode        String?
-  town            String?
-  country         String?
-  building        String?
-  room            String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+// Lieux (sites / bâtiments / salles) utilisés par les tickets, les assets et le pipeline
+// email. isCustom=true pour les lieux créés manuellement dans l'ERP.
+model Location {
+  id           Int      @id @default(autoincrement())
+  name         String // nom simple ("Bâtiment A")
+  completename String? // nom complet hiérarchique ("Siège > Bâtiment A > Salle 201")
+  isCustom     Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  address      String?
+  postcode     String?
+  town         String?
+  country      String?
+  building     String?
+  room         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   requesterLinks RequesterLocation[]
   assets         Asset[]
 }
 
 model Ticket {
-  id            Int            @id @default(autoincrement())
-  title         String
-  content       String
-  status        TicketStatus   @default(NEW)
-  priority      TicketPriority @default(P3)
-  category      String?
-  glpiTicketId  Int?     @unique // identifiant du ticket correspondant dans GLPI, une fois synchronisé
-  glpiLocationId Int?     // identifiant du "Lieu" GLPI (locations_id), résolu en nom via la table GlpiLocation
-  glpiLocationName String? // nom complet du lieu GLPI résolu ("Siège > Bâtiment A > Salle 201")
-  aiProcessed   Boolean  @default(false) // vrai si le ticket a été créé/traité par l'agent IA de triage (workflow n8n)
+  id           Int            @id @default(autoincrement())
+  title        String
+  content      String
+  status       TicketStatus   @default(NEW)
+  priority     TicketPriority @default(P3)
+  category     String?
+  locationId   Int? // identifiant du lieu (table Location)
+  locationName String? // nom complet du lieu résolu ("Siège > Bâtiment A > Salle 201")
+  aiProcessed  Boolean        @default(false) // vrai si le ticket a été créé/traité par l'agent IA de triage (workflow n8n)
 
   sourceEmail   String? // adresse email de l'expéditeur du mail ayant déclenché la création du ticket (via n8n)
   sourceName    String? // nom affiché de l'expéditeur du mail d'origine
   sourceSubject String? // sujet du mail d'origine
 
-  requester     User?  @relation("TicketRequester", fields: [requesterId], references: [id])
-  requesterId   Int?
+  requester   User? @relation("TicketRequester", fields: [requesterId], references: [id])
+  requesterId Int?
 
-  assignedTo    User?  @relation("TicketAssignee", fields: [assignedToId], references: [id])
-  assignedToId  Int?
+  assignedTo   User? @relation("TicketAssignee", fields: [assignedToId], references: [id])
+  assignedToId Int?
 
-  lastModifiedBy User?  @relation("TicketLastModifier", fields: [lastModifiedById], references: [id])
+  lastModifiedBy   User? @relation("TicketLastModifier", fields: [lastModifiedById], references: [id])
   lastModifiedById Int?
 
-  team          Team?  @relation(fields: [teamId], references: [id])
-  teamId        Int?
+  deletedAt   DateTime? // soft delete — renseigné = ticket dans la corbeille (restaurable)
+  deletedById Int?
+  deletedBy   User?     @relation("TicketDeletedBy", fields: [deletedById], references: [id])
+
+  team   Team? @relation(fields: [teamId], references: [id])
+  teamId Int?
 
   approvalStatus ApprovalStatus @default(NOT_REQUIRED)
-  approvedBy     User?    @relation("TicketApprover", fields: [approvedById], references: [id])
+  approvedBy     User?          @relation("TicketApprover", fields: [approvedById], references: [id])
   approvedById   Int?
   approvedAt     DateTime?
   approvalNote   String?
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  solvedAt      DateTime?
-  closedAt      DateTime?
-  lastGlpiSyncAt DateTime? // dernière synchro réussie vers GLPI (création, maj statut, followup)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  solvedAt  DateTime?
+  closedAt  DateTime?
 
   // Échéance manuelle posée par l'utilisateur (indépendante du SLA) — dueDateNotifiedAt évite
   // de re-notifier à chaque cycle du moniteur une fois l'alerte envoyée (reset lors d'un changement de dueDate).
-  dueDate          DateTime?
+  dueDate           DateTime?
   dueDateNotifiedAt DateTime?
-  customFields     Json?    // valeurs des champs personnalisés : { [customFieldDefinitionId]: valeur }
+  customFields      Json? // valeurs des champs personnalisés : { [customFieldDefinitionId]: valeur }
 
   // Moteur SLA — échéances calculées à la création et à chaque changement de priorité,
   // seuils configurables par priorité dans SystemSettings.slaHours
-  slaResponseDueAt    DateTime? // échéance de première réponse
-  slaResolutionDueAt  DateTime? // échéance de résolution
-  slaBreachedAt       DateTime? // date du premier dépassement SLA
-  firstResponseAt     DateTime? // temps de première réponse (premier followup technicien)
-  csatScore           Int?      // satisfaction demandeur (1-5)
-  csatComment         String?   // commentaire CSAT optionnel
-  csatRatedAt         DateTime? // date de notation CSAT
+  slaResponseDueAt   DateTime? // échéance de première réponse
+  slaResolutionDueAt DateTime? // échéance de résolution
+  slaBreachedAt      DateTime? // date du premier dépassement SLA
+  firstResponseAt    DateTime? // temps de première réponse (premier followup technicien)
+  csatScore          Int? // satisfaction demandeur (1-5)
+  csatComment        String? // commentaire CSAT optionnel
+  csatRatedAt        DateTime? // date de notation CSAT
 
   // Moteur d'escalade — escalationLevel s'incrémente à chaque escalade (auto ou manuelle),
   // escalatedAt = dernière escalade, escalateAt = déclenchement planifié (règle de triage),
@@ -386,72 +385,71 @@ model Ticket {
   outlookConversationId String?
   lastUserReplyAt       DateTime?
   reminderSentAt        DateTime?
-  reminderCount         Int       @default(0)
+  reminderCount         Int                         @default(0)
   aiSummary             String?
   contentEmbedding      Unsupported("vector(768)")?
 
   // Garde-fous sur l'analyse d'intention automatique des réponses email
-  splitCount            Int       @default(0) // nombre de tickets déjà créés par scission depuis ce ticket
-  firstOpenedAt         DateTime? // date du tout premier passage à OPEN, pour plafonner la durée de vie totale
-  aiExchangeCount       Int       @default(0) // nombre de réponses de suivi déjà générées par l'IA sur la conversation en cours, remis à 0 à la résolution — au-delà du seuil (followupEscalation.js), on escalade systématiquement vers un humain
+  splitCount      Int       @default(0) // nombre de tickets déjà créés par scission depuis ce ticket
+  firstOpenedAt   DateTime? // date du tout premier passage à OPEN, pour plafonner la durée de vie totale
+  aiExchangeCount Int       @default(0) // nombre de réponses de suivi déjà générées par l'IA sur la conversation en cours, remis à 0 à la résolution — au-delà du seuil (followupEscalation.js), on escalade systématiquement vers un humain
 
   // Incident majeur — regroupement multi-sites
-  isMajorIncident Boolean  @default(false)
-  impactedSites   String[] @default([])
+  isMajorIncident Boolean   @default(false)
+  impactedSites   String[]  @default([])
   firstDetectedAt DateTime?
   lastDetectedAt  DateTime?
 
   // Expéditeur dégradé par la boucle de rétroaction (taux de rejets élevé)
-  lowTrustSender Boolean  @default(false)
+  lowTrustSender Boolean @default(false)
 
   // Clôture suggérée par l'IA (détection de résolution) — doit être validée par un humain
   // dans le Centre de Validation avant de passer SOLVED. closeSuggestionConfidence garde
   // le score IA pour affichage et statistiques.
-  closeSuggested             Boolean   @default(false)
-  closeSuggestedAt           DateTime?
-  closeSuggestionConfidence  Float?
+  closeSuggested            Boolean   @default(false)
+  closeSuggestedAt          DateTime?
+  closeSuggestionConfidence Float?
   // Nombre de suggestions de clôture déjà émises sur ce ticket : plafonné (2) pour empêcher
   // les boucles de re-suggestion après rejet de la Hotline ; remis à 0 à la validation.
-  closeSuggestionCount       Int       @default(0)
+  closeSuggestionCount      Int       @default(0)
 
-  // Champs alignés sur le formulaire de ticket GLPI
-  type        TicketType   @default(INCIDENT)
-  source      String?      // "Helpdesk", "Email", "Téléphone", etc.
-  urgency     TicketUrgency  @default(MEDIUM)
-  impact      TicketImpact   @default(MEDIUM)
-  externalId  String?      // "ID externe" GLPI
-  observers   User[]       @relation("TicketObservers")
+  // Champs alignés sur le formulaire de ticket classique
+  type       TicketType    @default(INCIDENT)
+  source     String? // "Helpdesk", "Email", "Téléphone", etc.
+  urgency    TicketUrgency @default(MEDIUM)
+  impact     TicketImpact  @default(MEDIUM)
+  externalId String? // "ID externe" (référence externe optionnelle)
+  observers  User[]        @relation("TicketObservers")
 
-  followups       Followup[]
-  aiEmailDrafts   AiEmailDraft[]
-  attachments     TicketAttachment[]
-  aiSuggestions   AiTicketSuggestion[]
-  knowledgeDrafts KnowledgeDraft[]
-  messages        TicketMessage[]
-  events          TicketEvent[]
+  followups        Followup[]
+  aiEmailDrafts    AiEmailDraft[]
+  attachments      TicketAttachment[]
+  aiSuggestions    AiTicketSuggestion[]
+  knowledgeDrafts  KnowledgeDraft[]
+  messages         TicketMessage[]
+  events           TicketEvent[]
   fieldCorrections TicketFieldCorrection[]
-  timeEntries     TicketTimeEntry[]
-  linksA          TicketLink[] @relation("TicketLinksA")
-  linksB          TicketLink[] @relation("TicketLinksB")
-  assets          AssetTicket[]
-  problems        ProblemTicket[]
+  timeEntries      TicketTimeEntry[]
+  linksA           TicketLink[]            @relation("TicketLinksA")
+  linksB           TicketLink[]            @relation("TicketLinksB")
+  assets           AssetTicket[]
+  problems         ProblemTicket[]
 
   @@index([requesterId])
   @@index([assignedToId])
   @@index([teamId])
   @@index([approvedById])
-  @@index([glpiTicketId])
   @@index([status, createdAt])
 }
 
 // Suggestion d'action interne générée par l'agent IA pour le technicien (ex: réassigner, changer priorité, ticket similaire)
 model AiTicketSuggestion {
-  id          Int      @id @default(autoincrement())
-  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  ticketId    Int
-  suggestion  String   // texte de la suggestion ("Augmenter la priorité à P1", "Ticket similaire #42", ...)
-  reason      String?  // justification donnée par l'IA
-  createdAt   DateTime @default(now())
+  id         Int      @id @default(autoincrement())
+  ticket     Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ticketId   Int
+  suggestion String // texte de la suggestion ("Augmenter la priorité à P1", "Ticket similaire #42", ...)
+  reason     String? // justification donnée par l'IA
+  createdAt  DateTime @default(now())
 }
 
 // Réputation d'un expéditeur, apprise exclusivement des décisions humaines (approbations/rejets).
@@ -460,16 +458,16 @@ model AiTicketSuggestion {
 model SenderReputation {
   id              Int       @id @default(autoincrement())
   email           String    @unique // adresse de l'expéditeur (minuscules)
-  domain          String    // domaine extrait de l'adresse, pour l'agrégation du rapport hebdomadaire
+  domain          String // domaine extrait de l'adresse, pour l'agrégation du rapport hebdomadaire
   ticketsTotal    Int       @default(0)
   ticketsApproved Int       @default(0)
   ticketsRejected Int       @default(0)
   status          String    @default("NORMAL") // NORMAL | LOW_TRUST
   // Réputation sur les SUGGESTIONS DE CLÔTURE du même expéditeur (validation Hotline)
-  closureTotal     Int       @default(0)
-  closureApproved  Int       @default(0)
-  closureRejected  Int       @default(0)
-  closureStatus    String    @default("NORMAL") // NORMAL | LOW_TRUST_CLOSURE
+  closureTotal    Int       @default(0)
+  closureApproved Int       @default(0)
+  closureRejected Int       @default(0)
+  closureStatus   String    @default("NORMAL") // NORMAL | LOW_TRUST_CLOSURE
   degradedAt      DateTime?
   lastDecisionAt  DateTime?
   createdAt       DateTime  @default(now())
@@ -479,10 +477,10 @@ model SenderReputation {
   @@index([status])
 }
 
-// File de retry pour les actions de synchro GLPI différées qui ont échoué au moment où elles
-// devaient être exécutées (ex. clôture validée mais GLPI indisponible). Rejouées à intervalle
-// régulier avec backoff exponentiel, jusqu'à maxAttempts.
-model GlpiSyncRetry {
+// File de retry générique pour les actions différées qui ont échoué au moment où elles
+// devaient être exécutées. Rejouées à intervalle régulier avec backoff exponentiel,
+// jusqu'à maxAttempts.
+model SyncRetry {
   id          Int      @id @default(autoincrement())
   entityType  String // "Ticket", "Location", ...
   entityId    Int
@@ -497,7 +495,7 @@ model GlpiSyncRetry {
   @@index([nextRetryAt, attempts])
 }
 
-// Pièce jointe d'un ticket, importée depuis GLPI (Document_Item) lors de la synchronisation
+// Pièce jointe d'un ticket (uploadée manuellement ou reçue par email)
 enum EmailAttachmentSource {
   MANUAL_UPLOAD
   INCOMING_EMAIL
@@ -507,30 +505,29 @@ model TicketAttachment {
   id              Int                   @id @default(autoincrement())
   ticket          Ticket                @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   ticketId        Int
-  glpiDocumentId  Int?                  @unique
   filename        String
   mimeType        String?
   source          EmailAttachmentSource @default(MANUAL_UPLOAD)
   incomingEmail   IncomingEmail?        @relation(fields: [incomingEmailId], references: [id], onDelete: SetNull)
   incomingEmailId Int?
   contentHash     String? // hash sha256 du contenu binaire, pour détecter les logos/signatures dupliqués entre messages d'un même ticket
-  localFilepath   String? // chemin fichier local si pas encore uploadé vers GLPI (attente approbation)
+  localFilepath   String? // chemin fichier local si stocké sur disque (attente approbation)
   createdAt       DateTime              @default(now())
 
   @@index([incomingEmailId])
 }
 
 model Followup {
-  id              Int      @id @default(autoincrement())
-  ticket          Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  ticketId        Int
-  author          User?    @relation(fields: [authorId], references: [id])
-  authorId        Int?
-  content         String
-  source          String   @default("erp")
-  glpiFollowupId  Int?     @unique
-  isPrivate       Boolean  @default(false)
-  createdAt       DateTime @default(now())
+  id        Int       @id @default(autoincrement())
+  ticket    Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ticketId  Int
+  author    User?     @relation(fields: [authorId], references: [id])
+  authorId  Int?
+  content   String
+  source    String    @default("erp")
+  isPrivate Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime?
 
   @@index([authorId])
 }
@@ -552,20 +549,26 @@ model TicketLink {
 
 // Modèles de ticket réutilisables
 model TicketTemplate {
-  id          Int      @id @default(autoincrement())
-  name        String
-  description String?
-  title       String
-  content     String
-  priority    String?
-  category    String?
-  type        String?
-  urgency     String?
-  impact      String?
-  isActive    Boolean  @default(true)
-  createdById Int?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id               Int       @id @default(autoincrement())
+  name             String
+  description      String?
+  title            String
+  content          String
+  priority         String?
+  category         String?
+  type             String?
+  source           String?
+  urgency          String?
+  impact           String?
+  locationId       Int?
+  teamId           Int?
+  assignedToId     Int?
+  dueDate          DateTime?
+  requiresApproval Boolean   @default(false)
+  isActive         Boolean   @default(true)
+  createdById      Int?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 }
 
 model ApiConfig {
@@ -582,16 +585,12 @@ model ApiConfig {
 // Réglages globaux d'automatisation IA, modifiables depuis Paramètres > Automatisation.
 // Table singleton : une seule ligne, toujours id=1.
 model SystemSettings {
-  id                     Int      @id @default(1)
-  autoApproveGlpiSolutions Boolean @default(false) // approuve automatiquement la validation de solution GLPI dès qu'un ticket passe Résolu
-  autoSendAiEmails       Boolean  @default(false) // envoie directement les emails générés par l'IA sans passer par le circuit d'approbation humaine AiEmailDraft
-  enableFewShotTriage    Boolean  @default(true)  // active l'apprentissage Few-Shot par historique pour la classification de tickets
-  enableGlpiTicketCreation Boolean @default(true)  // active la création automatique de tickets GLPI lors de la création de tickets ERP
-  activeGlpiInstance     String   @default("glpi") // serviceName de l'instance GLPI unique utilisée ("glpi")
-  autonomousMode         Boolean  @default(false) // mode autonome : la plateforme fonctionne comme e-ticketing sans GLPI, toutes les syncs GLPI sont désactivées
-  closeChildrenWithParent Boolean @default(false) // clôture en cascade : fermer un parent ferme aussi ses sous-tickets (enfants)
+  id                       Int     @id @default(1)
+  autoSendAiEmails         Boolean @default(false) // envoie directement les emails générés par l'IA sans passer par le circuit d'approbation humaine AiEmailDraft
+  enableFewShotTriage      Boolean @default(true) // active l'apprentissage Few-Shot par historique pour la classification de tickets
+  closeChildrenWithParent  Boolean @default(false) // clôture en cascade : fermer un parent ferme aussi ses sous-tickets (enfants)
   autoApproveManualTickets Boolean @default(false) // auto-approuve les tickets créés manuellement (formulaire/portail) — les tickets créés par email/IA restent soumis à validation
-  enableAutoCreateSkills  Boolean  @default(false) // crée automatiquement les compétences suggérées par l'IA lors de l'analyse email si elles n'existent pas encore
+  enableAutoCreateSkills   Boolean @default(false) // crée automatiquement les compétences suggérées par l'IA lors de l'analyse email si elles n'existent pas encore
 
   // URLs absolues du serveur, utilisées pour générer des liens/ressources dans les emails sortants
   // (logo de signature, lien d'approbation de brouillon, lien de réinitialisation de mot de passe).
@@ -599,15 +598,12 @@ model SystemSettings {
   // Docker) pour permettre de pointer vers l'IP réseau réelle du serveur sans rebuild — utile dès
   // que le serveur est accédé autrement qu'en localhost. Laisser vide = retombe sur la variable
   // d'environnement, puis sur localhost en dernier recours.
-  backendUrl  String? @db.Text
-  frontendUrl String? @db.Text
+  backendUrl                String? @db.Text
+  frontendUrl               String? @db.Text
   // Fréquences de synchronisation automatique (Paramètres > Automatisation > Fréquences de synchronisation).
-  // Toutes désactivables individuellement en mettant 0 — le bouton manuel correspondant (s'il existe) reste alors le seul moyen de forcer une synchro.
-  glpiTicketsSyncIntervalSeconds         Int @default(20)   // tickets GLPI + pièces jointes + approbations auto
-  emailSyncIntervalSeconds               Int @default(15)   // relevé des boîtes mail entrantes
-  glpiTeamsCategoriesSyncIntervalMinutes Int @default(10)   // groupes GLPI -> équipes, ITILCategory -> catégories
-  glpiLocationsSyncIntervalMinutes       Int @default(30)   // lieux GLPI -> GlpiLocation
-  aiModelsSyncIntervalHours              Int @default(24)   // liste des modèles disponibles par fournisseur IA
+  // Toutes désactivables individuellement en mettant 0.
+  emailSyncIntervalSeconds  Int     @default(15) // relevé des boîtes mail entrantes
+  aiModelsSyncIntervalHours Int     @default(24) // liste des modèles disponibles par fournisseur IA
 
   // Relance des brouillons AiEmailDraft non validés (Paramètres > Automatisation).
   draftReminderEnabled      Boolean @default(true)
@@ -617,8 +613,8 @@ model SystemSettings {
   //   { P1: { response: 1, resolution: 4 }, P2: { response: 2, resolution: 8 },
   //     P3: { response: 4, resolution: 24 }, P4: { response: 8, resolution: 72 } }
   // slaMonitorIntervalSeconds = fréquence de détection des dépassements (0 = désactivé)
-  slaHours                  Json?   // seuils par priorité, ex: {"P1":{"response":1,"resolution":4}}
-  slaMonitorIntervalSeconds Int     @default(60)
+  slaHours                  Json? // seuils par priorité, ex: {"P1":{"response":1,"resolution":4}}
+  slaMonitorIntervalSeconds Int   @default(60)
 
   // Échéances manuelles des tickets — fréquence de détection des dépassements de dueDate (0 = désactivé)
   dueDateMonitorIntervalSeconds Int @default(300)
@@ -640,88 +636,92 @@ model SystemSettings {
 
   // Signature HTML insérée en bas de tous les emails automatiques (accusé de réception, relance,
   // notification d'incident connu), à la place du "Cordialement, Support IT" codé en dur. Laisser vide = défaut.
-  emailSignature String? @db.Text
+  emailSignature      String? @db.Text
   // URL absolue du logo uploadé (Paramètres > Automatisation), insérée automatiquement dans emailSignature.
   signatureLogoUrl    String? @db.Text
   signatureLogoHeight Int     @default(60) // hauteur d'affichage du logo dans l'email, en pixels
 
   // Récapitulatif quotidien des tickets ouverts (Paramètres > Automatisation > Récapitulatif quotidien).
-  dailySummaryEnabled   Boolean  @default(false)
-  dailySummaryTime      String   @default("18:00") // heure locale au format "HH:mm", vérifiée chaque minute par dailySummaryScheduler
-  dailySummaryRecipients String[] @default([])      // liste libre d'adresses email, indépendante des comptes ERP
+  dailySummaryEnabled      Boolean  @default(false)
+  dailySummaryTime         String   @default("18:00") // heure locale au format "HH:mm", vérifiée chaque minute par dailySummaryScheduler
+  dailySummaryRecipients   String[] @default([]) // liste libre d'adresses email, indépendante des comptes ERP
   dailySummaryLastSentDate String? // date "YYYY-MM-DD" du dernier envoi, pour ne déclencher qu'une fois par jour
+
+  // Notification email envoyée aux boîtes configurées à chaque création de ticket par un demandeur
+  // (formulaire, portail, chatbot). Paramètres > Notifications email.
+  chatbotNotifyEmail            String?
+  ticketCreationEmailEnabled    Boolean  @default(false)
+  ticketCreationEmailRecipients String[] @default([]) // liste libre d'adresses email
 
   // Date de mise en production de la plateforme — utilisée comme référence pour le reporting
   // et les statistiques (tickets "pré-platforme" vs "post-platforme").
-  goLiveDate            DateTime?
+  goLiveDate DateTime?
 
   // Comportement quand un email répond à un ticket fermé :
   //   "create_new" — crée un nouveau ticket avec une référence à l'ancien (recommandé)
   //   "reopen"      — rouvre le ticket automatiquement
-  closedTicketBehavior  String   @default("create_new")
+  closedTicketBehavior String @default("create_new")
 
   // Seuil en jours : si un ticket fermé a été clos depuis plus longtemps que cette durée,
   // il n'est pas rouvert — un nouveau ticket est créé à la place (même en mode "reopen").
-  reopenThresholdDays   Int      @default(90)
-
-  // Marquage des tickets GLPI créés par la plateforme pour les distinguer des tickets manuels :
-  //   "internal_note" — ajoute une note privée "Créé automatiquement via SOS Platform"
-  //   "none"          — aucun marquage
-  glpiSourceMarker      String   @default("internal_note")
-
-  // Dry-run (audit) : analyse les emails et prend des décisions, mais n'écrit RIEN dans GLPI,
-  // ni création de ticket, ni suivi, ni fermeture. Toutes les actions sont simulées et enregistrées
-  // dans le journal de transition. Correspond au Mode Audit.
-  dryRunMode            Boolean  @default(false)
-
-  // Contrôle granulaire des actions GLPI (indépendant de dryRun) :
-  //   enableGlpiFollowupCreation — permet d'ajouter des suivis aux tickets GLPI existants
-  //   enableGlpiTicketClosure    — permet de fermer/résoudre des tickets dans GLPI
-  enableGlpiFollowupCreation Boolean @default(true)
-  enableGlpiTicketClosure   Boolean @default(true)
+  reopenThresholdDays Int @default(90)
 
   // Relance des tickets en attente d'approbation Hotline (Paramètres > Automatisation).
-  approvalReminderMinutes   Int     @default(30) // délai en minutes avant relance des tickets PENDING à la Hotline
+  approvalReminderMinutes Int @default(30) // délai en minutes avant relance des tickets PENDING à la Hotline
 
   // ── Toggles d'envoi d'emails (Paramètres > Notifications) ──────────────────
-  emailAcknowledgementEnabled     Boolean @default(true)  // accusé de réception automatique
-  emailKnownIncidentEnabled       Boolean @default(true)  // notification "incident déjà connu"
-  emailAssignmentEnabled          Boolean @default(true)  // notification d'assignation au technicien
-  emailSlaBreachEnabled           Boolean @default(true)  // alerte dépassement SLA au technicien
-  emailDueDateBreachEnabled       Boolean @default(true)  // alerte dépassement d'échéance au technicien
-  emailStatusChangeEnabled        Boolean @default(true)  // notification changement de statut au demandeur
-  emailResolvedEnabled            Boolean @default(true)  // notification résolution (différée 10 min) au demandeur
-  emailEscalationEnabled          Boolean @default(true)  // notification d'escalade (admin/tech + demandeur)
+  emailAcknowledgementEnabled       Boolean @default(true) // accusé de réception automatique
+  emailKnownIncidentEnabled         Boolean @default(true) // notification "incident déjà connu"
+  emailAssignmentEnabled            Boolean @default(true) // notification d'assignation au technicien
+  emailSlaBreachEnabled             Boolean @default(true) // alerte dépassement SLA au technicien
+  emailDueDateBreachEnabled         Boolean @default(true) // alerte dépassement d'échéance au technicien
+  emailStatusChangeEnabled          Boolean @default(true) // notification changement de statut au demandeur
+  emailResolvedEnabled              Boolean @default(true) // notification résolution (différée 10 min) au demandeur
+  emailEscalationEnabled            Boolean @default(true) // notification d'escalade (admin/tech + demandeur)
   emailMajorIncidentResolvedEnabled Boolean @default(true) // notification résolution incident majeur aux sites impactés
-  emailApprovalEnabled            Boolean @default(true)  // notification d'approbation au demandeur
+  emailApprovalEnabled              Boolean @default(true) // notification d'approbation au demandeur
 
-  updatedAt              DateTime @updatedAt
+  // Configuration de visibilité de la barre latérale par rôle (Paramètres > Navigation).
+  // Clé = chemin de la route (ex: "/tickets"), Valeur = liste des rôles autorisés à voir cet élément.
+  // Si null ou vide, les defaults codés en dur (fallbackRoles) s'appliquent.
+  // Exemple : { "/": ["REQUESTER","TECHNICIAN","HOTLINE","ADMIN","SUPERADMIN"], "/problems": ["HOTLINE","ADMIN","SUPERADMIN"] }
+  navigationConfig Json?
+
+  // ── Apparence de la page de connexion (configurable par SUPERADMIN) ─────────
+  // loginThemeMode: "daily_rotation" = rotation déterministe (jour de l'année) sur les variantes activées,
+  //                 "fixed"          = variante unique toujours affichée,
+  //                 "random"         = tirage aléatoire parmi les variantes activées à chaque chargement.
+  loginThemeMode            String   @default("daily_rotation")
+  loginThemeFixedVariant    String   @default("classic")
+  loginThemeEnabledVariants String[] @default(["classic", "split", "hero", "minimal"])
+
+  updatedAt DateTime @updatedAt
 }
 
-// Suivi de santé de chaque tâche automatique planifiée (sync GLPI, pipeline email, relances...) —
+// Suivi de santé de chaque tâche automatique planifiée (pipeline email, relances...) —
 // permet de détecter et d'alerter en cas de panne silencieuse prolongée, au lieu de ne laisser
 // la trace que dans les logs serveur que personne ne consulte en routine.
 model SchedulerHealth {
-  id                    Int      @id @default(autoincrement())
-  name                  String   @unique // identifiant technique de la tâche, ex: "tickets GLPI"
-  consecutiveFailures   Int      @default(0)
-  lastError             String?  @db.Text
-  lastFailureAt         DateTime?
-  lastSuccessAt         DateTime?
-  alertSentAt           DateTime? // dernière fois qu'une alerte a été envoyée pour cette série d'échecs — évite de spammer à chaque cycle tant que la panne persiste
-  updatedAt             DateTime @updatedAt
+  id                  Int       @id @default(autoincrement())
+  name                String    @unique // identifiant technique de la tâche, ex: "pipeline email"
+  consecutiveFailures Int       @default(0)
+  lastError           String?   @db.Text
+  lastFailureAt       DateTime?
+  lastSuccessAt       DateTime?
+  alertSentAt         DateTime? // dernière fois qu'une alerte a été envoyée pour cette série d'échecs — évite de spammer à chaque cycle tant que la panne persiste
+  updatedAt           DateTime  @updatedAt
 }
 
 // Fournisseur d'IA (OpenAI, Anthropic, Google Gemini, NVIDIA, Mistral, etc.)
 model AiProvider {
-  id          Int      @id @default(autoincrement())
-  name        String   @unique // identifiant technique : "openai", "anthropic", "gemini", "nvidia", ...
-  label       String   // nom affiché : "OpenAI", "Anthropic (Claude)", ...
-  baseUrl     String?
-  isActive    Boolean  @default(true)
-  isDeleted   Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        Int      @id @default(autoincrement())
+  name      String   @unique // identifiant technique : "openai", "anthropic", "gemini", "nvidia", ...
+  label     String // nom affiché : "OpenAI", "Anthropic (Claude)", ...
+  baseUrl   String?
+  isActive  Boolean  @default(true)
+  isDeleted Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   models AiModel[]
   keys   AiKey[]
@@ -735,17 +735,17 @@ enum AiModelType {
 }
 
 model AiModel {
-  id         Int        @id @default(autoincrement())
-  provider   AiProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  id         Int         @id @default(autoincrement())
+  provider   AiProvider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
   providerId Int
-  name       String     // identifiant technique du modèle
-  label      String?    // nom affiché
+  name       String // identifiant technique du modèle
+  label      String? // nom affiché
   type       AiModelType @default(CHAT) // détermine si ce modèle peut être "par défaut" pour le chat (5 prompts IA) ou pour les embeddings (base de connaissances) — un fournisseur peut avoir un défaut distinct pour chaque type
-  isDefault  Boolean    @default(false)
-  isActive   Boolean    @default(true)
-  isDeleted  Boolean    @default(false)
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
+  isDefault  Boolean     @default(false)
+  isActive   Boolean     @default(true)
+  isDeleted  Boolean     @default(false)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
 
   keys AiKey[]
 
@@ -760,7 +760,7 @@ model AiKey {
   providerId Int
   model      AiModel?   @relation(fields: [modelId], references: [id], onDelete: SetNull)
   modelId    Int?
-  label      String     // nom donné par l'utilisateur : "Clé perso", "Clé société", ...
+  label      String // nom donné par l'utilisateur : "Clé perso", "Clé société", ...
   apiKey     String
   isActive   Boolean    @default(true)
   isDefault  Boolean    @default(false)
@@ -779,85 +779,84 @@ enum EmailProvider {
 
 // Configuration de boîte mail (ex: Outlook/Microsoft 365) utilisée par le workflow ITSM
 model EmailAccount {
-  id            Int           @id @default(autoincrement())
-  label         String        // nom donné par l'utilisateur : "Support IT", "Boîte principale", ...
-  provider      EmailProvider @default(OUTLOOK)
-  emailAddress  String
+  id           Int           @id @default(autoincrement())
+  label        String // nom donné par l'utilisateur : "Support IT", "Boîte principale", ...
+  provider     EmailProvider @default(OUTLOOK)
+  emailAddress String
 
   // OAuth2 (Outlook / Gmail)
-  clientId      String?
-  clientSecret  String?
-  tenantId      String?
-  refreshToken  String?
+  clientId     String?
+  clientSecret String?
+  tenantId     String?
+  refreshToken String?
 
   // IMAP/SMTP générique
-  imapHost      String?
-  imapPort      Int?
-  smtpHost      String?
-  smtpPort      Int?
-  username      String?
-  password      String?
-  useTls        Boolean       @default(true)
+  imapHost String?
+  imapPort Int?
+  smtpHost String?
+  smtpPort Int?
+  username String?
+  password String?
+  useTls   Boolean @default(true)
 
-  isActive      Boolean       @default(true)
-  isDefault     Boolean       @default(false)
+  isActive  Boolean @default(true)
+  isDefault Boolean @default(false)
 
   // Suivi du polling Microsoft Graph
-  lastSyncAt    DateTime?
-  deltaLink     String?       // lien de pagination delta Microsoft Graph pour ne traiter que les nouveaux messages
+  lastSyncAt DateTime?
+  deltaLink  String? // lien de pagination delta Microsoft Graph pour ne traiter que les nouveaux messages
 
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // Email entrant reçu via Microsoft Graph, traité par le pipeline IA
 model IncomingEmail {
-  id                  Int           @id @default(autoincrement())
-  graphMessageId      String        @unique
-  internetMessageId   String?
-  conversationId      String?
-  inReplyTo           String?
-  references          String?
-  emailAccountId      Int
-  fromEmail           String
-  fromName            String?
-  subject             String
-  bodyPreview         String?
-  bodyHtml            String?
-  receivedAt          DateTime
+  id                Int      @id @default(autoincrement())
+  graphMessageId    String   @unique
+  internetMessageId String?
+  conversationId    String?
+  inReplyTo         String?
+  references        String?
+  emailAccountId    Int
+  fromEmail         String
+  fromName          String?
+  subject           String
+  bodyPreview       String?
+  bodyHtml          String?
+  receivedAt        DateTime
 
   // Résultat de l'analyse IA
-  aiSummary           String?
-  aiCategory          String?
-  aiPriority          String?
-  aiTeam              String?
-  aiConfidence        Float?
-  aiIsSpam            Boolean       @default(false)
-  aiIntent            String?       // RESOLVED | STILL_PRESENT | NEW_INFO | QUESTION | REOPEN
+  aiSummary    String?
+  aiCategory   String?
+  aiPriority   String?
+  aiTeam       String?
+  aiConfidence Float?
+  aiIsSpam     Boolean @default(false)
+  aiIntent     String? // RESOLVED | STILL_PRESENT | NEW_INFO | QUESTION | REOPEN
 
   // Ticket rattaché
-  glpiTicketId        Int?
-  erpTicketId         Int?
-  isNewTicket         Boolean       @default(true)
+  erpTicketId Int?
+  isNewTicket Boolean @default(true)
 
-  status              String        @default("PENDING")
-  isRead              Boolean       @default(false)
-  error               String?
-  errorDetail         String?       @db.Text  // message d'erreur détaillé (fournisseur + quota + délai)
-  retryCount          Int           @default(0)
-  nextRetryAt         DateTime?
-  lastError           String?
+  status      String    @default("PENDING")
+  isRead      Boolean   @default(false)
+  error       String?
+  errorDetail String?   @db.Text // message d'erreur détaillé (fournisseur + quota + délai)
+  retryCount  Int       @default(0)
+  nextRetryAt DateTime?
+  lastError   String?
 
-  ccRecipients        String[]      @default([])
-  hasAttachments      Boolean       @default(false)
-  attachments         TicketAttachment[]
+  ccRecipients   String[]           @default([])
+  hasAttachments Boolean            @default(false)
+  attachments    TicketAttachment[]
 
   // Dossier custom (null = boîte de réception par défaut)
-  folderId            Int?
-  folder              InboxFolder?    @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  folderId Int?
+  folder   InboxFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
 
-  createdAt           DateTime      @default(now())
-  updatedAt           DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([conversationId])
   @@index([internetMessageId])
@@ -872,61 +871,61 @@ model IncomingEmail {
 
 // Dossiers custom de la boîte de réception (type Outlook)
 model InboxFolder {
-  id            Int             @id @default(autoincrement())
-  name          String          // nom affiché dans la sidebar
-  icon          String?         // nom d'icône lucide (optionnel)
-  color         String?         // code couleur hex (optionnel)
-  position      Int             @default(0) // ordre d'affichage
-  isSystem      Boolean         @default(false) // true pour les dossiers built-in (non supprimables)
-  createdById   Int?            // null = dossier système
-  createdBy     User?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  emails        IncomingEmail[]
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  id          Int             @id @default(autoincrement())
+  name        String // nom affiché dans la sidebar
+  icon        String? // nom d'icône lucide (optionnel)
+  color       String? // code couleur hex (optionnel)
+  position    Int             @default(0) // ordre d'affichage
+  isSystem    Boolean         @default(false) // true pour les dossiers built-in (non supprimables)
+  createdById Int? // null = dossier système
+  createdBy   User?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  emails      IncomingEmail[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
 
   @@unique([name, createdById])
 }
 
 // Règles de tri automatique (type Outlook)
 model InboxRule {
-  id                Int       @id @default(autoincrement())
-  label             String    // nom de la règle
-  isEnabled         Boolean   @default(true)
-  position          Int       @default(0) // ordre d'application
-  conditions        Json      // [{ field: "fromEmail", operator: "contains", value: "prosuma" }]
-  conditionOperator String    @default("AND") // AND | OR
-  action            String    // move_to_folder | mark_read | mark_spam | mark_category
-  actionConfig      Json      // { folderId: 5 } | { category: "Urgent" }
+  id                Int      @id @default(autoincrement())
+  label             String // nom de la règle
+  isEnabled         Boolean  @default(true)
+  position          Int      @default(0) // ordre d'application
+  conditions        Json // [{ field: "fromEmail", operator: "contains", value: "prosuma" }]
+  conditionOperator String   @default("AND") // AND | OR
+  action            String // move_to_folder | mark_read | mark_spam | mark_category
+  actionConfig      Json // { folderId: 5 } | { category: "Urgent" }
   createdById       Int
-  createdBy         User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  createdBy         User     @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }
 
 // Historique complet des messages entrants et sortants d'un ticket
 model TicketMessage {
-  id                Int              @id @default(autoincrement())
-  ticket            Ticket           @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  ticketId          Int
-  direction         MessageDirection
-  sender            String
-  recipients        String[]
-  subject           String
-  body              String
-  bodyHtml          String?
+  id         Int              @id @default(autoincrement())
+  ticket     Ticket           @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ticketId   Int
+  direction  MessageDirection
+  sender     String
+  recipients String[]
+  subject    String
+  body       String
+  bodyHtml   String?
 
   // Identifiants Outlook pour le threading
-  outlookMessageId  String?          @unique
+  outlookMessageId  String? @unique
   internetMessageId String?
   inReplyTo         String?
   conversationId    String?
 
-  ccRecipients      String[]         @default([])
-  timestamp         DateTime         @default(now())
-  createdAt         DateTime         @default(now())
+  ccRecipients String[] @default([])
+  timestamp    DateTime @default(now())
+  createdAt    DateTime @default(now())
 
   // Résumé IA de l'email (1-2 phrases) + statut du ticket au moment de la réception
-  summary           String?          @db.Text
+  summary            String? @db.Text
   ticketStatusAtTime String?
 
   @@index([ticketId])
@@ -935,44 +934,43 @@ model TicketMessage {
 
 // Journal d'audit de toutes les actions sur un ticket
 model TicketEvent {
-  id          Int             @id @default(autoincrement())
-  ticket      Ticket          @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  ticketId    Int
-  type        TicketEventType
-  actor       String          @default("SYSTEM") // email utilisateur ou "SYSTEM" / "AI"
-  payload     Json?           // données contextuelles de l'événement
-  createdAt   DateTime        @default(now())
+  id        Int             @id @default(autoincrement())
+  ticket    Ticket          @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ticketId  Int
+  type      TicketEventType
+  actor     String          @default("SYSTEM") // email utilisateur ou "SYSTEM" / "AI"
+  payload   Json? // données contextuelles de l'événement
+  createdAt DateTime        @default(now())
 
   @@index([ticketId])
 }
 
 // Configuration des relances automatiques (délais en jours)
 model ReminderConfig {
-  id                Int      @id @default(autoincrement())
-  firstReminderDays Int      @default(2)
-  secondReminderDays Int     @default(5)
-  preCloseDays      Int      @default(10)
-  autoCloseDays     Int      @default(15)
-  isActive          Boolean  @default(true)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id                 Int      @id @default(autoincrement())
+  firstReminderDays  Int      @default(2)
+  secondReminderDays Int      @default(5)
+  preCloseDays       Int      @default(10)
+  autoCloseDays      Int      @default(15)
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 }
 
 // Brouillon de réponse email généré par l'agent IA (workflow n8n), en attente de validation humaine
 model AiEmailDraft {
-  id              Int            @id @default(autoincrement())
-  ticket          Ticket?        @relation(fields: [ticketId], references: [id], onDelete: SetNull)
-  ticketId        Int?
+  id       Int     @id @default(autoincrement())
+  ticket   Ticket? @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  ticketId Int?
 
-  glpiTicketId    Int?
   recipientEmail  String
   recipientName   String? // nom du destinataire (ex: pour affichage dans le centre de validation)
-  ccRecipients    String[]       @default([])
+  ccRecipients    String[] @default([])
   subject         String
   proposedContent String
 
-  draftKind       String         @default("ACKNOWLEDGEMENT") // ACKNOWLEDGEMENT | KNOWN_INCIDENT | CONVERSATION_FOLLOWUP
-  exchangeTurn    Int? // numéro du tour de conversation (copie de Ticket.aiExchangeCount), uniquement pour CONVERSATION_FOLLOWUP
+  draftKind    String @default("ACKNOWLEDGEMENT") // ACKNOWLEDGEMENT | KNOWN_INCIDENT | CONVERSATION_FOLLOWUP
+  exchangeTurn Int? // numéro du tour de conversation (copie de Ticket.aiExchangeCount), uniquement pour CONVERSATION_FOLLOWUP
 
   // Id Outlook du message reçu auquel cette réponse fait suite (TicketMessage.outlookMessageId) —
   // utilisé à l'envoi (emailSender.sendEmail) pour répondre dans le même fil de conversation côté
@@ -981,21 +979,21 @@ model AiEmailDraft {
   inReplyToGraphMessageId String?
   outlookConversationId   String?
 
-  status          ApprovalStatus @default(PENDING)
-  reviewedBy      User?          @relation(fields: [reviewedById], references: [id])
-  reviewedById    Int?
-  reviewedAt      DateTime?
-  reviewNote      String?
+  status       ApprovalStatus @default(PENDING)
+  reviewedBy   User?          @relation(fields: [reviewedById], references: [id])
+  reviewedById Int?
+  reviewedAt   DateTime?
+  reviewNote   String?
 
-  sentAt          DateTime?
+  sentAt DateTime?
 
-  reminderCount   Int       @default(0) // nombre de relances déjà envoyées pour ce brouillon en attente
-  lastReminderAt  DateTime? // date de la dernière relance envoyée — évite de relancer à chaque cycle
+  reminderCount  Int       @default(0) // nombre de relances déjà envoyées pour ce brouillon en attente
+  lastReminderAt DateTime? // date de la dernière relance envoyée — évite de relancer à chaque cycle
 
-  approvalTokens  EmailApprovalToken[]
+  approvalTokens EmailApprovalToken[]
 
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([ticketId])
   @@index([reviewedById])
@@ -1007,18 +1005,18 @@ model AiEmailDraft {
 // login. Token opaque à usage unique, distinct d'un JWT : invalidé dès qu'il est consommé
 // (approve/reject) et expire après un délai court, pour limiter l'exposition si le lien fuit.
 model EmailApprovalToken {
-  id          Int           @id @default(autoincrement())
-  token       String        @unique
-  draft       AiEmailDraft  @relation(fields: [draftId], references: [id], onDelete: Cascade)
-  draftId     Int
-  expiresAt   DateTime
-  usedAt      DateTime?
+  id                        Int          @id @default(autoincrement())
+  token                     String       @unique
+  draft                     AiEmailDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  draftId                   Int
+  expiresAt                 DateTime
+  usedAt                    DateTime?
   // internetMessageId de l'email de relance envoyé contenant ce token — permet de reconnaître
   // la RÉPONSE du responsable (in-reply-to) quand il préfère répondre directement par email
   // ("j'approuve" / "je rejette") plutôt que de cliquer le lien, notamment hors réseau local
   // sans accès au tunnel/VPN exposant l'application.
-  reminderInternetMessageId String? @unique
-  createdAt   DateTime      @default(now())
+  reminderInternetMessageId String?      @unique
+  createdAt                 DateTime     @default(now())
 }
 
 // ── Compétences métier des techniciens ─────────────────────────────────────
@@ -1026,14 +1024,14 @@ model EmailApprovalToken {
 // qui peut être assigné à un technicien avec un niveau de maîtrise (1-5).
 // Utilisé par ticketAutoAssign.js pour l'assignation intelligente des tickets.
 model Skill {
-  id          Int         @id @default(autoincrement())
-  name        String      @unique
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
   description String?
-  category    String?     // Catégorie parente pour regrouper les compétences (ex: "Infrastructure")
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  category    String? // Catégorie parente pour regrouper les compétences (ex: "Infrastructure")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  userSkills  UserSkill[]
+  userSkills UserSkill[]
 }
 
 // Niveau de compétence d'un technicien pour un domaine donné
@@ -1052,14 +1050,14 @@ model UserSkill {
 // Journal des réassignations de tickets — utilisé par le système d'auto-apprentissage
 // pour mesurer la précision des assignations automatiques et améliorer les futures suggestions.
 model ReassignmentLog {
-  id                    Int      @id @default(autoincrement())
-  ticketId              Int      // ticket concerné
-  previousTechnicianId  Int?     // technicien avant réassignation (null = non assigné)
-  newTechnicianId       Int?     // nouveau technicien (null = désassigné)
-  reason                String?  // raison donnée par l'humain : "surcharge", "compétence", "disponibilité", "autre"
-  wasAutoAssigned       Boolean  @default(false) // true si le ticket avait été assigné automatiquement
-  assignedByUserId      Int?     // utilisateur qui a fait la réassignation
-  createdAt             DateTime @default(now())
+  id                   Int      @id @default(autoincrement())
+  ticketId             Int // ticket concerné
+  previousTechnicianId Int? // technicien avant réassignation (null = non assigné)
+  newTechnicianId      Int? // nouveau technicien (null = désassigné)
+  reason               String? // raison donnée par l'humain : "surcharge", "compétence", "disponibilité", "autre"
+  wasAutoAssigned      Boolean  @default(false) // true si le ticket avait été assigné automatiquement
+  assignedByUserId     Int? // utilisateur qui a fait la réassignation
+  createdAt            DateTime @default(now())
 
   @@index([ticketId])
   @@index([newTechnicianId])
@@ -1071,12 +1069,12 @@ model ReassignmentLog {
 // créée automatiquement lors des événements socket (ticket créé, assigné, mis à jour).
 model Notification {
   id        Int      @id @default(autoincrement())
-  userId    Int      // destinataire de la notification
-  type      String   // "ticket_created" | "ticket_assigned" | "ticket_updated"
-  title     String   // titre court affiché dans le volet
-  message   String   // message détaillé
-  link      String?  // lien de navigation (ex: "/tickets/42")
-  metadata  Json?    // données supplémentaires (priorité, méthode d'assignation, etc.)
+  userId    Int // destinataire de la notification
+  type      String // "ticket_created" | "ticket_assigned" | "ticket_updated"
+  title     String // titre court affiché dans le volet
+  message   String // message détaillé
+  link      String? // lien de navigation (ex: "/tickets/42")
+  metadata  Json? // données supplémentaires (priorité, méthode d'assignation, etc.)
   isRead    Boolean  @default(false)
   createdAt DateTime @default(now())
 
@@ -1108,31 +1106,31 @@ enum KnowledgeDocumentStatus {
 
 // Document source de la base de connaissances (PDF, DOCX, Markdown, ou article approuvé)
 model KnowledgeDocument {
-  id          Int                     @id @default(autoincrement())
-  title       String
-  sourceType  String                  // "pdf" | "docx" | "markdown" | "article"
-  filename    String?
-  status      KnowledgeDocumentStatus @default(PROCESSING)
-  error       String?
-  category    String?                 // Catégorie du document (ex: "Réseau", "Logiciel", "Matériel")
-  tags        String[]                // Tags pour filtrage
-  author      String?                 // Auteur du document
-  createdAt   DateTime                @default(now())
-  updatedAt   DateTime                @updatedAt
+  id         Int                     @id @default(autoincrement())
+  title      String
+  sourceType String // "pdf" | "docx" | "markdown" | "article"
+  filename   String?
+  status     KnowledgeDocumentStatus @default(PROCESSING)
+  error      String?
+  category   String? // Catégorie du document (ex: "Réseau", "Logiciel", "Matériel")
+  tags       String[] // Tags pour filtrage
+  author     String? // Auteur du document
+  createdAt  DateTime                @default(now())
+  updatedAt  DateTime                @updatedAt
 
-  chunks      KnowledgeChunk[]
-  feedbacks   KnowledgeFeedback[]
+  chunks    KnowledgeChunk[]
+  feedbacks KnowledgeFeedback[]
 }
 
 // Fragment de texte d'un document, avec son embedding pour la recherche de similarité (pgvector)
 model KnowledgeChunk {
-  id          Int               @id @default(autoincrement())
-  document    KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  documentId  Int
-  chunkIndex  Int
-  content     String
-  embedding   Unsupported("vector(768)")?
-  createdAt   DateTime          @default(now())
+  id         Int                         @id @default(autoincrement())
+  document   KnowledgeDocument           @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId Int
+  chunkIndex Int
+  content    String
+  embedding  Unsupported("vector(768)")?
+  createdAt  DateTime                    @default(now())
 
   @@index([documentId])
 }
@@ -1145,15 +1143,15 @@ enum KnowledgeFeedbackRating {
 }
 
 model KnowledgeFeedback {
-  id         Int                      @id @default(autoincrement())
-  document   KnowledgeDocument        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  id         Int                     @id @default(autoincrement())
+  document   KnowledgeDocument       @relation(fields: [documentId], references: [id], onDelete: Cascade)
   documentId Int
-  chunkId    Int?                     // ID du chunk spécifique si applicable
-  query      String                   // La requête de recherche qui a généré ce résultat
-  rating     KnowledgeFeedbackRating  // Note de pertinence
-  comment    String?                  // Commentaire optionnel
-  userEmail  String?                  // Email de l'utilisateur qui a donné le feedback
-  createdAt  DateTime                 @default(now())
+  chunkId    Int? // ID du chunk spécifique si applicable
+  query      String // La requête de recherche qui a généré ce résultat
+  rating     KnowledgeFeedbackRating // Note de pertinence
+  comment    String? // Commentaire optionnel
+  userEmail  String? // Email de l'utilisateur qui a donné le feedback
+  createdAt  DateTime                @default(now())
 }
 
 enum KnowledgeDraftStatus {
@@ -1164,28 +1162,28 @@ enum KnowledgeDraftStatus {
 
 // Brouillon d'article de connaissance généré par l'IA à partir d'un ticket résolu
 model KnowledgeDraft {
-  id          Int                  @id @default(autoincrement())
-  ticket      Ticket?              @relation(fields: [ticketId], references: [id], onDelete: SetNull)
-  ticketId    Int?
+  id       Int     @id @default(autoincrement())
+  ticket   Ticket? @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  ticketId Int?
 
-  title       String
-  problem     String
-  cause       String
-  solution    String
-  keywords    String[]
-  category    String?              // Catégorie proposée pour l'article
-  tags        String[]             // Tags proposés pour l'article
+  title    String
+  problem  String
+  cause    String
+  solution String
+  keywords String[]
+  category String? // Catégorie proposée pour l'article
+  tags     String[] // Tags proposés pour l'article
 
-  status      KnowledgeDraftStatus @default(PENDING)
-  reviewedBy  User?                @relation(fields: [reviewedById], references: [id])
+  status       KnowledgeDraftStatus @default(PENDING)
+  reviewedBy   User?                @relation(fields: [reviewedById], references: [id])
   reviewedById Int?
-  reviewedAt  DateTime?
-  reviewNote  String?
+  reviewedAt   DateTime?
+  reviewNote   String?
 
-  documentId  Int? // document de connaissance créé une fois approuvé
+  documentId Int? // document de connaissance créé une fois approuvé
 
-  createdAt   DateTime             @default(now())
-  updatedAt   DateTime             @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([ticketId])
   @@index([reviewedById])
@@ -1203,30 +1201,30 @@ model PromptTemplate {
   updatedAt DateTime @updatedAt
 }
 
-// Workflow n8n déclenchable depuis l'UI (ex: synchro GLPI, notification, automatisation)
+// Workflow n8n déclenchable depuis l'UI (ex: notification, automatisation)
 model N8nWorkflow {
-  id          Int      @id @default(autoincrement())
-  name        String   // nom affiché : "Synchro GLPI", "Notification Slack", ...
-  webhookUrl  String   // URL du webhook n8n à appeler
+  id          Int       @id @default(autoincrement())
+  name        String // nom affiché : "Notification Slack", "Sauvegarde DB", ...
+  webhookUrl  String // URL du webhook n8n à appeler
   description String?
-  isActive    Boolean  @default(true)
+  isActive    Boolean   @default(true)
   lastRunAt   DateTime?
-  lastStatus  String?  // "success" | "error"
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  lastStatus  String? // "success" | "error"
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
 
-// Mapping entre emails (Outlook) et tickets (GLPI/ERP) — pour le workflow ITSM
+// Mapping entre emails (Outlook) et tickets (ERP) — pour le workflow ITSM
 model TicketMapping {
-  id               Int      @id @default(autoincrement())
-  provider         String   // "outlook", "gmail", etc.
-  conversationId   String?  @db.Text
-  messageId        String?  @db.Text
-  requesterEmail   String?
-  ticketId         Int?     // ID du ticket dans le système (GLPI ou ERP)
-  status           String?  // "open", "solved", "closed"
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id             Int      @id @default(autoincrement())
+  provider       String // "outlook", "gmail", etc.
+  conversationId String?  @db.Text
+  messageId      String?  @db.Text
+  requesterEmail String?
+  ticketId       Int? // ID du ticket dans le système (ERP)
+  status         String? // "open", "solved", "closed"
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   @@index([conversationId])
   @@index([messageId])
@@ -1234,15 +1232,15 @@ model TicketMapping {
 
 // Historique des événements de mail pour le workflow ITSM
 model MailEvent {
-  id               Int      @id @default(autoincrement())
-  messageId        String   @db.Text
-  conversationId   String?  @db.Text
-  fromEmail        String
-  subject          String
-  bodyHash         String
-  decision         Json
-  relatedTicketId  Int?
-  createdAt        DateTime @default(now())
+  id              Int      @id @default(autoincrement())
+  messageId       String   @db.Text
+  conversationId  String?  @db.Text
+  fromEmail       String
+  subject         String
+  bodyHash        String
+  decision        Json
+  relatedTicketId Int?
+  createdAt       DateTime @default(now())
 
   @@index([messageId])
   @@index([conversationId])
@@ -1251,45 +1249,44 @@ model MailEvent {
 
 // File d'attente des erreurs de workflow ITSM
 model MailError {
-  id                     Int       @id @default(autoincrement())
-  messageId              String    @db.Text
-  conversationId         String?   @db.Text
-  fromEmail              String
-  subject                String
-  bodyHash               String
-  errorStage             String
-  errorDetails           String?   @db.Text
-  rawSubworkflowOutput   String?   @db.Text
-  failedAt               DateTime  @default(now())
-  createdAt              DateTime  @default(now())
+  id                   Int      @id @default(autoincrement())
+  messageId            String   @db.Text
+  conversationId       String?  @db.Text
+  fromEmail            String
+  subject              String
+  bodyHash             String
+  errorStage           String
+  errorDetails         String?  @db.Text
+  rawSubworkflowOutput String?  @db.Text
+  failedAt             DateTime @default(now())
+  createdAt            DateTime @default(now())
 
   @@index([messageId])
   @@index([conversationId])
 }
 
-// Équipes support pour le mapping entre l'IA et GLPI
+// Équipes support pour le mapping IA → équipe
 model SupportTeam {
-  id               Int       @id @default(autoincrement())
-  teamName         String    @unique
-  glpiGroupName    String?   // Nom du groupe correspondant dans GLPI
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id        Int      @id @default(autoincrement())
+  teamName  String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // Index de similarité sémantique des tickets (pour la détection de doublons dans le workflow)
 model TicketSimilarityIndex {
-  id               Int                     @id @default(autoincrement())
-  ticketId         Int
-  summary          String
-  bodyShort        String
-  content          String
-  embedding        Unsupported("vector(768)")?
-  status           String
-  requesterEmail   String
-  metadata         Json?
-  openedAt         DateTime                @default(now())
-  createdAt        DateTime                @default(now())
-  updatedAt        DateTime                @updatedAt
+  id             Int                         @id @default(autoincrement())
+  ticketId       Int
+  summary        String
+  bodyShort      String
+  content        String
+  embedding      Unsupported("vector(768)")?
+  status         String
+  requesterEmail String
+  metadata       Json?
+  openedAt       DateTime                    @default(now())
+  createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @updatedAt
 
   @@index([ticketId])
   @@index([requesterEmail])
@@ -1299,53 +1296,78 @@ model TicketSimilarityIndex {
 model TriageRule {
   id                  Int      @id @default(autoincrement())
   isActive            Boolean  @default(true)
-  priority            Int      @default(0)   // plus élevé = évalué en premier
-  matchField          String   // 'subject' | 'body' | 'subject_or_body' | 'from' | 'sentiment' | 'time_window' | 'domain'
-  matchType           String   // 'contains' | 'regex' | 'equals' | 'starts_with' | 'ai_semantic'
-  matchValue          String   // valeur à chercher (insensible à la casse)
-  sentiment           String?  // 'FRUSTRATED' | 'URGENT' | 'NEUTRAL'
-  timeWindow          String?  // 'WORK_HOURS' | 'OFF_HOURS'
+  priority            Int      @default(0) // plus élevé = évalué en premier
+  matchField          String // 'subject' | 'body' | 'subject_or_body' | 'from' | 'sentiment' | 'time_window' | 'domain'
+  matchType           String // 'contains' | 'regex' | 'equals' | 'starts_with' | 'ai_semantic'
+  matchValue          String // valeur à chercher (insensible à la casse)
+  sentiment           String? // 'FRUSTRATED' | 'URGENT' | 'NEUTRAL'
+  timeWindow          String? // 'WORK_HOURS' | 'OFF_HOURS'
   minTicketsLast24h   Int?
-  category            String?  // catégorie ITSM assignée (ex: "Matériel", "VPN", etc.)
-  skillName           String?  // compétence cible (ex: "PORT USB")
-  teamName            String?  // équipe cible (ex: "Sécurité")
-  ticketPriority      String?  // P1|P2|P3|P4|URGENT
+  category            String? // catégorie ITSM assignée (ex: "Matériel", "VPN", etc.)
+  skillName           String? // compétence cible (ex: "PORT USB")
+  teamName            String? // équipe cible (ex: "Sécurité")
+  ticketPriority      String? // P1|P2|P3|P4|URGENT
   isSpam              Boolean  @default(false)
-  autoApproveGlpi     Boolean  @default(false)
   assignMode          String   @default("SPECIFIC") // "SPECIFIC" | "LEAST_BUSY"
   tags                String[] @default([])
   autoEscalateMinutes Int?
   notificationWebhook String?
-  label               String   // Description humaine de la règle
+  label               String // Description humaine de la règle
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 }
 
 model ChatMessage {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  user      User     @relation(fields: [userId], references: [id])
-  role      String   // 'user' | 'assistant'
-  content   String
-  sources   Json?    // [{ title, id }]
-  rating    Int?     // 1 = utile, -1 = pas utile
-  createdAt DateTime @default(now())
+  id             Int           @id @default(autoincrement())
+  conversationId Int?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  userId         Int
+  user           User          @relation(fields: [userId], references: [id])
+  role           String // 'user' | 'assistant'
+  content        String
+  sources        Json? // [{ title, id }]
+  rating         Int? // 1 = utile, -1 = pas utile
+  intent         String? // intention détectée
+  tokensUsed     Int? // nombre de tokens consommés (estimation)
+  durationMs     Int? // temps de réponse en millisecondes
+  flagged        Boolean       @default(false)
+  createdAt      DateTime      @default(now())
 
   @@index([userId, createdAt])
+  @@index([intent])
+  @@index([flagged])
+  @@index([conversationId])
+}
+
+model Conversation {
+  id                Int      @id @default(autoincrement())
+  userId            Int
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title             String? // titre auto-généré ou édité par l'utilisateur
+  pinned            Boolean  @default(false)
+  archived          Boolean  @default(false)
+  pendingTicketData Json? // données du ticket en attente de confirmation
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  messages ChatMessage[]
+
+  @@index([userId, pinned, archived])
+  @@index([userId, updatedAt])
 }
 
 // Consigne chaque modification/correction de champ effectuée par un membre de la Hotline sur un ticket
 model TicketFieldCorrection {
-  id              Int      @id @default(autoincrement())
-  ticket          Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  ticketId        Int
-  fieldName       String   // "category", "priority", "type", "assignedToId", "teamId", "title", "content", "urgency", "impact", "glpiLocationId"
-  oldValue        String?  @db.Text
-  newValue        String?  @db.Text
-  aiPrediction    String?  @db.Text // valeur initiale suggérée par l'IA lors de la création
-  correctedBy     User?    @relation(fields: [correctedById], references: [id], onDelete: SetNull)
-  correctedById   Int?
-  createdAt       DateTime @default(now())
+  id            Int      @id @default(autoincrement())
+  ticket        Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ticketId      Int
+  fieldName     String // "category", "priority", "type", "assignedToId", "teamId", "title", "content", "urgency", "impact", "locationId"
+  oldValue      String?  @db.Text
+  newValue      String?  @db.Text
+  aiPrediction  String?  @db.Text // valeur initiale suggérée par l'IA lors de la création
+  correctedBy   User?    @relation(fields: [correctedById], references: [id], onDelete: SetNull)
+  correctedById Int?
+  createdAt     DateTime @default(now())
 
   @@index([ticketId])
   @@index([fieldName])
@@ -1360,7 +1382,7 @@ model AiWeeklyPatternReport {
   endDate          DateTime
   totalCorrections Int            @default(0)
   totalRejections  Int            @default(0)
-  proposedRules    Json           // Tableau de règles de triage suggérées [{ matchField, matchValue, suggestedCategory, suggestedPriority, confidence }]
+  proposedRules    Json // Tableau de règles de triage suggérées [{ matchField, matchValue, suggestedCategory, suggestedPriority, confidence }]
   status           ApprovalStatus @default(PENDING) // PENDING | APPROVED | REJECTED
   reviewedBy       User?          @relation(fields: [reviewedById], references: [id], onDelete: SetNull)
   reviewedById     Int?
@@ -1373,22 +1395,22 @@ model AiWeeklyPatternReport {
   @@index([reviewedById])
 }
 
-// Association entre un expéditeur d'email (demandeur externe) et un lieu GLPI.
+// Association entre un expéditeur d'email (demandeur externe) et un lieu.
 // Créée automatiquement quand la Hotline approuve un ticket ou corrige son lieu.
 // Un même email peut être lié à plusieurs lieux (ex: technicien itinérant).
 model RequesterLocation {
-  id              Int         @id @default(autoincrement())
-  email           String      // email normalisé du demandeur (lowercase)
-  glpiLocation    GlpiLocation @relation(fields: [glpiLocationId], references: [id], onDelete: Cascade)
-  glpiLocationId  Int
-  assignedBy      User?       @relation("RequesterAssignment", fields: [assignedById], references: [id], onDelete: SetNull)
+  id              Int      @id @default(autoincrement())
+  email           String // email normalisé du demandeur (lowercase)
+  location        Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  locationId      Int
+  assignedBy      User?    @relation("RequesterAssignment", fields: [assignedById], references: [id], onDelete: SetNull)
   assignedById    Int?
-  assignmentCount Int         @default(1)
-  lastUsedAt      DateTime    @default(now())
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  assignmentCount Int      @default(1)
+  lastUsedAt      DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  @@unique([email, glpiLocationId])
+  @@unique([email, locationId])
   @@index([email])
 }
 
@@ -1396,12 +1418,12 @@ model RequesterLocation {
 // Indépendant du ticket contrairement à TicketEvent.
 model AuditLog {
   id          Int      @id @default(autoincrement())
-  action      String   // "USER_CREATED" | "TEAM_DELETED" | "SETTINGS_UPDATED" | ...
+  action      String // "USER_CREATED" | "TEAM_DELETED" | "SETTINGS_UPDATED" | ...
   actorId     Int?
   actorEmail  String?
-  targetType  String?  // "User" | "Team" | "Ticket" | "GlpiLocation" | "SystemSettings" | ...
+  targetType  String? // "User" | "Team" | "Ticket" | "Location" | "SystemSettings" | ...
   targetId    Int?
-  targetLabel String?  // libellé lisible (nom, titre, etc.)
+  targetLabel String? // libellé lisible (nom, titre, etc.)
   metadata    Json?
   ipAddress   String?
   createdAt   DateTime @default(now())
@@ -1414,39 +1436,39 @@ model AuditLog {
 // ── Problèmes (ITIL Problem Management) ────────────────────────────────
 
 model Problem {
-  id              Int            @id @default(autoincrement())
-  title           String
-  description     String
-  status          ProblemStatus  @default(NEW)
-  priority        TicketPriority @default(P3)
-  urgency         TicketUrgency  @default(MEDIUM)
-  impact          TicketImpact   @default(MEDIUM)
-  category        String?
-  glpiLocationId  Int?
-  glpiLocationName String?
-  dueDate         DateTime?
+  id           Int            @id @default(autoincrement())
+  title        String
+  description  String
+  status       ProblemStatus  @default(NEW)
+  priority     TicketPriority @default(P3)
+  urgency      TicketUrgency  @default(MEDIUM)
+  impact       TicketImpact   @default(MEDIUM)
+  category     String?
+  locationId   Int?
+  locationName String?
+  dueDate      DateTime?
 
   // Acteurs
-  requester       User?   @relation("ProblemRequester", fields: [requesterId], references: [id], onDelete: SetNull)
-  requesterId     Int?
-  assignedTo      User?   @relation("ProblemAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
-  assignedToId    Int?
-  team            Team?   @relation(fields: [teamId], references: [id], onDelete: SetNull)
-  teamId          Int?
-  observers       User[]  @relation("ProblemObservers")
+  requester    User?  @relation("ProblemRequester", fields: [requesterId], references: [id], onDelete: SetNull)
+  requesterId  Int?
+  assignedTo   User?  @relation("ProblemAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  assignedToId Int?
+  team         Team?  @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  teamId       Int?
+  observers    User[] @relation("ProblemObservers")
 
   // Dates
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  solvedAt        DateTime?
-  closedAt        DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  solvedAt  DateTime?
+  closedAt  DateTime?
 
   // Relations
-  tickets         ProblemTicket[]
-  followups       ProblemFollowup[]
-  events          ProblemEvent[]
-  linksA          ProblemLink[] @relation("ProblemLinksA")
-  linksB          ProblemLink[] @relation("ProblemLinksB")
+  tickets   ProblemTicket[]
+  followups ProblemFollowup[]
+  events    ProblemEvent[]
+  linksA    ProblemLink[]     @relation("ProblemLinksA")
+  linksB    ProblemLink[]     @relation("ProblemLinksB")
 
   @@index([status])
   @@index([requesterId])
@@ -1457,12 +1479,12 @@ model Problem {
 
 // Liaison Problème ↔ Ticket (plusieurs incidents liés à un problème racine)
 model ProblemTicket {
-  id          Int      @id @default(autoincrement())
-  problem     Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
-  problemId   Int
-  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  ticketId    Int
-  createdAt   DateTime @default(now())
+  id        Int      @id @default(autoincrement())
+  problem   Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  problemId Int
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ticketId  Int
+  createdAt DateTime @default(now())
 
   @@unique([problemId, ticketId])
   @@index([ticketId])
@@ -1470,14 +1492,14 @@ model ProblemTicket {
 
 // Suivi / commentaires sur un problème (comme Followup pour les tickets)
 model ProblemFollowup {
-  id              Int      @id @default(autoincrement())
-  problem         Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
-  problemId       Int
-  author          User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
-  authorId        Int?
-  content         String
-  isPrivate       Boolean  @default(false)
-  createdAt       DateTime @default(now())
+  id        Int      @id @default(autoincrement())
+  problem   Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  problemId Int
+  author    User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  authorId  Int?
+  content   String
+  isPrivate Boolean  @default(false)
+  createdAt DateTime @default(now())
 
   @@index([problemId])
   @@index([authorId])
@@ -1485,29 +1507,56 @@ model ProblemFollowup {
 
 // Journal d'événements sur un problème
 model ProblemEvent {
-  id          Int             @id @default(autoincrement())
-  problem     Problem         @relation(fields: [problemId], references: [id], onDelete: Cascade)
-  problemId   Int
-  type        String          @default("CREATED") // CREATED, STATUS_CHANGED, PRIORITY_CHANGED, ASSIGNED, FOLLOWUP_ADDED
-  actor       String          @default("SYSTEM")
-  payload     Json?
-  createdAt   DateTime        @default(now())
+  id        Int      @id @default(autoincrement())
+  problem   Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  problemId Int
+  type      String   @default("CREATED") // CREATED, STATUS_CHANGED, PRIORITY_CHANGED, ASSIGNED, FOLLOWUP_ADDED
+  actor     String   @default("SYSTEM")
+  payload   Json?
+  createdAt DateTime @default(now())
 
   @@index([problemId])
 }
 
 // Liens entre problèmes (lié à, doublon, bloque/bloqué)
 model ProblemLink {
-  id          Int      @id @default(autoincrement())
-  problemA    Problem  @relation("ProblemLinksA", fields: [problemAId], references: [id], onDelete: Cascade)
-  problemAId  Int
-  problemB    Problem  @relation("ProblemLinksB", fields: [problemBId], references: [id], onDelete: Cascade)
-  problemBId  Int
-  type        String   @default("RELATED") // RELATED, DUPLICATE_OF
-  createdAt   DateTime @default(now())
+  id         Int      @id @default(autoincrement())
+  problemA   Problem  @relation("ProblemLinksA", fields: [problemAId], references: [id], onDelete: Cascade)
+  problemAId Int
+  problemB   Problem  @relation("ProblemLinksB", fields: [problemBId], references: [id], onDelete: Cascade)
+  problemBId Int
+  type       String   @default("RELATED") // RELATED, DUPLICATE_OF
+  createdAt  DateTime @default(now())
 
   @@unique([problemAId, problemBId, type])
   @@index([problemBId])
 }
 
+// ── Dashboards personnalisables ────────────────────────────────────────────
+model Dashboard {
+  id        String   @id @default(cuid())
+  name      String
+  userId    Int
+  isDefault Boolean  @default(false)
+  layout    Json     @default("[]") // [{i, x, y, w, h}] react-grid-layout positions
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
+  user    User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  widgets DashboardWidget[]
+
+  @@index([userId])
+}
+
+model DashboardWidget {
+  id          String  @id @default(cuid())
+  dashboardId String
+  widgetType  String // "kpi_open_tickets", "chart_tickets_trend", etc.
+  title       String?
+  config      Json? // filtres, période, couleurs, taille min/max
+  position    Int     @default(0)
+
+  dashboard Dashboard @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
+
+  @@index([dashboardId])
+}

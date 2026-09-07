@@ -293,8 +293,10 @@ function emitSlaBreach(ticket) {
 }
 
 // Escalade d'un ticket (automatique ou manuelle) : alerte l'assigné + la room des assignations
-function emitTicketEscalated(ticket, { reason, escalationLevel } = {}) {
+function emitTicketEscalated(ticket, { reason, escalationLevel, targetTeamName } = {}) {
   if (!io) return;
+  // Escalade = transfert à une équipe responsable (targetTeamName) ou simple alerte
+  // de prise en charge prioritaire au sein de l'équipe courante.
   const payload = {
     id: ticket.id,
     title: ticket.title,
@@ -302,6 +304,7 @@ function emitTicketEscalated(ticket, { reason, escalationLevel } = {}) {
     status: ticket.status,
     escalationLevel: escalationLevel || ticket.escalationLevel || 1,
     reason: reason || null,
+    targetTeamName: targetTeamName || null,
   };
   io.to('assignments').emit('ticket_escalated', payload);
 
@@ -310,10 +313,12 @@ function emitTicketEscalated(ticket, { reason, escalationLevel } = {}) {
     persistNotification({
       userId: ticket.assignedToId,
       type: 'ticket_escalated',
-      title: 'Ticket escaladé',
-      message: `#${ticket.id} — ${ticket.title}${reason ? ` (${reason})` : ''}`,
+      title: targetTeamName ? 'Ticket transféré' : 'Ticket escaladé',
+      message: targetTeamName
+        ? `#${ticket.id} — ${ticket.title} → équipe ${targetTeamName}${reason ? ` (${reason})` : ''}`
+        : `#${ticket.id} — ${ticket.title}${reason ? ` (${reason})` : ''}`,
       link: `/tickets/${ticket.id}`,
-      metadata: { priority: ticket.priority, escalationLevel: payload.escalationLevel },
+      metadata: { priority: ticket.priority, escalationLevel: payload.escalationLevel, targetTeamName: payload.targetTeamName },
     });
   }
 }

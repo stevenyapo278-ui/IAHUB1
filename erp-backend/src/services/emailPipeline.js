@@ -16,6 +16,7 @@ const { getSystemSettings } = require('./systemSettings');
 const { emitTicketCreated, emitTicketAssigned, persistNotification } = require('../utils/socket');
 const { tryHandleReminderReply } = require('./draftReplyApproval');
 const { getBreaker } = require('../utils/circuitBreaker');
+const { htmlToText } = require('../utils/htmlToText');
 const { isLowTrustSender } = require('./senderReputation');
 const { generateEmailSummary } = require('./emailSummaryGenerator');
 const { applyRulesToEmail } = require('./inboxRuleEngine');
@@ -174,7 +175,14 @@ async function processMessage(message, account) {
   // Corps nettoyé de la signature/disclaimer, calculé une seule fois ici et réutilisé par toutes
   // les analyses IA en aval (intention, filtrage des images, résumé) pour éviter qu'elles soient
   // biaisées par le texte de signature répété à chaque message du fil.
-  const cleanBody = await stripSignature(bodyPreview);
+  // IMPORTANT — fils transférés ("FYI") : bodyPreview de Graph ne fait que ~255 caractères. Quand un
+  // demandeur transfère une CONVERSATION ENTIÈRE vers l'adresse support, la vraie demande est plus
+  // bas dans le fil. On convertit donc le bodyHtml complet en texte et on l'utilise si le preview
+  // ne couvre qu'une petite partie du contenu réel.
+  const fullThreadText = htmlToText(bodyHtml);
+  const previewIsTruncated = fullThreadText.length > bodyPreview.length + 100; // marge : évite de remplacer par du bruit HTML
+  const bodyForAnalysis = previewIsTruncated ? fullThreadText : bodyPreview;
+  const cleanBody = await stripSignature(bodyForAnalysis);
 
   let analysis = null;
 
@@ -386,11 +394,31 @@ async function processMessage(message, account) {
       };
 
       const { validateAndCleanAnalysis } = require('./emailAnalysisValidator');
-      analysis = validateAndCleanAnalysis(rawRuleAnalysis, [], [], { body: cleanBody });
+      analysis = await validateAndCleanAnalysis(rawRuleAnalysis, [], [], { body: cleanBody });
       if (ruleMatch.ticketPriority) analysis.priority = ruleMatch.ticketPriority;
     } else {
       // Couche 3 : Fallback analyse IA pour nouveau ticket
-      analysis = await analyzeEmail({ subject, body: cleanBody, from: fromEmail, fromName });
+      // Résolution de l'expéditeur pour injecter role/équipes/compétences dans le prompt IA
+      let senderRole = 'inconnu';
+      let senderTeams = 'aucune';
+      let senderSkills = 'aucune';
+      if (fromEmail) {
+        const knownUser = await prisma.user.findUnique({
+          where: { email: fromEmail.toLowerCase().trim() },
+          select: {
+            role: true,
+            team: { select: { name: true } },
+            skills: { select: { level: true, skill: { select: { name: true } } } },
+          },
+        });
+        if (knownUser) {
+          senderRole = knownUser.role;
+          senderTeams = knownUser.team?.name || 'aucune';
+          senderSkills = knownUser.skills?.map((s) => s.skill.name).join(', ') || 'aucune';
+          console.log(`[emailPipeline] Expéditeur résolu : ${fromEmail} → role=${senderRole}, équipe=${senderTeams}`);
+        }
+      }
+      analysis = await analyzeEmail({ subject, body: cleanBody, from: fromEmail, fromName, senderRole, senderTeams, senderSkills });
     }
 
     // Bloquer la création de ticket si l'IA ou le filtre détecte un email d'information, un spam ou DO_NOT_CREATE
@@ -568,7 +596,7 @@ async function processMessage(message, account) {
 
     // 2. Suggestion IA (peut override l'historique du demandeur si l'IA trouve mieux)
     if (analysis.location) {
-      const loc = await prisma.glpiLocation.findFirst({
+      const loc = await prisma.location.findFirst({
         where: { completename: analysis.location },
         select: { id: true, name: true, completename: true },
       });

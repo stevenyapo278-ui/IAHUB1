@@ -43,8 +43,8 @@ export default function TicketFilterBar({
   searchInputRef,
 }) {
   return (
-    <div className="py-3 border-b border-outline-variant/20 bg-surface-container-lowest shrink-0">
-      <div className="mx-4 sm:mx-6 lg:mx-8">
+    <div className="px-4 sm:px-6 lg:px-8 shrink-0">
+      <div className="p-4 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest">
       {/* ── Row 1 : Search + Quick toggle chips + Advanced filters ── */}
       <div className="flex items-center gap-2 flex-wrap">
         {/* Live Search Input */}

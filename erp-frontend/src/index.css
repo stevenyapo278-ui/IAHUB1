@@ -2,42 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-/* ─── Gilmer Font Family (self-hosted) —备用字体 ──────────────────────────────── */
-@font-face {
-  font-family: 'Gilmer';
-  src: url('/fonts/gilmer/Gilmer-Light.woff2') format('woff2');
-  font-weight: 300;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'Gilmer';
-  src: url('/fonts/gilmer/Gilmer-Regular.woff2') format('woff2');
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'Gilmer';
-  src: url('/fonts/gilmer/Gilmer-Medium.woff2') format('woff2');
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'Gilmer';
-  src: url('/fonts/gilmer/Gilmer-Bold.woff2') format('woff2');
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'Gilmer';
-  src: url('/fonts/gilmer/Gilmer-Heavy.woff2') format('woff2');
-  font-weight: 800;
-  font-style: normal;
-  font-display: swap;
-}
+/* ─── Police Ubuntu (Google Fonts, chargée dans index.html) ─────────────────── */
 
 @tailwind base;
 @tailwind components;
@@ -476,7 +441,7 @@
   --skin-danger:                #dc2626;
   --skin-info:                  #0ea5e9;
   --skin-radius-card:           0.25rem;
-  --skin-font-sans:             "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --skin-font-sans:             "Ubuntu Mono", ui-monospace, monospace;
 }
 [data-skin=console].dark {
   --skin-background:           #0a0f0b;
@@ -731,7 +696,7 @@ html.theme-animating *::after {
   }
   .theme {
     --font-heading:      var(--font-sans);
-    --font-sans:      'Plus Jakarta Sans', 'Inter', 'Gilmer', system-ui, sans-serif;
+    --font-sans:      var(--user-font, 'Ubuntu'), system-ui, sans-serif;
   }
   /* ─── Shadcn-compatible tokens → mapped to M3 design tokens ──────────────── */
   :root {
@@ -1614,7 +1579,7 @@ html.theme-animating *::after {
   gap: 14px;
   overflow-y: auto;
   overflow-x: hidden;
-  font-family: 'Plus Jakarta Sans', 'Inter', 'Gilmer', system-ui, sans-serif;
+  font-family: 'Ubuntu', system-ui, sans-serif;
 }
 
 /* ─── Header ─────────────────────────────────────────────────────────────────── */
@@ -2261,11 +2226,11 @@ html[data-compact-mode] .sidebar-nav {
 /* ═══════════════════════════════════════════════════════════════════════════════ */
 
 .font-display {
-  font-family: var(--skin-font-sans, "Plus Jakarta Sans"), "Inter", "Gilmer", system-ui, sans-serif;
+  font-family: var(--user-font, var(--skin-font-sans, "Ubuntu")), system-ui, sans-serif;
 }
 
 .font-data {
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: "Ubuntu Mono", ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
 }
@@ -2555,7 +2520,147 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   opacity: 0.5;
   cursor: pointer;
   transition: opacity 0.15s;
-}
-input[type="date"]::-webkit-calendar-picker-indicator:hover {
+}input[type="date"]::-webkit-calendar-picker-indicator:hover {
   opacity: 0.8;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Dashboard personnalisable — react-grid-layout v2
+   Grille stable : widgets flex column, body scrollable, chrome d'édition
+   non intrusif (aucun impact sur la géométrie calculée par la grille).
+   ════════════════════════════════════════════════════════════════════════ */
+
+.dashboard-grid {
+  position: relative;
+  min-height: 200px;
+}
+
+/* ── Widget : structure flex column à hauteur pilotée par la grille ────
+   react-grid-layout pilote left/top/width/height en inline styles :
+   le widget remplit 100% de sa cellule, jamais l'inverse. */
+.dashboard-widget {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+/* Corps du widget : prend l'espace restant sous le drag-handle, scrollable */
+.dashboard-widget__body {
+  flex: 1 1 0%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden auto; /* scroll vertical si le contenu dépasse */
+  padding: 12px 14px;
+  scrollbar-width: thin;
+}
+
+.dashboard-widget__body::-webkit-scrollbar {
+  width: 6px;
+}
+.dashboard-widget__body::-webkit-scrollbar-thumb {
+  background: var(--color-outline-variant, rgba(128, 128, 128, 0.3));
+  border-radius: 999px;
+}
+
+/* ── Poignée de drag (mode édition uniquement) ─────────────────────────
+   block-level : la réserve d'espace est identique du premier au dernier
+   render — la grille ne voit jamais sa géométrie changer sous elle. */
+.dashboard-widget .drag-handle {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--color-outline-variant, rgba(128, 128, 128, 0.2));
+  background: var(--color-surface-container-low, rgba(128, 128, 128, 0.06));
+  cursor: move;
+  user-select: none;
+  touch-action: none;
+}
+.dashboard-widget .drag-handle__label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-on-surface-variant, inherit);
+  opacity: 0.8;
+}
+.dashboard-widget .drag-handle button {
+  margin-left: auto;
+  padding: 2px;
+  border-radius: 6px;
+  color: var(--color-on-surface-variant, inherit);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.dashboard-widget .drag-handle button:hover {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+}
+
+/* ── Mode édition : halo d'affilade, transition figée pendant le drag ── */
+.dashboard-grid--editing .dashboard-widget {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--skin-primary, #0067ff) 35%, transparent);
+}
+.dashboard-grid--editing .react-grid-item.react-draggable-dragging,
+.dashboard-grid--editing .react-grid-item.react-resizable-resizing {
+  transition: none; /* sinon la géométrie court après le curseur (lag visuel) */
+  z-index: 30;
+}
+
+/* ── Placeholder (silhouette pendant le drag) ─────────────────────────── */
+.react-grid-item.react-grid-placeholder {
+  background: color-mix(in srgb, var(--skin-primary, #0067ff) 15%, transparent);
+  border-radius: 12px;
+  transition-duration: 100ms;
+}
+.react-grid-item.react-grid-placeholder.placeholder-resizing {
+  transition: none;
+}
+
+/* ── Poignées de resize : propres et discrètes ────────────────────────── */
+.react-grid-item > .react-resizable-handle {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  bottom: 0;
+  right: 0;
+  cursor: se-resize;
+  z-index: 10;
+}
+.react-grid-item > .react-resizable-handle::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid var(--color-outline-variant, rgba(128, 128, 128, 0.4));
+  border-bottom: 2px solid var(--color-outline-variant, rgba(128, 128, 128, 0.4));
+  border-bottom-right-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.dashboard-grid--editing .react-grid-item > .react-resizable-handle::after {
+  opacity: 1;
+}
+.react-grid-item > .react-resizable-handle-s {
+  cursor: s-resize;
+}
+.react-grid-item > .react-resizable-handle-e {
+  cursor: e-resize;
+}
+.react-grid-item > .react-resizable-handle-s::after {
+  right: calc(50% - 3px);
+  width: 7px;
+  height: 4px;
+  border-right: none;
+}
+.react-grid-item > .react-resizable-handle-e::after {
+  bottom: calc(50% - 3px);
+  width: 4px;
+  height: 7px;
+  border-bottom: none;
 }

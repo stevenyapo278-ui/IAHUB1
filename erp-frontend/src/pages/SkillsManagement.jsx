@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import api from '../api/client';
 import ConfirmDialog from '../components/ConfirmDialog';
+import UserAvatar from '../components/UserAvatar';
 import Pagination from '../components/Pagination';
 import {
   BrainCircuit, Plus, Trash2, X, Check,
@@ -278,9 +279,7 @@ export default function SkillsManagement() {
                           return (
                             <div key={us.user.id} className="flex items-center justify-between group/row">
                               <div className="flex items-center gap-2">
-                                <div className="w-6 h-6 rounded-full bg-surface-container border border-outline-variant/40 text-on-surface text-[10px] font-bold flex items-center justify-center">
-                                  {us.user.fullName?.charAt(0)?.toUpperCase()}
-                                </div>
+                                <UserAvatar user={us.user} size="sm" colorClass="bg-surface-container text-on-surface" />
                                 <span className="text-xs text-on-surface font-medium">{us.user.fullName}</span>
                               </div>
                               <div className="flex items-center gap-1.5">

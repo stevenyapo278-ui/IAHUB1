@@ -23,6 +23,7 @@ import { useMemo, useRef, useCallback, useEffect, useState } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
 import { RefreshCw } from 'lucide-react';
+import UserAvatar from './UserAvatar';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -40,7 +41,7 @@ function ensureThemeInjected() {
   style.textContent = `
     /* ── Katalyst AG Grid Theme — Premium Design System ──────────────── */
     .ag-theme-katalyst-datagrid {
-      --ag-font-family: 'Plus Jakarta Sans', 'Inter', ui-sans-serif, system-ui, sans-serif;
+      --ag-font-family: var(--user-font, 'Ubuntu'), ui-sans-serif, system-ui, sans-serif;
       --ag-font-size: 13px;
       --ag-row-height: 48px;
       --ag-header-height: 44px;
@@ -90,7 +91,7 @@ function ensureThemeInjected() {
       background: var(--ag-header-background-color);
     }
     .ag-theme-katalyst-datagrid .ag-header-cell {
-      font-family: 'Plus Jakarta Sans', 'Inter', ui-sans-serif, system-ui, sans-serif;
+      font-family: var(--user-font, 'Ubuntu'), ui-sans-serif, system-ui, sans-serif;
       font-size: 10px;
       font-weight: 700;
       letter-spacing: 0.06em;
@@ -341,17 +342,12 @@ export function BadgeRenderer({ bg, text, label, border }) {
   );
 }
 
-/** Avatar + name renderer — photo ou initiale + nom + email. */
+/** Avatar + name renderer — photo de profil (avatarUrl) ou initiale + nom + email. */
 export function AvatarNameRenderer({ data }) {
   if (!data) return null;
-  const initials = (data.name || data.fullName || '?').charAt(0).toUpperCase();
   return (
     <div className="flex h-full items-center gap-2.5">
-      <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary text-xs font-bold shrink-0">
-        {data.avatar ? (
-          <img src={data.avatar} alt="" className="w-8 h-8 rounded-full object-cover" />
-        ) : initials}
-      </span>
+      <UserAvatar user={data} size="md" colorClass="bg-primary/10 text-primary" />
       <div className="leading-tight min-w-0">
         <div className="font-medium text-foreground truncate text-sm">{data.name || data.fullName}</div>
         {data.email && <div className="text-xs text-muted-foreground truncate">{data.email}</div>}

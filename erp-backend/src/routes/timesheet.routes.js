@@ -46,7 +46,7 @@ router.post(
         description: description?.trim() || null,
         entryDate: req.body.entryDate ? new Date(req.body.entryDate) : new Date(),
       },
-      include: { user: { select: { id: true, fullName: true } } },
+      include: { user: { select: { id: true, fullName: true, avatarUrl: true } } },
     });
     return res.status(201).json(entry);
   }
@@ -97,7 +97,7 @@ router.post(
         description: req.body.description?.trim() || null,
         entryDate: new Date(timer.startedAt),
       },
-      include: { user: { select: { id: true, fullName: true } } },
+      include: { user: { select: { id: true, fullName: true, avatarUrl: true } } },
     });
     return res.status(201).json(entry);
   }
@@ -129,7 +129,7 @@ router.get('/', requirePermission('tickets.timesheet'), async (req, res) => {
   const entries = await prisma.ticketTimeEntry.findMany({
     where,
     orderBy: { entryDate: 'desc' },
-    include: { user: { select: { id: true, fullName: true, email: true } } },
+    include: { user: { select: { id: true, fullName: true, email: true, avatarUrl: true } } },
   });
 
   // Agrégats : total + répartition par jour

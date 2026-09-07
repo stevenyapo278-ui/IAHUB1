@@ -13,7 +13,6 @@ import {
   FileText,
   User,
   ShieldCheck,
-  Shield,
   Terminal,
   Settings,
   History,
@@ -35,12 +34,14 @@ import {
   Palette,
   Settings2,
   Monitor,
+  UserCircle,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
 import { useTheme } from '../context/ThemeContext';
 import { hasPermission } from '../utils/permissions';
 import ForcePasswordChange from '../components/ForcePasswordChange';
+import AccountModal from '../components/AccountModal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import GlobalSearch from '../components/GlobalSearch';
 import NotificationPanel from '../components/NotificationPanel';
@@ -50,6 +51,7 @@ import CursorGlow from '../components/CursorGlow';
 import { useNotifications } from '../context/NotificationContext';
 import { useUserPreferences } from '../context/UserPreferencesContext';
 import { saveSessionLocation } from '../utils/sessionLocation';
+import useSystemSettings from '../hooks/useSystemSettings';
 
 // ChatWidget est chargé à la demande : il tire Recharts (~390 Ko) via son graphique,
 // on ne l'inclut donc pas dans le bundle initial de l'application.
@@ -58,33 +60,33 @@ const ChatWidget = lazy(() => import('../components/ChatWidget'));
 const platformItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, color: 'text-amber-400', end: true, permission: null },
   { to: '/portal', label: 'Portail', icon: Monitor, color: 'text-teal-400', permission: null },
+  { to: '/chat', label: 'Assistant IA', icon: Bot, color: 'text-blue-400', permission: null },
   { to: '/tickets', label: 'Tickets', icon: Ticket, color: 'text-gold-400', permission: null },
-  { to: '/problems', label: 'Problèmes', icon: AlertTriangle, color: 'text-amber-400', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE'] },
+  { to: '/problems', label: 'Problèmes', icon: AlertTriangle, color: 'text-amber-400', permission: 'problems.manage', fallbackRoles: ['ADMIN', 'HOTLINE'] },
   { to: '/email-drafts', label: 'Centre de Validation', icon: MailCheck, color: 'text-amber-400', permission: 'emaildrafts.manage', fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
   { to: '/inbox', label: 'Boîte mail', icon: Inbox, color: 'text-sky-400', permission: 'inbox.sync', fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
   { to: '/knowledge-base', label: 'Base de connaissances', icon: BookOpen, color: 'text-purple-400', permission: null },
-  { to: '/ticket-evolution', label: 'Évolution tickets', icon: TrendingUp, color: 'text-cyan-400', permission: null, fallbackRoles: ['ADMIN', 'TECHNICIAN', 'HOTLINE'] },
+  { to: '/ticket-evolution', label: 'Évolution tickets', icon: TrendingUp, color: 'text-cyan-400', permission: 'aiweeklyreports.manage', fallbackRoles: ['ADMIN', 'TECHNICIAN', 'HOTLINE'] },
 ];
 
 const orgItems = [
   { to: '/teams', label: 'Équipes', icon: Users, color: 'text-emerald-400', permission: 'teams.manage', fallbackRoles: ['ADMIN'] },
   { to: '/users', label: 'Utilisateurs', icon: User, color: 'text-emerald-400', permission: 'users.manage', fallbackRoles: ['ADMIN'] },
-  { to: '/technician-stats', label: 'Perf. techniciens', icon: Gauge, color: 'text-orange-400', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
-  { to: '/skills', label: 'Compétences', icon: BrainCircuit, color: 'text-teal-400', permission: null, fallbackRoles: ['ADMIN'] },
-  { to: '/categories', label: 'Catégories', icon: Tag, color: 'text-gold-400', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
-  { to: '/locations', label: 'Lieux', icon: MapPin, color: 'text-amber-400', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE'] },
+  { to: '/technician-stats', label: 'Perf. techniciens', icon: Gauge, color: 'text-orange-400', permission: 'aiweeklyreports.manage', fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
+  { to: '/skills', label: 'Compétences', icon: BrainCircuit, color: 'text-teal-400', permission: 'settings.ai', fallbackRoles: ['ADMIN'] },
+  { to: '/categories', label: 'Catégories', icon: Tag, color: 'text-gold-400', permission: 'tickets.manage', fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
+  { to: '/locations', label: 'Lieux', icon: MapPin, color: 'text-amber-400', permission: 'locations.manage', fallbackRoles: ['ADMIN', 'HOTLINE'] },
   { to: '/assets', label: 'Inventaire', icon: Boxes, color: 'text-blue-400', permission: null },
 ];
 
 const systemItems = [
-  { to: '/supervision', label: 'Supervision IA', icon: Activity, color: 'text-indigo-400', permission: 'inbox.sync', fallbackRoles: ['ADMIN', 'TECHNICIAN'] },
-  { to: '/ai-weekly-reports', label: 'Apprentissage IA', icon: BrainCircuit, color: 'text-purple-400', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE'] },
+  { to: '/ai-weekly-reports', label: 'Apprentissage IA', icon: BrainCircuit, color: 'text-purple-400', permission: 'aiweeklyreports.manage', fallbackRoles: ['ADMIN', 'HOTLINE'] },
   { to: '/prompts', label: 'Prompts IA', icon: Terminal, color: 'text-violet-400', permission: 'prompts.manage', fallbackRoles: ['ADMIN'] },
+  { to: '/chat-monitor', label: 'Monitoring Chatbot', icon: Activity, color: 'text-rose-400', permission: null, roles: ['SUPERADMIN'] },
   { to: '/permission-groups', label: 'Groupes de droits', icon: ShieldCheck, color: 'text-cyan-400', permission: 'users.manage', fallbackRoles: ['ADMIN'] },
   { to: '/settings', label: 'Paramètres', icon: Settings, color: 'text-on-surface-variant', permission: ['settings.ai', 'settings.email', 'settings.integrations', 'automation.manage'], fallbackRoles: ['ADMIN'] },
   { to: '/documentation', label: 'Documentation', icon: FileText, color: 'text-blue-400', permission: null },
-  { to: '/logs', label: 'Journal activité', icon: History, color: 'text-rose-400', permission: null, roles: ['ADMIN', 'SUPERADMIN', 'HOTLINE', 'TECHNICIAN'] },
-  { to: '/audit', label: 'Audit système', icon: Shield, color: 'text-amber-400', permission: null, fallbackRoles: ['ADMIN'] },
+  { to: '/logs', label: 'Journal & Audit', icon: History, color: 'text-rose-400', permission: null, roles: ['ADMIN', 'SUPERADMIN', 'HOTLINE', 'TECHNICIAN'] },
 ];
 
 function getPageBreadcrumb(pathname) {
@@ -107,6 +109,7 @@ export default function MainLayout() {
   const { theme, toggleTheme, layoutSettings } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
+  const { settings: systemSettings, loading: settingsLoading } = useSystemSettings();
 
   const { unreadCount } = useNotifications();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -114,6 +117,7 @@ export default function MainLayout() {
   const [showSystemMenu, setShowSystemMenu] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showAccountModal, setShowAccountModal] = useState(false);
   const [showLayoutSettings, setShowLayoutSettings] = useState(false);
   const [showCustomizer, setShowCustomizer] = useState(false);
   const [sidebarHovered, setSidebarHovered] = useState(false);
@@ -170,7 +174,17 @@ export default function MainLayout() {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }));
   }
 
+  const navCfg = systemSettings?.navigationConfig;
+
   const filterItems = (items) => items.filter((item) => {
+    // Config navigation du SUPERADMIN (Paramètres > Navigation) : prioritaire sur tout le reste.
+    // Appliquée ICI pour être cohérente sur toutes les vues (sidebar étendue, dropdowns compactes,
+    // badges, fil d'ariane) — pas seulement dans SidebarItem.
+    const navRoles = navCfg?.[item.to];
+    if (navRoles) {
+      if (user?.role === 'SUPERADMIN') return true;
+      return navRoles.includes(user?.role);
+    }
     // Restriction par rôle explicite (roles) ou fallbackRoles — SUPERADMIN voit tout
     if (item.permission === null && (item.roles || item.fallbackRoles)) {
       if (user && user.role === 'SUPERADMIN') return true;
@@ -184,6 +198,10 @@ export default function MainLayout() {
 
   const visibleOrgItems = filterItems(orgItems);
   const visibleSystemItems = filterItems(systemItems);
+
+  // Le bouton "Paramètres" (menu utilisateur) n'apparaît que si la page Paramètres est
+  // visible dans la sidebar — sinon les utilisateurs sans droits n'y ont pas accès.
+  const canSeeSettings = visibleSystemItems.some((item) => item.to === '/settings');
 
   const hasAdminAccess = visibleSystemItems.length > 0;
   const allSecondaryItems = [...visibleOrgItems, ...visibleSystemItems];
@@ -205,6 +223,43 @@ export default function MainLayout() {
   useEffect(() => {
     prevPathRef.current = location.pathname;
   }, [location.pathname]);
+
+  // ── Guard navigation : rediriger si la route courante n'est pas autorisée ──
+  const allNavItems = [...platformItems, ...orgItems, ...systemItems];
+  const navConfig = systemSettings?.navigationConfig;
+
+  function isPathAllowed(path) {
+    if (user?.role === 'SUPERADMIN') return true;
+    if (navConfig && navConfig[path]) {
+      return navConfig[path].includes(user?.role);
+    }
+    // Pas de config → vérifier les fallbackRoles / roles
+    const item = allNavItems.find((i) => i.to === path);
+    if (!item) return true; // route inconnue → laisser passer (ProtectedRoute gère)
+    if (item.permission !== null) {
+      const keys = Array.isArray(item.permission) ? item.permission : [item.permission];
+      return keys.some((key) => hasPermission(user, key));
+    }
+    if (item.fallbackRoles || item.roles) {
+      const allowed = item.roles || item.fallbackRoles;
+      return allowed.includes(user?.role);
+    }
+    return true; // pas de restriction
+  }
+
+  function getFirstAllowedPath() {
+    for (const item of allNavItems) {
+      if (isPathAllowed(item.to)) return item.to;
+    }
+    return '/login';
+  }
+
+  useEffect(() => {
+    if (!systemSettings || user?.role === 'SUPERADMIN') return;
+    if (!isPathAllowed(location.pathname)) {
+      navigate(getFirstAllowedPath(), { replace: true });
+    }
+  }, [location.pathname, navConfig, user?.role, systemSettings]);
 
   const isSidebarExpanded = sidebarPinned || sidebarHovered;
   const sidebarW = isSidebarExpanded ? 256 : 80;
@@ -257,6 +312,16 @@ export default function MainLayout() {
 
         {/* Navigation */}
         <nav className="sidebar-nav">
+          {/* Tant que les réglages ne sont pas chargés (1er passage sans cache), on ne rend
+              pas la nav : évite le flash d'items que la navigationConfig va masquer. */}
+          {settingsLoading && !systemSettings ? (
+            <div className="px-3 py-6 space-y-3" aria-hidden="true">
+              {[...Array(5)].map((_, i) => (
+                <div key={i} className="h-8 rounded-lg bg-surface-container animate-pulse" />
+              ))}
+            </div>
+          ) : (
+          <>
           <div className="sidebar-group-label">Plateforme</div>
           {platformItems.map((item) => {
             const count = item.to === '/tickets' ? badgeCounts.tickets : item.to === '/email-drafts' ? badgeCounts.drafts : 0;
@@ -267,6 +332,7 @@ export default function MainLayout() {
                 user={user}
                 isSidebarExpanded={isSidebarExpanded}
                 count={count}
+                navigationConfig={systemSettings?.navigationConfig}
               />
             );
           })}
@@ -280,7 +346,7 @@ export default function MainLayout() {
               <div className="sidebar-group-label">Organisation</div>
               {isSidebarExpanded ? (
                 visibleOrgItems.map((item) => (
-                  <SidebarItem key={item.to} item={item} user={user} isSidebarExpanded={isSidebarExpanded} />
+                  <SidebarItem key={item.to} item={item} user={user} isSidebarExpanded={isSidebarExpanded} navigationConfig={systemSettings?.navigationConfig} />
                 ))
               ) : (
                 <CompactSectionButton
@@ -302,7 +368,7 @@ export default function MainLayout() {
               <div className="sidebar-group-label">Administration</div>
               {isSidebarExpanded ? (
                 visibleSystemItems.map((item) => (
-                  <SidebarItem key={item.to} item={item} user={user} isSidebarExpanded={isSidebarExpanded} />
+                  <SidebarItem key={item.to} item={item} user={user} isSidebarExpanded={isSidebarExpanded} navigationConfig={systemSettings?.navigationConfig} />
                 ))
               ) : (
                 <CompactSectionButton
@@ -318,6 +384,8 @@ export default function MainLayout() {
               )}
             </>
           )}
+          </>
+          )}
         </nav>
 
         {/* User profile at bottom */}
@@ -326,8 +394,12 @@ export default function MainLayout() {
           onClick={() => setShowUserMenu(!showUserMenu)}
           ref={userMenuRef}
         >
-          <div className="sidebar-user-avatar">
-            {user?.fullName?.charAt(0)?.toUpperCase() || '?'}
+          <div className="sidebar-user-avatar overflow-hidden">
+            {user?.avatarUrl ? (
+              <img src={user.avatarUrl} alt={user.fullName} className="w-full h-full object-cover" />
+            ) : (
+              user?.fullName?.charAt(0)?.toUpperCase() || '?'
+            )}
           </div>
           <div className="sidebar-user-info min-w-0 flex-1">
             <p className="text-xs font-medium text-on-surface truncate">{user?.fullName}</p>
@@ -337,11 +409,11 @@ export default function MainLayout() {
           {isSidebarExpanded && (
             <div className="flex items-center gap-0.5 shrink-0 sidebar-user-info">
               <button
-                onClick={(e) => { e.stopPropagation(); setShowUserMenu(false); navigate('/settings'); }}
+                onClick={(e) => { e.stopPropagation(); setShowUserMenu(false); setShowAccountModal(true); }}
                 className="rounded-lg p-1.5 text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors"
-                title="Paramètres"
+                title="Mon compte"
               >
-                <Settings className="w-4 h-4" />
+                <UserCircle className="w-4 h-4" />
               </button>
               <button
                 onClick={(e) => { e.stopPropagation(); setShowUserMenu(false); handleLogout(); }}
@@ -356,12 +428,21 @@ export default function MainLayout() {
           {showUserMenu && (
             <div className="sidebar-dropdown" style={{ bottom: '100%', left: 0, top: 'auto', marginBottom: 8 }}>
               <button
-                onClick={(e) => { e.stopPropagation(); setShowUserMenu(false); navigate('/settings'); }}
+                onClick={(e) => { e.stopPropagation(); setShowUserMenu(false); setShowAccountModal(true); }}
                 className="sidebar-dropdown-item flex items-center gap-2"
               >
-                <Settings className="w-4 h-4" />
-                <span>Paramètres</span>
+                <UserCircle className="w-4 h-4" />
+                <span>Mon compte</span>
               </button>
+              {canSeeSettings && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowUserMenu(false); navigate('/settings'); }}
+                  className="sidebar-dropdown-item flex items-center gap-2"
+                >
+                  <Settings className="w-4 h-4" />
+                  <span>Paramètres</span>
+                </button>
+              )}
               <button
                 onClick={(e) => { e.stopPropagation(); setShowUserMenu(false); handleLogout(); }}
                 className="sidebar-dropdown-item text-red-400/80 hover:text-red-400 flex items-center gap-2"
@@ -499,6 +580,18 @@ export default function MainLayout() {
 
       {user?.mustChangePassword && <ForcePasswordChange />}
 
+      {/* Mon compte — photo de profil, accessible à tous les utilisateurs */}
+      <AccountModal
+        open={showAccountModal}
+        onClose={() => setShowAccountModal(false)}
+        user={user}
+        onUserUpdated={(updated) => {
+          localStorage.setItem('user', JSON.stringify(updated));
+          // rafraîchit le contexte auth pour mettre à jour l'avatar dans la sidebar
+          window.dispatchEvent(new CustomEvent('auth:user-updated', { detail: updated }));
+        }}
+      />
+
       <ConfirmDialog
         open={showLogoutConfirm}
         title="Déconnexion"
@@ -596,11 +689,39 @@ const SHORTCUT_ICONS = {
 
 function PinnedShortcuts() {
   const { pinnedShortcuts } = useUserPreferences();
+  const { user } = useAuth();
+  const { settings: systemSettings } = useSystemSettings();
   const navigate = useNavigate();
-  if (!pinnedShortcuts || pinnedShortcuts.length === 0) return null;
+
+  const navConfig = systemSettings?.navigationConfig;
+
+  function isShortcutAllowed(path) {
+    if (user?.role === 'SUPERADMIN') return true;
+    const basePath = path.split('?')[0];
+    if (navConfig && navConfig[basePath]) {
+      return navConfig[basePath].includes(user?.role);
+    }
+    // Pas de config → vérifier les fallbackRoles
+    const allItems = [...platformItems, ...orgItems, ...systemItems];
+    const item = allItems.find((i) => i.to === basePath);
+    if (!item) return true;
+    if (item.permission !== null) {
+      const keys = Array.isArray(item.permission) ? item.permission : [item.permission];
+      return keys.some((key) => hasPermission(user, key));
+    }
+    if (item.fallbackRoles || item.roles) {
+      const allowed = item.roles || item.fallbackRoles;
+      return allowed.includes(user?.role);
+    }
+    return true;
+  }
+
+  const allowedShortcuts = (pinnedShortcuts || []).filter(isShortcutAllowed);
+  if (allowedShortcuts.length === 0) return null;
+
   return (
     <div className="hidden lg:flex items-center gap-1 ml-3 pl-3 border-l border-outline-variant/40 shrink-0">
-      {pinnedShortcuts.map((path) => (
+      {allowedShortcuts.map((path) => (
         <button
           key={path}
           onClick={() => navigate(path)}
@@ -618,10 +739,24 @@ function PinnedShortcuts() {
   );
 }
 
-function SidebarItem({ item, user, isSidebarExpanded, count }) {
+function SidebarItem({ item, user, isSidebarExpanded, count, navigationConfig }) {
+  // Vérification des permissions (clés de permission)
   if (item.permission !== null) {
     const keys = Array.isArray(item.permission) ? item.permission : [item.permission];
-    if (!keys.some((key) => hasPermission(user, key, item.fallbackRoles))) return null;
+    if (!keys.some((key) => hasPermission(user, key))) return null;
+  }
+
+  // Vérification de la configuration navigation (si définie par le SUPERADMIN)
+  if (navigationConfig && navigationConfig[item.to]) {
+    const allowedRoles = navigationConfig[item.to];
+    if (!allowedRoles.includes(user?.role)) return null;
+  } else if (item.permission === null && (item.fallbackRoles || item.roles)) {
+    // Fallback sur les defaults codés en dur si pas de config navigation
+    if (user?.role === 'SUPERADMIN') { /* SUPERADMIN voit tout */ }
+    else {
+      const allowed = item.roles || item.fallbackRoles;
+      if (!allowed.includes(user?.role)) return null;
+    }
   }
 
   const Icon = item.icon;

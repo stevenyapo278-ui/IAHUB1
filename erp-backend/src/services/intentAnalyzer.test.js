@@ -9,9 +9,8 @@ jest.mock('../prismaClient', () => ({
 }));
 
 jest.mock('./ticketEvent', () => ({ logEvent: jest.fn() }));
-jest.mock('./glpiTicketCreator', () => ({
-  updateGlpiTicket: jest.fn(),
-  createTicketFromEmail: jest.fn().mockResolvedValue({ erpTicketId: 2, glpiTicketId: null }),
+jest.mock('./ticketCreator', () => ({
+  createTicketFromEmail: jest.fn().mockResolvedValue({ erpTicketId: 2 }),
 }));
 
 const { applyIntentActions } = require('./intentAnalyzer');
@@ -20,8 +19,7 @@ describe('applyIntentActions — validation humaine obligatoire des clôtures', 
   beforeEach(() => {
     mockTicketFindUnique.mockReset();
     mockTicketUpdate.mockReset();
-    require('./glpiTicketCreator').updateGlpiTicket.mockClear();
-    require('./glpiTicketCreator').createTicketFromEmail.mockClear();
+    require('./ticketCreator').createTicketFromEmail.mockClear();
     mockTicketFindUnique.mockResolvedValue({
       id: 1, status: 'OPEN', firstOpenedAt: new Date(), aiExchangeCount: 1, closeSuggestionCount: 0,
     });
@@ -74,13 +72,13 @@ describe('applyIntentActions — validation humaine obligatoire des clôtures', 
     expect(logEvent).toHaveBeenCalledWith(1, 'CLOSURE_NOT_SUGGESTED', 'AI', expect.objectContaining({ reason: 'limit_reached' }));
   });
 
-  it('ne synchronise pas le statut GLPI tant que la clôture suggérée n\'est pas validée', async () => {
-    const { updateGlpiTicket } = require('./glpiTicketCreator');
-
-    mockTicketUpdate.mockImplementation(async (args) => ({ ...args.data, id: 1, glpiTicketId: 42 }));
+  it('suggère la clôture sans synchronisation GLPI (intégration retirée)', async () => {
+    mockTicketUpdate.mockImplementation(async (args) => ({ ...args.data, id: 1 }));
     await applyIntentActions(1, { intent: 'RESOLVED', confidence: 0.99 }, 'AI');
 
-    expect(updateGlpiTicket).not.toHaveBeenCalled();
+    // La suggestion de clôture est bien posée, aucune erreur levée
+    const updateCall = mockTicketUpdate.mock.calls[0][0];
+    expect(updateCall.data.closeSuggested).toBe(true);
   });
 
   it('suggère aussi la clôture sur NEW_ISSUE_IN_THREAD (split) au lieu de fermer automatiquement', async () => {
@@ -101,7 +99,7 @@ describe('applyIntentActions — validation humaine obligatoire des clôtures', 
   });
 
   it('scinde le nouveau sujet même si la clôture n\'est pas suggérée (confiance insuffisante)', async () => {
-    const { createTicketFromEmail } = require('./glpiTicketCreator');
+    const { createTicketFromEmail } = require('./ticketCreator');
 
     mockTicketFindUnique.mockResolvedValue({
       id: 1, status: 'OPEN', firstOpenedAt: new Date(), splitCount: 0, closeSuggestionCount: 0,

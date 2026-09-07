@@ -2,6 +2,9 @@ const express = require('express');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
 const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
@@ -9,7 +12,8 @@ const { getUserPermissions } = require('../middleware/permissions');
 const { sendPasswordResetLinkEmail } = require('../services/emailSender');
 const { auditLog } = require('../services/auditLogService');
 const { isLdapEnabled, isLdapAdminUsername, ldapEmailFor, authenticateLdap } = require('../services/ldapAuth');
-const { recordFailedLogin, clearFailedLogins, isAccountLocked } = require('../utils/security');
+const { recordFailedLogin, clearFailedLogins, isAccountLocked, validateUpload } = require('../utils/security');
+const { resolveBackendUrl } = require('../services/systemSettings');
 
 const router = express.Router();
 
@@ -18,6 +22,32 @@ const PASSWORD_RESET_TOKEN_TTL_HOURS = 1; // court délai : ce token donne accè
 // Domaine email optionnel : permet la connexion avec l'identifiant seul (ex. « styapo »)
 // au lieu de l'adresse complète (ex. « styapo@prosuma.ci »). Vide = désactivé.
 const AUTH_EMAIL_DOMAIN = process.env.AUTH_EMAIL_DOMAIN?.trim() || '';
+
+// ── Photo de profil (self-service, tous les utilisateurs) ────────────────
+// NB : on écrit dans <src>/uploads/avatar — le même répertoire que celui servi par
+// app.use('/uploads', express.static(path.join(__dirname, 'uploads')))
+const AVATAR_UPLOAD_DIR = path.join(__dirname, '..', 'uploads', 'avatar');
+fs.mkdirSync(AVATAR_UPLOAD_DIR, { recursive: true });
+
+const avatarUpload = multer({
+  storage: multer.diskStorage({
+    destination: AVATAR_UPLOAD_DIR,
+    filename: (req, file, cb) => cb(null, `avatar-${req.user.sub}-${Date.now()}${path.extname(file.originalname)}`),
+  }),
+  limits: { fileSize: 2 * 1024 * 1024 }, // 2 Mo max
+  fileFilter: (req, file, cb) => {
+    if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(file.mimetype)) {
+      return cb(new Error('Format d\'image non supporté (png, jpg, gif, webp)'));
+    }
+    return cb(null, true);
+  },
+});
+
+// Renvoie l'utilisateur avec avatarUrl résolue en URL absolue (servable depuis le navigateur)
+async function userWithAvatarUrl(user, settings) {
+  const backendUrl = resolveBackendUrl(settings || (await prisma.systemSettings.findUnique({ where: { id: 1 } })));
+  return { ...user, avatarUrl: user.avatarUrl ? `${backendUrl}${user.avatarUrl}` : null };
+}
 
 function resolveLoginIdentifier(input) {
   const value = String(input).trim().toLowerCase();
@@ -125,6 +155,7 @@ router.post(
             teamId: user.teamId,
             permissions,
             mustChangePassword: user.mustChangePassword,
+            avatarUrl: user.avatarUrl || null,
           },
         });
       } else {
@@ -310,7 +341,7 @@ router.post(
 router.get('/me', authenticate, async (req, res) => {
   const user = await prisma.user.findUnique({
     where: { id: req.user.sub },
-    select: { id: true, email: true, fullName: true, role: true, teamId: true, isActive: true, mustChangePassword: true },
+    select: { id: true, email: true, fullName: true, role: true, teamId: true, isActive: true, mustChangePassword: true, avatarUrl: true },
   });
 
   if (!user) {
@@ -325,7 +356,134 @@ router.get('/me', authenticate, async (req, res) => {
     }
   }
 
-  return res.json({ ...user, permissions });
+  // avatarUrl stockée en relatif (/uploads/avatar/...) → résolue en URL absolue pour le navigateur
+  const { avatarUrl, ...rest } = await userWithAvatarUrl(user);
+  return res.json({ ...rest, avatarUrl, permissions });
+});
+
+// ── Photo de profil — upload self-service (tous les utilisateurs authentifiés) ──────────
+router.post('/avatar', authenticate, avatarUpload.single('avatar'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu' });
+
+  // Valider que le fichier n'est pas dangereux (extension/MIME)
+  const validation = validateUpload(req.file.originalname, req.file.mimetype, 'logo');
+  if (!validation.valid) {
+    fs.unlink(req.file.path, () => {});
+    return res.status(400).json({ error: validation.error });
+  }
+
+  const previous = await prisma.user.findUnique({ where: { id: req.user.sub }, select: { avatarUrl: true } });
+
+  // Stockage en chemin relatif (portable), résolu en URL absolue à la lecture
+  const relativePath = `/uploads/avatar/${req.file.filename}`;
+  await prisma.user.update({ where: { id: req.user.sub }, data: { avatarUrl: relativePath } });
+
+  // Supprimer l'ancienne photo pour éviter l'accumulation de fichiers orphelins
+  if (previous?.avatarUrl?.startsWith('/uploads/avatar/')) {
+    fs.unlink(path.join(AVATAR_UPLOAD_DIR, path.basename(previous.avatarUrl)), () => {});
+  }
+
+  const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+  auditLog('USER_AVATAR_UPDATED', {
+    actor: req.user,
+    targetType: 'User',
+    targetId: req.user.sub,
+    targetLabel: req.user.email,
+    metadata: { filename: req.file.filename },
+  }).catch(() => {});
+
+  return res.json({ avatarUrl: `${resolveBackendUrl(settings)}${relativePath}` });
+});
+
+// ── Thème de la page de connexion — public (sans auth) ──────────────────────────
+// Utilisé par Login.jsx pour savoir quelle variante afficher selon la config SUPERADMIN.
+// Réponse mise en cache côté client (60s) pour éviter de spammer la DB à chaque refresh.
+const VALID_LOGIN_VARIANTS = ['classic', 'split', 'hero', 'minimal'];
+const VALID_LOGIN_MODES = ['daily_rotation', 'fixed', 'random'];
+
+function getLoginDayOfYear(date) {
+  const start = new Date(date.getFullYear(), 0, 0);
+  return Math.floor((date - start) / 86400000);
+}
+
+function resolveLoginVariant(settings, now = new Date()) {
+  const enabled = Array.isArray(settings.loginThemeEnabledVariants) && settings.loginThemeEnabledVariants.length > 0
+    ? settings.loginThemeEnabledVariants.filter((v) => VALID_LOGIN_VARIANTS.includes(v))
+    : [...VALID_LOGIN_VARIANTS];
+  const pool = enabled.length > 0 ? enabled : [...VALID_LOGIN_VARIANTS];
+  if (settings.loginThemeMode === 'fixed') {
+    const fv = settings.loginThemeFixedVariant;
+    if (VALID_LOGIN_VARIANTS.includes(fv)) return fv;
+    return pool[0];
+  }
+  if (settings.loginThemeMode === 'random') {
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+  // daily_rotation (défaut) — déterministe par jour de l'année
+  const seed = getLoginDayOfYear(now) + now.getFullYear() * 366;
+  return pool[seed % pool.length];
+}
+
+router.get('/login-theme', async (req, res) => {
+  let settings = null;
+  try {
+    settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+  } catch (_) {
+    // fallback si DB indisponible — on laisse le frontend utiliser sa rotation locale
+  }
+  if (!settings) {
+    settings = {
+      loginThemeMode: 'daily_rotation',
+      loginThemeFixedVariant: 'classic',
+      loginThemeEnabledVariants: [...VALID_LOGIN_VARIANTS],
+    };
+  }
+  // Normalisation défensive (valeurs legacy / null)
+  const mode = VALID_LOGIN_MODES.includes(settings.loginThemeMode) ? settings.loginThemeMode : 'daily_rotation';
+  const fixedVariant = VALID_LOGIN_VARIANTS.includes(settings.loginThemeFixedVariant) ? settings.loginThemeFixedVariant : 'classic';
+  const enabledVariants = Array.isArray(settings.loginThemeEnabledVariants) && settings.loginThemeEnabledVariants.length > 0
+    ? [...new Set(settings.loginThemeEnabledVariants.filter((v) => VALID_LOGIN_VARIANTS.includes(v)))]
+    : [...VALID_LOGIN_VARIANTS];
+  const pool = enabledVariants.length > 0 ? enabledVariants : [...VALID_LOGIN_VARIANTS];
+
+  const normalizedSettings = { loginThemeMode: mode, loginThemeFixedVariant: fixedVariant, loginThemeEnabledVariants: pool };
+  const resolvedVariant = resolveLoginVariant(normalizedSettings);
+
+  let previewNext7Days = null;
+  if (mode === 'daily_rotation') {
+    previewNext7Days = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() + i);
+      const v = resolveLoginVariant(normalizedSettings, d);
+      previewNext7Days.push({
+        date: d.toISOString().slice(0, 10),
+        variant: v,
+        dayLabel: d.toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'short' }),
+      });
+    }
+  }
+
+  res.set('Cache-Control', 'public, max-age=5, must-revalidate');
+  return res.json({
+    mode,
+    fixedVariant,
+    enabledVariants: pool,
+    resolvedVariant,
+    previewNext7Days,
+  });
+});
+
+// ── Photo de profil — suppression (revenir à l'initiale) ────────────────────────────────
+router.delete('/avatar', authenticate, async (req, res) => {
+  const previous = await prisma.user.findUnique({ where: { id: req.user.sub }, select: { avatarUrl: true } });
+  await prisma.user.update({ where: { id: req.user.sub }, data: { avatarUrl: null } });
+
+  if (previous?.avatarUrl?.startsWith('/uploads/avatar/')) {
+    fs.unlink(path.join(AVATAR_UPLOAD_DIR, path.basename(previous.avatarUrl)), () => {});
+  }
+
+  return res.json({ avatarUrl: null });
 });
 
 module.exports = router;

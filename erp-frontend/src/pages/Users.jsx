@@ -12,6 +12,7 @@ import {
 
 import api from '../api/client';
 import ConfirmDialog from '../components/ConfirmDialog';
+import UserAvatar from '../components/UserAvatar';
 import Toggle from '../components/Toggle';
 import { useAuth } from '../context/AuthContext';
 import { useFilterParam } from '../hooks/useFilterParam';
@@ -390,9 +391,7 @@ export default function Users() {
         return (
           <div className="flex items-center gap-2.5 h-full">
             <div className="relative shrink-0">
-              <div className={`w-8 h-8 rounded-full border flex items-center justify-center text-[11px] font-bold ${roleCfg.bg} ${roleCfg.color} ${roleCfg.border}`}>
-                {initials(u.fullName)}
-              </div>
+              <UserAvatar user={u} size="md" colorClass={`${roleCfg.bg} ${roleCfg.color}`} />
               <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-surface-container-lowest ${u.isActive ? 'bg-emerald-500' : 'bg-zinc-400'}`} />
             </div>
             <div className="min-w-0">
@@ -1153,9 +1152,7 @@ export default function Users() {
                               className={`flex items-center gap-2.5 p-2.5 rounded-xl border cursor-grab active:cursor-grabbing transition-all ${
                                 tmDragUser?.id === u.id ? 'border-emerald-500/40 bg-emerald-500/10 shadow-md scale-[1.02]' : 'border-outline-variant/20 bg-surface hover:border-outline-variant/40 hover:bg-surface-container-low'
                               }`}>
-                              <div className="w-8 h-8 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 font-bold text-[11px] flex items-center justify-center shrink-0">
-                                {u.fullName?.charAt(0)?.toUpperCase() || '?'}
-                              </div>
+                              <UserAvatar user={u} size="md" colorClass="bg-emerald-500/10 text-emerald-600" />
                               <div className="min-w-0 flex-1">
                                 <p className="text-xs font-semibold text-on-surface truncate">{u.fullName}</p>
                                 <p className="text-[10px] text-on-surface-variant truncate">{u.email}</p>
@@ -1200,7 +1197,7 @@ export default function Users() {
                                   <div className="space-y-1">
                                     {teamMembers.map(u => (
                                       <div key={u.id} className="flex items-center gap-2 p-2 rounded-lg bg-surface border border-outline-variant/20 group">
-                                        <div className="w-6 h-6 rounded-full bg-blue-500/10 text-blue-600 font-bold text-[9px] flex items-center justify-center shrink-0">{u.fullName?.charAt(0)?.toUpperCase()}</div>
+                                        <UserAvatar user={u} size="sm" colorClass="bg-blue-500/10 text-blue-600" />
                                         <span className="text-[11px] font-medium text-on-surface truncate flex-1">{u.fullName}</span>
                                         <button onClick={async () => {
                                           try { await api.delete(`/teams/${team.id}/members/${u.id}`); toast.success(`${u.fullName} retiré de « ${team.name} »`); setTeamManagerUsers(prev => prev.map(usr => usr.id === u.id ? { ...usr, teamId: null } : usr)); load(); }

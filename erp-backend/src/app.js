@@ -159,7 +159,7 @@ app.use((req, res, next) => {
 
 // Fichiers persistants servis statiquement (ex: logo de signature email, voir systemsettings.routes.js)
 // Bloquer les extensions dangereuses pour éviter l'exécution de scripts/uploadés
-app.use('/uploads', express.static('uploads', {
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
   setHeaders(res, filePath) {
     const ext = (filePath.split('.').pop() || '').toLowerCase();
     const blocked = ['exe','bat','cmd','com','msi','scr','pif','vbs','vbe','js','jse',
@@ -226,6 +226,7 @@ app.use('/api/timesheet', require('./routes/timesheet.routes'));
 app.use('/api/custom-fields', apiCache(30), require('./routes/customfields.routes'));
 app.use('/api/assets', apiCache(30), require('./routes/asset.routes'));
 app.use('/api/cache', require('./routes/cache.routes'));
+app.use('/api/dashboards', require('./routes/dashboardConfigs.routes'));
 
 // Serve frontend static files in production
 const isProduction = process.env.NODE_ENV === 'production';
