@@ -4,11 +4,13 @@ const { sendAssignmentNotificationEmail } = require('./emailSender');
 const { getSystemSettings } = require('./systemSettings');
 const { applySla } = require('./slaService');
 const { scheduleEscalation } = require('./escalationService');
+const { formatTicketTitle } = require('../utils/ticketTitle');
 
 // Crée un ticket ERP à partir d'un email entrant analysé par l'IA.
 // Retourne { erpTicketId }.
 async function createTicketFromEmail({ subject, body, from, fromName, analysis, emailAccountId, locationId, locationName, lowTrustSender = false, tx = prisma, escalateMinutes = null, triageRuleId = null }) {
-  const title = analysis.suggestedTitle || subject;
+  // Titre EN MAJUSCULES, partie LIEU = lieu strictement résolu en base (INDÉTERMINÉ sinon)
+  const title = formatTicketTitle(analysis.suggestedTitle || subject, locationName || null);
 
   const erpTicket = await tx.ticket.create({
     data: {

@@ -33,6 +33,7 @@ import {
   Move,
 } from 'lucide-react';
 import { useUserPreferences } from '../context/UserPreferencesContext';
+import DEFAULT_VISIBILITY from '../config/navigationDefaults';
 import { useAuth } from '../context/AuthContext';
 import useSystemSettings from '../hooks/useSystemSettings';
 import { hasPermission } from '../utils/permissions';
@@ -256,6 +257,9 @@ function ShortcutsTab() {
       const allowed = item.roles || item.fallbackRoles;
       return allowed.includes(user?.role);
     }
+    // Pas de restriction codée en dur → appliquer les défauts partagés (onglet Navigation)
+    const defaultRoles = DEFAULT_VISIBILITY[basePath];
+    if (defaultRoles) return defaultRoles.includes(user?.role);
     return true;
   }
 

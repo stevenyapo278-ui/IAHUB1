@@ -52,6 +52,7 @@ import { useNotifications } from '../context/NotificationContext';
 import { useUserPreferences } from '../context/UserPreferencesContext';
 import { saveSessionLocation } from '../utils/sessionLocation';
 import useSystemSettings from '../hooks/useSystemSettings';
+import DEFAULT_VISIBILITY from '../config/navigationDefaults';
 
 // ChatWidget est chargé à la demande : il tire Recharts (~390 Ko) via son graphique,
 // on ne l'inclut donc pas dans le bundle initial de l'application.
@@ -191,7 +192,13 @@ export default function MainLayout() {
       const allowed = item.roles || item.fallbackRoles;
       return allowed.includes(user?.role);
     }
-    if (item.permission === null) return true;
+    if (item.permission === null) {
+      // Ni permission ni rôles codés en dur → appliquer les défauts partagés
+      // (Paramètres > Navigation), pour rester cohérent avec l'onglet Navigation.
+      const defaultRoles = DEFAULT_VISIBILITY[item.to];
+      if (defaultRoles) return defaultRoles.includes(user?.role);
+      return true;
+    }
     const keys = Array.isArray(item.permission) ? item.permission : [item.permission];
     return keys.some((key) => hasPermission(user, key, item.fallbackRoles));
   });
@@ -244,7 +251,10 @@ export default function MainLayout() {
       const allowed = item.roles || item.fallbackRoles;
       return allowed.includes(user?.role);
     }
-    return true; // pas de restriction
+    // Pas de restriction codée en dur → appliquer les défauts partagés (onglet Navigation)
+    const defaultRoles = DEFAULT_VISIBILITY[path];
+    if (defaultRoles) return defaultRoles.includes(user?.role);
+    return true; // chemin inconnu des défauts → pas de restriction
   }
 
   function getFirstAllowedPath() {
@@ -713,6 +723,9 @@ function PinnedShortcuts() {
       const allowed = item.roles || item.fallbackRoles;
       return allowed.includes(user?.role);
     }
+    // Pas de restriction codée en dur → appliquer les défauts partagés (onglet Navigation)
+    const defaultRoles = DEFAULT_VISIBILITY[basePath];
+    if (defaultRoles) return defaultRoles.includes(user?.role);
     return true;
   }
 
@@ -757,6 +770,11 @@ function SidebarItem({ item, user, isSidebarExpanded, count, navigationConfig })
       const allowed = item.roles || item.fallbackRoles;
       if (!allowed.includes(user?.role)) return null;
     }
+  } else if (item.permission === null) {
+    // Ni permission ni rôles codés en dur → appliquer les défauts partagés
+    // (Paramètres > Navigation), pour rester cohérent avec l'onglet Navigation.
+    const defaultRoles = DEFAULT_VISIBILITY[item.to];
+    if (defaultRoles && !defaultRoles.includes(user?.role)) return null;
   }
 
   const Icon = item.icon;

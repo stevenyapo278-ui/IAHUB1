@@ -26,6 +26,11 @@ Informations système sur l'expéditeur (si connu) :
 <email_body>
 {{body}}
 </email_body>
+
+SIGNATURE DE L'EXPÉDITEUR (extraite de la fin du message brut : société, agence, adresse, téléphone) :
+<signature_expediteur>
+{{signatureText}}
+</signature_expediteur>
 --- FIN EMAIL ENTRANT ---
 
 Retourne UNIQUEMENT ce schéma JSON :
@@ -40,9 +45,9 @@ Retourne UNIQUEMENT ce schéma JSON :
   "urgency": "LOW|MEDIUM|HIGH|CRITICAL|null",
   "team": "nom de l'équipe concernée ou null",
   "confidence": 0.0 à 1.0,
-  "suggestedTitle": "titre au format 'SITE : ACTION DEMANDEE' (max 80 caractères) ou null",
+  "suggestedTitle": "titre EN MAJUSCULES au format 'LIEU : ACTION DEMANDEE' (max 80 caractères), LIEU étant le lieu retenu pour location (ou INDÉTERMINÉ si aucun lieu ne correspond), ou null",
   "suggestedSkill": "nom exact de la compétence parmi la liste ci-dessous, ou null",
-  "location": "nom complet exact du lieu parmi la liste ci-dessous, ou null",
+  "location": "nom complet EXACT du lieu parmi la liste ci-dessous correspondant à la signature/adresse de l'expéditeur, ou null si aucun ne correspond",
   "evidence": ["citations exactes mot pour mot du message qui justifient la décision"],
   "language": "fr|en|autre"
 }
@@ -111,7 +116,8 @@ impact / urgency :
 - null si ticketDecision ≠ "CREATE"
 
 suggestedTitle :
-- Format strict : "SITE : ACTION DEMANDEE"
+- Format strict : "LIEU : ACTION DEMANDEE" — EN MAJUSCULES
+- LIEU = le lieu retenu pour "location", ou "INDÉTERMINÉ" si aucun lieu ne correspond
 - Max 80 caractères
 - null si ticketDecision ≠ "CREATE"
 
@@ -120,16 +126,21 @@ suggestedSkill :
 - Si correspondance claire → retourne le nom EXACT.
 - Sinon null.
 
-location (TRÈS IMPORTANT) :
-- Priorité absolue au lieu explicitement mentionné dans le corps ou le sujet du message.
-- Si le message dit "Panne de caisse au Supermarché Marcory" → le lieu est "Supermarché Marcory" (même si l'expéditeur est du siège).
-- Seulement si aucun lieu n'est mentionné → utiliser la signature ou le domaine de l'expéditeur.
-- Utiliser UNIQUEMENT un nom complet exact de la liste fournie, sinon null.
+location (RÈGLE STRICTE — AUCUNE EXCEPTION) :
+- Analyse UNIQUEMENT la signature de l'expéditeur (<signature_expediteur> : société, agence,
+  adresse, téléphone) et son ADRESSE EMAIL (domaine et partie locale).
+- Compare ces indices avec la liste des lieux disponibles ci-dessous.
+- Ne retourner un lieu QUE s'il figure EXACTEMENT dans cette liste (copier le nom complet exact).
+- Si AUCUN lieu ne correspond → "location": null (le système affichera INDÉTERMINÉ).
+- INTERDIT ABSOLU : inventer, deviner ou utiliser comme lieu :
+  * un nom d'application, de logiciel ou d'équipement (ex: Excel, Sage, GLPI, VPN, imprimante, caisse) ;
+  * un lieu simplement mentionné dans la description du problème ou dans le fil cité ;
+  * un lieu absent de la liste fournie.
 
 Liste des compétences techniciens disponibles :
 {{availableSkills}}
 
-Liste des lieux disponibles (utilise le nom complet exact) :
+Liste des lieux disponibles (utilise le nom complet exact — seule source de vérité) :
 {{availableLocations}}
 
 ═══════════════════════════════════════════════════════════════

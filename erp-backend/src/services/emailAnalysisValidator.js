@@ -1,5 +1,6 @@
 const { calculatePriority } = require('./emailPriorityMatrix');
 const prisma = require('../prismaClient');
+const { normalizeLocationText, isAppLikeLocation, UNDETERMINED } = require('./locationDetector');
 
 const TICKET_DECISIONS = ['CREATE', 'DO_NOT_CREATE', 'NEEDS_REVIEW'];
 const DECISION_REASONS = ['INCIDENT', 'SERVICE_REQUEST', 'INFORMATION', 'SPAM', 'AUTOMATED', 'DUPLICATE', 'AMBIGUOUS', 'TECHNICIAN_UPDATE', 'INTERNAL_NOTE', 'OUT_OF_OFFICE'];
@@ -153,20 +154,35 @@ async function validateAndCleanAnalysis(rawAnalysis = {}, availableSkills = [], 
     analysis.suggestedSkill = null;
   }
 
-  if (analysis.location && availableLocations.length > 0) {
-    const normLoc = String(analysis.location).trim().toLowerCase();
-    const matchLoc = availableLocations.find((l) => (l.completename || l.name || '').toLowerCase().trim() === normLoc);
-    if (matchLoc) {
-      analysis.location = matchLoc.completename || matchLoc.name;
-    } else {
-      // Lieu inventé par l'IA inexistant dans la base → marquer NON DÉTERMINÉ
+  // ── RÈGLE STRICTE SUR LE LIEU ────────────────────────────────────────────
+  // Le lieu proposé par l'IA doit correspondre EXACTEMENT (insensible à la casse et aux
+  // accents) à un lieu de la base. Un nom d'application, de logiciel ou d'équipement n'est
+  // JAMAIS accepté. Tout le reste → null (le pipeline affichera INDÉTERMINÉ).
+  if (analysis.location) {
+    const proposed = String(analysis.location).trim();
+    if (isAppLikeLocation(proposed)) {
+      console.log(`[emailAnalysisValidator] Lieu refusé (terme applicatif/équipement) : "${proposed}" → INDÉTERMINÉ`);
       analysis.location = null;
-      if (analysis.suggestedTitle && analysis.suggestedTitle.includes(' : ')) {
-        const action = analysis.suggestedTitle.substring(analysis.suggestedTitle.indexOf(' : ') + 3).trim();
-        analysis.suggestedTitle = `NON DÉTERMINÉ : ${action}`.substring(0, 80);
+    } else {
+      const normProposed = normalizeLocationText(proposed);
+      const matchLoc = availableLocations.find((l) => {
+        const completename = normalizeLocationText(l.completename || l.name || '');
+        const name = normalizeLocationText(l.name || '');
+        return normProposed && (normProposed === completename || normProposed === name);
+      });
+      if (matchLoc) {
+        analysis.location = matchLoc.completename || matchLoc.name;
+      } else {
+        // Lieu inventé par l'IA inexistant dans la base → marquer INDÉTERMINÉ
+        console.log(`[emailAnalysisValidator] Lieu IA "${proposed}" introuvable en base → INDÉTERMINÉ`);
+        analysis.location = null;
+        if (analysis.suggestedTitle && analysis.suggestedTitle.includes(' : ')) {
+          const action = analysis.suggestedTitle.substring(analysis.suggestedTitle.indexOf(' : ') + 3).trim();
+          analysis.suggestedTitle = `${UNDETERMINED} : ${action}`.substring(0, 80);
+        }
       }
     }
-  } else if (!analysis.location) {
+  } else {
     analysis.location = null;
   }
 

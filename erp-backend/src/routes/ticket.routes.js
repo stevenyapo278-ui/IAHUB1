@@ -16,6 +16,7 @@ const { applySla, recordFirstResponse } = require('../services/slaService');
 const { escalateTicket } = require('../services/escalationService');
 const { mergeTickets } = require('../services/ticketMergeService');
 const { normalizeLinkType, normalizeLinkEndpoints, normalizeParentChildType, resolveChildrenIds } = require('../utils/ticketLinks');
+const { formatTicketTitle, UNDETERMINED } = require('../utils/ticketTitle');
 const { sanitizeTicketHtml } = require('../utils/security');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
@@ -35,6 +36,18 @@ function isRequesterOnly(user) {
 // Un technicien ne voit que les tickets qui lui sont assignés ou qu'il a ouverts.
 function isTechnicianOnly(user) {
   return user.role === 'TECHNICIAN';
+}
+
+// RÈGLE STRICTE : un TECHNICIAN ne modifie JAMAIS les éléments d'un ticket (titre, contenu,
+// statut, priorité, catégorie, lieu, assignation, approbation, liens, fusion, suppression...).
+// Il consulte le ticket et ajoute des suivis — rien d'autre. Ce garde-fou s'applique par RÔLE,
+// quel que soit le groupe de permissions : aucune permission ne peut redonner ce droit.
+const TECHNICIAN_EDIT_ERROR = 'Un technicien ne peut pas modifier un ticket : il peut uniquement ajouter des suivis.';
+function forbidTechnicianTicketEdits(req, res, next) {
+  if (req.user && req.user.role === 'TECHNICIAN') {
+    return res.status(403).json({ error: TECHNICIAN_EDIT_ERROR });
+  }
+  next();
 }
 
 // List tickets (with optional filters + pagination + sorting)
@@ -733,10 +746,25 @@ router.post(
       }
     }
 
+    // Lieu : doit obligatoirement exister en base (liste déroulante) — jamais de texte libre.
+    // (Correctif : locationId était déstructuré mais jamais enregistré à la création.)
+    let finalLocationId = null;
+    let finalLocationName = null;
+    if (locationId) {
+      const loc = await prisma.location.findUnique({
+        where: { id: Number(locationId) },
+        select: { id: true, name: true, completename: true },
+      });
+      if (!loc) return res.status(400).json({ error: 'Lieu introuvable' });
+      finalLocationId = loc.id;
+      finalLocationName = loc.completename || loc.name;
+    }
+
     const ticket = await prisma.ticket.create({
       data: {
 
-        title,
+        // Titre toujours EN MAJUSCULES (règle stricte sur les noms de tickets)
+        title: formatTicketTitle(title),
         content: sanitizeTicketHtml(content),
         priority: priority || 'P3',
         category: category || null,
@@ -754,6 +782,8 @@ router.post(
         ...(dueDate ? { dueDate: new Date(dueDate) } : {}),
         source: source || null,
         externalId: externalId || null,
+        locationId: finalLocationId,
+        locationName: finalLocationName,
         ...(customFields ? { customFields } : {}),
         ...(observerIds.length > 0 ? { observers: { connect: observerIds.map((id) => ({ id: Number(id) })) } } : {}),
         ...(assetIds.length > 0 ? { assets: { create: assetIds.map((assetId) => ({ assetId: Number(assetId) })) } } : {}),
@@ -843,7 +873,7 @@ router.post(
 );
 
 // Update ticket (status, priority, assignment, etc.)
-router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+router.patch('/:id', forbidTechnicianTicketEdits, requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const id = Number(req.params.id);
   // Whitelist : seuls ces champs acceptent la mise à jour (protection mass assignment)
   const allowed = ['title', 'content', 'status', 'priority', 'category', 'teamId', 'assignedToId', 'requesterId', 'sourceName', 'sourceEmail', 'type', 'urgency', 'impact', 'source', 'externalId', 'dueDate', 'assetIds', 'observerIds', 'approvalStatus', 'isMajorIncident', 'impactedSites', 'closeSuggested', 'locationId'];
@@ -857,7 +887,8 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
   }
 
   const data = {};
-  if (title !== undefined) data.title = title;
+  // Titre toujours EN MAJUSCULES (règle stricte sur les noms de tickets)
+  if (title !== undefined) data.title = formatTicketTitle(title);
   if (content !== undefined) data.content = sanitizeTicketHtml(content);
   if (priority !== undefined) data.priority = priority;
   if (category !== undefined) data.category = category;
@@ -896,14 +927,15 @@ router.patch('/:id', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']
   if (source !== undefined) data.source = source;
   if (externalId !== undefined) data.externalId = externalId;
 
-  // locationId du frontend
+  // locationId du frontend — obligatoirement un lieu existant en base (liste déroulante),
+  // jamais de texte libre. Vidé explicitement → "INDÉTERMINÉ".
   if (locationId !== undefined) {
     data.locationId = locationId ? Number(locationId) : null;
     if (locationId) {
       const loc = await prisma.location.findUnique({ where: { id: Number(locationId) }, select: { name: true, completename: true } });
       if (loc)         data.locationName = loc.completename || loc.name;
     } else {
-      data.locationName = null;
+      data.locationName = UNDETERMINED;
     }
   }
 
@@ -1053,7 +1085,7 @@ router.get('/:id/corrections', async (req, res) => {
 });
 
 // Approve a ticket
-router.post('/:id/approve', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+router.post('/:id/approve', forbidTechnicianTicketEdits, requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
   const id = Number(req.params.id);
   try {
     const result = await approveTicket(id, {
@@ -1069,7 +1101,7 @@ router.post('/:id/approve', requirePermission('tickets.approve', ['ADMIN', 'TECH
 });
 
 // Reject a ticket
-router.post('/:id/reject', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+router.post('/:id/reject', forbidTechnicianTicketEdits, requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
   const id = Number(req.params.id);
   const note = req.body.note || req.body.reason;
   if (!note || !note.trim()) {
@@ -1106,7 +1138,7 @@ router.post('/:id/reject', requirePermission('tickets.approve', ['ADMIN', 'TECHN
 // de résolution). La Hotline valide ici → SOLVED, ou rejette → le ticket reste actif.
 
 // Valider la clôture suggérée : passe le ticket en SOLVED.
-router.post('/:id/validate-close', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+router.post('/:id/validate-close', forbidTechnicianTicketEdits, requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
   const id = Number(req.params.id);
   try {
     const existing = await prisma.ticket.findUnique({ where: { id } });
@@ -1151,7 +1183,7 @@ router.post('/:id/validate-close', requirePermission('tickets.approve', ['ADMIN'
 });
 
 // Rejeter la clôture suggérée : le problème n'est pas résolu, le ticket reste actif.
-router.post('/:id/reject-close', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+router.post('/:id/reject-close', forbidTechnicianTicketEdits, requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
   const id = Number(req.params.id);
   const note = req.body.note || req.body.reason;
   if (!note || !note.trim()) {
@@ -1200,7 +1232,7 @@ router.post('/:id/reject-close', requirePermission('tickets.approve', ['ADMIN', 
 });
 // Analyse proactive : scanne les tickets ouverts sans réponse utilisateur récente pour détecter
 // les résolutions probables et proposer des clôtures à la Hotline (bouton « Analyse des tickets »).
-router.post('/analyze-closures', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+router.post('/analyze-closures', forbidTechnicianTicketEdits, requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
   try {
     const { runClosureAnalysis } = require('../services/closureScanner');
     const max = Math.min(parseInt((req.body || {}).limit, 10) || 25, 100);
@@ -1211,7 +1243,7 @@ router.post('/analyze-closures', requirePermission('tickets.approve', ['ADMIN', 
   }
 });
 // Met à jour l'assignation, journalise dans ReassignmentLog et émet socket event.
-router.patch('/:id/reassign', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+router.patch('/:id/reassign', forbidTechnicianTicketEdits, requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const id = Number(req.params.id);
   const { assignedToId, reason } = req.body;
 
@@ -1254,7 +1286,7 @@ router.patch('/:id/reassign', requirePermission('tickets.assign', ['ADMIN', 'TEC
 // - targetTeamId  : réaffecte le ticket à une autre équipe (le technicien actuel est remplacé)
 // - assignedToId  : technicien choisi dans l'équipe cible (optionnel — sinon ticket d'équipe non assigné)
 // Droit requis : tickets.assign — réservé aux ADMIN/SUPERADMIN/HOTLINE via les groupes de droits.
-router.post('/:id/escalate', requirePermission('tickets.assign', ['ADMIN', 'HOTLINE']), async (req, res) => {
+router.post('/:id/escalate', forbidTechnicianTicketEdits, requirePermission('tickets.assign', ['ADMIN', 'HOTLINE']), async (req, res) => {
   const id = Number(req.params.id);
   const { reason, targetTeamId, assignedToId } = req.body || {};
   try {
@@ -1439,7 +1471,7 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
 });
 
 // Bascule privé/public d'un commentaire (visible uniquement par l'équipe)
-router.patch('/:id/followups/:followupId/visibility', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+router.patch('/:id/followups/:followupId/visibility', forbidTechnicianTicketEdits, requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const ticketId = Number(req.params.id);
   const followupId = Number(req.params.followupId);
 
@@ -1507,7 +1539,7 @@ router.patch('/:id/followups/:followupId', requirePermission('tickets.assign', [
 });
 
 // ── Tickets liés ────────────────────────────────────────────────────────
-router.post('/:id/links', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+router.post('/:id/links', forbidTechnicianTicketEdits, requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const ticketId = Number(req.params.id);
   const { targetTicketId, type } = req.body;
 
@@ -1542,7 +1574,7 @@ router.post('/:id/links', requirePermission('tickets.assign', ['ADMIN', 'TECHNIC
   return res.status(201).json({ link });
 });
 
-router.delete('/:id/links/:linkId', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+router.delete('/:id/links/:linkId', forbidTechnicianTicketEdits, requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const linkId = Number(req.params.linkId);
   const link = await prisma.ticketLink.findUnique({ where: { id: linkId } });
   if (!link) return res.status(404).json({ error: 'Lien introuvable' });
@@ -1557,7 +1589,7 @@ router.delete('/:id/links/:linkId', requirePermission('tickets.assign', ['ADMIN'
 // ── Sous-tickets (parent/enfant) ─────────────────────────────────────────
 // Crée un ticket enfant depuis un parent : hérite catégorie, équipe, demandeur,
 // priorité, lieu, observateurs par défaut, puis établit le lien PARENT→CHILD.
-router.post('/:id/children', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+router.post('/:id/children', forbidTechnicianTicketEdits, requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const parentId = Number(req.params.id);
   const { title, content, priority } = req.body;
   if (!title || !title.trim()) return res.status(400).json({ error: 'Le titre est requis' });
@@ -1606,7 +1638,7 @@ router.post('/:id/children', requirePermission('tickets.assign', ['ADMIN', 'TECH
 });
 
 // ── Fusion de tickets sources dans le ticket courant ────────────────────
-router.post('/:id/merge', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+router.post('/:id/merge', forbidTechnicianTicketEdits, requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const targetId = Number(req.params.id);
   const sourceIds = (req.body.sourceTicketIds || []).map(Number).filter((n) => Number.isInteger(n) && n !== targetId);
   if (sourceIds.length === 0) {
@@ -1663,7 +1695,7 @@ router.post('/:id/csat', async (req, res) => {
 
 // ── Corbeille (soft delete) ─────────────────────────────────────────────────
 // DELETE /:id → met à la corbeille (restaurable). Suppression définitive : DELETE /:id?permanent=true
-router.delete('/:id', requirePermission('tickets.delete', ['ADMIN']), async (req, res) => {
+router.delete('/:id', forbidTechnicianTicketEdits, requirePermission('tickets.delete', ['ADMIN']), async (req, res) => {
   const id = Number(req.params.id);
   try {
     const ticket = await prisma.ticket.findUnique({ where: { id }, select: { id: true, deletedAt: true } });
@@ -1692,7 +1724,7 @@ router.delete('/:id', requirePermission('tickets.delete', ['ADMIN']), async (req
 });
 
 // Restaure un ticket depuis la corbeille
-router.post('/:id/restore', requirePermission('tickets.delete', ['ADMIN']), async (req, res) => {
+router.post('/:id/restore', forbidTechnicianTicketEdits, requirePermission('tickets.delete', ['ADMIN']), async (req, res) => {
   const id = Number(req.params.id);
   const ticket = await prisma.ticket.findUnique({ where: { id }, select: { id: true, deletedAt: true } });
   if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
@@ -1705,7 +1737,7 @@ router.post('/:id/restore', requirePermission('tickets.delete', ['ADMIN']), asyn
 });
 
 // Delete tickets in bulk — body: { ids: [1, 2, 3] }
-router.post('/bulk-delete', requirePermission('tickets.bulkDelete', ['ADMIN']), [body('ids').isArray({ min: 1 })], async (req, res) => {
+router.post('/bulk-delete', forbidTechnicianTicketEdits, requirePermission('tickets.bulkDelete', ['ADMIN']), [body('ids').isArray({ min: 1 })], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 

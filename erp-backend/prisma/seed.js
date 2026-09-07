@@ -30,17 +30,13 @@ const ADMIN_DEFAULT_PERMISSIONS = [
   'aiweeklyreports.manage',
 ];
 
+// RÈGLE STRICTE : un technicien consulte les tickets et ajoute des suivis — il ne modifie
+// aucun élément d'un ticket (titre, statut, lieu, assignation, approbation...). Les routes de
+// mutation sont de toute façon verrouillées par RÔLE côté serveur (forbidTechnicianTicketEdits
+// dans ticket.routes.js) : aucune permission ne peut redonner ce droit à un technicien.
 const TECHNICIAN_DEFAULT_PERMISSIONS = [
   'tickets.view',
-  'tickets.assign',
-  'tickets.approve',
   'tickets.timesheet',
-  'tickets.manage',
-  'knowledge.manage',
-  'inbox.sync',
-  'emaildrafts.manage',
-  'locations.manage',
-  'assets.manage',
 ];
 
 const HOTLINE_DEFAULT_PERMISSIONS = [
@@ -173,7 +169,7 @@ async function main() {
 
   const defaultGroups = [
     { name: 'Administrateurs', description: 'Groupe par défaut pour le rôle Administrateur. Accès complet à la gestion utilisateur, équipe, paramètres.', permissions: ADMIN_DEFAULT_PERMISSIONS },
-    { name: 'Techniciens', description: 'Groupe par défaut pour le rôle Technicien. Gestion de tickets, knowledge base, inbox, supervision.', permissions: TECHNICIAN_DEFAULT_PERMISSIONS },
+    { name: 'Techniciens', description: 'Consultation des tickets et ajout de suivis uniquement.', permissions: TECHNICIAN_DEFAULT_PERMISSIONS },
     { name: 'Équipe Hotline', description: 'Groupe par défaut pour le rôle Hotline. Validation de tickets, rapports IA, gestion des lieux.', permissions: HOTLINE_DEFAULT_PERMISSIONS },
     { name: 'Demandeurs', description: 'Groupe par défaut pour le rôle Demandeur. Création de tickets et consultation de l\'inventaire.', permissions: REQUESTER_DEFAULT_PERMISSIONS },
   ];

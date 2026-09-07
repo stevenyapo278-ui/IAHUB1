@@ -45,7 +45,7 @@ import {
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { hasPermission } from '../utils/permissions';
+import { hasPermission, canEditTickets } from '../utils/permissions';
 import useSystemSettings from '../hooks/useSystemSettings';
 import ConfirmDialog from '../components/ConfirmDialog';
 import UserAvatar from '../components/UserAvatar';
@@ -583,10 +583,14 @@ function ChevronsRight({ className }) {
 export default function Tickets() {
   const { user } = useAuth();
   const { autonomousMode } = useSystemSettings();
-  const canAssign = hasPermission(user, 'tickets.assign') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN';
-  const canApprove = hasPermission(user, 'tickets.approve') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN';
-  const canDelete = hasPermission(user, 'tickets.delete') || user?.role === 'SUPERADMIN';
-  const canBulkDelete = hasPermission(user, 'tickets.bulkDelete') || user?.role === 'SUPERADMIN';
+  // Plafond par RÔLE : un TECHNICIAN (comme un REQUESTER) consulte les tickets et ajoute des
+  // suivis — il ne modifie jamais leurs éléments, quel que soit son groupe de permissions
+  // (miroir du garde-fou serveur forbidTechnicianTicketEdits).
+  const canEditTicketsRole = canEditTickets(user);
+  const canAssign = canEditTicketsRole && (hasPermission(user, 'tickets.assign') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN');
+  const canApprove = canEditTicketsRole && (hasPermission(user, 'tickets.approve') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN');
+  const canDelete = canEditTicketsRole && (hasPermission(user, 'tickets.delete') || user?.role === 'SUPERADMIN');
+  const canBulkDelete = canEditTicketsRole && (hasPermission(user, 'tickets.bulkDelete') || user?.role === 'SUPERADMIN');
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
@@ -595,6 +599,17 @@ export default function Tickets() {
   const [teams, setTeams] = useState([]);
   const [users, setUsers] = useState([]);
   const [locations, setLocations] = useState([]);
+
+  // Liste déroulante Lieu : nom complet (chemin exact de la base) en libellé,
+  // ville/adresse en sous-titre — un lieu ne peut être choisi QUE dans cette liste.
+  const locationOptions = useMemo(
+    () => locations.map((l) => ({
+      value: String(l.id),
+      label: l.completename || l.name,
+      subLabel: [l.town, l.address].filter(Boolean).join(' — '),
+    })),
+    [locations]
+  );
   const [categories, setCategories] = useState([]);
   const [glpiUsers, setGlpiUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1053,7 +1068,7 @@ export default function Tickets() {
     if (!t) return;
     setForm((prev) => ({
       ...prev,
-      title: t.title || prev.title,
+      title: (t.title || prev.title).toLocaleUpperCase('fr-FR'),
       content: t.content || prev.content,
       priority: t.priority || prev.priority,
       category: t.category || prev.category,
@@ -1616,8 +1631,8 @@ export default function Tickets() {
 
                   <FormField label="Titre *">
                     <input type="text" required value={form.title}
-                      onChange={(e) => setForm({ ...form, title: e.target.value })}
-                      placeholder="ex: Problème d'impression ou accès réseau..." className={FIELD_CLS} />
+                      onChange={(e) => setForm({ ...form, title: e.target.value.toLocaleUpperCase('fr-FR') })}
+                      placeholder="ex: MARCORY : PROBLÈME D'IMPRESSION..." className={`${FIELD_CLS} uppercase`} />
                   </FormField>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1685,31 +1700,48 @@ export default function Tickets() {
                         {SOURCE_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
                       </select>
                     </FormField>
-                    {locations.length > 0 && (
-                      <FormField label="Lieu / Emplacement">
-                        <SearchableSelect options={locations} value={form.locationId}
-                          onChange={(val) => setForm({ ...form, locationId: val })}
-                          placeholder="Rechercher un lieu GLPI..." searchPlaceholder="Rechercher un lieu..." />
-                      </FormField>
-                    )}
-                    {canAssign && teams.length > 0 && (
+                    <FormField label="Lieu / Emplacement">
+                      <SearchableSelect options={locationOptions} value={form.locationId}
+                        onChange={(val) => setForm({ ...form, locationId: val })}
+                        ariaLabel="Lieu du ticket"
+                        disabled={locationOptions.length === 0}
+                        placeholder={locationOptions.length === 0 ? 'Aucun lieu disponible' : 'Rechercher un lieu...'}
+                        searchPlaceholder="Rechercher un lieu..." />
+                    </FormField>
+                    {canAssign && (
                       <FormField label="Équipe assignée">
-                        <select value={form.teamId} onChange={(e) => {
-                          const selectedTeam = teams.find((t) => String(t.id) === e.target.value);
-                          const teamObserverIds = (selectedTeam?.defaultObservers || []).map((o) => o.id);
-                          setForm({ ...form, teamId: e.target.value, assignedToId: '', observerIds: teamObserverIds });
-                        }} className={FIELD_CLS}>
-                          <option value="">— Aucune équipe —</option>
-                          {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                        </select>
+                        <SearchableSelect
+                          ariaLabel="Équipe assignée"
+                          options={teams.map((t) => ({
+                            value: String(t.id),
+                            label: t.name,
+                            subLabel: t.defaultObservers?.length ? `${t.defaultObservers.length} observateur(s) par défaut` : undefined,
+                          }))}
+                          value={form.teamId ? String(form.teamId) : ''}
+                          onChange={(val) => {
+                            const selectedTeam = teams.find((t) => String(t.id) === val);
+                            const teamObserverIds = (selectedTeam?.defaultObservers || []).map((o) => o.id);
+                            setForm({ ...form, teamId: val, assignedToId: '', observerIds: teamObserverIds });
+                          }}
+                          disabled={teams.length === 0}
+                          placeholder={teams.length === 0 ? 'Aucune équipe disponible' : 'Rechercher une équipe...'}
+                          searchPlaceholder="Rechercher une équipe..." />
                       </FormField>
                     )}
-                    {canAssign && users.length > 0 && (
+                    {canAssign && (
                       <FormField label="Assigné à">
-                        <select value={form.assignedToId} onChange={(e) => setForm({ ...form, assignedToId: e.target.value })} className={FIELD_CLS}>
-                          <option value="">— Non assigné —</option>
-                          {users.filter((u) => u.isActive).map((u) => <option key={u.id} value={u.id}>{u.fullName}</option>)}
-                        </select>
+                        <SearchableSelect
+                          ariaLabel="Technicien assigné"
+                          options={users.filter((u) => u.isActive).map((u) => ({
+                            value: String(u.id),
+                            label: u.fullName,
+                            subLabel: u.role || undefined,
+                          }))}
+                          value={form.assignedToId ? String(form.assignedToId) : ''}
+                          onChange={(val) => setForm({ ...form, assignedToId: val })}
+                          disabled={users.filter((u) => u.isActive).length === 0}
+                          placeholder="Rechercher un technicien..."
+                          searchPlaceholder="Rechercher par nom..." />
                       </FormField>
                     )}
                   </div>

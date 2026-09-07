@@ -379,7 +379,7 @@ function guessSkillFromText(subject, body, skills) {
 // ═══════════════════════════════════════════════════════════════════════════
 // ANALYSE EMAIL (point d'entrée principal pipeline)
 // ═══════════════════════════════════════════════════════════════════════════
-async function analyzeEmail({ subject, body, from, fromName, senderRole, senderTeams, senderSkills }) {
+async function analyzeEmail({ subject, body, from, fromName, senderRole, senderTeams, senderSkills, signatureText }) {
   const providers = await getActiveProviders();
   if (providers.length === 0) throw new Error('Aucun provider IA configuré (Paramètres → Intelligence Artificielle)');
 
@@ -397,6 +397,7 @@ async function analyzeEmail({ subject, body, from, fromName, senderRole, senderT
     senderSkills: senderSkills || 'aucune',
     availableSkills: formatSkillsForPrompt(skills),
     availableLocations: formatLocationsForPrompt(locations),
+    signatureText: signatureText || '(signature non détectée)',
   });
 
   const raw = await callProviderWithFallback(providers, prompt, 'email');

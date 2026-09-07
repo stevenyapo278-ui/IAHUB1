@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, X, ChevronDown, Check } from 'lucide-react';
+import { Search, X, ChevronDown, Check, Loader2 } from 'lucide-react';
 
 const MAX_RENDERED = 80;
 
@@ -15,13 +15,17 @@ export default function SearchableSelect({
   subLabelKey,
   icon: Icon,
   disabled = false,
+  loading = false,
+  ariaLabel,
   className = '',
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [highlighted, setHighlighted] = useState(-1);
   const [menuStyle, setMenuStyle] = useState({});
   const containerRef = useRef(null);
   const menuRef = useRef(null);
+  const searchRef = useRef(null);
 
   const selectedOption = useMemo(
     () => options.find((opt) => String(opt[valueKey]) === String(value)),
@@ -40,6 +44,68 @@ export default function SearchableSelect({
 
   const visibleOptions = filteredOptions.slice(0, MAX_RENDERED);
   const isTruncated = filteredOptions.length > MAX_RENDERED;
+
+  // Remet la surbrillance sur l'option sélectionnée (ou la première) à l'ouverture / au filtrage
+  useEffect(() => {
+    if (!open) return;
+    const selectedIdx = filteredOptions.findIndex((opt) => String(opt[valueKey]) === String(value));
+    setHighlighted(selectedIdx >= 0 ? selectedIdx : filteredOptions.length > 0 ? 0 : -1);
+  }, [open, search]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Focus automatique sur le champ de recherche à l'ouverture
+  useEffect(() => {
+    if (open) {
+      const t = setTimeout(() => searchRef.current?.focus(), 0);
+      return () => clearTimeout(t);
+    }
+    setSearch('');
+  }, [open]);
+
+  const selectOption = useCallback((opt) => {
+    onChange(String(opt[valueKey]));
+    setOpen(false);
+    setSearch('');
+  }, [onChange, valueKey]);
+
+  // Navigation clavier commune (déclencheur + champ de recherche) : flèches, Entrée, Échap, Début/Fin
+  const handleKeyDown = useCallback((e) => {
+    if (disabled || loading) return;
+    if (!open) {
+      if (['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(e.key)) {
+        e.preventDefault();
+        setOpen(true);
+      }
+      return;
+    }
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setHighlighted((i) => Math.min(i + 1, filteredOptions.length - 1));
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        setHighlighted((i) => Math.max(i - 1, 0));
+        break;
+      case 'Home':
+        e.preventDefault();
+        setHighlighted(filteredOptions.length > 0 ? 0 : -1);
+        break;
+      case 'End':
+        e.preventDefault();
+        setHighlighted(filteredOptions.length - 1);
+        break;
+      case 'Enter':
+        e.preventDefault();
+        if (filteredOptions[highlighted]) selectOption(filteredOptions[highlighted]);
+        break;
+      case 'Escape':
+        e.preventDefault();
+        setOpen(false);
+        break;
+      default:
+        break;
+    }
+  }, [open, disabled, loading, filteredOptions, highlighted, selectOption]);
 
   function updateMenuPosition() {
     if (!containerRef.current) return;
@@ -89,6 +155,8 @@ export default function SearchableSelect({
   const dropdown = open ? createPortal(
     <div
       ref={menuRef}
+      role="listbox"
+      aria-label={ariaLabel || placeholder}
       className="z-[9999] overflow-hidden rounded-xl border border-border bg-surface shadow-xl animate-fadeIn"
       style={menuStyle}
     >
@@ -97,10 +165,13 @@ export default function SearchableSelect({
         <div className="relative shrink-0 mb-1">
           <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
+            ref={searchRef}
             type="text"
-            autoFocus
+            role="searchbox"
+            aria-label={searchPlaceholder}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={handleKeyDown}
             placeholder={searchPlaceholder}
             className="w-full pl-8 pr-7 py-2 rounded-lg border border-border bg-surface text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors"
           />
@@ -114,19 +185,27 @@ export default function SearchableSelect({
 
         {/* Options list */}
         <div className="overflow-y-auto" style={{ maxHeight: 'calc(100% - 48px)' }}>
-          {filteredOptions.length === 0 ? (
+          {loading ? (
+            <div className="px-2.5 py-3 text-sm text-muted-foreground flex items-center gap-2 justify-center">
+              <Loader2 className="w-4 h-4 animate-spin" /> Chargement...
+            </div>
+          ) : filteredOptions.length === 0 ? (
             <div className="px-2.5 py-2 text-sm text-muted-foreground">Aucun résultat trouvé</div>
           ) : (
-            visibleOptions.map((opt) => {
+            visibleOptions.map((opt, idx) => {
               const optVal = String(opt[valueKey]);
               const isSelected = String(value) === optVal;
+              const isHighlighted = idx === highlighted;
               return (
                 <button
                   key={optVal}
                   type="button"
-                  onClick={() => { onChange(optVal); setOpen(false); setSearch(''); }}
+                  role="option"
+                  aria-selected={isSelected}
+                  onClick={() => selectOption(opt)}
+                  onMouseEnter={() => setHighlighted(idx)}
                   className={`w-full px-2.5 py-2 rounded-lg text-sm text-left transition-colors flex items-center justify-between gap-2 cursor-pointer ${
-                    isSelected ? 'bg-primary/10 font-medium text-primary' : 'text-foreground hover:bg-surface-muted'
+                    isSelected ? 'bg-primary/10 font-medium text-primary' : isHighlighted ? 'bg-surface-muted text-foreground' : 'text-foreground'
                   }`}
                 >
                   <div className="min-w-0 flex-1">
@@ -156,8 +235,13 @@ export default function SearchableSelect({
     <div ref={containerRef} className={`relative w-full ${className}`}>
       <button
         type="button"
-        disabled={disabled}
+        disabled={disabled || loading}
         onClick={() => setOpen((prev) => !prev)}
+        onKeyDown={handleKeyDown}
+        role="combobox"
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label={ariaLabel || placeholder}
         className="w-full h-10 px-3 flex items-center justify-between gap-2 rounded-lg border bg-surface text-foreground text-sm transition-colors cursor-pointer
           hover:border-muted-foreground/40
           focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background
@@ -179,12 +263,20 @@ export default function SearchableSelect({
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
           {selectedOption && (
-            <span onClick={(e) => { e.stopPropagation(); onChange(''); }}
-              className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-muted transition-colors">
+            <span
+              role="button"
+              tabIndex={-1}
+              aria-label="Effacer la sélection"
+              onClick={(e) => { e.stopPropagation(); onChange(''); }}
+              className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-muted transition-colors cursor-pointer">
               <X className="w-3.5 h-3.5" />
             </span>
           )}
-          <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+          {loading ? (
+            <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />
+          ) : (
+            <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+          )}
         </div>
       </button>
       {dropdown}

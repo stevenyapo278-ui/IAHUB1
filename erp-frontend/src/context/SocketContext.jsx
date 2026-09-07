@@ -47,6 +47,15 @@ export function SocketProvider({ children }) {
       console.error('[Socket.io] Erreur de connexion:', err.message);
     });
 
+    // ── Réglages système modifiés (ex : visibilité de la navigation par rôle,
+    //    onglet Paramètres > Navigation) ───────────────────────────────────
+    // Le serveur prévient tous les clients connectés : on relaie vers l'événement window
+    // 'system-settings:updated' que useSystemSettings écoute déjà, pour que la sidebar
+    // (et autres vues) se rafraîchisse immédiatement, sans rechargement de page.
+    newSocket.on('system-settings:updated', () => {
+      window.dispatchEvent(new CustomEvent('system-settings:updated'));
+    });
+
     // ── Ticket créé ────────────────────────────────────────────────────
     newSocket.on('ticket_created', (ticket) => {
       const p1 = ticket.priority === 'P1';

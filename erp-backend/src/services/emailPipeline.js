@@ -20,6 +20,8 @@ const { htmlToText } = require('../utils/htmlToText');
 const { isLowTrustSender } = require('./senderReputation');
 const { generateEmailSummary } = require('./emailSummaryGenerator');
 const { applyRulesToEmail } = require('./inboxRuleEngine');
+const { detectLocationFromSender, extractSignatureZone } = require('./locationDetector');
+const { formatTicketTitle, UNDETERMINED } = require('../utils/ticketTitle');
 
 const MAX_RETRIES = 3;const RETRY_DELAYS_MS = [180000, 600000, 1800000]; // 3min, 10min, 30min
 
@@ -197,6 +199,10 @@ async function processMessage(message, account) {
   const previewIsTruncated = fullThreadText.length > bodyPreview.length + 100; // marge : évite de remplacer par du bruit HTML
   const bodyForAnalysis = previewIsTruncated ? fullThreadText : bodyPreview;
   const cleanBody = await stripSignature(bodyForAnalysis);
+  // Zone de signature (texte retiré par le stripper, ou fin du message en fallback) —
+  // utilisée pour la détection STRICTE du lieu (signature + adresse email vs table Location)
+  // et transmise à l'IA d'analyse pour la même comparaison.
+  const signatureText = extractSignatureZone(bodyForAnalysis, cleanBody);
 
   let analysis = null;
 
@@ -432,7 +438,7 @@ async function processMessage(message, account) {
           console.log(`[emailPipeline] Expéditeur résolu : ${fromEmail} → role=${senderRole}, équipe=${senderTeams}`);
         }
       }
-      analysis = await analyzeEmail({ subject, body: cleanBody, from: fromEmail, fromName, senderRole, senderTeams, senderSkills });
+      analysis = await analyzeEmail({ subject, body: cleanBody, from: fromEmail, fromName, senderRole, senderTeams, senderSkills, signatureText });
     }
 
     // Bloquer la création de ticket si l'IA ou le filtre détecte un email d'information, un spam ou DO_NOT_CREATE
@@ -584,13 +590,32 @@ async function processMessage(message, account) {
       return updated;
     }
 
-    // Résoudre le lieu : 1) suggestion IA (prioritaire), 2) fallback RequesterLocation (historique)
-    // RÈGLE STRICTE : un lieu n'est assigné QUE s'il existe dans la table Location.
+    // ── Résolution STRICTE du lieu ──────────────────────────────────────────
+    // Règle : le lieu provient UNIQUEMENT d'une correspondance entre la signature /
+    // l'adresse email de l'expéditeur et la table Location. Aucune correspondance →
+    // "INDÉTERMINÉ" (jamais le nom d'une application ou d'un logiciel, jamais une
+    // invention de l'IA, et plus aucun fallback sur l'historique du demandeur).
     let locationId = null;
     let resolvedLocationName = null;
 
-    if (analysis.location) {
-      // L'IA a proposé un lieu → vérifier qu'il existe en DB
+    // 1) Détection déterministe : signature + adresse email vs table Location
+    try {
+      const activeLocations = await prisma.location.findMany({
+        where: { isActive: true },
+        select: { id: true, name: true, completename: true },
+      });
+      const detected = detectLocationFromSender({ fromEmail, fromName, signatureText, locations: activeLocations });
+      if (detected) {
+        locationId = detected.locationId;
+        resolvedLocationName = detected.locationName;
+        console.log(`[emailPipeline] Lieu résolu strictement via signature/email : "${resolvedLocationName}" pour ${fromEmail}`);
+      }
+    } catch (err) {
+      console.error('[emailPipeline] Détection lieu échouée:', err.message);
+    }
+
+    // 2) Suggestion IA (déjà validée contre la base par le validateur) → re-vérification exacte
+    if (!locationId && analysis.location) {
       const loc = await prisma.location.findFirst({
         where: { completename: analysis.location },
         select: { id: true, name: true, completename: true },
@@ -600,25 +625,14 @@ async function processMessage(message, account) {
         resolvedLocationName = loc.name || loc.completename;
         console.log(`[emailPipeline] Lieu IA résolu : "${resolvedLocationName}" pour ${fromEmail}`);
       } else {
-        // Lieu IA inexistant en DB → aucun lieu assigné, même si le demandeur a un historique
-        console.log(`[emailPipeline] Lieu IA "${analysis.location}" introuvable en DB → aucun lieu assigné`);
+        console.log(`[emailPipeline] Lieu IA "${analysis.location}" introuvable en DB → INDÉTERMINÉ`);
       }
-    } else if (fromEmail) {
-      // Pas de lieu IA → fallback historique du demandeur uniquement si pas de lieu explicite dans le mail
-      const knownLocation = await prisma.requesterLocation.findFirst({
-        where: { email: fromEmail.toLowerCase().trim() },
-        orderBy: { lastUsedAt: 'desc' },
-        select: { locationId: true, location: { select: { id: true, name: true, completename: true } } },
-      });
-      if (knownLocation?.location) {
-        locationId = knownLocation.location.id;
-        resolvedLocationName = knownLocation.location.name || knownLocation.location.completename;
-        await prisma.requesterLocation.updateMany({
-          where: { email: fromEmail.toLowerCase().trim() },
-          data: { lastUsedAt: new Date(), assignmentCount: { increment: 1 } },
-        }).catch(() => {});
-        console.log(`[emailPipeline] Lieu résolu via historique demandeur : "${resolvedLocationName}" pour ${fromEmail}`);
-      }
+    }
+
+    // 3) Aucune correspondance → INDÉTERMINÉ (affiché tel quel sur le ticket)
+    if (!locationId) {
+      resolvedLocationName = UNDETERMINED;
+      console.log(`[emailPipeline] Aucun lieu correspondant (signature/email/IA) → INDÉTERMINÉ pour ${fromEmail}`);
     }
 
     // 3. Créer/mettre à jour l'association RequesterLocation si on a résolu un lieu
@@ -630,20 +644,13 @@ async function processMessage(message, account) {
       }).catch(() => {});
     }
 
-    // 2. Aligner le titre avec le lieu résolu pour éviter toute incohérence SITE ≠ LIEU
-    //    Si le titre IA contient " : " (format "SITE : ACTION"), on remplace la partie SITE
-    //    par le nom du lieu réellement assigné dès lors que les deux diffèrent.
-    if (resolvedLocationName && analysis.suggestedTitle && analysis.suggestedTitle.includes(' : ')) {
-      const colonIdx = analysis.suggestedTitle.indexOf(' : ');
-      const aiSite = analysis.suggestedTitle.substring(0, colonIdx).trim().toUpperCase();
-      const action = analysis.suggestedTitle.substring(colonIdx + 3).trim();
-      const resolvedSiteUpper = resolvedLocationName.toUpperCase();
-      if (aiSite !== resolvedSiteUpper) {
-        // Reconstruire le titre avec le lieu réel plutôt que celui deviné par l'IA
-        analysis.suggestedTitle = `${resolvedLocationName} : ${action}`.substring(0, 80);
-        console.log(`[emailPipeline] Titre aligné sur le lieu résolu : "${analysis.suggestedTitle}" (site IA "${aiSite}" → "${resolvedLocationName}")`);
-      }
+    // Titre du ticket : EN MAJUSCULES, partie LIEU strictement alignée sur le lieu résolu
+    // en base ("INDÉTERMINÉ" si aucun lieu ne correspond) — jamais le site deviné par l'IA.
+    const formattedTitle = formatTicketTitle(analysis.suggestedTitle || subject, resolvedLocationName);
+    if (formattedTitle && formattedTitle !== analysis.suggestedTitle) {
+      console.log(`[emailPipeline] Titre formaté (majuscules + lieu strict) : "${formattedTitle}"`);
     }
+    analysis.suggestedTitle = formattedTitle;
 
     // Étape 3 : créer ticket ERP dans une transaction
     const lowTrustSender = await isLowTrustSender(fromEmail).catch(() => false);

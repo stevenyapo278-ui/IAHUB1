@@ -4,6 +4,7 @@ import { LayoutDashboard, Monitor, Ticket, AlertTriangle, MailCheck, Inbox, Book
 import api from '../../api/client';
 import { clearSystemSettingsCache } from '../../hooks/useSystemSettings';
 import { itemVariants } from './SettingsComponents';
+import DEFAULT_VISIBILITY from '../../config/navigationDefaults';
 
 const ROLES = ['REQUESTER', 'TECHNICIAN', 'HOTLINE', 'ADMIN', 'SUPERADMIN'];
 
@@ -38,31 +39,8 @@ const NAV_ITEMS = [
   ]},
 ];
 
-// Defaults basés sur les fallbackRoles codés en dur dans MainLayout.jsx
-const DEFAULT_VISIBILITY = {
-  '/':                   ['REQUESTER', 'TECHNICIAN', 'HOTLINE', 'ADMIN', 'SUPERADMIN'],
-  '/portal':             ['REQUESTER', 'TECHNICIAN', 'HOTLINE', 'ADMIN', 'SUPERADMIN'],
-  '/tickets':            ['REQUESTER', 'TECHNICIAN', 'HOTLINE', 'ADMIN', 'SUPERADMIN'],
-  '/problems':           ['HOTLINE', 'ADMIN', 'SUPERADMIN'],
-  '/email-drafts':       ['TECHNICIAN', 'HOTLINE', 'ADMIN', 'SUPERADMIN'],
-  '/inbox':              ['TECHNICIAN', 'HOTLINE', 'ADMIN', 'SUPERADMIN'],
-  '/knowledge-base':     ['REQUESTER', 'TECHNICIAN', 'HOTLINE', 'ADMIN', 'SUPERADMIN'],
-  '/ticket-evolution':   ['TECHNICIAN', 'HOTLINE', 'ADMIN', 'SUPERADMIN'],
-  '/teams':              ['ADMIN', 'SUPERADMIN'],
-  '/users':              ['ADMIN', 'SUPERADMIN'],
-  '/technician-stats':   ['TECHNICIAN', 'HOTLINE', 'ADMIN', 'SUPERADMIN'],
-  '/skills':             ['ADMIN', 'SUPERADMIN'],
-  '/categories':         ['TECHNICIAN', 'HOTLINE', 'ADMIN', 'SUPERADMIN'],
-  '/locations':          ['HOTLINE', 'ADMIN', 'SUPERADMIN'],
-  '/assets':             ['TECHNICIAN', 'HOTLINE', 'ADMIN', 'SUPERADMIN'],
-  '/ai-weekly-reports':  ['HOTLINE', 'ADMIN', 'SUPERADMIN'],
-  '/prompts':            ['ADMIN', 'SUPERADMIN'],
-  '/permission-groups':  ['ADMIN', 'SUPERADMIN'],
-  '/settings':           ['ADMIN', 'SUPERADMIN'],
-  '/documentation':      ['REQUESTER', 'TECHNICIAN', 'HOTLINE', 'ADMIN', 'SUPERADMIN'],
-  '/logs':               ['TECHNICIAN', 'HOTLINE', 'ADMIN', 'SUPERADMIN'],
-  '/audit':              ['ADMIN', 'SUPERADMIN'],
-};
+// Les défauts de visibilité (DEFAULT_VISIBILITY) sont définis dans
+// config/navigationDefaults.js — source unique partagée avec MainLayout.jsx.
 
 export default function NavigationTab() {
   const [config, setConfig] = useState(null);

@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api from '../api/client';
+import { useAuth } from '../context/AuthContext';
 
 // Cache navigateur (localStorage) : les réglages système (notamment navigationConfig
 // qui pilote la visibilité des pages par rôle) sont disponibles de façon SYNCHRONE au
@@ -36,6 +37,12 @@ export default function useSystemSettings() {
   const [settings, setSettings] = useState(readCache);
   const [loading, setLoading] = useState(() => !readCache());
   const [error, setError] = useState('');
+  const { user } = useAuth();
+
+  // Détecte un changement d'utilisateur (déconnexion/reconnexion dans le même onglet) :
+  // la config mise en cache appartient alors à la session précédente → forcer un rechargement.
+  const prevUserIdRef = useRef(null);
+  const firstMountRef = useRef(true);
 
   function refresh() {
     cachedPromise = null;
@@ -54,7 +61,15 @@ export default function useSystemSettings() {
   }
 
   useEffect(() => {
-    if (!cachedPromise) {
+    const isFirstMount = firstMountRef.current;
+    firstMountRef.current = false;
+    const userChanged = prevUserIdRef.current !== user?.id;
+    prevUserIdRef.current = user?.id;
+
+    if (!isFirstMount && userChanged && user) {
+      // Changement d'utilisateur → recharger (la config en cache est celle de la session précédente)
+      refresh();
+    } else if (!cachedPromise) {
       cachedPromise = api.get('/system-settings')
         .then(({ data }) => {
           writeCache(data);
@@ -73,11 +88,14 @@ export default function useSystemSettings() {
     }
 
     // Une autre page (ex : SUPERADMIN qui sauvegarde la config navigation) signale
-    // un changement → recharger immédiatement dans les vues déjà montées.
+    // un changement → recharger immédiatement dans les vues déjà montées. Le serveur
+    // relaie aussi ce signal via Socket.IO (SocketContext → événement window) pour que
+    // TOUS les onglets ouverts (pas seulement celui de l'admin) se mettent à jour.
     function onSettingsUpdated() { refresh(); }
     window.addEventListener('system-settings:updated', onSettingsUpdated);
     return () => window.removeEventListener('system-settings:updated', onSettingsUpdated);
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   return { settings, autonomousMode: settings?.autonomousMode === true, loading, error, refresh };
 }

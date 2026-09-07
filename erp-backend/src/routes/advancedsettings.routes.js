@@ -6,6 +6,8 @@ const { requireSuperAdmin } = require('../middleware/permissions');
 const { normalizeHost, resolveBackendUrl, resolveFrontendUrl } = require('../services/systemSettings');
 const { auditLog } = require('../services/auditLogService');
 const { purgeTickets, freshStart } = require('../services/ticketPurge');
+const cacheStore = require('../services/cacheStore');
+const { getIO } = require('../utils/socket');
 
 // Mot de passe secret pour marquer le départ en prod
 const PROD_START_PASSWORD = 'JeMarqueLeDebut';
@@ -125,6 +127,14 @@ async function handleSaveSettings(req, res) {
     update: data,
     create: { id: 1, ...data },
   });
+
+  // Les réglages (dont navigationConfig, qui pilote la sidebar de tous les utilisateurs) sont
+  // servis via GET /api/system-settings derrière un cache TTL 30s : on l'invalide pour que la
+  // nouvelle valeur soit servie immédiatement, et on prévient tous les clients connectés via
+  // Socket.IO pour qu'ils rafraîchissent leur config sans attendre un rechargement de page.
+  cacheStore.clear('GET /api/system-settings');
+  const io = getIO();
+  if (io) io.emit('system-settings:updated', { ts: Date.now() });
 
   auditLog('SETTINGS_UPDATED', {
     actor: req.user,
