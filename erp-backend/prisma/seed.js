@@ -57,14 +57,17 @@ const REQUESTER_DEFAULT_PERMISSIONS = [
 const prisma = new PrismaClient();
 
 async function main() {
-  const teams = ['Réseau', 'Système', 'Sécurité', 'Applicatif', 'Logiciel', 'Matériel', 'Téléphonie'];
-  for (const name of teams) {
-    await prisma.team.upsert({
-      where: { name },
-      update: {},
-      create: { name },
-    });
+  // Équipes par défaut : créées uniquement si la table est vide (première installation).
+  // Si un admin supprime ou renomme une équipe, le seed ne la recrée PAS au redéploiement.
+  const existingTeamCount = await prisma.team.count();
+  if (existingTeamCount === 0) {
+    const defaultTeams = ['Réseau', 'Système', 'Sécurité', 'Applicatif', 'Logiciel', 'Matériel', 'Téléphonie'];
+    for (const name of defaultTeams) {
+      await prisma.team.create({ data: { name } });
+    }
+    console.log(`Équipes par défaut créées : ${defaultTeams.join(', ')}`);
   }
+
 
   // Le mapping statique des techniciens GLPI (GLPI_TECHNICIANS) n'existe plus dans
   // src/utils/glpiMapping.js — les techniciens sont désormais créés/synchronisés via

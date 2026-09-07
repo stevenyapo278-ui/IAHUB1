@@ -622,6 +622,8 @@ export default function Tickets() {
     })),
     [flatCategories]
   );
+  const [templates, setTemplates] = useState([]);
+  const [selectedTemplate, setSelectedTemplate] = useState('');
   const templateOptions = useMemo(
     () => templates.map((t) => ({
       value: String(t.id),
@@ -761,8 +763,7 @@ export default function Tickets() {
   const [assetOptions, setAssetOptions] = useState([]);
   const [error, setError] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
-  const [templates, setTemplates] = useState([]);
-  const [selectedTemplate, setSelectedTemplate] = useState('');
+
   const [deleting, setDeleting] = useState(false);
   const [creating, setCreating] = useState(false);
   const [page, setPage] = useState(() => {
