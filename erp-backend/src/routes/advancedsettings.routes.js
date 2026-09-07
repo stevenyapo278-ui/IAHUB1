@@ -95,7 +95,7 @@ router.post('/pause', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PUT / — sauvegarde des réglages (existants)
+// PUT / PATCH / — sauvegarde des réglages (existants)
 // ═══════════════════════════════════════════════════════════════════════════
 const PUT_FIELDS = [
   'backendUrl', 'frontendUrl',
@@ -108,9 +108,10 @@ const PUT_FIELDS = [
   'chatbotNotifyEmail', 'ticketCreationEmailEnabled',
   'enableFewShotTriage', 'enableAutoCreateSkills',
   'slaHours',
+  'navigationConfig',
 ];
 
-router.put('/', async (req, res) => {
+async function handleSaveSettings(req, res) {
   const data = {};
   for (const field of PUT_FIELDS) {
     if (req.body[field] !== undefined) data[field] = req.body[field];
@@ -134,6 +135,9 @@ router.put('/', async (req, res) => {
   }).catch(() => {});
 
   return res.json(settings);
-});
+}
+
+router.put('/', handleSaveSettings);
+router.patch('/', handleSaveSettings);
 
 module.exports = router;
