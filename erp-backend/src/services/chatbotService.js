@@ -133,7 +133,7 @@ async function searchTickets(query, limit = 5, user = null) {
         { title: { contains: w, mode: 'insensitive' } },
         { content: { contains: w, mode: 'insensitive' } },
         { category: { contains: w, mode: 'insensitive' } },
-        { glpiLocationName: { contains: w, mode: 'insensitive' } },
+        { locationName: { contains: w, mode: 'insensitive' } },
       ]);
 
       // REQUESTER/TECHNICIAN : leur filtre role EST déjà dans where.OR
@@ -366,7 +366,7 @@ async function getTicketSummary(ticketId) {
   r += `**Assigné à :** ${ticket.assignedTo?.fullName || 'Non assigné'}\n`;
   if (ticket.team) r += `**Équipe :** ${ticket.team.name}\n`;
   if (ticket.category) r += `**Catégorie :** ${ticket.category}\n`;
-  if (ticket.glpiLocationName) r += `**Lieu :** ${ticket.glpiLocationName}\n`;
+  if (ticket.locationName) r += `**Lieu :** ${ticket.locationName}\n`;
   r += `**Créé le :** ${new Date(ticket.createdAt).toLocaleDateString('fr-FR')}\n\n`;
   r += `**Description :**\n${(ticket.content || 'Aucune description').substring(0, 800)}\n`;
 
@@ -630,7 +630,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
       if (t.category) ticketContext += ` | Catégorie : ${t.category}`;
       if (t.requester) ticketContext += ` | Demandeur : ${t.requester.fullName}`;
       if (t.assignedTo) ticketContext += ` | Assigné à : ${t.assignedTo.fullName}`;
-      if (t.glpiLocationName) ticketContext += ` | Lieu : ${t.glpiLocationName}`;
+      if (t.locationName) ticketContext += ` | Lieu : ${t.locationName}`;
       if (t.glpiTicketId) ticketContext += ` | GLPI #${t.glpiTicketId}`;
       ticketContext += `\n  - *Description :* ${(t.content || '').substring(0, 200)}...\n\n`;
     }
@@ -643,7 +643,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
       assetContext += `• **${a.name}** (${a.assetType}) — N° série: ${a.serialNumber || 'N/A'} | Inventaire: ${a.inventoryNumber || 'N/A'}`;
       if (a.manufacturer) assetContext += ` | Marque: ${a.manufacturer}`;
       if (a.model) assetContext += ` | Modèle: ${a.model}`;
-      if (a.glpiLocation) assetContext += ` | Lieu: ${a.glpiLocation.name}`;
+      if (a.location) assetContext += ` | Lieu: ${a.location.name}`;
       if (a.owner) assetContext += ` | Propriétaire: ${a.owner.fullName}`;
       assetContext += `\n`;
     }

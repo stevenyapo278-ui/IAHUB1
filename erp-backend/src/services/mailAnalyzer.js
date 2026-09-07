@@ -192,7 +192,7 @@ async function getFewShotExamples(subject, body) {
 
   try {
     const similarTickets = await prisma.$queryRawUnsafe(`
-      SELECT t.title, t.content, t.category, t.priority, t."glpiLocationName", tm.name as team_name
+      SELECT t.title, t.content, t.category, t.priority, t."locationName", tm.name as team_name
       FROM "Ticket" t
       LEFT JOIN "Team" tm ON tm.id = t."teamId"
       WHERE t.status IN ('SOLVED', 'CLOSED') 
@@ -220,7 +220,7 @@ Classification attendue :
   "priority": "${ticket.priority}",
   "team": "${(ticket.team_name || '').replace(/"/g, '\\"')}",
   "suggestedTitle": "${(ticket.title || '').replace(/"/g, '\\"')}",
-  "location": "${(ticket.glpiLocationName || '').replace(/"/g, '\\"')}"
+  "location": "${(ticket.locationName || '').replace(/"/g, '\\"')}"
 }
 `;
     }

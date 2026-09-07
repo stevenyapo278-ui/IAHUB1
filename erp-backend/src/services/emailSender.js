@@ -675,7 +675,7 @@ async function sendTicketCreationNotification(ticket) {
   <tr><td style="padding:4px 12px 4px 0;color:#666">Demandeur</td><td>${requester?.fullName || 'Inconnu'}${requester?.email ? ` (${requester.email})` : ''}</td></tr>
   ${ticket.category ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Catégorie</td><td>${ticket.category}</td></tr>` : ''}
   ${ticket.priority ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Priorité</td><td>${PRIORITY_LABEL[ticket.priority] || ticket.priority}</td></tr>` : ''}
-  ${ticket.glpiLocationName ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Lieu</td><td>${ticket.glpiLocationName}</td></tr>` : ''}
+  ${ticket.locationName ? `<tr><td style="padding:4px 12px 4px 0;color:#666">Lieu</td><td>${ticket.locationName}</td></tr>` : ''}
   ${content ? `<tr><td style="padding:4px 12px 4px 0;color:#666;vertical-align:top">Description</td><td style="max-width:400px;white-space:pre-wrap">${content.substring(0, 500)}${content.length > 500 ? '…' : ''}</td></tr>` : ''}
 </table>
 <p style="margin:20px 0">

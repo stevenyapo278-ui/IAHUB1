@@ -580,11 +580,11 @@ async function processMessage(message, account) {
       const knownLocation = await prisma.requesterLocation.findFirst({
         where: { email: fromEmail.toLowerCase().trim() },
         orderBy: { lastUsedAt: 'desc' },
-        select: { glpiLocationId: true, glpiLocation: { select: { id: true, name: true, completename: true } } },
+        select: { locationId: true, location: { select: { id: true, name: true, completename: true } } },
       });
-      if (knownLocation?.glpiLocation) {
-        locationId = knownLocation.glpiLocation.id;
-        resolvedLocationName = knownLocation.glpiLocation.name || knownLocation.glpiLocation.completename;
+      if (knownLocation?.location) {
+        locationId = knownLocation.location.id;
+        resolvedLocationName = knownLocation.location.name || knownLocation.location.completename;
         // Mettre à jour le compteur et la date de dernière utilisation
         await prisma.requesterLocation.updateMany({
           where: { email: fromEmail.toLowerCase().trim() },
@@ -615,9 +615,9 @@ async function processMessage(message, account) {
     // 3. Créer/mettre à jour l'association RequesterLocation si on a résolu un lieu
     if (locationId && fromEmail) {
       await prisma.requesterLocation.upsert({
-        where: { email_glpiLocationId: { email: fromEmail.toLowerCase().trim(), glpiLocationId: locationId } },
+        where: { email_locationId: { email: fromEmail.toLowerCase().trim(), locationId: locationId } },
         update: { lastUsedAt: new Date(), assignmentCount: { increment: 1 } },
-        create: { email: fromEmail.toLowerCase().trim(), glpiLocationId: locationId },
+        create: { email: fromEmail.toLowerCase().trim(), locationId: locationId },
       }).catch(() => {});
     }
 

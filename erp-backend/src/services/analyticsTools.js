@@ -50,7 +50,7 @@ async function getTopLocationsStats({ filterKeyword, period, limit = 5 }) {
       priority: true,
       status: true,
       createdAt: true,
-      glpiLocationId: true,
+      locationId: true,
       location: {
         select: {
           id: true,
@@ -66,7 +66,7 @@ async function getTopLocationsStats({ filterKeyword, period, limit = 5 }) {
 
   for (const t of tickets) {
     const locName = t.location?.completename || t.location?.name || 'Non spécifié / Magasin Inconnu';
-    const locId = t.glpiLocationId || 'unknown';
+    const locId = t.locationId || 'unknown';
 
     if (!locationMap.has(locName)) {
       locationMap.set(locName, {
@@ -120,7 +120,7 @@ async function getCategoryDistribution({ locationId, period, filterKeyword, limi
   const startDate = parsePeriod(period);
   const where = {};
   if (startDate) where.createdAt = { gte: startDate };
-  if (locationId) where.glpiLocationId = Number(locationId);
+  if (locationId) where.locationId = Number(locationId);
 
   if (filterKeyword) {
     const kw = filterKeyword.trim();
