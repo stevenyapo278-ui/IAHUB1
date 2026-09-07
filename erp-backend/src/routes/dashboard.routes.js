@@ -12,9 +12,8 @@ router.use(requirePermission('tickets.view'));
 router.get('/stats', async (req, res) => {
   const { startDate, endDate } = req.query;
   const where = {};
-  // Les tickets en attente d'approbation restent dans le Centre de Validation :
-  // ils ne comptent pas dans les statistiques tant qu'ils ne sont pas approuvés.
-  where.approvalStatus = { not: 'PENDING' };
+  // Les tickets en attente d'approbation ou rejetés restent hors des statistiques principales
+  where.approvalStatus = { notIn: ['PENDING', 'REJECTED'] };
   if (startDate || endDate) {
     where.createdAt = {};
     if (startDate) where.createdAt.gte = new Date(startDate);

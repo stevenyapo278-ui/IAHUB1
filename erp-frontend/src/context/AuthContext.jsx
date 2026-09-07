@@ -72,11 +72,19 @@ export function AuthProvider({ children }) {
         // purge plutôt que de laisser l'utilisateur "connecté" avec un user obsolète qui ferait
         // échouer silencieusement tous les appels API suivants (cf. bug observé : /auth/me 404 en
         // boucle après suppression/recréation d'un compte côté serveur).
-        .catch(() => {
+        // IMPORTANT — 429 / 5xx / erreur réseau = erreur TRANSITOIRE : on NE purge PAS la
+        // session. Purger sur tout échec déconnectait les utilisateurs dès que le quota de
+        // l'API était momentanément épuisé, et l'écran de login ne pouvait pas non plus
+        // reconneter (429 sur /auth/login) → « application crashée » sans retour arrière.
+        .catch((err) => {
           if (cancelled) return;
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-          setUser(null);
+          const status = err?.response?.status;
+          if (status === 401 || status === 404) {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            setUser(null);
+          }
+          // 429 / 5xx / réseau : on garde la session, le prochain refresh (2 min) retentera.
         });
     }
 

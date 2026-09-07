@@ -160,6 +160,16 @@ export default function TicketDetail() {
   const [teams, setTeams] = useState([]);
   const [categories, setCategories] = useState([]);
   const flatCategories = useMemo(() => flattenCategoryTree(categories), [categories]);
+  const categoryOptions = useMemo(() => {
+    const opts = flatCategories.map((c) => ({
+      value: c.name,
+      label: c.label || c.name,
+    }));
+    if (ticket?.category && !opts.some((o) => o.value === ticket.category)) {
+      opts.unshift({ value: ticket.category, label: ticket.category });
+    }
+    return opts;
+  }, [flatCategories, ticket?.category]);
   // Définitions des champs personnalisés (pour résoudre libellés/valeurs dans le détail)
   const [customFieldDefs, setCustomFieldDefs] = useState([]);
   const [locations, setLocations] = useState([]);
@@ -272,7 +282,8 @@ export default function TicketDetail() {
   // Escalade = transfert d'équipe : droit tickets.assign restreint aux acteurs support désignés
   // (l'ADMIN peut l'avoir retiré de son groupe de droits — la hotline l'a par défaut côté serveur).
   const canEscalate = canEditTicketsRole && ['ADMIN', 'SUPERADMIN', 'HOTLINE'].includes(user?.role) && hasPermission(user, 'tickets.assign');
-  const canDelete = canEditTicketsRole && (hasPermission(user, 'tickets.delete') || user?.role === 'SUPERADMIN');
+  const canDeleteRole = ['SUPERADMIN', 'ADMIN', 'HOTLINE'].includes(user?.role);
+  const canDelete = canEditTicketsRole && (canDeleteRole || hasPermission(user, 'tickets.delete'));
   const canManageProblems = canEditTicketsRole && (hasPermission(user, 'problems.manage') || user?.role === 'SUPERADMIN');
   const canEdit = canEditTicketsRole && (hasPermission(user, 'tickets.edit') || user?.role === 'ADMIN' || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN');
 
@@ -456,19 +467,51 @@ export default function TicketDetail() {
     }
   };
 
-  // Extrait le nom du lieu (partie avant " : ") d'un titre
+  // Extrait le nom du lieu (partie avant ":", "-", "/", "|") d'un titre
   function extractLocationFromTitle(title) {
-    if (!title || !title.includes(' : ')) return null;
-    return title.split(' : ')[0].trim();
+    if (!title || typeof title !== 'string') return null;
+    const trimmed = title.trim();
+
+    // Ignore les préfixes de type mail / réponse / transfert
+    if (/^(re|fw|fwd)\s*:/i.test(trimmed)) return null;
+
+    // 1) Séparateur deux-points (ex: "DSI: ...", "DSI : ...", "MARCORY:...")
+    if (trimmed.includes(':')) {
+      const parts = trimmed.split(':');
+      const candidate = parts[0].trim();
+      const rest = parts.slice(1).join(':').trim();
+      if (candidate.length >= 2 && candidate.length <= 35 && rest.length > 0) {
+        return candidate;
+      }
+    }
+
+    // 2) Séparateurs avec espaces : "MARCORY - ...", "DSI / ...", "PLATEAU | ..."
+    const altMatch = trimmed.match(/^([A-Z0-9\s_'-]{2,35}?)\s*(?: - | \/ | \| )\s*(.+)$/i);
+    if (altMatch) {
+      const candidate = altMatch[1].trim();
+      if (candidate.length >= 2 && altMatch[2].trim().length > 0) {
+        return candidate;
+      }
+    }
+
+    return null;
   }
 
-  // Vérifie si un lieu correspond déjà dans la liste
+  // Vérifie si un lieu correspond déjà dans la liste (match exact ou partiel)
   function findMatchingLocation(locName) {
     if (!locName) return null;
-    const lower = locName.toLowerCase();
-    return locations.find(
-      (l) => l.name?.toLowerCase() === lower || l.completename?.toLowerCase() === lower
+    const lower = locName.toLowerCase().trim();
+    const exact = locations.find(
+      (l) => l.name?.toLowerCase().trim() === lower || l.completename?.toLowerCase().trim() === lower
     );
+    if (exact) return exact;
+
+    const partial = locations.find(
+      (l) =>
+        l.name?.toLowerCase().includes(lower) ||
+        l.completename?.toLowerCase().includes(lower)
+    );
+    return partial || null;
   }
 
   // Sauvegarder le titre + proposer d'enregistrer le lieu si nouveau
@@ -1963,20 +2006,15 @@ export default function TicketDetail() {
                   Catégorie
                 </label>
                 {canAssign ? (
-                  <select
-                    className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                  <SearchableSelect
+                    options={categoryOptions}
                     value={ticket.category || ''}
                     disabled={savingField === 'category'}
-                    onChange={(e) => updateField('category', e.target.value)}
-                  >
-                    <option value="">-----</option>
-                    {ticket.category && !flatCategories.some((o) => o.name === ticket.category) && (
-                      <option value={ticket.category}>{ticket.category}</option>
-                    )}
-                    {flatCategories.map((o) => (
-                      <option key={o.id} value={o.name}>{o.label}</option>
-                    ))}
-                  </select>
+                    onChange={(val) => updateField('category', val)}
+                    placeholder="Aucune catégorie"
+                    searchPlaceholder="Rechercher une catégorie..."
+                    ariaLabel="Catégorie du ticket"
+                  />
                 ) : (
                   <div className="w-full bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/15 rounded-xl px-3 py-2 text-xs font-semibold text-on-surface">
                     {ticket.category || '-'}
@@ -2119,6 +2157,36 @@ export default function TicketDetail() {
 
               <div>
                 <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface mb-1">
+                  Demandeur
+                </label>
+                {canAssign ? (
+                  <RemoteUserSelect
+                    value={ticket.requesterId || ''}
+                    valueLabel={ticket.requester?.fullName || ticket.sourceName}
+                    disabled={savingField === 'requesterId'}
+                    hideEmail={true}
+                    onChange={(val) => updateField('requesterId', val ? Number(val) : null)}
+                    placeholder="Rechercher un demandeur..."
+                    searchPlaceholder="Rechercher par nom..."
+                  />
+                ) : (
+                  <div className="w-full flex items-center gap-2 bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/15 rounded-xl px-3 py-2 text-xs font-semibold text-on-surface">
+                    {ticket.requester ? (
+                      <>
+                        <div className="w-5 h-5 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[9px] font-bold border border-primary/20">
+                          {initials(ticket.requester.fullName)}
+                        </div>
+                        {ticket.requester.fullName}
+                      </>
+                    ) : (
+                      <span className="text-on-surface-variant">{ticket.sourceName || 'Non spécifié'}</span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface mb-1">
                   Attribué à
                 </label>
                 {canAssign ? (
@@ -2126,6 +2194,7 @@ export default function TicketDetail() {
                     value={ticket.assignedToId || ''}
                     valueLabel={ticket.assignedTo?.fullName}
                     disabled={savingField === 'assignedToId'}
+                    onlyStaff={true}
                     onChange={(val) => updateField('assignedToId', val ? Number(val) : null)}
                     placeholder="Non assigné"
                     searchPlaceholder="Rechercher un technicien..."
@@ -2267,10 +2336,9 @@ export default function TicketDetail() {
                   <label className="block text-[11px] font-semibold text-on-surface-variant mb-1">
                     Sélectionner un utilisateur :
                   </label>
-                  <select
+                  <RemoteUserSelect
                     value={selectedRequesterId}
-                    onChange={(e) => {
-                      const val = e.target.value;
+                    onChange={(val) => {
                       setSelectedRequesterId(val);
                       if (val) {
                         const found = allUsers.find(u => String(u.id) === val) || glpiUsers.find(u => String(u.id) === val);
@@ -2280,15 +2348,10 @@ export default function TicketDetail() {
                         }
                       }
                     }}
-                    className="w-full text-xs font-semibold px-3 py-2 rounded-xl border border-outline-variant/60 bg-surface text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer"
-                  >
-                    <option value="">-- Expéditeur externe (Nom / Email) --</option>
-                    {allUsers.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.fullName} ({u.email})
-                      </option>
-                    ))}
-                  </select>
+                    hideEmail={true}
+                    placeholder="— Expéditeur externe (Nom / Email) —"
+                    searchPlaceholder="Rechercher un demandeur..."
+                  />
                 </div>
 
                 {!selectedRequesterId && (

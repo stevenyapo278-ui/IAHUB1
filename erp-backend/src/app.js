@@ -5,6 +5,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { ipKeyGenerator } = rateLimit;
+const jwt = require('jsonwebtoken');
 const path = require('path');
 const fs = require('fs');
 
@@ -100,8 +101,49 @@ const corsOrigin = process.env.CORS_ORIGIN
 app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 
-const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 500, standardHeaders: true, legacyHeaders: false });
-app.use('/api', limiter);
+// ── Limiteur global de l'API — clé par UTILISATEUR authentifié, pas par IP ──
+// BUG CORRIGÉ : l'ancien limiteur (500 req/15 min PAR IP) faisait partager un SEUL
+// bucket à tous les utilisateurs derrière un même NAT/proxy (sans TRUST_PROXY=1,
+// req.ip = IP du proxy pour toute l'entreprise). Le polling légitime de l'app
+// (listes de tickets toutes les 15 s, badges sidebar toutes les 30 s, /auth/me
+// toutes les 2 min ≈ 130-150 req/15 min PAR ONGLET) épuisait le quota en quelques
+// minutes après plusieurs créations de tickets (bursts socket → refresh chez tous
+// les clients). Ensuite TOUT répondait 429 — y compris /api/auth/login, monté
+// après ce limiteur — et AuthContext déconnectait sur l'échec /auth/me : plus
+// aucune reconnexion possible pendant 15 min (« l'application a crashé »).
+// Désormais : chaque utilisateur authentifié (JWT décodé, sans accès DB) a son
+// PROPRE quota ; les anonymes (écran de login) ont un bucket par IP ; et la
+// route /auth/login est EXCLUE du bucket global (elle a ses propres limiteurs
+// dédiés, échecs uniquement) — un utilisateur peut donc TOUJOURS se reconnecter.
+function getAuthSub(req) {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  if (!token) return null;
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    return payload?.sub ? String(payload.sub) : null;
+  } catch {
+    return null; // token absent/expiré/invalide → bucket anonyme par IP
+  }
+}
+
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  // Utilisateur authentifié : 2000 req/15 min (le polling multi-onglets légitime
+  // tourne autour de 150-300 ; large marge). Anonyme : 300 par IP.
+  max: (req) => (getAuthSub(req) ? 2000 : 300),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Trop de requêtes. Réessayez dans quelques minutes.' },
+  keyGenerator: (req) => {
+    const sub = getAuthSub(req);
+    return sub ? `user:${sub}` : `ip:${ipKeyGenerator(req.ip)}`;
+  },
+  // Le login ne doit JAMAIS être bloqué par le bucket global (sinon « plus de
+  // reconnexion possible ») : il est protégé par ses propres limiteurs ci-dessous.
+  skip: (req) => req.path === '/auth/login',
+});
+app.use('/api', globalLimiter);
 
 // ── Limiteurs de connexion à deux niveaux ────────────────────────────────────
 // Derrière un reverse proxy (Dokploy/Traefik), toutes les requêtes partagent la

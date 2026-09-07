@@ -47,7 +47,7 @@ export default function TemplatesTab() {
   );
 
   const userOptions = useMemo(
-    () => users.filter((u) => u.isActive !== false).map((u) => ({
+    () => users.filter((u) => u.isActive !== false && u.role !== 'REQUESTER').map((u) => ({
       value: String(u.id),
       label: u.fullName || u.email,
       subLabel: u.role || undefined,

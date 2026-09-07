@@ -14,6 +14,8 @@ export default function RemoteUserSelect({
   searchPlaceholder = 'Rechercher par nom ou email...',
   excludeIds = [],
   disabled = false,
+  onlyStaff = false,
+  hideEmail = false,
   className = '',
 }) {
   const [open, setOpen] = useState(false);
@@ -33,16 +35,20 @@ export default function RemoteUserSelect({
     setLoading(true);
     const params = { limit: PAGE_SIZE };
     if (q.trim()) params.search = q.trim();
+    if (onlyStaff) params.onlyStaff = 'true';
     api.get('/users', { params })
       .then(({ data }) => {
         if (seq !== requestSeq.current) return;
-        const list = Array.isArray(data) ? data : (data.users || []);
+        let list = Array.isArray(data) ? data : (data.users || []);
+        if (onlyStaff) {
+          list = list.filter((u) => u.role !== 'REQUESTER');
+        }
         setOptions(list);
         setTotal(list.length);
       })
       .catch(() => { if (seq === requestSeq.current) setOptions([]); })
       .finally(() => { if (seq === requestSeq.current) setLoading(false); });
-  }, []);
+  }, [onlyStaff]);
 
   useEffect(() => {
     if (!value || valueLabel) { setResolvedLabel(null); return; }
@@ -134,7 +140,8 @@ export default function RemoteUserSelect({
                   }`}>
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium text-sm">{opt.fullName}</p>
-                    <p className="text-xs text-muted-foreground truncate">{opt.email}</p>
+                    {!hideEmail && <p className="text-xs text-muted-foreground truncate">{opt.email}</p>}
+                    {hideEmail && opt.role && <p className="text-[11px] text-muted-foreground truncate font-normal">{opt.role}</p>}
                   </div>
                   {isSelected && <Check className="w-4 h-4 text-primary shrink-0" />}
                 </button>

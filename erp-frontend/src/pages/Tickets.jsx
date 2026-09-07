@@ -589,8 +589,9 @@ export default function Tickets() {
   const canEditTicketsRole = canEditTickets(user);
   const canAssign = canEditTicketsRole && (hasPermission(user, 'tickets.assign') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN');
   const canApprove = canEditTicketsRole && (hasPermission(user, 'tickets.approve') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN');
-  const canDelete = canEditTicketsRole && (hasPermission(user, 'tickets.delete') || user?.role === 'SUPERADMIN');
-  const canBulkDelete = canEditTicketsRole && (hasPermission(user, 'tickets.bulkDelete') || user?.role === 'SUPERADMIN');
+  const canDeleteRole = ['SUPERADMIN', 'ADMIN', 'HOTLINE'].includes(user?.role);
+  const canDelete = canEditTicketsRole && (canDeleteRole || hasPermission(user, 'tickets.delete'));
+  const canBulkDelete = canEditTicketsRole && (canDeleteRole || hasPermission(user, 'tickets.bulkDelete'));
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
@@ -614,6 +615,77 @@ export default function Tickets() {
   const [glpiUsers, setGlpiUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const flatCategories = useMemo(() => flattenCategoryTree(categories), [categories]);
+  const categoryOptions = useMemo(
+    () => flatCategories.map((c) => ({
+      value: c.name,
+      label: c.label || c.name,
+    })),
+    [flatCategories]
+  );
+  const templateOptions = useMemo(
+    () => templates.map((t) => ({
+      value: String(t.id),
+      label: t.name,
+      subLabel: t.category || undefined,
+    })),
+    [templates]
+  );
+  const priorityOptions = useMemo(
+    () => PRIORITY_OPTIONS.map((p) => ({
+      value: p,
+      label: `${p} — ${p === 'P1' ? 'Critique' : p === 'P2' ? 'Haute' : p === 'P3' ? 'Moyenne' : 'Basse'}`,
+    })),
+    []
+  );
+  const typeOptions = useMemo(
+    () => TYPE_OPTIONS.map((t) => ({ value: t.value, label: t.label })),
+    []
+  );
+  const sourceOptions = useMemo(
+    () => SOURCE_OPTIONS.map((s) => ({ value: s, label: s })),
+    []
+  );
+
+  function extractLocationFromTitle(title) {
+    if (!title || typeof title !== 'string') return null;
+    const trimmed = title.trim();
+    if (/^(re|fw|fwd)\s*:/i.test(trimmed)) return null;
+
+    if (trimmed.includes(':')) {
+      const parts = trimmed.split(':');
+      const candidate = parts[0].trim();
+      const rest = parts.slice(1).join(':').trim();
+      if (candidate.length >= 2 && candidate.length <= 35 && rest.length > 0) {
+        return candidate;
+      }
+    }
+
+    const altMatch = trimmed.match(/^([A-Z0-9\s_'-]{2,35}?)\s*(?: - | \/ | \| )\s*(.+)$/i);
+    if (altMatch) {
+      const candidate = altMatch[1].trim();
+      if (candidate.length >= 2 && altMatch[2].trim().length > 0) {
+        return candidate;
+      }
+    }
+
+    return null;
+  }
+
+  function findMatchingLocation(locName, locationList = []) {
+    if (!locName) return null;
+    const lower = locName.toLowerCase().trim();
+    const exact = locationList.find(
+      (l) => l.name?.toLowerCase().trim() === lower || l.completename?.toLowerCase().trim() === lower
+    );
+    if (exact) return exact;
+
+    const partial = locationList.find(
+      (l) =>
+        l.name?.toLowerCase().includes(lower) ||
+        l.completename?.toLowerCase().includes(lower)
+    );
+    return partial || null;
+  }
   const [refreshing, setRefreshing] = useState(false);
   const isFirstLoad = useRef(true);
 
@@ -683,6 +755,7 @@ export default function Tickets() {
   const [showForm, setShowForm] = useState(searchParams.get('new') === '1');
   const [form, setForm] = useState(EMPTY_FORM);
   const [attachment, setAttachment] = useState(null);
+  const [pastedImages, setPastedImages] = useState([]);
   const [customFieldDefs, setCustomFieldDefs] = useState([]);
   const [customValues, setCustomValues] = useState({});
   const [assetOptions, setAssetOptions] = useState([]);
@@ -1030,19 +1103,79 @@ export default function Tickets() {
       }).catch(() => setCustomFieldDefs([]));
   }, [form.category]);
 
+  function handlePaste(e) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type?.startsWith('image/')) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (!file) continue;
+        const id = `paste-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const dataUrl = URL.createObjectURL(file);
+        setPastedImages((prev) => [...prev, { id, file, dataUrl }]);
+        toast.success('Image collée — elle sera envoyée avec le ticket');
+      }
+    }
+  }
+
+  function removePastedImage(id) {
+    setPastedImages((prev) => {
+      const img = prev.find((p) => p.id === id);
+      if (img) URL.revokeObjectURL(img.dataUrl);
+      return prev.filter((p) => p.id !== id);
+    });
+  }
+
   async function handleCreate(e) {
     e.preventDefault(); setError(''); setCreating(true);
     try {
+      let finalLocationId = form.locationId;
+
+      // Détection & suggestion automatique de lieu si aucun lieu n'a été choisi dans la liste déroulante
+      if (!finalLocationId && form.title) {
+        const candidateLocName = extractLocationFromTitle(form.title);
+        if (candidateLocName) {
+          const matched = findMatchingLocation(candidateLocName, locations);
+          if (matched) {
+            finalLocationId = String(matched.id);
+            toast.info(`Lieu "${matched.name}" détecté depuis le titre et associé au ticket.`);
+          } else {
+            // Création automatique du nouveau lieu (ex: "DSI")
+            try {
+              const { data: newLoc } = await api.post('/locations', { name: candidateLocName });
+              finalLocationId = String(newLoc.id);
+              toast.success(`Nouveau lieu "${newLoc.name}" créé et associé au ticket.`);
+              api.get('/locations').then(({ data }) => setLocations(data)).catch(() => {});
+            } catch (err) {
+              console.warn('[Tickets] Impossible de créer le lieu automatiquement:', err.message);
+            }
+          }
+        }
+      }
+
       const payload = new FormData();
-      Object.entries(form).forEach(([key, value]) => {
+      Object.entries({ ...form, locationId: finalLocationId }).forEach(([key, value]) => {
         if (key === 'observerIds') { if (value.length > 0) payload.append('observerIds', JSON.stringify(value)); return; }
         if (key === 'assetIds') { if (value.length > 0) payload.append('assetIds', JSON.stringify(value)); return; }
         if (value !== '' && value !== undefined && value !== null) payload.append(key, value);
       });
+
+      if (pastedImages.length > 0) {
+        let content = form.content || '';
+        pastedImages.forEach((img, idx) => {
+          payload.append('images', img.file);
+          content += `\n\n<!--IMAGE_${idx}-->`;
+        });
+        payload.set('content', content);
+      }
+
       if (Object.keys(customValues).length > 0) payload.append('customFields', JSON.stringify(customValues));
       if (attachment) payload.append('attachment', attachment);
       await api.post('/tickets', payload, { headers: { 'Content-Type': 'multipart/form-data' } });
       toast.success('Ticket créé');
+      pastedImages.forEach((img) => URL.revokeObjectURL(img.dataUrl));
+      setPastedImages([]);
       setForm(EMPTY_FORM); setCustomValues({}); setAttachment(null); setShowForm(false); setSearchParams({});
       loadTickets();
     } catch (err) {
@@ -1053,6 +1186,10 @@ export default function Tickets() {
   }
 
   function toggleForm() {
+    if (showForm) {
+      pastedImages.forEach((img) => URL.revokeObjectURL(img.dataUrl));
+      setPastedImages([]);
+    }
     setShowForm((v) => !v);
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -1525,7 +1662,7 @@ export default function Tickets() {
                   className="text-xs font-semibold px-2 py-1.5 rounded-lg border border-border/40 bg-background text-foreground cursor-pointer focus:outline-none max-w-[120px]">
                   <option value="">Assigner…</option>
                   <option value="none">Non assigné</option>
-                  {users.filter((u) => u.isActive).map((u) => <option key={u.id} value={u.id}>{u.fullName}</option>)}
+                  {users.filter((u) => u.isActive && u.role !== 'REQUESTER').map((u) => <option key={u.id} value={u.id}>{u.fullName}</option>)}
                 </select>
                 <button onClick={handleBulkUpdate} disabled={bulkUpdating}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold hover:opacity-90 transition-opacity disabled:opacity-50">
@@ -1622,10 +1759,14 @@ export default function Tickets() {
 
                   {templates.length > 0 && (
                     <FormField label="Modèle (pré-remplissage)">
-                      <select value={selectedTemplate} onChange={(e) => applyTemplate(e.target.value)} className={FIELD_CLS}>
-                        <option value="">— Aucun modèle —</option>
-                        {templates.map((t) => <option key={t.id} value={t.id}>{t.name}{t.category ? ` (${t.category})` : ''}</option>)}
-                      </select>
+                      <SearchableSelect
+                        options={templateOptions}
+                        value={selectedTemplate}
+                        onChange={(val) => applyTemplate(val)}
+                        placeholder="— Aucun modèle —"
+                        searchPlaceholder="Rechercher un modèle..."
+                        ariaLabel="Modèle de ticket"
+                      />
                     </FormField>
                   )}
 
@@ -1637,15 +1778,24 @@ export default function Tickets() {
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <FormField label="Catégorie">
-                      <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className={FIELD_CLS}>
-                        <option value="">Sélectionner une catégorie</option>
-                        {flatCategories.map((o) => <option key={o.id} value={o.name}>{o.label}</option>)}
-                      </select>
+                      <SearchableSelect
+                        options={categoryOptions}
+                        value={form.category}
+                        onChange={(val) => setForm({ ...form, category: val })}
+                        placeholder="Sélectionner une catégorie"
+                        searchPlaceholder="Rechercher une catégorie..."
+                        ariaLabel="Catégorie"
+                      />
                     </FormField>
                     <FormField label="Priorité">
-                      <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })} className={FIELD_CLS}>
-                        {PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{p} — {p === 'P1' ? 'Critique' : p === 'P2' ? 'Haute' : p === 'P3' ? 'Moyenne' : 'Basse'}</option>)}
-                      </select>
+                      <SearchableSelect
+                        options={priorityOptions}
+                        value={form.priority}
+                        onChange={(val) => setForm({ ...form, priority: val })}
+                        placeholder="Sélectionner une priorité"
+                        searchPlaceholder="Rechercher une priorité..."
+                        ariaLabel="Priorité"
+                      />
                     </FormField>
                   </div>
 
@@ -1691,14 +1841,24 @@ export default function Tickets() {
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <FormField label="Type de demande">
-                      <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className={FIELD_CLS}>
-                        {TYPE_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-                      </select>
+                      <SearchableSelect
+                        options={typeOptions}
+                        value={form.type}
+                        onChange={(val) => setForm({ ...form, type: val })}
+                        placeholder="Sélectionner un type"
+                        searchPlaceholder="Rechercher un type..."
+                        ariaLabel="Type de demande"
+                      />
                     </FormField>
                     <FormField label="Source de la demande">
-                      <select value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })} className={FIELD_CLS}>
-                        {SOURCE_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-                      </select>
+                      <SearchableSelect
+                        options={sourceOptions}
+                        value={form.source}
+                        onChange={(val) => setForm({ ...form, source: val })}
+                        placeholder="Sélectionner une source"
+                        searchPlaceholder="Rechercher une source..."
+                        ariaLabel="Source de la demande"
+                      />
                     </FormField>
                     <FormField label="Lieu / Emplacement">
                       <SearchableSelect options={locationOptions} value={form.locationId}
@@ -1732,14 +1892,14 @@ export default function Tickets() {
                       <FormField label="Assigné à">
                         <SearchableSelect
                           ariaLabel="Technicien assigné"
-                          options={users.filter((u) => u.isActive).map((u) => ({
+                          options={users.filter((u) => u.isActive && u.role !== 'REQUESTER').map((u) => ({
                             value: String(u.id),
                             label: u.fullName,
                             subLabel: u.role || undefined,
                           }))}
                           value={form.assignedToId ? String(form.assignedToId) : ''}
                           onChange={(val) => setForm({ ...form, assignedToId: val })}
-                          disabled={users.filter((u) => u.isActive).length === 0}
+                          disabled={users.filter((u) => u.isActive && u.role !== 'REQUESTER').length === 0}
                           placeholder="Rechercher un technicien..."
                           searchPlaceholder="Rechercher par nom..." />
                       </FormField>
@@ -1748,7 +1908,7 @@ export default function Tickets() {
 
                   <FormField label="Demandeur">
                     <RemoteUserSelect value={form.requesterId} onChange={(val) => setForm({ ...form, requesterId: val })}
-                      glpiUsers={glpiUsers} placeholder="Rechercher un demandeur..." />
+                      glpiUsers={glpiUsers} hideEmail={true} placeholder="Rechercher un demandeur..." />
                   </FormField>
 
                   <FormField label="Observateurs">
@@ -1766,7 +1926,25 @@ export default function Tickets() {
 
                   <FormField label="Description">
                     <textarea rows={4} value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })}
-                      placeholder="Décrivez le problème..." className={`${FIELD_CLS} resize-none`} />
+                      onPaste={handlePaste}
+                      placeholder="Décrivez le problème (collez des images directement avec Ctrl+V)..." className={`${FIELD_CLS} resize-none`} />
+                    {pastedImages.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {pastedImages.map((img) => (
+                          <div key={img.id} className="relative group w-20 h-20 rounded-lg overflow-hidden border border-border/40 bg-surface-container shrink-0">
+                            <img src={img.dataUrl} alt="Aperçu" className="w-full h-full object-cover" />
+                            <button
+                              type="button"
+                              onClick={() => removePastedImage(img.id)}
+                              className="absolute top-1 right-1 bg-black/60 hover:bg-black text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                              title="Supprimer l'image"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </FormField>
 
                   <FormField label="Pièce jointe">

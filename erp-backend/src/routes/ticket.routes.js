@@ -65,10 +65,9 @@ router.get('/', async (req, res) => {
   const where = {};
   // Soft delete : la corbeille n'apparaît plus dans les vues principales
   where.deletedAt = null;
-  // Fonctionnement GLPI : les tickets en attente d'approbation Hotline ne sont pas encore
-  // de « vrais » tickets — ils restent dans le Centre de Validation et sont exclus de la
-  // vue Tickets, des exports et des stats. (Approuver → devient un ticket normal.)
-  where.approvalStatus = { not: 'PENDING' };
+  // Fonctionnement GLPI : les tickets en attente d'approbation Hotline ou rejetés
+  // restent hors de la vue principale des tickets et des exports.
+  where.approvalStatus = { notIn: ['PENDING', 'REJECTED'] };
   if (isRequesterOnly(req.user)) {
     // Le demandeur ne voit que les tickets qu'il a ouverts ou dont il est observateur
     where.OR = [
@@ -253,8 +252,8 @@ router.get('/export', async (req, res) => {
 
   const where = {};
   where.deletedAt = null; // l'export exclut aussi la corbeille
-  // Idem liste : l'export exclut les tickets en attente d'approbation (Centre de Validation)
-  where.approvalStatus = { not: 'PENDING' };
+  // Idem liste : l'export exclut les tickets en attente d'approbation ou rejetés
+  where.approvalStatus = { notIn: ['PENDING', 'REJECTED'] };
   if (isRequesterOnly(req.user)) {
     // Le demandeur n'exporte que ses propres tickets ou ceux qu'il observe
     where.OR = [
@@ -668,7 +667,10 @@ router.get('/:id/attachments/:attachmentId/file', async (req, res) => {
 // Create ticket
 router.post(
   '/',
-  upload.single('attachment'),
+  upload.fields([
+    { name: 'attachment', maxCount: 1 },
+    { name: 'images', maxCount: 10 },
+  ]),
   [body('title').notEmpty(), body('content').notEmpty()],
   async (req, res) => {
     const errors = validationResult(req);
@@ -712,8 +714,8 @@ router.post(
       }
     }
 
-    // Seul un ADMIN/TECHNICIAN peut créer un ticket pour un autre demandeur
-    const canSetRequester = ['ADMIN', 'TECHNICIAN'].includes(req.user.role);
+    // Seul un membre du support (SUPERADMIN, ADMIN, TECHNICIAN, HOTLINE) peut créer un ticket pour un autre demandeur
+    const canSetRequester = ['SUPERADMIN', 'ADMIN', 'TECHNICIAN', 'HOTLINE'].includes(req.user.role);
     const finalRequesterId = canSetRequester && requesterId ? Number(requesterId) : req.user.sub;
 
     // Seul un ADMIN/TECHNICIAN/HOTLINE peut fixer le statut initial
@@ -801,29 +803,66 @@ router.post(
       }
     }
 
-    // Sauvegarder la pièce jointe localement
-    if (req.file) {
+    // Sauvegarder la pièce jointe ou les images collées localement
+    const singleAttachment = req.files?.['attachment']?.[0] || req.file;
+    if (singleAttachment) {
       try {
-        // Valider que le fichier n'est pas dangereux
-        const validation = validateUpload(req.file.originalname, req.file.mimetype, 'ticket');
+        const validation = validateUpload(singleAttachment.originalname, singleAttachment.mimetype, 'ticket');
         if (!validation.valid) {
           return res.status(400).json({ error: validation.error });
         }
         const TICKET_ATTACHMENTS_DIR = path.join(__dirname, '..', 'uploads', 'ticket-attachments');
         fs.mkdirSync(TICKET_ATTACHMENTS_DIR, { recursive: true });
-        const safeFilename = makeSafeFilename(req.file.originalname);
+        const safeFilename = makeSafeFilename(singleAttachment.originalname);
         const destPath = path.join(TICKET_ATTACHMENTS_DIR, safeFilename);
-        fs.writeFileSync(destPath, req.file.buffer);
+        fs.writeFileSync(destPath, singleAttachment.buffer);
         await prisma.ticketAttachment.create({
           data: {
             ticketId: ticket.id,
-            filename: req.file.originalname,
-            mimeType: req.file.mimetype,
+            filename: singleAttachment.originalname,
+            mimeType: singleAttachment.mimetype,
             localFilepath: path.join('uploads', 'ticket-attachments', safeFilename),
           },
         });
       } catch (err) {
         console.error('[ticket.routes] Sauvegarde pièce jointe échouée:', err.message);
+      }
+    }
+
+    // Traitement des images collées (pastedImages)
+    const pastedFiles = req.files?.['images'] || [];
+    if (pastedFiles.length > 0) {
+      try {
+        const TICKET_ATTACHMENTS_DIR = path.join(__dirname, '..', 'uploads', 'ticket-attachments');
+        fs.mkdirSync(TICKET_ATTACHMENTS_DIR, { recursive: true });
+        const savedImages = [];
+        for (const file of pastedFiles) {
+          const validation = validateUpload(file.originalname, file.mimetype, 'ticket');
+          if (!validation.valid) continue;
+          const ext = path.extname(file.originalname) || '.png';
+          const safeFilename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+          const destPath = path.join(TICKET_ATTACHMENTS_DIR, safeFilename);
+          fs.writeFileSync(destPath, file.buffer);
+          await prisma.ticketAttachment.create({
+            data: {
+              ticketId: ticket.id,
+              filename: file.originalname || safeFilename,
+              mimeType: file.mimetype || 'image/png',
+              localFilepath: path.join('uploads', 'ticket-attachments', safeFilename),
+            },
+          });
+          savedImages.push(`/uploads/ticket-attachments/${safeFilename}`);
+        }
+
+        // Remplacer les marqueurs <!--IMAGE_n--> par les tags <img> et assainir
+        let updatedContent = ticket.content;
+        savedImages.forEach((imgUrl, idx) => {
+          updatedContent = updatedContent.replace(`<!--IMAGE_${idx}-->`, `<img src="${imgUrl}" alt="image collée" />`);
+        });
+        updatedContent = sanitizeTicketHtml(updatedContent);
+        await prisma.ticket.update({ where: { id: ticket.id }, data: { content: updatedContent } });
+      } catch (err) {
+        console.error('[ticket.routes] Traitement images collées échoué:', err.message);
       }
     }
 
@@ -1112,6 +1151,8 @@ router.post('/:id/reject', forbidTechnicianTicketEdits, requirePermission('ticke
       where: { id },
       data: {
         approvalStatus: 'REJECTED',
+        status: 'CLOSED',
+        closedAt: new Date(),
         approvedById: req.user.sub,
         approvedAt: new Date(),
         approvalNote: note.trim(),
@@ -1438,13 +1479,13 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
   }
 
   // Construire le contenu final : remplacer les marqueurs IMAGE_<n> par des <img> tags
-  const backendBase = (process.env.BACKEND_URL || '').replace(/\/+$/, '');
+  // On utilise toujours un chemin relatif (/uploads/...) pour que les images s'affichent
+  // correctement quel que soit le domaine, l'IP (ex: Dokploy) ou le port d'accès.
   let content = req.body.content;
   imageAttachments.forEach((img, idx) => {
-    const imgSrc = backendBase ? `${backendBase}${img.url}` : img.url;
     content = content.replace(
       `<!--IMAGE_${idx}-->`,
-      `<img src="${imgSrc}" alt="image collée" />`
+      `<img src="${img.url}" alt="image collée" />`
     );
   });
   // Sanitizer le HTML pour prévenir les XSS stockés
@@ -1694,8 +1735,15 @@ router.post('/:id/csat', async (req, res) => {
 });
 
 // ── Corbeille (soft delete) ─────────────────────────────────────────────────
+// Seuls SUPERADMIN, ADMIN et HOTLINE peuvent supprimer/restaurer des tickets (les techniciens et demandeurs sont strictement interdits).
+function requireDeleteTicketPermission(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: 'Authentification requise' });
+  if (['SUPERADMIN', 'ADMIN', 'HOTLINE'].includes(req.user.role)) return next();
+  return res.status(403).json({ error: 'Seuls les administrateurs et la hotline peuvent supprimer un ticket.' });
+}
+
 // DELETE /:id → met à la corbeille (restaurable). Suppression définitive : DELETE /:id?permanent=true
-router.delete('/:id', forbidTechnicianTicketEdits, requirePermission('tickets.delete', ['ADMIN']), async (req, res) => {
+router.delete('/:id', forbidTechnicianTicketEdits, requireDeleteTicketPermission, async (req, res) => {
   const id = Number(req.params.id);
   try {
     const ticket = await prisma.ticket.findUnique({ where: { id }, select: { id: true, deletedAt: true } });
@@ -1724,7 +1772,7 @@ router.delete('/:id', forbidTechnicianTicketEdits, requirePermission('tickets.de
 });
 
 // Restaure un ticket depuis la corbeille
-router.post('/:id/restore', forbidTechnicianTicketEdits, requirePermission('tickets.delete', ['ADMIN']), async (req, res) => {
+router.post('/:id/restore', forbidTechnicianTicketEdits, requireDeleteTicketPermission, async (req, res) => {
   const id = Number(req.params.id);
   const ticket = await prisma.ticket.findUnique({ where: { id }, select: { id: true, deletedAt: true } });
   if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
@@ -1737,7 +1785,7 @@ router.post('/:id/restore', forbidTechnicianTicketEdits, requirePermission('tick
 });
 
 // Delete tickets in bulk — body: { ids: [1, 2, 3] }
-router.post('/bulk-delete', forbidTechnicianTicketEdits, requirePermission('tickets.bulkDelete', ['ADMIN']), [body('ids').isArray({ min: 1 })], async (req, res) => {
+router.post('/bulk-delete', forbidTechnicianTicketEdits, requireDeleteTicketPermission, [body('ids').isArray({ min: 1 })], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 

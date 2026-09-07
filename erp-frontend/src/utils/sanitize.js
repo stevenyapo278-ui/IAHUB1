@@ -191,7 +191,10 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
 
 export function sanitizeHtml(html) {
   if (!html) return '';
-  // Le hook lit l'état du thème au moment du sanitize : si l'utilisateur bascule
-  // de thème, le prochain rendu du contenu resanitizera avec les bonnes règles.
-  return DOMPurify.sanitize(html);
+  // Remplacer les URLs absolues localhost/127.0.0.1 des uploads par des chemins relatifs (/uploads/...)
+  // afin que les images collées dans les suivis s'affichent sur Dokploy et tous les serveurs distants.
+  const normalized = typeof html === 'string'
+    ? html.replace(/https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?(\/uploads\/[^\s"'>]+)/gi, '$1')
+    : html;
+  return DOMPurify.sanitize(normalized);
 }

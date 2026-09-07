@@ -97,7 +97,7 @@ const userSelect = {
 };
 
 router.get('/', authorizeAdmin, async (req, res) => {
-  const { search, limit, page, role, teamId, isActive, all } = req.query;
+  const { search, limit, page, role, teamId, isActive, all, onlyStaff, excludeRole } = req.query;
   const where = {};
   if (search && search.trim()) {
     const trimmed = search.trim();
@@ -108,7 +108,8 @@ router.get('/', authorizeAdmin, async (req, res) => {
     ];
     where.OR = searchConditions;
   }
-  if (role) where.role = role;
+  if (onlyStaff === 'true' || excludeRole === 'REQUESTER') where.role = { not: 'REQUESTER' };
+  else if (role) where.role = role;
   if (teamId) where.teamId = teamId === 'null' ? null : Number(teamId);
   if (isActive === 'true') where.isActive = true;
   else if (isActive === 'false') where.isActive = false;

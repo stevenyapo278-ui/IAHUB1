@@ -107,8 +107,11 @@ function safeFilename(originalname) {
 function sanitizeTicketHtml(html) {
   if (!html || typeof html !== 'string') return html;
 
+  // Convertir les URLs absolues localhost / 127.0.0.1 des uploads en chemins relatifs (/uploads/...)
+  let cleaned = html.replace(/https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?(\/uploads\/[^\s"'>]+)/gi, '$1');
+
   // Supprimer les balises dangereuses (tout le contenu entre les balises)
-  let cleaned = html
+  cleaned = cleaned
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
     .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
     .replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '')
