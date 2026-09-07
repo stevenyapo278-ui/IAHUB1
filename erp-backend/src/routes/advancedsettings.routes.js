@@ -78,9 +78,10 @@ router.post('/pause', async (req, res) => {
   // action: 'pause' ou 'resume'
   const isPause = action === 'pause';
 
-  await prisma.systemSettings.update({
+  await prisma.systemSettings.upsert({
     where: { id: 1 },
-    data: { autonomousMode: isPause },
+    update: { autonomousMode: isPause },
+    create: { id: 1, autonomousMode: isPause },
   });
 
   auditLog(isPause ? 'SYSTEM_PAUSED' : 'SYSTEM_RESUMED', {

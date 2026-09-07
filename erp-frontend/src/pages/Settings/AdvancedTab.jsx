@@ -473,7 +473,7 @@ function CacheSection() {
                 <div key={e.key} className="px-4 py-2 flex items-center justify-between gap-4">
                   <code className="font-mono text-[11px] text-on-surface truncate">{e.key}</code>
                   <div className="flex items-center gap-3 shrink-0">
-                    <span className="text-[11px] text-on-surface-variant font-medium">{e.hits} hit{s.e.hits > 1 ? 's' : ''}</span>
+                    <span className="text-[11px] text-on-surface-variant font-medium">{e.hits} hit{e.hits > 1 ? 's' : ''}</span>
                     <span className="text-[11px] text-on-surface-variant font-medium">{e.remainingSeconds}s restantes</span>
                   </div>
                 </div>
