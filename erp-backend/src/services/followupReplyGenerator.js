@@ -56,7 +56,7 @@ async function generateFollowupReply({ ticketId, lastMessageBody, fromEmail, fro
 
   let raw;
   try {
-    raw = (await callProviderWithFallback(providers, prompt)).trim();
+    raw = (await callProviderWithFallback(providers, prompt, 'email')).trim();
   } catch (err) {
     console.error('[followupReplyGenerator] Échec appel provider IA:', err.message);
     return { canAnswer: false, replyHtml: '', usedKnowledgeChunkIds: [], confidence: 0 };

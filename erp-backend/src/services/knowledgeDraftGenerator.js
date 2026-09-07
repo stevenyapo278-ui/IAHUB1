@@ -1,5 +1,5 @@
 const prisma = require('../prismaClient');
-const { getActiveProviders, callProviderWithFallback } = require('./mailAnalyzer');
+const { getActiveProviders, callProviderWithFallback, callAiWithRetry } = require('./mailAnalyzer');
 const { getPrompt } = require('./promptTemplates');
 
 // Génère automatiquement un KnowledgeDraft à partir d'un ticket résolu
@@ -29,7 +29,7 @@ async function generateKnowledgeDraft({ ticketId, resolutionNote, technicianEmai
     history: history || ticket.content?.substring(0, 500) || '',
   });
 
-  const raw = await callProviderWithFallback(providers, prompt);
+  const raw = await callAiWithRetry(() => callProviderWithFallback(providers, prompt, 'background'), { maxRetries: 3, baseDelay: 1000 });
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error(`Le provider IA n'a pas retourné un JSON valide`);
 

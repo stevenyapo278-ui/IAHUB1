@@ -1,5 +1,5 @@
 const prisma = require('../prismaClient');
-const { getActiveProviders, callProviderWithFallback } = require('./mailAnalyzer');
+const { getActiveProviders, callProviderWithFallback, callAiWithRetry } = require('./mailAnalyzer');
 
 // Analyse proactive d'un lot de tickets : l'IA détecte les résolutions probables sur les tickets
 // ouverts sans réponse utilisateur récente, et propose une clôture à la Hotline (mêmes garde-fous
@@ -111,7 +111,7 @@ async function analyzeCandidate(ticket, cutoff) {
 
   let raw;
   try {
-    raw = (await callProviderWithFallback(providers, prompt)).trim();
+    raw = (await callAiWithRetry(() => callProviderWithFallback(providers, prompt, 'background'), { maxRetries: 3, baseDelay: 1000 })).trim();
   } catch (err) {
     return { ...context, action: 'SKIP_PROVIDER_ERROR', confidence: null, evidence: '', reasoning: `Erreur provider IA: ${err.message}` };
   }

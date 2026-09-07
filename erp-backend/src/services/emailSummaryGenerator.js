@@ -1,5 +1,5 @@
 const prisma = require('../prismaClient');
-const { getActiveProviders, callProviderWithFallback } = require('./mailAnalyzer');
+const { getActiveProviders, callProviderWithFallback, callAiWithRetry } = require('./mailAnalyzer');
 const { getPrompt } = require('./promptTemplates');
 const { logger } = require('../utils/logger');
 
@@ -25,7 +25,7 @@ async function generateEmailSummary({ body, direction }) {
     }
 
     const prompt = await getPrompt('summarizeEmail', { body: cleanBody });
-    const raw = await callProviderWithFallback(providers, prompt);
+    const raw = await callAiWithRetry(() => callProviderWithFallback(providers, prompt, 'background'), { maxRetries: 2, baseDelay: 800 });
     const summary = raw.trim()
       .replace(/^["'`\u201c\u201d]+/, '')
       .replace(/["'`\u201c\u201d]+$/, '');

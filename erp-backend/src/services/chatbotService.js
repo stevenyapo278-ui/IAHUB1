@@ -1,5 +1,5 @@
 const prisma = require('../prismaClient');
-const { getActiveProviders, callProviderWithFallback } = require('./mailAnalyzer');
+const { getActiveProviders, callProviderWithFallback, callAiWithRetry } = require('./mailAnalyzer');
 const { emitTicketCreated } = require('../utils/socket');
 const { sendTicketCreationNotification } = require('./emailSender');
 const analyticsTools = require('./analyticsTools');
@@ -219,23 +219,10 @@ async function callAI(messages) {
   const formattedMessages = messages.map((m) => `${m.role === 'user' ? 'Utilisateur' : 'Assistant'} : ${m.content}`).join('\n\n');
   const prompt = `${SYSTEM_PROMPT}\n\n---\n\n${formattedMessages}`;
 
-  const MAX_RETRIES = 2;
-  const RETRY_DELAYS = [2000, 5000]; // 2s, 5s
-  let lastError;
-
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      return await callProviderWithFallback(providers, prompt);
-    } catch (err) {
-      lastError = err;
-      if (attempt < MAX_RETRIES) {
-        const delay = RETRY_DELAYS[attempt] || RETRY_DELAYS[RETRY_DELAYS.length - 1];
-        console.warn(`[chatbot] Tentative ${attempt + 1}/${MAX_RETRIES + 1} échouée, retry dans ${delay}ms: ${err.message}`);
-        await new Promise((r) => setTimeout(r, delay));
-      }
-    }
-  }
-  throw lastError;
+  return callAiWithRetry(() => callProviderWithFallback(providers, prompt, 'chatbot'), {
+    maxRetries: 2,
+    baseDelay: 1500,
+  });
 }
 
 async function callIntentAI(message) {
@@ -244,7 +231,7 @@ async function callIntentAI(message) {
 
   try {
     const formatted = `${INTENT_PROMPT}\n\nUser: "${message}"\nJSON:`;
-    const raw = await callProviderWithFallback(providers, formatted);
+    const raw = await callProviderWithFallback(providers, formatted, 'chatbot');
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (jsonMatch) return JSON.parse(jsonMatch[0]);
   } catch {}

@@ -1,7 +1,7 @@
 const prisma = require('../prismaClient');
 const { sendEmail, getEmailSignature } = require('./emailSender');
 const { getSystemSettings } = require('./systemSettings');
-const { getActiveProviders, callProviderWithFallback } = require('./mailAnalyzer');
+const { getActiveProviders, callProviderWithFallback, callAiWithRetry } = require('./mailAnalyzer');
 const { getPrompt } = require('./promptTemplates');
 
 const OPEN_STATUSES = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER'];
@@ -30,7 +30,7 @@ async function generateInsight(tickets) {
 
   try {
     const prompt = await getPrompt('dailySummaryInsight', { ticketsList });
-    const raw = await callProviderWithFallback(providers, prompt);
+    const raw = await callAiWithRetry(() => callProviderWithFallback(providers, prompt, 'background'), { maxRetries: 3, baseDelay: 1000 });
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
     return parsed.insight || null;

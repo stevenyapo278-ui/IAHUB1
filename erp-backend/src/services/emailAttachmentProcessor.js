@@ -41,7 +41,7 @@ async function filterOutSignatureImages(attachments, bodyText) {
   });
 
   try {
-    const raw = await callProviderWithFallback(providers, prompt);
+    const raw = await callProviderWithFallback(providers, prompt, 'email');
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
     const signatureIndexes = new Set(

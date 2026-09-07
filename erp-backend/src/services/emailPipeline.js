@@ -891,6 +891,24 @@ function chunkArray(array, size) {
   return chunked;
 }
 
+// Limiteur de concurrence pour les appels IA simultanés (évite de saturer les providers)
+async function runWithConcurrency(tasks, concurrency = 4) {
+  const results = [];
+  const executing = new Set();
+  for (const task of tasks) {
+    const p = task().then((result) => {
+      executing.delete(p);
+      return result;
+    });
+    executing.add(p);
+    results.push(p);
+    if (executing.size >= concurrency) {
+      await Promise.race(executing);
+    }
+  }
+  return Promise.allSettled(results);
+}
+
 async function runEmailPipeline() {
   const pollResults = await pollAllAccounts();
   const results = [];
@@ -901,19 +919,16 @@ async function runEmailPipeline() {
       continue;
     }
     
-    // Parallélisation par lots de 5 pour éviter d'engorger la boucle événementielle et la BDD
-    const chunks = chunkArray(messages, 5);
-    for (const chunk of chunks) {
-      const chunkPromises = chunk.map(m => processMessage(m, account));
-      const settled = await Promise.allSettled(chunkPromises);
-      
-      for (const res of settled) {
-        if (res.status === 'fulfilled') {
-          results.push({ accountId: account.id, emailId: res.value?.id, status: res.value?.status });
-        } else {
-          console.error(`[emailPipeline] Erreur traitement lot (${account.emailAddress}):`, res.reason);
-          results.push({ accountId: account.id, error: res.reason?.message || res.reason });
-        }
+    // Concurrence limitée à 4 appels IA simultanés pour ne pas saturer les providers
+    const tasks = messages.map((m) => () => processMessage(m, account));
+    const settled = await runWithConcurrency(tasks, 4);
+    
+    for (const res of settled) {
+      if (res.status === 'fulfilled') {
+        results.push({ accountId: account.id, emailId: res.value?.id, status: res.value?.status });
+      } else {
+        console.error(`[emailPipeline] Erreur traitement (${account.emailAddress}):`, res.reason);
+        results.push({ accountId: account.id, error: res.reason?.message || res.reason });
       }
     }
   }

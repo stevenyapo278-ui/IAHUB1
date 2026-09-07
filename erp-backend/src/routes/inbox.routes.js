@@ -297,6 +297,12 @@ router.get('/thread', async (req, res) => {
   res.json(thread);
 });
 
+// Métriques IA en temps réel (taux de succès, échecs par provider, cooldowns actifs)
+const { getAiMetrics } = require('../services/mailAnalyzer');
+router.get('/ai-metrics', requirePermission('inbox.sync', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+  res.json(getAiMetrics());
+});
+
 // Logs de traitement des emails — derniers emails reçus avec leur statut d'analyse
 router.get('/logs', requirePermission('inbox.sync', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   try {
