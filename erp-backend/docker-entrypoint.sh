@@ -73,7 +73,7 @@ echo "Migration de la base de données..."
 npx prisma migrate deploy || echo "⚠️  migrate deploy a échoué (DB drift ou migration manquante), on continue avec le schéma existant"
 
 echo "Génération du client Prisma..."
-npx prisma generate
+npx prisma generate 2>&1 || echo "⚠️  prisma generate a échoué, on utilise le client pré-généré"
 
 echo "Seed initial..."
 node prisma/seed.js 2>/dev/null || true

@@ -8,7 +8,7 @@ const { findSimilarOpenTicket, attachSiteToTicket, saveTicketEmbedding } = requi
 const { analyzeIntent, applyIntentActions } = require('./intentAnalyzer');
 const { decideFollowupAction } = require('./followupEscalation');
 const { generateFollowupReply } = require('./followupReplyGenerator');
-const { buildAcknowledgementHtml, buildKnownIncidentNotificationHtml, sendEmail, getEmailSignature } = require('./emailSender');
+const { buildAcknowledgementHtml, buildKnownIncidentNotificationHtml, sendAcknowledgement, sendEmail, getEmailSignature } = require('./emailSender');
 const { processIncomingAttachments } = require('./emailAttachmentProcessor');
 const { stripSignature } = require('./signatureStripper');
 const { logEvent } = require('./ticketEvent');
@@ -826,7 +826,6 @@ async function processMessage(message, account) {
               sourceName: (fromEmail || '').split('@')[0],
               sourceSubject: subject || null,
               aiProcessed: false,
-              aiConfidence: 0,
               aiSummary: `[FALLBACK] Analyse IA échouée — email nécessitant une révision manuelle. Erreur : ${err.message}`,
             },
           });
