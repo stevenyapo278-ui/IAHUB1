@@ -56,6 +56,9 @@ export default function EmailNotificationsTab() {
   // ── Notification création de ticket ──
   const [ticketCreationRecipientInput, setTicketCreationRecipientInput] = useState('');
 
+  // ── Notification échec IA ──
+  const [failureRecipientInput, setFailureRecipientInput] = useState('');
+
   // ── Sons & notifications navigateur ──
   const [soundsEnabled, setSoundsEnabledState] = useState(isSoundsEnabled());
   const [soundsVolume, setSoundsVolumeState] = useState(getSoundsVolume());
@@ -107,6 +110,26 @@ export default function EmailNotificationsTab() {
 
   function removeTicketCreationRecipient(email) {
     updateSetting('ticketCreationEmailRecipients', (settings.ticketCreationEmailRecipients || []).filter((e) => e !== email));
+  }
+
+  // ── Notification échec IA ──
+  function addFailureRecipient() {
+    const value = failureRecipientInput.trim();
+    if (!value) return;
+    const current = settings.emailFailureNotificationRecipients && settings.emailFailureNotificationRecipients.length > 0
+      ? settings.emailFailureNotificationRecipients
+      : (settings.emailFailureNotificationEmail ? [settings.emailFailureNotificationEmail] : []);
+    if (!current.includes(value)) {
+      updateSetting('emailFailureNotificationRecipients', [...current, value]);
+    }
+    setFailureRecipientInput('');
+  }
+
+  function removeFailureRecipient(email) {
+    const current = settings.emailFailureNotificationRecipients && settings.emailFailureNotificationRecipients.length > 0
+      ? settings.emailFailureNotificationRecipients
+      : (settings.emailFailureNotificationEmail ? [settings.emailFailureNotificationEmail] : []);
+    updateSetting('emailFailureNotificationRecipients', current.filter((e) => e !== email));
   }
 
   async function testDailySummary() {
@@ -440,23 +463,74 @@ export default function EmailNotificationsTab() {
             {/* Notification email en cas d'échec de traitement */}
             <motion.div
               variants={itemVariants}
-              whileHover={{ y: -1, borderColor: 'var(--color-outline-variant)' }}
-              className="bento-card flex flex-col gap-4 p-lg"
+              className="bento-card flex flex-col gap-sm p-lg"
             >
               <div className="min-w-0 flex-1">
-                <div className="font-headline-sm text-headline-sm text-on-surface font-semibold break-words">Email en cas d'échec IA</div>
+                <div className="font-headline-sm text-headline-sm text-on-surface font-semibold break-words">Email(s) en cas d'échec IA</div>
                 <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 break-words">
-                  Adresse email de notification quand un email entrant n'a pas pu être traité par l'IA (quota dépassé, erreur provider, etc.).
+                  Adresses email notifiées quand un email entrant n'a pas pu être traité par l'IA (quota dépassé, erreur provider, etc.).
                 </p>
               </div>
-              <input
-                type="email"
-                value={settings.emailFailureNotificationEmail || ''}
-                onChange={(e) => updateSetting('emailFailureNotificationEmail', e.target.value || null)}
-                placeholder="admin@exemple.com"
-                className={inputClass}
-                disabled={saving}
-              />
+
+              <div className="flex items-center gap-sm mt-2">
+                <input
+                  type="email"
+                  value={failureRecipientInput}
+                  onChange={(e) => setFailureRecipientInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      addFailureRecipient();
+                    }
+                  }}
+                  placeholder="adresse@exemple.com"
+                  disabled={saving}
+                  className={`${inputClass} flex-1`}
+                />
+                <motion.button
+                  type="button"
+                  onClick={addFailureRecipient}
+                  disabled={saving}
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.96 }}
+                  className="px-4 py-2 btn-gradient font-semibold rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm disabled:opacity-50 shrink-0"
+                >
+                  Ajouter
+                </motion.button>
+              </div>
+
+              {((settings.emailFailureNotificationRecipients && settings.emailFailureNotificationRecipients.length > 0)
+                ? settings.emailFailureNotificationRecipients
+                : (settings.emailFailureNotificationEmail ? [settings.emailFailureNotificationEmail] : [])).length > 0 && (
+                <motion.div
+                  initial="hidden"
+                  animate="visible"
+                  variants={{ visible: { transition: { staggerChildren: 0.03 } } }}
+                  className="flex flex-wrap gap-2 mt-2"
+                >
+                  {((settings.emailFailureNotificationRecipients && settings.emailFailureNotificationRecipients.length > 0)
+                    ? settings.emailFailureNotificationRecipients
+                    : (settings.emailFailureNotificationEmail ? [settings.emailFailureNotificationEmail] : [])).map((email) => (
+                    <motion.span
+                      key={email}
+                      variants={itemVariants}
+                      layout
+                      className="inline-flex items-center gap-1.5 px-3 py-1 bg-surface-container-high border border-outline-variant/60 rounded-full text-on-surface text-xs font-semibold shadow-sm"
+                    >
+                      {email}
+                      <motion.button
+                        onClick={() => removeFailureRecipient(email)}
+                        disabled={saving}
+                        whileHover={{ scale: 1.2 }}
+                        whileTap={{ scale: 0.9 }}
+                        className="text-on-surface-variant hover:text-error transition-colors flex items-center"
+                      >
+                        <span className="material-symbols-outlined text-[14px]">close</span>
+                      </motion.button>
+                    </motion.span>
+                  ))}
+                </motion.div>
+              )}
             </motion.div>
           </div>
         </div>

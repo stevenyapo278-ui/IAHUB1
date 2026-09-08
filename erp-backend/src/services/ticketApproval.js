@@ -39,6 +39,9 @@ async function approveTicket(id, { approvedById, approvedByEmail = 'HOTLINE', ap
 
   emitTicketUpdated(ticket, { approvalStatus: 'APPROVED' });
 
+  // Nettoyer tous les brouillons en attente sur ce ticket (évite d'avoir à les ré-approuver dans /email-drafts)
+  await prisma.aiEmailDraft.deleteMany({ where: { ticketId: id } }).catch(() => {});
+
   // Email au demandeur : son ticket a été approuvé
   try {
     const fullTicket = await prisma.ticket.findUnique({

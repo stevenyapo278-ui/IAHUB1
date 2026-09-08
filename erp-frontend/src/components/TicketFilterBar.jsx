@@ -48,15 +48,15 @@ export default function TicketFilterBar({
       {/* ── Row 1 : Search + Quick toggle chips + Advanced filters ── */}
       <div className="flex items-center gap-2 flex-wrap">
         {/* Live Search Input */}
-        <div className="relative shrink-0 mr-1">
+        <div className="relative shrink-0 mr-1 flex-1 sm:flex-initial">
           <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50" />
           <input
             ref={searchInputRef}
             type="text"
             value={searchQuery || ''}
             onChange={(e) => onSearchChange?.(e.target.value)}
-            placeholder="Rechercher... ⌘K"
-            className="w-48 pl-8 pr-7 py-1.5 text-xs bg-surface border border-outline-variant/60 rounded-xl text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+            placeholder="Rechercher (#ID, titre, demandeur, assigné, lieu, équipe...) ⌘K"
+            className="w-full sm:w-80 md:w-96 pl-8 pr-7 py-1.5 text-xs bg-surface border border-outline-variant/60 rounded-xl text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
           />
           {searchQuery && (
             <button

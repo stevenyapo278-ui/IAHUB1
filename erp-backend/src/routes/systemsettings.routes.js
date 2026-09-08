@@ -10,6 +10,7 @@ const { sendDailySummary } = require('../services/dailySummary');
 const { resolveBackendUrl } = require('../services/systemSettings');
 const { auditLog } = require('../services/auditLogService');
 const { validateUpload } = require('../utils/security');
+const cacheStore = require('../services/cacheStore');
 
 const router = express.Router();
 router.use(authenticate);
@@ -90,6 +91,8 @@ router.patch(
     body('ticketCreationEmailRecipients.*').optional().isEmail(),
     body('notifyTechnicianOnAssignment').optional().isBoolean(),
     body('emailFailureNotificationEmail').optional({ nullable: true }).isEmail(),
+    body('emailFailureNotificationRecipients').optional().isArray(),
+    body('emailFailureNotificationRecipients.*').optional().isEmail(),
     body('slaHours').optional().isObject(),
     body('slaMonitorIntervalSeconds').optional().isInt({ min: 0, max: 3600 }),
     body('enableAutoCreateSkills').optional().isBoolean(),
@@ -126,6 +129,7 @@ router.patch(
     if (req.body.ticketCreationEmailRecipients !== undefined) data.ticketCreationEmailRecipients = req.body.ticketCreationEmailRecipients;
     if (req.body.notifyTechnicianOnAssignment !== undefined) data.notifyTechnicianOnAssignment = req.body.notifyTechnicianOnAssignment;
     if (req.body.emailFailureNotificationEmail !== undefined) data.emailFailureNotificationEmail = req.body.emailFailureNotificationEmail || null;
+    if (req.body.emailFailureNotificationRecipients !== undefined) data.emailFailureNotificationRecipients = req.body.emailFailureNotificationRecipients;
     if (req.body.enableAutoCreateSkills !== undefined) data.enableAutoCreateSkills = req.body.enableAutoCreateSkills;
     if (req.body.slaHours !== undefined) data.slaHours = req.body.slaHours;
     if (req.body.slaMonitorIntervalSeconds !== undefined) data.slaMonitorIntervalSeconds = req.body.slaMonitorIntervalSeconds;
@@ -142,9 +146,11 @@ router.patch(
     if (req.body.emailApprovalEnabled !== undefined) data.emailApprovalEnabled = req.body.emailApprovalEnabled;
 
     const updated = await prisma.systemSettings.update({ where: { id: 1 }, data });
+    cacheStore.clear();
+
+    auditLog('SYSTEM_SETTINGS_UPDATED', { actor: req.user, targetType: 'SystemSettings', targetId: 1, targetLabel: 'Réglages automatisation', metadata: { changedFields: Object.keys(data) } }).catch(() => {});
 
     return res.json(updated);
-    auditLog('SYSTEM_SETTINGS_UPDATED', { actor: req.user, targetType: 'SystemSettings', targetId: 1, targetLabel: 'Réglages automatisation', metadata: { changedFields: Object.keys(data) } }).catch(() => {});
   }
 );
 

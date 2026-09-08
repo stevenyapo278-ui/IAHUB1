@@ -87,10 +87,13 @@ async function notifyAdminsEmailFailed({ incomingId, subject, fromEmail, error, 
       }
     }
 
-    // ── Email de notification à l'adresse configurée ──────────────────
+    // ── Email de notification aux adresses configurées ──────────────────
     const settings = await getSystemSettings();
-    const notifyEmail = settings?.emailFailureNotificationEmail;
-    if (notifyEmail) {
+    const recipientList = (settings?.emailFailureNotificationRecipients || []).length > 0
+      ? settings.emailFailureNotificationRecipients
+      : (settings?.emailFailureNotificationEmail || '').split(/[,;]/).map(e => e.trim()).filter(Boolean);
+
+    if (recipientList.length > 0) {
       const { sendEmail: sendEmailNotification } = require('./emailSender');
       const retryInfoLine = nextRetryAt
         ? `<p>Prochain essai automatique dans <strong>${Math.round((new Date(nextRetryAt).getTime() - Date.now()) / 60000)} min</strong>.</p>`
@@ -112,8 +115,10 @@ ${detailBlock}
 <p>Vous pouvez relancer le traitement manuellement depuis l'<a href="${settings?.frontendUrl || 'http://localhost:3000'}/inbox">Inbox</a>.</p>
 `.trim();
       const subjectLine = `${isDeadLetter ? '❌' : '⚠️'} Email non traité — ${subject || '(sans objet)'}`;
-      await sendEmailNotification({ to: notifyEmail, subject: subjectLine, bodyHtml, saveAsMessage: false })
-        .catch((e) => console.error(`[emailPipeline] Échec envoi email notification vers ${notifyEmail}:`, e.message));
+      for (const notifyEmail of recipientList) {
+        await sendEmailNotification({ to: notifyEmail, subject: subjectLine, bodyHtml, saveAsMessage: false })
+          .catch((e) => console.error(`[emailPipeline] Échec envoi email notification vers ${notifyEmail}:`, e.message));
+      }
     }
   } catch (err) {
     console.error('[emailPipeline] Erreur notification admin:', err.message);
@@ -550,25 +555,15 @@ async function processMessage(message, account) {
         });
       }
 
-      // Notification "incident déjà connu" — envoyée directement ou mise en attente d'approbation
-      // selon le réglage Paramètres > Automatisation > Auto-envoi des emails IA.
-      const knownIncidentHtml = buildKnownIncidentNotificationHtml({
+      // Notification "incident déjà connu" — envoyée directement au demandeur
+      await sendKnownIncidentNotification({
+        ticketId: similarMatch.ticketId,
+        toEmail: fromEmail,
         toName: fromName,
         originalSubject: similarMatch.ticketTitle,
         isMajor: updatedTicket.isMajorIncident,
         impactedCount: updatedTicket.impactedSites.length,
-        signature: await getEmailSignature(),
-      });
-      await dispatchOrQueueEmail({
-        ticketId: similarMatch.ticketId,
-        recipientEmail: fromEmail,
-        ccRecipients,
-        subject: `[Ticket #EN_ATTENTE] ${similarMatch.ticketTitle}`,
-        html: knownIncidentHtml,
-        draftType: 'KNOWN_INCIDENT',
-        inReplyToGraphMessageId: graphMessageId,
-        outlookConversationId: conversationId,
-      });
+      }).catch((e) => console.error(`[emailPipeline] Échec notification incident connu vers ${fromEmail}:`, e.message));
 
       const updated = await prisma.incomingEmail.update({
         where: { id: incoming.id },
@@ -745,26 +740,13 @@ async function processMessage(message, account) {
     // Sauvegarder l'embedding pour la détection future d'incidents similaires
     await saveTicketEmbedding(erpTicketId, subject, cleanBody);
 
-    // Étape 6 : accusé de réception — envoyé directement ou mis en attente d'approbation selon
-    // le réglage Paramètres > Automatisation > Auto-envoi des emails IA.
-    const pipelineSettings = await getSystemSettings();
-    const acknowledgementHtml = buildAcknowledgementHtml({
+    // Étape 6 : accusé de réception automatique au demandeur
+    await sendAcknowledgement({
+      ticketId: erpTicketId,
+      toEmail: fromEmail,
       toName: fromName,
-      ticketId: erpTicketId,
       originalSubject: subject,
-      customMessage: pipelineSettings.acknowledgementMessage,
-      signature: await getEmailSignature(),
-    });
-    await dispatchOrQueueEmail({
-      ticketId: erpTicketId,
-      recipientEmail: fromEmail,
-      ccRecipients,
-      subject: `[Ticket #EN_ATTENTE] ${subject}`,
-      html: acknowledgementHtml,
-      draftType: 'ACKNOWLEDGEMENT',
-      inReplyToGraphMessageId: graphMessageId,
-      outlookConversationId: conversationId,
-    });
+    }).catch((e) => console.error(`[emailPipeline] Échec envoi accusé de réception vers ${fromEmail}:`, e.message));
 
     const updated = await prisma.incomingEmail.update({
       where: { id: incoming.id },

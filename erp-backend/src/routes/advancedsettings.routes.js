@@ -101,16 +101,21 @@ router.post('/pause', async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 const PUT_FIELDS = [
   'backendUrl', 'frontendUrl',
-  'autoSendAiEmails', 'autonomousMode',
-  'glpiTicketsSyncIntervalSeconds', 'emailSyncIntervalSeconds',
+  'autoSendAiEmails', 'autonomousMode', 'enableFewShotTriage',
+  'closeChildrenWithParent', 'autoApproveManualTickets', 'enableAutoCreateSkills',
+  'glpiTicketsSyncIntervalSeconds', 'emailSyncIntervalSeconds', 'aiModelsSyncIntervalHours',
   'draftReminderEnabled', 'draftReminderDelayMinutes',
-  'dailySummaryEnabled', 'dailySummaryTime', 'dailySummaryRecipients',
+  'dailySummaryEnabled', 'dailySummaryTime', 'dailySummaryRecipients', 'dailySummaryLastSentDate',
   'approvalReminderMinutes', 'closedTicketBehavior', 'reopenThresholdDays',
   'solvedAutoCloseDays', 'slaMonitorIntervalSeconds', 'dueDateMonitorIntervalSeconds',
-  'chatbotNotifyEmail', 'ticketCreationEmailEnabled',
-  'enableFewShotTriage', 'enableAutoCreateSkills',
-  'slaHours',
-  'navigationConfig',
+  'chatbotNotifyEmail', 'ticketCreationEmailEnabled', 'ticketCreationEmailRecipients',
+  'acknowledgementMessage', 'notifyTechnicianOnAssignment', 'emailFailureNotificationEmail',
+  'emailSignature', 'signatureLogoUrl', 'signatureLogoHeight', 'goLiveDate',
+  'emailAcknowledgementEnabled', 'emailKnownIncidentEnabled', 'emailAssignmentEnabled',
+  'emailSlaBreachEnabled', 'emailDueDateBreachEnabled', 'emailStatusChangeEnabled',
+  'emailResolvedEnabled', 'emailEscalationEnabled', 'emailMajorIncidentResolvedEnabled',
+  'emailApprovalEnabled', 'slaHours', 'navigationConfig',
+  'loginThemeMode', 'loginThemeFixedVariant', 'loginThemeEnabledVariants',
 ];
 
 async function handleSaveSettings(req, res) {
@@ -119,32 +124,37 @@ async function handleSaveSettings(req, res) {
     if (req.body[field] !== undefined) data[field] = req.body[field];
   }
   if (Object.keys(data).length === 0) {
-    return res.status(400).json({ error: 'Aucun réglage à sauvegarder' });
+    return res.status(400).json({ error: 'Aucun réglage à sauvegarder (champs non reconnus)' });
   }
 
-  const settings = await prisma.systemSettings.upsert({
-    where: { id: 1 },
-    update: data,
-    create: { id: 1, ...data },
-  });
+  try {
+    const settings = await prisma.systemSettings.upsert({
+      where: { id: 1 },
+      update: data,
+      create: { id: 1, ...data },
+    });
 
-  // Les réglages (dont navigationConfig, qui pilote la sidebar de tous les utilisateurs) sont
-  // servis via GET /api/system-settings derrière un cache TTL 30s : on l'invalide pour que la
-  // nouvelle valeur soit servie immédiatement, et on prévient tous les clients connectés via
-  // Socket.IO pour qu'ils rafraîchissent leur config sans attendre un rechargement de page.
-  cacheStore.clear('GET /api/system-settings');
-  const io = getIO();
-  if (io) io.emit('system-settings:updated', { ts: Date.now() });
+    // Les réglages (dont navigationConfig, qui pilote la sidebar de tous les utilisateurs) sont
+    // servis via GET /api/system-settings derrière un cache TTL 30s : on l'invalide pour que la
+    // nouvelle valeur soit servie immédiatement, et on prévient tous les clients connectés via
+    // Socket.IO pour qu'ils rafraîchissent leur config sans attendre un rechargement de page.
+    cacheStore.clear('GET /api/system-settings');
+    const io = getIO();
+    if (io) io.emit('system-settings:updated', { ts: Date.now() });
 
-  auditLog('SETTINGS_UPDATED', {
-    actor: req.user,
-    targetType: 'SystemSettings',
-    targetId: 1,
-    targetLabel: Object.keys(data).join(', '),
-    metadata: { fields: Object.keys(data) },
-  }).catch(() => {});
+    auditLog('SETTINGS_UPDATED', {
+      actor: req.user,
+      targetType: 'SystemSettings',
+      targetId: 1,
+      targetLabel: Object.keys(data).join(', '),
+      metadata: { fields: Object.keys(data) },
+    }).catch(() => {});
 
-  return res.json(settings);
+    return res.json(settings);
+  } catch (err) {
+    console.error('[advancedsettings.routes] Erreur sauvegarde réglages:', err);
+    return res.status(500).json({ error: 'Erreur lors de la sauvegarde des réglages : ' + err.message });
+  }
 }
 
 router.put('/', handleSaveSettings);

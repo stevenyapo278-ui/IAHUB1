@@ -636,6 +636,7 @@ model SystemSettings {
   // Adresse email de notification en cas d'échec de traitement d'un email entrant.
   // Laisser vide = pas d'email de notification (les notifications in-app restent actives).
   emailFailureNotificationEmail String?
+  emailFailureNotificationRecipients String[] @default([])
 
   // Signature HTML insérée en bas de tous les emails automatiques (accusé de réception, relance,
   // notification d'incident connu), à la place du "Cordialement, Support IT" codé en dur. Laisser vide = défaut.

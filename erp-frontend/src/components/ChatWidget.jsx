@@ -55,7 +55,7 @@ function WidgetRenderer({ widget }) {
         </button>
       </div>
       <div className="h-36 w-full pt-2">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height="100%" minWidth={100} minHeight={120}>
           <BarChart data={normalizedData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
             <XAxis dataKey="name" tick={{ fontSize: 9 }} />
             <YAxis tick={{ fontSize: 9 }} allowDecimals={false} />

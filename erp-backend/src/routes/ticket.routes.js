@@ -5,7 +5,7 @@ const fs = require('fs');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
-const { notifyMajorIncidentResolved, sendTicketStatusNotification, sendResolvedNotificationEmail, sendTicketCreationNotification } = require('../services/emailSender');
+const { notifyMajorIncidentResolved, sendTicketStatusNotification, sendResolvedNotificationEmail, sendTicketCreationNotification, sendAcknowledgement, sendAssignmentNotificationEmail } = require('../services/emailSender');
 const { approveTicket } = require('../services/ticketApproval');
 const { autoAssignTechnician } = require('../services/ticketAutoAssign');
 const { logEvent } = require('../services/ticketEvent');
@@ -50,123 +50,173 @@ function forbidTechnicianTicketEdits(req, res, next) {
   next();
 }
 
+function buildTicketSearchCondition(rawTerm) {
+  if (!rawTerm || typeof rawTerm !== 'string') return null;
+  const term = rawTerm.trim();
+  if (!term) return null;
+
+  const conditions = [
+    { title: { contains: term, mode: 'insensitive' } },
+    { content: { contains: term, mode: 'insensitive' } },
+    { category: { contains: term, mode: 'insensitive' } },
+    { locationName: { contains: term, mode: 'insensitive' } },
+    { sourceEmail: { contains: term, mode: 'insensitive' } },
+    { sourceName: { contains: term, mode: 'insensitive' } },
+    { sourceSubject: { contains: term, mode: 'insensitive' } },
+    { aiSummary: { contains: term, mode: 'insensitive' } },
+    { requester: { fullName: { contains: term, mode: 'insensitive' } } },
+    { requester: { email: { contains: term, mode: 'insensitive' } } },
+    { assignedTo: { fullName: { contains: term, mode: 'insensitive' } } },
+    { assignedTo: { email: { contains: term, mode: 'insensitive' } } },
+    { assignees: { some: { fullName: { contains: term, mode: 'insensitive' } } } },
+    { assignees: { some: { email: { contains: term, mode: 'insensitive' } } } },
+    { team: { name: { contains: term, mode: 'insensitive' } } },
+    { observers: { some: { fullName: { contains: term, mode: 'insensitive' } } } },
+    { observers: { some: { email: { contains: term, mode: 'insensitive' } } } },
+  ];
+
+  // Identifiant numérique (#9, ticket #9, ou 9)
+  const numericStr = term.replace(/^#/, '').replace(/^ticket\s*#?/i, '').trim();
+  const numericId = parseInt(numericStr, 10);
+  if (!isNaN(numericId) && numericId > 0 && String(numericId) === numericStr) {
+    conditions.push({ id: numericId });
+  }
+
+  // Recherche par niveau de priorité (P1, P2, P3, P4)
+  const upperTerm = term.toUpperCase();
+  if (['P1', 'P2', 'P3', 'P4'].includes(upperTerm)) {
+    conditions.push({ priority: upperTerm });
+  }
+
+  return { OR: conditions };
+}
+
+function buildTicketWhereClause(user, queryParams = {}) {
+  const {
+    status, priority, teamId, assignedToId, mine, title, search, query,
+    category, locationId, aiProcessed, due, closeSuggested, approvalStatus,
+    dateFrom, dateTo,
+  } = queryParams;
+
+  const andConditions = [
+    { deletedAt: null },
+    { approvalStatus: { notIn: ['PENDING', 'REJECTED'] } },
+  ];
+
+  if (isRequesterOnly(user)) {
+    andConditions.push({
+      OR: [
+        { requesterId: user.sub },
+        { observers: { some: { id: user.sub } } },
+      ],
+    });
+  } else if (isTechnicianOnly(user)) {
+    andConditions.push({
+      OR: [
+        { assignedToId: user.sub },
+        { assignees: { some: { id: user.sub } } },
+        { requesterId: user.sub },
+        { observers: { some: { id: user.sub } } },
+      ],
+    });
+  }
+
+  if (status) {
+    if (status === 'OPEN_GROUP') {
+      andConditions.push({ status: { in: ['NEW', 'OPEN', 'PLANNED', 'PENDING'] } });
+    } else if (status === 'CLOSED_GROUP') {
+      andConditions.push({ status: { in: ['SOLVED', 'CLOSED'] } });
+    } else if (status === 'NOT_CLOSED') {
+      andConditions.push({ status: { notIn: ['SOLVED', 'CLOSED'] } });
+    } else if (status === 'SOLVED_GROUP') {
+      andConditions.push({ status: 'SOLVED' });
+    } else {
+      andConditions.push({ status });
+    }
+  }
+
+  if (priority) andConditions.push({ priority });
+  if (teamId) andConditions.push({ teamId: Number(teamId) });
+
+  if (assignedToId === 'none') {
+    andConditions.push({ assignedToId: null, assignees: { none: {} } });
+  } else if (assignedToId) {
+    const techId = Number(assignedToId);
+    andConditions.push({
+      OR: [
+        { assignedToId: techId },
+        { assignees: { some: { id: techId } } },
+      ],
+    });
+  }
+
+  if (category) andConditions.push({ category: { contains: category, mode: 'insensitive' } });
+  if (locationId) andConditions.push({ locationId: Number(locationId) });
+  if (aiProcessed === 'true') andConditions.push({ aiProcessed: true });
+
+  if (mine === 'true') {
+    if (user.role === 'REQUESTER') {
+      andConditions.push({
+        OR: [
+          { requesterId: user.sub },
+          { observers: { some: { id: user.sub } } },
+        ],
+      });
+    } else {
+      andConditions.push({
+        OR: [
+          { assignedToId: user.sub },
+          { assignees: { some: { id: user.sub } } },
+          { requesterId: user.sub },
+          { observers: { some: { id: user.sub } } },
+        ],
+      });
+    }
+  }
+
+  if (approvalStatus) andConditions.push({ approvalStatus });
+
+  if (due === 'overdue') {
+    andConditions.push({ dueDate: { not: null, lt: new Date() } });
+    if (!status) andConditions.push({ status: { notIn: ['SOLVED', 'CLOSED'] } });
+  } else if (due === 'due') {
+    andConditions.push({ dueDate: { not: null } });
+  } else if (due === 'undue') {
+    andConditions.push({ dueDate: null });
+  }
+
+  if (closeSuggested === 'true') andConditions.push({ closeSuggested: true });
+  if (closeSuggested === 'false') andConditions.push({ closeSuggested: false });
+
+  if (dateFrom || dateTo) {
+    const dateCond = {};
+    if (dateFrom) dateCond.gte = new Date(dateFrom);
+    if (dateTo) {
+      const end = new Date(dateTo);
+      end.setHours(23, 59, 59, 999);
+      dateCond.lte = end;
+    }
+    andConditions.push({ createdAt: dateCond });
+  }
+
+  const searchQuery = title || search || query;
+  const searchCond = buildTicketSearchCondition(searchQuery);
+  if (searchCond) {
+    andConditions.push(searchCond);
+  }
+
+  return { AND: andConditions };
+}
+
 // List tickets (with optional filters + pagination + sorting)
 router.get('/', async (req, res) => {
-  const {
-    status, priority, teamId, assignedToId, mine, title, search, limit, page,
-    sortBy, sortOrder, category, locationId, aiProcessed, due, dateFrom, dateTo
-  } = req.query;
-  const searchQuery = title || search || req.query.query;
+  const { limit, page, sortBy, sortOrder } = req.query;
 
   const pageNum = Math.max(1, parseInt(page) || 1);
   const pageSize = Math.min(500, Math.max(1, parseInt(limit) || 50));
   const skip = (pageNum - 1) * pageSize;
 
-  const where = {};
-  // Soft delete : la corbeille n'apparaît plus dans les vues principales
-  where.deletedAt = null;
-  // Fonctionnement GLPI : les tickets en attente d'approbation Hotline ou rejetés
-  // restent hors de la vue principale des tickets et des exports.
-  where.approvalStatus = { notIn: ['PENDING', 'REJECTED'] };
-  if (isRequesterOnly(req.user)) {
-    // Le demandeur ne voit que les tickets qu'il a ouverts ou dont il est observateur
-    where.OR = [
-      { requesterId: req.user.sub },
-      { observers: { some: { id: req.user.sub } } },
-    ];
-  } else if (isTechnicianOnly(req.user)) {
-    // Le technicien voit ses tickets assignés, ceux qu'il a ouverts, et ceux qu'il observe
-    where.OR = [
-      { assignedToId: req.user.sub },
-      { assignees: { some: { id: req.user.sub } } },
-      { requesterId: req.user.sub },
-      { observers: { some: { id: req.user.sub } } },
-    ];
-  }
-  if (status) {
-    if (status === 'OPEN_GROUP') {
-      where.status = { in: ['NEW', 'OPEN', 'PLANNED', 'PENDING'] };
-    } else if (status === 'CLOSED_GROUP') {
-      where.status = { in: ['SOLVED', 'CLOSED'] };
-    } else if (status === 'NOT_CLOSED') {
-      where.status = { notIn: ['SOLVED', 'CLOSED'] };
-    } else if (status === 'SOLVED_GROUP') {
-      where.status = 'SOLVED';
-    } else {
-      where.status = status;
-    }
-  }
-  if (priority) where.priority = priority;
-  if (teamId) where.teamId = Number(teamId);
-  if (assignedToId === 'none') {
-    where.assignedToId = null;
-    where.assignees = { none: {} };
-  } else if (assignedToId) {
-    const techId = Number(assignedToId);
-    where.OR = [
-      { assignedToId: techId },
-      { assignees: { some: { id: techId } } },
-    ];
-  }
-  if (category) where.category = category;
-
-  if (aiProcessed === 'true') where.aiProcessed = true;
-
-  if (mine === 'true') {
-    if (req.user.role === 'REQUESTER') {
-      where.OR = [
-        { requesterId: req.user.sub },
-        { observers: { some: { id: req.user.sub } } },
-      ];
-    } else {
-      where.OR = [
-        { assignedToId: req.user.sub },
-        { assignees: { some: { id: req.user.sub } } },
-        { requesterId: req.user.sub },
-        { observers: { some: { id: req.user.sub } } },
-      ];
-    }
-  }
-
-  if (req.query.approvalStatus) where.approvalStatus = req.query.approvalStatus;
-
-  // due=overdue -> tickets dont l'échéance manuelle est dépassée et qui ne sont pas clôturés
-  if (due === 'overdue') {
-    where.dueDate = { not: null, lt: new Date() };
-    if (!status) where.status = { notIn: ['SOLVED', 'CLOSED'] };
-  }
-  if (due === 'due') where.dueDate = { not: null };
-  if (due === 'undue') where.dueDate = null;
-
-  // Filtrer les tickets dont la clôture a été suggérée par l'IA (en attente de validation Hotline)
-  if (req.query.closeSuggested === 'true') where.closeSuggested = true;
-  if (req.query.closeSuggested === 'false') where.closeSuggested = false;
-
-  // Filtrer par période de création
-  if (dateFrom || dateTo) {
-    where.createdAt = {};
-    if (dateFrom) where.createdAt.gte = new Date(dateFrom);
-    if (dateTo) {
-      const end = new Date(dateTo);
-      end.setHours(23, 59, 59, 999);
-      where.createdAt.lte = end;
-    }
-  }
-
-
-
-  if (searchQuery) {
-    const numericId = parseInt(searchQuery, 10);
-    const orConditions = [
-      { title: { contains: searchQuery, mode: 'insensitive' } },
-      { content: { contains: searchQuery, mode: 'insensitive' } },
-      { category: { contains: searchQuery, mode: 'insensitive' } },
-    ];
-    if (!isNaN(numericId)) {
-      orConditions.push({ id: numericId });
-    }
-    where.OR = orConditions;
-  }
+  const where = buildTicketWhereClause(req.user, req.query);
 
   // Tri dynamique
   let orderBy = { createdAt: 'desc' };
@@ -179,7 +229,6 @@ router.get('/', async (req, res) => {
     else if (sortBy === 'status') orderBy = { status: order };
     else if (sortBy === 'assignedTo') orderBy = { assignedTo: { fullName: order } };
     else if (sortBy === 'requester') orderBy = { requester: { fullName: order } };
-
     else if (sortBy === 'updatedAt') orderBy = { updatedAt: order };
   }
 
@@ -208,15 +257,17 @@ router.get('/', async (req, res) => {
 
   // Agrégation des compteurs de statut/priorité côté serveur (coût négligeable :
   // au plus ~6 statuts × 4 priorités lignes retournées par le GROUP BY).
-  let openCount = 0, pendingCount = 0, resolvedCount = 0, p1Count = 0, p2Count = 0;
+  let openCount = 0, pendingCount = 0, solvedCount = 0, closedCount = 0, p1Count = 0, p2Count = 0;
   for (const row of breakdown) {
     const n = row._count._all;
     if (['NEW', 'OPEN', 'PLANNED'].includes(row.status)) openCount += n;
-    else if (row.status === 'PENDING') pendingCount += n;
-    else if (row.status === 'SOLVED' || row.status === 'CLOSED') resolvedCount += n;
+    else if (['PENDING', 'WAITING_FOR_USER'].includes(row.status)) pendingCount += n;
+    else if (row.status === 'SOLVED') solvedCount += n;
+    else if (row.status === 'CLOSED') closedCount += n;
     if (row.priority === 'P1') p1Count += n;
     else if (row.priority === 'P2') p2Count += n;
   }
+  const resolvedCount = solvedCount + closedCount;
 
   // Badge « clôtures souvent injustifiées » : quand on liste les clôtures suggérées, on attache
   // à chaque ticket si son expéditeur est dégradé sur les clôtures (feedback de la Hotline).
@@ -238,82 +289,25 @@ router.get('/', async (req, res) => {
 
   return res.json({
     items: tickets, total, page: pageNum, pages: Math.ceil(total / pageSize),
-    stats: { open: openCount, pending: pendingCount, resolved: resolvedCount, p1: p1Count, p2: p2Count, ai: aiCount, unassigned: unassignedCount },
+    stats: {
+      open: openCount,
+      pending: pendingCount,
+      solved: solvedCount,
+      closed: closedCount,
+      resolved: resolvedCount,
+      p1: p1Count,
+      p2: p2Count,
+      ai: aiCount,
+      unassigned: unassignedCount,
+    },
   });
 });
 
 // Export serveur : mêmes filtres que la liste, dataset complet (pas de pagination UI)
 router.get('/export', async (req, res) => {
-  const {
-    status, priority, teamId, assignedToId, mine, search, category, source,
-    aiProcessed, closeSuggested, approvalStatus, sortBy, sortOrder, format,
-    dateFrom, dateTo,
-  } = req.query;
+  const { sortBy, sortOrder } = req.query;
 
-  const where = {};
-  where.deletedAt = null; // l'export exclut aussi la corbeille
-  // Idem liste : l'export exclut les tickets en attente d'approbation ou rejetés
-  where.approvalStatus = { notIn: ['PENDING', 'REJECTED'] };
-  if (isRequesterOnly(req.user)) {
-    // Le demandeur n'exporte que ses propres tickets ou ceux qu'il observe
-    where.OR = [
-      { requesterId: req.user.sub },
-      { observers: { some: { id: req.user.sub } } },
-    ];
-  } else if (isTechnicianOnly(req.user)) {
-    // Le technicien n'exporte que ses tickets assignés, ouverts, ou observés
-    where.OR = [
-      { assignedToId: req.user.sub },
-      { requesterId: req.user.sub },
-      { observers: { some: { id: req.user.sub } } },
-    ];
-  }
-  if (status) {
-    if (status === 'OPEN_GROUP') where.status = { in: ['NEW', 'OPEN', 'PLANNED', 'PENDING'] };
-    else if (status === 'CLOSED_GROUP') where.status = { in: ['SOLVED', 'CLOSED'] };
-    else if (status === 'NOT_CLOSED') where.status = { notIn: ['SOLVED', 'CLOSED'] };
-    else if (status === 'SOLVED_GROUP') where.status = 'SOLVED';
-    else where.status = status;
-  }
-  if (priority) where.priority = priority;
-  if (teamId) where.teamId = Number(teamId);
-  if (assignedToId === 'none') where.assignedToId = null;
-  else if (assignedToId) where.assignedToId = Number(assignedToId);
-  if (category) where.category = category;
-  if (aiProcessed === 'true') where.aiProcessed = true;
-  if (mine === 'true') {
-    if (req.user.role === 'REQUESTER') where.requesterId = req.user.sub;
-    else if (req.user.role === 'TECHNICIAN') {
-      where.OR = [
-        { assignedToId: req.user.sub },
-        { requesterId: req.user.sub },
-      ];
-    } else where.assignedToId = req.user.sub;
-  }
-  if (approvalStatus) where.approvalStatus = approvalStatus;
-  if (closeSuggested === 'true') where.closeSuggested = true;
-  if (closeSuggested === 'false') where.closeSuggested = false;
-
-  if (dateFrom || dateTo) {
-    where.createdAt = {};
-    if (dateFrom) where.createdAt.gte = new Date(dateFrom);
-    if (dateTo) {
-      const end = new Date(dateTo);
-      end.setHours(23, 59, 59, 999);
-      where.createdAt.lte = end;
-    }
-  }
-
-  if (search) {
-    const numericId = parseInt(search, 10);
-    const orConditions = [
-      { title: { contains: search, mode: 'insensitive' } },
-      { content: { contains: search, mode: 'insensitive' } },
-      { category: { contains: search, mode: 'insensitive' } },
-    ];
-    if (!isNaN(numericId)) orConditions.push({ id: numericId });
-    where.OR = orConditions;
-  }
+  const where = buildTicketWhereClause(req.user, req.query);
 
   let orderBy = { createdAt: 'desc' };
   if (sortBy) {
@@ -875,10 +869,12 @@ router.post(
         }
 
         // Remplacer les marqueurs <!--IMAGE_n--> par les tags <img> et assainir
-        let updatedContent = ticket.content;
+        let updatedContent = ticket.content || '';
         savedImages.forEach((imgUrl, idx) => {
-          updatedContent = updatedContent.replace(`<!--IMAGE_${idx}-->`, `<img src="${imgUrl}" alt="image collée" />`);
+          const markerRegex = new RegExp(`<!--IMAGE_${idx}-->?`, 'gi');
+          updatedContent = updatedContent.replace(markerRegex, `<img src="${imgUrl}" alt="image collée" />`);
         });
+        updatedContent = updatedContent.replace(/<!--IMAGE_\d+-->?/gi, '');
         updatedContent = sanitizeTicketHtml(updatedContent);
         await prisma.ticket.update({ where: { id: ticket.id }, data: { content: updatedContent } });
       } catch (err) {
@@ -905,7 +901,40 @@ router.post(
       emitTicketCreated(finalTicket);
       if (finalTicket.assignedToId) {
         emitTicketAssigned(finalTicket.id, finalTicket.title, finalTicket.assignedToId, finalTicket.category ? 'by_category' : 'manual');
+
+        // Notification email au technicien assigné
+        prisma.user.findUnique({ where: { id: finalTicket.assignedToId }, select: { email: true, fullName: true } })
+          .then((tech) => {
+            if (tech?.email) {
+              sendAssignmentNotificationEmail({
+                ticketId: finalTicket.id,
+                ticketTitle: finalTicket.title,
+                priority: finalTicket.priority,
+                technicianEmail: tech.email,
+                technicianName: tech.fullName,
+                category: finalTicket.category,
+              }).catch((e) => console.error('[ticket.routes] Échec notification assignation technicien:', e.message));
+            }
+          })
+          .catch(() => {});
       }
+
+      // Accusé de réception email au demandeur (création manuelle / portail)
+      if (finalTicket.requesterId) {
+        prisma.user.findUnique({ where: { id: finalTicket.requesterId }, select: { email: true, fullName: true } })
+          .then((reqUser) => {
+            if (reqUser?.email) {
+              sendAcknowledgement({
+                ticketId: finalTicket.id,
+                toEmail: reqUser.email,
+                toName: reqUser.fullName,
+                originalSubject: finalTicket.title,
+              }).catch((e) => console.error('[ticket.routes] Échec accusé de réception demandeur:', e.message));
+            }
+          })
+          .catch(() => {});
+      }
+
       // Notification email aux boîtes configurées dans les Paramètres (best-effort, non bloquant)
       sendTicketCreationNotification(finalTicket).catch((err) =>
         console.error('[ticket.routes] Notification création échouée:', err.message)
@@ -1094,6 +1123,23 @@ router.patch('/:id', forbidTechnicianTicketEdits, requirePermission('tickets.ass
     // Émettre événement temps réel
     emitTicketUpdated(ticket, { status, priority, category, assignedToId });
     notifyRequesterOnStatusChange(id, data.status);
+
+    if (data.assignedToId !== undefined && data.assignedToId && String(before?.assignedToId) !== String(data.assignedToId)) {
+      prisma.user.findUnique({ where: { id: Number(data.assignedToId) }, select: { email: true, fullName: true } })
+        .then((tech) => {
+          if (tech?.email) {
+            sendAssignmentNotificationEmail({
+              ticketId: ticket.id,
+              ticketTitle: ticket.title,
+              priority: ticket.priority,
+              technicianEmail: tech.email,
+              technicianName: tech.fullName,
+              category: ticket.category,
+            }).catch((e) => console.error('[ticket.routes] Échec notification assignation technicien:', e.message));
+          }
+        })
+        .catch(() => {});
+    }
 
     // Clôture en cascade : si un parent passe à SOLVED/CLOSED et que le réglage
     // closeChildrenWithParent est actif, clôturer aussi ses sous-tickets ouverts
@@ -1503,13 +1549,12 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
   // Construire le contenu final : remplacer les marqueurs IMAGE_<n> par des <img> tags
   // On utilise toujours un chemin relatif (/uploads/...) pour que les images s'affichent
   // correctement quel que soit le domaine, l'IP (ex: Dokploy) ou le port d'accès.
-  let content = req.body.content;
+  let content = req.body.content || '';
   imageAttachments.forEach((img, idx) => {
-    content = content.replace(
-      `<!--IMAGE_${idx}-->`,
-      `<img src="${img.url}" alt="image collée" />`
-    );
+    const markerRegex = new RegExp(`<!--IMAGE_${idx}-->?`, 'gi');
+    content = content.replace(markerRegex, `<img src="${img.url}" alt="image collée" />`);
   });
+  content = content.replace(/<!--IMAGE_\d+-->?/gi, '');
   // Sanitizer le HTML pour prévenir les XSS stockés
   content = sanitizeTicketHtml(content);
 

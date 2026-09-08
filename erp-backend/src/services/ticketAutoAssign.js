@@ -91,6 +91,27 @@ async function findBestTechnician(category, aiCategory) {
   return { team, technician: leastLoaded, method: 'team' };
 }
 
+const { sendAssignmentNotificationEmail } = require('./emailSender');
+
+async function notifyAssignedTechnician(ticketId, technicianId) {
+  try {
+    const fullTech = await prisma.user.findUnique({ where: { id: technicianId }, select: { email: true, fullName: true } });
+    const ticket = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { id: true, title: true, priority: true, category: true } });
+    if (fullTech?.email && ticket) {
+      await sendAssignmentNotificationEmail({
+        ticketId: ticket.id,
+        ticketTitle: ticket.title,
+        priority: ticket.priority,
+        technicianEmail: fullTech.email,
+        technicianName: fullTech.fullName,
+        category: ticket.category,
+      });
+    }
+  } catch (err) {
+    console.error(`[ticketAutoAssign] Échec notification email technicien (${technicianId}):`, err.message);
+  }
+}
+
 // Choisit automatiquement un technicien (par compétence d'abord, puis par équipe)
 // et l'assigne au ticket — le moins chargé parmi les candidats.
 // Retourne le technicien assigné ou null.
@@ -106,6 +127,8 @@ async function autoAssignTechnician(ticketId, category) {
       teamId: team?.id || null,
     },
   });
+
+  notifyAssignedTechnician(ticketId, technician.id).catch(() => {});
 
   return technician;
 }
@@ -123,6 +146,8 @@ async function autoAssignTechnicianWithAI(ticketId, category, aiCategory) {
       teamId: team?.id || null,
     },
   });
+
+  notifyAssignedTechnician(ticketId, technician.id).catch(() => {});
 
   // Journaliser l'assignation automatique pour le suivi de précision
   try {

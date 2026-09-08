@@ -30,6 +30,23 @@ import {
 
 import { sanitizeHtml } from '../utils/sanitize';
 
+function extractCleanTextAndImages(content) {
+  if (!content || typeof content !== 'string') return { text: '', images: [] };
+  const imgRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>|<!--IMAGE_\d+-->?/gi;
+  const images = [];
+  let match;
+  while ((match = imgRegex.exec(content)) !== null) {
+    if (match[0].startsWith('<img')) {
+      images.push(match[0]);
+    }
+  }
+  const text = content
+    .replace(/<img[^>]+src=["']([^"']+)["'][^>]*>/gi, '')
+    .replace(/<!--IMAGE_\d+-->?/gi, '')
+    .trim();
+  return { text, images };
+}
+
 // Variants du "défilement" entre tickets (carrousel) : le ticket sorti glisse dans le sens du voyage,
 // le nouveau entre par le côté opposé — sortie rapide puis entrée longue et douce (ease-out quintique)
 const TICKET_SLIDE_VARIANTS = {
@@ -210,7 +227,13 @@ export default function TicketDetail() {
   const [newLocationName, setNewLocationName] = useState('');
   const [editingFollowupId, setEditingFollowupId] = useState(null);
   const [editingFollowupContent, setEditingFollowupContent] = useState('');
+  const [editingFollowupImages, setEditingFollowupImages] = useState([]);
   const [savingFollowupEdit, setSavingFollowupEdit] = useState(false);
+
+  const [editingContent, setEditingContent] = useState(false);
+  const [editingContentValue, setEditingContentValue] = useState('');
+  const [editingContentImages, setEditingContentImages] = useState([]);
+  const [savingContent, setSavingContent] = useState(false);
 
   const openEscalateModal = async () => {
     setEscalateTargetTeamId('');
@@ -427,6 +450,16 @@ export default function TicketDetail() {
     }
   }
 
+  async function openImageAttachment(attachment) {
+    try {
+      const { data } = await api.get(`/tickets/${id}/attachments/${attachment.id}/file`, { responseType: 'blob' });
+      const url = URL.createObjectURL(data);
+      setLightboxSrc({ src: url, filename: attachment.filename, blob: data, attachment });
+    } catch {
+      setError('Impossible d\'ouvrir l\'image');
+    }
+  }
+
   useEffect(() => {
     api.get('/categories').then(({ data }) => setCategories(data)).catch(() => {});
     api.get('/locations').then(({ data }) => setLocations(data)).catch(() => {});
@@ -640,27 +673,60 @@ export default function TicketDetail() {
 
   function startEditFollowup(f) {
     setEditingFollowupId(f.id);
-    setEditingFollowupContent(f.content || '');
+    const { text, images } = extractCleanTextAndImages(f.content || '');
+    setEditingFollowupContent(text);
+    setEditingFollowupImages(images);
   }
 
   function cancelEditFollowup() {
     setEditingFollowupId(null);
     setEditingFollowupContent('');
+    setEditingFollowupImages([]);
   }
 
   async function saveEditFollowup(followupId) {
-    if (!editingFollowupContent.trim()) return;
+    if (!editingFollowupContent.trim() && editingFollowupImages.length === 0) return;
     setSavingFollowupEdit(true);
     try {
-      await api.patch(`/tickets/${id}/followups/${followupId}`, { content: editingFollowupContent });
+      let finalContent = editingFollowupContent.trim();
+      if (editingFollowupImages.length > 0) {
+        finalContent += (finalContent ? '\n\n' : '') + editingFollowupImages.join('\n\n');
+      }
+      await api.patch(`/tickets/${id}/followups/${followupId}`, { content: finalContent });
       toast.success('Commentaire modifié');
       setEditingFollowupId(null);
       setEditingFollowupContent('');
+      setEditingFollowupImages([]);
       load();
     } catch (err) {
       toast.error(err.response?.data?.error || "Erreur lors de la modification du commentaire");
     } finally {
       setSavingFollowupEdit(false);
+    }
+  }
+
+  function startEditContent() {
+    const { text, images } = extractCleanTextAndImages(ticket?.content || '');
+    setEditingContentValue(text);
+    setEditingContentImages(images);
+    setEditingContent(true);
+  }
+
+  async function handleSaveContent() {
+    setSavingContent(true);
+    try {
+      let finalContent = editingContentValue.trim();
+      if (editingContentImages.length > 0) {
+        finalContent += (finalContent ? '\n\n' : '') + editingContentImages.join('\n\n');
+      }
+      await api.patch(`/tickets/${id}`, { content: finalContent });
+      toast.success('Description du ticket modifiée');
+      setEditingContent(false);
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de la modification de la description');
+    } finally {
+      setSavingContent(false);
     }
   }
 
@@ -1383,16 +1449,71 @@ export default function TicketDetail() {
             </div>
 
             {/* Ticket Description Content */}
-            {ticket.content && (ticket.content.includes('<') || ticket.content.includes('&#') || ticket.content.includes('&lt;')) ? (
-              <div
-                className="leading-relaxed text-sm text-on-surface [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-3 [&_a]:text-blue-600 [&_a]:underline [&_p]:mb-2 [&_p]:last:mb-0 [&_h1]:text-lg [&_h1]:font-bold [&_h1]:mt-4 [&_h1]:mb-2 [&_h2]:text-base [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-1.5 [&_h3]:text-sm [&_h3]:font-bold [&_h3]:mt-2.5 [&_h3]:mb-1 [&_div]:mb-1.5 [&_b]:font-semibold [&_table]:w-full [&_table]:border-collapse [&_th]:border [&_th]:border-outline-variant/30 [&_th]:p-2 [&_th]:bg-surface-container [&_th]:text-left [&_th]:text-[11px] [&_th]:font-bold [&_td]:border [&_td]:border-outline-variant/30 [&_td]:p-2 [&_td]:text-[11px] [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-4 [&_ol]:my-1.5 [&_li]:mb-0.5"
-                dangerouslySetInnerHTML={{ __html: sanitizeHtml(ticket.content) }}
-              />
-            ) : (
-              <div className="text-sm text-on-surface leading-relaxed whitespace-pre-wrap font-normal">
-                {ticket.content}
-              </div>
-            )}
+            <div className="group/desc relative">
+              {editingContent ? (
+                <div className="space-y-2">
+                  <textarea
+                    className="w-full min-h-[140px] p-3 rounded-xl border border-primary/40 bg-surface text-sm text-on-surface leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    rows={7}
+                    value={editingContentValue}
+                    onChange={(e) => setEditingContentValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') setEditingContent(false);
+                      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') handleSaveContent();
+                    }}
+                    autoFocus
+                  />
+                  {editingContentImages.length > 0 && (
+                    <div className="text-[10px] text-on-surface-variant/70 italic">
+                      {editingContentImages.length} image{editingContentImages.length > 1 ? 's' : ''} conservée{editingContentImages.length > 1 ? 's' : ''} (non modifiables ici)
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSaveContent}
+                      disabled={savingContent}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary text-on-primary text-[10px] font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 cursor-pointer"
+                    >
+                      {savingContent ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                      Enregistrer
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingContent(false)}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-outline-variant/40 bg-surface-container text-on-surface-variant text-[10px] font-semibold hover:bg-surface-container-high transition-colors cursor-pointer"
+                    >
+                      <X className="w-3 h-3" />
+                      Annuler
+                    </button>
+                    <span className="text-[9px] text-on-surface-variant/50 ml-1">Ctrl+Entrée pour sauvegarder · Échap pour annuler</span>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {canEdit && ticket.source !== 'GLPI' && (
+                    <button
+                      type="button"
+                      onClick={startEditContent}
+                      title="Modifier la description"
+                      className="absolute top-0 right-0 p-1 rounded-md border border-outline-variant/40 bg-surface-container text-on-surface-variant hover:text-on-surface hover:border-outline transition-colors cursor-pointer opacity-0 group-hover/desc:opacity-100 z-10"
+                    >
+                      <Pencil className="w-3 h-3" />
+                    </button>
+                  )}
+                  {ticket.content && (ticket.content.includes('<') || ticket.content.includes('&#') || ticket.content.includes('&lt;')) ? (
+                    <div
+                      className="leading-relaxed text-sm text-on-surface [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-3 [&_a]:text-blue-600 [&_a]:underline [&_p]:mb-2 [&_p]:last:mb-0 [&_h1]:text-lg [&_h1]:font-bold [&_h1]:mt-4 [&_h1]:mb-2 [&_h2]:text-base [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-1.5 [&_h3]:text-sm [&_h3]:font-bold [&_h3]:mt-2.5 [&_h3]:mb-1 [&_div]:mb-1.5 [&_b]:font-semibold [&_table]:w-full [&_table]:border-collapse [&_th]:border [&_th]:border-outline-variant/30 [&_th]:p-2 [&_th]:bg-surface-container [&_th]:text-left [&_th]:text-[11px] [&_th]:font-bold [&_td]:border [&_td]:border-outline-variant/30 [&_td]:p-2 [&_td]:text-[11px] [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-4 [&_ol]:my-1.5 [&_li]:mb-0.5"
+                      dangerouslySetInnerHTML={{ __html: sanitizeHtml(ticket.content) }}
+                    />
+                  ) : (
+                    <div className="text-sm text-on-surface leading-relaxed whitespace-pre-wrap font-normal">
+                      {ticket.content}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
 
             {/* Attachments */}
             {ticket.attachments?.length > 0 && (
@@ -1409,11 +1530,14 @@ export default function TicketDetail() {
                       <button
                         key={a.id}
                         type="button"
-                        onClick={() => downloadAttachment(a)}
-                        title={fromEmail ? `${a.filename} (reçu par email)` : a.filename}
-                        className="relative hover:opacity-90 transition-opacity group cursor-pointer"
+                        onClick={() => openImageAttachment(a)}
+                        title={`${fromEmail ? '(reçu par email) ' : ''}Cliquer pour agrandir`}
+                        className="relative hover:scale-105 hover:shadow-lg transition-all duration-200 group cursor-pointer rounded-xl"
                       >
                         <AttachmentThumbnail ticketId={ticket.id} attachment={a} />
+                        <span className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/0 group-hover:bg-black/20 transition-all duration-200">
+                          <Eye className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 drop-shadow transition-all duration-200" />
+                        </span>
                         {fromEmail && (
                           <span className="p-1 bg-surface rounded-full text-on-surface-variant shadow-sm border border-outline-variant/40 absolute top-1 right-1">
                             <Mail className="w-3 h-3 text-primary" />
@@ -3452,20 +3576,48 @@ export default function TicketDetail() {
       {/* Lightbox image */}
       {lightboxSrc && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm cursor-pointer"
-          onClick={() => setLightboxSrc(null)}
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-md cursor-pointer"
+          onClick={() => {
+            if (lightboxSrc?.blob) URL.revokeObjectURL(lightboxSrc.src);
+            setLightboxSrc(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              if (lightboxSrc?.blob) URL.revokeObjectURL(lightboxSrc.src);
+              setLightboxSrc(null);
+            }
+          }}
+          tabIndex={0}
+          autoFocus
         >
-          <img
-            src={lightboxSrc}
-            alt="Aperçu"
-            className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          />
+          <div className="relative flex flex-col items-center gap-3" onClick={(e) => e.stopPropagation()}>
+            <img
+              src={lightboxSrc?.src || lightboxSrc}
+              alt={lightboxSrc?.filename || 'Aperçu'}
+              className="max-w-[90vw] max-h-[85vh] object-contain rounded-xl shadow-2xl border border-white/10"
+            />
+            {lightboxSrc?.filename && (
+              <span className="text-white/70 text-xs font-mono">{lightboxSrc.filename}</span>
+            )}
+            {lightboxSrc?.attachment && (
+              <button
+                type="button"
+                onClick={() => downloadAttachment(lightboxSrc.attachment)}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-semibold transition-all backdrop-blur-sm border border-white/20"
+              >
+                <Paperclip className="w-3.5 h-3.5" />
+                Télécharger
+              </button>
+            )}
+          </div>
           <button
-            className="absolute top-4 right-4 text-white/80 hover:text-white transition-colors"
-            onClick={() => setLightboxSrc(null)}
+            className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-all"
+            onClick={() => {
+              if (lightboxSrc?.blob) URL.revokeObjectURL(lightboxSrc.src);
+              setLightboxSrc(null);
+            }}
           >
-            <X className="w-8 h-8" />
+            <X className="w-6 h-6" />
           </button>
         </div>
       )}
