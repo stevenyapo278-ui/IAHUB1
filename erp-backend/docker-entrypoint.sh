@@ -16,6 +16,7 @@ echo "Résolution des éventuelles migrations en échec..."
 npx prisma migrate resolve --rolled-back 20260727000000_add_missing_columns 2>/dev/null || true
 npx prisma migrate resolve --rolled-back 20260727000100_add_remaining_missing_columns 2>/dev/null || true
 npx prisma migrate resolve --rolled-back 20260820110000_enforce_single_permission_group_per_user 2>/dev/null || true
+npx prisma migrate resolve --applied 20260908102000_add_missing_columns 2>/dev/null || true
 
 # Migration login theme : appliquer directement via SQL si la colonne est absente
 # (contourne le drift DB où Prisma croit la migration déjà appliquée)
