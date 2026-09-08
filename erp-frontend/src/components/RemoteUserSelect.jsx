@@ -15,7 +15,9 @@ export default function RemoteUserSelect({
   excludeIds = [],
   disabled = false,
   onlyStaff = false,
+  teamId = null,
   hideEmail = false,
+  onSelectUser,
   className = '',
 }) {
   const [open, setOpen] = useState(false);
@@ -36,6 +38,7 @@ export default function RemoteUserSelect({
     const params = { limit: PAGE_SIZE };
     if (q.trim()) params.search = q.trim();
     if (onlyStaff) params.onlyStaff = 'true';
+    if (teamId) params.teamId = teamId;
     api.get('/users', { params })
       .then(({ data }) => {
         if (seq !== requestSeq.current) return;
@@ -48,7 +51,7 @@ export default function RemoteUserSelect({
       })
       .catch(() => { if (seq === requestSeq.current) setOptions([]); })
       .finally(() => { if (seq === requestSeq.current) setLoading(false); });
-  }, [onlyStaff]);
+  }, [onlyStaff, teamId]);
 
   useEffect(() => {
     if (!value || valueLabel) { setResolvedLabel(null); return; }
@@ -134,7 +137,7 @@ export default function RemoteUserSelect({
               const isSelected = String(value) === String(opt.id);
               return (
                 <button key={opt.id} type="button"
-                  onClick={() => { onChange(String(opt.id)); setOpen(false); setQuery(''); }}
+                  onClick={() => { onChange(String(opt.id)); onSelectUser?.(opt); setOpen(false); setQuery(''); }}
                   className={`w-full px-2.5 py-2 rounded-lg text-sm text-left transition-colors flex items-center justify-between gap-2 cursor-pointer ${
                     isSelected ? 'bg-primary/10 font-medium text-primary' : 'text-foreground hover:bg-surface-muted'
                   }`}>

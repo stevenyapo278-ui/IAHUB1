@@ -2331,10 +2331,14 @@ export default function TicketDetail() {
                 {canAssign ? (
                   <RemoteUserMultiSelect
                     value={(ticket.assignees && ticket.assignees.length > 0) ? ticket.assignees.map((a) => a.id) : (ticket.assignedToId ? [ticket.assignedToId] : [])}
-                    onChange={async (vals) => {
+                    onChange={async (vals, selectedUsers) => {
                       try {
                         setSavingField('assigneeIds');
-                        await api.patch(`/tickets/${id}`, { assigneeIds: vals });
+                        const firstUser = selectedUsers && selectedUsers[0];
+                        const autoTeamId = firstUser ? (firstUser.teamId || firstUser.team?.id) : null;
+                        const payload = { assigneeIds: vals };
+                        if (autoTeamId && !ticket.teamId) payload.teamId = autoTeamId;
+                        await api.patch(`/tickets/${id}`, payload);
                         toast.success('Techniciens assignés mis à jour');
                         load();
                       } catch (err) {
@@ -2343,6 +2347,8 @@ export default function TicketDetail() {
                         setSavingField(null);
                       }
                     }}
+                    teamId={ticket.teamId || null}
+                    onlyStaff={true}
                     placeholder="Rechercher des techniciens..."
                     disabled={savingField === 'assigneeIds'}
                   />

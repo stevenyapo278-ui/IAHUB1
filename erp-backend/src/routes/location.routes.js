@@ -104,13 +104,14 @@ router.get('/potential-requesters', async (req, res) => {
   const { search } = req.query;
   const q = search?.trim().toLowerCase() || '';
 
-  // 1. Utilisateurs ERP
-  const userWhere = q ? {
-    OR: [
+  // 1. Utilisateurs ERP (actifs de préférence)
+  const userWhere = { isActive: true };
+  if (q) {
+    userWhere.OR = [
       { fullName: { contains: q, mode: 'insensitive' } },
       { email: { contains: q, mode: 'insensitive' } },
-    ],
-  } : {};
+    ];
+  }
   const users = await prisma.user.findMany({
     where: userWhere,
     select: { id: true, fullName: true, email: true, role: true, avatarUrl: true },
@@ -118,7 +119,7 @@ router.get('/potential-requesters', async (req, res) => {
     take: 50,
   });
 
-  // 2. Expéditeurs d'emails connus (depuis les tickets/email entrants, distincts)
+  // 2. Expéditeurs d'emails connus (depuis la table IncomingEmail)
   const emailWhere = q ? {
     OR: [
       { fromEmail: { contains: q, mode: 'insensitive' } },
@@ -132,14 +133,31 @@ router.get('/potential-requesters', async (req, res) => {
     _max: { fromName: true, receivedAt: true },
     orderBy: { _count: { fromEmail: 'desc' } },
     take: 50,
-  });
+  }).catch(() => []);
 
-  // 3. Combiner et dédupliquer
+  // 3. Expéditeurs depuis la table Ticket (sourceEmail)
+  const ticketEmailWhere = { sourceEmail: { not: null } };
+  if (q) {
+    ticketEmailWhere.OR = [
+      { sourceEmail: { contains: q, mode: 'insensitive' } },
+      { sourceName: { contains: q, mode: 'insensitive' } },
+    ];
+  }
+  const ticketEmails = await prisma.ticket.groupBy({
+    by: ['sourceEmail'],
+    where: ticketEmailWhere,
+    _count: { sourceEmail: true },
+    _max: { sourceName: true, createdAt: true },
+    orderBy: { _count: { sourceEmail: 'desc' } },
+    take: 50,
+  }).catch(() => []);
+
+  // 4. Combiner et dédupliquer
   const seen = new Set();
   const result = [];
 
   for (const u of users) {
-    const key = u.email?.toLowerCase();
+    const key = u.email?.toLowerCase().trim();
     if (key && !seen.has(key)) {
       seen.add(key);
       result.push({
@@ -153,7 +171,7 @@ router.get('/potential-requesters', async (req, res) => {
   }
 
   for (const e of knownEmails) {
-    const key = e.fromEmail?.toLowerCase();
+    const key = e.fromEmail?.toLowerCase().trim();
     if (key && !seen.has(key)) {
       seen.add(key);
       result.push({
@@ -162,6 +180,20 @@ router.get('/potential-requesters', async (req, res) => {
         email: e.fromEmail,
         subLabel: `${e._count.fromEmail} email(s) reçu(s)`,
         lastSeen: e._max.receivedAt,
+      });
+    }
+  }
+
+  for (const t of ticketEmails) {
+    const key = t.sourceEmail?.toLowerCase().trim();
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      result.push({
+        type: 'requester',
+        label: t._max.sourceName || t.sourceEmail,
+        email: t.sourceEmail,
+        subLabel: `${t._count.sourceEmail} ticket(s) créé(s)`,
+        lastSeen: t._max.createdAt,
       });
     }
   }

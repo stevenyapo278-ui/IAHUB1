@@ -13,10 +13,14 @@ export default function RemoteUserMultiSelect({
   value,           // array of user IDs (primary prop)
   selectedIds,     // alias for backward compat
   onChange,
+  onSelectUsers,   // optional callback: (usersArray) => void
   placeholder = 'Rechercher des utilisateurs...',
   searchPlaceholder = 'Rechercher par nom ou email...',
   excludeIds = [],
   disabled = false,
+  teamId = null,
+  onlyStaff = false,
+  role = null,
   className = '',
 }) {
   const ids = value || selectedIds || [];
@@ -26,6 +30,7 @@ export default function RemoteUserMultiSelect({
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [labelsById, setLabelsById] = useState({});
+  const [usersMap, setUsersMap] = useState({});
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0, width: 0 });
   const containerRef = useRef(null);
   const menuRef = useRef(null);
@@ -37,16 +42,27 @@ export default function RemoteUserMultiSelect({
     setLoading(true);
     const params = { limit: PAGE_SIZE };
     if (q.trim()) params.search = q.trim();
+    if (teamId) params.teamId = teamId;
+    if (onlyStaff) params.onlyStaff = 'true';
+    if (role) params.role = role;
     api.get('/users', { params })
       .then(({ data }) => {
         if (seq !== requestSeq.current) return;
-        const list = Array.isArray(data) ? data : (data.users || []);
+        let list = Array.isArray(data) ? data : (data.users || []);
+        if (onlyStaff) {
+          list = list.filter((u) => u.role !== 'REQUESTER');
+        }
         setOptions(list);
         setTotal(list.length);
+        setUsersMap((prev) => {
+          const next = { ...prev };
+          for (const u of list) next[u.id] = u;
+          return next;
+        });
       })
       .catch(() => { if (seq === requestSeq.current) setOptions([]); })
       .finally(() => { if (seq === requestSeq.current) setLoading(false); });
-  }, []);
+  }, [teamId, onlyStaff, role]);
 
   useEffect(() => {
     if (ids.length === 0) { setLabelsById({}); return; }
@@ -64,6 +80,11 @@ export default function RemoteUserMultiSelect({
             for (const u of list) next[u.id] = u.fullName;
             return next;
           });
+          setUsersMap((prev) => {
+            const next = { ...prev };
+            for (const u of list) next[u.id] = u;
+            return next;
+          });
         })
         .catch(() => {});
     }
@@ -73,7 +94,7 @@ export default function RemoteUserMultiSelect({
   useEffect(() => {
     if (!open) return;
     search(query);
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, teamId, onlyStaff, role]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Position menu relative to trigger button (portal-based)
   useEffect(() => {
@@ -101,10 +122,17 @@ export default function RemoteUserMultiSelect({
     debounceRef.current = setTimeout(() => search(text), 250);
   }
 
-  function toggle(id) {
+  function toggle(opt) {
+    const id = typeof opt === 'object' ? opt.id : opt;
+    const optObj = typeof opt === 'object' ? opt : options.find((o) => o.id === id);
     const isSelected = ids.includes(id);
-    const next = isSelected ? ids.filter((item) => item !== id) : [...ids, id];
-    onChange(next);
+    const nextIds = isSelected ? ids.filter((item) => item !== id) : [...ids, id];
+    const nextMap = optObj ? { ...usersMap, [id]: optObj } : usersMap;
+    if (optObj) setUsersMap(nextMap);
+
+    const selectedUsersList = nextIds.map((itemId) => nextMap[itemId]).filter(Boolean);
+    onChange(nextIds, selectedUsersList);
+    if (onSelectUsers) onSelectUsers(selectedUsersList);
   }
 
   const visibleOptions = options.filter((o) => !excludeIds.includes(o.id));
@@ -202,7 +230,7 @@ export default function RemoteUserMultiSelect({
                     <button
                       key={opt.id}
                       type="button"
-                      onClick={() => toggle(opt.id)}
+                      onClick={() => toggle(opt)}
                       className={`w-full px-2.5 py-2 rounded-lg text-sm text-left transition-colors flex items-center justify-between gap-2 cursor-pointer ${
                         isSelected
                           ? 'bg-primary/10 font-medium text-primary'

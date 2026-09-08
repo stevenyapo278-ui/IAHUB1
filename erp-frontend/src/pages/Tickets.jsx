@@ -793,6 +793,15 @@ export default function Tickets() {
   const [customValues, setCustomValues] = useState({});
   const [assetOptions, setAssetOptions] = useState([]);
   const [error, setError] = useState('');
+
+  const availableCreationTeams = useMemo(() => {
+    if (!form.observerIds || form.observerIds.length === 0) return teams;
+    const obsSet = new Set(form.observerIds.map(Number));
+    const matched = teams.filter((t) =>
+      t.defaultObservers && t.defaultObservers.some((o) => obsSet.has(Number(o.id)))
+    );
+    return matched.length > 0 ? matched : teams;
+  }, [teams, form.observerIds]);
   const [selectedIds, setSelectedIds] = useState([]);
 
   const [deleting, setDeleting] = useState(false);
@@ -1917,7 +1926,7 @@ export default function Tickets() {
                       <FormField label="Équipe assignée">
                         <SearchableSelect
                           ariaLabel="Équipe assignée"
-                          options={teams.map((t) => ({
+                          options={availableCreationTeams.map((t) => ({
                             value: String(t.id),
                             label: t.name,
                             subLabel: t.defaultObservers?.length ? `${t.defaultObservers.length} observateur(s) par défaut` : undefined,
@@ -1928,8 +1937,8 @@ export default function Tickets() {
                             const teamObserverIds = (selectedTeam?.defaultObservers || []).map((o) => o.id);
                             setForm({ ...form, teamId: val, assignedToId: '', observerIds: teamObserverIds });
                           }}
-                          disabled={teams.length === 0}
-                          placeholder={teams.length === 0 ? 'Aucune équipe disponible' : 'Rechercher une équipe...'}
+                          disabled={availableCreationTeams.length === 0}
+                          placeholder={availableCreationTeams.length === 0 ? 'Aucune équipe disponible' : 'Rechercher une équipe...'}
                           searchPlaceholder="Rechercher une équipe..." />
                       </FormField>
                     )}
@@ -1937,9 +1946,18 @@ export default function Tickets() {
                       <FormField label="Assigné à">
                         <RemoteUserMultiSelect
                           value={form.assigneeIds || (form.assignedToId ? [Number(form.assignedToId)] : [])}
-                          onChange={(vals) => setForm({ ...form, assigneeIds: vals, assignedToId: vals[0] ? String(vals[0]) : '' })}
-                          users={users}
-                          glpiUsers={glpiUsers}
+                          onChange={(vals, selectedUsers) => {
+                            const firstUser = selectedUsers && selectedUsers[0];
+                            const autoTeamId = firstUser ? (firstUser.teamId || firstUser.team?.id) : null;
+                            setForm((prev) => ({
+                              ...prev,
+                              assigneeIds: vals,
+                              assignedToId: vals[0] ? String(vals[0]) : '',
+                              ...(autoTeamId ? { teamId: String(autoTeamId) } : {}),
+                            }));
+                          }}
+                          teamId={form.teamId || null}
+                          onlyStaff={true}
                           placeholder="Rechercher des techniciens..."
                         />
                       </FormField>

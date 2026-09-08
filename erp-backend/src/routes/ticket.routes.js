@@ -77,11 +77,17 @@ async function allowTechnicianStatusOnly(req, res, next) {
     if (!isAssigned) {
       return res.status(403).json({ error: 'Vous ne pouvez modifier que les tickets qui vous sont assignés.' });
     }
+    req.isTechnicianStatusOnly = true;
   } catch (err) {
     return res.status(500).json({ error: 'Erreur lors de la vérification des droits.' });
   }
 
   next();
+}
+
+function requireTicketAssignOrTechnicianStatusOnly(req, res, next) {
+  if (req.isTechnicianStatusOnly) return next();
+  return requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN'])(req, res, next);
 }
 
 function buildTicketSearchCondition(rawTerm) {
@@ -1018,7 +1024,7 @@ router.post(
 );
 
 // Update ticket (status, priority, assignment, etc.)
-router.patch('/:id', allowTechnicianStatusOnly, requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+router.patch('/:id', allowTechnicianStatusOnly, requireTicketAssignOrTechnicianStatusOnly, async (req, res) => {
   const id = Number(req.params.id);
   // Whitelist : seuls ces champs acceptent la mise à jour (protection mass assignment)
   const allowed = ['title', 'content', 'status', 'priority', 'category', 'teamId', 'assignedToId', 'assigneeIds', 'requesterId', 'secondaryRequesterId', 'requesterIds', 'sourceName', 'sourceEmail', 'type', 'urgency', 'impact', 'source', 'externalId', 'dueDate', 'assetIds', 'observerIds', 'approvalStatus', 'isMajorIncident', 'impactedSites', 'closeSuggested', 'locationId'];

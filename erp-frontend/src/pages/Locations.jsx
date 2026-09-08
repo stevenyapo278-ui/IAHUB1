@@ -157,6 +157,18 @@ function LocationDetailModal({ open, onClose, locationId, locations, canManage, 
 
   useEffect(() => { if (open && locationId) { loadRequesters(); setSelectedEmail(''); setSelectedLabel(''); setSearchInput(''); } }, [open, locationId, loadRequesters]);
 
+  const dropdownContainerRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (dropdownContainerRef.current && !dropdownContainerRef.current.contains(e.target)) {
+        setShowDropdown(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   // Recherche de demandeurs potentiels
   useEffect(() => {
     if (!showDropdown) return;
@@ -178,13 +190,16 @@ function LocationDetailModal({ open, onClose, locationId, locations, canManage, 
   }
 
   async function handleAdd() {
-    if (!selectedEmail.trim()) return;
+    const targetEmail = (selectedEmail || searchInput).trim();
+    if (!targetEmail) return;
     setAdding(true);
     try {
-      await api.post('/locations/requesters', { email: selectedEmail.trim(), locationId: locationId });
-      toast.success(`« ${selectedLabel || selectedEmail} » associé au lieu`);
+      await api.post('/locations/requesters', { email: targetEmail, locationId: locationId });
+      toast.success(`« ${selectedLabel || targetEmail} » associé au lieu`);
       setSelectedEmail('');
       setSelectedLabel('');
+      setSearchInput('');
+      setShowDropdown(false);
       loadRequesters();
       onRefresh?.();
     } catch (err) {
@@ -264,7 +279,7 @@ function LocationDetailModal({ open, onClose, locationId, locations, canManage, 
 
             {/* Ajouter un demandeur */}
             {canManage && (
-              <div className="relative">
+              <div ref={dropdownContainerRef} className="relative">
                 <div className="flex gap-2">
                   <div className="relative flex-1">
                     <Users className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface/30" />
@@ -282,12 +297,13 @@ function LocationDetailModal({ open, onClose, locationId, locations, canManage, 
                         value={searchInput}
                         onChange={(e) => { setSearchInput(e.target.value); setShowDropdown(true); }}
                         onFocus={() => setShowDropdown(true)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAdd(); } }}
                         placeholder="Rechercher un utilisateur ou demandeur..."
                         className="w-full pl-9 pr-4 py-2 rounded-xl border border-outline-variant/60 bg-surface text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
                       />
                     )}
                   </div>
-                  <button onClick={handleAdd} disabled={adding || !selectedEmail.trim()}
+                  <button onClick={handleAdd} disabled={adding || (!selectedEmail.trim() && !searchInput.trim())}
                     className="px-3 py-2 rounded-xl bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 hover:bg-amber-600 cursor-pointer transition-colors disabled:opacity-50 shrink-0">
                     {adding ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <UserPlus className="w-3.5 h-3.5" />}
                     Associer
@@ -295,42 +311,39 @@ function LocationDetailModal({ open, onClose, locationId, locations, canManage, 
                 </div>
                 {/* Dropdown résultats */}
                 {showDropdown && !selectedEmail && (
-                  <>
-                    <div className="fixed inset-0 z-10" onClick={() => setShowDropdown(false)} />
-                    <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-surface-container-lowest border border-outline-variant/60 rounded-xl shadow-xl max-h-60 overflow-y-auto">
-                      {searching ? (
-                        <div className="p-3 text-center text-xs text-on-surface-variant">
-                          <RefreshCw className="w-4 h-4 animate-spin mx-auto mb-1" />
-                          Recherche...
-                        </div>
-                      ) : potentialRequesters.length === 0 ? (
-                        <div className="p-3 text-center text-xs text-on-surface-variant italic">
-                          Aucun résultat — tapez un email pour associer manuellement
-                        </div>
-                      ) : (
-                        potentialRequesters.map((r) => (
-                          <button key={r.email}
-                            onClick={() => handleSelectRequester(r)}
-                            className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-surface-container transition-colors text-left cursor-pointer">
-                            <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-[10px] font-bold text-white ${
-                              r.type === 'user' ? 'bg-sky-600' : 'bg-emerald-600'
-                            }`}>
-                              {r.type === 'user' ? 'U' : 'E'}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <p className="text-xs font-semibold text-on-surface truncate">{r.label}</p>
-                              <p className="text-[10px] text-on-surface-variant truncate">{r.email} · {r.subLabel}</p>
-                            </div>
-                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
-                              r.type === 'user' ? 'bg-sky-500/10 text-sky-400' : 'bg-emerald-500/10 text-emerald-400'
-                            }`}>
-                              {r.type === 'user' ? 'ERP' : 'Email'}
-                            </span>
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  </>
+                  <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-surface-container-lowest border border-outline-variant/60 rounded-xl shadow-xl max-h-60 overflow-y-auto">
+                    {searching ? (
+                      <div className="p-3 text-center text-xs text-on-surface-variant">
+                        <RefreshCw className="w-4 h-4 animate-spin mx-auto mb-1" />
+                        Recherche...
+                      </div>
+                    ) : potentialRequesters.length === 0 ? (
+                      <div className="p-3 text-center text-xs text-on-surface-variant italic">
+                        Aucun résultat — tapez un email pour associer manuellement
+                      </div>
+                    ) : (
+                      potentialRequesters.map((r) => (
+                        <button key={r.email}
+                          onClick={() => handleSelectRequester(r)}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-surface-container transition-colors text-left cursor-pointer">
+                          <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-[10px] font-bold text-white ${
+                            r.type === 'user' ? 'bg-sky-600' : 'bg-emerald-600'
+                          }`}>
+                            {r.type === 'user' ? 'U' : 'E'}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-semibold text-on-surface truncate">{r.label}</p>
+                            <p className="text-[10px] text-on-surface-variant truncate">{r.email} · {r.subLabel}</p>
+                          </div>
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                            r.type === 'user' ? 'bg-sky-500/10 text-sky-400' : 'bg-emerald-500/10 text-emerald-400'
+                          }`}>
+                            {r.type === 'user' ? 'ERP' : 'Email'}
+                          </span>
+                        </button>
+                      ))
+                    )}
+                  </div>
                 )}
               </div>
             )}
