@@ -39,10 +39,43 @@ async function approveTicket(id, { approvedById, approvedByEmail = 'HOTLINE', ap
 
   emitTicketUpdated(ticket, { approvalStatus: 'APPROVED' });
 
-  // Nettoyer tous les brouillons en attente sur ce ticket (évite d'avoir à les ré-approuver dans /email-drafts)
-  await prisma.aiEmailDraft.deleteMany({ where: { ticketId: id } }).catch(() => {});
+  // 1. Envoyer et valider automatiquement tout brouillon en attente associé à ce ticket dans /email-drafts?tab=drafts
+  const { sendEmail } = require('./emailSender');
+  try {
+    const pendingDrafts = await prisma.aiEmailDraft.findMany({ where: { ticketId: id, status: 'PENDING' } });
+    for (const draft of pendingDrafts) {
+      const displayId = draft.ticketId || id;
+      const resolvedContent = (draft.proposedContent || '').replaceAll('#EN_ATTENTE', `#${displayId}`);
+      const resolvedSubject = (draft.subject || '').replaceAll('#EN_ATTENTE', `#${displayId}`);
 
-  // Email au demandeur : son ticket a été approuvé
+      await sendEmail({
+        ticketId: draft.ticketId,
+        to: draft.recipientEmail,
+        cc: draft.ccRecipients,
+        subject: resolvedSubject,
+        bodyHtml: resolvedContent,
+        saveAsMessage: true,
+        inReplyToGraphMessageId: draft.inReplyToGraphMessageId,
+        conversationId: draft.outlookConversationId,
+      }).catch((err) => console.error(`[ticketApproval] Échec envoi brouillon #${draft.id}:`, err.message));
+
+      await prisma.aiEmailDraft.update({
+        where: { id: draft.id },
+        data: {
+          status: 'APPROVED',
+          proposedContent: resolvedContent,
+          subject: resolvedSubject,
+          reviewedById: approvedById || null,
+          reviewedAt: new Date(),
+          sentAt: new Date(),
+        },
+      }).catch(() => {});
+    }
+  } catch (err) {
+    console.error(`[ticketApproval] Traitement des brouillons du ticket ${id} échoué:`, err.message);
+  }
+
+  // 2. Email informatif au demandeur : son ticket a été approuvé avec toutes les infos du ticket
   try {
     const fullTicket = await prisma.ticket.findUnique({
       where: { id },
@@ -51,7 +84,9 @@ async function approveTicket(id, { approvedById, approvedByEmail = 'HOTLINE', ap
         assignedTo: { select: { fullName: true } },
       },
     });
-    if (fullTicket?.requester?.email) {
+    const recipientEmail = fullTicket?.requester?.email || existing.sourceEmail;
+    const recipientName = fullTicket?.requester?.fullName || existing.sourceName || '';
+    if (recipientEmail) {
       sendApprovalNotificationEmail({
         ticketId: fullTicket.id,
         ticketTitle: fullTicket.title,
@@ -59,8 +94,8 @@ async function approveTicket(id, { approvedById, approvedByEmail = 'HOTLINE', ap
         priority: fullTicket.priority,
         category: fullTicket.category,
         assignedToName: fullTicket.assignedTo?.fullName || null,
-        requesterEmail: fullTicket.requester.email,
-        requesterName: fullTicket.requester.fullName,
+        requesterEmail: recipientEmail,
+        requesterName: recipientName,
         content: fullTicket.content || null,
       }).catch((err) => console.error(`[ticketApproval] Échec email approbation (ticket ${id}):`, err.message));
     }

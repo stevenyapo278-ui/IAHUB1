@@ -20,9 +20,14 @@ function authenticate(req, res, next) {
     return res.status(401).json({ error: 'Token invalide ou expiré' });
   }
 
+  const userId = Number(payload?.sub);
+  if (!userId || Number.isNaN(userId)) {
+    return res.status(401).json({ error: 'Token invalide (identifiant incorrect)' });
+  }
+
   prisma.user
     .findUnique({
-      where: { id: payload.sub },
+      where: { id: userId },
       select: { id: true, email: true, role: true, teamId: true, isActive: true },
     })
     .then((user) => {
@@ -32,7 +37,10 @@ function authenticate(req, res, next) {
       req.user = { sub: user.id, email: user.email, role: user.role, teamId: user.teamId };
       next();
     })
-    .catch(() => res.status(500).json({ error: 'Erreur d’authentification' }));
+    .catch((err) => {
+      console.error('[auth middleware] Erreur d\'authentification DB:', err.message);
+      res.status(500).json({ error: 'Erreur d’authentification' });
+    });
 }
 
 function authorize(...roles) {
