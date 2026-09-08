@@ -2288,17 +2288,24 @@ export default function TicketDetail() {
 
               <div>
                 <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface mb-1">
-                  Demandeur principal
+                  Demandeurs
                 </label>
                 {canAssign ? (
-                  <RemoteUserSelect
-                    value={ticket.requesterId || ''}
-                    valueLabel={ticket.requester?.fullName || ticket.sourceName}
-                    disabled={savingField === 'requesterId'}
-                    hideEmail={true}
-                    onChange={(val) => updateField('requesterId', val ? Number(val) : null)}
-                    placeholder="Rechercher un demandeur..."
-                    searchPlaceholder="Rechercher par nom..."
+                  <RemoteUserMultiSelect
+                    value={ticket.requesterIds || (ticket.requesterId ? [ticket.requesterId] : [])}
+                    onChange={async (vals) => {
+                      try {
+                        setSavingField('requesterIds');
+                        await api.patch(`/tickets/${id}`, { requesterIds: vals });
+                        toast.success('Demandeurs mis à jour');
+                        load();
+                      } catch (err) {
+                        toast.error(err.response?.data?.error || 'Échec de la mise à jour');
+                      } finally {
+                        setSavingField(null);
+                      }
+                    }}
+                    placeholder="Rechercher des demandeurs..."
                   />
                 ) : (
                   <div className="w-full flex items-center gap-2 bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/15 rounded-xl px-3 py-2 text-xs font-semibold text-on-surface">
@@ -2311,36 +2318,6 @@ export default function TicketDetail() {
                       </>
                     ) : (
                       <span className="text-on-surface-variant">{ticket.sourceName || 'Non spécifié'}</span>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface mb-1">
-                  Second demandeur
-                </label>
-                {canAssign ? (
-                  <RemoteUserSelect
-                    value={ticket.secondaryRequesterId || ''}
-                    valueLabel={ticket.secondaryRequester?.fullName}
-                    disabled={savingField === 'secondaryRequesterId'}
-                    hideEmail={true}
-                    onChange={(val) => updateField('secondaryRequesterId', val ? Number(val) : null)}
-                    placeholder="Sélectionner un second demandeur..."
-                    searchPlaceholder="Rechercher par nom..."
-                  />
-                ) : (
-                  <div className="w-full flex items-center gap-2 bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/15 rounded-xl px-3 py-2 text-xs font-semibold text-on-surface">
-                    {ticket.secondaryRequester ? (
-                      <>
-                        <div className="w-5 h-5 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[9px] font-bold border border-primary/20">
-                          {initials(ticket.secondaryRequester.fullName)}
-                        </div>
-                        {ticket.secondaryRequester.fullName}
-                      </>
-                    ) : (
-                      <span className="text-on-surface-variant italic font-normal">Aucun</span>
                     )}
                   </div>
                 )}

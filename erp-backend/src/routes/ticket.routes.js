@@ -144,6 +144,7 @@ function buildTicketWhereClause(user, queryParams = {}) {
       OR: [
         { requesterId: user.sub },
         { secondaryRequesterId: user.sub },
+        { requesterIds: { has: user.sub } },
         { observers: { some: { id: user.sub } } },
       ],
     });
@@ -154,6 +155,7 @@ function buildTicketWhereClause(user, queryParams = {}) {
         { assignees: { some: { id: user.sub } } },
         { requesterId: user.sub },
         { secondaryRequesterId: user.sub },
+        { requesterIds: { has: user.sub } },
         { observers: { some: { id: user.sub } } },
       ],
     });
@@ -663,6 +665,7 @@ router.get('/:id', async (req, res) => {
 
   // Un demandeur ne consulte que ses propres tickets (404 = ne révèle pas l'existence des autres)
   if (isRequesterOnly(req.user) && ticket.requesterId !== req.user.sub && ticket.secondaryRequesterId !== req.user.sub &&
+      !(ticket.requesterIds || []).includes(req.user.sub) &&
       !ticket.observers?.some(o => o.id === req.user.sub)) {
     return res.status(404).json({ error: 'Ticket introuvable' });
   }
@@ -671,6 +674,7 @@ router.get('/:id', async (req, res) => {
   if (isTechnicianOnly(req.user) && ticket.assignedToId !== req.user.sub &&
       !ticket.assignees?.some(a => a.id === req.user.sub) &&
       ticket.requesterId !== req.user.sub && ticket.secondaryRequesterId !== req.user.sub &&
+      !(ticket.requesterIds || []).includes(req.user.sub) &&
       !ticket.observers?.some(o => o.id === req.user.sub)) {
     return res.status(404).json({ error: 'Ticket introuvable' });
   }
@@ -733,6 +737,18 @@ router.post(
       title, content, priority, category, teamId, assignedToId, requesterId, secondaryRequesterId, requiresApproval,
       type, urgency, impact, source, externalId, status, openedAt, locationId, dueDate,
     } = req.body;
+
+    // requesterIds (tableau de demandeurs) — tolérance JSON/multipart
+    let requesterIds = [];
+    if (req.body.requesterIds) {
+      try {
+        requesterIds = Array.isArray(req.body.requesterIds) ? req.body.requesterIds.map(Number) : JSON.parse(req.body.requesterIds).map(Number);
+      } catch {
+        requesterIds = [];
+      }
+    }
+    // Le premier requesterId est toujours le demandeur principal
+    const finalRequesterIdFromIds = requesterIds.length > 0 ? requesterIds[0] : null;
 
     // observerIds peut arriver en JSON (multipart) ou en tableau (JSON direct)
     let observerIds = [];
@@ -839,6 +855,7 @@ router.post(
         assignedToId: finalAssignedToId,
         requesterId: finalRequesterId,
         secondaryRequesterId: secondaryRequesterId ? Number(secondaryRequesterId) : null,
+        requesterIds: requesterIds.length > 0 ? requesterIds : (finalRequesterId ? [finalRequesterId] : []),
         status: finalStatus,
         ...(finalStatus === 'SOLVED' ? { solvedAt: new Date() } : {}),
         ...(finalStatus === 'CLOSED' ? { closedAt: new Date() } : {}),
@@ -1004,8 +1021,8 @@ router.post(
 router.patch('/:id', allowTechnicianStatusOnly, requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const id = Number(req.params.id);
   // Whitelist : seuls ces champs acceptent la mise à jour (protection mass assignment)
-  const allowed = ['title', 'content', 'status', 'priority', 'category', 'teamId', 'assignedToId', 'assigneeIds', 'requesterId', 'secondaryRequesterId', 'sourceName', 'sourceEmail', 'type', 'urgency', 'impact', 'source', 'externalId', 'dueDate', 'assetIds', 'observerIds', 'approvalStatus', 'isMajorIncident', 'impactedSites', 'closeSuggested', 'locationId'];
-  const { title, content, status, priority, category, teamId, assignedToId, assigneeIds, requesterId, secondaryRequesterId, sourceName, sourceEmail, type, urgency, impact, source, externalId, dueDate, assetIds, locationId } = req.body;
+  const allowed = ['title', 'content', 'status', 'priority', 'category', 'teamId', 'assignedToId', 'assigneeIds', 'requesterId', 'secondaryRequesterId', 'requesterIds', 'sourceName', 'sourceEmail', 'type', 'urgency', 'impact', 'source', 'externalId', 'dueDate', 'assetIds', 'observerIds', 'approvalStatus', 'isMajorIncident', 'impactedSites', 'closeSuggested', 'locationId'];
+  const { title, content, status, priority, category, teamId, assignedToId, assigneeIds, requesterId, secondaryRequesterId, requesterIds, sourceName, sourceEmail, type, urgency, impact, source, externalId, dueDate, assetIds, locationId } = req.body;
 
   // Rejecter les champs non autorisés
   for (const key of Object.keys(req.body)) {
@@ -1053,6 +1070,20 @@ router.patch('/:id', allowTechnicianStatusOnly, requirePermission('tickets.assig
   }
   if (secondaryRequesterId !== undefined) {
     data.secondaryRequesterId = secondaryRequesterId ? Number(secondaryRequesterId) : null;
+  }
+  if (requesterIds !== undefined) {
+    const ids = Array.isArray(requesterIds) ? requesterIds.map(Number) : [];
+    data.requesterIds = ids;
+    // Sync secondaryRequesterId from requesterIds for backward compat
+    if (ids.length > 1) {
+      data.secondaryRequesterId = ids[1];
+    } else if (ids.length <= 1) {
+      data.secondaryRequesterId = null;
+    }
+    // Sync requesterId from first entry
+    if (ids.length > 0) {
+      data.requesterId = ids[0];
+    }
   }
   if (sourceName !== undefined) data.sourceName = sourceName;
   if (sourceEmail !== undefined) data.sourceEmail = sourceEmail;

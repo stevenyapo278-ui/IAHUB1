@@ -57,6 +57,18 @@ if [ "$COL_SR" != "1" ] || [ "$COL_LOC" != "1" ] || [ "$COL_EFR" != "1" ]; then
   echo "Colonnes Ticket/SystemSettings ajoutées avec succès."
 fi
 
+# Colonne requesterIds (tableau de demandeurs)
+COL_RIDS=$(PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -t -A -c "SELECT 1 FROM information_schema.columns WHERE table_name='Ticket' AND column_name='requesterIds'" 2>/dev/null || true)
+if [ "$COL_RIDS" != "1" ]; then
+  echo "Colonne Ticket.requesterIds manquante — application directe du SQL..."
+  set +e
+  PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -c "ALTER TABLE \"Ticket\" ADD COLUMN IF NOT EXISTS \"requesterIds\" INTEGER[] DEFAULT ARRAY[]::INTEGER[];"
+  # Backfill depuis requesterId + secondaryRequesterId
+  PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -c "UPDATE \"Ticket\" SET \"requesterIds\" = (CASE WHEN \"requesterId\" IS NOT NULL AND \"secondaryRequesterId\" IS NOT NULL THEN ARRAY[\"requesterId\", \"secondaryRequesterId\"] WHEN \"requesterId\" IS NOT NULL THEN ARRAY[\"requesterId\"] ELSE ARRAY[]::INTEGER[] END) WHERE \"requesterId\" IS NOT NULL OR \"secondaryRequesterId\" IS NOT NULL;"
+  set -e
+  echo "Colonne Ticket.requesterIds ajoutée avec succès."
+fi
+
 echo "Migration de la base de données..."
 npx prisma migrate deploy || echo "⚠️  migrate deploy a échoué (DB drift ou migration manquante), on continue avec le schéma existant"
 

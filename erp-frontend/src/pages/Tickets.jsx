@@ -90,6 +90,7 @@ const EMPTY_FORM = {  title: '',
   assigneeIds: [],
   requesterId: '',
   secondaryRequesterId: '',
+  requesterIds: [],
   observerIds: [],
   assetIds: [],
   requiresApproval: false,
@@ -260,15 +261,22 @@ function AssigneeRenderer({ data }) {
 function RequesterRenderer({ data }) {
   if (!data) return null;
   const reqName = data.requester?.fullName || data.sourceName || data.sourceEmail;
-  const secReqName = data.secondaryRequester?.fullName;
-  if (!reqName && !secReqName) return <span className="text-sm text-muted-foreground/60 italic">—</span>;
+  // Afficher les demandeurs depuis requesterIds si disponible, sinon fallback sur secondaryRequester
+  const allRequesterIds = data.requesterIds || [];
+  const secondaryFromIds = allRequesterIds.length > 1;
+  if (!reqName && !secondaryFromIds && !data.secondaryRequester?.fullName) return <span className="text-sm text-muted-foreground/60 italic">—</span>;
   return (
     <div className="flex h-full items-center gap-2 font-medium text-foreground truncate">
       <Avatar user={data.requester} name={reqName} colorClass="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20" />
       <span className="text-sm truncate">{reqName}</span>
-      {secReqName && (
-        <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold truncate" title={`2nd demandeur: ${secReqName}`}>
-          + {secReqName}
+      {secondaryFromIds && (
+        <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold truncate" title={`${allRequesterIds.length - 1} autre(s) demandeur(s)`}>
+          + {allRequesterIds.length - 1}
+        </span>
+      )}
+      {!secondaryFromIds && data.secondaryRequester?.fullName && (
+        <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold truncate" title={`2nd demandeur: ${data.secondaryRequester.fullName}`}>
+          + {data.secondaryRequester.fullName}
         </span>
       )}
     </div>
@@ -1183,6 +1191,7 @@ export default function Tickets() {
         if (key === 'assigneeIds') { if (value && value.length > 0) payload.append('assigneeIds', JSON.stringify(value)); return; }
         if (key === 'observerIds') { if (value.length > 0) payload.append('observerIds', JSON.stringify(value)); return; }
         if (key === 'assetIds') { if (value.length > 0) payload.append('assetIds', JSON.stringify(value)); return; }
+        if (key === 'requesterIds') { if (value && value.length > 0) payload.append('requesterIds', JSON.stringify(value)); return; }
         if (value !== '' && value !== undefined && value !== null) payload.append(key, value);
       });
 
@@ -1937,16 +1946,14 @@ export default function Tickets() {
                     )}
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <FormField label="Demandeur principal">
-                      <RemoteUserSelect value={form.requesterId} onChange={(val) => setForm({ ...form, requesterId: val })}
-                        glpiUsers={glpiUsers} hideEmail={true} placeholder="Demandeur principal..." />
-                    </FormField>
-                    <FormField label="Second demandeur (optionnel)">
-                      <RemoteUserSelect value={form.secondaryRequesterId} onChange={(val) => setForm({ ...form, secondaryRequesterId: val })}
-                        glpiUsers={glpiUsers} hideEmail={true} placeholder="Second demandeur..." />
-                    </FormField>
-                  </div>
+                  <FormField label="Demandeurs">
+                    <RemoteUserMultiSelect
+                      value={form.requesterIds || []}
+                      onChange={(vals) => setForm({ ...form, requesterIds: vals, requesterId: vals[0] ? String(vals[0]) : '', secondaryRequesterId: vals[1] ? String(vals[1]) : '' })}
+                      glpiUsers={glpiUsers}
+                      placeholder="Rechercher des demandeurs..."
+                    />
+                  </FormField>
 
                   <FormField label="Observateurs">
                     <RemoteUserMultiSelect value={form.observerIds} onChange={(vals) => setForm({ ...form, observerIds: vals })}

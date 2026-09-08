@@ -338,6 +338,8 @@ model Ticket {
   secondaryRequester   User? @relation("TicketSecondaryRequester", fields: [secondaryRequesterId], references: [id])
   secondaryRequesterId Int?
 
+  requesterIds Int[] @default([]) // tous les demandeurs (le premier = requesterId pour rétrocompatibilité)
+
   assignedTo   User? @relation("TicketAssignee", fields: [assignedToId], references: [id])
   assignedToId Int?
 
