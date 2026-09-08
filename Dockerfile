@@ -55,8 +55,8 @@ RUN chmod +x docker-entrypoint.sh
 # Frontend dist depuis le stage 1
 COPY --from=build-frontend /app/erp-frontend/dist /app/erp-frontend/dist
 
-# Uploads directory
-RUN mkdir -p /app/erp-backend/src/uploads/avatar \
+# Uploads directory — process.cwd() = /app/erp-backend, Docker volume monté dessus
+RUN mkdir -p /app/erp-backend/uploads/avatar \
     && chown -R node:node /app
 
 USER node
