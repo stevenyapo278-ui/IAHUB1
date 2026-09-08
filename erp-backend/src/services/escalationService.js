@@ -49,7 +49,12 @@ async function escalateTicket(ticketId, {
   if (targetTeamId != null && targetTeamId !== '' && Number(targetTeamId) !== ticket.team?.id) {
     targetTeam = await prisma.team.findUnique({
       where: { id: Number(targetTeamId) },
-      select: { id: true, name: true, groupEmail: true },
+      select: {
+        id: true, name: true, groupEmail: true,
+        // Observateurs par défaut de l'équipe cible — ils suivent le ticket lors du
+        // transfert (même convention que le changement d'équipe manuel dans l'interface).
+        defaultObservers: { select: { id: true } },
+      },
     });
     if (!targetTeam) throw new Error('Équipe cible introuvable');
   }
@@ -75,10 +80,20 @@ async function escalateTicket(ticketId, {
   if (assignedToId !== undefined) {
     // assignedToId explicite (valeur ou null) : on applique ; sinon on ne touche pas à l'assignation.
     data.assignedToId = targetTechnician ? targetTechnician.id : null;
+    // Synchroniser la relation many-to-many assignees : l'interface « Attribué à » affiche
+    // assignees en priorité — sans cette synchro, l'ancien technicien restait affiché malgré
+    // le changement d'assignedToId (escalade « ne changeait pas le technicien »).
+    data.assignees = targetTechnician ? { set: [{ id: targetTechnician.id }] } : { set: [] };
   } else if (teamChanged) {
     // Transfert d'équipe sans technicien explicite : l'ancien technicien n'a plus la main —
     // le ticket retourne dans le pool de l'équipe cible (auto-assignation ou prise en charge manuelle).
     data.assignedToId = null;
+    data.assignees = { set: [] };
+  }
+  // Transfert d'équipe : les observateurs par défaut de l'équipe cible suivent le ticket
+  // (remplacement complet — même convention que le changement d'équipe manuel dans l'interface).
+  if (teamChanged && targetTeam && Array.isArray(targetTeam.defaultObservers) && targetTeam.defaultObservers.length > 0) {
+    data.observers = { set: targetTeam.defaultObservers.map((o) => ({ id: o.id })) };
   }
   // L'escalade reste marquée sur le ticket (historique/audit) mais ne « monte » plus de niveau :
   // le compteur suit uniquement le nombre de transferts successifs.

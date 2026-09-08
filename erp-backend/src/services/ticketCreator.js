@@ -1,5 +1,6 @@
 const prisma = require('../prismaClient');
 const { autoAssignTechnicianWithAI } = require('./ticketAutoAssign');
+const { notifyNewPendingTicket } = require('./approvalReminderScheduler');
 const { applySla } = require('./slaService');
 const { scheduleEscalation } = require('./escalationService');
 const { formatTicketTitle } = require('../utils/ticketTitle');
@@ -76,6 +77,15 @@ async function createTicketFromEmail({ subject, body, from, fromName, analysis, 
     }
   } catch (err) {
     console.error('[ticketCreator] Échec rattachement observateurs équipe:', err.message);
+  }
+
+  // Notification IMMÉDIATE à la Hotline quand le ticket est créé en attente d'approbation (PENDING).
+  // Uniquement hors transaction (tx === prisma) : dans le pipeline email, la notification est
+  // déclenchée par emailPipeline.js APRÈS le commit de la transaction — on évite ainsi le doublon.
+  if (tx === prisma && erpTicket.approvalStatus === 'PENDING') {
+    notifyNewPendingTicket(erpTicket.id).catch((err) =>
+      console.error(`[ticketCreator] Échec notification hotline ticket ${erpTicket.id}:`, err.message)
+    );
   }
 
   return { erpTicketId: erpTicket.id };

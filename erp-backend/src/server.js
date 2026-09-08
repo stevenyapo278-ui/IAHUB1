@@ -9,6 +9,7 @@ const { runEmailPipeline } = require('./services/emailPipeline');
 const { getSystemSettings } = require('./services/systemSettings');
 const { runDraftReminderScheduler } = require('./services/draftReminderScheduler');
 const { runReminderScheduler } = require('./services/reminderScheduler');
+const { processApprovalReminders } = require('./services/approvalReminderScheduler');
 const { checkAndSendDailySummary } = require('./services/dailySummary');
 const { runSolvedAutoCloseScheduler } = require('./services/solvedAutoCloseScheduler');
 const { withHealthTracking } = require('./services/schedulerHealth');
@@ -39,6 +40,7 @@ if (process.env.CORS_ORIGIN === '*') {
 const FALLBACK_CHECK_DELAY_MS = 60 * 1000; // si l'intervalle configuré est 0 (désactivé), on revérifie le réglage chaque minute
 const DRAFT_REMINDER_CHECK_INTERVAL_MS = 5 * 60 * 1000; // vérifie toutes les 5 min quels brouillons dépassent le délai configuré (draftReminderDelayMinutes)
 const TICKET_REMINDER_CHECK_INTERVAL_MS = 60 * 60 * 1000; // vérifie toutes les heures quels tickets WAITING_FOR_USER dépassent les délais de ReminderConfig (en jours, donc pas besoin d'une fréquence plus fine)
+const APPROVAL_REMINDER_CHECK_INTERVAL_MS = 5 * 60 * 1000; // vérifie toutes les 5 min quels tickets PENDING dépassent le délai d'approbation (approvalReminderMinutes, défaut 30 min)
 const DAILY_SUMMARY_CHECK_INTERVAL_MS = 60 * 1000; // vérifie chaque minute si l'heure configurée (dailySummaryTime, ex "18:00") est atteinte
 const SOLVED_AUTO_CLOSE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // vérifie chaque heure quels tickets SOLVED dépassent le délai de 3 jours
 
@@ -210,6 +212,14 @@ trackedTicketReminder().catch((err) => logger.error('Erreur relance tickets en a
 setInterval(() => {
   trackedTicketReminder().catch((err) => logger.error('Erreur relance tickets en attente:', { error: err.message, stack: err.stack }));
 }, TICKET_REMINDER_CHECK_INTERVAL_MS);
+
+// Relance Hotline pour tickets en attente d'approbation (PENDING). La 1re notification part
+// IMMÉDIATEMENT à la création du ticket (emailPipeline → notifyNewPendingTicket) ; ce scheduler
+// n'envoie que la relance suivante après approvalReminderMinutes (défaut 30 min, réglage avancé).
+const trackedApprovalReminder = withHealthTracking('relance approbation Hotline', processApprovalReminders);
+setInterval(() => {
+  trackedApprovalReminder().catch((err) => logger.error('Erreur relance approbation Hotline:', { error: err.message, stack: err.stack }));
+}, APPROVAL_REMINDER_CHECK_INTERVAL_MS);
 
 // Récapitulatif quotidien des tickets ouverts (Paramètres > Automatisation > Récapitulatif
 // quotidien) — vérifie chaque minute si l'heure configurée est atteinte, ne déclenche l'envoi

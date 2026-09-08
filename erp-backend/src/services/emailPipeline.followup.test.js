@@ -55,6 +55,7 @@ jest.mock('./followupReplyGenerator', () => ({ generateFollowupReply: (...args) 
 jest.mock('./emailSender', () => ({
   buildAcknowledgementHtml: jest.fn(),
   buildKnownIncidentNotificationHtml: jest.fn(),
+  buildEmailLayout: ({ children }) => children,
   sendEmail: jest.fn(),
   getEmailSignature: jest.fn().mockResolvedValue('<div>Signature</div>'),
 }));

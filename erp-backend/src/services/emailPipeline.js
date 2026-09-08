@@ -8,7 +8,8 @@ const { findSimilarOpenTicket, attachSiteToTicket, saveTicketEmbedding } = requi
 const { analyzeIntent, applyIntentActions } = require('./intentAnalyzer');
 const { decideFollowupAction } = require('./followupEscalation');
 const { generateFollowupReply } = require('./followupReplyGenerator');
-const { buildAcknowledgementHtml, buildKnownIncidentNotificationHtml, sendAcknowledgement, sendEmail, getEmailSignature } = require('./emailSender');
+const { buildAcknowledgementHtml, buildKnownIncidentNotificationHtml, buildEmailLayout, sendAcknowledgement, sendEmail, getEmailSignature } = require('./emailSender');
+const { notifyNewPendingTicket } = require('./approvalReminderScheduler');
 const { processIncomingAttachments } = require('./emailAttachmentProcessor');
 const { stripSignature } = require('./signatureStripper');
 const { logEvent } = require('./ticketEvent');
@@ -350,7 +351,15 @@ async function processMessage(message, account) {
             const nextExchangeTurn = (ticketForFollowup?.aiExchangeCount || 0) + 1;
             await prisma.ticket.update({ where: { id: match.ticketId }, data: { aiExchangeCount: nextExchangeTurn } });
 
-            const followupHtml = `${replyResult.replyHtml}${await getEmailSignature()}`;
+            // Brouillon enveloppé dans le gabarit email commun (bandeau + signature) pour un rendu
+            // homogène avec les autres emails — le placeholder #EN_ATTENTE est remplacé par le vrai
+            // numéro de ticket à l'envoi (voir ticketApproval.js / draftapproval.routes.js).
+            const followupHtml = buildEmailLayout({
+              headerTitle: 'Réponse à votre demande',
+              headerSubtitle: 'Ticket #EN_ATTENTE',
+              children: replyResult.replyHtml,
+              signature: await getEmailSignature(),
+            });
             await prisma.aiEmailDraft.create({
               data: {
                 ticketId: match.ticketId,
@@ -761,6 +770,13 @@ async function processMessage(message, account) {
       toName: fromName,
       originalSubject: subject,
     }).catch((e) => console.error(`[emailPipeline] Échec envoi accusé de réception vers ${fromEmail}:`, e.message));
+
+    // Notification IMMÉDIATE à la Hotline : le ticket est en attente d'approbation (PENDING) —
+    // le mail part en même temps que la création, plus besoin d'attendre les 30/60 min du scheduler.
+    // Best-effort : un échec ne doit jamais bloquer le pipeline.
+    notifyNewPendingTicket(erpTicketId).catch((e) =>
+      console.error(`[emailPipeline] Échec notification immédiate hotline ticket ${erpTicketId}:`, e.message)
+    );
 
     const updated = await prisma.incomingEmail.update({
       where: { id: incoming.id },

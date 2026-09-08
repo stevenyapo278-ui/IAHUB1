@@ -115,7 +115,7 @@ describe('escalateTicket — escalade = transfert à une équipe responsable', (
     expect(groupMail[0].targetTeamName).toBe('Sécurité');
   });
 
-  it('avec technicien cible : l\'assigne et vérifie son appartenance à l\'équipe cible', async () => {
+  it('avec technicien cible : l\'assigne et synchronise la liste many-to-many assignees', async () => {
     mockTicket(ticket);
     prisma.team.findUnique = jest.fn(async () => ({ id: 9, name: 'Sécurité', groupEmail: null }));
     prisma.user.findFirst = jest.fn(async () => ({ id: 55, email: 'tech9@prosuma.ci', fullName: 'Tech 9', teamId: 9 }));
@@ -124,9 +124,48 @@ describe('escalateTicket — escalade = transfert à une équipe responsable', (
 
     expect(updated.teamId).toBe(9);
     expect(updated.assignedToId).toBe(55);
+    // L'interface « Attribué à » affiche assignees en priorité — sans cette synchro,
+    // l'ancien technicien restait affiché malgré le changement d'assignedToId.
+    expect(updated.assignees).toEqual({ set: [{ id: 55 }] });
     expect(prisma.user.findFirst).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ id: 55, role: 'TECHNICIAN', isActive: true }),
     }));
+  });
+
+  it('désassigne (assignedToId + assignees vidés) lors d\'un transfert d\'équipe sans technicien explicite', async () => {
+    mockTicket({ ...ticket, assignedTo: { id: 5, email: 'tech@prosuma.ci', fullName: 'Tech' } });
+    prisma.team.findUnique = jest.fn(async () => ({ id: 9, name: 'Sécurité', groupEmail: null }));
+
+    const updated = await escalateTicket(10, { targetTeamId: 9 });
+
+    expect(updated.teamId).toBe(9);
+    expect(updated.assignedToId).toBeNull();
+    expect(updated.assignees).toEqual({ set: [] });
+  });
+
+  it('attache les observateurs par défaut de l\'équipe cible lors du transfert d\'équipe', async () => {
+    mockTicket(ticket);
+    prisma.team.findUnique = jest.fn(async () => ({
+      id: 9, name: 'Sécurité', groupEmail: null,
+      defaultObservers: [{ id: 71 }, { id: 72 }],
+    }));
+
+    const updated = await escalateTicket(10, { targetTeamId: 9 });
+
+    expect(updated.teamId).toBe(9);
+    expect(updated.observers).toEqual({ set: [{ id: 71 }, { id: 72 }] });
+  });
+
+  it('ne touche pas aux observateurs quand l\'équipe cible n\'a pas d\'observateurs par défaut', async () => {
+    mockTicket({ ...ticket, observers: [{ id: 71 }] });
+    prisma.team.findUnique = jest.fn(async () => ({ id: 9, name: 'Sécurité', groupEmail: null, defaultObservers: [] }));
+    prisma.ticket.update = jest.fn(async ({ data }) => ({ ...ticket, ...data }));
+
+    await escalateTicket(10, { targetTeamId: 9 });
+
+    const { data } = prisma.ticket.update.mock.calls[0][0];
+    expect(data.teamId).toBe(9);
+    expect(data.observers).toBeUndefined();
   });
 
   it('refuse un technicien qui n\'a pas le rôle TECHNICIAN ou est inactif', async () => {

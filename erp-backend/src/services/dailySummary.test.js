@@ -2,7 +2,11 @@ jest.mock('../prismaClient', () => ({
   ticket: { findMany: jest.fn() },
   systemSettings: { update: jest.fn() },
 }));
-jest.mock('./emailSender', () => ({ sendEmail: jest.fn(), getEmailSignature: jest.fn().mockResolvedValue('<p>Signature</p>') }));
+jest.mock('./emailSender', () => ({
+  sendEmail: jest.fn(),
+  getEmailSignature: jest.fn().mockResolvedValue('<p>Signature</p>'),
+  buildEmailLayout: ({ children, signature }) => `${children}\n${signature}`,
+}));
 jest.mock('./systemSettings', () => ({ getSystemSettings: jest.fn() }));
 // Aucun fournisseur IA actif par défaut dans ces tests : generateInsight doit alors retourner null
 // sans planter (dégradation silencieuse), voir les tests dédiés ci-dessous qui le surchargent.
@@ -11,6 +15,7 @@ jest.mock('./mailAnalyzer', () => ({
   getActiveProviders: jest.fn().mockResolvedValue([]),
   callProvider: jest.fn(),
   callProviderWithFallback: jest.fn(),
+  callAiWithRetry: (fn) => fn(),
 }));
 jest.mock('./promptTemplates', () => ({ getPrompt: jest.fn() }));
 
