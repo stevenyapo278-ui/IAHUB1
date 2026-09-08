@@ -510,6 +510,18 @@ router.post(
         }
 
         emitTicketUpdated(ticket, { status, priority, assignedToId });
+        if (data.assignedToId && String(before?.assignedToId) !== String(data.assignedToId)) {
+          emitTicketAssigned(ticket.id, ticket.title, Number(data.assignedToId), 'manual');
+          prisma.user.findUnique({ where: { id: Number(data.assignedToId) }, select: { email: true, fullName: true } })
+            .then((tech) => {
+              if (tech?.email) {
+                sendAssignmentNotificationEmail({
+                  ticketId: ticket.id, ticketTitle: ticket.title, priority: ticket.priority,
+                  technicianEmail: tech.email, technicianName: tech.fullName, category: ticket.category,
+                }).catch((e) => console.error('[ticket.routes] Échec notification assignation bulk:', e.message));
+              }
+            }).catch(() => {});
+        }
         if (data.status) notifyRequesterOnStatusChange(id, data.status);
         updatedCount += 1;
       } catch (err) {
@@ -1430,6 +1442,16 @@ router.patch('/:id/reassign', forbidTechnicianTicketEdits, requirePermission('ti
 
     emitTicketAssigned(id, ticket.title, Number(assignedToId), 'manual');
 
+    prisma.user.findUnique({ where: { id: Number(assignedToId) }, select: { email: true, fullName: true } })
+      .then((tech) => {
+        if (tech?.email) {
+          sendAssignmentNotificationEmail({
+            ticketId: id, ticketTitle: ticket.title, priority: ticket.priority,
+            technicianEmail: tech.email, technicianName: tech.fullName, category: ticket.category,
+          }).catch((e) => console.error('[ticket.routes] Échec notification réassignation:', e.message));
+        }
+      }).catch(() => {});
+
     return res.json(ticket);
   } catch (err) {
     return res.status(500).json({ error: err.message });
@@ -1788,6 +1810,20 @@ router.post('/:id/children', forbidTechnicianTicketEdits, requirePermission('tic
   await logEvent(child.id, 'LINKED', req.user.email || 'SYSTEM', { targetTicketId: parentId, linkType: 'CHILD' });
 
   emitTicketCreated(child);
+
+  if (child.assignedToId) {
+    emitTicketAssigned(child.id, child.title, child.assignedToId, 'manual');
+    prisma.user.findUnique({ where: { id: child.assignedToId }, select: { email: true, fullName: true } })
+      .then((tech) => {
+        if (tech?.email) {
+          sendAssignmentNotificationEmail({
+            ticketId: child.id, ticketTitle: child.title, priority: child.priority,
+            technicianEmail: tech.email, technicianName: tech.fullName, category: child.category,
+          }).catch((e) => console.error('[ticket.routes] Échec notification assignation enfant:', e.message));
+        }
+      }).catch(() => {});
+  }
+
   return res.status(201).json(child);
 });
 

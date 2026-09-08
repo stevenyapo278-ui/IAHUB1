@@ -1,7 +1,7 @@
 const prisma = require('../prismaClient');
 const { getActiveProviders, callProviderWithFallback, callAiWithRetry } = require('./mailAnalyzer');
-const { emitTicketCreated } = require('../utils/socket');
-const { sendTicketCreationNotification } = require('./emailSender');
+const { emitTicketCreated, emitTicketAssigned } = require('../utils/socket');
+const { sendTicketCreationNotification, sendAssignmentNotificationEmail } = require('./emailSender');
 const analyticsTools = require('./analyticsTools');
 
 const SYSTEM_PROMPT = `Tu es l'Assistant IA intelligent et analyste Helpdesk IT de Prosuma (IA Hub). Tu réponds en français, de manière chaleureuse, claire, concise, précise et professionnelle.
@@ -456,7 +456,16 @@ async function assignTicket(ticketId, personName) {
     data: { assignedToId: tech.id, status: ticket.status === 'NEW' ? 'OPEN' : ticket.status },
   });
 
-  emitTicketCreated(updated);
+  emitTicketAssigned(updated.id, updated.title, tech.id, 'manual');
+  prisma.user.findUnique({ where: { id: tech.id }, select: { email: true, fullName: true } })
+    .then((fullTech) => {
+      if (fullTech?.email) {
+        sendAssignmentNotificationEmail({
+          ticketId: updated.id, ticketTitle: updated.title, priority: updated.priority,
+          technicianEmail: fullTech.email, technicianName: fullTech.fullName, category: updated.category,
+        }).catch(() => {});
+      }
+    }).catch(() => {});
   return { ticket: updated, assignedTo: tech.fullName, oldAssignedTo: ticket.assignedToId };
 }
 

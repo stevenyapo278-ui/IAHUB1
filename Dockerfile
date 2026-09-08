@@ -56,7 +56,7 @@ RUN chmod +x docker-entrypoint.sh
 COPY --from=build-frontend /app/erp-frontend/dist /app/erp-frontend/dist
 
 # Uploads directory
-RUN mkdir -p /app/erp-backend/uploads \
+RUN mkdir -p /app/erp-backend/src/uploads/avatar \
     && chown -R node:node /app
 
 USER node

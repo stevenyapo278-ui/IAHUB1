@@ -1,7 +1,5 @@
 const prisma = require('../prismaClient');
 const { autoAssignTechnicianWithAI } = require('./ticketAutoAssign');
-const { sendAssignmentNotificationEmail } = require('./emailSender');
-const { getSystemSettings } = require('./systemSettings');
 const { applySla } = require('./slaService');
 const { scheduleEscalation } = require('./escalationService');
 const { formatTicketTitle } = require('../utils/ticketTitle');
@@ -49,26 +47,10 @@ async function createTicketFromEmail({ subject, body, from, fromName, analysis, 
   }
 
   // Assigne automatiquement le meilleur technicien
+  // (notifyAssignedTechnician dans autoAssignTechnicianWithAI envoie déjà l'email)
   try {
     const skillHint = analysis.suggestedSkill || analysis.category;
-    const assigned = await autoAssignTechnicianWithAI(erpTicket.id, analysis.category, skillHint);
-
-    if (assigned) {
-      const fullUser = await tx.user.findUnique({ where: { id: assigned.id } });
-      if (fullUser?.email) {
-        const settings = await getSystemSettings();
-        if (settings.emailAssignmentEnabled !== false) {
-          await sendAssignmentNotificationEmail({
-            ticketId: erpTicket.id,
-            ticketTitle: erpTicket.title,
-            priority: erpTicket.priority,
-            technicianEmail: fullUser.email,
-            technicianName: fullUser.fullName,
-            category: analysis.category,
-          }).catch((err) => console.error('[ticketCreator] Échec envoi notification assignation:', err.message));
-        }
-      }
-    }
+    await autoAssignTechnicianWithAI(erpTicket.id, analysis.category, skillHint);
   } catch (err) {
     console.error('[ticketCreator] Auto-assignation échouée:', err.message);
   }

@@ -75,7 +75,7 @@ services:
       LDAP_USER_FILTER: ${LDAP_USER_FILTER:-(&(objectClass=user)(objectCategory=person))}
       FRONTEND_DIST_PATH: /app/erp-frontend/dist
     volumes:
-      - app_uploads:/app/erp-backend/uploads
+      - app_uploads:/app/erp-backend/src/uploads
     ports:
       - "${PORT:-4000}:4000"
     networks:
