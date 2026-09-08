@@ -119,12 +119,14 @@ async function autoAssignTechnician(ticketId, category) {
   const { team, technician } = await findBestTechnician(category, null);
   if (!technician) return null;
 
+  const ticket = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { status: true } });
   await prisma.ticket.update({
     where: { id: ticketId },
     data: {
       assignedToId: technician.id,
       assignees: { set: [{ id: technician.id }] },
       teamId: team?.id || null,
+      ...(ticket?.status === 'NEW' ? { status: 'OPEN' } : {}),
     },
   });
 
@@ -138,12 +140,14 @@ async function autoAssignTechnicianWithAI(ticketId, category, aiCategory) {
   const { team, technician, method } = await findBestTechnician(category, aiCategory);
   if (!technician) return null;
 
+  const ticket = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { status: true } });
   await prisma.ticket.update({
     where: { id: ticketId },
     data: {
       assignedToId: technician.id,
       assignees: { set: [{ id: technician.id }] },
       teamId: team?.id || null,
+      ...(ticket?.status === 'NEW' ? { status: 'OPEN' } : {}),
     },
   });
 

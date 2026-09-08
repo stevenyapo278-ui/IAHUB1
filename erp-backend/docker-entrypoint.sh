@@ -38,6 +38,24 @@ else
   echo "Colonne loginThemeMode déjà présente — rien à faire."
 fi
 
+# Colonnes secondaryRequester / location / emailFailureNotificationRecipients
+# (contourne le drift DB — ces colonnes peuvent manquer si les migrations n'ont pas été appliquées)
+COL_SR=$(PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -t -A -c "SELECT 1 FROM information_schema.columns WHERE table_name='Ticket' AND column_name='secondaryRequesterId'" 2>/dev/null || true)
+COL_LOC=$(PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -t -A -c "SELECT 1 FROM information_schema.columns WHERE table_name='Ticket' AND column_name='locationId'" 2>/dev/null || true)
+COL_EFR=$(PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -t -A -c "SELECT 1 FROM information_schema.columns WHERE table_name='SystemSettings' AND column_name='emailFailureNotificationRecipients'" 2>/dev/null || true)
+if [ "$COL_SR" != "1" ] || [ "$COL_LOC" != "1" ] || [ "$COL_EFR" != "1" ]; then
+  echo "Colonnes Ticket/SystemSettings manquantes — application directe du SQL..."
+  set +e
+  [ "$COL_LOC" != "1" ] && PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -c "ALTER TABLE \"Ticket\" ADD COLUMN IF NOT EXISTS \"locationId\" INTEGER;"
+  [ "$COL_LOC" != "1" ] && PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -c "ALTER TABLE \"Ticket\" ADD COLUMN IF NOT EXISTS \"locationName\" TEXT;"
+  [ "$COL_SR" != "1" ] && PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -c "ALTER TABLE \"Ticket\" ADD COLUMN IF NOT EXISTS \"secondaryRequesterId\" INTEGER;"
+  [ "$COL_SR" != "1" ] && PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -c "CREATE INDEX IF NOT EXISTS \"Ticket_secondaryRequesterId_idx\" ON \"Ticket\"(\"secondaryRequesterId\");"
+  [ "$COL_SR" != "1" ] && PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'Ticket_secondaryRequesterId_fkey') THEN ALTER TABLE \"Ticket\" ADD CONSTRAINT \"Ticket_secondaryRequesterId_fkey\" FOREIGN KEY (\"secondaryRequesterId\") REFERENCES \"User\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE; END IF; END \$\$;"
+  [ "$COL_EFR" != "1" ] && PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -c "ALTER TABLE \"SystemSettings\" ADD COLUMN IF NOT EXISTS \"emailFailureNotificationRecipients\" TEXT[] DEFAULT ARRAY[]::TEXT[];"
+  set -e
+  echo "Colonnes Ticket/SystemSettings ajoutées avec succès."
+fi
+
 echo "Migration de la base de données..."
 npx prisma migrate deploy || echo "⚠️  migrate deploy a échoué (DB drift ou migration manquante), on continue avec le schéma existant"
 

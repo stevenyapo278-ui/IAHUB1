@@ -30,7 +30,7 @@ router.get('/stats', async (req, res) => {
     prisma.ticket.groupBy({ by: ['teamId'], where, _count: { _all: true } }),
     prisma.ticket.groupBy({ by: ['category'], where, _count: { _all: true } }),
     prisma.ticket.count({ where }),
-    prisma.ticket.count({ where: { ...where, status: { in: ['NEW', 'OPEN', 'PENDING'] } } }),
+    prisma.ticket.count({ where: { ...where, status: { in: ['NEW', 'OPEN', 'PLANNED', 'PENDING'] } } }),
   ]);
 
   const teamIds = byTeam.map((t) => t.teamId).filter((id) => id !== null);
@@ -179,7 +179,7 @@ router.get('/technician-performance', requirePermission('tickets.assign'), async
     technicians.map(async (tech) => {
       const [assigned, open, solved] = await Promise.all([
         prisma.ticket.count({ where: { assignedToId: tech.id, ...ticketDateWhere } }),
-        prisma.ticket.count({ where: { assignedToId: tech.id, status: { in: ['NEW', 'OPEN', 'PENDING'] }, ...ticketDateWhere } }),
+        prisma.ticket.count({ where: { assignedToId: tech.id, status: { in: ['NEW', 'OPEN', 'PLANNED', 'PENDING'] }, ...ticketDateWhere } }),
         prisma.ticket.count({ where: { assignedToId: tech.id, status: { in: ['SOLVED', 'CLOSED'] }, ...ticketDateWhere } }),
       ]);
       return { id: tech.id, fullName: tech.fullName, email: tech.email, assigned, open, solved };
@@ -562,7 +562,7 @@ router.get('/sla-analytics', requirePermission('tickets.assign'), async (req, re
     });
 
     const RESOLVED = ['SOLVED', 'CLOSED'];
-    const OPEN = ['NEW', 'OPEN', 'PENDING'];
+    const OPEN = ['NEW', 'OPEN', 'PLANNED', 'PENDING'];
 
     // Statistiques par priorité
     const byPriority = {};
