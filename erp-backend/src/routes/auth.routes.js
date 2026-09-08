@@ -24,9 +24,8 @@ const PASSWORD_RESET_TOKEN_TTL_HOURS = 1; // court délai : ce token donne accè
 const AUTH_EMAIL_DOMAIN = process.env.AUTH_EMAIL_DOMAIN?.trim() || '';
 
 // ── Photo de profil (self-service, tous les utilisateurs) ────────────────
-// NB : on écrit dans <src>/uploads/avatar — le même répertoire que celui servi par
-// app.use('/uploads', express.static(path.join(__dirname, 'uploads')))
-const AVATAR_UPLOAD_DIR = path.join(__dirname, '..', 'uploads', 'avatar');
+// On écrit dans <WORKDIR>/uploads/avatar — le volume Docker y est monté.
+const AVATAR_UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'avatar');
 fs.mkdirSync(AVATAR_UPLOAD_DIR, { recursive: true });
 
 const avatarUpload = multer({

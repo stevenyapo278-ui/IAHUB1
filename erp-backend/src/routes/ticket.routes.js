@@ -880,7 +880,7 @@ router.post(
         if (!validation.valid) {
           return res.status(400).json({ error: validation.error });
         }
-        const TICKET_ATTACHMENTS_DIR = path.join(__dirname, '..', 'uploads', 'ticket-attachments');
+        const TICKET_ATTACHMENTS_DIR = path.join(process.cwd(), 'uploads', 'ticket-attachments');
         fs.mkdirSync(TICKET_ATTACHMENTS_DIR, { recursive: true });
         const safeFilename = makeSafeFilename(singleAttachment.originalname);
         const destPath = path.join(TICKET_ATTACHMENTS_DIR, safeFilename);
@@ -902,7 +902,7 @@ router.post(
     const pastedFiles = req.files?.['images'] || [];
     if (pastedFiles.length > 0) {
       try {
-        const TICKET_ATTACHMENTS_DIR = path.join(__dirname, '..', 'uploads', 'ticket-attachments');
+        const TICKET_ATTACHMENTS_DIR = path.join(process.cwd(), 'uploads', 'ticket-attachments');
         fs.mkdirSync(TICKET_ATTACHMENTS_DIR, { recursive: true });
         const savedImages = [];
         for (const file of pastedFiles) {
@@ -1536,7 +1536,7 @@ async function notifyRequesterOnStatusChange(id, status) {
 }
 
 // ── Upload de suivi avec images collées ─────────────────────────────────
-const FOLLOWUP_IMAGES_DIR = path.join(__dirname, '..', 'uploads', 'followup-images');
+const FOLLOWUP_IMAGES_DIR = path.join(process.cwd(), 'uploads', 'followup-images');
 fs.mkdirSync(FOLLOWUP_IMAGES_DIR, { recursive: true });
 
 const followupUpload = multer({

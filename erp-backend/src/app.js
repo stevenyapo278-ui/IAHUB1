@@ -176,8 +176,8 @@ app.use((req, res, next) => {
 });
 
 // Fichiers persistants servis statiquement (ex: logo de signature email, voir systemsettings.routes.js)
-// Bloquer les extensions dangereuses pour éviter l'exécution de scripts/uploadés
-app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
+// Le volume Docker est monté sur <WORKDIR>/uploads — on utilise process.cwd() pour y accéder.
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads'), {
   setHeaders(res, filePath) {
     const ext = (filePath.split('.').pop() || '').toLowerCase();
     const blocked = ['exe','bat','cmd','com','msi','scr','pif','vbs','vbe','js','jse',

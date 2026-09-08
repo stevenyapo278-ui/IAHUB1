@@ -9,7 +9,7 @@ const { getActiveProviders, callProviderWithFallback } = require('./mailAnalyzer
 const GENERIC_IMAGE_NAME = /^(image|img|photo)\d*\.(png|jpe?g|gif|bmp)$/i;
 const ATTACHMENT_MENTION_KEYWORDS = /capture|screenshot|écran|piece jointe|pièce jointe|ci-joint|photo du|voir le fichier|en attache/i;
 
-const ATTACHMENTS_DIR = path.join(__dirname, '..', '..', 'uploads', 'attachments');
+const ATTACHMENTS_DIR = path.join(process.cwd(), 'uploads', 'attachments');
 
 function ensureAttachmentsDir() {
   if (!fs.existsSync(ATTACHMENTS_DIR)) {
