@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import io from 'socket.io-client';
 import { toast } from 'sonner';
+import { Ticket, Flame, UserCheck, RefreshCw, ExternalLink } from 'lucide-react';
 import { useAuth } from './AuthContext';
 import { sendBrowserNotification, requestBrowserNotifPermission } from '../utils/browserNotification';
 import { playTicketCreated, playTicketAssigned, playTicketUpdated, playAlertP1 } from '../utils/sounds';
@@ -47,11 +48,6 @@ export function SocketProvider({ children }) {
       console.error('[Socket.io] Erreur de connexion:', err.message);
     });
 
-    // ── Réglages système modifiés (ex : visibilité de la navigation par rôle,
-    //    onglet Paramètres > Navigation) ───────────────────────────────────
-    // Le serveur prévient tous les clients connectés : on relaie vers l'événement window
-    // 'system-settings:updated' que useSystemSettings écoute déjà, pour que la sidebar
-    // (et autres vues) se rafraîchisse immédiatement, sans rechargement de page.
     newSocket.on('system-settings:updated', () => {
       window.dispatchEvent(new CustomEvent('system-settings:updated'));
     });
@@ -69,39 +65,36 @@ export function SocketProvider({ children }) {
         }
       );
       toast(
-        <div className="toast-clickable-content" style={{ position: 'relative' }}>
-          {p1 && <div className="toast-accent-bar" />}
-          <div className={`toast-icon-wrap ${p1 ? 'toast-icon-p1' : ''}`}>
-            <span
-              className="material-symbols-outlined toast-icon"
-              style={{
-                fontSize: '22px',
-                fontVariationSettings: "'FILL' 1",
-                color: p1 ? '#ef4444' : 'var(--color-primary)',
-              }}
-            >
-              {p1 ? 'emergency' : 'confirmation_number'}
-            </span>
+        <div className="flex items-start gap-3 w-full min-w-0 pr-2 group cursor-pointer">
+          <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
+            p1
+              ? 'bg-red-500/10 text-red-500 border-red-500/20 shadow-xs shadow-red-500/20'
+              : 'bg-primary/10 text-primary border-primary/20'
+          }`}>
+            {p1 ? <Flame className="w-4 h-4 animate-pulse text-red-500" /> : <Ticket className="w-4 h-4 text-primary" />}
           </div>
-          <div className="toast-body">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <p className="toast-title">{p1 ? '🚨 Incident critique' : 'Nouveau ticket'}</p>
-              <span className={`toast-id-chip ${p1 ? 'toast-id-p1' : ''}`}>#{ticket.id}</span>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className={`text-xs font-bold ${p1 ? 'text-red-500' : 'text-on-surface'}`}>
+                {p1 ? '🚨 Incident critique' : 'Nouveau ticket'}
+              </span>
+              <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-extrabold shrink-0 ${
+                p1 ? 'bg-red-500/15 text-red-500' : 'bg-primary/15 text-primary'
+              }`}>
+                #{ticket.id}
+              </span>
             </div>
-            <p className="toast-subtitle">{ticket.title}</p>
+            <p className="text-xs text-on-surface-variant font-medium truncate mt-0.5 max-w-[240px]">
+              {ticket.title}
+            </p>
           </div>
-          <div className="toast-arrow">
-            <span className="material-symbols-outlined">open_in_new</span>
+          <div className="shrink-0 text-on-surface-variant/40 group-hover:text-primary transition-colors self-center">
+            <ExternalLink className="w-3.5 h-3.5" />
           </div>
         </div>,
         {
           duration: 6000,
           onClick: () => navigateRef.current(`/tickets/${ticket.id}`),
-          style: {
-            background: p1
-              ? 'linear-gradient(135deg, rgba(239,68,68,0.06) 0%, rgba(239,68,68,0.01) 100%)'
-              : undefined,
-          },
         }
       );
     });
@@ -110,8 +103,8 @@ export function SocketProvider({ children }) {
     newSocket.on('ticket_assigned_to_you', (data) => {
       playTicketAssigned();
       const methodLabel =
-        data.method === 'ai_skills' ? 'Par compétence IA' :
-        data.method === 'by_category' ? 'Par catégorie' : 'Manuellement';
+        data.method === 'ai_skills' ? '✨ Par compétence IA' :
+        data.method === 'by_category' ? '📂 Par catégorie' : '👤 Manuellement';
       sendBrowserNotification(
         'Ticket assigné à vous',
         {
@@ -121,30 +114,26 @@ export function SocketProvider({ children }) {
         }
       );
       toast(
-        <div className="toast-clickable-content" style={{ position: 'relative' }}>
-          <div className="toast-accent-bar toast-accent-blue" />
-          <div className="toast-icon-wrap toast-icon-assign">
-            <span
-              className="material-symbols-outlined toast-icon"
-              style={{ fontSize: '22px', color: '#6366f1', fontVariationSettings: "'FILL' 1" }}
-            >
-              person_pin
+        <div className="flex items-start gap-3 w-full min-w-0 pr-2 group cursor-pointer">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
+            <UserCheck className="w-4 h-4 text-indigo-500" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-xs font-bold text-on-surface">Ticket assigné à vous</span>
+              <span className="px-1.5 py-0.2 rounded-md text-[10px] font-mono font-extrabold bg-indigo-500/15 text-indigo-500 shrink-0">
+                #{data.ticketId}
+              </span>
+            </div>
+            <p className="text-xs text-on-surface-variant font-medium truncate mt-0.5 max-w-[240px]">
+              {data.title}
+            </p>
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 mt-1">
+              {methodLabel}
             </span>
           </div>
-          <div className="toast-body">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <p className="toast-title">Ticket assigné à vous</p>
-              <span className="toast-id-chip">#{data.ticketId}</span>
-            </div>
-            <p className="toast-subtitle">{data.title}</p>
-            <p className="toast-meta">
-              {data.method === 'ai_skills' ? '✨ Par compétence IA' :
-               data.method === 'by_category' ? '📂 Par catégorie' :
-               '👤 Manuellement'}
-            </p>
-          </div>
-          <div className="toast-arrow">
-            <span className="material-symbols-outlined">open_in_new</span>
+          <div className="shrink-0 text-on-surface-variant/40 group-hover:text-indigo-500 transition-colors self-center">
+            <ExternalLink className="w-3.5 h-3.5" />
           </div>
         </div>,
         {
@@ -166,26 +155,24 @@ export function SocketProvider({ children }) {
             onClick: () => navigateRef.current(`/tickets/${data.id}`),
           }
         );
-        toast.info(
-          <div className="toast-clickable-content" style={{ position: 'relative' }}>
-            <div className="toast-accent-bar toast-accent-amber" />
-            <div className="toast-icon-wrap toast-icon-update">
-              <span
-                className="material-symbols-outlined toast-icon"
-                style={{ fontSize: '22px', color: '#f59e0b', fontVariationSettings: "'FILL' 1" }}
-              >
-                update
-              </span>
+        toast(
+          <div className="flex items-start gap-3 w-full min-w-0 pr-2 group cursor-pointer">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-amber-500/10 text-amber-500 border border-amber-500/20">
+              <RefreshCw className="w-4 h-4 text-amber-500" />
             </div>
-            <div className="toast-body">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <p className="toast-title">Ticket mis à jour</p>
-                <span className="toast-id-chip">#{data.id}</span>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-xs font-bold text-on-surface">Statut mis à jour</span>
+                <span className="px-1.5 py-0.2 rounded-md text-[10px] font-mono font-extrabold bg-amber-500/15 text-amber-500 shrink-0">
+                  #{data.id}
+                </span>
               </div>
-              <p className="toast-subtitle">Statut → {data.status}</p>
+              <p className="text-xs text-on-surface-variant font-medium truncate mt-0.5">
+                Nouveau statut : <span className="font-bold text-on-surface">{data.status}</span>
+              </p>
             </div>
-            <div className="toast-arrow">
-              <span className="material-symbols-outlined">open_in_new</span>
+            <div className="shrink-0 text-on-surface-variant/40 group-hover:text-amber-500 transition-colors self-center">
+              <ExternalLink className="w-3.5 h-3.5" />
             </div>
           </div>,
           {

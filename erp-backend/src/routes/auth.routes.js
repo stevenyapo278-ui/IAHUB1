@@ -133,7 +133,7 @@ router.post(
         const token = jwt.sign(
           { sub: user.id, email: user.email, role: user.role, teamId: user.teamId },
           process.env.JWT_SECRET,
-          { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
+          { expiresIn: process.env.JWT_EXPIRES_IN || '30d' }
         );
 
         let permissions = null;
@@ -214,7 +214,7 @@ router.post(
         const token = jwt.sign(
           { sub: account.id, email: account.email, role: account.role, teamId: account.teamId },
           process.env.JWT_SECRET,
-          { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
+          { expiresIn: process.env.JWT_EXPIRES_IN || '30d' }
         );
 
         let permissions = null;
@@ -365,8 +365,14 @@ router.get('/me', authenticate, async (req, res) => {
       }
     }
 
+    const freshToken = jwt.sign(
+      { sub: user.id, email: user.email, role: user.role, teamId: user.teamId },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN || '30d' }
+    );
+
     const { avatarUrl, ...rest } = await userWithAvatarUrl(user);
-    return res.json({ ...rest, avatarUrl, permissions });
+    return res.json({ ...rest, avatarUrl, permissions, token: freshToken });
   } catch (err) {
     console.error('[auth.me] Erreur lors de la lecture utilisateur:', err.message);
     return res.status(500).json({ error: 'Erreur serveur lors du chargement du profil' });

@@ -16,7 +16,7 @@ POSTGRES_PASSWORD=erp_password
 POSTGRES_DB=erp_itsm
 DATABASE_URL=postgresql://erp_user:erp_password@localhost:5433/erp_itsm?schema=public
 JWT_SECRET=dev_jwt_secret_change_in_production_$(openssl rand -hex 8 2>/dev/null || date +%s)
-JWT_EXPIRES_IN=8h
+JWT_EXPIRES_IN=30d
 CORS_ORIGIN=*
 FRONTEND_URL=http://localhost:5173
 BACKEND_URL=http://localhost:4000

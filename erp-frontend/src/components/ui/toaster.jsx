@@ -1,4 +1,5 @@
 import { Toaster as SonnerToaster } from 'sonner';
+import { CheckCircle2, AlertCircle, Info, AlertTriangle } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 
 export default function Toaster() {
@@ -7,49 +8,32 @@ export default function Toaster() {
   return (
     <SonnerToaster
       theme={theme}
-      richColors
       closeButton
-      expand={true}
-      visibleToasts={6}
-      position="top-right"
-      gap={10}
+      expand={false}
+      visibleToasts={5}
+      position="bottom-right"
+      gap={8}
       toastOptions={{
-        duration: 6000,
-        className: 'group-toast',
+        duration: 5000,
         style: {
-          borderRadius: '18px',
-          border: '1px solid rgba(255,255,255,0.2)',
-          boxShadow:
-            '0 8px 32px -4px rgba(0,0,0,0.14), 0 2px 8px -2px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.2)',
-          backdropFilter: 'blur(24px) saturate(1.8)',
-          WebkitBackdropFilter: 'blur(24px) saturate(1.8)',
-          padding: '14px 16px',
-          minHeight: '56px',
+          background: 'var(--color-surface)',
+          color: 'var(--color-on-surface)',
+          border: '1px solid var(--color-outline-variant)',
+          borderRadius: '16px',
+          boxShadow: '0 12px 36px -4px rgba(0, 0, 0, 0.22), 0 4px 12px -2px rgba(0, 0, 0, 0.08)',
+          backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
+          padding: '12px 14px',
+          fontSize: '13px',
+          fontFamily: 'inherit',
           cursor: 'pointer',
-          transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
         },
       }}
       icons={{
-        success: (
-          <span className="material-symbols-outlined text-emerald-500" style={{ fontSize: '20px', fontVariationSettings: "'FILL' 1" }}>
-            check_circle
-          </span>
-        ),
-        error: (
-          <span className="material-symbols-outlined text-red-500" style={{ fontSize: '20px', fontVariationSettings: "'FILL' 1" }}>
-            error
-          </span>
-        ),
-        info: (
-          <span className="material-symbols-outlined text-primary" style={{ fontSize: '20px', fontVariationSettings: "'FILL' 1" }}>
-            info
-          </span>
-        ),
-        warning: (
-          <span className="material-symbols-outlined text-amber-500" style={{ fontSize: '20px', fontVariationSettings: "'FILL' 1" }}>
-            warning
-          </span>
-        ),
+        success: <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />,
+        error: <AlertCircle className="w-5 h-5 text-red-500 shrink-0" />,
+        info: <Info className="w-5 h-5 text-primary shrink-0" />,
+        warning: <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />,
       }}
     />
   );

@@ -64,6 +64,9 @@ export function AuthProvider({ children }) {
       api.get('/auth/me')
         .then(({ data }) => {
           if (cancelled) return;
+          if (data.token) {
+            localStorage.setItem('token', data.token);
+          }
           const refreshed = { id: data.id, email: data.email, fullName: data.fullName, role: data.role, teamId: data.teamId, permissions: data.permissions, mustChangePassword: data.mustChangePassword, avatarUrl: data.avatarUrl };
           localStorage.setItem('user', JSON.stringify(refreshed));
           setUser(refreshed);
