@@ -18,6 +18,20 @@ const { tryHandleReminderReply } = require('./draftReplyApproval');
 const { getBreaker } = require('../utils/circuitBreaker');
 const { htmlToText } = require('../utils/htmlToText');
 const { isLowTrustSender } = require('./senderReputation');
+
+// Wrapper pour appliquer les inbox rules sur TOUS les emails, quelle que soit l'issue du pipeline.
+// Évite la duplication du try/catch à chaque point de sortie.
+async function applyInboxRulesSafe(updated, context) {
+  try {
+    const matchedRule = await applyRulesToEmail(updated);
+    if (matchedRule) {
+      console.log(`[emailPipeline] Règle "${matchedRule.label}" appliquée sur email #${updated.id} (${context})`);
+    }
+  } catch (ruleErr) {
+    console.error(`[emailPipeline] Erreur application règles sur email #${updated.id} (${context}):`, ruleErr.message);
+  }
+  return updated;
+}
 const { generateEmailSummary } = require('./emailSummaryGenerator');
 const { applyRulesToEmail } = require('./inboxRuleEngine');
 const { detectLocationFromSender, extractSignatureZone } = require('./locationDetector');
@@ -370,7 +384,7 @@ async function processMessage(message, account) {
       });
 
       if (io) io.emit('email_updated', updated);
-      return updated;
+      return applyInboxRulesSafe(updated, 'followup');
     }
 
     // Couche 1 : Pré-filtre spam et mails d'information déterministe (sans appel LLM)
@@ -384,7 +398,7 @@ async function processMessage(message, account) {
         data: { status: targetStatus, aiSummary: `Filtré (${targetStatus}) : ${spamCheck.reason}`, aiIsSpam: true, aiConfidence: 1.0, aiIntent: 'INFORMATIONAL' },
       });
       if (io) io.emit('email_updated', updated);
-      return updated;
+      return applyInboxRulesSafe(updated, 'spam-filter');
     }
 
     // Couche 2 : Moteur de règles déterministe (sans appel LLM)
@@ -399,7 +413,7 @@ async function processMessage(message, account) {
           data: { status: 'SPAM', aiSummary: `Spam filtré (règle) : ${ruleMatch.label}`, aiIsSpam: true, aiConfidence: 1.0 },
         });
         if (io) io.emit('email_updated', updated);
-        return updated;
+        return applyInboxRulesSafe(updated, 'triage-spam');
       }
 
       const rawRuleAnalysis = {
@@ -463,7 +477,7 @@ async function processMessage(message, account) {
         },
       });
       if (io) io.emit('email_updated', updated);
-      return updated;
+      return applyInboxRulesSafe(updated, 'ai-spam-info');
     }
 
     // Traitement des e-mails ambigus ou à faible confiance (NEEDS_REVIEW)
@@ -482,7 +496,7 @@ async function processMessage(message, account) {
         },
       });
       if (io) io.emit('email_updated', updated);
-      return updated;
+      return applyInboxRulesSafe(updated, 'needs-review');
     }
 
     // Étape 2b : détecter un incident similaire déjà ouvert (même problème, autre site/magasin)
@@ -582,7 +596,7 @@ async function processMessage(message, account) {
       });
 
       if (io) io.emit('email_updated', updated);
-      return updated;
+      return applyInboxRulesSafe(updated, 'similar-incident');
     }
 
     // ── Résolution STRICTE du lieu ──────────────────────────────────────────
@@ -758,11 +772,7 @@ async function processMessage(message, account) {
       },
     });
     // Appliquer les règles de tri après l'analyse IA
-    try {
-      await applyRulesToEmail(updated);
-    } catch (ruleErr) {
-      console.error('[emailPipeline] Erreur application règles:', ruleErr.message);
-    }
+    await applyInboxRulesSafe(updated, 'new-ticket');
     if (io) io.emit('email_updated', updated);
   } catch (err) {
     const isTransient = isTransientError(err);
@@ -861,6 +871,8 @@ async function processMessage(message, account) {
         },
       });
       if (io) io.emit('email_updated', updated);
+      // Appliquer les inbox rules même sur les emails en échec (permet de trier les emails cassés)
+      await applyInboxRulesSafe(updated, deadLetter ? 'dead-letter' : 'error');
       console.error(`[emailPipeline] ${deadLetter ? 'DEAD_LETTER' : 'ERROR'} incoming #${incoming.id}:`, err.message);
       // Notification admin pour échec définitif
       await notifyAdminsEmailFailed({

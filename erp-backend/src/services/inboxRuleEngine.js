@@ -7,6 +7,7 @@ const prisma = require('../prismaClient');
 const FIELD_ACCESSORS = {
   fromEmail: (email) => email.fromEmail || '',
   fromName: (email) => email.fromName || '',
+  fromDomain: (email) => (email.fromEmail || '').split('@')[1] || '',
   subject: (email) => email.subject || '',
   bodyPreview: (email) => email.bodyPreview || '',
   aiCategory: (email) => email.aiCategory || '',
@@ -22,6 +23,10 @@ const OPERATORS = {
   equals: (fieldValue, ruleValue) => fieldValue.toLowerCase() === ruleValue.toLowerCase(),
   starts_with: (fieldValue, ruleValue) => fieldValue.toLowerCase().startsWith(ruleValue.toLowerCase()),
   ends_with: (fieldValue, ruleValue) => fieldValue.toLowerCase().endsWith(ruleValue.toLowerCase()),
+  regex: (fieldValue, ruleValue) => {
+    try { return new RegExp(ruleValue, 'i').test(fieldValue); }
+    catch { return false; }
+  },
 };
 
 // Évalue une seule condition sur un email
@@ -67,6 +72,33 @@ async function applyRuleAction(rule, emailId) {
         await prisma.incomingEmail.update({ where: { id: emailId }, data: { aiCategory: config.category } });
       }
       break;
+    case 'mark_priority':
+      if (config.priority) {
+        await prisma.incomingEmail.update({ where: { id: emailId }, data: { aiPriority: config.priority } });
+      }
+      break;
+    case 'delete':
+      // Soft delete : passe en status DELETE (affiché dans la corbeille inbox)
+      await prisma.incomingEmail.update({ where: { id: emailId }, data: { status: 'DELETE' } });
+      console.log(`[inboxRuleEngine] Email #${emailId} marqué pour suppression`);
+      break;
+    case 'auto_assign':
+      // Assigne le ticket lié à un technicien spécifique
+      if (config.assigneeId) {
+        const email = await prisma.incomingEmail.findUnique({ where: { id: emailId }, select: { erpTicketId: true } });
+        if (email?.erpTicketId) {
+          await prisma.ticket.update({
+            where: { id: email.erpTicketId },
+            data: {
+              assignedToId: Number(config.assigneeId),
+              assignees: { connect: { id: Number(config.assigneeId) } },
+              status: 'OPEN',
+            },
+          });
+          console.log(`[inboxRuleEngine] Ticket #${email.erpTicketId} assigné à #${config.assigneeId}`);
+        }
+      }
+      break;
   }
 }
 
@@ -90,7 +122,7 @@ async function applyRulesToEmail(email) {
 async function matchRuleAgainstEmails(rule) {
   const emails = await prisma.incomingEmail.findMany({
     orderBy: { receivedAt: 'desc' },
-    take: 3000,
+    take: 5000,
   });
   let count = 0;
   for (const email of emails) {

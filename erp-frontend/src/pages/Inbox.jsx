@@ -2418,10 +2418,12 @@ function InboxRulesModal({ onClose }) {
     { value: 'subject', label: 'Sujet' },
     { value: 'fromEmail', label: 'Email expéditeur' },
     { value: 'fromName', label: 'Nom expéditeur' },
+    { value: 'fromDomain', label: 'Domaine expéditeur' },
     { value: 'bodyPreview', label: 'Contenu' },
     { value: 'aiCategory', label: 'Catégorie IA' },
     { value: 'aiPriority', label: 'Priorité IA' },
     { value: 'aiTeam', label: 'Équipe IA' },
+    { value: 'hasAttachments', label: 'A des pièces jointes' },
   ];
   const OP_OPTIONS = [
     { value: 'contains', label: 'contient' },
@@ -2429,6 +2431,7 @@ function InboxRulesModal({ onClose }) {
     { value: 'equals', label: 'égal à' },
     { value: 'starts_with', label: 'commence par' },
     { value: 'ends_with', label: 'finit par' },
+    { value: 'regex', label: 'regex' },
   ];
 
   return (
@@ -2465,7 +2468,7 @@ function InboxRulesModal({ onClose }) {
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-bold text-on-surface truncate">{rule.label}</span>
                         <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-surface-container-high text-on-surface-variant">
-                          {rule.action === 'move_to_folder' ? '→ Déplacer' : rule.action === 'mark_read' ? '✓ Lu' : rule.action === 'mark_spam' ? '⚠ Spam' : '🏷 Catégorie'}
+                          {rule.action === 'move_to_folder' ? '→ Déplacer' : rule.action === 'mark_read' ? '✓ Lu' : rule.action === 'mark_spam' ? '⚠ Spam' : rule.action === 'mark_priority' ? '⚡ Priorité' : rule.action === 'auto_assign' ? '👤 Assigner' : rule.action === 'delete' ? '✕ Supprimer' : '🏷 Catégorie'}
                         </span>
                       </div>
                       <div className="mt-1 flex flex-wrap gap-1">
@@ -2578,6 +2581,9 @@ function InboxRulesModal({ onClose }) {
                         <option value="mark_read">Marquer comme lu</option>
                         <option value="mark_spam">Marquer comme spam</option>
                         <option value="mark_category">Appliquer une catégorie</option>
+                        <option value="mark_priority">Appliquer une priorité</option>
+                        <option value="auto_assign">Assigner à un technicien</option>
+                        <option value="delete">Supprimer</option>
                       </select>
                     </label>
                     {form.action === 'move_to_folder' && (
@@ -2596,6 +2602,28 @@ function InboxRulesModal({ onClose }) {
                         <input type="text" placeholder="Ex: COMMERCIAL"
                           value={form.actionConfig.category || ''}
                           onChange={(e) => setForm((f) => ({ ...f, actionConfig: { ...f.actionConfig, category: e.target.value } }))}
+                          className="px-2 py-2 rounded-lg border border-outline-variant/40 bg-surface-container text-xs text-on-surface" />
+                      </label>
+                    )}
+                    {form.action === 'mark_priority' && (
+                      <label className="flex flex-col gap-1.5 flex-1">
+                        <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Priorité</span>
+                        <select value={form.actionConfig.priority || ''} onChange={(e) => setForm((f) => ({ ...f, actionConfig: { ...f.actionConfig, priority: e.target.value } }))}
+                          className="px-2 py-2 rounded-lg border border-outline-variant/40 bg-surface-container text-xs text-on-surface cursor-pointer">
+                          <option value="">— Choisir —</option>
+                          <option value="P1">P1 — Critique</option>
+                          <option value="P2">P2 — Haute</option>
+                          <option value="P3">P3 — Moyenne</option>
+                          <option value="P4">P4 — Basse</option>
+                        </select>
+                      </label>
+                    )}
+                    {form.action === 'auto_assign' && (
+                      <label className="flex flex-col gap-1.5 flex-1">
+                        <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Technicien</span>
+                        <input type="number" placeholder="ID technicien"
+                          value={form.actionConfig.assigneeId || ''}
+                          onChange={(e) => setForm((f) => ({ ...f, actionConfig: { ...f.actionConfig, assigneeId: e.target.value } }))}
                           className="px-2 py-2 rounded-lg border border-outline-variant/40 bg-surface-container text-xs text-on-surface" />
                       </label>
                     )}
@@ -2774,6 +2802,9 @@ function CreateRuleFromEmailModal({ email, folders, onClose }) {
               <option value="mark_read">Marquer comme lu</option>
               <option value="mark_spam">Marquer comme spam</option>
               <option value="mark_category">Appliquer une catégorie</option>
+              <option value="mark_priority">Appliquer une priorité</option>
+              <option value="auto_assign">Assigner à un technicien</option>
+              <option value="delete">Supprimer</option>
             </select>
           </label>
           {form.action === 'move_to_folder' && (
@@ -2792,6 +2823,28 @@ function CreateRuleFromEmailModal({ email, folders, onClose }) {
               <input type="text" placeholder="Ex: COMMERCIAL"
                 value={form.actionConfig.category || ''}
                 onChange={(e) => setForm((f) => ({ ...f, actionConfig: { ...f.actionConfig, category: e.target.value } }))}
+                className="px-2 py-2 rounded-lg border border-outline-variant/40 bg-surface-container text-xs text-on-surface" />
+            </label>
+          )}
+          {form.action === 'mark_priority' && (
+            <label className="flex flex-col gap-1.5 flex-1">
+              <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Priorité</span>
+              <select value={form.actionConfig.priority || ''} onChange={(e) => setForm((f) => ({ ...f, actionConfig: { ...f.actionConfig, priority: e.target.value } }))}
+                className="px-2 py-2 rounded-lg border border-outline-variant/40 bg-surface-container text-xs text-on-surface cursor-pointer">
+                <option value="">— Choisir —</option>
+                <option value="P1">P1 — Critique</option>
+                <option value="P2">P2 — Haute</option>
+                <option value="P3">P3 — Moyenne</option>
+                <option value="P4">P4 — Basse</option>
+              </select>
+            </label>
+          )}
+          {form.action === 'auto_assign' && (
+            <label className="flex flex-col gap-1.5 flex-1">
+              <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Technicien</span>
+              <input type="number" placeholder="ID technicien"
+                value={form.actionConfig.assigneeId || ''}
+                onChange={(e) => setForm((f) => ({ ...f, actionConfig: { ...f.actionConfig, assigneeId: e.target.value } }))}
                 className="px-2 py-2 rounded-lg border border-outline-variant/40 bg-surface-container text-xs text-on-surface" />
             </label>
           )}

@@ -203,7 +203,7 @@ router.get('/rules', async (req, res) => {
 router.post('/rules', [
   body('label').trim().isLength({ min: 1, max: 100 }),
   body('conditions').isArray({ min: 1 }),
-  body('action').isIn(['move_to_folder', 'mark_read', 'mark_spam', 'mark_category']),
+  body('action').isIn(['move_to_folder', 'mark_read', 'mark_spam', 'mark_category', 'mark_priority', 'delete', 'auto_assign']),
   body('actionConfig').isObject(),
 ], async (req, res) => {
   const errors = validationResult(req);
@@ -268,7 +268,6 @@ router.post('/rules/:id/apply', async (req, res) => {
     if (!rule || rule.createdById !== req.user.sub) return res.status(404).json({ error: 'Règle introuvable' });
     const { evaluateRule, applyRuleAction } = require('../services/inboxRuleEngine');
     const emails = await prisma.incomingEmail.findMany({
-      where: { status: 'DONE' },
       orderBy: { receivedAt: 'desc' },
       take: 5000,
     });
