@@ -130,3 +130,4 @@ React, React Router, Axios (via `api/` wrapper), SWR for data fetching, Tailwind
 - Seed: idempotent (all upserts), never add required migrations to seed
 - Never modify existing migration files
 - GLPI base URL in API calls: always strip trailing slash (`config.baseUrl.replace(/\/+$/, '')`)
+- **Upload paths**: always use `process.cwd()` to resolve upload directories, NEVER `__dirname`. The Docker volume is mounted at `<WORKDIR>/uploads` (= `process.cwd() + '/uploads'`). Using `__dirname` in `src/` files resolves to `<WORKDIR>/src/uploads` which is outside the volume — files are lost on container restart. See `auth.routes.js`, `ticket.routes.js`, `app.js` for examples.
