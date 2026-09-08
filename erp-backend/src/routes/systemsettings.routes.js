@@ -178,51 +178,75 @@ router.post('/daily-summary/test', requirePermission('automation.manage', ['ADMI
 
 // ── Test d'envoi de templates email ─────────────────────────────────────────
 // Envoie un email de test avec un template donné (prédéfini avec des données fictives)
-// pour vérifier le rendu visuel sans créer de ticket réel.
+// pour vérifier le rendu visuel sans créer de ticket réel. Chaque template réutilise
+// le même builder que l'envoi réel (emailSender.js) : le test reflète exactement le rendu
+// que recevront les destinataires.
 const {
-  sendEmail, buildAcknowledgementHtml, buildKnownIncidentNotificationHtml,
-  sendAssignmentNotificationEmail, sendSlaBreachEmail, sendDueDateEmail,
-  sendTicketStatusNotification, sendReminder, getEmailSignature,
+  sendEmail,
+  buildAcknowledgementHtml, buildKnownIncidentNotificationHtml,
+  buildAssignmentNotificationHtml, buildSlaBreachHtml, buildDueDateHtml,
+  buildStatusChangeHtml, buildReminderHtml, getEmailSignature,
 } = require('../services/emailSender');
 
 const EMAIL_TEST_TEMPLATES = {
   acknowledgement: {
     label: 'Accusé de réception',
-    build: (signature, ticketLink) => buildAcknowledgementHtml({
+    build: ({ signature, ticketLink }) => buildAcknowledgementHtml({
       toName: 'Jean Dupont', glpiTicketId: 999, ticketId: 999,
       originalSubject: 'Problème d\'impression bureau 305',
       customMessage: 'Votre demande a bien été reçue (ticket #{ticketId}).',
-      signature,
-      ticketLink,
+      signature, ticketLink,
     }),
   },
   known_incident: {
     label: 'Incident déjà connu',
-    build: (signature) => buildKnownIncidentNotificationHtml({
+    build: ({ signature, ticketLink }) => buildKnownIncidentNotificationHtml({
       toName: 'Jean Dupont', glpiTicketId: 999, ticketId: 999,
       originalSubject: 'Panne réseau site Abidjan', isMajor: true, impactedCount: 12,
-      signature,
+      signature, ticketLink,
     }),
   },
   assignment: {
     label: 'Assignation technicien',
-    build: null, // send function, not build
+    build: ({ signature, ticketLink }) => buildAssignmentNotificationHtml({
+      technicianName: 'Jean Dupont', glpiTicketId: 999, ticketId: 999,
+      ticketTitle: 'Test template email', priority: 'P2', category: 'IT — Matériel', teamName: 'Support IT',
+      signature, ticketLink,
+    }),
   },
   sla_breach: {
     label: 'Dépassement SLA',
-    build: null,
+    build: ({ signature, ticketLink }) => buildSlaBreachHtml({
+      technicianName: 'Jean Dupont', glpiTicketId: 999, ticketId: 999,
+      ticketTitle: 'Test template email', priority: 'P2',
+      slaResponseDueAt: new Date(Date.now() - 3600000).toISOString(),
+      signature, ticketLink,
+    }),
   },
   due_date: {
     label: 'Dépassement échéance',
-    build: null,
+    build: ({ signature, ticketLink }) => buildDueDateHtml({
+      technicianName: 'Jean Dupont', glpiTicketId: 999, ticketId: 999,
+      ticketTitle: 'Test template email', priority: 'P2',
+      dueDate: new Date(Date.now() - 7200000).toISOString(),
+      signature, ticketLink,
+    }),
   },
   status_change: {
     label: 'Changement de statut',
-    build: null,
+    build: ({ signature, ticketLink }) => buildStatusChangeHtml({
+      recipientName: 'Jean Dupont', glpiTicketId: 999, ticketId: 999,
+      ticketTitle: 'Test template email', status: 'OPEN', priority: 'P2', category: 'IT — Matériel',
+      signature, ticketLink,
+    }),
   },
   reminder: {
     label: 'Relance demandeur',
-    build: null,
+    build: ({ signature, ticketLink }) => buildReminderHtml({
+      toName: 'Jean Dupont', glpiTicketId: 999, ticketId: 999,
+      subject: 'Test template email', isPreClose: false,
+      signature, ticketLink,
+    }),
   },
 };
 
@@ -240,93 +264,10 @@ router.post('/test-email', requirePermission('automation.manage', ['ADMIN']), as
     const frontendUrl = resolveFrontendUrl(settings);
     const signature = await getEmailSignature();
 
-    const mockTicket = {
-      ticketId: 999, glpiTicketId: 999, ticketTitle: 'Test template email',
-      priority: 'P2', category: 'IT — Matériel',
-    };
+    const ticketLink = `${frontendUrl}/tickets/999`;
+    const templateCtx = { signature, ticketLink };
 
-    const mockRequester = { requesterEmail: recipientEmail, requesterName: 'Jean Dupont' };
-
-    let bodyHtml;
-
-    switch (type) {
-      case 'acknowledgement':
-        bodyHtml = EMAIL_TEST_TEMPLATES.acknowledgement.build(signature, `${frontendUrl}/tickets/999`);
-        break;
-      case 'known_incident':
-        bodyHtml = EMAIL_TEST_TEMPLATES.known_incident.build(signature);
-        break;
-      case 'assignment':
-        bodyHtml = `
-<p>Bonjour Jean Dupont,</p>
-<p>Un nouveau ticket vient de vous être <strong>assigné automatiquement</strong> par notre système d'analyse IA.</p>
-<table style="border-collapse:collapse;margin:16px 0;width:100%;max-width:600px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;font-size:14px;font-family:sans-serif">
-  <tr><td style="padding:8px 12px;color:#4b5563;font-weight:600;width:180px;vertical-align:top">Numéro de ticket</td><td style="padding:8px 12px"><strong>#999</strong></td></tr>
-  <tr style="background:#f9fafb"><td style="padding:8px 12px;color:#4b5563;font-weight:600">Sujet</td><td style="padding:8px 12px"><strong>Test template email</strong></td></tr>
-  <tr><td style="padding:8px 12px;color:#4b5563;font-weight:600">Catégorie</td><td style="padding:8px 12px">IT — Matériel</td></tr>
-  <tr style="background:#f9fafb"><td style="padding:8px 12px;color:#4b5563;font-weight:600">Priorité</td><td style="padding:8px 12px;color:#d97706;font-weight:600"><strong>Haute</strong></td></tr>
-</table>
-<p style="margin:20px 0"><a href="${frontendUrl}/tickets/999" style="background:#2563eb;color:#ffffff;padding:10px 20px;text-decoration:none;display:inline-block;border-radius:8px;font-weight:bold;font-size:14px;font-family:sans-serif">Prendre en charge le ticket</a></p>
-<p style="color:#6b7280;font-size:12px">Connectez-vous à l'application pour consulter le détail et intervenir sur ce ticket.</p>
-${signature}`;
-        break;
-      case 'sla_breach':
-        bodyHtml = `
-<p>Bonjour Jean Dupont,</p>
-<p>Le ticket <strong>#999 — Test template email</strong> a dépassé son délai de réponse SLA.</p>
-<table style="border-collapse:collapse;margin:16px 0;width:100%;max-width:600px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;font-size:14px;font-family:sans-serif">
-  <tr><td style="padding:8px 12px;color:#4b5563;font-weight:600;width:180px;vertical-align:top">Numéro de ticket</td><td style="padding:8px 12px"><strong>#999</strong></td></tr>
-  <tr style="background:#f9fafb"><td style="padding:8px 12px;color:#4b5563;font-weight:600">Sujet</td><td style="padding:8px 12px">Test template email</td></tr>
-  <tr><td style="padding:8px 12px;color:#4b5563;font-weight:600">Priorité</td><td style="padding:8px 12px;color:#d97706;font-weight:600"><strong>Haute</strong></td></tr>
-  <tr style="background:#f9fafb"><td style="padding:8px 12px;color:#4b5563;font-weight:600">Délai de réponse attendu</td><td style="padding:8px 12px;color:#dc2626;font-weight:600"><strong>${new Date(Date.now() - 3600000).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}</strong></td></tr>
-</table>
-<p style="margin:20px 0"><a href="${frontendUrl}/tickets/999" style="background:#2563eb;color:#ffffff;padding:10px 20px;text-decoration:none;display:inline-block;border-radius:8px;font-weight:bold;font-size:14px;font-family:sans-serif">Prendre en charge le ticket</a></p>
-<p style="color:#6b7280;font-size:12px">Ce ticket doit être pris en charge rapidement — connectez-vous pour répondre au demandeur.</p>
-${signature}`;
-        break;
-      case 'due_date':
-        bodyHtml = `
-<p>Bonjour Jean Dupont,</p>
-<p>Le ticket <strong>#999 — Test template email</strong> a dépassé son <strong>échéance manuelle</strong>.</p>
-<table style="border-collapse:collapse;margin:16px 0;width:100%;max-width:600px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;font-size:14px;font-family:sans-serif">
-  <tr><td style="padding:8px 12px;color:#4b5563;font-weight:600;width:180px;vertical-align:top">Numéro de ticket</td><td style="padding:8px 12px"><strong>#999</strong></td></tr>
-  <tr style="background:#f9fafb"><td style="padding:8px 12px;color:#4b5563;font-weight:600">Sujet</td><td style="padding:8px 12px">Test template email</td></tr>
-  <tr><td style="padding:8px 12px;color:#4b5563;font-weight:600">Priorité</td><td style="padding:8px 12px;color:#d97706;font-weight:600"><strong>Haute</strong></td></tr>
-  <tr style="background:#f9fafb"><td style="padding:8px 12px;color:#4b5563;font-weight:600">Échéance prévue</td><td style="padding:8px 12px;color:#dc2626;font-weight:600"><strong>${new Date(Date.now() - 7200000).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}</strong></td></tr>
-</table>
-<p style="margin:20px 0"><a href="${frontendUrl}/tickets/999" style="background:#2563eb;color:#ffffff;padding:10px 20px;text-decoration:none;display:inline-block;border-radius:8px;font-weight:bold;font-size:14px;font-family:sans-serif">Traiter le ticket</a></p>
-<p style="color:#6b7280;font-size:12px">Ce ticket doit être pris en charge rapidement — connectez-vous pour le traiter.</p>
-${signature}`;
-        break;
-      case 'status_change':
-        bodyHtml = `
-<p>Bonjour Jean Dupont,</p>
-<p>Le statut de votre demande a changé :</p>
-<table style="border-collapse:collapse;margin:16px 0;width:100%;max-width:600px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;font-size:14px;font-family:sans-serif">
-  <tr><td style="padding:8px 12px;color:#4b5563;font-weight:600;width:180px;vertical-align:top">Numéro de ticket</td><td style="padding:8px 12px"><strong>#999</strong></td></tr>
-  <tr style="background:#f9fafb"><td style="padding:8px 12px;color:#4b5563;font-weight:600">Sujet</td><td style="padding:8px 12px"><strong>Test template email</strong></td></tr>
-  <tr><td style="padding:8px 12px;color:#4b5563;font-weight:600">Nouveau statut</td><td style="padding:8px 12px;color:#2563eb;font-weight:600"><strong>En cours (Attribué)</strong></td></tr>
-  <tr style="background:#f9fafb"><td style="padding:8px 12px;color:#4b5563;font-weight:600">Catégorie</td><td style="padding:8px 12px">IT — Matériel</td></tr>
-  <tr><td style="padding:8px 12px;color:#4b5563;font-weight:600">Priorité</td><td style="padding:8px 12px;color:#d97706;font-weight:600"><strong>Haute</strong></td></tr>
-</table>
-<p style="margin:20px 0"><a href="${frontendUrl}/tickets/999" style="background:#2563eb;color:#ffffff;padding:10px 20px;text-decoration:none;display:inline-block;border-radius:8px;font-weight:bold;font-size:14px;font-family:sans-serif">Suivre mon ticket</a></p>
-<p>Vous pouvez suivre votre demande et ajouter des informations directement dans le portail.</p>
-${signature}`;
-        break;
-      case 'reminder':
-        bodyHtml = `
-<p>Bonjour Jean Dupont,</p>
-<p>Nous revenons vers vous concernant votre ticket en cours :</p>
-<table style="border-collapse:collapse;margin:16px 0;width:100%;max-width:600px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;font-size:14px;font-family:sans-serif">
-  <tr><td style="padding:8px 12px;color:#4b5563;font-weight:600;width:180px;vertical-align:top">Numéro de ticket</td><td style="padding:8px 12px"><strong>#999</strong></td></tr>
-  <tr style="background:#f9fafb"><td style="padding:8px 12px;color:#4b5563;font-weight:600">Sujet</td><td style="padding:8px 12px">Test template email</td></tr>
-</table>
-<p>Votre demande est toujours en attente. Pouvez-vous nous confirmer si le problème est résolu ou s'il persiste ?</p>
-<p>Répondez simplement à cet email ou cliquez sur le bouton ci-dessous :</p>
-<p style="margin:20px 0"><a href="${frontendUrl}/tickets/999" style="background:#2563eb;color:#ffffff;padding:10px 20px;text-decoration:none;display:inline-block;border-radius:8px;font-weight:bold;font-size:14px;font-family:sans-serif">Suivre mon ticket</a></p>
-${signature}`;
-        break;
-    }
+    const bodyHtml = EMAIL_TEST_TEMPLATES[type].build(templateCtx);
 
     const subject = `[Test] ${EMAIL_TEST_TEMPLATES[type].label} — Ticket #999`;
     await sendEmail({ ticketId: null, to: recipientEmail, subject, bodyHtml, saveAsMessage: false });
