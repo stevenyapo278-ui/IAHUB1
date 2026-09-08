@@ -38,15 +38,49 @@ function isTechnicianOnly(user) {
   return user.role === 'TECHNICIAN';
 }
 
-// RÈGLE STRICTE : un TECHNICIAN ne modifie JAMAIS les éléments d'un ticket (titre, contenu,
-// statut, priorité, catégorie, lieu, assignation, approbation, liens, fusion, suppression...).
-// Il consulte le ticket et ajoute des suivis — rien d'autre. Ce garde-fou s'applique par RÔLE,
-// quel que soit le groupe de permissions : aucune permission ne peut redonner ce droit.
-const TECHNICIAN_EDIT_ERROR = 'Un technicien ne peut pas modifier un ticket : il peut uniquement ajouter des suivis.';
+// RÈGLE : un TECHNICIAN ne peut pas modifier librement un ticket (titre, contenu,
+// priorité, catégorie, lieu, assignation, approbation, liens, fusion, suppression...).
+// Exception : un technicien ASSIGNÉ au ticket peut changer le statut (ex: mettre en SOLVED/CLOSED).
+// Ce garde-fou s'applique par RÔLE : seule la modification de statut par l'assigné est autorisée.
+const TECHNICIAN_EDIT_ERROR = 'Un technicien ne peut modifier que le statut des tickets qui lui sont assignés.';
 function forbidTechnicianTicketEdits(req, res, next) {
   if (req.user && req.user.role === 'TECHNICIAN') {
     return res.status(403).json({ error: TECHNICIAN_EDIT_ERROR });
   }
+  next();
+}
+
+// Middleware PATCH : un technicien assigné ne peut changer que le statut.
+// Pour tout autre champ, on bloque. Les autres rôles passent directement.
+async function allowTechnicianStatusOnly(req, res, next) {
+  if (!req.user || req.user.role !== 'TECHNICIAN') return next();
+
+  const id = Number(req.params.id);
+  const bodyKeys = Object.keys(req.body);
+
+  // Vérifier que seul le champ "status" est envoyé
+  const forbiddenFields = bodyKeys.filter((k) => k !== 'status');
+  if (forbiddenFields.length > 0) {
+    return res.status(403).json({ error: TECHNICIAN_EDIT_ERROR });
+  }
+
+  // Vérifier que le technicien est bien assigné à ce ticket
+  try {
+    const ticket = await prisma.ticket.findUnique({
+      where: { id },
+      select: { assignedToId: true, assignees: { select: { id: true } } },
+    });
+    if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
+    const isAssigned =
+      ticket.assignedToId === req.user.sub ||
+      ticket.assignees.some((a) => a.id === req.user.sub);
+    if (!isAssigned) {
+      return res.status(403).json({ error: 'Vous ne pouvez modifier que les tickets qui vous sont assignés.' });
+    }
+  } catch (err) {
+    return res.status(500).json({ error: 'Erreur lors de la vérification des droits.' });
+  }
+
   next();
 }
 
@@ -66,6 +100,8 @@ function buildTicketSearchCondition(rawTerm) {
     { aiSummary: { contains: term, mode: 'insensitive' } },
     { requester: { fullName: { contains: term, mode: 'insensitive' } } },
     { requester: { email: { contains: term, mode: 'insensitive' } } },
+    { secondaryRequester: { fullName: { contains: term, mode: 'insensitive' } } },
+    { secondaryRequester: { email: { contains: term, mode: 'insensitive' } } },
     { assignedTo: { fullName: { contains: term, mode: 'insensitive' } } },
     { assignedTo: { email: { contains: term, mode: 'insensitive' } } },
     { assignees: { some: { fullName: { contains: term, mode: 'insensitive' } } } },
@@ -107,6 +143,7 @@ function buildTicketWhereClause(user, queryParams = {}) {
     andConditions.push({
       OR: [
         { requesterId: user.sub },
+        { secondaryRequesterId: user.sub },
         { observers: { some: { id: user.sub } } },
       ],
     });
@@ -116,6 +153,7 @@ function buildTicketWhereClause(user, queryParams = {}) {
         { assignedToId: user.sub },
         { assignees: { some: { id: user.sub } } },
         { requesterId: user.sub },
+        { secondaryRequesterId: user.sub },
         { observers: { some: { id: user.sub } } },
       ],
     });
@@ -242,6 +280,7 @@ router.get('/', async (req, res) => {
       take: pageSize,
       include: {
         requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+        secondaryRequester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
         assignedTo: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
         assignees: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
         team: { select: { id: true, name: true } },
@@ -547,6 +586,7 @@ router.get('/trash/list', async (req, res) => {
     take: 200,
     include: {
       requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+      secondaryRequester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
       assignedTo: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
       deletedBy: { select: { id: true, fullName: true } },
     },
@@ -576,6 +616,7 @@ router.get('/pending-approval', async (req, res) => {
       locationName: true, lowTrustSender: true, aiProcessed: true, aiSummary: true,
       approvalNote: true, approvalStatus: true,
       createdAt: true, requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+      secondaryRequester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
     },
   });
   return res.json({ items, total: items.length });
@@ -587,6 +628,7 @@ router.get('/:id', async (req, res) => {
     // NB : pas de filtre deletedAt ici — la corbeille doit pouvoir afficher un ticket supprimé
     include: {
       requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+      secondaryRequester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
       assignedTo: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
       assignees: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
       lastModifiedBy: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
@@ -608,7 +650,7 @@ router.get('/:id', async (req, res) => {
   }
 
   // Un demandeur ne consulte que ses propres tickets (404 = ne révèle pas l'existence des autres)
-  if (isRequesterOnly(req.user) && ticket.requesterId !== req.user.sub &&
+  if (isRequesterOnly(req.user) && ticket.requesterId !== req.user.sub && ticket.secondaryRequesterId !== req.user.sub &&
       !ticket.observers?.some(o => o.id === req.user.sub)) {
     return res.status(404).json({ error: 'Ticket introuvable' });
   }
@@ -616,7 +658,7 @@ router.get('/:id', async (req, res) => {
   // Un technicien ne consulte que ses tickets assignés, ceux qu'il a ouverts, ou ceux qu'il observe
   if (isTechnicianOnly(req.user) && ticket.assignedToId !== req.user.sub &&
       !ticket.assignees?.some(a => a.id === req.user.sub) &&
-      ticket.requesterId !== req.user.sub &&
+      ticket.requesterId !== req.user.sub && ticket.secondaryRequesterId !== req.user.sub &&
       !ticket.observers?.some(o => o.id === req.user.sub)) {
     return res.status(404).json({ error: 'Ticket introuvable' });
   }
@@ -676,7 +718,7 @@ router.post(
     }
 
     const {
-      title, content, priority, category, teamId, assignedToId, requesterId, requiresApproval,
+      title, content, priority, category, teamId, assignedToId, requesterId, secondaryRequesterId, requiresApproval,
       type, urgency, impact, source, externalId, status, openedAt, locationId, dueDate,
     } = req.body;
 
@@ -784,6 +826,7 @@ router.post(
         teamId: teamId ? Number(teamId) : null,
         assignedToId: finalAssignedToId,
         requesterId: finalRequesterId,
+        secondaryRequesterId: secondaryRequesterId ? Number(secondaryRequesterId) : null,
         status: finalStatus,
         ...(finalStatus === 'SOLVED' ? { solvedAt: new Date() } : {}),
         ...(finalStatus === 'CLOSED' ? { closedAt: new Date() } : {}),
@@ -946,11 +989,11 @@ router.post(
 );
 
 // Update ticket (status, priority, assignment, etc.)
-router.patch('/:id', forbidTechnicianTicketEdits, requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+router.patch('/:id', allowTechnicianStatusOnly, requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const id = Number(req.params.id);
   // Whitelist : seuls ces champs acceptent la mise à jour (protection mass assignment)
-  const allowed = ['title', 'content', 'status', 'priority', 'category', 'teamId', 'assignedToId', 'assigneeIds', 'requesterId', 'sourceName', 'sourceEmail', 'type', 'urgency', 'impact', 'source', 'externalId', 'dueDate', 'assetIds', 'observerIds', 'approvalStatus', 'isMajorIncident', 'impactedSites', 'closeSuggested', 'locationId'];
-  const { title, content, status, priority, category, teamId, assignedToId, assigneeIds, requesterId, sourceName, sourceEmail, type, urgency, impact, source, externalId, dueDate, assetIds, locationId } = req.body;
+  const allowed = ['title', 'content', 'status', 'priority', 'category', 'teamId', 'assignedToId', 'assigneeIds', 'requesterId', 'secondaryRequesterId', 'sourceName', 'sourceEmail', 'type', 'urgency', 'impact', 'source', 'externalId', 'dueDate', 'assetIds', 'observerIds', 'approvalStatus', 'isMajorIncident', 'impactedSites', 'closeSuggested', 'locationId'];
+  const { title, content, status, priority, category, teamId, assignedToId, assigneeIds, requesterId, secondaryRequesterId, sourceName, sourceEmail, type, urgency, impact, source, externalId, dueDate, assetIds, locationId } = req.body;
 
   // Rejecter les champs non autorisés
   for (const key of Object.keys(req.body)) {
@@ -995,6 +1038,9 @@ router.patch('/:id', forbidTechnicianTicketEdits, requirePermission('tickets.ass
         data.sourceEmail = reqUser.email;
       }
     }
+  }
+  if (secondaryRequesterId !== undefined) {
+    data.secondaryRequesterId = secondaryRequesterId ? Number(secondaryRequesterId) : null;
   }
   if (sourceName !== undefined) data.sourceName = sourceName;
   if (sourceEmail !== undefined) data.sourceEmail = sourceEmail;

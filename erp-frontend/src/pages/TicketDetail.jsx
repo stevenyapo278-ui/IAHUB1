@@ -296,10 +296,16 @@ export default function TicketDetail() {
     }
   };
 
-  // Plafond par RÔLE (miroir du garde-fou serveur forbidTechnicianTicketEdits) : un TECHNICIAN
+  // Plafond par RÔLE (miroir du garde-fou serveur allowTechnicianStatusOnly) : un TECHNICIAN
   // ne modifie jamais les éléments d'un ticket — il consulte et ajoute des suivis, quel que
-  // soit son groupe de permissions. Toutes les actions d'édition ci-dessous en dépendent.
+  // soit son groupe de permissions. Exception : technicien assigné → peut changer le statut.
   const canEditTicketsRole = canEditTickets(user);
+  const isAssignedTechnician = user?.role === 'TECHNICIAN' &&
+    ticket != null &&
+    (
+      ticket.assignedToId === user?.id ||
+      (Array.isArray(ticket.assignees) && ticket.assignees.some((a) => a.id === user?.id))
+    );
   const canAssign = canEditTicketsRole && (hasPermission(user, 'tickets.assign') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN');
   const canApprove = canEditTicketsRole && (hasPermission(user, 'tickets.approve') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN');
   // Escalade = transfert d'équipe : droit tickets.assign restreint aux acteurs support désignés
@@ -2154,7 +2160,7 @@ export default function TicketDetail() {
                 <select
                   className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                   value={ticket.status}
-                  disabled={!canAssign || savingField === 'status'}
+                  disabled={(!canAssign && !isAssignedTechnician) || savingField === 'status'}
                   onChange={(e) => updateField('status', e.target.value)}
                 >
                   {MANUAL_STATUS_OPTIONS.map((s) => (
@@ -2282,7 +2288,7 @@ export default function TicketDetail() {
 
               <div>
                 <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface mb-1">
-                  Demandeur
+                  Demandeur principal
                 </label>
                 {canAssign ? (
                   <RemoteUserSelect
@@ -2305,6 +2311,36 @@ export default function TicketDetail() {
                       </>
                     ) : (
                       <span className="text-on-surface-variant">{ticket.sourceName || 'Non spécifié'}</span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface mb-1">
+                  Second demandeur
+                </label>
+                {canAssign ? (
+                  <RemoteUserSelect
+                    value={ticket.secondaryRequesterId || ''}
+                    valueLabel={ticket.secondaryRequester?.fullName}
+                    disabled={savingField === 'secondaryRequesterId'}
+                    hideEmail={true}
+                    onChange={(val) => updateField('secondaryRequesterId', val ? Number(val) : null)}
+                    placeholder="Sélectionner un second demandeur..."
+                    searchPlaceholder="Rechercher par nom..."
+                  />
+                ) : (
+                  <div className="w-full flex items-center gap-2 bg-slate-100 dark:bg-surface-container-low border border-slate-200 dark:border-outline-variant/15 rounded-xl px-3 py-2 text-xs font-semibold text-on-surface">
+                    {ticket.secondaryRequester ? (
+                      <>
+                        <div className="w-5 h-5 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[9px] font-bold border border-primary/20">
+                          {initials(ticket.secondaryRequester.fullName)}
+                        </div>
+                        {ticket.secondaryRequester.fullName}
+                      </>
+                    ) : (
+                      <span className="text-on-surface-variant italic font-normal">Aucun</span>
                     )}
                   </div>
                 )}
@@ -2493,14 +2529,28 @@ export default function TicketDetail() {
                 </div>
               </div>
             ) : (
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl border border-outline-variant/40 bg-surface-container text-on-surface flex items-center justify-center font-bold text-sm shrink-0 shadow-sm">
-                  {initials(ticket.requester?.fullName || ticket.sourceName)}
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl border border-outline-variant/40 bg-surface-container text-on-surface flex items-center justify-center font-bold text-sm shrink-0 shadow-sm">
+                    {initials(ticket.requester?.fullName || ticket.sourceName)}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-bold text-on-surface truncate">{ticket.requester?.fullName || ticket.sourceName || ticket.sourceEmail || '-'}</p>
+                    <p className="text-[11px] text-on-surface-variant font-medium truncate">{ticket.requester?.email || ticket.sourceEmail || '-'}</p>
+                  </div>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-bold text-on-surface truncate">{ticket.requester?.fullName || ticket.sourceName || ticket.sourceEmail || '-'}</p>
-                  <p className="text-[11px] text-on-surface-variant font-medium truncate">{ticket.requester?.email || ticket.sourceEmail || '-'}</p>
-                </div>
+                {ticket.secondaryRequester && (
+                  <div className="flex items-center gap-3 border-t border-outline-variant/15 pt-2.5">
+                    <div className="w-8 h-8 rounded-xl border border-outline-variant/40 bg-surface-container text-on-surface flex items-center justify-center font-bold text-xs shrink-0 shadow-sm">
+                      {initials(ticket.secondaryRequester.fullName)}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">2nd Demandeur</p>
+                      <p className="text-xs font-bold text-on-surface truncate">{ticket.secondaryRequester.fullName}</p>
+                      <p className="text-[11px] text-on-surface-variant font-medium truncate">{ticket.secondaryRequester.email}</p>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

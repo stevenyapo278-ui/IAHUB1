@@ -504,17 +504,6 @@ export default function Users() {
             title="Gérer les équipes par glisser-déposer">
             <UsersIcon className="w-3.5 h-3.5" />
           </button>
-          {!autonomousMode && (
-            <button onClick={async () => {
-              setError(''); setImportResult(null);
-              try { const { data } = await api.get('/glpi/importable-users'); setImportableUsers(data); setSelectedImportIds([]); setShowGlpiImport(true); }
-              catch (err) { setError(err.response?.data?.error || 'Erreur GLPI'); }
-            }}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-outline-variant/40 text-xs font-semibold text-on-surface-variant hover:bg-surface-container-high transition-colors">
-              <Download className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">GLPI</span>
-            </button>
-          )}
           {canManage && (
             <button onClick={() => { setCreateModal(true); setError(''); setForm(emptyForm); }}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-bold hover:opacity-90 transition-opacity shadow-sm">
@@ -828,13 +817,20 @@ export default function Users() {
                     <Toggle checked={editForm.isActive} onChange={val => setEditForm({ ...editForm, isActive: val })} />
                   </label>
                 </div>
-                <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-outline-variant/30 bg-surface-container-low/40">
-                  <button onClick={closeEditModal} className="px-4 py-2 rounded-xl border border-outline-variant/40 text-on-surface text-xs font-semibold hover:bg-surface-container transition-colors">Annuler</button>
-                  <button onClick={saveEdit} disabled={savingEdit || !editForm.fullName.trim() || !editForm.email.trim()}
-                    className="px-4 py-2 rounded-xl bg-primary text-on-primary text-xs font-bold shadow-md disabled:opacity-50 flex items-center gap-2 transition-all hover:opacity-90">
-                    {savingEdit ? <RotateCcw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                    {savingEdit ? 'Enregistrement...' : 'Enregistrer'}
+                <div className="flex items-center justify-between px-5 py-4 border-t border-outline-variant/30 bg-surface-container-low/40">
+                  <button type="button" onClick={() => { const uid = editModal.user?.id; closeEditModal(); if (uid) setConfirmDeleteId(uid); }}
+                    className="px-3 py-2 rounded-xl text-red-500 hover:bg-red-500/10 text-xs font-semibold flex items-center gap-1.5 transition-colors">
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Supprimer</span>
                   </button>
+                  <div className="flex items-center gap-2">
+                    <button onClick={closeEditModal} className="px-4 py-2 rounded-xl border border-outline-variant/40 text-on-surface text-xs font-semibold hover:bg-surface-container transition-colors">Annuler</button>
+                    <button onClick={saveEdit} disabled={savingEdit || !editForm.fullName.trim() || !editForm.email.trim()}
+                      className="px-4 py-2 rounded-xl bg-primary text-on-primary text-xs font-bold shadow-md disabled:opacity-50 flex items-center gap-2 transition-all hover:opacity-90">
+                      {savingEdit ? <RotateCcw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                      {savingEdit ? 'Enregistrement...' : 'Enregistrer'}
+                    </button>
+                  </div>
                 </div>
               </motion.div>
             </div>
@@ -850,88 +846,7 @@ export default function Users() {
         message="Un nouveau mot de passe temporaire sera généré et envoyé par email."
         confirmLabel="Réinitialiser" loading={resetting} onConfirm={handleResetPassword} onCancel={() => setConfirmResetId(null)} />
 
-      {/* Modal GLPI Import */}
-      {createPortal(
-        <AnimatePresence>
-          {showGlpiImport && (
-            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { if (!importing) setShowGlpiImport(false); }} className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer" />
-              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} transition={{ type: 'spring', duration: 0.35, bounce: 0.12 }}
-                className="relative bg-surface border border-outline-variant/40 rounded-3xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
-                <div className="flex items-center gap-3 px-5 py-4 border-b border-outline-variant/30">
-                  <div className="p-1.5 rounded-lg bg-sky-500/10"><Download className="w-4 h-4 text-sky-600 dark:text-sky-400" /></div>
-                  <h3 className="text-sm font-bold text-on-surface">Importer depuis GLPI</h3>
-                  <motion.button onClick={() => { if (!importing) setShowGlpiImport(false); }} whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }} className="ml-auto p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"><X className="w-4 h-4" /></motion.button>
-                </div>
-                <div className="p-5 overflow-y-auto flex-1">
-                  {importResult ? (
-                    <div className="space-y-3">
-                      <div className="p-4 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-sm">
-                        {importResult.imported} utilisateur(s) importé(s) avec succès
-                      </div>
-                      {importResult.errors?.length > 0 && (
-                        <div className="p-4 rounded-xl bg-red-500/5 text-red-600 dark:text-red-400 border border-red-500/20 text-xs">
-                          <p className="font-bold mb-2">Erreurs :</p>
-                          <ul className="list-disc pl-4 space-y-1">{importResult.errors.map((e, i) => <li key={i}>GLPI #{e.glpiId} : {e.reason}</li>)}</ul>
-                        </div>
-                      )}
-                      <div className="flex justify-end">
-                        <button onClick={() => { setShowGlpiImport(false); load(); }} className="px-4 py-2 rounded-xl bg-primary text-on-primary text-sm font-bold">Terminé</button>
-                      </div>
-                    </div>
-                  ) : importableUsers.length === 0 ? (
-                    <div className="flex flex-col items-center gap-3 py-8 text-on-surface-variant">
-                      <CheckCircle2 className="w-10 h-10 text-emerald-500/40" />
-                      <p className="text-sm">Tous les utilisateurs GLPI sont déjà importés.</p>
-                    </div>
-                  ) : (
-                    <>
-                      <p className="text-xs text-on-surface-variant mb-3">{importableUsers.length} utilisateur(s) GLPI disponibles. Ils recevront le rôle <strong>Technicien</strong>.</p>
-                      <label className="flex items-center gap-2 cursor-pointer mb-3">
-                        <input type="checkbox" checked={selectedImportIds.length === importableUsers.length}
-                          onChange={() => setSelectedImportIds(selectedImportIds.length === importableUsers.length ? [] : importableUsers.map(u => u.glpiId))}
-                          className="accent-primary w-3.5 h-3.5" />
-                        <span className="text-xs text-on-surface">Tout sélectionner ({selectedImportIds.length})</span>
-                      </label>
-                      <div className="border border-outline-variant/30 rounded-xl divide-y divide-outline-variant/15 max-h-60 overflow-y-auto">
-                        {importableUsers.map(u => (
-                          <label key={u.glpiId} className="flex items-center gap-3 px-3 py-2.5 hover:bg-surface-container-low/60 cursor-pointer">
-                            <input type="checkbox" checked={selectedImportIds.includes(u.glpiId)}
-                              onChange={() => setSelectedImportIds(ids => ids.includes(u.glpiId) ? ids.filter(id => id !== u.glpiId) : [...ids, u.glpiId])}
-                              className="accent-primary w-3.5 h-3.5" />
-                            <div className="w-7 h-7 rounded-full bg-surface-container border border-outline-variant/40 text-on-surface text-[10px] font-bold flex items-center justify-center">
-                              {u.fullName?.split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase() || '?'}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs font-medium text-on-surface truncate">{u.fullName}</p>
-                              <p className="text-[10px] text-on-surface-variant truncate">{u.email}</p>
-                            </div>
-                            <span className="text-[10px] text-outline/50 font-mono">#{u.glpiId}</span>
-                          </label>
-                        ))}
-                      </div>
-                      <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-outline-variant/30">
-                        <button onClick={() => setShowGlpiImport(false)} disabled={importing} className="px-4 py-2 rounded-xl border border-outline-variant/40 text-on-surface text-sm font-medium hover:bg-surface-container transition-colors disabled:opacity-50">Annuler</button>
-                        <button disabled={selectedImportIds.length === 0 || importing}
-                          onClick={async () => {
-                            setImporting(true);
-                            try { const { data } = await api.post('/glpi/import-users', { userIds: selectedImportIds }); setImportResult(data); }
-                            catch (err) { setError(err.response?.data?.error || "Erreur d'import"); setShowGlpiImport(false); }
-                            finally { setImporting(false); }
-                          }} className="px-4 py-2 rounded-xl bg-primary text-on-primary text-sm font-bold disabled:opacity-50 flex items-center gap-2 shadow-md">
-                          {importing && <RotateCcw className="w-3.5 h-3.5 animate-spin" />}
-                          {importing ? 'Import...' : `Importer (${selectedImportIds.length})`}
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </motion.div>
-            </div>
-          )}
-        </AnimatePresence>,
-        document.body
-      )}
+
 
       {/* Modal CSV Import */}
       {createPortal(

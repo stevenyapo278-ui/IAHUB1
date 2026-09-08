@@ -213,6 +213,17 @@ export function NotificationProvider({ children }) {
     }
   }, []);
 
+  // ── Supprimer / fermer une notification ─────────────────────────
+  const dismissNotification = useCallback(async (id) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    setUnreadCount((prev) => Math.max(0, prev - 1));
+    try {
+      await api.delete(`/notifications/${id}`).catch(() => api.patch(`/notifications/${id}/read`));
+    } catch (err) {
+      console.error('[NotificationContext] Erreur suppression notif:', err.message);
+    }
+  }, []);
+
   return (
     <NotificationContext.Provider
       value={{
@@ -223,6 +234,7 @@ export function NotificationProvider({ children }) {
         loadMore,
         markAsRead,
         markAllAsRead,
+        dismissNotification,
         refresh: () => loadNotifications(),
       }}
     >

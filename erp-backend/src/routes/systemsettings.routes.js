@@ -33,11 +33,22 @@ const logoUpload = multer({
 });
 
 async function getOrCreateSettings() {
-  return prisma.systemSettings.upsert({
-    where: { id: 1 },
-    update: {},
-    create: { id: 1 },
-  });
+  try {
+    let settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+    if (!settings) {
+      settings = await prisma.systemSettings.create({ data: { id: 1 } });
+    }
+    return settings;
+  } catch (err) {
+    console.error('[systemsettings] Erreur lecture SystemSettings:', err.message);
+    return {
+      id: 1,
+      autoSendAiEmails: false,
+      enableFewShotTriage: true,
+      emailApprovalEnabled: true,
+      emailAcknowledgementEnabled: true,
+    };
+  }
 }
 
 router.get('/', async (req, res) => {

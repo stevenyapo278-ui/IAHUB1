@@ -142,7 +142,8 @@ model User {
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 
-  ticketsCreated               Ticket[]                @relation("TicketRequester")
+  ticketsRequested             Ticket[]                @relation("TicketRequester")
+  ticketsSecondaryRequested    Ticket[]                @relation("TicketSecondaryRequester")
   ticketsAssigned              Ticket[]                @relation("TicketAssignee")
   ticketsAssignedMultiple      Ticket[]                @relation("TicketAssignees")
   ticketsApproved              Ticket[]                @relation("TicketApprover")
@@ -334,6 +335,9 @@ model Ticket {
   requester   User? @relation("TicketRequester", fields: [requesterId], references: [id])
   requesterId Int?
 
+  secondaryRequester   User? @relation("TicketSecondaryRequester", fields: [secondaryRequesterId], references: [id])
+  secondaryRequesterId Int?
+
   assignedTo   User? @relation("TicketAssignee", fields: [assignedToId], references: [id])
   assignedToId Int?
 
@@ -439,6 +443,7 @@ model Ticket {
   problems         ProblemTicket[]
 
   @@index([requesterId])
+  @@index([secondaryRequesterId])
   @@index([assignedToId])
   @@index([teamId])
   @@index([approvedById])

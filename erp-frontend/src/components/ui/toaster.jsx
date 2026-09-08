@@ -9,10 +9,12 @@ export default function Toaster() {
       theme={theme}
       richColors
       closeButton
+      expand={true}
+      visibleToasts={6}
       position="top-right"
       gap={10}
       toastOptions={{
-        duration: 5000,
+        duration: 6000,
         className: 'group-toast',
         style: {
           borderRadius: '18px',

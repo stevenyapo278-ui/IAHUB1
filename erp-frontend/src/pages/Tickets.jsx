@@ -89,6 +89,7 @@ const EMPTY_FORM = {  title: '',
   assignedToId: '',
   assigneeIds: [],
   requesterId: '',
+  secondaryRequesterId: '',
   observerIds: [],
   assetIds: [],
   requiresApproval: false,
@@ -259,11 +260,17 @@ function AssigneeRenderer({ data }) {
 function RequesterRenderer({ data }) {
   if (!data) return null;
   const reqName = data.requester?.fullName || data.sourceName || data.sourceEmail;
-  if (!reqName) return <span className="text-sm text-muted-foreground/60 italic">—</span>;
+  const secReqName = data.secondaryRequester?.fullName;
+  if (!reqName && !secReqName) return <span className="text-sm text-muted-foreground/60 italic">—</span>;
   return (
-    <div className="flex h-full items-center gap-2.5">
+    <div className="flex h-full items-center gap-2 font-medium text-foreground truncate">
       <Avatar user={data.requester} name={reqName} colorClass="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20" />
-      <span className="text-sm font-medium text-foreground truncate">{reqName}</span>
+      <span className="text-sm truncate">{reqName}</span>
+      {secReqName && (
+        <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold truncate" title={`2nd demandeur: ${secReqName}`}>
+          + {secReqName}
+        </span>
+      )}
     </div>
   );
 }
@@ -1930,10 +1937,16 @@ export default function Tickets() {
                     )}
                   </div>
 
-                  <FormField label="Demandeur">
-                    <RemoteUserSelect value={form.requesterId} onChange={(val) => setForm({ ...form, requesterId: val })}
-                      glpiUsers={glpiUsers} hideEmail={true} placeholder="Rechercher un demandeur..." />
-                  </FormField>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <FormField label="Demandeur principal">
+                      <RemoteUserSelect value={form.requesterId} onChange={(val) => setForm({ ...form, requesterId: val })}
+                        glpiUsers={glpiUsers} hideEmail={true} placeholder="Demandeur principal..." />
+                    </FormField>
+                    <FormField label="Second demandeur (optionnel)">
+                      <RemoteUserSelect value={form.secondaryRequesterId} onChange={(val) => setForm({ ...form, secondaryRequesterId: val })}
+                        glpiUsers={glpiUsers} hideEmail={true} placeholder="Second demandeur..." />
+                    </FormField>
+                  </div>
 
                   <FormField label="Observateurs">
                     <RemoteUserMultiSelect value={form.observerIds} onChange={(vals) => setForm({ ...form, observerIds: vals })}

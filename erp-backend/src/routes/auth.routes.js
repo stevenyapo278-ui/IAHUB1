@@ -339,26 +339,39 @@ router.post(
 // ces permissions qui s'appliquent (null = pas de groupe, le frontend retombe alors sur les règles
 // par rôle classiques pour ne jamais casser l'accès d'un compte existant sans groupe assigné).
 router.get('/me', authenticate, async (req, res) => {
-  const user = await prisma.user.findUnique({
-    where: { id: req.user.sub },
-    select: { id: true, email: true, fullName: true, role: true, teamId: true, isActive: true, mustChangePassword: true, avatarUrl: true },
-  });
-
-  if (!user) {
-    return res.status(404).json({ error: 'Utilisateur introuvable' });
-  }
-
-  let permissions = null;
-  if (user.role !== 'SUPERADMIN') {
-    const groupCount = await prisma.permissionGroup.count({ where: { members: { some: { id: user.id } } } });
-    if (groupCount > 0) {
-      permissions = Array.from(await getUserPermissions(user.id));
+  try {
+    const userId = Number(req.user?.sub);
+    if (!userId || Number.isNaN(userId)) {
+      return res.status(401).json({ error: 'Identifiant utilisateur invalide' });
     }
-  }
 
-  // avatarUrl stockée en relatif (/uploads/avatar/...) → résolue en URL absolue pour le navigateur
-  const { avatarUrl, ...rest } = await userWithAvatarUrl(user);
-  return res.json({ ...rest, avatarUrl, permissions });
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, fullName: true, role: true, teamId: true, isActive: true, mustChangePassword: true, avatarUrl: true },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'Utilisateur introuvable' });
+    }
+
+    let permissions = null;
+    if (user.role !== 'SUPERADMIN') {
+      try {
+        const groupCount = await prisma.permissionGroup.count({ where: { members: { some: { id: user.id } } } });
+        if (groupCount > 0) {
+          permissions = Array.from(await getUserPermissions(user.id));
+        }
+      } catch (permErr) {
+        console.error('[auth.me] Erreur permissions:', permErr.message);
+      }
+    }
+
+    const { avatarUrl, ...rest } = await userWithAvatarUrl(user);
+    return res.json({ ...rest, avatarUrl, permissions });
+  } catch (err) {
+    console.error('[auth.me] Erreur lors de la lecture utilisateur:', err.message);
+    return res.status(500).json({ error: 'Erreur serveur lors du chargement du profil' });
+  }
 });
 
 // ── Photo de profil — upload self-service (tous les utilisateurs authentifiés) ──────────

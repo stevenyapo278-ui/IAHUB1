@@ -71,7 +71,7 @@ function ticketIdFromLink(link) {
 }
 
 export default function NotificationPanel({ open, onClose }) {
-  const { notifications, unreadCount, hasMore, loadMore, markAsRead, markAllAsRead } = useNotifications();
+  const { notifications, unreadCount, hasMore, loadMore, markAsRead, markAllAsRead, dismissNotification } = useNotifications();
   const navigate = useNavigate();
   const panelRef = useRef(null);
   const scrollRef = useRef(null);
@@ -285,6 +285,7 @@ export default function NotificationPanel({ open, onClose }) {
                             notif={notif}
                             onClick={handleNotifClick}
                             onMarkRead={handleMarkOneRead}
+                            onDismiss={(e, id) => { e.stopPropagation(); dismissNotification(id); }}
                           />
                         ))}
                       </div>
@@ -324,7 +325,7 @@ export default function NotificationPanel({ open, onClose }) {
   );
 }
 
-function NotifItem({ notif, onClick, onMarkRead }) {
+function NotifItem({ notif, onClick, onMarkRead, onDismiss }) {
   const read = notif.isRead;
   const typeCfg = TYPE_CONFIG[notif.type] || DEFAULT_TYPE_CONFIG;
   const Icon = typeCfg.icon;
@@ -370,7 +371,7 @@ function NotifItem({ notif, onClick, onMarkRead }) {
       </div>
 
       {/* Contenu */}
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 pr-6">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
             <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md border ${typeCfg.chip}`}>
@@ -428,18 +429,28 @@ function NotifItem({ notif, onClick, onMarkRead }) {
       </div>
 
       {/* Actions au survol */}
-      {!read && (
+      <div className="absolute right-2 top-2.5 flex items-center gap-1">
+        {!read && (
+          <button
+            onClick={(e) => onMarkRead(e, notif)}
+            title="Marquer comme lue"
+            className="w-6 h-6 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
+            style={{ color: 'var(--color-on-surface-variant)', backgroundColor: 'var(--color-surface-container-high)' }}
+            onMouseEnter={(e) => e.currentTarget.style.color = 'var(--color-on-surface)'}
+            onMouseLeave={(e) => e.currentTarget.style.color = 'var(--color-on-surface-variant)'}
+          >
+            <Check className="w-3.5 h-3.5" />
+          </button>
+        )}
         <button
-          onClick={(e) => onMarkRead(e, notif)}
-          title="Marquer comme lue"
-          className="shrink-0 w-6 h-6 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
-          style={{ color: 'var(--color-on-surface-variant)', backgroundColor: 'var(--color-surface-container-high)' }}
-          onMouseEnter={(e) => e.currentTarget.style.color = 'var(--color-on-surface)'}
-          onMouseLeave={(e) => e.currentTarget.style.color = 'var(--color-on-surface-variant)'}
+          onClick={(e) => onDismiss(e, notif.id)}
+          title="Fermer la notification"
+          className="w-6 h-6 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer hover:bg-red-500/10 hover:text-red-500"
+          style={{ color: 'var(--color-on-surface-variant)' }}
         >
-          <Check className="w-3.5 h-3.5" />
+          <X className="w-3.5 h-3.5" />
         </button>
-      )}
+      </div>
 
       {/* Indicateur non-lu (petit point) */}
       {!read && (
