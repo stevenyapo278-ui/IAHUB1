@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../api/client';
 import {
   Mail, UserCheck, AlertTriangle, Clock, RefreshCw, CheckCircle2,
-  TrendingUp, Shield, Send, Bell, Volume2, MousePointer2,
+  TrendingUp, Shield, Send, Bell, Volume2, MousePointer2, FlaskConical,
 } from 'lucide-react';
 import {
   isSoundsEnabled,
@@ -27,16 +27,16 @@ import { SettingRow, inputClass, itemVariants } from './SettingsComponents';
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const EMAIL_TOGGLES = [
-  { key: 'emailAcknowledgementEnabled', label: 'Accusé de réception', description: "Email automatique envoyé au demandeur lors de la création d'un ticket par email.", icon: Mail, category: 'Automatiques (pipeline email)', subjects: ['[Ticket #ID] Objet du ticket'] },
-  { key: 'emailKnownIncidentEnabled', label: 'Incident déjà connu', description: 'Notification quand un email correspond à un incident existant (le demandeur est rattaché au ticket existant).', icon: AlertTriangle, category: 'Automatiques (pipeline email)', subjects: ['[Ticket #ID] Objet du ticket'] },
-  { key: 'emailAssignmentEnabled', label: 'Assignation technicien', description: "Email envoyé au technicien quand l'IA lui attribue automatiquement un ticket.", icon: UserCheck, category: 'Automatiques (pipeline email)', subjects: ['[Ticket #ID] Nouvelle assignation — Titre du ticket'] },
-  { key: 'emailSlaBreachEnabled', label: 'Dépassement SLA', description: 'Alerte envoyée au technicien assigné quand le SLA de réponse est dépassé.', icon: Clock, category: 'Automatiques (schedulers)', subjects: ['[SLA] Dépassement — Ticket #ID : Titre du ticket'] },
-  { key: 'emailDueDateBreachEnabled', label: "Dépassement d'échéance", description: "Alerte envoyée au technicien assigné quand la date d'échéance manuelle est dépassée.", icon: Clock, category: 'Automatiques (schedulers)', subjects: ['[Échéance] Dépassement — Ticket #ID : Titre du ticket'] },
-  { key: 'emailStatusChangeEnabled', label: 'Changement de statut', description: 'Notification envoyée au demandeur à chaque changement de statut du ticket.', icon: RefreshCw, category: 'Manuelles (actions utilisateur)', subjects: ['[Ticket #ID] Statut — Titre du ticket'] },
-  { key: 'emailResolvedEnabled', label: 'Résolution (différé 10 min)', description: 'Email de résolution envoyé au demandeur 10 minutes après le passage en "Résolu" (laisse un délai de correction).', icon: CheckCircle2, category: 'Manuelles (actions utilisateur)', subjects: ['[Ticket #ID] Résolu — Titre du ticket'] },
-  { key: 'emailEscalationEnabled', label: 'Escalade', description: "Notification envoyée aux admins/techniciens et au demandeur lors d'une escalade de ticket.", icon: TrendingUp, category: 'Manuelles (actions utilisateur)', subjects: ['[Escalade Niv.1] Ticket #ID : Titre du ticket', '[Ticket #ID] Votre demande a été escaladée'] },
-  { key: 'emailMajorIncidentResolvedEnabled', label: 'Résolution incident majeur', description: 'Notification envoyée aux emails des sites impactés quand un incident majeur est résolu.', icon: Shield, category: 'Manuelles (actions utilisateur)', subjects: ['[Ticket #ID] Titre du ticket'] },
-  { key: 'emailApprovalEnabled', label: 'Approbation ticket', description: 'Notification envoyée au demandeur quand son ticket est approuvé par la Hotline.', icon: Send, category: 'Manuelles (actions utilisateur)', subjects: ['[Ticket #ID] Approuvé — Titre du ticket'] },
+  { key: 'emailAcknowledgementEnabled', label: 'Accusé de réception', description: "Email automatique envoyé au demandeur lors de la création d'un ticket par email.", icon: Mail, category: 'Automatiques (pipeline email)', subjects: ['[Ticket #ID] Objet du ticket'], testKey: 'acknowledgement' },
+  { key: 'emailKnownIncidentEnabled', label: 'Incident déjà connu', description: 'Notification quand un email correspond à un incident existant (le demandeur est rattaché au ticket existant).', icon: AlertTriangle, category: 'Automatiques (pipeline email)', subjects: ['[Ticket #ID] Objet du ticket'], testKey: 'known_incident' },
+  { key: 'emailAssignmentEnabled', label: 'Assignation technicien', description: "Email envoyé au technicien quand l'IA lui attribue automatiquement un ticket.", icon: UserCheck, category: 'Automatiques (pipeline email)', subjects: ['[Ticket #ID] Nouvelle assignation — Titre du ticket'], testKey: 'assignment' },
+  { key: 'emailSlaBreachEnabled', label: 'Dépassement SLA', description: 'Alerte envoyée au technicien assigné quand le SLA de réponse est dépassé.', icon: Clock, category: 'Automatiques (schedulers)', subjects: ['[SLA] Dépassement — Ticket #ID : Titre du ticket'], testKey: 'sla_breach' },
+  { key: 'emailDueDateBreachEnabled', label: "Dépassement d'échéance", description: "Alerte envoyée au technicien assigné quand la date d'échéance manuelle est dépassée.", icon: Clock, category: 'Automatiques (schedulers)', subjects: ['[Échéance] Dépassement — Ticket #ID : Titre du ticket'], testKey: 'due_date' },
+  { key: 'emailStatusChangeEnabled', label: 'Changement de statut', description: 'Notification envoyée au demandeur à chaque changement de statut du ticket.', icon: RefreshCw, category: 'Manuelles (actions utilisateur)', subjects: ['[Ticket #ID] Statut — Titre du ticket'], testKey: 'status_change' },
+  { key: 'emailResolvedEnabled', label: 'Résolution (différé 10 min)', description: 'Email de résolution envoyé au demandeur 10 minutes après le passage en "Résolu" (laisse un délai de correction).', icon: CheckCircle2, category: 'Manuelles (actions utilisateur)', subjects: ['[Ticket #ID] Résolu — Titre du ticket'], testKey: null },
+  { key: 'emailEscalationEnabled', label: 'Escalade', description: "Notification envoyée aux admins/techniciens et au demandeur lors d'une escalade de ticket.", icon: TrendingUp, category: 'Manuelles (actions utilisateur)', subjects: ['[Escalade Niv.1] Ticket #ID : Titre du ticket', '[Ticket #ID] Votre demande a été escaladée'], testKey: null },
+  { key: 'emailMajorIncidentResolvedEnabled', label: 'Résolution incident majeur', description: 'Notification envoyée aux emails des sites impactés quand un incident majeur est résolu.', icon: Shield, category: 'Manuelles (actions utilisateur)', subjects: ['[Ticket #ID] Titre du ticket'], testKey: null },
+  { key: 'emailApprovalEnabled', label: 'Approbation ticket', description: 'Notification envoyée au demandeur quand son ticket est approuvé par la Hotline.', icon: Send, category: 'Manuelles (actions utilisateur)', subjects: ['[Ticket #ID] Approuvé — Titre du ticket'], testKey: null },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -64,6 +64,11 @@ export default function EmailNotificationsTab() {
   const [soundsVolume, setSoundsVolumeState] = useState(getSoundsVolume());
   const [soundsInteraction, setSoundsInteractionState] = useState(isSoundsInteractionEnabled());
   const [browserNotif, setBrowserNotif] = useState(isBrowserNotifEnabled());
+
+  // ── Test email ──
+  const [testEmailInput, setTestEmailInput] = useState('');
+  const [testingEmailType, setTestingEmailType] = useState(null);
+  const [testEmailResult, setTestEmailResult] = useState(null);
 
   useEffect(() => {
     api.get('/system-settings').then(({ data }) => setSettings(data)).catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
@@ -163,6 +168,22 @@ export default function EmailNotificationsTab() {
     if (value) playClick();
   }
 
+  // ── Test email template ──
+  async function testEmailTemplate(type) {
+    const email = testEmailInput.trim();
+    if (!email) return;
+    setTestingEmailType(type);
+    setTestEmailResult(null);
+    try {
+      const { data } = await api.post('/system-settings/test-email', { type, recipientEmail: email });
+      setTestEmailResult({ type, sent: data.sent });
+    } catch (err) {
+      setTestEmailResult({ type, sent: false, error: err.response?.data?.error || 'Erreur d\'envoi' });
+    } finally {
+      setTestingEmailType(null);
+    }
+  }
+
   if (!settings) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -205,6 +226,24 @@ export default function EmailNotificationsTab() {
         </div>
         <p className="text-xs text-on-surface-variant px-1 -mt-2">Choisissez quels emails automatiques sont envoyés. Chaque type correspond à un événement déclencheur dans le cycle de vie d'un ticket.</p>
 
+        {/* Champ email de test global */}
+        <motion.div variants={itemVariants} className="bento-card flex flex-col sm:flex-row sm:items-center gap-3 p-lg">
+          <div className="flex items-center gap-2 shrink-0">
+            <FlaskConical className="w-4 h-4 text-primary" />
+            <span className="text-sm font-semibold text-on-surface">Tester un template</span>
+          </div>
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <input
+              type="email"
+              value={testEmailInput}
+              onChange={(e) => setTestEmailInput(e.target.value)}
+              placeholder="email@exemple.com — adresse de test"
+              className={`${inputClass} flex-1`}
+            />
+            <span className="text-xs text-on-surface-variant/60 shrink-0 hidden sm:block">Puis cliquez sur "Tester" à droite du toggle souhaité.</span>
+          </div>
+        </motion.div>
+
         {categories.map((category) => (
         <div key={category} className="space-y-3">
           <h3 className="text-xs font-bold uppercase tracking-wider text-on-surface-variant/60 px-1">
@@ -239,15 +278,51 @@ export default function EmailNotificationsTab() {
                     )}
                   </div>
                 </div>
-                <div className="shrink-0">
+                <div className="shrink-0 flex items-center gap-2">
+                  {toggle.testKey && (
+                    <motion.button
+                      type="button"
+                      onClick={() => testEmailTemplate(toggle.testKey)}
+                      disabled={testingEmailType !== null || !testEmailInput.trim()}
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.96 }}
+                      className="px-3 py-1.5 border border-outline-variant/60 text-on-surface hover:bg-surface-container-high rounded-xl font-semibold text-xs transition-all disabled:opacity-50 shrink-0 shadow-sm flex items-center gap-1.5"
+                      title="Envoyer un email de test avec ce template"
+                    >
+                      <FlaskConical className="w-3.5 h-3.5" />
+                      {testingEmailType === toggle.testKey ? 'Envoi...' : 'Tester'}
+                    </motion.button>
+                  )}
                   <Toggle checked={settings[toggle.key] ?? true} onChange={(v) => updateSetting(toggle.key, v)} disabled={saving} />
                 </div>
               </motion.div>
-            ))}
-          </div>
+        ))}
         </div>
+      </div>
       ))}
       </div>
+
+      {/* Résultat du test email */}
+      <AnimatePresence>
+        {testEmailResult && (
+          <motion.div
+            key="email-test-result"
+            initial={{ opacity: 0, height: 0, y: -8 }}
+            animate={{ opacity: 1, height: 'auto', y: 0 }}
+            exit={{ opacity: 0, height: 0, y: -8 }}
+            transition={{ duration: 0.3 }}
+            className={`p-md rounded-xl border overflow-hidden font-body-sm ${
+              testEmailResult.sent
+                ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400'
+                : 'border-red-500/20 bg-red-500/5 text-red-500'
+            }`}
+          >
+            {testEmailResult.sent
+              ? `Email de test envoyé avec succès à ${testEmailInput.trim()}`
+              : `Échec de l'envoi : ${testEmailResult.error}`}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       {/* SECTION 2 : RÉCAPITULATIF QUOTIDIEN & NOTIFICATIONS EMAIL */}
