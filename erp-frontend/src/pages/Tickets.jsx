@@ -1503,11 +1503,14 @@ export default function Tickets() {
         {[
           { label: 'Total', value: totalCount, filterVal: '', color: 'text-on-surface' },
           { label: 'Ouverts', value: serverStats.open, filterVal: 'OPEN_GROUP', color: 'text-amber-600 dark:text-amber-400' },
-          { label: 'En attente', value: serverStats.pending, filterVal: 'PENDING', color: 'text-sky-600 dark:text-sky-400' },
+          { label: 'En attente', value: serverStats.pending, filterVal: 'PENDING_GROUP', color: 'text-sky-600 dark:text-sky-400' },
           { label: 'Résolus', value: serverStats.solved ?? 0, filterVal: 'SOLVED', color: 'text-emerald-600 dark:text-emerald-400' },
           { label: 'Fermés', value: serverStats.closed ?? 0, filterVal: 'CLOSED', color: 'text-slate-600 dark:text-slate-400' },
         ].map((s) => {
-          const isActive = s.filterVal !== '' && filters.status === s.filterVal;
+          const isActive = s.filterVal !== '' && (
+            filters.status === s.filterVal ||
+            (s.filterVal === 'PENDING_GROUP' && filters.status === 'PENDING')
+          );
           return (
             <button
               key={s.label}

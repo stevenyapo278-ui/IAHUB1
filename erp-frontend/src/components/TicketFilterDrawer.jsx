@@ -90,11 +90,13 @@ export default function TicketFilterDrawer({
               { label: 'Tous les statuts', value: '' },
               { label: 'Tous sauf clôturés (défaut)', value: 'NOT_CLOSED' },
               { label: 'Ouverts (actifs)', value: 'OPEN_GROUP' },
+              { label: 'En attente (tous)', value: 'PENDING_GROUP' },
               { label: 'Clôturés / résolus', value: 'CLOSED_GROUP' },
               { label: 'Nouveau', value: 'NEW' },
               { label: 'En cours', value: 'OPEN' },
               { label: 'Planifié', value: 'PLANNED' },
               { label: 'En attente', value: 'PENDING' },
+              { label: 'En attente demandeur', value: 'WAITING_FOR_USER' },
               { label: 'Résolu', value: 'SOLVED' },
               { label: 'Fermé', value: 'CLOSED' },
             ]}

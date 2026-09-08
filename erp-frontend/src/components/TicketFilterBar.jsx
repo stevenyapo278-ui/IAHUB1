@@ -20,11 +20,13 @@ const QUICK_TOGGLES = [
 const STATUS_LABELS = {
   'NOT_CLOSED': 'Non clôturés',
   'OPEN_GROUP': 'Ouverts',
+  'PENDING_GROUP': 'En attente',
   'CLOSED_GROUP': 'Clôturés',
   'NEW': 'Nouveau',
   'OPEN': 'En cours',
   'PLANNED': 'Planifié',
   'PENDING': 'En attente',
+  'WAITING_FOR_USER': 'En attente demandeur',
   'SOLVED': 'Résolu',
   'CLOSED': 'Fermé',
 };

@@ -142,8 +142,13 @@ function buildTicketWhereClause(user, queryParams = {}) {
 
   const andConditions = [
     { deletedAt: null },
-    { approvalStatus: { notIn: ['PENDING', 'REJECTED'] } },
   ];
+
+  if (approvalStatus) {
+    andConditions.push({ approvalStatus });
+  } else {
+    andConditions.push({ approvalStatus: { notIn: ['PENDING', 'REJECTED'] } });
+  }
 
   if (isRequesterOnly(user)) {
     andConditions.push({
@@ -169,7 +174,9 @@ function buildTicketWhereClause(user, queryParams = {}) {
 
   if (status) {
     if (status === 'OPEN_GROUP') {
-      andConditions.push({ status: { in: ['NEW', 'OPEN', 'PLANNED', 'PENDING'] } });
+      andConditions.push({ status: { in: ['NEW', 'OPEN', 'PLANNED'] } });
+    } else if (status === 'PENDING_GROUP' || status === 'PENDING') {
+      andConditions.push({ status: { in: ['PENDING', 'WAITING_FOR_USER'] } });
     } else if (status === 'CLOSED_GROUP') {
       andConditions.push({ status: { in: ['SOLVED', 'CLOSED'] } });
     } else if (status === 'NOT_CLOSED') {
