@@ -228,22 +228,54 @@ async function getEmailSignature() {
 // Génère le HTML de l'accusé de réception (fonction pure, sans envoi).
 // `customMessage` vient de SystemSettings.acknowledgementMessage (Paramètres > Automatisation > Emails) ;
 // placeholders supportés : {ticketId}, {subject}, {toName}.
-function buildAcknowledgementHtml({ toName, glpiTicketId, ticketId, originalSubject, customMessage, signature }) {
+// `ticketLink` : lien vers le ticket dans l'application (bouton "Suivre mon ticket").
+function buildAcknowledgementHtml({ toName, glpiTicketId, ticketId, originalSubject, customMessage, signature, ticketLink }) {
   const displayId = glpiTicketId || ticketId || 'N/A';
   const introMessage = (customMessage || DEFAULT_ACKNOWLEDGEMENT_MESSAGE)
     .replaceAll('{ticketId}', displayId)
     .replaceAll('{subject}', originalSubject)
     .replaceAll('{toName}', toName || '');
   return `
-<p>Bonjour ${toName || ''},</p>
-<p>${introMessage}</p>
-${buildStyledTable([
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:24px 16px">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;font-family:sans-serif">
+        <tr>
+          <td style="background:#2563eb;padding:20px 24px">
+            <div style="color:#ffffff;font-size:18px;font-weight:bold;line-height:1.3">Votre demande a bien été enregistrée</div>
+            <div style="color:#dbeafe;font-size:14px;margin-top:4px">Ticket #${displayId}</div>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px 24px 0;color:#1f2937;font-size:14px;line-height:1.6">
+            <p style="margin:0 0 12px">Bonjour ${toName || ''},</p>
+            <p style="margin:0 0 12px">${introMessage}</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 24px">
+            ${buildStyledTable([
   { label: 'Numéro de ticket', value: `<strong>#${displayId}</strong>` },
   { label: 'Sujet', value: originalSubject },
 ])}
-<p>Notre équipe va analyser votre demande et vous contactera dans les meilleurs délais.</p>
-<p>Vous pouvez répondre directement à cet email pour ajouter des informations à votre ticket.</p>
-${signature || DEFAULT_EMAIL_SIGNATURE}
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:8px 24px 24px;color:#1f2937;font-size:14px;line-height:1.6">
+            <p style="margin:0 0 12px">Notre équipe va analyser votre demande et vous contactera dans les meilleurs délais.</p>
+            ${ticketLink ? buildActionLink(ticketLink, 'Suivre mon ticket') : ''}
+            <p style="margin:0 0 12px">Vous pouvez aussi répondre directement à cet email pour ajouter des informations à votre ticket.</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 24px 24px">
+            ${signature || DEFAULT_EMAIL_SIGNATURE}
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
 `.trim();
 }
 
@@ -254,7 +286,9 @@ async function sendAcknowledgement({ ticketId, glpiTicketId, toEmail, toName, or
   const displayId = glpiTicketId || ticketId || 'N/A';
   const subject = `[Ticket #${displayId}] ${originalSubject}`;
   const signature = await getEmailSignature();
-  const bodyHtml = buildAcknowledgementHtml({ toName, glpiTicketId, ticketId, originalSubject, customMessage: settings.acknowledgementMessage, signature });
+  const frontendUrl = resolveFrontendUrl(settings);
+  const ticketLink = ticketId ? `${frontendUrl}/tickets/${ticketId}` : null;
+  const bodyHtml = buildAcknowledgementHtml({ toName, glpiTicketId, ticketId, originalSubject, customMessage: settings.acknowledgementMessage, signature, ticketLink });
   return sendEmail({ ticketId, to: toEmail, subject, bodyHtml, saveAsMessage: true });
 }
 

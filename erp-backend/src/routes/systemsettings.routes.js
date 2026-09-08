@@ -188,11 +188,12 @@ const {
 const EMAIL_TEST_TEMPLATES = {
   acknowledgement: {
     label: 'Accusé de réception',
-    build: (signature) => buildAcknowledgementHtml({
+    build: (signature, ticketLink) => buildAcknowledgementHtml({
       toName: 'Jean Dupont', glpiTicketId: 999, ticketId: 999,
       originalSubject: 'Problème d\'impression bureau 305',
       customMessage: 'Votre demande a bien été reçue (ticket #{ticketId}).',
       signature,
+      ticketLink,
     }),
   },
   known_incident: {
@@ -250,7 +251,7 @@ router.post('/test-email', requirePermission('automation.manage', ['ADMIN']), as
 
     switch (type) {
       case 'acknowledgement':
-        bodyHtml = EMAIL_TEST_TEMPLATES.acknowledgement.build(signature);
+        bodyHtml = EMAIL_TEST_TEMPLATES.acknowledgement.build(signature, `${frontendUrl}/tickets/999`);
         break;
       case 'known_incident':
         bodyHtml = EMAIL_TEST_TEMPLATES.known_incident.build(signature);
