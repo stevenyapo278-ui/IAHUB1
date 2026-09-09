@@ -763,12 +763,18 @@ async function processMessage(message, account) {
     // Sauvegarder l'embedding pour la détection future d'incidents similaires
     await saveTicketEmbedding(erpTicketId, subject, cleanBody);
 
-    // Étape 6 : accusé de réception automatique au demandeur
+    // Étape 6 : accusé de réception automatique au demandeur — envoyé en RÉPONSE dans le
+    // fil de l'email d'origine (createReply) avec les personnes qui étaient en copie,
+    // afin de garder tout le monde dans la boucle dès le premier échange.
     await sendAcknowledgement({
       ticketId: erpTicketId,
       toEmail: fromEmail,
       toName: fromName,
       originalSubject: subject,
+      cc: ccRecipients,
+      inReplyToGraphMessageId: graphMessageId,
+      conversationId,
+      inReplyTo: internetMessageId,
     }).catch((e) => console.error(`[emailPipeline] Échec envoi accusé de réception vers ${fromEmail}:`, e.message));
 
     // Notification IMMÉDIATE à la Hotline : le ticket est en attente d'approbation (PENDING) —

@@ -83,9 +83,11 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
 
   if (!account) throw new Error('Aucun compte email configuré pour l\'envoi (Outlook/M365 ou SMTP)');
 
-  // Route SMTP
+  // Route SMTP — même garde-fou : ne jamais mettre la boîte d'envoi en copie
   if (!isOutlook) {
-    await sendEmailViaSmtp({ to, cc, subject, bodyHtml, account });
+    const senderAddress = (account.emailAddress || account.username || '').toLowerCase().trim();
+    const ccList = (cc || []).filter((addr) => addr && String(addr).toLowerCase().trim() !== senderAddress);
+    await sendEmailViaSmtp({ to, cc: ccList, subject, bodyHtml, account });
     if (saveAsMessage && ticketId) {
       const sender = account.emailAddress || account.username;
       // Récupérer le statut actuel du ticket pour le suivi
@@ -97,7 +99,7 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
           direction: 'OUTBOUND',
           sender,
           recipients: Array.isArray(to) ? to : [to],
-          ccRecipients: cc || [],
+          ccRecipients: ccList,
           subject,
           body: plainBody,
           bodyHtml,
@@ -111,7 +113,7 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
           if (summary) return prisma.ticketMessage.updateMany({ where: { ticketId, direction: 'OUTBOUND', body: plainBody }, data: { summary } });
         })
         .catch(() => {});
-      await logEvent(ticketId, 'EMAIL_SENT', 'SYSTEM', { to, cc, subject, method: 'SMTP' });
+      await logEvent(ticketId, 'EMAIL_SENT', 'SYSTEM', { to, cc: ccList, subject, method: 'SMTP' });
     }
     return;
   }
@@ -122,24 +124,16 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
   const toRecipients = Array.isArray(to)
     ? to.map((addr) => ({ emailAddress: { address: addr } }))
     : [{ emailAddress: { address: to } }];
-  const ccRecipientsPayload = cc && cc.length > 0 ? cc.map((addr) => ({ emailAddress: { address: addr } })) : [];
+
+  // Ne JAMAIS mettre la boîte d'envoi elle-même en copie : le mail retomberait dans la
+  // boîte sondée par le pipeline email et y serait re-traité comme un message entrant.
+  const senderAddress = (account.emailAddress || account.username || '').toLowerCase().trim();
+  const ccList = (cc || []).filter((addr) => addr && String(addr).toLowerCase().trim() !== senderAddress);
+  const ccRecipientsPayload = ccList.length > 0 ? ccList.map((addr) => ({ emailAddress: { address: addr } })) : [];
 
   const isSimulatedId = typeof inReplyToGraphMessageId === 'string' && inReplyToGraphMessageId.startsWith('SIM-');
 
-  let draft;
-  if (inReplyToGraphMessageId && !isSimulatedId) {
-    draft = await graphFetch(account, `/me/messages/${inReplyToGraphMessageId}/createReply`, { method: 'POST', body: JSON.stringify({}) });
-    await graphFetch(account, `/me/messages/${draft.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({
-        subject,
-        body: { contentType: 'HTML', content: bodyHtml },
-        toRecipients,
-        ccRecipients: ccRecipientsPayload,
-        ...(logoAttachment ? { attachments: [logoAttachment] } : {}),
-      }),
-    });
-  } else {
+  const buildNewMessage = () => {
     const message = {
       subject,
       body: { contentType: 'HTML', content: bodyHtml },
@@ -147,7 +141,35 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
       ...(ccRecipientsPayload.length > 0 ? { ccRecipients: ccRecipientsPayload } : {}),
       ...(logoAttachment ? { attachments: [logoAttachment] } : {}),
     };
-    draft = await graphFetch(account, '/me/messages', { method: 'POST', body: JSON.stringify(message) });
+    return graphFetch(account, '/me/messages', { method: 'POST', body: JSON.stringify(message) });
+  };
+
+  let draft;
+  if (inReplyToGraphMessageId && !isSimulatedId) {
+    try {
+      draft = await graphFetch(account, `/me/messages/${inReplyToGraphMessageId}/createReply`, { method: 'POST', body: JSON.stringify({}) });
+      await graphFetch(account, `/me/messages/${draft.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          subject,
+          body: { contentType: 'HTML', content: bodyHtml },
+          toRecipients,
+          ccRecipients: ccRecipientsPayload,
+          ...(logoAttachment ? { attachments: [logoAttachment] } : {}),
+        }),
+      });
+    } catch (err) {
+      // Message source introuvable (purgé/rétention Outlook) → envoi en email neuf plutôt
+      // que d'échouer : le destinataire reçoit quand même sa réponse, sans fil de conversation.
+      if (/Erreur Graph API \(404\)/.test(err.message || '')) {
+        console.warn(`[emailSender] Message source ${inReplyToGraphMessageId} introuvable (404) — envoi sans fil de conversation`);
+        draft = await buildNewMessage();
+      } else {
+        throw err;
+      }
+    }
+  } else {
+    draft = await buildNewMessage();
   }
   await graphFetch(account, `/me/messages/${draft.id}/send`, { method: 'POST' });
 
@@ -161,7 +183,7 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
         direction: 'OUTBOUND',
         sender: account.emailAddress,
         recipients: Array.isArray(to) ? to : [to],
-        ccRecipients: cc || [],
+        ccRecipients: ccList,
         subject,
         body: plainBody,
         bodyHtml,
@@ -300,8 +322,10 @@ ${ticketLink ? buildActionLink(ticketLink, 'Suivre mon ticket') : ''}
   });
 }
 
-// Envoie un accusé de réception automatique lors de la création d'un nouveau ticket
-async function sendAcknowledgement({ ticketId, glpiTicketId, toEmail, toName, originalSubject }) {
+// Envoie un accusé de réception automatique lors de la création d'un nouveau ticket.
+// cc + inReplyToGraphMessageId : pour un ticket né d'un email, l'accusé part en RÉPONSE
+// dans le fil d'origine avec les personnes en copie de la demande — pas en email isolé.
+async function sendAcknowledgement({ ticketId, glpiTicketId, toEmail, toName, originalSubject, cc = [], inReplyToGraphMessageId = null, conversationId = null, inReplyTo = null }) {
   const settings = await getSystemSettings();
   if (settings.emailAcknowledgementEnabled === false) return null;
   const displayId = glpiTicketId || ticketId || 'N/A';
@@ -310,7 +334,7 @@ async function sendAcknowledgement({ ticketId, glpiTicketId, toEmail, toName, or
   const frontendUrl = resolveFrontendUrl(settings);
   const ticketLink = ticketId ? `${frontendUrl}/tickets/${ticketId}` : null;
   const bodyHtml = buildAcknowledgementHtml({ toName, glpiTicketId, ticketId, originalSubject, customMessage: settings.acknowledgementMessage, signature, ticketLink });
-  return sendEmail({ ticketId, to: toEmail, subject, bodyHtml, saveAsMessage: true });
+  return sendEmail({ ticketId, to: toEmail, cc, subject, bodyHtml, saveAsMessage: true, inReplyToGraphMessageId, conversationId, inReplyTo });
 }
 
 // ── Template : Relance demandeur ─────────────────────────────────────────────
@@ -796,7 +820,10 @@ ${buildActionLink(ticketLink, 'Consulter mon ticket')}`,
   });
 }
 
-async function sendApprovalNotificationEmail({ ticketId, ticketTitle, status, priority, category, assignedToName, requesterEmail, requesterName, content }) {
+// inReplyToGraphMessageId + conversationId + inReplyTo : quand le ticket provient d'un email,
+// la confirmation part en RÉPONSE dans le fil Outlook d'origine (createReply) plutôt qu'en email
+// isolé — les personnes en copie de la demande d'origine (cc) restent dans la boucle.
+async function sendApprovalNotificationEmail({ ticketId, ticketTitle, status, priority, category, assignedToName, requesterEmail, requesterName, content, cc = [], inReplyToGraphMessageId = null, conversationId = null, inReplyTo = null }) {
   const settings = await getSystemSettings();
   if (settings.emailApprovalEnabled === false) return null;
   const frontendUrl = resolveFrontendUrl(settings);
@@ -805,7 +832,7 @@ async function sendApprovalNotificationEmail({ ticketId, ticketTitle, status, pr
   const subject = `[Ticket #${ticketId}] Prise en compte — ${ticketTitle}`;
   const bodyHtml = buildApprovalNotificationHtml({ requesterName, ticketId, ticketTitle, status, priority, category, assignedToName, content, signature, ticketLink });
 
-  return sendEmail({ ticketId, to: requesterEmail, subject, bodyHtml, saveAsMessage: true });
+  return sendEmail({ ticketId, to: requesterEmail, cc, subject, bodyHtml, saveAsMessage: true, inReplyToGraphMessageId, conversationId, inReplyTo });
 }
 
 // ── Template : Résolution ticket ─────────────────────────────────────────────

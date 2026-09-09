@@ -58,6 +58,14 @@ router.post('/:token/approve', [body('recipientEmail').optional().isEmail()], as
   const finalCc = Array.isArray(ccRecipients) ? ccRecipients : draft.ccRecipients;
 
   try {
+    // Répondre dans le fil d'origine si l'info de threading est disponible sur le brouillon
+    const lastInbound = draft.ticketId
+      ? await prisma.ticketMessage.findFirst({
+          where: { ticketId: draft.ticketId, direction: 'INBOUND', outlookMessageId: { not: null } },
+          orderBy: { timestamp: 'desc' },
+          select: { outlookMessageId: true, conversationId: true, internetMessageId: true },
+        })
+      : null;
     await sendEmail({
       ticketId: draft.ticketId,
       to: finalRecipient,
@@ -65,6 +73,9 @@ router.post('/:token/approve', [body('recipientEmail').optional().isEmail()], as
       subject: draft.subject,
       bodyHtml: finalContent,
       saveAsMessage: true,
+      inReplyToGraphMessageId: draft.inReplyToGraphMessageId || lastInbound?.outlookMessageId || null,
+      conversationId: draft.outlookConversationId || lastInbound?.conversationId || null,
+      inReplyTo: lastInbound?.internetMessageId || null,
     });
   } catch (err) {
     return res.status(502).json({ error: `Envoi échoué : ${err.message}` });

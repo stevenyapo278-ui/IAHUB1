@@ -374,18 +374,45 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   async function handleConfirmCombinedApproval() {
     if (!combinedDraft) return;
     setApprovingCombined(true);
+    let draftSendError = null;
     try {
       const ticketId = combinedDraft.ticketId || combinedDraft.ticket?.id;
 
-      // Step 1: Approuver le ticket dans GLPI s'il est en attente
+      // Step 1: Approuver le ticket dans GLPI s'il est en attente.
+      // NB : côté serveur, approveTicket envoie déjà automatiquement tout brouillon
+      // PENDING associé à ce ticket (cf. services/ticketApproval.js) — le brouillon
+      // n'est donc plus PENDING après cette étape.
       if (ticketId && combinedDraft.ticket?.approvalStatus === 'PENDING') {
         await api.post(`/tickets/${ticketId}/approve`);
       }
 
-      // Step 2: Approuver et envoyer le brouillon de réponse
-      await api.post(`/ai-email-drafts/${combinedDraft.id}/approve`);
+      // Step 2: Approuver et envoyer le brouillon de réponse, SAUF s'il vient d'être
+      // envoyé par l'approbation du ticket (sinon 400 "Brouillon déjà traité" alors
+      // que l'email est bel et bien parti).
+      if (combinedDraft.ticket?.approvalStatus === 'PENDING') {
+        try {
+          await api.post(`/ai-email-drafts/${combinedDraft.id}/approve`);
+        } catch (err) {
+          if (err.response?.status === 400) {
+            // Brouillon déjà approuvé + envoyé par /tickets/:id/approve → non bloquant
+            draftSendError = null;
+          } else {
+            draftSendError = err.response?.data?.error || 'Échec de l\'envoi de la réponse IA';
+          }
+        }
+      } else {
+        try {
+          await api.post(`/ai-email-drafts/${combinedDraft.id}/approve`);
+        } catch (err) {
+          draftSendError = err.response?.data?.error || 'Échec de l\'envoi de la réponse IA';
+        }
+      }
 
-      toast.success('Ticket créé ET Réponse IA envoyée avec succès !');
+      if (draftSendError) {
+        toast.error(`Ticket approuvé, mais l'envoi de la réponse a échoué : ${draftSendError}`);
+      } else {
+        toast.success('Ticket approuvé ET réponse IA envoyée au demandeur !');
+      }
       setShowCombinedModal(false);
       setCombinedDraft(null);
       loadAllData(true);
