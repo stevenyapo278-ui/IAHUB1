@@ -703,6 +703,11 @@ model SystemSettings {
   // tickets existants reste disponible). Défaut : true (bouton visible).
   portalAllowNewRequest Boolean @default(true)
 
+  // ── Assistant vocal (Paramètres > IA) ──────────────────────────────────────
+  // ID du modèle dédié à l'assistant vocal (optionnel). Si null, utilise le modèle par défaut.
+  voiceAiModelId Int?    @unique
+  voiceAiModel   AiModel? @relation(fields: [voiceAiModelId], references: [id], onDelete: SetNull)
+
   // ── Apparence de la page de connexion (configurable par SUPERADMIN) ─────────
   // loginThemeMode: "daily_rotation" = rotation déterministe (jour de l'année) sur les variantes activées,
   //                 "fixed"          = variante unique toujours affichée,
@@ -764,6 +769,9 @@ model AiModel {
   updatedAt  DateTime    @updatedAt
 
   keys AiKey[]
+
+  // Lien inverse : modèle utilisé pour l'assistant vocal
+  voiceSetting SystemSettings?
 
   @@unique([providerId, name])
 }

@@ -435,6 +435,19 @@ export default function AiProvidersTab() {
   const [selectedProvider, setSelectedProvider] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [voiceModelId, setVoiceModelId] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  // Liste de tous les modèles pour le sélecteur vocal
+  const allModels = useMemo(() => {
+    return providers.flatMap((p) =>
+      (p.models || []).map((m) => ({
+        id: m.id,
+        name: m.name,
+        providerLabel: p.label,
+      }))
+    );
+  }, [providers]);
 
   // Rafraîchit la liste ET le fournisseur ouvert dans la modale (sans la fermer) : après une
   // action (modèle par défaut, suppression, sync...), le contenu affiché doit refléter la base
@@ -448,9 +461,25 @@ export default function AiProvidersTab() {
         setSelectedProvider((current) => (current ? data.find((p) => p.id === current.id) || null : current));
       })
       .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
+    // Charger le modèle vocal depuis les settings
+    api.get('/system-settings')
+      .then(({ data }) => setVoiceModelId(data.voiceAiModelId || null))
+      .catch(() => {});
   }
 
   useEffect(() => refresh(), []);
+
+  async function handleUpdateVoiceModel(modelId) {
+    setSaving(true);
+    try {
+      await api.patch('/system-settings', { voiceAiModelId: modelId });
+      setVoiceModelId(modelId);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur lors de la mise à jour');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function handleCreateProvider(e) {
     e.preventDefault();
@@ -635,6 +664,34 @@ export default function AiProvidersTab() {
           />
         )}
       </AnimatePresence>
+
+      {/* Configuration du modèle vocal */}
+      <motion.div variants={itemVariants} className="bg-surface-container rounded-3xl border border-outline-variant/30 p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <span className="material-symbols-outlined text-primary">record_voice_over</span>
+          <div>
+            <h3 className="text-base font-semibold text-on-surface">Assistant Vocal</h3>
+            <p className="text-xs text-on-surface-variant">Modèle dédié à la reconnaissance et synthèse vocale</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <select
+            value={voiceModelId || ''}
+            onChange={(e) => handleUpdateVoiceModel(e.target.value ? parseInt(e.target.value) : null)}
+            disabled={saving}
+            className="flex-1 bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300"
+          >
+            <option value="">Modèle par défaut (même que le chat)</option>
+            {allModels.map((m) => (
+              <option key={m.id} value={m.id}>{m.providerLabel} — {m.name}</option>
+            ))}
+          </select>
+          {saving && <span className="material-symbols-outlined text-primary animate-spin text-[18px]">progress_activity</span>}
+        </div>
+        <p className="text-[11px] text-on-surface-variant/60 mt-2">
+          Si aucun modèle n'est sélectionné, l'assistant vocal utilise le même modèle que le chat textuel.
+        </p>
+      </motion.div>
 
       <ConfirmDialog
         open={!!pendingDelete}

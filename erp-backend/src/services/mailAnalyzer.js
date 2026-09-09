@@ -186,7 +186,7 @@ async function callAnthropic(provider, apiKey, prompt, modelName, usage) {
 // ═══════════════════════════════════════════════════════════════════════════
 // APPEL SINGLE PROVIDER (itération clés × modèles + gestion 429)
 // ═══════════════════════════════════════════════════════════════════════════
-async function callProvider(provider, prompt, usage = 'email') {
+async function callProvider(provider, prompt, usage = 'email', forcedModelId = null) {
   // Ignorer le provider s'il est en cooldown 429
   if (isProviderOnCooldown(provider.name)) {
     throw new Error(`Provider "${provider.label}" en cooldown 429 — skipped`);
@@ -194,7 +194,15 @@ async function callProvider(provider, prompt, usage = 'email') {
 
   const keys = provider.keys;
   const models = provider.models || [];
-  const modelCandidates = models.length > 0 ? models.map((m) => m.name) : [undefined];
+
+  // Si un modèle est forcé, l'utiliser en priorité
+  let modelCandidates;
+  if (forcedModelId) {
+    const forcedModel = models.find((m) => m.id === forcedModelId);
+    modelCandidates = forcedModel ? [forcedModel.name] : (models.length > 0 ? models.map((m) => m.name) : [undefined]);
+  } else {
+    modelCandidates = models.length > 0 ? models.map((m) => m.name) : [undefined];
+  }
 
   let lastError;
   for (const key of keys) {
@@ -233,11 +241,12 @@ async function callProvider(provider, prompt, usage = 'email') {
 // ═══════════════════════════════════════════════════════════════════════════
 // FALLBACK INTER-PROVIDERS (avec skip cooldown)
 // ═══════════════════════════════════════════════════════════════════════════
-async function callProviderWithFallback(providers, prompt, usage = 'email') {
+async function callProviderWithFallback(providers, prompt, usage = 'email', options = {}) {
   if (!providers || providers.length === 0) {
     throw new Error('Aucun provider IA configuré (Paramètres → Intelligence Artificielle)');
   }
 
+  const { forcedModelId } = options;
   const errors = [];
   for (const provider of providers) {
     // Skip les providers en cooldown 429
@@ -246,7 +255,7 @@ async function callProviderWithFallback(providers, prompt, usage = 'email') {
       continue;
     }
     try {
-      const result = await callProvider(provider, prompt, usage);
+      const result = await callProvider(provider, prompt, usage, forcedModelId);
       if (errors.length > 0) {
         logger.warn(`[AI] Fallback utilisé : "${provider.label}" a répondu après ${errors.length} échec(s)`);
       }

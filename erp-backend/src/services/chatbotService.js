@@ -242,14 +242,14 @@ async function searchLocations(query, limit = 10) {
 
 // ── Appel IA ───────────────────────────────────────────────────────────
 
-async function callAI(messages) {
+async function callAI(messages, options = {}) {
   const providers = await getActiveProviders();
   if (providers.length === 0) throw new Error('Aucun fournisseur IA configuré.');
 
   const formattedMessages = messages.map((m) => `${m.role === 'user' ? 'Utilisateur' : 'Assistant'} : ${m.content}`).join('\n\n');
   const prompt = `${SYSTEM_PROMPT}\n\n---\n\n${formattedMessages}`;
 
-  return callAiWithRetry(() => callProviderWithFallback(providers, prompt, 'chatbot'), {
+  return callAiWithRetry(() => callProviderWithFallback(providers, prompt, 'chatbot', options), {
     maxRetries: 2,
     baseDelay: 1500,
   });
@@ -1129,9 +1129,18 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   const systemContext = contextParts.length > 0 ? `\n\n${contextParts.join('\n\n')}` : '';
   aiMessages.push({ role: 'user', content: `${message}${systemContext}${intentHint}` });
 
+  // Récupérer le modèle vocal configuré (optionnel)
+  let voiceModelOptions = {};
+  try {
+    const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+    if (settings?.voiceAiModelId) {
+      voiceModelOptions = { forcedModelId: settings.voiceAiModelId };
+    }
+  } catch {}
+
   let reply;
   try {
-    reply = await callAI(aiMessages);
+    reply = await callAI(aiMessages, voiceModelOptions);
     reply = cleanAiReply(reply);
   } catch (err) {
     console.error('[chatbot] Échec de la génération de réponse IA:', err.message);

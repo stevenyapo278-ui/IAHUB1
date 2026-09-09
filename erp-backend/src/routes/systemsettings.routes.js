@@ -118,6 +118,7 @@ router.patch(
     body('emailMajorIncidentResolvedEnabled').optional().isBoolean(),
     body('emailApprovalEnabled').optional().isBoolean(),
     body('solvedAutoCloseDays').optional().isInt({ min: 0, max: 365 }),
+    body('voiceAiModelId').optional({ nullable: true }).isInt(),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -155,6 +156,7 @@ router.patch(
     if (req.body.emailEscalationEnabled !== undefined) data.emailEscalationEnabled = req.body.emailEscalationEnabled;
     if (req.body.emailMajorIncidentResolvedEnabled !== undefined) data.emailMajorIncidentResolvedEnabled = req.body.emailMajorIncidentResolvedEnabled;
     if (req.body.emailApprovalEnabled !== undefined) data.emailApprovalEnabled = req.body.emailApprovalEnabled;
+    if (req.body.voiceAiModelId !== undefined) data.voiceAiModelId = req.body.voiceAiModelId || null;
 
     const updated = await prisma.systemSettings.update({ where: { id: 1 }, data });
     cacheStore.clear();
