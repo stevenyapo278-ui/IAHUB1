@@ -86,8 +86,13 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
   // Route SMTP — même garde-fou : ne jamais mettre la boîte d'envoi en copie
   if (!isOutlook) {
     const senderAddress = (account.emailAddress || account.username || '').toLowerCase().trim();
+    // Même garde-fou en To qu'en Graph : ne jamais adresser la boîte d'envoi elle-même
+    // (sauf si c'est le seul destinataire — l'envoi part quand même).
+    const toList = (Array.isArray(to) ? to : [to]).map((a) => String(a || '').trim()).filter(Boolean);
+    const toFiltered = toList.filter((addr) => addr.toLowerCase() !== senderAddress);
+    const smtpTo = toFiltered.length > 0 ? toFiltered : toList;
     const ccList = (cc || []).filter((addr) => addr && String(addr).toLowerCase().trim() !== senderAddress);
-    await sendEmailViaSmtp({ to, cc: ccList, subject, bodyHtml, account });
+    await sendEmailViaSmtp({ to: smtpTo, cc: ccList, subject, bodyHtml, account });
     if (saveAsMessage && ticketId) {
       const sender = account.emailAddress || account.username;
       // Récupérer le statut actuel du ticket pour le suivi
@@ -98,7 +103,7 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
           ticketId,
           direction: 'OUTBOUND',
           sender,
-          recipients: Array.isArray(to) ? to : [to],
+          recipients: smtpTo,
           ccRecipients: ccList,
           subject,
           body: plainBody,
@@ -121,9 +126,17 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
   const settings = await getSystemSettings();
   const logoAttachment = getLogoAttachmentIfReferenced(bodyHtml, settings.signatureLogoUrl);
 
-  const toRecipients = Array.isArray(to)
-    ? to.map((addr) => ({ emailAddress: { address: addr } }))
-    : [{ emailAddress: { address: to } }];
+  // Ne JAMAIS adresser la boîte d'envoi elle-même (To) : même risque que pour les CC — le mail
+  // retomberait dans la boîte sondée par le pipeline email et y serait re-traité comme un
+  // message entrant. Cas typique : demande envoyée directement à la boîte support, dont
+  // l'adresse ressort dans la liste To du message d'origine qu'on remet dans la boucle.
+  // EXCEPTION : la boîte support reste en To si c'est le SEUL destinataire (l'envoi doit
+  // partir quand même, l'admin verra l'anomalie dans l'email enregistré).
+  const senderAddrNorm = (account.emailAddress || account.username || '').toLowerCase().trim();
+  const toListRaw = (Array.isArray(to) ? to : [to]).map((a) => String(a || '').trim()).filter(Boolean);
+  const toListFiltered = toListRaw.filter((addr) => addr.toLowerCase() !== senderAddrNorm);
+  const finalToList = toListFiltered.length > 0 ? toListFiltered : toListRaw;
+  const toRecipients = finalToList.map((addr) => ({ emailAddress: { address: addr } }));
 
   // Ne JAMAIS mettre la boîte d'envoi elle-même en copie : le mail retomberait dans la
   // boîte sondée par le pipeline email et y serait re-traité comme un message entrant.
@@ -182,7 +195,7 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
         ticketId,
         direction: 'OUTBOUND',
         sender: account.emailAddress,
-        recipients: Array.isArray(to) ? to : [to],
+        recipients: finalToList,
         ccRecipients: ccList,
         subject,
         body: plainBody,
@@ -325,7 +338,7 @@ ${ticketLink ? buildActionLink(ticketLink, 'Suivre mon ticket') : ''}
 // Envoie un accusé de réception automatique lors de la création d'un nouveau ticket.
 // cc + inReplyToGraphMessageId : pour un ticket né d'un email, l'accusé part en RÉPONSE
 // dans le fil d'origine avec les personnes en copie de la demande — pas en email isolé.
-async function sendAcknowledgement({ ticketId, glpiTicketId, toEmail, toName, originalSubject, cc = [], inReplyToGraphMessageId = null, conversationId = null, inReplyTo = null }) {
+async function sendAcknowledgement({ ticketId, glpiTicketId, toEmail, toName, originalSubject, cc = [], to = null, inReplyToGraphMessageId = null, conversationId = null, inReplyTo = null }) {
   const settings = await getSystemSettings();
   if (settings.emailAcknowledgementEnabled === false) return null;
   const displayId = glpiTicketId || ticketId || 'N/A';
@@ -334,7 +347,18 @@ async function sendAcknowledgement({ ticketId, glpiTicketId, toEmail, toName, or
   const frontendUrl = resolveFrontendUrl(settings);
   const ticketLink = ticketId ? `${frontendUrl}/tickets/${ticketId}` : null;
   const bodyHtml = buildAcknowledgementHtml({ toName, glpiTicketId, ticketId, originalSubject, customMessage: settings.acknowledgementMessage, signature, ticketLink });
-  return sendEmail({ ticketId, to: toEmail, cc, subject, bodyHtml, saveAsMessage: true, inReplyToGraphMessageId, conversationId, inReplyTo });
+  // `to` = liste To du message d'origine (boîtes de diffusion comprises) : on la remet dans la
+  // boucle derrière le destinataire principal, sans doublon, pour une sémantique « Répondre à tous ».
+  const seenTo = new Set([String(toEmail || '').toLowerCase().trim()]);
+  const ackTo = [toEmail];
+  for (const addr of (Array.isArray(to) ? to : [])) {
+    const norm = String(addr || '').toLowerCase().trim();
+    if (norm && !seenTo.has(norm)) {
+      seenTo.add(norm);
+      ackTo.push(addr);
+    }
+  }
+  return sendEmail({ ticketId, to: ackTo, cc, subject, bodyHtml, saveAsMessage: true, inReplyToGraphMessageId, conversationId, inReplyTo });
 }
 
 // ── Template : Relance demandeur ─────────────────────────────────────────────
@@ -823,7 +847,153 @@ ${buildActionLink(ticketLink, 'Consulter mon ticket')}`,
 // inReplyToGraphMessageId + conversationId + inReplyTo : quand le ticket provient d'un email,
 // la confirmation part en RÉPONSE dans le fil Outlook d'origine (createReply) plutôt qu'en email
 // isolé — les personnes en copie de la demande d'origine (cc) restent dans la boucle.
-async function sendApprovalNotificationEmail({ ticketId, ticketTitle, status, priority, category, assignedToName, requesterEmail, requesterName, content, cc = [], inReplyToGraphMessageId = null, conversationId = null, inReplyTo = null }) {
+// Enveloppe le contenu d'un brouillon IA au moment de l'ENVOI dans le gabarit commun
+// (bandeau « Réponse à votre demande » + signature FRAÎCHE lue en base).
+//
+// Contexte : les brouillons CONVERSATION_FOLLOWUP sont désormais stockés BRUTS (replyHtml de
+// l'IA, sans gabarit) pour que la signature configurée dans Paramètres soit toujours celle du
+// jour de l'envoi — même pour un brouillon généré avant un changement de signature.
+//
+// Compat : les brouillons plus anciens (ou créés via le webhook n8n) contiennent déjà le
+// gabarit complet avec une signature figée. On les détecte et on les laisse tels quels pour
+// ne jamais envelopper deux fois (pas de double bandeau ni de double signature).
+// Heuristique de détection (sans dépendre du libellé du bandeau) :
+//  - le gabarit insère la signature en cid:logo-signature → présent = déjà enveloppé ;
+//  - le contenu brut de l'IA ne contient jamais la signature configurée (ni la par défaut),
+//    donc leur présence = déjà enveloppé aussi.
+function isDraftContentAlreadyWrapped(content, signature) {
+  if (!content) return false;
+  if (content.includes('cid:logo-signature')) return true;
+  const plainSignature = (signature || DEFAULT_EMAIL_SIGNATURE || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+  if (plainSignature.length > 10) {
+    const plainContent = content.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ');
+    if (plainContent.includes(plainSignature)) return true;
+  }
+  return false;
+}
+
+// À appeler par tous les points d'envoi d'un brouillon IA (approbation locale, distante, par
+// réponse email ou approbation de ticket). Retourne le HTML final à mettre dans bodyHtml.
+async function wrapDraftContentForSend({ content, ticketId }) {
+  if (!content) return content;
+  const signature = await getEmailSignature();
+  if (isDraftContentAlreadyWrapped(content, signature)) return content;
+  return buildEmailLayout({
+    headerTitle: 'Réponse à votre demande',
+    headerSubtitle: ticketId ? `Ticket #${ticketId}` : undefined,
+    children: content,
+    signature,
+  });
+}
+
+// Envoi UNIFIÉ d'un brouillon IA approuvé — utilisé par tous les chemins d'approbation
+// (locale depuis /email-drafts, approbation de ticket, lien public, réponse email) pour un
+// comportement homogène :
+//  - contenu enveloppé À L'ENVOI dans le gabarit commun avec la signature FRAÎCHE (jour) ;
+//  - placeholder #EN_ATTENTE remplacé par le vrai numéro (sujet + corps) ;
+//  - réponse dans le fil Outlook d'origine (inReplyToGraphMessageId du brouillon, sinon
+//    en secours le dernier message entrant du ticket) ;
+//  - CC = personnes en copie de la demande d'origine : celui fourni par l'appelant, sinon
+//    celui stocké sur le brouillon, sinon celui du dernier message entrant. Le destinataire
+//    principal et la boîte support (expéditeur) ne sont jamais dupliqués (géré par sendEmail).
+async function sendAiDraftEmail({
+  ticketId,
+  draft = null,
+  to,
+  cc = null,
+  subject = null,
+  content = null,
+  inReplyToGraphMessageId = null,
+  conversationId = null,
+  inReplyTo = null,
+}) {
+  const effectiveTicketId = ticketId || draft?.ticketId || null;
+  const displayId = effectiveTicketId || 'N/A';
+  const finalContent = (content !== null && content !== undefined ? content : draft?.proposedContent || '')
+    .replaceAll('#EN_ATTENTE', `#${displayId}`);
+  const finalSubject = (subject !== null && subject !== undefined ? subject : draft?.subject || '')
+    .replaceAll('#EN_ATTENTE', `#${displayId}`);
+
+  let replyId = inReplyToGraphMessageId || draft?.inReplyToGraphMessageId || null;
+  let convId = conversationId || draft?.outlookConversationId || null;
+  let replyHeader = inReplyTo || null;
+  // CC effectif : explicite (même vide = choix de l'appelant) → brouillon.
+  // ⚠️ Le repli sur le message entrant est TOUJOURS évalué ci-dessous (fusion), car les CC
+  // pertinents sont ceux de la DEMANDE D'ORIGINE, pas ceux du dernier email du fil (un
+  // brouillon de relance stocke les CC du message de relance, souvent vide).
+  let effectiveCc = Array.isArray(cc) ? cc : (Array.isArray(draft?.ccRecipients) ? draft.ccRecipients : []);
+  // Destinataires « To » additionnels : la liste To du message d'origine (celle du brouillon
+  // si elle a été capturée, sinon celle du premier message entrant) — c'est là que vivent les
+  // adresses des BOÎTES DE DIFFUSION par lesquelles la demande est arrivée. Une réponse « Répondre
+  // à tous » doit remettre le groupe dans la boucle, sinon le canal (ex. hotline@…) ne voit
+  // jamais la réponse. Le destinataire principal reste `to` (l'expéditeur d'origine).
+  let extraTo = Array.isArray(draft?.recipients) ? draft.recipients : null;
+
+  const needFirstInbound = !!effectiveTicketId && (!replyId || !extraTo);
+  const lastInbound = needFirstInbound || !!effectiveTicketId
+    ? await prisma.ticketMessage.findFirst({
+        where: { ticketId: effectiveTicketId, direction: 'INBOUND', outlookMessageId: { not: null } },
+        orderBy: { timestamp: 'desc' },
+        select: { outlookMessageId: true, ccRecipients: true, recipients: true, conversationId: true, internetMessageId: true },
+      })
+    : null;
+  // Premier message entrant = la demande d'origine : source de vérité des CC et de la liste To
+  // (boîtes de diffusion comprises) — le dernier message entrant ne porte que le fil récent.
+  const firstInbound = effectiveTicketId
+    ? await prisma.ticketMessage.findFirst({
+        where: { ticketId: effectiveTicketId, direction: 'INBOUND', outlookMessageId: { not: null } },
+        orderBy: { timestamp: 'asc' },
+        select: { outlookMessageId: true, ccRecipients: true, recipients: true, conversationId: true, internetMessageId: true },
+      })
+    : null;
+
+  if (!replyId && lastInbound) {
+    replyId = lastInbound.outlookMessageId || null;
+    convId = convId || lastInbound.conversationId || null;
+    replyHeader = replyHeader || lastInbound.internetMessageId || null;
+  }
+
+  // Fusion des CC : CC explicites/brouillon + CC de la demande d'origine (sans doublons).
+  // Le destinataire principal et la boîte support sont exclus plus bas (toNorm + filtre sendEmail).
+  const ccMerge = (list) => (list || [])
+    .map((a) => String(a || '').toLowerCase().trim())
+    .filter(Boolean);
+  const toNorm = ccMerge(Array.isArray(to) ? to : [to]);
+  const seen = new Set(toNorm);
+  const mergedCc = [];
+  for (const addr of [...ccMerge(effectiveCc), ...ccMerge(firstInbound?.ccRecipients), ...ccMerge(lastInbound?.ccRecipients)]) {
+    if (!seen.has(addr)) {
+      seen.add(addr);
+      mergedCc.push(addr);
+    }
+  }
+  effectiveCc = mergedCc;
+
+  // Fusion des To additionnels : To du brouillon (si capturé) + To de la demande d'origine,
+  // en excluant tout ce qui est déjà destinataire principal ou CC (le groupe peut arriver
+  // dans les deux selon la façon dont le demandeur a adressé son mail).
+  const extraToMerged = [];
+  for (const addr of [...ccMerge(extraTo), ...ccMerge(firstInbound?.recipients)]) {
+    if (!addr || seen.has(addr)) continue;
+    seen.add(addr);
+    extraToMerged.push(addr);
+  }
+  const finalTo = Array.isArray(to) ? [...to, ...extraToMerged] : [to, ...extraToMerged];
+
+  return sendEmail({
+    ticketId: effectiveTicketId,
+    to: finalTo,
+    cc: effectiveCc,
+    subject: finalSubject,
+    bodyHtml: await wrapDraftContentForSend({ content: finalContent, ticketId: effectiveTicketId }),
+    saveAsMessage: true,
+    inReplyToGraphMessageId: replyId,
+    conversationId: convId,
+    inReplyTo: replyHeader,
+  });
+}
+
+async function sendApprovalNotificationEmail({ ticketId, ticketTitle, status, priority, category, assignedToName, requesterEmail, requesterName, content, cc = [], toExtra = [], inReplyToGraphMessageId = null, conversationId = null, inReplyTo = null }) {
   const settings = await getSystemSettings();
   if (settings.emailApprovalEnabled === false) return null;
   const frontendUrl = resolveFrontendUrl(settings);
@@ -832,7 +1002,21 @@ async function sendApprovalNotificationEmail({ ticketId, ticketTitle, status, pr
   const subject = `[Ticket #${ticketId}] Prise en compte — ${ticketTitle}`;
   const bodyHtml = buildApprovalNotificationHtml({ requesterName, ticketId, ticketTitle, status, priority, category, assignedToName, content, signature, ticketLink });
 
-  return sendEmail({ ticketId, to: requesterEmail, cc, subject, bodyHtml, saveAsMessage: true, inReplyToGraphMessageId, conversationId, inReplyTo });
+  // Sémantique « Répondre à tous » : derrière le demandeur, on remet la liste To d'origine
+  // (boîtes de diffusion comprises) — sans doublon avec le demandeur ni avec les CC.
+  const seen = new Set([String(requesterEmail || '').toLowerCase().trim()]);
+  const ccNorm = (cc || []).map((a) => String(a || '').toLowerCase().trim()).filter(Boolean);
+  ccNorm.forEach((a) => seen.add(a));
+  const approvalTo = [requesterEmail];
+  for (const addr of (Array.isArray(toExtra) ? toExtra : [])) {
+    const norm = String(addr || '').toLowerCase().trim();
+    if (norm && !seen.has(norm)) {
+      seen.add(norm);
+      approvalTo.push(addr);
+    }
+  }
+
+  return sendEmail({ ticketId, to: approvalTo, cc, subject, bodyHtml, saveAsMessage: true, inReplyToGraphMessageId, conversationId, inReplyTo });
 }
 
 // ── Template : Résolution ticket ─────────────────────────────────────────────
@@ -978,4 +1162,6 @@ module.exports = {
   buildResolvedNotificationHtml,
   buildTicketCreationNotificationHtml,
   getEmailSignature,
+  wrapDraftContentForSend,
+  sendAiDraftEmail,
 };

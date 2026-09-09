@@ -4,6 +4,7 @@ const mockIncomingEmailUpdate = jest.fn();
 const mockTicketCreate = jest.fn();
 
 jest.mock('../prismaClient', () => ({
+  ticketMessage: { findFirst: jest.fn().mockResolvedValue(null) },
   incomingEmail: {
     findUnique: (...args) => mockIncomingEmailFindUnique(...args),
     create: (...args) => mockIncomingEmailCreate(...args),

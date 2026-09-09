@@ -24,6 +24,7 @@ jest.mock('../prismaClient', () => ({
     update: (...args) => mockTicketMessageUpdate(...args),
     findMany: (...args) => mockTicketMessageFindMany(...args),
     findUnique: (...args) => mockTicketMessageFindUnique(...args),
+    findFirst: jest.fn().mockResolvedValue(null),
   },
   aiEmailDraft: { create: (...args) => mockAiEmailDraftCreate(...args) },
 }));
@@ -145,5 +146,42 @@ describe('emailPipeline — conversation IA multi-tours sur les emails de suivi'
 
     expect(mockGenerateFollowupReply).not.toHaveBeenCalled();
     expect(mockAiEmailDraftCreate).not.toHaveBeenCalled();
+  });
+
+  it('ignore le message émis par la boîte support elle-même (anti-boucle, expéditeur = boîte)', async () => {
+    const prismaMock = require('../prismaClient');
+    mockIncomingEmailFindUnique.mockResolvedValue(null);
+
+    const result = await processMessage(buildMessage({ from: { emailAddress: { address: 'support@prosuma.ci', name: 'Support' } } }), { id: 1, emailAddress: 'support@prosuma.ci' });
+
+    expect(result).toBeNull();
+    expect(mockIncomingEmailCreate).not.toHaveBeenCalled();
+    expect(mockAnalyzeIntent).not.toHaveBeenCalled();
+    expect(prismaMock.ticketMessage.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('ignore l\'écho de notre propre réponse revenue via boîte de diffusion (même internetMessageId qu\'un OUTBOUND)', async () => {
+    const prismaMock = require('../prismaClient');
+    mockIncomingEmailFindUnique.mockResolvedValue(null);
+    prismaMock.ticketMessage.findFirst.mockResolvedValueOnce({ id: 555, ticketId: 42 }); // envoi sortant trouvé avec cet id RFC
+
+    const result = await processMessage(buildMessage({ internetMessageId: '<notre-reponse@prosuma.ci>' }), { id: 1, emailAddress: 'support@prosuma.ci' });
+
+    expect(result).toBeNull();
+    expect(mockIncomingEmailCreate).not.toHaveBeenCalled();
+    expect(mockAnalyzeIntent).not.toHaveBeenCalled();
+    expect(logEvent).toHaveBeenCalledWith(42, 'EMAIL_LOOP_SKIPPED', 'SYSTEM', expect.objectContaining({ internetMessageId: '<notre-reponse@prosuma.ci>' }));
+  });
+
+  it('analyse normalement un message entrant dont l\'internetMessageId ne correspond à aucun envoi sortant', async () => {
+    const prismaMock = require('../prismaClient');
+    mockIncomingEmailFindUnique.mockResolvedValue(null);
+    prismaMock.ticketMessage.findFirst.mockResolvedValueOnce(null); // pas d'écho
+    mockGenerateFollowupReply.mockResolvedValue({ canAnswer: true, replyHtml: '<p>ok</p>', confidence: 0.9, usedKnowledgeChunkIds: [] });
+
+    await processMessage(buildMessage(), { id: 1, emailAddress: 'support@prosuma.ci' });
+
+    expect(mockAnalyzeIntent).toHaveBeenCalled();
+    expect(mockAiEmailDraftCreate).toHaveBeenCalled();
   });
 });

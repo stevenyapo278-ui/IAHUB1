@@ -3,7 +3,7 @@ const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
-const { sendEmail } = require('../services/emailSender');
+const { sendEmail, sendAiDraftEmail } = require('../services/emailSender');
 
 
 // Convertit le HTML en texte simple pour le followup GLPI (champ texte, pas de rendu HTML)
@@ -111,21 +111,23 @@ router.post('/:id/approve', requirePermission('emaildrafts.manage', ['ADMIN', 'T
   const finalRecipient = recipientEmail !== undefined ? recipientEmail : draft.recipientEmail;
   const finalCc = Array.isArray(ccRecipients) ? ccRecipients : draft.ccRecipients;
 
-  // Remplacer le placeholder #EN_ATTENTE par le vrai numéro de ticket
+  // Remplacer le placeholder #EN_ATTENTE par le vrai numéro de ticket (pour l'archivage)
   const displayId = draft.ticketId || 'N/A';
   const resolvedContent = finalContent.replaceAll('#EN_ATTENTE', `#${displayId}`);
   const resolvedSubject = (draft.subject || '').replaceAll('#EN_ATTENTE', `#${displayId}`);
 
   try {
-    await sendEmail({
+    // Envoi unifié (emailSender.sendAiDraftEmail) : contenu enveloppé à l'envoi avec la
+    // signature du jour, #EN_ATTENTE résolu, réponse dans le fil Outlook d'origine et
+    // CC = copies de la demande d'origine (repli automatique sur le dernier message
+    // entrant du ticket si le brouillon n'en a pas). Un ccRecipients explicite de la
+    // requête (même vide) est respecté tel quel.
+    await sendAiDraftEmail({
       ticketId: draft.ticketId,
+      draft,
       to: finalRecipient,
-      cc: finalCc,
-      subject: resolvedSubject,
-      bodyHtml: resolvedContent,
-      saveAsMessage: true,
-      inReplyToGraphMessageId: draft.inReplyToGraphMessageId,
-      conversationId: draft.outlookConversationId,
+      cc: ccRecipients,
+      content: finalContent,
     });
   } catch (err) {
     return res.status(502).json({ error: `Envoi échoué : ${err.message}` });

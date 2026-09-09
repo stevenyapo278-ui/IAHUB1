@@ -1,5 +1,5 @@
 const prisma = require('../prismaClient');
-const { sendEmail } = require('./emailSender');
+const { sendEmail, sendAiDraftEmail } = require('./emailSender');
 
 // Mots-clés reconnus dans une réponse email au mail de relance — volontairement larges
 // (variantes FR/EN courtes), car l'humain tape vite depuis son téléphone, hors bureau.
@@ -44,25 +44,11 @@ async function tryHandleReminderReply({ inReplyTo, bodyPreview }) {
 
   if (decision === 'APPROVED') {
     try {
-      // Répondre dans le fil d'origine si l'info de threading est disponible sur le brouillon
-      const lastInbound = draft.ticketId
-        ? await prisma.ticketMessage.findFirst({
-            where: { ticketId: draft.ticketId, direction: 'INBOUND', outlookMessageId: { not: null } },
-            orderBy: { timestamp: 'desc' },
-            select: { outlookMessageId: true, conversationId: true, internetMessageId: true },
-          })
-        : null;
-      await sendEmail({
-        ticketId: draft.ticketId,
-        to: draft.recipientEmail,
-        cc: draft.ccRecipients,
-        subject: draft.subject,
-        bodyHtml: draft.proposedContent,
-        saveAsMessage: true,
-        inReplyToGraphMessageId: draft.inReplyToGraphMessageId || lastInbound?.outlookMessageId || null,
-        conversationId: draft.outlookConversationId || lastInbound?.conversationId || null,
-        inReplyTo: lastInbound?.internetMessageId || null,
-      });
+      // Envoi unifié (emailSender.sendAiDraftEmail) : signature du jour à l'envoi,
+      // #EN_ATTENTE résolu (corrige le leak du placeholder sur ce chemin), réponse dans
+      // le fil d'origine et CC = copies de la demande d'origine (repli sur le dernier
+      // message entrant du ticket).
+      await sendAiDraftEmail({ draft, to: draft.recipientEmail });
     } catch (err) {
       console.error(`[draftReplyApproval] Échec envoi après approbation par réponse email (brouillon ${draft.id}):`, err.message);
       return true;

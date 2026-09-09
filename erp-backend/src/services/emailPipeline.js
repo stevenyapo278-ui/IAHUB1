@@ -8,7 +8,7 @@ const { findSimilarOpenTicket, attachSiteToTicket, saveTicketEmbedding } = requi
 const { analyzeIntent, applyIntentActions } = require('./intentAnalyzer');
 const { decideFollowupAction } = require('./followupEscalation');
 const { generateFollowupReply } = require('./followupReplyGenerator');
-const { buildAcknowledgementHtml, buildKnownIncidentNotificationHtml, buildEmailLayout, sendAcknowledgement, sendEmail, getEmailSignature } = require('./emailSender');
+const { sendAcknowledgement, sendEmail } = require('./emailSender');
 const { notifyNewPendingTicket } = require('./approvalReminderScheduler');
 const { processIncomingAttachments } = require('./emailAttachmentProcessor');
 const { stripSignature } = require('./signatureStripper');
@@ -199,8 +199,45 @@ async function processMessage(message, account) {
   // aussi la présence d'une référence cid: dans bodyHtml comme preuve d'une pièce jointe à récupérer.
   const hasAttachments = message.hasAttachments === true || !!message.simulatedAttachments || /cid:/i.test(bodyHtml || '');
 
+  // ── Garde anti-boucle (1/2) : message émis par la boîte support elle-même ──
+  // Cas typique : l'IA répond à un message dont le To contient la boîte de diffusion dont
+  // elle est membre — Outlook lui re-delivre sa propre réponse comme un « nouveau » message
+  // (nouveau graphMessageId → échappe à la déduplication). Sans ce garde, analyse → réponse
+  // → re-analyse → … en boucle. Les auto-réponses externes (OOO) restent gérées en aval par
+  // l'analyseur d'intention (isAutoReply → AI_AUTO_REPLY_IGNORED).
+  const selfAddrNorm = (account?.emailAddress || '').toLowerCase().trim();
+  if (selfAddrNorm && fromEmail.toLowerCase().trim() === selfAddrNorm) {
+    console.warn(`[emailPipeline] Message de la boîte support elle-même ignoré (anti-boucle) : "${subject}"`);
+    return null;
+  }
+
   const existing = await prisma.incomingEmail.findUnique({ where: { graphMessageId } });
   if (existing) return existing;
+
+  // ── Garde anti-boucle (2/2) : écho via boîte de diffusion ──
+  // Quand la réponse de l'IA repasse par le groupe de diffusion, la copie re-délivrée dans la
+  // boîte a un NOUVEAU graphMessageId mais le MÊME internetMessageId RFC que l'envoi original
+  // (conservé sur le TicketMessage OUTBOUND à l'envoi). Une demande « légitimement dupliquée »
+  // (même message reçu deux fois) partage aussi ce couple — dans les deux cas, il n'y a rien
+  // à analyser : on ignore, et on trace l'événement sur le ticket si le fil est connu.
+  if (internetMessageId) {
+    const ownSend = await prisma.ticketMessage.findFirst({
+      where: { internetMessageId, direction: 'OUTBOUND' },
+      select: { id: true, ticketId: true },
+    });
+    if (ownSend) {
+      console.warn(`[emailPipeline] Écho de notre propre envoi ignoré (anti-boucle) : "${subject}" (internetMessageId=${internetMessageId})`);
+      if (ownSend.ticketId) {
+        logEvent(ownSend.ticketId, 'EMAIL_LOOP_SKIPPED', 'SYSTEM', {
+          internetMessageId,
+          subject,
+          method: 'ECHO_DETECTED',
+          note: 'Copie de notre propre réponse revenue via boîte de diffusion — ignorée, aucune ré-analyse.',
+        }).catch(() => {});
+      }
+      return null;
+    }
+  }
 
   // Réponse d'un responsable à un email de relance de brouillon ("j'approuve"/"je rejette") —
   // traité à part, ne doit pas créer de IncomingEmail/ticket (ce n'est pas une demande utilisateur).
@@ -351,22 +388,20 @@ async function processMessage(message, account) {
             const nextExchangeTurn = (ticketForFollowup?.aiExchangeCount || 0) + 1;
             await prisma.ticket.update({ where: { id: match.ticketId }, data: { aiExchangeCount: nextExchangeTurn } });
 
-            // Brouillon enveloppé dans le gabarit email commun (bandeau + signature) pour un rendu
-            // homogène avec les autres emails — le placeholder #EN_ATTENTE est remplacé par le vrai
-            // numéro de ticket à l'envoi (voir ticketApproval.js / draftapproval.routes.js).
-            const followupHtml = buildEmailLayout({
-              headerTitle: 'Réponse à votre demande',
-              headerSubtitle: 'Ticket #EN_ATTENTE',
-              children: replyResult.replyHtml,
-              signature: await getEmailSignature(),
-            });
+            // Brouillon stocké BRUT (replyHtml de l'IA, sans gabarit) : le gabarit commun
+            // (bandeau « Réponse à votre demande » + signature) est ajouté au moment de
+            // l'ENVOI (wrapDraftContentForSend, voir emailSender.js), pour que la signature
+            // soit toujours celle du jour — même si elle change entre la génération du
+            // brouillon et son approbation. Le placeholder #EN_ATTENTE reste remplacé par
+            // le vrai numéro de ticket à l'envoi (voir ticketApproval.js, aiemaildraft.routes.js,
+            // draftapproval.routes.js, draftReplyApproval.js).
             await prisma.aiEmailDraft.create({
               data: {
                 ticketId: match.ticketId,
                 recipientEmail: fromEmail,
                 ccRecipients,
                 subject: `[Ticket #EN_ATTENTE] ${subject}`,
-                proposedContent: followupHtml,
+                proposedContent: replyResult.replyHtml,
                 draftKind: 'CONVERSATION_FOLLOWUP',
                 exchangeTurn: nextExchangeTurn,
                 inReplyToGraphMessageId: graphMessageId,
@@ -764,14 +799,15 @@ async function processMessage(message, account) {
     await saveTicketEmbedding(erpTicketId, subject, cleanBody);
 
     // Étape 6 : accusé de réception automatique au demandeur — envoyé en RÉPONSE dans le
-    // fil de l'email d'origine (createReply) avec les personnes qui étaient en copie,
-    // afin de garder tout le monde dans la boucle dès le premier échange.
+    // fil de l'email d'origine (createReply), avec les personnes en copie ET la liste To
+    // d'origine (boîtes de diffusion comprises) pour une sémantique « Répondre à tous ».
     await sendAcknowledgement({
       ticketId: erpTicketId,
       toEmail: fromEmail,
       toName: fromName,
       originalSubject: subject,
       cc: ccRecipients,
+      to: toRecipients,
       inReplyToGraphMessageId: graphMessageId,
       conversationId,
       inReplyTo: internetMessageId,

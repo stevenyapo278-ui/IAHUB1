@@ -40,31 +40,23 @@ async function approveTicket(id, { approvedById, approvedByEmail = 'HOTLINE', ap
   emitTicketUpdated(ticket, { approvalStatus: 'APPROVED' });
 
   // 1. Envoyer et valider automatiquement tout brouillon en attente associé à ce ticket dans /email-drafts?tab=drafts
-  const { sendEmail } = require('./emailSender');
+  const { sendAiDraftEmail } = require('./emailSender');
   try {
     const pendingDrafts = await prisma.aiEmailDraft.findMany({ where: { ticketId: id, status: 'PENDING' } });
     for (const draft of pendingDrafts) {
+      const displayId = draft.ticketId || id;
       // Un brouillon sans destinataire ne peut jamais partir : on le signale et on passe au suivant
       if (!draft.recipientEmail) {
         console.error(`[ticketApproval] Brouillon #${draft.id} sans destinataire — envoi impossible (ticket ${id})`);
         continue;
       }
-      const displayId = draft.ticketId || id;
-      const resolvedContent = (draft.proposedContent || '').replaceAll('#EN_ATTENTE', `#${displayId}`);
-      const resolvedSubject = (draft.subject || '').replaceAll('#EN_ATTENTE', `#${displayId}`);
 
       let sentOk = false;
       try {
-        await sendEmail({
-          ticketId: draft.ticketId,
-          to: draft.recipientEmail,
-          cc: draft.ccRecipients,
-          subject: resolvedSubject,
-          bodyHtml: resolvedContent,
-          saveAsMessage: true,
-          inReplyToGraphMessageId: draft.inReplyToGraphMessageId,
-          conversationId: draft.outlookConversationId,
-        });
+        // Envoi unifié : contenu enveloppé à l'envoi (signature du jour), #EN_ATTENTE résolu,
+        // réponse dans le fil d'origine et CC = copies de la demande d'origine (avec repli
+        // automatique sur le dernier message entrant du ticket si le brouillon n'en a pas).
+        await sendAiDraftEmail({ draft, to: draft.recipientEmail });
         sentOk = true;
       } catch (err) {
         console.error(`[ticketApproval] Échec envoi brouillon #${draft.id}:`, err.message);
@@ -77,8 +69,10 @@ async function approveTicket(id, { approvedById, approvedByEmail = 'HOTLINE', ap
           where: { id: draft.id },
           data: {
             status: 'APPROVED',
-            proposedContent: resolvedContent,
-            subject: resolvedSubject,
+            // Archive : placeholders résolus pour un affichage propre (le contenu reste brut,
+            // sans gabarit — la version envoyée complète vit dans TicketMessage).
+            proposedContent: (draft.proposedContent || '').replaceAll('#EN_ATTENTE', `#${displayId}`),
+            subject: (draft.subject || '').replaceAll('#EN_ATTENTE', `#${displayId}`),
             reviewedById: approvedById || null,
             reviewedAt: new Date(),
             sentAt: new Date(),
@@ -112,12 +106,26 @@ async function approveTicket(id, { approvedById, approvedByEmail = 'HOTLINE', ap
       const lastInbound = await prisma.ticketMessage.findFirst({
         where: { ticketId: id, direction: 'INBOUND', outlookMessageId: { not: null } },
         orderBy: { timestamp: 'desc' },
-        select: { outlookMessageId: true, ccRecipients: true, conversationId: true, internetMessageId: true },
+        select: { outlookMessageId: true, ccRecipients: true, recipients: true, conversationId: true, internetMessageId: true },
       });
       // Ne jamais mettre en CC : le demandeur lui-même (déjà destinataire principal)
       const requesterEmailNorm = recipientEmail.toLowerCase().trim();
       const ccRecipients = (lastInbound?.ccRecipients || []).filter(
         (addr) => addr && addr.toLowerCase().trim() !== requesterEmailNorm
+      );
+      // « Répondre à tous » : on remet aussi la liste To de la DEMANDE D'ORIGINE (boîtes de
+      // diffusion comprises) derrière le demandeur — le canal par lequel la demande est
+      // arrivée (ex. hotline@…) doit voir la réponse. On lit le PREMIER message entrant
+      // (la demande initiale), pas le dernier : après une relance du demandeur, le To du
+      // dernier message pointe vers la boîte support, pas vers le groupe d'origine.
+      // Le filtre anti-boîte-support de sendEmail évite toute re-boucle résiduelle.
+      const firstInbound = await prisma.ticketMessage.findFirst({
+        where: { ticketId: id, direction: 'INBOUND', outlookMessageId: { not: null } },
+        orderBy: { timestamp: 'asc' },
+        select: { recipients: true },
+      });
+      const lastInboundTo = (firstInbound?.recipients || lastInbound?.recipients || []).filter(
+        (addr) => addr && addr.toLowerCase().trim() !== requesterEmailNorm && !ccRecipients.some((c) => c.toLowerCase().trim() === addr.toLowerCase().trim())
       );
       sendApprovalNotificationEmail({
         ticketId: fullTicket.id,
@@ -130,6 +138,7 @@ async function approveTicket(id, { approvedById, approvedByEmail = 'HOTLINE', ap
         requesterName: recipientName,
         content: fullTicket.content || null,
         cc: ccRecipients,
+        toExtra: lastInboundTo,
         inReplyToGraphMessageId: lastInbound?.outlookMessageId || null,
         conversationId: lastInbound?.conversationId || null,
         // inReplyTo = internetMessageId du message auquel on répond (norme RFC),

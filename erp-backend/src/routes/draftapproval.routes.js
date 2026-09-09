@@ -1,7 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
-const { sendEmail } = require('../services/emailSender');
+const { sendEmail, sendAiDraftEmail } = require('../services/emailSender');
 const { getSystemSettings } = require('../services/systemSettings');
 
 const router = express.Router();
@@ -58,24 +58,15 @@ router.post('/:token/approve', [body('recipientEmail').optional().isEmail()], as
   const finalCc = Array.isArray(ccRecipients) ? ccRecipients : draft.ccRecipients;
 
   try {
-    // Répondre dans le fil d'origine si l'info de threading est disponible sur le brouillon
-    const lastInbound = draft.ticketId
-      ? await prisma.ticketMessage.findFirst({
-          where: { ticketId: draft.ticketId, direction: 'INBOUND', outlookMessageId: { not: null } },
-          orderBy: { timestamp: 'desc' },
-          select: { outlookMessageId: true, conversationId: true, internetMessageId: true },
-        })
-      : null;
-    await sendEmail({
+    // Envoi unifié (emailSender.sendAiDraftEmail) : signature du jour appliquée à l'envoi,
+    // #EN_ATTENTE résolu (corrige le leak du placeholder sur ce chemin), réponse dans le fil
+    // d'origine et CC = copies de la demande d'origine (repli sur le dernier message entrant).
+    await sendAiDraftEmail({
       ticketId: draft.ticketId,
+      draft,
       to: finalRecipient,
-      cc: finalCc,
-      subject: draft.subject,
-      bodyHtml: finalContent,
-      saveAsMessage: true,
-      inReplyToGraphMessageId: draft.inReplyToGraphMessageId || lastInbound?.outlookMessageId || null,
-      conversationId: draft.outlookConversationId || lastInbound?.conversationId || null,
-      inReplyTo: lastInbound?.internetMessageId || null,
+      cc: Array.isArray(ccRecipients) ? ccRecipients : null,
+      content: finalContent,
     });
   } catch (err) {
     return res.status(502).json({ error: `Envoi échoué : ${err.message}` });
