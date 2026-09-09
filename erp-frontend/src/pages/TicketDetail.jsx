@@ -306,7 +306,15 @@ export default function TicketDetail() {
   const canApprove = canEditTicketsRole && (hasPermission(user, 'tickets.approve') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN');
   // Escalade = transfert d'équipe : droit tickets.assign restreint aux acteurs support désignés
   // (l'ADMIN peut l'avoir retiré de son groupe de droits — la hotline l'a par défaut côté serveur).
-  const canEscalate = canEditTicketsRole && ['ADMIN', 'SUPERADMIN', 'HOTLINE'].includes(user?.role) && hasPermission(user, 'tickets.assign');
+  // Uniquement sur un ticket ACTIF : sur un ticket résolu/fermé/rejeté il n'y a plus de travail
+  // à pousser vers une équipe — le bouton serait une source de misclicks et de notifications
+  // parasites (le backend rejette aussi, défense en profondeur). WAITING_FOR_USER reste
+  // escaladable : c'est un état actif (demandeur silencieux, relance nécessaire).
+  const ESCALATABLE_STATUSES = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER'];
+  const canEscalate = canEditTicketsRole
+    && ['ADMIN', 'SUPERADMIN', 'HOTLINE'].includes(user?.role)
+    && hasPermission(user, 'tickets.assign')
+    && ESCALATABLE_STATUSES.includes(ticket?.status);
   const canDeleteRole = ['SUPERADMIN', 'ADMIN', 'HOTLINE'].includes(user?.role);
   const canDelete = canEditTicketsRole && (canDeleteRole || hasPermission(user, 'tickets.delete'));
   const canManageProblems = canEditTicketsRole && (hasPermission(user, 'problems.manage') || user?.role === 'SUPERADMIN');

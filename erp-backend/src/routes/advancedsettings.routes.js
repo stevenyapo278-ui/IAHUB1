@@ -115,6 +115,7 @@ const PUT_FIELDS = [
   'emailSlaBreachEnabled', 'emailDueDateBreachEnabled', 'emailStatusChangeEnabled',
   'emailResolvedEnabled', 'emailEscalationEnabled', 'emailMajorIncidentResolvedEnabled',
   'emailApprovalEnabled', 'slaHours', 'navigationConfig',
+  'portalAllowNewRequest',
   'loginThemeMode', 'loginThemeFixedVariant', 'loginThemeEnabledVariants',
 ];
 

@@ -11,6 +11,7 @@ import { PRIORITY_CONFIG, STATUS_CONFIG, PRIORITY_OPTIONS, TYPE_OPTIONS } from '
 import SlaBadge from '../components/SlaBadge';
 import EmptyState from '../components/EmptyState';
 import { sanitizeHtml } from '../utils/sanitize';
+import useSystemSettings from '../hooks/useSystemSettings';
 
 const PRIORITY_ICON_BG = {
   P1: 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-400 border border-red-200 dark:border-red-500/25 font-bold',
@@ -29,6 +30,10 @@ const EMPTY_FORM = {
 
 export default function Portal() {
   const { user } = useAuth();
+  const { settings } = useSystemSettings();
+  // Soumission désactivable globalement (Paramètres > Avancé) : le bouton « Nouvelle demande »
+  // disparaît, le suivi des tickets existants reste disponible. Défaut : visible.
+  const canCreate = settings?.portalAllowNewRequest !== false;
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -95,6 +100,13 @@ export default function Portal() {
 
   async function submitCreate(e) {
     e.preventDefault();
+    // Double garde : si le réglage a été coupé pendant que le formulaire était ouvert,
+    // la soumission est refusée même si le modal reste affiché.
+    if (!canCreate) {
+      toast.error('La soumission de nouvelles demandes est désactivée.');
+      setShowCreate(false);
+      return;
+    }
     if (!form.title.trim() || !form.content.trim()) {
       toast.error('Titre et description sont obligatoires');
       return;
@@ -155,13 +167,15 @@ export default function Portal() {
             Suivez vos demandes et déposez une nouvelle demande d'assistance.
           </p>
         </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-on-primary font-bold text-body-sm shadow-sm hover:opacity-90 transition-all cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          Nouvelle demande
-        </button>
+        {canCreate && (
+          <button
+            onClick={() => setShowCreate(true)}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-on-primary font-bold text-body-sm shadow-sm hover:opacity-90 transition-all cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            Nouvelle demande
+          </button>
+        )}
       </div>
 
       {/* Filtres */}

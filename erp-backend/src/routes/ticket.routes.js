@@ -517,6 +517,9 @@ router.post(
             ...data,
             ...(data.status === 'SOLVED' ? { solvedAt: new Date() } : {}),
             ...(data.status === 'CLOSED' ? { closedAt: new Date() } : {}),
+            // Clôture groupée : consommer la suggestion de clôture éventuelle (cohérence
+            // avec la clôture individuelle — sinon le ticket restait dans le Centre de Validation)
+            ...((data.status === 'SOLVED' || data.status === 'CLOSED') ? { closeSuggested: false, closeSuggestedAt: null, closeSuggestionConfidence: null } : {}),
           },
         });
 
@@ -1138,6 +1141,14 @@ router.patch('/:id', allowTechnicianStatusOnly, requireTicketAssignOrTechnicianS
     data.status = status;
     if (status === 'SOLVED') data.solvedAt = new Date();
     if (status === 'CLOSED') data.closedAt = new Date();
+    // Clôture directe par un humain (hors validation IA) : la suggestion de clôture
+    // éventuelle est consommée — sinon le ticket restait listé dans l'onglet
+    // « Clôtures suggérées » du Centre de Validation alors qu'il est déjà résolu/fermé.
+    if (status === 'SOLVED' || status === 'CLOSED') {
+      data.closeSuggested = false;
+      data.closeSuggestedAt = null;
+      data.closeSuggestionConfidence = null;
+    }
   }
 
   if (req.body.approvalStatus !== undefined) {
@@ -1256,7 +1267,7 @@ router.patch('/:id', allowTechnicianStatusOnly, requireTicketAssignOrTechnicianS
           if (childIds.length > 0) {
             await prisma.ticket.updateMany({
               where: { id: { in: childIds }, status: { notIn: ['SOLVED', 'CLOSED'] } },
-              data: { status: data.status, closedAt: data.status === 'CLOSED' ? new Date() : undefined, solvedAt: data.status === 'SOLVED' ? new Date() : undefined },
+              data: { status: data.status, closedAt: data.status === 'CLOSED' ? new Date() : undefined, solvedAt: data.status === 'SOLVED' ? new Date() : undefined, closeSuggested: false, closeSuggestedAt: null, closeSuggestionConfidence: null },
             });
             for (const childId of childIds) {
               await logEvent(childId, 'STATUS_CHANGED', req.user.email || 'SYSTEM', { oldStatus: before.status, newStatus: data.status, action: 'Clôture en cascade du parent' });
@@ -1326,6 +1337,11 @@ router.post('/:id/reject', forbidTechnicianTicketEdits, requirePermission('ticke
         approvalStatus: 'REJECTED',
         status: 'CLOSED',
         closedAt: new Date(),
+        // Rejet = clôture : consommer la suggestion de clôture éventuelle (le ticket
+        // ne doit pas apparaître dans les clôtures suggérées alors qu'il est fermé)
+        closeSuggested: false,
+        closeSuggestedAt: null,
+        closeSuggestionConfidence: null,
         approvedById: req.user.sub,
         approvedAt: new Date(),
         approvalNote: note.trim(),
@@ -1371,6 +1387,15 @@ router.post('/:id/validate-close', forbidTechnicianTicketEdits, requirePermissio
   try {
     const existing = await prisma.ticket.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ error: 'Ticket introuvable' });
+    if (existing.status === 'SOLVED' || existing.status === 'CLOSED') {
+      // Résidu de cohérence (données antérieures au fix) : ticket clôturé par un autre
+      // chemin mais suggestion jamais consommée → on nettoie et on refuse poliment.
+      await prisma.ticket.update({
+        where: { id },
+        data: { closeSuggested: false, closeSuggestedAt: null, closeSuggestionConfidence: null },
+      }).catch(() => {});
+      return res.status(400).json({ error: "Ce ticket est déjà résolu/fermé — plus aucune clôture à valider." });
+    }
     if (!existing.closeSuggested) {
       return res.status(400).json({ error: 'Aucune clôture suggérée en attente sur ce ticket.' });
     }
@@ -1420,6 +1445,15 @@ router.post('/:id/reject-close', forbidTechnicianTicketEdits, requirePermission(
   try {
     const existing = await prisma.ticket.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ error: 'Ticket introuvable' });
+    if (existing.status === 'SOLVED' || existing.status === 'CLOSED') {
+      // Résidu de cohérence (données antérieures au fix) : nettoyage au lieu d'un rejet
+      // de clôture absurde sur un ticket déjà fermé.
+      await prisma.ticket.update({
+        where: { id },
+        data: { closeSuggested: false, closeSuggestedAt: null, closeSuggestionConfidence: null },
+      }).catch(() => {});
+      return res.status(400).json({ error: "Ce ticket est déjà résolu/fermé — plus aucune clôture à rejeter." });
+    }
     if (!existing.closeSuggested) {
       return res.status(400).json({ error: 'Aucune clôture suggérée en attente sur ce ticket.' });
     }
@@ -1543,6 +1577,8 @@ router.post('/:id/escalate', forbidTechnicianTicketEdits, requirePermission('tic
     if (err.message === 'Ticket introuvable') return res.status(404).json({ error: err.message });
     if (err.message === 'Équipe cible introuvable'
       || err.message.includes('technicien')) return res.status(400).json({ error: err.message });
+    // Statut non escaladable (SOLVED/CLOSED/REJECTED/corbeille) — erreur métier, pas un crash
+    if (err.message.includes('escalader un ticket résolu')) return res.status(400).json({ error: err.message });
     console.error('[ticket.routes] Erreur escalade ticket:', err.message);
     return res.status(500).json({ error: 'Erreur lors de l\'escalade' });
   }

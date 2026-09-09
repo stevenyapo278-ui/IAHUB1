@@ -35,7 +35,9 @@ async function runReminderScheduler() {
       if (since >= delays.autoCloseDays) {
         await prisma.ticket.update({
           where: { id: ticket.id },
-          data: { status: 'CLOSED', closedAt: new Date() },
+          // Clôture auto (sans réponse) : consommer la suggestion de clôture éventuelle
+          // (le filtre closeSuggested=false exclut déjà ces tickets ici, garde par sécurité)
+          data: { status: 'CLOSED', closedAt: new Date(), closeSuggested: false, closeSuggestedAt: null, closeSuggestionConfidence: null },
         });
         await logEvent(ticket.id, 'CLOSED_AUTO', 'SYSTEM', { reason: 'no_response', daysSinceLastReply: since });
         results.push({ ticketId: ticket.id, action: 'AUTO_CLOSED' });

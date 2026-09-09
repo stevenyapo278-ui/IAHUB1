@@ -698,6 +698,11 @@ model SystemSettings {
   // Exemple : { "/": ["REQUESTER","TECHNICIAN","HOTLINE","ADMIN","SUPERADMIN"], "/problems": ["HOTLINE","ADMIN","SUPERADMIN"] }
   navigationConfig Json?
 
+  // Afficher le bouton « Nouvelle demande » du portail (Paramètres > Avancé).
+  // false = la soumission de tickets depuis le portail est désactivée (le suivi des
+  // tickets existants reste disponible). Défaut : true (bouton visible).
+  portalAllowNewRequest Boolean @default(true)
+
   // ── Apparence de la page de connexion (configurable par SUPERADMIN) ─────────
   // loginThemeMode: "daily_rotation" = rotation déterministe (jour de l'année) sur les variantes activées,
   //                 "fixed"          = variante unique toujours affichée,

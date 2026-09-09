@@ -33,7 +33,9 @@ async function runSolvedAutoCloseScheduler() {
     try {
       await prisma.ticket.update({
         where: { id: ticket.id },
-        data: { status: 'CLOSED', closedAt: new Date() },
+        // Clôture auto après résolution : consommer une éventuelle suggestion de clôture
+        // résiduelle (sinon le ticket apparaissait encore dans les clôtures suggérées)
+        data: { status: 'CLOSED', closedAt: new Date(), closeSuggested: false, closeSuggestedAt: null, closeSuggestionConfidence: null },
       });
 
       await logEvent(ticket.id, 'CLOSED_AUTO', 'SYSTEM', {

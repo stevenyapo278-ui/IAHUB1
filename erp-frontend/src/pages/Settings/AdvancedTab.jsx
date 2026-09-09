@@ -178,6 +178,14 @@ export default function AdvancedTab() {
             disabled={saving}
           />
 
+          <SettingRow
+            title="Bouton « Nouvelle demande » (portail)"
+            description="Affiche ou masque le bouton de soumission du portail demandeur. Masqué, les utilisateurs peuvent toujours suivre leurs tickets existants mais ne peuvent plus créer de nouvelle demande depuis le portail."
+            checked={settings.portalAllowNewRequest !== false}
+            onChange={(v) => updateSetting('portalAllowNewRequest', v)}
+            disabled={saving}
+          />
+
           {settings.autonomousMode !== true && (
             <>
               <SettingRow

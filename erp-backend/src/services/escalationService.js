@@ -20,6 +20,15 @@ async function scheduleEscalation(ticketId, minutes, triageRuleId = null) {
 // le ticket change donc d'équipe responsable (et éventuellement de technicien).
 // Partagée entre le moniteur automatique et le bouton manuel : événement tracé,
 // notification socket, emails (équipe cible, admins, technicien sortant, demandeur).
+//
+// Gardes de statut : une escalade n'a de sens que sur un ticket ACTIF — il y a un travail
+// en cours à pousser vers la bonne équipe. Sur un ticket résolu/fermé/rejeté/corbeille,
+// il n'y a plus rien à transférer : l'escalade ne ferait que déclencher des notifications
+// parasites et gonfler le niveau d'escalade. WAITING_FOR_USER reste escaladable (état
+// actif de traitement : demandeur silencieux, besoin de relance par la bonne équipe).
+const ESCALATABLE_STATUSES = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER'];
+const ESCALATION_STATUS_ERROR = "Impossible d'escalader un ticket résolu, fermé ou rejeté — rouvrez-le d'abord si le problème persiste.";
+
 async function escalateTicket(ticketId, {
   reason = null,
   actor = 'SYSTEM',
@@ -42,6 +51,13 @@ async function escalateTicket(ticketId, {
     },
   });
   if (!ticket) throw new Error('Ticket introuvable');
+  if (ticket.deletedAt) throw new Error('Ticket introuvable'); // corbeille : ne pas révéler son existence
+  // Garde de statut partagée auto + manuel : le moniteur filtre déjà via ACTIVE_STATUSES
+  // en amont, mais la défense en profondeur garantit qu'aucun chemin (API, UI périmée)
+  // ne peut escalader un ticket dont le travail est terminé.
+  if (ticket.status && !ESCALATABLE_STATUSES.includes(ticket.status)) {
+    throw new Error(ESCALATION_STATUS_ERROR);
+  }
 
   // Résolution de l'équipe cible : fournie explicitement, sinon l'équipe courante
   // (escalade « au sein de l'équipe » = simple alerte de prise en charge prioritaire).
@@ -242,4 +258,4 @@ async function runEscalationMonitor() {
   return { escalatedCount };
 }
 
-module.exports = { scheduleEscalation, escalateTicket, runEscalationMonitor };
+module.exports = { scheduleEscalation, escalateTicket, runEscalationMonitor, ESCALATABLE_STATUSES, ESCALATION_STATUS_ERROR };

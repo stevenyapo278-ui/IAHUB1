@@ -50,6 +50,7 @@ describe('escalateTicket — escalade = transfert à une équipe responsable', (
     id: 10,
     title: 'Impression KO',
     priority: 'P1',
+    status: 'OPEN',
     escalationLevel: 1,
     assignedTo: { id: 5, email: 'tech@prosuma.ci', fullName: 'Tech' },
     requester: { id: 6, email: 'req@prosuma.ci', fullName: 'Req' },
@@ -193,6 +194,39 @@ describe('escalateTicket — escalade = transfert à une équipe responsable', (
 
     await expect(escalateTicket(10, { targetTeamId: 999 })).rejects.toThrow('Équipe cible introuvable');
     expect(prisma.ticket.update).not.toHaveBeenCalled();
+  });
+
+  it('refuse l\'escalade d\'un ticket résolu (SOLVED)', async () => {
+    mockTicket({ ...ticket, status: 'SOLVED' });
+
+    await expect(escalateTicket(10, {})).rejects.toThrow('escalader un ticket résolu');
+    expect(prisma.ticket.update).not.toHaveBeenCalled();
+    expect(emitTicketEscalated).not.toHaveBeenCalled();
+    expect(sendEscalationEmail).not.toHaveBeenCalled();
+  });
+
+  it('refuse l\'escalade d\'un ticket fermé (CLOSED)', async () => {
+    mockTicket({ ...ticket, status: 'CLOSED' });
+
+    await expect(escalateTicket(10, {})).rejects.toThrow('escalader un ticket résolu');
+    expect(prisma.ticket.update).not.toHaveBeenCalled();
+  });
+
+  it('refuse l\'escalade d\'un ticket rejeté (REJECTED) ou mis à la corbeille', async () => {
+    mockTicket({ ...ticket, status: 'REJECTED' });
+    await expect(escalateTicket(10, {})).rejects.toThrow('escalader un ticket résolu');
+
+    mockTicket({ ...ticket, status: 'OPEN', deletedAt: new Date() });
+    await expect(escalateTicket(10, {})).rejects.toThrow('Ticket introuvable');
+    expect(prisma.ticket.update).not.toHaveBeenCalled();
+  });
+
+  it('autorise l\'escalade sur WAITING_FOR_USER (état actif : demandeur silencieux)', async () => {
+    mockTicket({ ...ticket, status: 'WAITING_FOR_USER' });
+    prisma.ticket.update = jest.fn(async ({ data }) => ({ ...ticket, ...data }));
+
+    await expect(escalateTicket(10, {})).resolves.toBeTruthy();
+    expect(prisma.ticket.update).toHaveBeenCalled();
   });
 
   it('notifie le demandeur même sans admin ni technicien assigné', async () => {
