@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission, canEditTickets } from '../utils/permissions';
@@ -10,7 +10,6 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import { useTheme } from '../context/ThemeContext';
 import { playApproval, playRejection, playError } from '../utils/sounds';
 import SearchableSelect from '../components/SearchableSelect';
-import RemoteUserSelect from '../components/RemoteUserSelect';
 import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
 import SlaBadge from '../components/SlaBadge';
 import { flattenCategoryTree } from '../utils/categoryTree';
@@ -194,10 +193,7 @@ export default function TicketDetail() {
   const [allUsers, setAllUsers] = useState([]);
   const [syncFailures, setSyncFailures] = useState([]);
   const [savingField, setSavingField] = useState(null);
-  const [editingRequester, setEditingRequester] = useState(false);
-  const [selectedRequesterId, setSelectedRequesterId] = useState('');
-  const [customSourceName, setCustomSourceName] = useState('');
-  const [customSourceEmail, setCustomSourceEmail] = useState('');
+
   const [adjacent, setAdjacent] = useState({ first: null, prev: null, next: null, last: null });
   const slideDirectionRef = useRef('next'); // 'next' = vers la droite→gauche, 'prev' = gauche→droite
   const [corrections, setCorrections] = useState([]);
@@ -348,11 +344,33 @@ export default function TicketDetail() {
     load();
   }, [id, load]);
 
+  // Navigation ‹ › : hérite des filtres de la liste (passés en query params lors du clic
+  // depuis /tickets). Sans paramètres, le serveur applique son défaut (non clôturés,
+  // ni rejetés, ni corbeille) — les boutons ne font plus traverser toute la base.
+  const [searchParams] = useSearchParams();
+  // Conserve les filtres de liste entre deux sauts de navigation ‹ ›
+  const navQueryString = useMemo(() => {
+    const forwardable = ['status', 'priority', 'source', 'category', 'teamId', 'assignedToId', 'mine', 'aiProcessed', 'approvalStatus', 'closeSuggested', 'dateFrom', 'dateTo', 'search'];
+    const p = new URLSearchParams();
+    forwardable.forEach((k) => {
+      const v = searchParams.get(k);
+      if (v) p.set(k, v);
+    });
+    const s = p.toString();
+    return s ? `?${s}` : '';
+  }, [searchParams]);
   useEffect(() => {
-    api.get(`/tickets/${id}/adjacent`)
+    const forwardable = ['status', 'priority', 'source', 'category', 'teamId', 'assignedToId', 'mine', 'aiProcessed', 'approvalStatus', 'closeSuggested', 'dateFrom', 'dateTo', 'search'];
+    const navParams = new URLSearchParams();
+    forwardable.forEach((k) => {
+      const v = searchParams.get(k);
+      if (v) navParams.set(k, v);
+    });
+    const qs = navParams.toString();
+    api.get(`/tickets/${id}/adjacent${qs ? `?${qs}` : ''}`)
       .then(({ data }) => setAdjacent(data))
       .catch(() => setAdjacent({ first: null, prev: null, next: null, last: null }));
-  }, [id]);
+  }, [id, searchParams]);
 
   useEffect(() => {
     const intervalId = setInterval(load, 15000);
@@ -488,23 +506,6 @@ export default function TicketDetail() {
       setSavingField(null);
     }
   }
-
-  const handleSaveRequester = async () => {
-    try {
-      setSavingField('requester');
-      const payload = selectedRequesterId
-        ? { requesterId: Number(selectedRequesterId) }
-        : { requesterId: null };
-      await api.patch(`/tickets/${id}`, payload);
-      toast.success('Demandeur mis à jour');
-      setEditingRequester(false);
-      load();
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'Échec de la mise à jour du demandeur');
-    } finally {
-      setSavingField(null);
-    }
-  };
 
   // Extrait le nom du lieu (partie avant ":", "-", "/", "|") d'un titre
   function extractLocationFromTitle(title) {
@@ -1133,7 +1134,7 @@ export default function TicketDetail() {
               onClick={() => {
                 if (adjacent.first) {
                   slideDirectionRef.current = 'prev';
-                  navigate(`/tickets/${adjacent.first}`, { replace: true });
+                  navigate(`/tickets/${adjacent.first}${navQueryString}`, { replace: true });
                 }
               }}
               disabled={!adjacent.first}
@@ -1146,7 +1147,7 @@ export default function TicketDetail() {
               onClick={() => {
                 if (adjacent.prev) {
                   slideDirectionRef.current = 'prev';
-                  navigate(`/tickets/${adjacent.prev}`, { replace: true });
+                  navigate(`/tickets/${adjacent.prev}${navQueryString}`, { replace: true });
                 }
               }}
               disabled={!adjacent.prev}
@@ -1159,7 +1160,7 @@ export default function TicketDetail() {
               onClick={() => {
                 if (adjacent.next) {
                   slideDirectionRef.current = 'next';
-                  navigate(`/tickets/${adjacent.next}`, { replace: true });
+                  navigate(`/tickets/${adjacent.next}${navQueryString}`, { replace: true });
                 }
               }}
               disabled={!adjacent.next}
@@ -1172,7 +1173,7 @@ export default function TicketDetail() {
               onClick={() => {
                 if (adjacent.last) {
                   slideDirectionRef.current = 'next';
-                  navigate(`/tickets/${adjacent.last}`, { replace: true });
+                  navigate(`/tickets/${adjacent.last}${navQueryString}`, { replace: true });
                 }
               }}
               disabled={!adjacent.last}
@@ -2469,73 +2470,51 @@ export default function TicketDetail() {
                 </span>
                 Demandeur
               </h3>
-              {canEdit && !editingRequester && (
-                <button
-                  onClick={() => {
-                    setSelectedRequesterId(ticket.requesterId ? String(ticket.requesterId) : '');
-                    setCustomSourceName(ticket.sourceName || '');
-                    setCustomSourceEmail(ticket.sourceEmail || '');
-                    setEditingRequester(true);
-                  }}
-                  className="p-1.5 rounded-lg text-on-surface-variant hover:text-primary hover:bg-surface-container transition-all cursor-pointer"
-                  title="Modifier le demandeur"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                </button>
-              )}
             </div>
 
-            {editingRequester ? (
-              <div className="space-y-3 pt-1">
-                <RemoteUserSelect
-                  value={selectedRequesterId}
-                  onChange={(val) => setSelectedRequesterId(val)}
-                  hideEmail={true}
-                  placeholder="Rechercher un demandeur..."
-                  searchPlaceholder="Rechercher par nom..."
-                />
-                <div className="flex items-center gap-2 pt-1 justify-end">
-                  <button
-                    onClick={() => setEditingRequester(false)}
-                    className="px-3 py-1.5 rounded-xl border border-outline-variant/40 text-xs font-semibold text-on-surface-variant hover:bg-surface-container transition-colors cursor-pointer"
-                  >
-                    Annuler
-                  </button>
-                  <button
-                    onClick={handleSaveRequester}
-                    disabled={savingField === 'requester'}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-primary text-on-primary text-xs font-bold hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    Enregistrer
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl border border-outline-variant/40 bg-surface-container text-on-surface flex items-center justify-center font-bold text-sm shrink-0 shadow-sm">
-                    {initials(ticket.requester?.fullName || ticket.sourceName)}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-bold text-on-surface truncate">{ticket.requester?.fullName || ticket.sourceName || ticket.sourceEmail || '-'}</p>
-                    <p className="text-[11px] text-on-surface-variant font-medium truncate">{ticket.requester?.email || ticket.sourceEmail || '-'}</p>
-                  </div>
-                </div>
-                {ticket.secondaryRequester && (
-                  <div className="flex items-center gap-3 border-t border-outline-variant/15 pt-2.5">
-                    <div className="w-8 h-8 rounded-xl border border-outline-variant/40 bg-surface-container text-on-surface flex items-center justify-center font-bold text-xs shrink-0 shadow-sm">
-                      {initials(ticket.secondaryRequester.fullName)}
+            <div className="space-y-3">
+                {(() => {
+                  // Tous les demandeurs : objet User complet si connu, sinon résolu depuis allUsers
+                  const requesterIds = Array.isArray(ticket.requesterIds) && ticket.requesterIds.length > 0
+                    ? ticket.requesterIds
+                    : (ticket.requesterId ? [ticket.requesterId] : []);
+                  const knownUsers = [
+                    ...(ticket.requester ? [ticket.requester] : []),
+                    ...(ticket.secondaryRequester ? [ticket.secondaryRequester] : []),
+                  ];
+                  const resolved = requesterIds.map((rid) =>
+                    knownUsers.find((u) => u.id === rid) ||
+                    (allUsers || []).find((u) => u.id === rid) ||
+                    { id: rid, fullName: `Utilisateur #${rid}`, email: '' }
+                  );
+                  if (resolved.length === 0) {
+                    return (
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-2xl border border-outline-variant/40 bg-surface-container text-on-surface flex items-center justify-center font-bold text-sm shrink-0 shadow-sm">
+                          {initials(ticket.sourceName)}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-bold text-on-surface truncate">{ticket.sourceName || ticket.sourceEmail || '-'}</p>
+                          <p className="text-[11px] text-on-surface-variant font-medium truncate">{ticket.sourceEmail || '-'}</p>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return resolved.map((u, idx) => (
+                    <div key={u.id ?? idx} className={`flex items-center gap-3 ${idx > 0 ? 'border-t border-outline-variant/15 pt-2.5' : ''}`}>
+                      <div className="w-10 h-10 rounded-2xl border border-outline-variant/40 bg-surface-container text-on-surface flex items-center justify-center font-bold text-sm shrink-0 shadow-sm">
+                        {initials(u.fullName)}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        {idx === 0 && <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Demandeur principal</p>}
+                        {idx > 0 && <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">{idx + 1}{idx === 1 ? 'er' : 'e'} demandeur</p>}
+                        <p className="text-xs font-bold text-on-surface truncate">{u.fullName || '-'}</p>
+                        <p className="text-[11px] text-on-surface-variant font-medium truncate">{u.email || '-'}</p>
+                      </div>
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">2nd Demandeur</p>
-                      <p className="text-xs font-bold text-on-surface truncate">{ticket.secondaryRequester.fullName}</p>
-                      <p className="text-[11px] text-on-surface-variant font-medium truncate">{ticket.secondaryRequester.email}</p>
-                    </div>
-                  </div>
-                )}
+                  ));
+                })()}
               </div>
-            )}
           </div>
 
           {/* Champs personnalisés (lecture seule) */}

@@ -164,20 +164,28 @@ function PriorityRenderer({ data }) {
   return <PriorityDot priority={data.priority} />;
 }
 
+function TicketNumberRenderer({ data, context }) {
+  if (!data) return null;
+  const { debouncedSearch } = context || {};
+  const colorCls = PRIORITY_DOT[data.priority]?.text || 'text-on-surface-variant';
+  return (
+    <Link
+      to={`/tickets/${data.id}`}
+      onClick={(e) => e.stopPropagation()}
+      className={`font-mono text-xs font-extrabold tabular-nums hover:underline ${colorCls}`}
+    >
+      <HighlightText text={`#${data.id}`} query={debouncedSearch ? debouncedSearch.replace(/^#/, '') : ''} />
+    </Link>
+  );
+}
+
 function TicketInfoRenderer({ data, context }) {
   if (!data) return null;
   const { debouncedSearch } = context || {};
   return (
     <div className="flex flex-col justify-center h-full py-1 min-w-0 w-full overflow-hidden leading-snug">
-      {/* Row 1: ID + Title + Badges */}
+      {/* Row 1: Title + Badges — le N° vit dans sa propre colonne « N° » */}
       <div className="flex items-center gap-1.5 min-w-0 w-full overflow-hidden">
-        <Link
-          to={`/tickets/${data.id}`}
-          onClick={(e) => e.stopPropagation()}
-          className={`font-mono text-xs font-extrabold tabular-nums shrink-0 hover:underline ${PRIORITY_DOT[data.priority]?.text || 'text-on-surface-variant'}`}
-        >
-          #{data.id}
-        </Link>
         <Link
           to={`/tickets/${data.id}`}
           onClick={(e) => e.stopPropagation()}
@@ -545,23 +553,38 @@ function ColumnConfigPanel({ columns, onChange }) {
   );
 }
 
+const DEFAULT_COLUMNS = [
+  { key: 'numero', label: 'N°', visible: true },
+  { key: 'ticket', label: 'Ticket', visible: true },
+  { key: 'status', label: 'Statut', visible: true },
+  { key: 'assignedTo', label: 'Assigné', visible: true },
+  { key: 'requester', label: 'Demandeur', visible: true },
+  { key: 'location', label: 'Lieu', visible: true },
+  { key: 'observers', label: 'Observateurs', visible: true },
+  { key: 'createdAt', label: 'Ouvert', visible: true },
+  { key: 'updatedAt', label: 'Modifié', visible: true },
+];
+
+// Champs de tri supportés par GET /tickets (paramètre sortBy) —
+// doit rester aligné avec la whitelist du backend (ticket.routes.js).
+const SERVER_SORTABLE = new Set(['id', 'createdAt', 'title', 'priority', 'status', 'assignedTo', 'requester', 'updatedAt']);
+
 function loadColumnConfig() {
   try {
     const saved = JSON.parse(localStorage.getItem('tickets_columns'));
     if (Array.isArray(saved) && saved.length > 0) {
-      return saved.filter((c) => c.key !== 'priority');
+      const filtered = saved.filter((c) => c.key !== 'priority');
+      // Migration : ajoute les colonnes apparues après la première sauvegarde
+      // (ex. « N° ») en les insérant à leur position par défaut.
+      for (const def of DEFAULT_COLUMNS) {
+        if (!filtered.some((c) => c.key === def.key)) {
+          filtered.splice(DEFAULT_COLUMNS.indexOf(def), 0, { ...def });
+        }
+      }
+      return filtered;
     }
   } catch {}
-  return [
-    { key: 'ticket', label: 'Ticket', visible: true },
-    { key: 'status', label: 'Statut', visible: true },
-    { key: 'assignedTo', label: 'Assigné', visible: true },
-    { key: 'requester', label: 'Demandeur', visible: true },
-    { key: 'location', label: 'Lieu', visible: true },
-    { key: 'observers', label: 'Observateurs', visible: true },
-    { key: 'createdAt', label: 'Ouvert', visible: true },
-    { key: 'updatedAt', label: 'Modifié', visible: true },
-  ];
+  return DEFAULT_COLUMNS.map((c) => ({ ...c }));
 }
 
 function isDueOverdue(t) {
@@ -857,6 +880,27 @@ export default function Tickets() {
     const next = { ...filters, [key]: value };
     setFilters(next);
     setPage(1);
+  }
+
+  // Construit la query string des filtres actifs — utilisée pour naviguer vers un ticket
+  // afin que la navigation ‹ › dans la vue détail suive exactement le périmètre de cette liste.
+  function buildFilterQueryString() {
+    const p = new URLSearchParams();
+    if (filters.status) p.set('status', filters.status);
+    if (filters.priority) p.set('priority', filters.priority);
+    if (filters.source) p.set('source', filters.source);
+    if (filters.category) p.set('category', filters.category);
+    if (filters.teamId) p.set('teamId', filters.teamId);
+    if (filters.assignedToId) p.set('assignedToId', filters.assignedToId);
+    if (filters.mine) p.set('mine', filters.mine);
+    if (filters.aiProcessed) p.set('aiProcessed', filters.aiProcessed);
+    if (filters.approvalStatus) p.set('approvalStatus', filters.approvalStatus);
+    if (filters.closeSuggested) p.set('closeSuggested', filters.closeSuggested);
+    if (filters.dateFrom) p.set('dateFrom', filters.dateFrom);
+    if (filters.dateTo) p.set('dateTo', filters.dateTo);
+    if (debouncedSearch) p.set('search', debouncedSearch);
+    const qs = p.toString();
+    return qs ? `?${qs}` : '';
   }
 
   // ── Visibility set for column config
@@ -1307,6 +1351,16 @@ export default function Tickets() {
       });
     }
 
+    if (visibleKeys.has('numero')) {
+      cols.push({
+        field: 'id',
+        headerName: 'N°',
+        width: 78,
+        pinned: 'left',
+        cellRenderer: TicketNumberRenderer,
+      });
+    }
+
     if (visibleKeys.has('ticket')) {
       cols.push({
         field: 'title',
@@ -1354,6 +1408,7 @@ export default function Tickets() {
         width: 160,
         cellRenderer: LocationRenderer,
         valueGetter: (p) => p.data?.locationName || '',
+        sortable: false, // pas de tri serveur sur locationName
       });
     }
 
@@ -1364,6 +1419,7 @@ export default function Tickets() {
         width: 200,
         cellRenderer: ObserverRenderer,
         valueGetter: (p) => (p.data?.observers || []).map((o) => o.fullName).join(', '),
+        sortable: false, // pas de tri serveur sur les relations multiples
       });
     }
 
@@ -1398,8 +1454,34 @@ export default function Tickets() {
       suppressMovable: true,
     });
 
+    // Réflète le tri serveur sur les en-têtes : AG Grid v36 n'a plus d'option
+    // `sortModel` — l'état initial de tri passe par colDef.sort.
+    const serverSort = SERVER_SORTABLE.has(sortBy) ? (sortOrder === 'asc' ? 'asc' : 'desc') : null;
+    for (const col of cols) {
+      col.sort = (col.field === sortBy && serverSort) ? serverSort : undefined;
+    }
+
     return cols;
-  }, [visibleKeys, showSelectionColumn]);
+  }, [visibleKeys, showSelectionColumn, setSortBy, setSortOrder, sortBy, sortOrder]);
+
+  // Tri par en-tête → tri SERVEUR (clé 'id' supportée par l'API, ex. colonne « N° »).
+  // Sans ça, un clic d'en-tête ne trierait que la page courante et serait écrasé
+  // par le refresh silencieux toutes les 15 s.
+  const handleGridSortChanged = useCallback((event) => {
+    const cols = event.api?.getColumnState?.() || [];
+    const sorted = cols.find((c) => c.sort);
+    // AG Grid v36 : ColumnState.sort vaut 'asc' | 'desc' (plus 'ascending'/'descending')
+    const dir = sorted?.sort === 'asc' || sorted?.sort === 'desc' ? sorted.sort : null;
+    if (dir && SERVER_SORTABLE.has(sorted.colId)) {
+      setSortBy(sorted.colId);
+      setSortOrder(dir);
+    } else {
+      // Tri effacé (3e clic) ou colonne non triable côté serveur → tri par défaut
+      setSortBy('createdAt');
+      setSortOrder('desc');
+    }
+    setPage(1);
+  }, [setSortBy, setSortOrder]);
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
@@ -1623,7 +1705,7 @@ export default function Tickets() {
             <AnimatePresence mode="popLayout">
               {tickets.map((t) => (
                 <motion.div key={t.id} initial={false} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                  onClick={() => navigate(`/tickets/${t.id}`)}
+                  onClick={() => navigate(`/tickets/${t.id}${buildFilterQueryString()}`)}
                   className="rounded-xl border border-border/25 bg-surface hover:border-primary/30 hover:shadow-sm transition-all cursor-pointer group relative overflow-hidden p-4 flex flex-col gap-3">
                   <div className={`absolute top-0 left-0 right-0 h-0.5 ${
                     t.priority === 'P1' ? 'bg-red-500' : t.priority === 'P2' ? 'bg-orange-400' :
@@ -1684,8 +1766,11 @@ export default function Tickets() {
                 headerHeight={44}
                 rowHeight={60}
                 suppressRowClickSelection={!!showSelectionColumn}
-                onRowClick={(data) => navigate(`/tickets/${data.id}`)}
+                onRowClick={(data) => navigate(`/tickets/${data.id}${buildFilterQueryString()}`)}
                 noRowsText="Aucun ticket trouvé"
+                extraGridOptions={{
+                  onSortChanged: handleGridSortChanged,
+                }}
                 className="rounded-2xl overflow-hidden flex-1"
               />
             </div>

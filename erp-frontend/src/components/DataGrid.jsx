@@ -152,14 +152,13 @@ function ensureThemeInjected() {
       border-left: 1px solid color-mix(in srgb, var(--ag-border-color) 40%, transparent);
     }
 
-    /* Sort indicators */
+    /* Sort indicators — both directions (desc hidden by défaut in AG Grid v33+) */
     .ag-theme-katalyst-datagrid .ag-sort-ascending-icon,
-    .ag-theme-katalyst-datagrid .ag-sort-descending-icon,
+    .ag-theme-katalyst-datagrid .ag-sort-descending-icon {
+      display: inline;
+    }
     .ag-theme-katalyst-datagrid .ag-sort-none-icon {
       display: none;
-    }
-    .ag-theme-katalyst-datagrid .ag-sort-ascending-icon {
-      display: inline;
     }
 
     /* Pagination */
