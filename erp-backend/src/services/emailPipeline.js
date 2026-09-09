@@ -198,6 +198,9 @@ async function processMessage(message, account) {
   // présente dans le corps HTML — cas vu en pratique sur de longs fils de réponse. On considère donc
   // aussi la présence d'une référence cid: dans bodyHtml comme preuve d'une pièce jointe à récupérer.
   const hasAttachments = message.hasAttachments === true || !!message.simulatedAttachments || /cid:/i.test(bodyHtml || '');
+  // Flag positionné par les routes unspam : indique que l'email est retraitement d'un SPAM
+  // et que les règles de triage spam (couche 2) doivent être byspassées pour cette passe.
+  const bypassSpamRules = message.bypassSpamRules === true;
 
   // ── Garde anti-boucle (1/2) : message émis par la boîte support elle-même ──
   // Cas typique : l'IA répond à un message dont le To contient la boîte de diffusion dont
@@ -212,7 +215,9 @@ async function processMessage(message, account) {
   }
 
   const existing = await prisma.incomingEmail.findUnique({ where: { graphMessageId } });
-  if (existing) return existing;
+  // Mode retraitement (unspam) : si l'email est déjà en DB et qu'on bypasse les règles spam,
+  // on continue le traitement en utilisant l'enregistrement existant (pas de doublon créé).
+  if (existing && !bypassSpamRules) return existing;
 
   // ── Garde anti-boucle (2/2) : écho via boîte de diffusion ──
   // Quand la réponse de l'IA repasse par le groupe de diffusion, la copie re-délivrée dans la
@@ -263,7 +268,9 @@ async function processMessage(message, account) {
 
   let analysis = null;
 
-  const incoming = await prisma.incomingEmail.create({
+  // En mode retraitement (bypassSpamRules), on réutilise l'enregistrement existant plutôt que d'en créer un.
+  // Sinon on crée un nouvel enregistrement normalement.
+  const incoming = existing ?? await prisma.incomingEmail.create({
     data: {
       graphMessageId, internetMessageId, conversationId, inReplyTo, references,
       emailAccountId: account.id, fromEmail, fromName, subject,
@@ -431,30 +438,47 @@ async function processMessage(message, account) {
       return applyInboxRulesSafe(updated, 'followup');
     }
 
-    // Couche 1 : Pré-filtre spam et mails d'information déterministe (sans appel LLM)
+    // Couche 1 : Filtre technique minimal — UNIQUEMENT les messages véritablement automatiques
+    // (bounces, mailer-daemon, messages machine) qui ne sont JAMAIS des tickets.
+    // Les newsletters, emails d'information ou sujets suspects passent à l'IA (couche 3)
+    // pour être analysés, puis orientés vers le centre de validation si besoin.
     const { checkEmailSpam } = require('./emailSpamFilter');
     const spamCheck = checkEmailSpam(headers, subject, bodyPreview, fromEmail);
     if (spamCheck.isSpam) {
-      const targetStatus = spamCheck.isInformational ? 'INFORMATIONAL' : 'SPAM';
-      console.log(`[emailPipeline] Email filtré (${targetStatus}) par filtre déterministe: ${spamCheck.reason}`);
-      const updated = await prisma.incomingEmail.update({
-        where: { id: incoming.id },
-        data: { status: targetStatus, aiSummary: `Filtré (${targetStatus}) : ${spamCheck.reason}`, aiIsSpam: true, aiConfidence: 1.0, aiIntent: 'INFORMATIONAL' },
-      });
-      if (io) io.emit('email_updated', updated);
-      return applyInboxRulesSafe(updated, 'spam-filter');
+      if (spamCheck.isTechnicalAutomated) {
+        // Bounce, mailer-daemon, delivery failure : jamais un ticket — classer INFORMATIONAL
+        console.log(`[emailPipeline] Email technique automatique ignoré (INFORMATIONAL) : ${spamCheck.reason}`);
+        const updated = await prisma.incomingEmail.update({
+          where: { id: incoming.id },
+          data: { status: 'INFORMATIONAL', aiSummary: `Message automatique technique : ${spamCheck.reason}`, aiIsSpam: false, aiConfidence: 1.0, aiIntent: 'INFORMATIONAL' },
+        });
+        if (io) io.emit('email_updated', updated);
+        return applyInboxRulesSafe(updated, 'spam-filter');
+      }
+      // Tout le reste (newsletters, OOO, sujets suspects) : laisser passer à l'IA
+      console.log(`[emailPipeline] Email suspect mais non technique — transmis à l'IA pour analyse : ${spamCheck.reason}`);
     }
 
     // Couche 2 : Moteur de règles déterministe (sans appel LLM)
+    // Byspassée si bypassSpamRules est actif (retraitement manuel d'un email classé spam à tort)
     const { evaluateRules } = require('./emailRuleEngine');
-    const ruleMatch = await evaluateRules(subject, bodyPreview, fromEmail);
+    const ruleMatch = bypassSpamRules ? null : await evaluateRules(subject, bodyPreview, fromEmail);
 
     if (ruleMatch) {
       console.log(`[emailPipeline] Correspondance avec la règle de triage: "${ruleMatch.label}"`);
       if (ruleMatch.isSpam) {
+        // La règle suspecte cet email : au lieu de le bloquer en SPAM, on le passe en NEEDS_REVIEW
+        // pour que la Hotline valide. Plus aucun email ne disparaît silencieusement.
+        console.log(`[emailPipeline] Règle isSpam "${ruleMatch.label}" — orienté vers le centre de validation (NEEDS_REVIEW)`);
         const updated = await prisma.incomingEmail.update({
           where: { id: incoming.id },
-          data: { status: 'SPAM', aiSummary: `Spam filtré (règle) : ${ruleMatch.label}`, aiIsSpam: true, aiConfidence: 1.0 },
+          data: {
+            status: 'NEEDS_REVIEW',
+            aiSummary: `Signalé par règle : "${ruleMatch.label}" — en attente de validation Hotline`,
+            aiIsSpam: false,
+            aiConfidence: 0.8,
+            aiIntent: 'NEEDS_REVIEW',
+          },
         });
         if (io) io.emit('email_updated', updated);
         return applyInboxRulesSafe(updated, 'triage-spam');
@@ -504,20 +528,22 @@ async function processMessage(message, account) {
       analysis = await analyzeEmail({ subject, body: cleanBody, from: fromEmail, fromName, senderRole, senderTeams, senderSkills, signatureText });
     }
 
-    // Bloquer la création de ticket si l'IA ou le filtre détecte un email d'information, un spam ou DO_NOT_CREATE
+    // L'IA détecte un spam / email d'information / hors périmètre
+    // → Plutôt que de rejeter, on oriente vers le centre de validation (NEEDS_REVIEW)
+    //   pour que la Hotline puisse confirmer ou créer un ticket manuellement.
     if (analysis.isSpam || analysis.isInformational === true || analysis.requiresAction === false || analysis.ticketDecision === 'DO_NOT_CREATE') {
-      const targetStatus = (analysis.isSpam || analysis.emailType === 'SPAM') ? 'SPAM' : 'INFORMATIONAL';
-      console.log(`[emailPipeline] Email d'information ou hors périmètre support filtré (${targetStatus}) par l'IA (motif: ${analysis.decisionReason || 'INFO'}, résumé: "${analysis.summary}")`);
+      const reason = analysis.decisionReason || (analysis.isSpam ? 'SPAM' : 'INFORMATION');
+      console.log(`[emailPipeline] Email classé par l'IA comme non-actionnable (${reason}) — orienté NEEDS_REVIEW pour validation Hotline`);
       const updated = await prisma.incomingEmail.update({
         where: { id: incoming.id },
         data: {
-          status: targetStatus,
-          aiSummary: analysis.summary || 'Email d\'information filtré par l\'IA',
+          status: 'NEEDS_REVIEW',
+          aiSummary: analysis.summary || 'Email considéré comme non-actionnable par l\'IA — vérification Hotline requise',
           aiCategory: analysis.category || null,
           aiPriority: 'P4',
           aiConfidence: analysis.confidence || 1.0,
-          aiIsSpam: true,
-          aiIntent: analysis.decisionReason || 'INFORMATIONAL',
+          aiIsSpam: false, // on ne préjuge pas : c'est la Hotline qui décide
+          aiIntent: reason,
         },
       });
       if (io) io.emit('email_updated', updated);

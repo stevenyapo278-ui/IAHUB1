@@ -121,11 +121,38 @@ router.post('/:id/approve', requirePermission('aiweeklyreports.manage', ['ADMIN'
   const report = await prisma.aiWeeklyPatternReport.findUnique({ where: { id } });
   if (!report) return res.status(404).json({ error: 'Rapport introuvable' });
 
+  // Récupérer les domaines internes pour bloquer toute règle anti-spam qui les ciblerait
+  const activeAccounts = await prisma.emailAccount.findMany({ where: { isActive: true }, select: { emailAddress: true, username: true } });
+  const internalDomains = new Set();
+  for (const acc of activeAccounts) {
+    for (const addr of [acc.emailAddress, acc.username]) {
+      if (!addr) continue;
+      const at = addr.lastIndexOf('@');
+      if (at >= 0 && at < addr.length - 1) internalDomains.add(addr.slice(at + 1).toLowerCase());
+    }
+  }
+
   const rules = Array.isArray(report.proposedRules) ? report.proposedRules : [];
   let createdRulesCount = 0;
+  let skippedInternalDomainCount = 0;
 
   for (const r of rules) {
     if (!r.matchValue) continue;
+
+    // Filet de sécurité : ne jamais créer une règle spam qui bloquerait un domaine interne
+    if (r.isSpam && r.matchField === 'domain') {
+      const targetDomain = (r.matchValue || '').toLowerCase();
+      // Vérifier si le domaine cible correspond à (ou est contenu dans) un domaine interne
+      const wouldBlockInternal = [...internalDomains].some(
+        (d) => d === targetDomain || d.endsWith(`.${targetDomain}`) || targetDomain.endsWith(`.${d}`)
+      );
+      if (wouldBlockInternal) {
+        console.warn(`[aiweeklyreport] Règle anti-spam ignorée à l'approbation : domaine interne protégé "${targetDomain}"`);
+        skippedInternalDomainCount++;
+        continue;
+      }
+    }
+
     try {
       await prisma.triageRule.create({
         data: {
@@ -152,11 +179,11 @@ router.post('/:id/approve', requirePermission('aiweeklyreports.manage', ['ADMIN'
       status: 'APPROVED',
       reviewedById: req.user.sub,
       reviewedAt: new Date(),
-      reviewNote: req.body.note || `Approuvé par batch (${createdRulesCount} règles créées)`,
+      reviewNote: req.body.note || `Approuvé par batch (${createdRulesCount} règles créées${skippedInternalDomainCount > 0 ? `, ${skippedInternalDomainCount} règle(s) sur domaine interne ignorée(s)` : ''})`,
     },
   });
 
-  return res.json({ report: updatedReport, createdRulesCount });
+  return res.json({ report: updatedReport, createdRulesCount, skippedInternalDomainCount });
 });
 
 router.post('/:id/reject', requirePermission('aiweeklyreports.manage', ['ADMIN', 'SUPERADMIN', 'HOTLINE']), async (req, res) => {

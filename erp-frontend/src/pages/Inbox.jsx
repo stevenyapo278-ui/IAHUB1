@@ -442,6 +442,33 @@ export default function Inbox() {
     closeContextMenu();
   }
 
+  async function ctxUnspam() {
+    if (!contextMenu) return;
+    const t = contextMenu.thread;
+    const emailIds = t.emailIds || [];
+    if (emailIds.length === 0) return;
+    try {
+      let reprocessed = 0;
+      for (const emailId of emailIds) {
+        try {
+          await api.post(`/inbox/${emailId}/unspam`);
+          reprocessed++;
+        } catch (e) {
+          console.warn(`[unspam] Email #${emailId} :`, e.response?.data?.error || e.message);
+        }
+      }
+      cacheRef.current.clear();
+      setThreads((prev) => prev.filter((th) => th.id !== t.id));
+      refreshCounts();
+      if (reprocessed > 0) {
+        toast.success('Email retraité par l\'IA — vérifiez la boîte de réception');
+      } else {
+        toast.error('Échec du retraitement');
+      }
+    } catch (err) { toast.error(err.response?.data?.error || 'Erreur'); }
+    closeContextMenu();
+  }
+
   async function ctxDelete() {
     if (!contextMenu) return;
     const t = contextMenu.thread;
@@ -2118,6 +2145,14 @@ export default function Inbox() {
               Créer un ticket...
             </button>
             <div className="mx-3 border-t border-outline-variant/20" />
+            {/* Pas un spam — visible uniquement dans le dossier Spam */}
+            {contextMenu.thread.latest?.status === 'SPAM' && (
+              <button onClick={ctxUnspam}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors cursor-pointer">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                Ce n'est pas un spam — retraiter
+              </button>
+            )}
             <button onClick={ctxMarkSpam}
               className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-amber-500 hover:bg-amber-500/10 transition-colors cursor-pointer">
               <Ban className="w-3.5 h-3.5" />

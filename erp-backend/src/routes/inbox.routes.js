@@ -612,4 +612,154 @@ router.post('/:id/retry', requirePermission('inbox.sync', ['ADMIN']), async (req
   }
 });
 
+// ── Désarchiver un email SPAM et le retraiter via le pipeline IA ─────────────
+// Cas d'usage : un email légitime a été bloqué par une règle de triage trop agressive.
+// On remet l'email en PROCESSING et on le soumet à nouveau au pipeline IA,
+// en bypassant les règles de triage spam (couche 2) pour donner une chance à l'IA de décider.
+router.post('/:id/unspam', requirePermission('inbox.sync', ['ADMIN', 'SUPERADMIN', 'HOTLINE']), async (req, res) => {
+  try {
+    const incoming = await prisma.incomingEmail.findUnique({ where: { id: Number(req.params.id) } });
+    if (!incoming) return res.status(404).json({ error: 'Email introuvable' });
+    if (incoming.status !== 'SPAM') {
+      return res.status(400).json({ error: `Cet email n'est pas en statut SPAM (statut actuel : ${incoming.status})` });
+    }
+
+    const account = await prisma.emailAccount.findUnique({ where: { id: incoming.emailAccountId } });
+    if (!account) return res.status(400).json({ error: 'Compte email associé introuvable' });
+
+    // Reconstruire l'objet message pour le pipeline
+    const message = {
+      id: incoming.graphMessageId,
+      from: { emailAddress: { address: incoming.fromEmail, name: incoming.fromName || '' } },
+      subject: incoming.subject,
+      bodyPreview: incoming.bodyPreview,
+      body: { content: incoming.bodyHtml || '' },
+      receivedDateTime: incoming.receivedAt?.toISOString?.() || new Date().toISOString(),
+      conversationId: incoming.conversationId,
+      internetMessageId: incoming.internetMessageId,
+      hasAttachments: incoming.hasAttachments,
+      toRecipients: [],
+      ccRecipients: (incoming.ccRecipients || []).map((e) => ({ emailAddress: { address: e } })),
+      internetMessageHeaders: [],
+      // Flag spécial : bypass des règles de triage spam pour redonner une chance à l'IA
+      bypassSpamRules: true,
+    };
+
+    // Réinitialiser le statut et les flags spam
+    await prisma.incomingEmail.update({
+      where: { id: incoming.id },
+      data: {
+        status: 'PROCESSING',
+        aiIsSpam: false,
+        aiSummary: null,
+        error: null,
+        lastError: null,
+        retryCount: 0,
+      },
+    });
+
+    const { processMessage: pm } = require('../services/emailPipeline');
+    const result = await pm(message, account);
+
+    return res.json({
+      message: 'Email désarchivé et retraité avec succès',
+      newStatus: result?.status,
+      ticketId: result?.erpTicketId,
+      id: result?.id,
+    });
+  } catch (err) {
+    console.error('[inbox/unspam] Erreur:', err.message);
+    return res.status(500).json({ error: err.message || 'Erreur lors du désarchivage', errorDetail: err.errorDetail || null });
+  }
+});
+
+// ── Désarchiver en masse des emails SPAM (par expéditeur ou plage de dates) ──
+// Body : { fromEmail?: string, dateFrom?: ISO, dateTo?: ISO }
+// Au moins un critère est requis pour éviter un retraitement global accidentel.
+router.post(
+  '/unspam-bulk',
+  requirePermission('inbox.sync', ['ADMIN', 'SUPERADMIN']),
+  [
+    body('fromEmail').optional({ nullable: true }).isEmail().withMessage('Adresse email invalide'),
+    body('dateFrom').optional({ nullable: true }).isISO8601(),
+    body('dateTo').optional({ nullable: true }).isISO8601(),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const { fromEmail: filterEmail, dateFrom, dateTo } = req.body;
+    if (!filterEmail && !dateFrom && !dateTo) {
+      return res.status(400).json({ error: 'Au moins un critère est requis : fromEmail, dateFrom ou dateTo' });
+    }
+
+    const where = { status: 'SPAM' };
+    if (filterEmail) where.fromEmail = { equals: filterEmail, mode: 'insensitive' };
+    if (dateFrom || dateTo) {
+      where.receivedAt = {};
+      if (dateFrom) where.receivedAt.gte = new Date(dateFrom);
+      if (dateTo) where.receivedAt.lte = new Date(dateTo);
+    }
+
+    const spamEmails = await prisma.incomingEmail.findMany({
+      where,
+      orderBy: { receivedAt: 'asc' },
+      take: 200, // limite de sécurité pour éviter les traitements trop lourds
+    });
+
+    if (spamEmails.length === 0) {
+      return res.json({ message: 'Aucun email SPAM trouvé avec ces critères', processed: 0, errors: 0, total: 0 });
+    }
+
+    let processed = 0;
+    let errorCount = 0;
+    const results = [];
+
+    for (const incoming of spamEmails) {
+      try {
+        const account = await prisma.emailAccount.findUnique({ where: { id: incoming.emailAccountId } });
+        if (!account) { errorCount++; continue; }
+
+        const message = {
+          id: incoming.graphMessageId,
+          from: { emailAddress: { address: incoming.fromEmail, name: incoming.fromName || '' } },
+          subject: incoming.subject,
+          bodyPreview: incoming.bodyPreview,
+          body: { content: incoming.bodyHtml || '' },
+          receivedDateTime: incoming.receivedAt?.toISOString?.() || new Date().toISOString(),
+          conversationId: incoming.conversationId,
+          internetMessageId: incoming.internetMessageId,
+          hasAttachments: incoming.hasAttachments,
+          toRecipients: [],
+          ccRecipients: (incoming.ccRecipients || []).map((e) => ({ emailAddress: { address: e } })),
+          internetMessageHeaders: [],
+          bypassSpamRules: true,
+        };
+
+        await prisma.incomingEmail.update({
+          where: { id: incoming.id },
+          data: { status: 'PROCESSING', aiIsSpam: false, aiSummary: null, error: null, lastError: null, retryCount: 0 },
+        });
+
+        const { processMessage: pm } = require('../services/emailPipeline');
+        const result = await pm(message, account);
+        processed++;
+        results.push({ id: incoming.id, newStatus: result?.status, ticketId: result?.erpTicketId });
+      } catch (err) {
+        console.error(`[inbox/unspam-bulk] Erreur email #${incoming.id}:`, err.message);
+        errorCount++;
+        results.push({ id: incoming.id, error: err.message });
+      }
+    }
+
+    return res.json({
+      message: `${processed} email(s) retraité(s), ${errorCount} erreur(s)`,
+      processed,
+      errors: errorCount,
+      total: spamEmails.length,
+      results,
+    });
+  }
+);
+
 module.exports = router;

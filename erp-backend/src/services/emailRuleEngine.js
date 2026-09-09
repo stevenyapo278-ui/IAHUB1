@@ -100,9 +100,17 @@ async function evaluateRules(subject = '', body = '', fromEmail = '', extraConte
           break;
 
         case 'from':
-        case 'domain':
           isMatch = testMatch(fromEmail, rule.matchType, rule.matchValue);
           break;
+
+        case 'domain': {
+          // Extraire uniquement la partie domaine (après le @) pour éviter les faux matchs
+          // sur le local-part : une règle sur "prosuma.cl" ne doit jamais matcher "user@prosuma.ci"
+          const atIndex = (fromEmail || '').lastIndexOf('@');
+          const domainOnly = atIndex >= 0 ? fromEmail.slice(atIndex + 1).toLowerCase() : '';
+          isMatch = testMatch(domainOnly, rule.matchType, rule.matchValue);
+          break;
+        }
 
         case 'sentiment':
           if (rule.sentiment) {

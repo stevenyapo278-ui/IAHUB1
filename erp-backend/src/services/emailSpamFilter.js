@@ -36,17 +36,33 @@ function checkEmailSpam(headers = [], subject = '', body = '', fromEmail = '') {
     return h ? h.value : null;
   };
 
+  const bodySnippet = body.substring(0, 4000);
+  const fromLower = (fromEmail || '').toLowerCase();
+
+  const isTechnicalAutomated = (
+    fromLower.includes('bounce') || fromLower.includes('postmaster') || fromLower.includes('mailer-daemon') ||
+    /statut\s*de\s*remise|undelivered\s*mail|delivery\s*status|postmaster|failure\s*notice/i.test(subject) ||
+    /mail\s*delivery\s*system|mailer\-daemon|d(e|é)lai\s*de\s*remise\s*d(e|é)pass(e|é)/i.test(bodySnippet)
+  );
+
+  const makeResult = (isSpam, isInformational, reason) => ({
+    isSpam,
+    isInformational,
+    isTechnicalAutomated: isSpam ? isTechnicalAutomated : false,
+    reason,
+  });
+
   // 1. Analyse des en-têtes MIME typiques de réponses automatiques et listes de diffusion
   // Auto-Submitted header (RFC 3834)
   const autoSubmitted = getHeader('auto-submitted');
   if (autoSubmitted && autoSubmitted.toLowerCase() !== 'no') {
-    return { isSpam: true, isInformational: true, reason: `Header Auto-Submitted: ${autoSubmitted}` };
+    return makeResult(true, true, `Header Auto-Submitted: ${autoSubmitted}`);
   }
 
   // Precedence header
   const precedence = getHeader('precedence');
   if (precedence && ['bulk', 'junk', 'list', 'auto_reply'].includes(precedence.toLowerCase())) {
-    return { isSpam: true, isInformational: true, reason: `Header Precedence: ${precedence}` };
+    return makeResult(true, true, `Header Precedence: ${precedence}`);
   }
 
   // En-têtes de liste de diffusion de masse (RFC 2369 / Mailman / Campaign)
@@ -58,30 +74,30 @@ function checkEmailSpam(headers = [], subject = '', body = '', fromEmail = '') {
     getHeader('x-campaign-id') ||
     getHeader('x-broadcast')
   ) {
-    return { isSpam: true, isInformational: true, reason: 'Header de liste de diffusion / mailing list détecté' };
+    return makeResult(true, true, 'Header de liste de diffusion / mailing list détecté');
   }
 
   // Autres headers d'auto-reply
   if (getHeader('x-autoreply') || getHeader('x-auto-reply')) {
-    return { isSpam: true, isInformational: false, reason: 'Header X-Auto-Reply détecté' };
+    return makeResult(true, false, 'Header X-Auto-Reply détecté');
   }
 
   // Notification de machine
   if (getHeader('x-fc-machinegenerated')) {
-    return { isSpam: true, isInformational: true, reason: 'Header X-FC-MachineGenerated détecté' };
+    return makeResult(true, true, 'Header X-FC-MachineGenerated détecté');
   }
 
   // 2. Vérification de l'expéditeur (mots clés type noreply, bounce, diffusion, newsletter)
   if (fromEmail) {
-    const localPart = fromEmail.split('@')[0].toLowerCase();
-    const domainPart = fromEmail.split('@')[1]?.toLowerCase() || '';
+    const localPart = fromLower.split('@')[0];
+    const domainPart = fromLower.split('@')[1] || '';
 
     // Check blacklisted words in local part or domain
     const matchesBlacklist = BLACKLISTED_DOMAINS.some(term => 
       localPart.includes(term) || domainPart.includes(term)
     );
     if (matchesBlacklist) {
-      return { isSpam: true, isInformational: true, reason: `Expéditeur blacklisté/diffusion : ${fromEmail}` };
+      return makeResult(true, true, `Expéditeur blacklisté/diffusion : ${fromEmail}`);
     }
   }
 
@@ -111,7 +127,7 @@ function checkEmailSpam(headers = [], subject = '', body = '', fromEmail = '') {
   for (const regex of spamSubjectRegex) {
     if (regex.test(subject)) {
       const isInfo = /note|communiqu|maint|info|service|compte|circulaire|invitation|bulletin|fyi|annonce|proc[eé]dure/i.test(subject);
-      return { isSpam: true, isInformational: isInfo, reason: `Sujet correspond à la regex : ${regex.toString()}` };
+      return makeResult(true, isInfo, `Sujet correspond à la regex : ${regex.toString()}`);
     }
   }
 
@@ -132,16 +148,14 @@ function checkEmailSpam(headers = [], subject = '', body = '', fromEmail = '') {
     /message\s*adress[eé]\s*[aà]\s*tous\s*les\s*collaborateurs/i,
   ];
 
-  // On limite l'analyse regex du corps aux 4000 premiers caractères pour attraper les signatures légales longues
-  const bodySnippet = body.substring(0, 4000);
   for (const regex of spamBodyRegex) {
     if (regex.test(bodySnippet)) {
       const isInfo = /information|action|personnel|collaborateurs/i.test(bodySnippet);
-      return { isSpam: true, isInformational: isInfo, reason: `Corps correspond à la regex : ${regex.toString()}` };
+      return makeResult(true, isInfo, `Corps correspond à la regex : ${regex.toString()}`);
     }
   }
 
-  return { isSpam: false, isInformational: false, reason: null };
+  return makeResult(false, false, null);
 }
 
 module.exports = { checkEmailSpam };

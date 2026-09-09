@@ -25,7 +25,8 @@ export default function AiWeeklyReports() {
   const [generating, setGenerating] = useState(false);
   const [actionId, setActionId] = useState(null);
   const [rulesOpen, setRulesOpen] = useState(false);
-  const [rulesFilter, setRulesFilter] = useState('all'); // all | active | inactive
+  const [rulesFilter, setRulesFilter] = useState('all'); // all | active | inactive | spam
+  const [rulesSearch, setRulesSearch] = useState('');
 
   async function loadAll() {
     setLoading(true);
@@ -260,17 +261,34 @@ export default function AiWeeklyReports() {
           <ArrowRight className={`w-4 h-4 text-on-surface-variant transition-transform ${rulesOpen ? 'rotate-90' : ''}`} />
         </button>
 
-        {rulesOpen && (
+          {rulesOpen && (
           <div className="px-6 pb-6 space-y-3">
-            {/* Filtre actives / inactives */}
-            <div className="flex items-center gap-2">
-              {[['all', 'Toutes'], ['active', 'Actives'], ['inactive', 'Inactives']].map(([value, label]) => (
+            {/* Barre de recherche */}
+            <div className="relative">
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-on-surface-variant/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
+              <input
+                type="text"
+                placeholder="Rechercher par label, valeur, domaine, catégorie…"
+                value={rulesSearch}
+                onChange={(e) => setRulesSearch(e.target.value)}
+                className="w-full bg-surface border border-outline-variant/40 rounded-xl pl-9 pr-8 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+              />
+              {rulesSearch && (
+                <button onClick={() => setRulesSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant/50 hover:text-on-surface">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M18 6 6 18M6 6l12 12" /></svg>
+                </button>
+              )}
+            </div>
+
+            {/* Filtres actives / inactives / anti-spam */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {[['all', 'Toutes'], ['active', 'Actives'], ['inactive', 'Inactives'], ['spam', '🚫 Anti-spam']].map(([value, label]) => (
                 <button
                   key={value}
                   onClick={() => setRulesFilter(value)}
                   className={`px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all ${
                     rulesFilter === value
-                      ? 'bg-primary text-white shadow-md'
+                      ? value === 'spam' ? 'bg-red-600 text-white shadow-md' : 'bg-primary text-white shadow-md'
                       : 'bg-surface-container text-on-surface-variant hover:text-on-surface'
                   }`}
                 >
@@ -279,12 +297,23 @@ export default function AiWeeklyReports() {
               ))}
             </div>
 
-            {rules.filter((r) => rulesFilter === 'all' || (rulesFilter === 'active' ? r.isActive : !r.isActive)).length === 0 ? (
-              <p className="text-xs text-on-surface-variant py-6 text-center">Aucune règle dans cette catégorie.</p>
-            ) : (
+            {(() => {
+              const q = rulesSearch.toLowerCase().trim();
+              const filtered = rules.filter((r) => {
+                const matchStatus = rulesFilter === 'all' || (rulesFilter === 'active' ? r.isActive : rulesFilter === 'inactive' ? !r.isActive : rulesFilter === 'spam' ? r.isSpam : true);
+                const matchSearch = !q || [
+                  r.label, r.matchValue, r.category, r.matchField, r.matchType, r.ticketPriority
+                ].some((v) => v && String(v).toLowerCase().includes(q));
+                return matchStatus && matchSearch;
+              });
+              if (filtered.length === 0) return (
+                <p className="text-xs text-on-surface-variant py-6 text-center">
+                  {q || rulesFilter !== 'all' ? 'Aucune règle ne correspond à cette recherche.' : 'Aucune règle dans cette catégorie.'}
+                </p>
+              );
+              return (
               <div className="space-y-2">
-                {rules
-                  .filter((r) => rulesFilter === 'all' || (rulesFilter === 'active' ? r.isActive : !r.isActive))
+                {filtered
                   .map((rule) => {
                     const isSpamRule = rule.isSpam === true;
                     return (
@@ -341,7 +370,8 @@ export default function AiWeeklyReports() {
                     );
                   })}
               </div>
-            )}
+              );
+            })()}
           </div>
         )}
       </div>
