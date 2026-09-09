@@ -19,7 +19,8 @@ function getLogoAttachmentIfReferenced(bodyHtml, signatureLogoUrl) {
     // signatureLogoUrl est de la forme {BACKEND_URL}/uploads/signature-logo/<fichier> (voir systemsettings.routes.js)
     const filename = signatureLogoUrl.split('/uploads/signature-logo/')[1];
     if (!filename) return null;
-    const filePath = path.join('uploads', 'signature-logo', filename);
+    const filePath = path.join(process.cwd(), 'uploads', 'signature-logo', filename);
+    if (!fs.existsSync(filePath)) return null;
     const buffer = fs.readFileSync(filePath);
     const ext = path.extname(filename).slice(1).toLowerCase();
     const mimeType = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp' }[ext] || 'image/png';
@@ -41,19 +42,26 @@ function getLogoAttachmentIfReferenced(bodyHtml, signatureLogoUrl) {
 // si fourni, on répond via /createReply au lieu de créer un message de zéro — sans ça, Outlook
 // affiche la réponse comme un email totalement séparé du fil de conversation de l'utilisateur,
 // au lieu de s'enchaîner avec "RE:" au même endroit que les échanges précédents.
-async function sendEmailViaSmtp({ to, cc, subject, bodyHtml, account }) {
+async function sendEmailViaSmtp({ to, cc, subject, bodyHtml, account, logoAttachment }) {
   const transporter = nodemailer.createTransport({
     host: account.smtpHost,
     port: account.smtpPort || 587,
     secure: account.useTls === false ? false : account.smtpPort === 465,
     auth: { user: account.username, pass: account.password },
   });
+  const attachments = logoAttachment ? [{
+    filename: logoAttachment.name,
+    content: Buffer.from(logoAttachment.contentBytes, 'base64'),
+    contentType: logoAttachment.contentType,
+    cid: LOGO_CONTENT_ID,
+  }] : undefined;
   const mailOptions = {
     from: account.emailAddress,
     to: Array.isArray(to) ? to.join(', ') : to,
     cc: cc && cc.length > 0 ? cc.join(', ') : undefined,
     subject,
     html: bodyHtml,
+    attachments,
   };
   return transporter.sendMail(mailOptions);
 }
@@ -83,6 +91,19 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
 
   if (!account) throw new Error('Aucun compte email configuré pour l\'envoi (Outlook/M365 ou SMTP)');
 
+  const settings = await getSystemSettings();
+  let logoAttachment = getLogoAttachmentIfReferenced(bodyHtml, settings.signatureLogoUrl);
+
+  let effectiveBodyHtml = bodyHtml;
+  if (effectiveBodyHtml.includes(`cid:${LOGO_CONTENT_ID}`)) {
+    if (!logoAttachment && settings.signatureLogoUrl) {
+      effectiveBodyHtml = effectiveBodyHtml.replaceAll(`cid:${LOGO_CONTENT_ID}`, settings.signatureLogoUrl);
+    } else if (!logoAttachment && !settings.signatureLogoUrl) {
+      effectiveBodyHtml = effectiveBodyHtml.replace(/<p[^>]*><img[^>]*alt="Logo"[^>]*><\/p>/gi, '');
+      effectiveBodyHtml = effectiveBodyHtml.replaceAll(`cid:${LOGO_CONTENT_ID}`, '');
+    }
+  }
+
   // Route SMTP — même garde-fou : ne jamais mettre la boîte d'envoi en copie
   if (!isOutlook) {
     const senderAddress = (account.emailAddress || account.username || '').toLowerCase().trim();
@@ -92,12 +113,12 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
     const toFiltered = toList.filter((addr) => addr.toLowerCase() !== senderAddress);
     const smtpTo = toFiltered.length > 0 ? toFiltered : toList;
     const ccList = (cc || []).filter((addr) => addr && String(addr).toLowerCase().trim() !== senderAddress);
-    await sendEmailViaSmtp({ to: smtpTo, cc: ccList, subject, bodyHtml, account });
+    await sendEmailViaSmtp({ to: smtpTo, cc: ccList, subject, bodyHtml: effectiveBodyHtml, account, logoAttachment });
     if (saveAsMessage && ticketId) {
       const sender = account.emailAddress || account.username;
       // Récupérer le statut actuel du ticket pour le suivi
       const currentTicket = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { status: true } }).catch(() => null);
-      const plainBody = bodyHtml.replace(/<[^>]+>/g, ' ');
+      const plainBody = effectiveBodyHtml.replace(/<[^>]+>/g, ' ');
       await prisma.ticketMessage.create({
         data: {
           ticketId,
@@ -107,7 +128,7 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
           ccRecipients: ccList,
           subject,
           body: plainBody,
-          bodyHtml,
+          bodyHtml: effectiveBodyHtml,
           timestamp: new Date(),
           ticketStatusAtTime: currentTicket?.status || null,
         },
@@ -122,9 +143,6 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
     }
     return;
   }
-
-  const settings = await getSystemSettings();
-  const logoAttachment = getLogoAttachmentIfReferenced(bodyHtml, settings.signatureLogoUrl);
 
   // Ne JAMAIS adresser la boîte d'envoi elle-même (To) : même risque que pour les CC — le mail
   // retomberait dans la boîte sondée par le pipeline email et y serait re-traité comme un
@@ -149,7 +167,7 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
   const buildNewMessage = () => {
     const message = {
       subject,
-      body: { contentType: 'HTML', content: bodyHtml },
+      body: { contentType: 'HTML', content: effectiveBodyHtml },
       toRecipients,
       ...(ccRecipientsPayload.length > 0 ? { ccRecipients: ccRecipientsPayload } : {}),
       ...(logoAttachment ? { attachments: [logoAttachment] } : {}),
@@ -165,12 +183,17 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
         method: 'PATCH',
         body: JSON.stringify({
           subject,
-          body: { contentType: 'HTML', content: bodyHtml },
+          body: { contentType: 'HTML', content: effectiveBodyHtml },
           toRecipients,
           ccRecipients: ccRecipientsPayload,
-          ...(logoAttachment ? { attachments: [logoAttachment] } : {}),
         }),
       });
+      if (logoAttachment) {
+        await graphFetch(account, `/me/messages/${draft.id}/attachments`, {
+          method: 'POST',
+          body: JSON.stringify(logoAttachment),
+        });
+      }
     } catch (err) {
       // Message source introuvable (purgé/rétention Outlook) → envoi en email neuf plutôt
       // que d'échouer : le destinataire reçoit quand même sa réponse, sans fil de conversation.

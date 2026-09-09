@@ -9,7 +9,7 @@ DOMPurify.setConfig({
   ],
   ALLOWED_ATTR: ['href', 'target', 'rel', 'src', 'alt', 'class', 'style', 'width', 'height', 'cid'],
   ALLOW_DATA_ATTR: false,
-  ALLOWED_URI_REGEXP: /^(?:(?:https?|ftp|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i,
+  ALLOWED_URI_REGEXP: /^(?:(?:https?|ftp|mailto|cid):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i,
 });
 
 // ─── Adaptation des couleurs des contenus externes (emails, tickets GLPI) ────
@@ -189,12 +189,13 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   if (node.nodeType === 1) adaptElementColors(node);
 });
 
-export function sanitizeHtml(html) {
+export function sanitizeHtml(html, logoUrl = null) {
   if (!html) return '';
-  // Remplacer les URLs absolues localhost/127.0.0.1 des uploads par des chemins relatifs (/uploads/...)
-  // afin que les images collées dans les suivis s'affichent sur Dokploy et tous les serveurs distants.
-  const normalized = typeof html === 'string'
+  let str = typeof html === 'string'
     ? html.replace(/https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?(\/uploads\/[^\s"'>]+)/gi, '$1')
     : html;
-  return DOMPurify.sanitize(normalized);
+  if (logoUrl && typeof str === 'string' && str.includes('cid:logo-signature')) {
+    str = str.replaceAll('cid:logo-signature', logoUrl);
+  }
+  return DOMPurify.sanitize(str);
 }
