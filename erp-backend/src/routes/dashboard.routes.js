@@ -109,7 +109,7 @@ router.get('/pending-ai-drafts', async (req, res) => {
       ticket: { select: { id: true, title: true, approvalStatus: true, sourceEmail: true, sourceName: true } },
     },
     orderBy: { createdAt: 'asc' },
-    take: 20,
+    take: 100,
   });
   return res.json(drafts);
 });

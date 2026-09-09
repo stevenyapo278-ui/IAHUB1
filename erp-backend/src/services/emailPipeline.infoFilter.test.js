@@ -84,20 +84,30 @@ describe('emailPipeline — filtrage strict des emails d\'information', () => {
     mockIncomingEmailUpdate.mockResolvedValue({ id: 101, status: 'INFORMATIONAL' });
   });
 
-  it('bloque la création de ticket dès la couche 1 si le sujet est une Note d\'information', async () => {
+  it('oriente vers le centre de validation (NEEDS_REVIEW) si le sujet est une Note d\'information non technique', async () => {
+    mockAnalyzeEmail.mockResolvedValueOnce({
+      summary: 'Note d\'information bâtiment A',
+      category: 'Système',
+      priority: 'P4',
+      isSpam: false,
+      isInformational: true,
+      requiresAction: false,
+      confidence: 0.9,
+    });
+
     await processMessage(buildMessage(), { id: 1 });
 
     expect(mockCreateTicketFromEmail).not.toHaveBeenCalled();
     expect(mockIncomingEmailUpdate).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 101 },
       data: expect.objectContaining({
-        status: 'INFORMATIONAL',
-        aiIsSpam: true,
+        status: 'NEEDS_REVIEW',
+        aiIsSpam: false,
       }),
     }));
   });
 
-  it('bloque la création de ticket à la couche 3 si l\'IA identifie isInformational=true', async () => {
+  it('oriente vers le centre de validation (NEEDS_REVIEW) à la couche 3 si l\'IA identifie isInformational=true', async () => {
     const normalMessage = buildMessage({
       subject: 'Réorganisation de l\'équipe projets',
       from: { emailAddress: { address: 'chef.projet@prosuma.ci', name: 'Chef Projet' } },
@@ -121,8 +131,8 @@ describe('emailPipeline — filtrage strict des emails d\'information', () => {
     expect(mockIncomingEmailUpdate).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 101 },
       data: expect.objectContaining({
-        status: 'INFORMATIONAL',
-        aiIsSpam: true,
+        status: 'NEEDS_REVIEW',
+        aiIsSpam: false,
       }),
     }));
   });

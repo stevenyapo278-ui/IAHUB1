@@ -68,9 +68,15 @@ async function allowTechnicianStatusOnly(req, res, next) {
   try {
     const ticket = await prisma.ticket.findUnique({
       where: { id },
-      select: { assignedToId: true, assignees: { select: { id: true } } },
+      select: { status: true, assignedToId: true, assignees: { select: { id: true } } },
     });
     if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
+
+    // Un technicien ne peut apporter aucune modification si le ticket est résolu ou fermé
+    if (['SOLVED', 'CLOSED'].includes(ticket.status)) {
+      return res.status(403).json({ error: 'Aucune modification ne peut être apportée par un technicien sur un ticket résolu ou fermé.' });
+    }
+
     const isAssigned =
       ticket.assignedToId === req.user.sub ||
       ticket.assignees.some((a) => a.id === req.user.sub);
@@ -635,21 +641,24 @@ router.get('/pending-approval', async (req, res) => {
     // voit sa file, pas celle des autres) — Hotline/Admin voient tout.
     where.OR = [{ requesterId: req.user.sub }, { assignedToId: req.user.sub }];
   }
-  const items = await prisma.ticket.findMany({
-    where,
-    orderBy: [{ lowTrustSender: 'desc' }, { createdAt: 'desc' }],
-    take: limit,
-    select: {
-      id: true, title: true, content: true, status: true, priority: true,
-      category: true, type: true, source: true, sourceName: true, sourceEmail: true,
-      urgency: true, impact: true, isMajorIncident: true, impactedSites: true,
-      locationName: true, lowTrustSender: true, aiProcessed: true, aiSummary: true,
-      approvalNote: true, approvalStatus: true,
-      createdAt: true, requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
-      secondaryRequester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
-    },
-  });
-  return res.json({ items, total: items.length });
+  const [items, total] = await Promise.all([
+    prisma.ticket.findMany({
+      where,
+      orderBy: [{ lowTrustSender: 'desc' }, { createdAt: 'desc' }],
+      take: limit,
+      select: {
+        id: true, title: true, content: true, status: true, priority: true,
+        category: true, type: true, source: true, sourceName: true, sourceEmail: true,
+        urgency: true, impact: true, isMajorIncident: true, impactedSites: true,
+        locationName: true, lowTrustSender: true, aiProcessed: true, aiSummary: true,
+        approvalNote: true, approvalStatus: true,
+        createdAt: true, requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+        secondaryRequester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+      },
+    }),
+    prisma.ticket.count({ where }),
+  ]);
+  return res.json({ items, total });
 });
 
 router.get('/:id', async (req, res) => {
@@ -1663,12 +1672,17 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
     });
     if (!isObserver) return res.status(404).json({ error: 'Ticket introuvable' });
   }
-  if (isTechnicianOnly(req.user) && ticket.assignedToId !== req.user.sub && ticket.requesterId !== req.user.sub) {
-    const isObserver = await prisma.ticket.findFirst({
-      where: { id: ticketId, observers: { some: { id: req.user.sub } } },
-      select: { id: true },
-    });
-    if (!isObserver) return res.status(404).json({ error: 'Ticket introuvable' });
+  if (isTechnicianOnly(req.user)) {
+    if (['SOLVED', 'CLOSED'].includes(ticket.status)) {
+      return res.status(403).json({ error: 'Un technicien ne peut pas ajouter de suivi sur un ticket résolu ou fermé.' });
+    }
+    if (ticket.assignedToId !== req.user.sub && ticket.requesterId !== req.user.sub) {
+      const isObserver = await prisma.ticket.findFirst({
+        where: { id: ticketId, observers: { some: { id: req.user.sub } } },
+        select: { id: true },
+      });
+      if (!isObserver) return res.status(404).json({ error: 'Ticket introuvable' });
+    }
   }
 
   // Sauvegarder les images uploadées et créer des TicketAttachment
@@ -1778,6 +1792,13 @@ router.patch('/:id/followups/:followupId', requirePermission('tickets.assign', [
 
   if (!content || !content.trim()) {
     return res.status(400).json({ error: 'Le contenu ne peut pas être vide' });
+  }
+
+  if (isTechnicianOnly(req.user)) {
+    const parentTicket = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { status: true } });
+    if (parentTicket && ['SOLVED', 'CLOSED'].includes(parentTicket.status)) {
+      return res.status(403).json({ error: 'Un technicien ne peut pas modifier un suivi sur un ticket résolu ou fermé.' });
+    }
   }
 
   const followup = await prisma.followup.findFirst({

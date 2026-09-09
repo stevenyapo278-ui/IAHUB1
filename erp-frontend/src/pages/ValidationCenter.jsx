@@ -170,6 +170,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
 
         // Statistiques + série temporelle de l'évolution des clôtures suggérées
         setClosureStats(closureStatsRes?.data || null);
+        window.dispatchEvent(new CustomEvent('sidebar:refresh-badges'));
       })
       .catch((err) => toast.error(err.response?.data?.error || 'Erreur lors du chargement des validations'))
       .finally(() => {

@@ -88,22 +88,51 @@ async function processIncomingAttachments({ account, graphMessageId, incomingEma
 
   const rawAttachments = await fetchMessageAttachments(account, graphMessageId);
   const filtered = await filterOutSignatureImages(rawAttachments, bodyText);
+  const whereClause = ticketId ? { ticketId } : (incomingEmailId ? { incomingEmailId } : null);
   const existingHashes = new Set(
-    (await prisma.ticketAttachment.findMany({ where: { ticketId }, select: { contentHash: true } }))
-      .map((a) => a.contentHash).filter(Boolean)
+    whereClause
+      ? (await prisma.ticketAttachment.findMany({ where: whereClause, select: { contentHash: true } }))
+          .map((a) => a.contentHash).filter(Boolean)
+      : []
   );
   const saved = [];
+  const cidMap = {};
+
   for (const att of filtered) {
     const contentHash = hashContent(att.contentBytes);
-    if (existingHashes.has(contentHash)) continue;
-    const created = await saveAttachmentLocally({
-      ticketId, filename: att.name, mimeType: att.contentType,
-      contentBytes: att.contentBytes, contentHash, incomingEmailId,
-    });
-    existingHashes.add(contentHash);
-    saved.push(created);
+    let created;
+    if (!existingHashes.has(contentHash)) {
+      created = await saveAttachmentLocally({
+        ticketId: ticketId || null,
+        filename: att.name,
+        mimeType: att.contentType,
+        contentBytes: att.contentBytes,
+        contentHash,
+        incomingEmailId: incomingEmailId || null,
+      });
+      existingHashes.add(contentHash);
+      saved.push(created);
+    } else {
+      created = await prisma.ticketAttachment.findFirst({
+        where: whereClause ? { ...whereClause, contentHash } : { contentHash },
+      });
+    }
+
+    if (created && created.localFilepath) {
+      const filenameOnDisk = path.basename(created.localFilepath);
+      const publicUrl = `/uploads/attachments/${filenameOnDisk}`;
+
+      if (att.contentId) {
+        const cleanCid = att.contentId.replace(/^<|>$/g, '');
+        cidMap[cleanCid] = publicUrl;
+        cidMap[att.contentId] = publicUrl;
+      }
+      if (att.name) {
+        cidMap[att.name] = publicUrl;
+      }
+    }
   }
-  return { saved, cidMap: {} };
+  return { saved, cidMap };
 }
 
 module.exports = { processIncomingAttachments, uploadPendingAttachments };

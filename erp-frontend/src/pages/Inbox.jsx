@@ -17,7 +17,8 @@ import {
   Paperclip, Search, X, FlaskConical, Bot, ArrowUpRight, Reply, ChevronDown,
   ChevronRight, ChevronUp, Flame, AlertTriangle, ArrowDownWideNarrow, Rows3, Rows4,
   CircleDot, Mail, CheckCheck, Send, FileText, Tag, Users, Filter, Sparkles, Plus,
-  CalendarRange, Info, FolderPlus, ArrowRight, Loader2, Folder, Settings, Trash2, Play, EyeOff, Eye
+  CalendarRange, Info, FolderPlus, ArrowRight, Loader2, Folder, Settings, Trash2, Play, EyeOff, Eye,
+  MapPin, ShieldAlert, Gauge, Layers,
 } from 'lucide-react';
 
 const STATUS_LABELS = {
@@ -353,9 +354,52 @@ export default function Inbox() {
 
   // ── Modal création ticket depuis email ──────────────────────────────
   const [showCreateTicket, setShowCreateTicket] = useState(false);
-  const [ticketForm, setTicketForm] = useState({ title: '', content: '', priority: 'P3', category: '', teamId: '', assignedToId: '' });
+  const [ticketForm, setTicketForm] = useState({
+    type: 'INCIDENT',
+    title: '',
+    content: '',
+    priority: 'P3',
+    urgency: 'MEDIUM',
+    impact: 'MEDIUM',
+    category: '',
+    locationId: '',
+    teamId: '',
+    assignedToId: '',
+    isMajorIncident: false,
+  });
+  const [aiAnalysisMeta, setAiAnalysisMeta] = useState({
+    aiSummary: '',
+    aiConfidence: 0.9,
+    suggestedSkill: '',
+    isMajorIncident: false,
+    lowTrustSender: false,
+    fromEmail: '',
+    fromName: '',
+  });
+  const [activeTicketTab, setActiveTicketTab] = useState('form'); // 'form' | 'source'
   const [ticketSaving, setTicketSaving] = useState(false);
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
+
+  // Options pour les dropdowns ITSM
+  const [categoriesOptions, setCategoriesOptions] = useState([]);
+  const [locationsOptions, setLocationsOptions] = useState([]);
+  const [teamsOptions, setTeamsOptions] = useState([]);
+  const [techniciansOptions, setTechniciansOptions] = useState([]);
+
+  useEffect(() => {
+    Promise.all([
+      api.get('/categories').catch(() => ({ data: [] })),
+      api.get('/locations').catch(() => ({ data: [] })),
+      api.get('/teams').catch(() => ({ data: [] })),
+      api.get('/users?role=TECHNICIAN').catch(() => ({ data: [] })),
+    ]).then(([catRes, locRes, teamRes, techRes]) => {
+      setCategoriesOptions(Array.isArray(catRes.data) ? catRes.data : catRes.data?.items || []);
+      setLocationsOptions(Array.isArray(locRes.data) ? locRes.data : locRes.data?.items || []);
+      setTeamsOptions(Array.isArray(teamRes.data) ? teamRes.data : teamRes.data?.items || []);
+      const techList = Array.isArray(techRes.data) ? techRes.data : techRes.data?.users || techRes.data?.items || [];
+      setTechniciansOptions(techList);
+    });
+  }, []);
 
   // Recherche locale avec debounce
   const [searchInput, setSearchInput] = useState('');
@@ -442,11 +486,66 @@ export default function Inbox() {
     closeContextMenu();
   }
 
-  async function ctxUnspam() {
-    if (!contextMenu) return;
-    const t = contextMenu.thread;
-    const emailIds = t.emailIds || [];
+  function openCreateTicket(target) {
+    const thread = target || threadDetail;
+    const latest = thread?.latest || (thread?.messages && thread.messages[0]) || {};
+
+    const suggestedTitle = latest.suggestedTitle || latest.subject || thread?.subject || '';
+    const rawContent = latest.bodyPreview || latest.content || latest.bodyHtml || '';
+    const cleanContent = rawContent.replace(/<[^>]*>/g, '').trim();
+
+    const suggestedType = (latest.aiIntent === 'INCIDENT' || latest.type === 'INCIDENT' || latest.requestType === 'INCIDENT') ? 'INCIDENT' : 'REQUEST';
+
+    const suggestedPriority = latest.aiPriority || latest.priority || 'P3';
+    const suggestedUrgency = latest.urgency || (suggestedPriority === 'P1' ? 'HIGH' : suggestedPriority === 'P2' ? 'HIGH' : 'MEDIUM');
+    const suggestedImpact = latest.impact || (suggestedPriority === 'P1' ? 'HIGH' : suggestedPriority === 'P2' ? 'MEDIUM' : 'MEDIUM');
+
+    const suggestedCategory = latest.aiCategory || latest.category || '';
+
+    let matchedLocationId = latest.locationId ? String(latest.locationId) : '';
+    if (!matchedLocationId && (latest.locationName || latest.location)) {
+      const targetLoc = (latest.locationName || latest.location).toLowerCase();
+      const found = locationsOptions.find((l) =>
+        (l.completename && l.completename.toLowerCase().includes(targetLoc)) ||
+        (l.name && l.name.toLowerCase().includes(targetLoc))
+      );
+      if (found) matchedLocationId = String(found.id);
+    }
+
+    setTicketForm({
+      type: suggestedType,
+      title: suggestedTitle.substring(0, 200),
+      content: cleanContent.substring(0, 5000),
+      priority: suggestedPriority,
+      urgency: suggestedUrgency,
+      impact: suggestedImpact,
+      category: suggestedCategory,
+      locationId: matchedLocationId,
+      teamId: latest.teamId ? String(latest.teamId) : '',
+      assignedToId: latest.assignedToId ? String(latest.assignedToId) : '',
+      isMajorIncident: !!latest.isMajorIncident,
+    });
+
+    setAiAnalysisMeta({
+      aiSummary: latest.aiSummary || '',
+      aiConfidence: latest.aiConfidence ?? 0.85,
+      suggestedSkill: latest.suggestedSkill || latest.skillName || '',
+      isMajorIncident: !!latest.isMajorIncident,
+      lowTrustSender: !!latest.lowTrustSender,
+      fromEmail: latest.fromEmail || thread?.latest?.fromEmail || '',
+      fromName: latest.fromName || thread?.latest?.fromName || '',
+    });
+
+    setActiveTicketTab('form');
+    setShowCreateTicket(true);
+  }
+
+  async function handleUnspam(targetThread) {
+    const t = targetThread || contextMenu?.thread || selectedThread;
+    if (!t) return;
+    const emailIds = t.emailIds || (t.latest ? [t.latest.id] : []);
     if (emailIds.length === 0) return;
+    const toastId = toast.loading('Désarchivage et retraitement IA en cours...');
     try {
       let reprocessed = 0;
       for (const emailId of emailIds) {
@@ -459,14 +558,49 @@ export default function Inbox() {
       }
       cacheRef.current.clear();
       setThreads((prev) => prev.filter((th) => th.id !== t.id));
+      if (selectedThread?.id === t.id) setSelectedThread(null);
       refreshCounts();
+      window.dispatchEvent(new CustomEvent('sidebar:refresh-badges'));
       if (reprocessed > 0) {
-        toast.success('Email retraité par l\'IA — vérifiez la boîte de réception');
+        toast.success('Email désarchivé et retraité par l\'IA avec succès !', { id: toastId });
       } else {
-        toast.error('Échec du retraitement');
+        toast.error('Échec du retraitement de l\'email', { id: toastId });
       }
-    } catch (err) { toast.error(err.response?.data?.error || 'Erreur'); }
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors du retraitement', { id: toastId });
+    }
     closeContextMenu();
+  }
+
+  async function handleBulkUnspam() {
+    if (selectedIds.length === 0) return;
+    const toastId = toast.loading(`Retraitement de ${selectedIds.length} email(s)...`);
+    try {
+      let count = 0;
+      for (const threadId of selectedIds) {
+        const th = threads.find((t) => t.id === threadId);
+        const emailIds = th?.emailIds || (th?.latest ? [th.latest.id] : []);
+        for (const id of emailIds) {
+          try {
+            await api.post(`/inbox/${id}/unspam`);
+            count++;
+          } catch {}
+        }
+      }
+      cacheRef.current.clear();
+      setSelectedIds([]);
+      load();
+      refreshCounts();
+      window.dispatchEvent(new CustomEvent('sidebar:refresh-badges'));
+      toast.success(`${count} email(s) désarchivé(s) et retraité(s) par l'IA avec succès`, { id: toastId });
+    } catch (err) {
+      toast.error('Erreur lors du retraitement groupé', { id: toastId });
+    }
+  }
+
+  async function ctxUnspam() {
+    if (!contextMenu) return;
+    await handleUnspam(contextMenu.thread);
   }
 
   async function ctxDelete() {
@@ -1166,6 +1300,15 @@ export default function Inbox() {
                     {selectedIds.length} sélectionnée{selectedIds.length !== 1 ? 's' : ''}
                   </span>
                   <div className="ml-auto flex items-center gap-1.5">
+                    {activeFolder === 'spam' && (
+                      <button
+                        onClick={handleBulkUnspam}
+                        disabled={bulkAction}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-[10px] font-bold disabled:opacity-50 hover:bg-emerald-700 transition-all cursor-pointer"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" /> Ce n'est pas un spam
+                      </button>
+                    )}
                     <button
                       onClick={() => setShowMoveModal(true)}
                       disabled={bulkAction}
@@ -1328,20 +1471,18 @@ export default function Inbox() {
                         </div>
                       </div>
                       <div className="ml-auto shrink-0 flex items-center gap-2">
+                        {threadDetail.latest?.status === 'SPAM' && (
+                          <button
+                            onClick={() => handleUnspam(threadDetail)}
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-xs font-bold hover:bg-emerald-500/15 transition-all cursor-pointer"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            Ce n'est pas un spam
+                          </button>
+                        )}
                         {!threadDetail.latest?.erpTicketId && (
                           <button
-                            onClick={() => {
-                              const latest = threadDetail.latest || {};
-                              setTicketForm({
-                                title: (latest.subject || '').substring(0, 200),
-                                content: (latest.bodyPreview || latest.bodyHtml || '').substring(0, 5000),
-                                priority: 'P3',
-                                category: '',
-                                teamId: '',
-                                assignedToId: '',
-                              });
-                              setShowCreateTicket(true);
-                            }}
+                            onClick={() => openCreateTicket(threadDetail)}
                             className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-xs font-bold hover:bg-emerald-500/15 transition-all cursor-pointer"
                           >
                             <Plus className="w-3.5 h-3.5" />
@@ -1391,6 +1532,26 @@ export default function Inbox() {
                       </div>
                     )}
                   </div>
+
+                  {/* Bandeau d'alerte Spam dans le volet de lecture */}
+                  {threadDetail.latest?.status === 'SPAM' && (
+                    <div className="mx-6 mt-4 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <ShieldAlert className="w-5 h-5 text-amber-500 shrink-0" />
+                        <div>
+                          <p className="text-xs font-bold text-amber-600 dark:text-amber-400">Cet email a été classé comme Spam</p>
+                          <p className="text-[11px] text-on-surface-variant font-medium">S'il s'agit d'une vraie demande, vous pouvez désarchiver l'email et relancer son analyse par l'IA.</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleUnspam(threadDetail)}
+                        className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold shadow-md hover:bg-emerald-500 transition-all shrink-0 flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Ce n'est pas un spam — Retraiter par l'IA</span>
+                      </button>
+                    </div>
+                  )}
 
                   {/* Corps de la conversation */}
                   <div className="flex-1 overflow-y-auto">
@@ -1868,162 +2029,395 @@ export default function Inbox() {
         document.body
       )}
 
-      {/* ── Modal Création Ticket depuis Email ────────────────────────────── */}
+      {/* ── Modal Création Ticket depuis Email (Assistant IA Enrichi) ────── */}
       {createPortal(
         <AnimatePresence>
           {showCreateTicket && (
             <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
                 onClick={() => !ticketSaving && setShowCreateTicket(false)}
-                className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer" />
-              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+                className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer"
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
                 transition={{ type: 'spring', duration: 0.35, bounce: 0.12 }}
-                className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
-
+                className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden"
+              >
                 {/* Header */}
-                <div className="flex items-center gap-3 px-5 py-4 border-b border-outline-variant/30 shrink-0">
-                  <div className="p-1.5 rounded-lg bg-emerald-500/10"><FileText className="w-4 h-4 text-emerald-600" /></div>
-                  <div>
-                    <h3 className="text-sm font-bold text-on-surface">Créer un ticket</h3>
-                    <p className="text-[10px] text-on-surface-variant">À partir de l'email « {threadDetail?.subject || ''} »</p>
+                <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant/30 shrink-0 bg-surface-container-low">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-xl bg-gradient-to-br from-emerald-500/20 to-teal-500/20 border border-emerald-500/30 text-emerald-500">
+                      <Sparkles className="w-5 h-5 animate-pulse" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-extrabold text-on-surface flex items-center gap-2">
+                        Assistant IA — Création de Ticket
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                          Mail &rarr; Ticket
+                        </span>
+                      </h3>
+                      <p className="text-xs text-on-surface-variant font-medium">
+                        De : <span className="font-semibold text-on-surface">{aiAnalysisMeta.fromName ? `${aiAnalysisMeta.fromName} (${aiAnalysisMeta.fromEmail})` : (aiAnalysisMeta.fromEmail || 'Expéditeur')}</span>
+                      </p>
+                    </div>
                   </div>
-                  <motion.button onClick={() => setShowCreateTicket(false)} whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }}
-                    className="ml-auto p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all">
-                    <X className="w-4 h-4" />
-                  </motion.button>
+
+                  <div className="flex items-center gap-2">
+                    {/* Navigation Onglets Form / Email Source */}
+                    <div className="flex items-center gap-1 p-1 rounded-xl bg-surface-container border border-outline-variant/30">
+                      <button
+                        onClick={() => setActiveTicketTab('form')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          activeTicketTab === 'form'
+                            ? 'bg-primary text-on-primary shadow-xs'
+                            : 'text-on-surface-variant hover:text-on-surface'
+                        }`}
+                      >
+                        📝 Formulaire Ticket
+                      </button>
+                      <button
+                        onClick={() => setActiveTicketTab('source')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          activeTicketTab === 'source'
+                            ? 'bg-primary text-on-primary shadow-xs'
+                            : 'text-on-surface-variant hover:text-on-surface'
+                        }`}
+                      >
+                        📧 Aperçu du mail
+                      </button>
+                    </div>
+
+                    <motion.button
+                      onClick={() => setShowCreateTicket(false)}
+                      whileHover={{ scale: 1.1, rotate: 90 }}
+                      whileTap={{ scale: 0.9 }}
+                      className="p-2 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"
+                    >
+                      <X className="w-4 h-4" />
+                    </motion.button>
+                  </div>
                 </div>
 
                 {/* Body */}
-                <div className="flex-1 overflow-y-auto p-5 space-y-4">
-                  {/* Bouton Assistant IA */}
-                  <button
-                    onClick={async () => {
-                      setAiAnalyzing(true);
-                      try {
-                        const { data } = await api.post('/inbox/test-analyze', {
-                          subject: ticketForm.title,
-                          body: ticketForm.content,
-                          from: threadDetail?.latest?.fromEmail || '',
-                          fromName: threadDetail?.latest?.fromName || '',
-                        });
-                        setTicketForm(prev => ({
-                          ...prev,
-                          title: data.suggestedTitle || prev.title,
-                          priority: data.priority || prev.priority,
-                          category: data.category || prev.category,
-                        }));
-                        toast.success('Assistant IA : champs pré-remplis !');
-                      } catch (err) {
-                        toast.error(err.response?.data?.error || 'Erreur analyse IA');
-                      } finally {
-                        setAiAnalyzing(false);
-                      }
-                    }}
-                    disabled={aiAnalyzing}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-violet-500/10 to-purple-500/10 border border-violet-500/30 text-violet-600 dark:text-violet-400 text-xs font-bold hover:from-violet-500/15 hover:to-purple-500/15 transition-all cursor-pointer disabled:opacity-60"
-                  >
-                    {aiAnalyzing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4" />}
-                    {aiAnalyzing ? 'Analyse en cours...' : 'Assistant IA — Remplir automatiquement'}
-                  </button>
-
-                  {/* Champs */}
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Titre *</span>
-                    <input
-                      required
-                      value={ticketForm.title}
-                      onChange={e => setTicketForm({ ...ticketForm, title: e.target.value })}
-                      placeholder="Titre du ticket"
-                      className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-                    />
-                  </label>
-
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Description *</span>
-                    <textarea
-                      rows={5} required
-                      value={ticketForm.content}
-                      onChange={e => setTicketForm({ ...ticketForm, content: e.target.value })}
-                      placeholder="Description détaillée du problème..."
-                      className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-none"
-                    />
-                  </label>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <label className="flex flex-col gap-1.5">
-                      <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Priorité</span>
-                      <select
-                        value={ticketForm.priority}
-                        onChange={e => setTicketForm({ ...ticketForm, priority: e.target.value })}
-                        className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
-                      >
-                        <option value="P1">P1 — Critique</option>
-                        <option value="P2">P2 — Haute</option>
-                        <option value="P3">P3 — Moyenne</option>
-                        <option value="P4">P4 — Basse</option>
-                      </select>
-                    </label>
-                    <label className="flex flex-col gap-1.5">
-                      <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Catégorie</span>
-                      <input
-                        value={ticketForm.category}
-                        onChange={e => setTicketForm({ ...ticketForm, category: e.target.value })}
-                        placeholder="ex: Réseau, Logiciel..."
-                        className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                  {activeTicketTab === 'source' ? (
+                    /* Vue Email Source */
+                    <div className="space-y-4">
+                      <div className="p-4 rounded-xl bg-surface-container border border-outline-variant/30 space-y-2 text-xs">
+                        <p><span className="font-bold text-on-surface">Sujet :</span> {threadDetail?.subject || threadDetail?.latest?.subject}</p>
+                        <p><span className="font-bold text-on-surface">De :</span> {threadDetail?.latest?.fromName} &lt;{threadDetail?.latest?.fromEmail}&gt;</p>
+                        <p><span className="font-bold text-on-surface">Date :</span> {formatDateTime(threadDetail?.latest?.date)}</p>
+                      </div>
+                      <div
+                        className="p-5 rounded-2xl bg-surface border border-outline-variant/40 text-xs text-on-surface prose dark:prose-invert max-w-none min-h-[200px]"
+                        dangerouslySetInnerHTML={{ __html: sanitizeHtml(threadDetail?.latest?.bodyHtml || threadDetail?.latest?.bodyPreview || '') }}
                       />
-                    </label>
-                  </div>
+                    </div>
+                  ) : (
+                    /* Vue Formulaire Ticket avec Analyse IA */
+                    <div className="space-y-6">
+                      {/* Panneau Analyse & Recommandations IA */}
+                      <div className="p-4 rounded-2xl bg-gradient-to-br from-violet-500/10 via-purple-500/5 to-indigo-500/10 border border-violet-500/30 space-y-3">
+                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                          <div className="flex items-center gap-2">
+                            <Bot className="w-4 h-4 text-violet-500" />
+                            <span className="text-xs font-black text-on-surface uppercase tracking-wider">Analyse &amp; Recommandations de l'IA</span>
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {/* Confiance IA */}
+                            <span className="px-2.5 py-1 rounded-full bg-violet-500/15 text-violet-600 dark:text-violet-300 border border-violet-500/30 text-[11px] font-extrabold flex items-center gap-1">
+                              🎯 Confiance IA : {Math.round((aiAnalysisMeta.aiConfidence || 0.85) * 100)}%
+                            </span>
+                            {/* Compétence suggérée */}
+                            {aiAnalysisMeta.suggestedSkill && (
+                              <span className="px-2.5 py-1 rounded-full bg-teal-500/15 text-teal-600 dark:text-teal-300 border border-teal-500/30 text-[11px] font-extrabold flex items-center gap-1">
+                                ✨ Compétence : {aiAnalysisMeta.suggestedSkill}
+                              </span>
+                            )}
+                            {/* Incident Majeur */}
+                            {aiAnalysisMeta.isMajorIncident && (
+                              <span className="px-2.5 py-1 rounded-full bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30 text-[11px] font-extrabold flex items-center gap-1">
+                                <Flame className="w-3 h-3 animate-pulse" /> Incident Majeur
+                              </span>
+                            )}
+                            {/* Bouton Ré-analyser */}
+                            <button
+                              onClick={async () => {
+                                setAiAnalyzing(true);
+                                try {
+                                  const { data } = await api.post('/inbox/test-analyze', {
+                                    subject: ticketForm.title,
+                                    body: ticketForm.content,
+                                    from: aiAnalysisMeta.fromEmail || threadDetail?.latest?.fromEmail || '',
+                                    fromName: aiAnalysisMeta.fromName || threadDetail?.latest?.fromName || '',
+                                  });
+                                  setTicketForm((prev) => ({
+                                    ...prev,
+                                    title: data.suggestedTitle || prev.title,
+                                    priority: data.priority || prev.priority,
+                                    urgency: data.urgency || prev.urgency,
+                                    impact: data.impact || prev.impact,
+                                    category: data.category || prev.category,
+                                    type: data.requestType || data.type || prev.type,
+                                  }));
+                                  setAiAnalysisMeta((prev) => ({
+                                    ...prev,
+                                    aiSummary: data.summary || prev.aiSummary,
+                                    aiConfidence: data.confidence || 0.9,
+                                    suggestedSkill: data.suggestedSkill || prev.suggestedSkill,
+                                  }));
+                                  toast.success('Analyse IA rafraîchie avec succès !');
+                                } catch (err) {
+                                  toast.error(err.response?.data?.error || 'Erreur lors de l\'analyse IA');
+                                } finally {
+                                  setAiAnalyzing(false);
+                                }
+                              }}
+                              disabled={aiAnalyzing}
+                              className="px-2.5 py-1 rounded-xl bg-surface-container border border-outline-variant/40 text-on-surface text-[11px] font-bold hover:bg-surface-container-high transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50 ml-auto sm:ml-0"
+                            >
+                              <RefreshCw className={`w-3 h-3 text-violet-400 ${aiAnalyzing ? 'animate-spin' : ''}`} />
+                              <span>{aiAnalyzing ? 'Analyse...' : 'Ré-analyser'}</span>
+                            </button>
+                          </div>
+                        </div>
 
-                  {/* Info email source */}
-                  <div className="p-3 rounded-xl bg-surface-container border border-outline-variant/30 text-[11px] text-on-surface-variant space-y-1">
-                    <p><span className="font-bold text-on-surface">De :</span> {threadDetail?.latest?.fromEmail || 'Inconnu'}</p>
-                    <p><span className="font-bold text-on-surface">Date :</span> {formatDateTime(threadDetail?.latest?.date)}</p>
-                    {threadDetail?.latest?.erpTicketId && (
-                      <p className="text-amber-500 font-bold">⚠️ Un ticket est déjà associé (#{threadDetail.latest.erpTicketId})</p>
-                    )}
-                  </div>
+                        {/* Motif / Résumé IA */}
+                        {aiAnalysisMeta.aiSummary && (
+                          <div className="p-3 rounded-xl bg-surface-container/60 border border-outline-variant/20 text-xs text-on-surface-variant space-y-1">
+                            <span className="font-bold text-violet-600 dark:text-violet-400 block text-[11px]">💡 Motif &amp; Résumé IA :</span>
+                            <p className="italic leading-relaxed">{aiAnalysisMeta.aiSummary}</p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Type de ticket & Titre */}
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                        <label className="sm:col-span-1 flex flex-col gap-1.5">
+                          <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider flex items-center gap-1">
+                            Type <span className="text-violet-500 font-normal">✨ IA</span>
+                          </span>
+                          <select
+                            value={ticketForm.type}
+                            onChange={(e) => setTicketForm({ ...ticketForm, type: e.target.value })}
+                            className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3 py-2.5 text-xs font-bold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                          >
+                            <option value="INCIDENT">Incident</option>
+                            <option value="REQUEST">Demande</option>
+                          </select>
+                        </label>
+
+                        <label className="sm:col-span-3 flex flex-col gap-1.5">
+                          <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider flex items-center gap-1">
+                            Titre du ticket * <span className="text-violet-500 font-normal">✨ Suggéré par l'IA</span>
+                          </span>
+                          <input
+                            required
+                            value={ticketForm.title}
+                            onChange={(e) => setTicketForm({ ...ticketForm, title: e.target.value })}
+                            placeholder="Titre court du ticket"
+                            className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-xs text-on-surface font-semibold focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                          />
+                        </label>
+                      </div>
+
+                      {/* Description */}
+                      <label className="flex flex-col gap-1.5">
+                        <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Description / Contenu *</span>
+                        <textarea
+                          rows={4}
+                          required
+                          value={ticketForm.content}
+                          onChange={(e) => setTicketForm({ ...ticketForm, content: e.target.value })}
+                          placeholder="Description détaillée..."
+                          className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-none"
+                        />
+                      </label>
+
+                      {/* Grille Matrice ITSM (Priorité, Urgence, Impact) */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 p-4 rounded-2xl bg-surface-container/40 border border-outline-variant/30">
+                        <label className="flex flex-col gap-1.5">
+                          <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider flex items-center gap-1">
+                            Priorité <span className="text-violet-500 font-normal">✨ IA</span>
+                          </span>
+                          <select
+                            value={ticketForm.priority}
+                            onChange={(e) => setTicketForm({ ...ticketForm, priority: e.target.value })}
+                            className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-bold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                          >
+                            <option value="P1">P1 — Critique</option>
+                            <option value="P2">P2 — Haute</option>
+                            <option value="P3">P3 — Moyenne</option>
+                            <option value="P4">P4 — Basse</option>
+                          </select>
+                        </label>
+
+                        <label className="flex flex-col gap-1.5">
+                          <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Urgence</span>
+                          <select
+                            value={ticketForm.urgency}
+                            onChange={(e) => setTicketForm({ ...ticketForm, urgency: e.target.value })}
+                            className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-medium text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                          >
+                            <option value="VERY_LOW">Très basse</option>
+                            <option value="LOW">Basse</option>
+                            <option value="MEDIUM">Moyenne</option>
+                            <option value="HIGH">Haute</option>
+                            <option value="VERY_HIGH">Très haute</option>
+                          </select>
+                        </label>
+
+                        <label className="flex flex-col gap-1.5">
+                          <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Impact</span>
+                          <select
+                            value={ticketForm.impact}
+                            onChange={(e) => setTicketForm({ ...ticketForm, impact: e.target.value })}
+                            className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-medium text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                          >
+                            <option value="VERY_LOW">Très bas</option>
+                            <option value="LOW">Bas</option>
+                            <option value="MEDIUM">Moyen</option>
+                            <option value="HIGH">Haut</option>
+                            <option value="VERY_HIGH">Très haut</option>
+                            <option value="MAJOR">Majeur</option>
+                          </select>
+                        </label>
+                      </div>
+
+                      {/* Grille Organisation (Catégorie, Lieu, Équipe, Technicien) */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {/* Catégorie */}
+                        <label className="flex flex-col gap-1.5">
+                          <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider flex items-center gap-1">
+                            Catégorie <span className="text-violet-500 font-normal">✨ IA</span>
+                          </span>
+                          <input
+                            list="categories-list"
+                            value={ticketForm.category}
+                            onChange={(e) => setTicketForm({ ...ticketForm, category: e.target.value })}
+                            placeholder="Sélectionner ou saisir une catégorie..."
+                            className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs font-medium text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                          />
+                          <datalist id="categories-list">
+                            {categoriesOptions.map((c) => (
+                              <option key={c.id || c.name} value={c.name} />
+                            ))}
+                          </datalist>
+                        </label>
+
+                        {/* Lieu / Site */}
+                        <label className="flex flex-col gap-1.5">
+                          <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider flex items-center gap-1">
+                            Lieu / Site <span className="text-violet-500 font-normal">✨ Détecté par l'IA</span>
+                          </span>
+                          <select
+                            value={ticketForm.locationId}
+                            onChange={(e) => setTicketForm({ ...ticketForm, locationId: e.target.value })}
+                            className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-medium text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                          >
+                            <option value="">-- Aucun lieu spécifié --</option>
+                            {locationsOptions.map((loc) => (
+                              <option key={loc.id} value={loc.id}>
+                                {loc.completename || loc.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        {/* Équipe */}
+                        <label className="flex flex-col gap-1.5">
+                          <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Équipe attribuée</span>
+                          <select
+                            value={ticketForm.teamId}
+                            onChange={(e) => setTicketForm({ ...ticketForm, teamId: e.target.value })}
+                            className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-medium text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                          >
+                            <option value="">-- Aucune équipe --</option>
+                            {teamsOptions.map((tm) => (
+                              <option key={tm.id} value={tm.id}>{tm.name}</option>
+                            ))}
+                          </select>
+                        </label>
+
+                        {/* Technicien assigné */}
+                        <label className="flex flex-col gap-1.5">
+                          <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Technicien assigné</span>
+                          <select
+                            value={ticketForm.assignedToId}
+                            onChange={(e) => setTicketForm({ ...ticketForm, assignedToId: e.target.value })}
+                            className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3 py-2 text-xs font-medium text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
+                          >
+                            <option value="">-- Non assigné (Auto-assignation) --</option>
+                            {techniciansOptions.map((tech) => (
+                              <option key={tech.id} value={tech.id}>
+                                {tech.fullName || tech.email}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Footer */}
-                <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-outline-variant/30 shrink-0">
-                  <button onClick={() => setShowCreateTicket(false)} disabled={ticketSaving}
-                    className="px-4 py-2 rounded-xl border border-outline-variant/40 text-on-surface text-xs font-semibold hover:bg-surface-container transition-all cursor-pointer">
-                    Annuler
-                  </button>
-                  <button
-                    onClick={async () => {
-                      if (!ticketForm.title.trim() || !ticketForm.content.trim()) {
-                        toast.error('Titre et description requis');
-                        return;
-                      }
-                      setTicketSaving(true);
-                      try {
-                        const { data } = await api.post('/tickets', {
-                          title: ticketForm.title.trim(),
-                          content: ticketForm.content.trim(),
-                          priority: ticketForm.priority,
-                          category: ticketForm.category.trim() || null,
-                          teamId: ticketForm.teamId ? Number(ticketForm.teamId) : null,
-                          assignedToId: ticketForm.assignedToId ? Number(ticketForm.assignedToId) : null,
-                          source: 'Email',
-                          requesterEmail: threadDetail?.latest?.fromEmail || null,
-                        });
-                        toast.success(`Ticket #${data.id} créé avec succès`);
-                        setShowCreateTicket(false);
-                        load();
-                        refreshSelection();
-                      } catch (err) {
-                        toast.error(err.response?.data?.error || 'Erreur lors de la création');
-                      } finally {
-                        setTicketSaving(false);
-                      }
-                    }}
-                    disabled={ticketSaving || !ticketForm.title.trim() || !ticketForm.content.trim()}
-                    className="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white text-xs font-bold shadow-md shadow-emerald-500/20 transition-all hover:brightness-110 cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
-                  >
-                    {ticketSaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-                    {ticketSaving ? 'Création...' : 'Créer le ticket'}
-                  </button>
+                <div className="flex items-center justify-between gap-4 px-6 py-4 border-t border-outline-variant/30 shrink-0 bg-surface-container-low">
+                  <div className="text-[11px] text-on-surface-variant font-medium hidden sm:block">
+                    Demandeur : <span className="font-bold text-on-surface">{aiAnalysisMeta.fromEmail}</span>
+                  </div>
+                  <div className="flex items-center gap-2 ml-auto">
+                    <button
+                      onClick={() => setShowCreateTicket(false)}
+                      disabled={ticketSaving}
+                      className="px-4 py-2 rounded-xl border border-outline-variant/40 text-on-surface text-xs font-semibold hover:bg-surface-container transition-all cursor-pointer"
+                    >
+                      Annuler
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (!ticketForm.title.trim() || !ticketForm.content.trim()) {
+                          toast.error('Titre et description requis');
+                          return;
+                        }
+                        setTicketSaving(true);
+                        try {
+                          const { data } = await api.post('/tickets', {
+                            title: ticketForm.title.trim(),
+                            content: ticketForm.content.trim(),
+                            type: ticketForm.type,
+                            priority: ticketForm.priority,
+                            urgency: ticketForm.urgency,
+                            impact: ticketForm.impact,
+                            category: ticketForm.category.trim() || null,
+                            locationId: ticketForm.locationId ? Number(ticketForm.locationId) : null,
+                            teamId: ticketForm.teamId ? Number(ticketForm.teamId) : null,
+                            assignedToId: ticketForm.assignedToId ? Number(ticketForm.assignedToId) : null,
+                            source: 'Email',
+                            requesterEmail: aiAnalysisMeta.fromEmail || threadDetail?.latest?.fromEmail || null,
+                          });
+                          toast.success(`Ticket #${data.id} créé et transmis avec succès !`);
+                          setShowCreateTicket(false);
+                          load();
+                          refreshSelection();
+                          window.dispatchEvent(new CustomEvent('sidebar:refresh-badges'));
+                        } catch (err) {
+                          toast.error(err.response?.data?.error || 'Erreur lors de la création du ticket');
+                        } finally {
+                          setTicketSaving(false);
+                        }
+                      }}
+                      disabled={ticketSaving || !ticketForm.title.trim() || !ticketForm.content.trim()}
+                      className="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white text-xs font-bold shadow-md shadow-emerald-500/20 transition-all hover:brightness-110 cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      {ticketSaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                      {ticketSaving ? 'Création...' : 'Créer le ticket & Transmettre'}
+                    </button>
+                  </div>
                 </div>
               </motion.div>
             </div>

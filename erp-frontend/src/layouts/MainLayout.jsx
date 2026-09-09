@@ -50,6 +50,7 @@ import CustomizerDrawer from '../components/CustomizerDrawer';
 import CursorGlow from '../components/CursorGlow';
 import { useNotifications } from '../context/NotificationContext';
 import { useUserPreferences } from '../context/UserPreferencesContext';
+import { useSocket } from '../context/SocketContext';
 import { saveSessionLocation } from '../utils/sessionLocation';
 import useSystemSettings from '../hooks/useSystemSettings';
 import DEFAULT_VISIBILITY from '../config/navigationDefaults';
@@ -125,7 +126,8 @@ export default function MainLayout() {
   const [sidebarPinned, setSidebarPinned] = useState(() => {
     try { return localStorage.getItem('sidebarPinned') === 'true'; } catch { return false; }
   });
-  const [badgeCounts, setBadgeCounts] = useState({ tickets: 0, drafts: 0 });
+  const socket = useSocket();
+  const [badgeCounts, setBadgeCounts] = useState({ tickets: 0, drafts: 0, validation: 0, inbox: 0 });
   const sidebarRef = useRef(null);
   const userMenuRef = useRef(null);
   const notifBtnRef = useRef(null);
@@ -134,19 +136,59 @@ export default function MainLayout() {
     if (!user) return;
     function fetchSidebarBadges() {
       Promise.all([
-        api.get('/tickets?status=OPEN&limit=1').catch(() => null),
+        api.get('/tickets?status=NOT_CLOSED&limit=1').catch(() => null),
+        api.get('/tickets/pending-approval?limit=1').catch(() => null),
         api.get('/dashboard/pending-ai-drafts').catch(() => null),
-      ]).then(([ticketsRes, draftsRes]) => {
+        api.get('/knowledge/drafts').catch(() => null),
+        api.get('/inbox/counts').catch(() => null),
+      ]).then(([ticketsRes, pendingTicketsRes, draftsRes, knowledgeRes, inboxRes]) => {
+        const activeTicketsTotal = ticketsRes?.data?.total || 0;
+
+        const pendingTicketsCount = typeof pendingTicketsRes?.data?.total === 'number'
+          ? pendingTicketsRes.data.total
+          : Array.isArray(pendingTicketsRes?.data?.items)
+          ? pendingTicketsRes.data.items.length
+          : Array.isArray(pendingTicketsRes?.data)
+          ? pendingTicketsRes.data.length
+          : 0;
+
+        const pendingDraftsCount = Array.isArray(draftsRes?.data) ? draftsRes.data.length : 0;
+        const pendingKnowledgeCount = Array.isArray(knowledgeRes?.data) ? knowledgeRes.data.length : 0;
+
+        const validationTotal = pendingTicketsCount + pendingDraftsCount + pendingKnowledgeCount;
+        const unreadInboxCount = inboxRes?.data?.unread || 0;
+
         setBadgeCounts({
-          tickets: ticketsRes?.data?.total || 0,
-          drafts: Array.isArray(draftsRes?.data) ? draftsRes.data.length : 0,
+          tickets: activeTicketsTotal,
+          drafts: pendingDraftsCount,
+          validation: validationTotal,
+          inbox: unreadInboxCount,
         });
       });
     }
+
     fetchSidebarBadges();
     const interval = setInterval(fetchSidebarBadges, 30000);
-    return () => clearInterval(interval);
-  }, [user]);
+    window.addEventListener('sidebar:refresh-badges', fetchSidebarBadges);
+
+    if (socket) {
+      socket.on('ticket_created', fetchSidebarBadges);
+      socket.on('ticket_updated', fetchSidebarBadges);
+      socket.on('email_received', fetchSidebarBadges);
+      socket.on('email_updated', fetchSidebarBadges);
+    }
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('sidebar:refresh-badges', fetchSidebarBadges);
+      if (socket) {
+        socket.off('ticket_created', fetchSidebarBadges);
+        socket.off('ticket_updated', fetchSidebarBadges);
+        socket.off('email_received', fetchSidebarBadges);
+        socket.off('email_updated', fetchSidebarBadges);
+      }
+    };
+  }, [user, socket]);
 
   const toggleNotifications = useCallback(() => {
     setShowNotifications((prev) => !prev);
@@ -334,7 +376,14 @@ export default function MainLayout() {
           <>
           <div className="sidebar-group-label">Plateforme</div>
           {platformItems.map((item) => {
-            const count = item.to === '/tickets' ? badgeCounts.tickets : item.to === '/email-drafts' ? badgeCounts.drafts : 0;
+            const count =
+              item.to === '/tickets'
+                ? badgeCounts.tickets
+                : item.to === '/email-drafts'
+                ? badgeCounts.validation
+                : item.to === '/inbox'
+                ? badgeCounts.inbox
+                : 0;
             return (
               <SidebarItem
                 key={item.to}

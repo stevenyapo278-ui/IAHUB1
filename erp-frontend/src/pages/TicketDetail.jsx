@@ -1935,8 +1935,14 @@ export default function TicketDetail() {
             </div>
 
             {/* Add Comment Form */}
-            <form onSubmit={handleAddFollowup} className="pt-4 border-t border-outline-variant/30 space-y-3">
-              {canAssign && (
+            {user?.role === 'TECHNICIAN' && ['SOLVED', 'CLOSED'].includes(ticket.status) ? (
+              <div className="mt-4 p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300 text-xs font-semibold flex items-center gap-2">
+                <Lock className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                <span>Ce ticket est résolu ou fermé. Un technicien ne peut plus y apporter de modification ou de suivi.</span>
+              </div>
+            ) : (
+              <form onSubmit={handleAddFollowup} className="pt-4 border-t border-outline-variant/30 space-y-3">
+                {canAssign && (
                 <label className="flex items-center gap-2 cursor-pointer select-none w-fit">
                   <input
                     type="checkbox"
@@ -1997,6 +2003,7 @@ export default function TicketDetail() {
                 </button>
               </div>
             </form>
+            )}
           </div>
 
 
@@ -2169,7 +2176,7 @@ export default function TicketDetail() {
                 <select
                   className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                   value={ticket.status}
-                  disabled={(!canAssign && !isAssignedTechnician) || savingField === 'status'}
+                  disabled={(!canAssign && !isAssignedTechnician) || savingField === 'status' || (user?.role === 'TECHNICIAN' && ['SOLVED', 'CLOSED'].includes(ticket.status))}
                   onChange={(e) => updateField('status', e.target.value)}
                 >
                   {MANUAL_STATUS_OPTIONS.map((s) => (
@@ -3213,6 +3220,7 @@ export default function TicketDetail() {
                   </button>
                 </div>
               </form>
+            )}
             </div>
           </div>
         </div>

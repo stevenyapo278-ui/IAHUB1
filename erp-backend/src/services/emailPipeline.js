@@ -279,6 +279,33 @@ async function processMessage(message, account) {
     },
   });
 
+  let cidMap = {};
+  if (hasAttachments) {
+    try {
+      const attRes = await processIncomingAttachments({
+        account,
+        graphMessageId,
+        incomingEmailId: incoming.id,
+        ticketId: null,
+        simulatedAttachments: message.simulatedAttachments,
+        bodyText: cleanBody,
+      });
+      cidMap = attRes.cidMap || {};
+      if (Object.keys(cidMap).length > 0) {
+        const rewrittenIncomingHtml = rewriteCidRefs(incoming.bodyHtml, cidMap);
+        if (rewrittenIncomingHtml !== incoming.bodyHtml) {
+          await prisma.incomingEmail.update({
+            where: { id: incoming.id },
+            data: { bodyHtml: rewrittenIncomingHtml },
+          });
+          incoming.bodyHtml = rewrittenIncomingHtml;
+        }
+      }
+    } catch (attErr) {
+      console.warn(`[emailPipeline] Échec traitement pièces jointes incoming #${incoming.id}:`, attErr.message);
+    }
+  }
+
   const io = getIO();
   if (io) {
     io.emit('email_received', incoming);
@@ -442,9 +469,10 @@ async function processMessage(message, account) {
     // (bounces, mailer-daemon, messages machine) qui ne sont JAMAIS des tickets.
     // Les newsletters, emails d'information ou sujets suspects passent à l'IA (couche 3)
     // pour être analysés, puis orientés vers le centre de validation si besoin.
+    // Bypassée si bypassSpamRules est actif (retraitement manuel d'un email classé spam à tort)
     const { checkEmailSpam } = require('./emailSpamFilter');
     const spamCheck = checkEmailSpam(headers, subject, bodyPreview, fromEmail);
-    if (spamCheck.isSpam) {
+    if (spamCheck.isSpam && !bypassSpamRules) {
       if (spamCheck.isTechnicalAutomated) {
         // Bounce, mailer-daemon, delivery failure : jamais un ticket — classer INFORMATIONAL
         console.log(`[emailPipeline] Email technique automatique ignoré (INFORMATIONAL) : ${spamCheck.reason}`);
@@ -1030,8 +1058,11 @@ async function runEmailPipeline() {
 function rewriteCidRefs(html, cidMap) {
   if (!html || !cidMap || Object.keys(cidMap).length === 0) return html;
   return html.replace(/cid:([^"'>\s]+)/gi, (match, cid) => {
-    const docId = cidMap[cid];
-    return docId ? `/glpi/document/${docId}/file` : match;
+    const cleanCid = cid.replace(/^<|>$/g, '');
+    const mapped = cidMap[cleanCid] || cidMap[cid];
+    if (mapped) return mapped;
+    const docId = cidMap[cid] || cidMap[cleanCid];
+    return docId ? (String(docId).startsWith('/') ? docId : `/glpi/document/${docId}/file`) : match;
   });
 }
 

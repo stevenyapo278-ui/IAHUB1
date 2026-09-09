@@ -22,6 +22,7 @@ jest.mock('./ticketEvent', () => ({ logEvent: jest.fn() }));
 jest.mock('./mailAnalyzer', () => ({
   getActiveProviders: jest.fn().mockResolvedValue([{ name: 'test-provider' }]),
   callProviderWithFallback: jest.fn(),
+  callAiWithRetry: jest.fn(async (fn) => fn()),
 }));
 jest.mock('./promptTemplates', () => ({
   getPrompt: jest.fn().mockResolvedValue('prompt'),

@@ -20,8 +20,23 @@ function matchesSearch(email, q) {
   return haystack.includes(q);
 }
 
+const path = require('path');
+
 // Convertit un email entrant en message unifié du fil
 function inboundToMessage(email) {
+  let bodyHtml = email.bodyHtml;
+  if (bodyHtml && bodyHtml.includes('cid:') && Array.isArray(email.attachments)) {
+    for (const att of email.attachments) {
+      if (att.localFilepath) {
+        const filenameOnDisk = path.basename(att.localFilepath);
+        const publicUrl = `/uploads/attachments/${filenameOnDisk}`;
+        if (att.filename) {
+          bodyHtml = bodyHtml.replaceAll(`cid:${att.filename}`, publicUrl);
+        }
+      }
+    }
+  }
+
   return {
     kind: 'inbound',
     id: email.id,           // id IncomingEmail (requis pour le retry, etc.)
@@ -52,7 +67,7 @@ function inboundToMessage(email) {
     error: email.error,
     errorDetail: email.errorDetail,
     bodyPreview: email.bodyPreview,
-    bodyHtml: email.bodyHtml,
+    bodyHtml,
   };
 }
 
@@ -284,7 +299,7 @@ async function getThread(key, scope = null) {
   let emails;
   let sentMessages = [];
 
-  const attachmentSelect = { select: { id: true, filename: true, mimeType: true } };
+  const attachmentSelect = { select: { id: true, filename: true, mimeType: true, localFilepath: true } };
 
   if (typeof key === 'string' && key.startsWith('single-')) {
     const id = Number(key.slice('single-'.length));

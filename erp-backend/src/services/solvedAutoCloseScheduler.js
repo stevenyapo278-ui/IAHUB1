@@ -22,9 +22,12 @@ async function runSolvedAutoCloseScheduler() {
   const tickets = await prisma.ticket.findMany({
     where: {
       status: 'SOLVED',
-      solvedAt: { not: null, lte: threshold },
+      OR: [
+        { solvedAt: { lte: threshold } },
+        { solvedAt: null, updatedAt: { lte: threshold } },
+      ],
     },
-    select: { id: true, title: true, solvedAt: true },
+    select: { id: true, title: true, solvedAt: true, updatedAt: true },
   });
 
   const results = [];
@@ -35,12 +38,19 @@ async function runSolvedAutoCloseScheduler() {
         where: { id: ticket.id },
         // Clôture auto après résolution : consommer une éventuelle suggestion de clôture
         // résiduelle (sinon le ticket apparaissait encore dans les clôtures suggérées)
-        data: { status: 'CLOSED', closedAt: new Date(), closeSuggested: false, closeSuggestedAt: null, closeSuggestionConfidence: null },
+        data: {
+          status: 'CLOSED',
+          closedAt: new Date(),
+          solvedAt: ticket.solvedAt || ticket.updatedAt,
+          closeSuggested: false,
+          closeSuggestedAt: null,
+          closeSuggestionConfidence: null,
+        },
       });
 
       await logEvent(ticket.id, 'CLOSED_AUTO', 'SYSTEM', {
         reason: 'solved_auto_close',
-        daysSinceSolved: daysSince(ticket.solvedAt),
+        daysSinceSolved: daysSince(ticket.solvedAt || ticket.updatedAt),
       });
 
       results.push({ ticketId: ticket.id, action: 'AUTO_CLOSED' });
