@@ -55,9 +55,11 @@ async function removeAttachmentFiles(ticketIds) {
     });
     for (const a of attachments) {
       if (!a.localFilepath) continue;
+      // Même convention que le endpoint de lecture : chemins relatifs résolus depuis
+      // process.cwd() (= /app/erp-backend), pas depuis __dirname (src/services/).
       const filePath = path.isAbsolute(a.localFilepath)
         ? a.localFilepath
-        : path.join(__dirname, '..', '..', a.localFilepath);
+        : path.join(process.cwd(), a.localFilepath);
       try {
         if (fs.existsSync(filePath)) { fs.unlinkSync(filePath); removed++; }
       } catch { /* fichier déjà absent */ }

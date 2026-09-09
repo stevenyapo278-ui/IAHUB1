@@ -137,7 +137,7 @@ function buildTicketWhereClause(user, queryParams = {}) {
   const {
     status, priority, teamId, assignedToId, mine, title, search, query,
     category, locationId, aiProcessed, due, closeSuggested, approvalStatus,
-    dateFrom, dateTo,
+    dateFrom, dateTo, source,
   } = queryParams;
 
   const andConditions = [
@@ -189,6 +189,7 @@ function buildTicketWhereClause(user, queryParams = {}) {
   }
 
   if (priority) andConditions.push({ priority });
+  if (source) andConditions.push({ source });
   if (teamId) andConditions.push({ teamId: Number(teamId) });
 
   if (assignedToId === 'none') {
@@ -558,36 +559,35 @@ router.get('/:id/adjacent', async (req, res) => {
   const current = await prisma.ticket.findUnique({ where: { id }, select: { id: true } });
   if (!current) return res.status(404).json({ error: 'Ticket introuvable' });
 
-  // Filtre demandeur/technicien (ne navigue que dans ses tickets + observés)
-  let baseWhere = {};
-  if (isRequesterOnly(req.user)) {
-    baseWhere = { OR: [{ requesterId: req.user.sub }, { observers: { some: { id: req.user.sub } } }] };
-  } else if (isTechnicianOnly(req.user)) {
-    baseWhere = { OR: [{ assignedToId: req.user.sub }, { requesterId: req.user.sub }, { observers: { some: { id: req.user.sub } } }] };
-  }
+  // La navigation ‹ › hérite des MÊMES filtres que la liste GET /tickets (params identiques :
+  // status, priority, teamId, search, approvalStatus, …) — le frontend les transmet tels quels.
+  // buildTicketWhereClause exclut TOUJOURS la corbeille (deletedAt: null) et applique le périmètre
+  // demandeur/technicien ; sans filtre approvalStatus explicite, les tickets PENDING/REJECTED
+  // sont ignorés comme dans la liste par défaut.
+  const where = buildTicketWhereClause(req.user, req.query);
 
   const [first, prev, next, last] = await Promise.all([
     // Premier (<<) : ID min
     prisma.ticket.findFirst({
-      where: baseWhere,
+      where,
       orderBy: { id: 'asc' },
       select: { id: true },
     }),
     // Précédent (<) : ID immédiatement inférieur (numéro inférieur)
     prisma.ticket.findFirst({
-      where: { ...baseWhere, id: { lt: id } },
+      where: { ...where, id: { lt: id } },
       orderBy: { id: 'desc' },
       select: { id: true },
     }),
     // Suivant (>) : ID immédiatement supérieur (numéro supérieur)
     prisma.ticket.findFirst({
-      where: { ...baseWhere, id: { gt: id } },
+      where: { ...where, id: { gt: id } },
       orderBy: { id: 'asc' },
       select: { id: true },
     }),
     // Dernier (>>) : ID max
     prisma.ticket.findFirst({
-      where: baseWhere,
+      where,
       orderBy: { id: 'desc' },
       select: { id: true },
     }),
@@ -719,9 +719,12 @@ router.get('/:id/attachments/:attachmentId/file', async (req, res) => {
   }
 
   if (attachment.localFilepath) {
+    // Résolution relative à process.cwd() (= /app/erp-backend) : les chemins sont stockés
+    // sous la forme 'uploads/<sous-dossier>/<fichier>' et le volume Docker est monté sur
+    // <WORKDIR>/uploads. __dirname pointerait vers src/routes/ → fichiers introuvables.
     const localPath = path.isAbsolute(attachment.localFilepath)
       ? attachment.localFilepath
-      : path.join(__dirname, '..', attachment.localFilepath);
+      : path.join(process.cwd(), attachment.localFilepath);
     if (fs.existsSync(localPath)) {
       res.setHeader('Content-Type', attachment.mimeType || 'application/octet-stream');
       res.setHeader('Content-Disposition', `inline; filename="${attachment.filename}"`);
@@ -1331,6 +1334,20 @@ router.post('/:id/reject', forbidTechnicianTicketEdits, requirePermission('ticke
     await logEvent(id, 'REJECTED', req.user.email || 'HOTLINE', { reason: note.trim() });
     await auditLog('TICKET_REJECTED', { actor: req.user, targetType: 'Ticket', targetId: id, targetLabel: ticket.title, metadata: { reason: note.trim() } });
     emitTicketUpdated(ticket, { approvalStatus: 'REJECTED' });
+
+    // Incohérence corrigée : rejeter le ticket tue ses brouillons de réponse IA encore
+    // PENDING — sinon ils restaient dans le Centre de Validation (avec relances email)
+    // et pouvaient être approuvés à distance pour un ticket... rejeté.
+    await prisma.aiEmailDraft.updateMany({
+      where: { ticketId: id, status: 'PENDING' },
+      data: { status: 'REJECTED', reviewedById: req.user.sub, reviewedAt: new Date(), reviewNote: `Brouillon rejeté avec le ticket #${id} : ${note.trim()}` },
+    }).catch((err) => console.error('[ticket.routes] Rejet des brouillons du ticket échoué:', err.message));
+
+    // Le demandeur est informé du rejet (comme pour la clôture validée/rejetée),
+    // avec la raison — best-effort, jamais bloquant.
+    notifyRequesterOnStatusChange(id, 'CLOSED').catch((err) =>
+      console.error(`[ticket.routes] Échec notification rejet au demandeur (ticket ${id}):`, err.message)
+    );
 
     // Boucle de rétroaction : un rejet humain dégrade la réputation de l'expéditeur
     if (ticket.sourceEmail) {
@@ -1956,6 +1973,14 @@ router.delete('/:id', forbidTechnicianTicketEdits, requireDeleteTicketPermission
     await prisma.ticket.update({ where: { id }, data: { deletedAt: new Date(), deletedById: req.user.sub } });
     await logEvent(id, 'DELETED', req.user.email || 'SYSTEM');
     await auditLog('TICKET_SOFT_DELETED', { actor: req.user, targetType: 'Ticket', targetId: id, metadata: { ticketId: id } });
+
+    // Un ticket à la corbeille ne doit plus générer de relances ni pouvoir voir ses
+    // brouillons IA approuvés à distance : on les rejette explicitement.
+    await prisma.aiEmailDraft.updateMany({
+      where: { ticketId: id, status: 'PENDING' },
+      data: { status: 'REJECTED', reviewedById: req.user.sub, reviewedAt: new Date(), reviewNote: 'Brouillon rejeté : ticket mis à la corbeille' },
+    }).catch(() => {});
+
     return res.status(204).send();
   } catch (err) {
     if (err.code === 'P2025') return res.status(404).json({ error: 'Ticket introuvable' });
@@ -1995,6 +2020,11 @@ router.post('/bulk-delete', forbidTechnicianTicketEdits, requireDeleteTicketPerm
     where: { id: { in: ids }, deletedAt: null },
     data: { deletedAt: new Date(), deletedById: req.user.sub },
   });
+  // Rejeter les brouillons IA PENDING des tickets mis à la corbeille
+  await prisma.aiEmailDraft.updateMany({
+    where: { ticketId: { in: ids }, status: 'PENDING' },
+    data: { status: 'REJECTED', reviewedById: req.user.sub, reviewedAt: new Date(), reviewNote: 'Brouillon rejeté : ticket mis à la corbeille' },
+  }).catch(() => {});
   for (const id of ids) {
     await logEvent(id, 'DELETED', req.user.email || 'SYSTEM').catch(() => {});
   }
