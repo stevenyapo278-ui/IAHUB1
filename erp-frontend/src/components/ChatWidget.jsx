@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip } from 'recharts';
 import { Download, BarChart2, Send, Paperclip, MessageSquare, Users, TrendingUp, AlertTriangle, Timer, BarChart3, HelpCircle, PlusCircle, X, Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
+import VoiceVisualizer from './VoiceVisualizer';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
@@ -655,10 +656,10 @@ export default function ChatWidget() {
                 )}
               </div>
               {isListening && (
-                <div className="flex items-center gap-2 mt-2 text-[11px] text-primary">
-                  <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-                  <span>Écoute en cours...</span>
-                  {transcript && <span className="text-on-surface-variant italic">"{transcript}"</span>}
+                <div className="flex items-center gap-3 mt-2 px-2">
+                  <VoiceVisualizer isActive={isListening} />
+                  <span className="text-[11px] text-primary font-medium">Écoute en cours...</span>
+                  {transcript && <span className="text-[11px] text-on-surface-variant italic truncate">"{transcript}"</span>}
                 </div>
               )}
               {voiceError && (

@@ -10,6 +10,7 @@ import {
   MoreHorizontal, Search, Users, Edit3, Check, ChevronDown, PlusCircle,
   Mic, MicOff, Volume2, VolumeX,
 } from 'lucide-react';
+import VoiceVisualizer from '../components/VoiceVisualizer';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
 import { useVoiceRecognition } from '../hooks/useVoiceRecognition';
@@ -793,10 +794,10 @@ export default function ChatPage() {
               )}
             </div>
             {isListening && (
-              <div className="flex items-center justify-center gap-2 mt-2 text-[12px] text-primary">
-                <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-                <span>Écoute en cours...</span>
-                {transcript && <span className="text-on-surface-variant italic">"{transcript}"</span>}
+              <div className="flex items-center justify-center gap-3 mt-3 px-2">
+                <VoiceVisualizer isActive={isListening} />
+                <span className="text-[12px] text-primary font-medium">Écoute en cours...</span>
+                {transcript && <span className="text-[12px] text-on-surface-variant italic truncate">"{transcript}"</span>}
               </div>
             )}
             {voiceError && (
