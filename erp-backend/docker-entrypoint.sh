@@ -69,6 +69,16 @@ if [ "$COL_RIDS" != "1" ]; then
   echo "Colonne Ticket.requesterIds ajoutée avec succès."
 fi
 
+# La colonne est garantie ci-dessus : normaliser en NOT NULL (aligné avec la migration)
+# puis marquer la migration 20260908120000 comme APPLIQUÉE dans _prisma_migrations.
+# Sans ça, son statut FAILED déclenche P3009 et prisma migrate deploy refuse TOUTE
+# nouvelle migration à chaque déploiement (erreur avalée par le '|| echo' ci-dessous).
+set +e
+PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -c "UPDATE \"Ticket\" SET \"requesterIds\" = ARRAY[]::INTEGER[] WHERE \"requesterIds\" IS NULL;" 2>/dev/null || true
+PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -c "ALTER TABLE \"Ticket\" ALTER COLUMN \"requesterIds\" SET NOT NULL;" 2>/dev/null || true
+npx prisma migrate resolve --applied 20260908120000_add_requester_ids_array 2>/dev/null || true
+set -e
+
 echo "Migration de la base de données..."
 npx prisma migrate deploy || echo "⚠️  migrate deploy a échoué (DB drift ou migration manquante), on continue avec le schéma existant"
 
