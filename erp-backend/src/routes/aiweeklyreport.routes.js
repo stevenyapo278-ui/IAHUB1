@@ -7,6 +7,40 @@ const { generateWeeklyReport } = require('../services/aiWeeklyReportScheduler');
 const router = express.Router();
 router.use(authenticate);
 
+// Liste des règles de triage (issues de l'apprentissage ou manuelles) — permet de voir,
+// depuis la page Apprentissage IA, toutes les règles que le système applique au triage.
+// ?source=learning filtre sur les règles créées par l'approbation d'un rapport hebdo.
+router.get('/rules', requirePermission('aiweeklyreports.manage', ['ADMIN', 'SUPERADMIN', 'HOTLINE']), async (req, res) => {
+  const where = {};
+  if (req.query.source === 'learning') where.priority = 10; // valeur fixée à la création depuis un rapport
+  const rules = await prisma.triageRule.findMany({
+    where,
+    orderBy: [{ isActive: 'desc' }, { priority: 'desc' }, { createdAt: 'desc' }],
+  });
+  return res.json(rules);
+});
+
+// Active/désactive une règle de triage sans la supprimer (réversible, pas de perte d'historique)
+router.patch('/rules/:id/toggle', requirePermission('aiweeklyreports.manage', ['ADMIN', 'SUPERADMIN', 'HOTLINE']), async (req, res) => {
+  const id = Number(req.params.id);
+  const rule = await prisma.triageRule.findUnique({ where: { id } });
+  if (!rule) return res.status(404).json({ error: 'Règle introuvable' });
+  const updated = await prisma.triageRule.update({
+    where: { id },
+    data: { isActive: !rule.isActive },
+  });
+  return res.json(updated);
+});
+
+// Supprime définitivement une règle de triage
+router.delete('/rules/:id', requirePermission('aiweeklyreports.manage', ['ADMIN', 'SUPERADMIN', 'HOTLINE']), async (req, res) => {
+  const id = Number(req.params.id);
+  const rule = await prisma.triageRule.findUnique({ where: { id } });
+  if (!rule) return res.status(404).json({ error: 'Règle introuvable' });
+  await prisma.triageRule.delete({ where: { id } });
+  return res.json({ ok: true });
+});
+
 router.get('/', requirePermission('aiweeklyreports.manage', ['ADMIN', 'SUPERADMIN', 'HOTLINE']), async (req, res) => {
   const reports = await prisma.aiWeeklyPatternReport.findMany({
     include: { reviewedBy: { select: { id: true, fullName: true, email: true, avatarUrl: true } } },
