@@ -4,27 +4,55 @@ const { emitTicketCreated, emitTicketAssigned } = require('../utils/socket');
 const { sendTicketCreationNotification, sendAssignmentNotificationEmail } = require('./emailSender');
 const analyticsTools = require('./analyticsTools');
 
-const SYSTEM_PROMPT = `Tu es l'Assistant IA intelligent et analyste Helpdesk IT de Prosuma (IA Hub). Tu réponds en français, de manière chaleureuse, claire, concise, précise et professionnelle.
+const SYSTEM_PROMPT = `Tu es l'Assistant IA Helpdesk IT de Prosuma.
 
-Tes capacités :
-1. Saluer poliment et répondre de manière amicale aux salutations simples.
-2. Fournir des informations sur les TICKETS (statut, priorité, détails, demandeur, technicien, lieu, résumé, doublons potentiels).
-3. Produire des STATISTIQUES & ANALYSES (top magasins, répartitions par catégorie, causes racines, performances individuelles des techniciens).
-4. Fournir des procédures et réponses issues de la Base de Connaissances IT.
-5. Accompagner l'utilisateur pour créer de nouveaux tickets ou escalader vers un technicien.
-6. RECHERCHER dans l'inventaire d'équipements (assets), les utilisateurs, et les lieux.
-7. CHANGER le statut ou l'assignation d'un ticket (si autorisé).
-8. Fournir des RÉSUMÉS de tickets existants.
-9. DÉTECTER les tickets similaires avant création pour éviter les doublons.
+RÈGLES STRICTES DE FORMATAGE :
 
-RÈGLES DE FORMATAGE ET DE STYLE :
-- Sois direct et concis : réponds précisément à ce qui est demandé.
-- Utilise un format Markdown soigné (gras, puces, tableaux si approprié).
-- Pour les tableaux Markdown, insère TOUJOURS des sauts de ligne réels (\n) entre chaque ligne du tableau (en-tête, séparateur |:---| et données). Ne concatène JAMAIS un tableau sur une seule ligne.
-- Laisse toujours une ligne vide avant et après chaque tableau Markdown.
-- Si l'utilisateur salue simplement, réponds avec courtoisie et propose tes services.
-- Si des données statistiques ou des tickets sont fournis dans le contexte, utilise-les pour structurer ta réponse.
-- Quand tu modifies un ticket ou en crées un, confirme l'action avec le numéro et le lien.`;
+1. Réponds uniquement en français.
+2. Sois direct et concis (maximum 8-10 lignes sauf demande contraire).
+3. N'utilise JAMAIS de formules creuses ("Bien sûr", "Voici les informations", "Avec plaisir", etc.).
+4. N'utilise PAS d'emojis.
+5. N'utilise PAS de titres Markdown (# ## ###).
+6. N'utilise PAS de gras (**texte**) sauf pour les totaux importants.
+7. Pour les données chiffrées :
+   - Utilise UNIQUEMENT un tableau Markdown propre
+   - Maximum 6 colonnes
+   - Maximum 10 lignes de données
+   - Une seule phrase courte après le tableau si nécessaire
+8. Structure préférée pour les statistiques :
+   - 1 phrase d'intro très courte (optionnelle)
+   - Tableau Markdown
+   - 1 phrase de conclusion maximum
+9. Si tu génères un graphique (widget), dis juste une phrase courte. Le graphique s'affiche automatiquement.
+10. Capacités :
+   - Informations TICKETS (statut, priorité, détails)
+   - STATISTIQUES & ANALYSES (top magasins, répartitions, causes racines)
+   - Base de Connaissances IT
+   - Création/escalade de tickets
+   - Recherche inventaire, utilisateurs, lieux
+   - Changement statut/assignation (si autorisé)
+   - Résumés et détection de doublons`;
+
+// ── Nettoyage des réponses IA ──────────────────────────────────────────
+
+function cleanAiReply(text) {
+  if (!text) return '';
+  return text
+    // Supprime les formules creuses en début de réponse
+    .replace(/^(Bien sûr|Avec plaisir|Voici|Absolument|Certainement|Ok|D'accord|Je vais|Je peux)[ !,. :]*/i, '')
+    // Supprime les titres markdown
+    .replace(/^#{1,6}\s+/gm, '')
+    // Supprime le gras excessif
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    // Supprime les emojis en début de ligne ou isolés
+    .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
+    // Limite les sauts de ligne
+    .replace(/\n{3,}/g, '\n\n')
+    // Nettoie les espaces en trop
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n+$/, '')
+    .trim();
+}
 
 const INTENT_PROMPT = `Tu es un classificateur d'intentions. Analyse le message utilisateur et réponds UNIQUEMENT avec un JSON valide (pas de texte avant ou après).
 
@@ -236,7 +264,10 @@ async function callIntentAI(message) {
     const raw = await callProviderWithFallback(providers, formatted, 'chatbot');
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (jsonMatch) return JSON.parse(jsonMatch[0]);
-  } catch {}
+    console.warn('[chatbot] callIntentAI: pas de JSON valide dans la réponse IA, fallback regex');
+  } catch (err) {
+    console.warn('[chatbot] callIntentAI échoué, fallback regex:', err.message);
+  }
   return null;
 }
 
@@ -250,7 +281,7 @@ function detectIntentRegex(message) {
   if (lower.match(/\b(assigne|affecte|donne.*[àa]|attribue|passe.*[àa])\b/)) return 'assign_ticket';
   if (lower.match(/\b(inventaire|[ée]quipement|asset|pc portable|imprimante|mat[ée]riel)\b/)) return 'search_inventory';
   if (lower.match(/\b(utilisateur|user|qui est|email de|t[ée]l[ée]phone de|nom de)\b/)) return 'search_users';
-  if (lower.match(/\b(lieu|site|magasin|o[uù] se trouve|adresse|localisation)\b/)) return 'search_locations';
+  if (lower.match(/\b(lieu|site|o[uù] se trouve|adresse|localisation|magasin\s+(de\s+)?[a-z])\b/)) return 'search_locations';
   if (lower.match(/\b(r[ée]partition|par[ée]quipe|par[ée]quipe|bilan.*quipe|r[ée]union|hebdo|ouverts par|quipe)\b/)) return 'team_report';
   if (lower.match(/\b(magasin|lieu|top|comparer|plus de probl[èe]mes?|statistiques?|stats?|analyse|pourquoi|cause)\b/)) return 'analytics';
   if (lower.match(/^\s*(oui|yes|go|confirme|c'est bon|vas-y|ok|d'accord|je confirme|oui crée|oui vas)\b/i)) return 'confirm_create_ticket';
@@ -1069,6 +1100,22 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     }
   }
 
+  // Instructions spécifiques par intent pour guider le format de réponse
+  const intentInstructions = {
+    analytics: "Réponds uniquement avec un tableau Markdown propre suivi d'une seule phrase de conclusion. Pas d'introduction.",
+    team_report: "Utilise un tableau avec les colonnes : Équipe | Ouverts | En cours | Résolus. Maximum 1 phrase après.",
+    report: "Maximum 5 lignes + un tableau si nécessaire. Sois extrêmement concis.",
+    summary: "Résumé en 4-6 lignes maximum. Pas de tableau.",
+    general: "Réponse courte et naturelle (3-6 lignes).",
+    search_tickets: "Liste les tickets trouvés avec ID, titre, statut et lieu. Maximum 5 résultats.",
+    check_ticket: "Donne le statut, la priorité, le lieu et le technicien assigné. Sois factuel.",
+    create_ticket: "Confirme la création avec le numéro de ticket et un lien.",
+    create_ticket_for: "Confirme la création pour l'utilisateur mentionné.",
+    search_inventory: "Liste les équipements trouvés avec nom, type et lieu.",
+    search_users: "Liste les utilisateurs trouvés avec nom, email et rôle.",
+    search_locations: "Liste les lieux trouvés avec nom et adresse.",
+  };
+
   // Messages pour l'IA
   const aiMessages = [];
   const recentHistory = conversationHistory.slice(-10);
@@ -1078,12 +1125,14 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     aiMessages.push({ role: msg.role, content: msg.content });
   }
 
+  const intentHint = intentInstructions[intent] ? `\n\nINSTRUCTION SPÉCIFIQUE POUR CETTE INTENT : ${intentInstructions[intent]}` : '';
   const systemContext = contextParts.length > 0 ? `\n\n${contextParts.join('\n\n')}` : '';
-  aiMessages.push({ role: 'user', content: `${message}${systemContext}` });
+  aiMessages.push({ role: 'user', content: `${message}${systemContext}${intentHint}` });
 
   let reply;
   try {
     reply = await callAI(aiMessages);
+    reply = cleanAiReply(reply);
   } catch (err) {
     console.error('[chatbot] Échec de la génération de réponse IA:', err.message);
     reply = "Désolé, je rencontre une difficulté temporaire d'accès aux services IA. Veuillez réentreprendre votre demande dans quelques instants.";

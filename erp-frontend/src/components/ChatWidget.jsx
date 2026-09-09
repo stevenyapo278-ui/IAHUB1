@@ -80,6 +80,16 @@ function preprocessMarkdown(content) {
   formatted = formatted.replace(/([^\n])\n(\|[^\n]+\|)/g, '$1\n\n$2');
   formatted = formatted.replace(/(\|[^\n]+\|)\n([^\n\|])/g, '$1\n\n$2');
   
+  // Supprimer les titres markdown excessifs (# ## ###) sauf en début de réponse
+  formatted = formatted.replace(/\n#{1,6}\s+/g, '\n');
+  
+  // Limiter les sauts de ligne consécutifs à 2 max
+  formatted = formatted.replace(/\n{3,}/g, '\n\n');
+  
+  // Supprimer les emojis de début de ligne si présente en double
+  formatted = formatted.replace(/^📊\s*📊/gm, '📊');
+  formatted = formatted.replace(/^📈\s*📈/gm, '📈');
+  
   return formatted;
 }
 
