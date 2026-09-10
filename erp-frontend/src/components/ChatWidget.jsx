@@ -330,9 +330,9 @@ export default function ChatWidget() {
   // Sauvegarder position au changement
   useEffect(() => { if (!dragging) savePosition(position); }, [position, dragging]);
 
-  // Auto-read last assistant message with TTS
+  // Auto-read last assistant message with TTS (seulement si le widget est ouvert)
   useEffect(() => {
-    if (!ttsEnabled || !ttsSupported || isSpeaking) return;
+    if (!isOpen || !ttsEnabled || !ttsSupported || isSpeaking) return;
     const lastMessage = messages[messages.length - 1];
     if (lastMessage?.role === 'assistant' && lastMessage.content) {
       const cleanText = lastMessage.content
