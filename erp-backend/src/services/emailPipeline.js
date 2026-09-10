@@ -260,7 +260,7 @@ async function processMessage(message, account) {
   const fullThreadText = htmlToText(bodyHtml);
   const previewIsTruncated = fullThreadText.length > bodyPreview.length + 100; // marge : évite de remplacer par du bruit HTML
   const bodyForAnalysis = previewIsTruncated ? fullThreadText : bodyPreview;
-  const cleanBody = await stripSignature(bodyForAnalysis);
+  let cleanBody = await stripSignature(bodyForAnalysis);
   // Zone de signature (texte retiré par le stripper, ou fin du message en fallback) —
   // utilisée pour la détection STRICTE du lieu (signature + adresse email vs table Location)
   // et transmise à l'IA d'analyse pour la même comparaison.
@@ -280,6 +280,7 @@ async function processMessage(message, account) {
   });
 
   let cidMap = {};
+  let savedAttachments = [];
   if (hasAttachments) {
     try {
       const attRes = await processIncomingAttachments({
@@ -291,6 +292,7 @@ async function processMessage(message, account) {
         bodyText: cleanBody,
       });
       cidMap = attRes.cidMap || {};
+      savedAttachments = attRes.saved || [];
       if (Object.keys(cidMap).length > 0) {
         const rewrittenIncomingHtml = rewriteCidRefs(incoming.bodyHtml, cidMap);
         if (rewrittenIncomingHtml !== incoming.bodyHtml) {
@@ -303,6 +305,26 @@ async function processMessage(message, account) {
       }
     } catch (attErr) {
       console.warn(`[emailPipeline] Échec traitement pièces jointes incoming #${incoming.id}:`, attErr.message);
+    }
+  }
+
+  // ── ANALYSE VISION IA DES CAPTURES D'ÉCRAN / IMAGES JOINTES ──
+  // Si l'e-mail contient des images (captures d'écran), on extrait leur contenu par Vision IA
+  // pour que toutes les analyses IA en aval (catégorisation, règles, résumé, tickets) disposent
+  // du texte et du contexte visuel de la demande, même si le texte du mail est vide ou minimal.
+  const imageAttachments = (savedAttachments || []).filter(
+    (a) => a && a.localFilepath && (a.mimeType || '').startsWith('image/')
+  );
+  if (imageAttachments.length > 0) {
+    try {
+      const { analyzeImageAttachments } = require('./mailAnalyzer');
+      const imageAnalysisText = await analyzeImageAttachments(imageAttachments.slice(0, 3));
+      if (imageAnalysisText) {
+        console.log(`[emailPipeline] ${imageAttachments.length} capture(s) d'écran analysée(s) par Vision IA pour l'email #${incoming.id}`);
+        cleanBody = cleanBody ? `${cleanBody}\n\n${imageAnalysisText}` : imageAnalysisText;
+      }
+    } catch (imgErr) {
+      console.warn(`[emailPipeline] Échec analyse vision des images:`, imgErr.message);
     }
   }
 
@@ -764,7 +786,7 @@ async function processMessage(message, account) {
 
     const { erpTicketId, ticketMessageId } = await prisma.$transaction(async (tx) => {
       const created = await createTicketFromEmail({
-        subject, body: bodyPreview, from: fromEmail, fromName, analysis, emailAccountId: account.id, locationId, locationName: resolvedLocationName, lowTrustSender, tx,
+        subject, body: cleanBody || bodyPreview, from: fromEmail, fromName, analysis, emailAccountId: account.id, locationId, locationName: resolvedLocationName, lowTrustSender, tx,
         escalateMinutes: ruleMatch?.autoEscalateMinutes || null,
         triageRuleId: ruleMatch?.id || null,
       });

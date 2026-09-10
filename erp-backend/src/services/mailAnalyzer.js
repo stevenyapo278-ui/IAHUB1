@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const prisma = require('../prismaClient');
 const { getBreaker } = require('../utils/circuitBreaker');
 const { logger } = require('../utils/logger');
@@ -424,8 +426,130 @@ async function analyzeEmail({ subject, body, from, fromName, senderRole, senderT
   return result;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ANALYSE VISION IA DES CAPTURES D'ÉCRAN ET IMAGES JOINTES
+// ═══════════════════════════════════════════════════════════════════════════
+async function analyzeSingleImage(provider, apiKey, modelName, imageBase64, mimeType, prompt) {
+  const normMime = (mimeType || 'image/png').toLowerCase();
+  const safeMime = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif'].includes(normMime) ? normMime : 'image/png';
+
+  switch (provider.name) {
+    case 'gemini': {
+      const base = provider.baseUrl || 'https://generativelanguage.googleapis.com/v1beta';
+      const model = modelName || 'gemini-1.5-flash';
+      const res = await fetch(`${base}/models/${model}:generateContent`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(25000),
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: prompt },
+              { inlineData: { mimeType: safeMime, data: imageBase64 } }
+            ]
+          }],
+          generationConfig: { temperature: 0.1, maxOutputTokens: 1024 },
+        }),
+      });
+      if (!res.ok) throw new Error(`Gemini vision HTTP ${res.status}`);
+      const data = await res.json();
+      return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    }
+    case 'anthropic': {
+      const baseUrl = provider.baseUrl || 'https://api.anthropic.com';
+      const model = modelName || 'claude-3-5-sonnet-20241022';
+      const res = await fetch(`${baseUrl}/v1/messages`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(25000),
+        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+          model,
+          max_tokens: 1024,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              { type: 'image', source: { type: 'base64', media_type: safeMime, data: imageBase64 } }
+            ]
+          }]
+        }),
+      });
+      if (!res.ok) throw new Error(`Anthropic vision HTTP ${res.status}`);
+      const data = await res.json();
+      return data.content?.[0]?.text || '';
+    }
+    default: {
+      // OpenAI / OpenAI-compatible
+      const baseUrl = provider.baseUrl || 'https://api.openai.com/v1';
+      const model = modelName || 'gpt-4o-mini';
+      const res = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(25000),
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              { type: 'image_url', image_url: { url: `data:${safeMime};base64,${imageBase64}` } }
+            ]
+          }],
+          temperature: 0.1,
+          max_tokens: 1024,
+        }),
+      });
+      if (!res.ok) throw new Error(`OpenAI vision HTTP ${res.status}`);
+      const data = await res.json();
+      return data.choices?.[0]?.message?.content || '';
+    }
+  }
+}
+
+async function analyzeImageAttachments(attachments = []) {
+  if (!attachments || attachments.length === 0) return '';
+  const providers = await getActiveProviders();
+  if (providers.length === 0) return '';
+
+  const results = [];
+  const prompt = "Cette image est une capture d'écran ou une pièce jointe envoyée avec une demande de support informatique. Transcris et décris TOUS les éléments visibles importants : messages d'erreur, codes d'erreur, nom du logiciel/système/caisse, numéros, texte affiché. Sois très précis et concis (maximum 150 mots). Ne donne que la transcription/description.";
+
+  for (const att of attachments) {
+    if (!att.localFilepath || !fs.existsSync(att.localFilepath)) continue;
+    try {
+      const imageBuffer = fs.readFileSync(att.localFilepath);
+      if (imageBuffer.length > 8 * 1024 * 1024) continue;
+      const base64 = imageBuffer.toString('base64');
+      const filename = att.filename || path.basename(att.localFilepath);
+
+      let description = '';
+      for (const provider of providers) {
+        if (isProviderOnCooldown(provider.name)) continue;
+        const key = provider.keys[0];
+        const model = provider.models[0]?.name;
+        if (!key) continue;
+        try {
+          description = await analyzeSingleImage(provider, key.apiKey, model, base64, att.mimeType, prompt);
+          if (description && description.trim()) break;
+        } catch (err) {
+          logger.warn(`[AI-Vision] Échec analyse image "${filename}" par ${provider.label}: ${err.message}`);
+        }
+      }
+
+      if (description && description.trim()) {
+        results.push(`[Contenu extrait de la capture d'écran "${filename}"] :\n${description.trim()}`);
+      }
+    } catch (err) {
+      logger.warn(`[AI-Vision] Erreur lecture fichier image ${att.localFilepath}: ${err.message}`);
+    }
+  }
+
+  if (results.length === 0) return '';
+  return `--- [ANALYSE VISION DES CAPTURES D'ÉCRAN] ---\n${results.join('\n\n')}`;
+}
+
 module.exports = {
   analyzeEmail, getActiveProvider, getActiveProviders,
   callProvider, callProviderWithFallback, callAiWithRetry,
-  getAiMetrics, isProviderOnCooldown,
+  getAiMetrics, isProviderOnCooldown, analyzeImageAttachments,
 };

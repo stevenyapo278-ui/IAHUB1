@@ -111,11 +111,12 @@ async function processIncomingAttachments({ account, graphMessageId, incomingEma
         incomingEmailId: incomingEmailId || null,
       });
       existingHashes.add(contentHash);
-      saved.push(created);
+      if (created) saved.push(created);
     } else {
       created = await prisma.ticketAttachment.findFirst({
         where: whereClause ? { ...whereClause, contentHash } : { contentHash },
       });
+      if (created) saved.push(created);
     }
 
     if (created && created.localFilepath) {
