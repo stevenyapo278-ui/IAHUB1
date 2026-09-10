@@ -702,12 +702,14 @@ router.get('/:id', async (req, res) => {
     return res.status(404).json({ error: 'Ticket introuvable' });
   }
 
-  // Un technicien ne consulte que ses tickets assignés, ceux qu'il a ouverts, ou ceux qu'il observe
+  // Un technicien voit : ses tickets assignés, ceux qu'il a ouverts, ceux qu'il observe, et les tickets de son équipe
+  // (symétrique avec buildTicketWhereClause qui inclut teamId dans la liste — évite le 404 en cliquant un ticket d'équipe)
   if (isTechnicianOnly(req.user) && ticket.assignedToId !== req.user.sub &&
       !ticket.assignees?.some(a => a.id === req.user.sub) &&
       ticket.requesterId !== req.user.sub && ticket.secondaryRequesterId !== req.user.sub &&
       !(ticket.requesterIds || []).includes(req.user.sub) &&
-      !ticket.observers?.some(o => o.id === req.user.sub)) {
+      !ticket.observers?.some(o => o.id === req.user.sub) &&
+      !(req.user.teamId && ticket.teamId === req.user.teamId)) {
     return res.status(404).json({ error: 'Ticket introuvable' });
   }
 
@@ -1308,14 +1310,18 @@ router.patch('/:id', allowTechnicianStatusOnly, requireTicketAssignOrTechnicianS
 // Get ticket field corrections (audit trail)
 router.get('/:id/corrections', async (req, res) => {
   const id = Number(req.params.id);
-  // Un demandeur/technicien ne voit les corrections que de ses propres tickets ou ceux qu'il observe
+  // Un demandeur/technicien ne voit les corrections que de ses propres tickets, ceux qu'il observe, ou ceux de son équipe
   if (isRequesterOnly(req.user) || isTechnicianOnly(req.user)) {
     const where = isRequesterOnly(req.user)
       ? { id, requesterId: req.user.sub }
-      : { id, OR: [{ assignedToId: req.user.sub }, { requesterId: req.user.sub }] };
+      : { id, OR: [{ assignedToId: req.user.sub }, { assignees: { some: { id: req.user.sub } } }, { requesterId: req.user.sub }, { secondaryRequesterId: req.user.sub }] };
     const ownerTicket = await prisma.ticket.findFirst({ where, select: { id: true } });
     const isObserver = await prisma.ticket.findFirst({ where: { id, observers: { some: { id: req.user.sub } } }, select: { id: true } });
-    if (!ownerTicket && !isObserver) return res.status(404).json({ error: 'Ticket introuvable' });
+    // Pour un technicien : accès aussi aux tickets de son équipe (cohérence avec GET /tickets et GET /:id)
+    const isTeamTicket = isTechnicianOnly(req.user) && req.user.teamId
+      ? await prisma.ticket.findFirst({ where: { id, teamId: req.user.teamId }, select: { id: true } })
+      : null;
+    if (!ownerTicket && !isObserver && !isTeamTicket) return res.status(404).json({ error: 'Ticket introuvable' });
   }
   const corrections = await prisma.ticketFieldCorrection.findMany({
     where: { ticketId: id },
@@ -1685,12 +1691,15 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
     if (['SOLVED', 'CLOSED'].includes(ticket.status)) {
       return res.status(403).json({ error: 'Un technicien ne peut pas ajouter de suivi sur un ticket résolu ou fermé.' });
     }
-    if (ticket.assignedToId !== req.user.sub && ticket.requesterId !== req.user.sub && ticket.teamId !== req.user.teamId) {
-      const isObserver = await prisma.ticket.findFirst({
-        where: { id: ticketId, observers: { some: { id: req.user.sub } } },
-        select: { id: true },
-      });
-      if (!isObserver) return res.status(404).json({ error: 'Ticket introuvable' });
+    // Un technicien ne peut commenter QUE les tickets qui lui sont assignés (direct ou multi-assignees)
+    // Les tickets d'équipe non assignés sont visibles en lecture seule — pas de commentaire autorisé
+    const isAssigned = ticket.assignedToId === req.user.sub;
+    const isMultiAssigned = !isAssigned && await prisma.ticket.findFirst({
+      where: { id: ticketId, assignees: { some: { id: req.user.sub } } },
+      select: { id: true },
+    });
+    if (!isAssigned && !isMultiAssigned) {
+      return res.status(403).json({ error: 'Vous ne pouvez ajouter un suivi que sur les tickets qui vous sont assignés.' });
     }
   }
 

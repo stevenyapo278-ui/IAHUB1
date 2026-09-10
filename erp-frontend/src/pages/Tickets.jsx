@@ -181,11 +181,21 @@ function TicketNumberRenderer({ data, context }) {
 
 function TicketInfoRenderer({ data, context }) {
   if (!data) return null;
-  const { debouncedSearch } = context || {};
+  const { debouncedSearch, currentUser } = context || {};
   const originConf = data.origin ? ORIGIN_CONFIG[data.origin] : null;
+
+  // Badges contextuels technicien : indique pourquoi ce ticket est visible
+  const isTech = currentUser?.role === 'TECHNICIAN';
+  const isAssigned = isTech && (
+    data.assignedToId === currentUser?.id ||
+    data.assignees?.some((a) => a.id === currentUser?.id)
+  );
+  const isTeamTicket = isTech && currentUser?.teamId && data.teamId === currentUser?.teamId;
+  const isObserver = isTech && data.observers?.some((o) => o.id === currentUser?.id);
+
   return (
     <div className="flex flex-col justify-center h-full py-1 min-w-0 w-full overflow-hidden leading-snug">
-      {/* Row 1: Title + Badges — le N° vit dans sa propre colonne « N° » */}
+      {/* Row 1: Title + Badges — le N° vit dans sa propre colonne « N° » */}
       <div className="flex items-center gap-1.5 min-w-0 w-full overflow-hidden">
         <Link
           to={`/tickets/${data.id}`}
@@ -223,9 +233,33 @@ function TicketInfoRenderer({ data, context }) {
           )}
         </div>
       )}
+      {/* Row 3 : Badges contextuels technicien (visibles uniquement pour le rôle TECHNICIAN) */}
+      {isTech && (isAssigned || isTeamTicket || isObserver) && (
+        <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+          {isAssigned && (
+            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0">
+              <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              Assigné
+            </span>
+          )}
+          {isTeamTicket && !isAssigned && (
+            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-sky-500/12 text-sky-600 dark:text-sky-400 border border-sky-500/20 shrink-0">
+              <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              Mon équipe
+            </span>
+          )}
+          {isObserver && (
+            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-violet-500/12 text-violet-600 dark:text-violet-400 border border-violet-500/20 shrink-0">
+              <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              Observateur
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
+
 
 function StatusRenderer({ data, context }) {
   if (!data) return null;
@@ -1384,6 +1418,7 @@ export default function Tickets() {
   // ── AG Grid column definitions (Katalyst pinned style) ─────────────────────
   const agGridContext = useMemo(() => ({
     debouncedSearch,
+    currentUser: user ? { id: user.id, role: user.role, teamId: user.teamId } : null,
     canAssign,
     canDelete,
     handleQuickStatusChange,
@@ -1391,7 +1426,7 @@ export default function Tickets() {
     navigate,
     STATUS_OPTIONS: MANUAL_STATUS_OPTIONS,
     STATUS_LABELS,
-  }), [debouncedSearch, canAssign, canDelete, handleQuickStatusChange, askDeleteOne, navigate]);
+  }), [debouncedSearch, user, canAssign, canDelete, handleQuickStatusChange, askDeleteOne, navigate]);
 
   const gridColumnDefs = useMemo(() => {
     const cols = [];
@@ -1700,6 +1735,7 @@ export default function Tickets() {
         onSearchChange={setSearchQuery}
         onClearSearch={() => { setSearchQuery(''); setDebouncedSearch(''); setPage(1); }}
         searchInputRef={searchInputRef}
+        currentUser={user ? { id: user.id, role: user.role, teamId: user.teamId } : null}
       />
 
       {/* ── MAIN CONTENT ────────────────────────────────────────────────────── */}

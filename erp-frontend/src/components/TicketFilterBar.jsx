@@ -1,34 +1,33 @@
 import { motion } from 'framer-motion';
 import {
   CheckCircle2, Radio, User, UserX, Flag, Sparkles, Flame, SlidersHorizontal,
-  X, Search,
+  X, Search, Users,
 } from 'lucide-react';
 
 // ── TicketFilterBar ──────────────────────────────────────────────────────────
 // Barre de filtres rapide toujours visible au-dessus du tableau.
 const QUICK_TOGGLES = [
-  { key: 'status', val: 'OPEN_GROUP', label: 'Ouverts', Icon: Radio },
-  { key: 'status', val: 'CLOSED_GROUP', label: 'Clôturés', Icon: CheckCircle2 },
-  { key: 'status', val: 'NOT_CLOSED', label: 'Non clôturés', Icon: CheckCircle2 },
-  { key: 'priority', val: 'P1', label: 'P1', Icon: Flame },
-  { key: 'mine', val: 'true', label: 'Mes tickets', Icon: User },
-  { key: 'assignedToId', val: 'none', label: 'Non assignés', Icon: UserX },
-  { key: 'aiProcessed', val: 'true', label: 'Traité IA', Icon: Sparkles },
-  { key: 'closeSuggested', val: 'true', label: 'Clôture sugg.', Icon: Flag },
+  { key: 'status', val: 'OPEN_GROUP',  label: 'Ouverts',      Icon: Radio },
+  { key: 'status', val: 'CLOSED_GROUP',label: 'Clôturés',     Icon: CheckCircle2 },
+  { key: 'status', val: 'NOT_CLOSED',  label: 'Non clôturés', Icon: CheckCircle2 },
+  { key: 'priority', val: 'P1',        label: 'P1',           Icon: Flame },
+  { key: 'assignedToId', val: 'none',  label: 'Non assignés', Icon: UserX },
+  { key: 'aiProcessed', val: 'true',   label: 'Traité IA',    Icon: Sparkles },
+  { key: 'closeSuggested', val: 'true',label: 'Clôture sugg.',Icon: Flag },
 ];
 
 const STATUS_LABELS = {
-  'NOT_CLOSED': 'Non clôturés',
-  'OPEN_GROUP': 'Ouverts',
-  'PENDING_GROUP': 'En attente',
-  'CLOSED_GROUP': 'Clôturés',
-  'NEW': 'Nouveau',
-  'OPEN': 'En cours',
-  'PLANNED': 'Planifié',
-  'PENDING': 'En attente',
-  'WAITING_FOR_USER': 'En attente demandeur',
-  'SOLVED': 'Résolu',
-  'CLOSED': 'Fermé',
+  'NOT_CLOSED':      'Non clôturés',
+  'OPEN_GROUP':      'Ouverts',
+  'PENDING_GROUP':   'En attente',
+  'CLOSED_GROUP':    'Clôturés',
+  'NEW':             'Nouveau',
+  'OPEN':            'En cours',
+  'PLANNED':         'Planifié',
+  'PENDING':         'En attente',
+  'WAITING_FOR_USER':'En attente demandeur',
+  'SOLVED':          'Résolu',
+  'CLOSED':          'Fermé',
 };
 
 export default function TicketFilterBar({
@@ -43,7 +42,19 @@ export default function TicketFilterBar({
   onSearchChange,
   onClearSearch,
   searchInputRef,
+  // Contexte utilisateur pour les filtres personnalisés
+  currentUser,
 }) {
+  // Équipe du technicien connecté (si applicable)
+  const myTeam = currentUser?.role === 'TECHNICIAN' && currentUser?.teamId
+    ? teams?.find((t) => t.id === currentUser.teamId)
+    : null;
+
+  // Le filtre "Mon équipe" est actif quand teamId = mon équipe
+  const myTeamActive = myTeam && String(filters.teamId) === String(myTeam.id);
+  // Le filtre "Mes tickets" est actif
+  const mineActive = filters.mine === 'true';
+
   return (
     <div className="px-4 sm:px-6 lg:px-8 shrink-0">
       <div className="p-4 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest">
@@ -70,6 +81,47 @@ export default function TicketFilterBar({
           )}
         </div>
 
+        {/* ── Filtres contextuels TECHNICIAN ── */}
+        {currentUser?.role === 'TECHNICIAN' && (
+          <>
+            {/* Séparateur visuel */}
+            <div className="w-px h-4 bg-outline-variant/30 shrink-0" />
+
+            {/* Mes tickets */}
+            <button
+              onClick={() => onUpdate('mine', mineActive ? '' : 'true')}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-semibold border transition-all cursor-pointer shrink-0 ${
+                mineActive
+                  ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30 shadow-xs'
+                  : 'bg-surface border-outline-variant/30 text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
+              }`}
+              title="Voir seulement les tickets qui me sont assignés ou que j'ai créés"
+            >
+              <User className="w-3 h-3" />
+              Mes tickets
+            </button>
+
+            {/* Mon équipe — affiché seulement si le technicien appartient à une équipe */}
+            {myTeam && (
+              <button
+                onClick={() => onUpdate('teamId', myTeamActive ? '' : String(myTeam.id))}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-semibold border transition-all cursor-pointer shrink-0 ${
+                  myTeamActive
+                    ? 'bg-sky-500/15 text-sky-600 dark:text-sky-400 border-sky-500/30 shadow-xs'
+                    : 'bg-surface border-outline-variant/30 text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
+                }`}
+                title={`Voir seulement les tickets de mon équipe : ${myTeam.name}`}
+              >
+                <Users className="w-3 h-3" />
+                {myTeam.name}
+              </button>
+            )}
+
+            <div className="w-px h-4 bg-outline-variant/30 shrink-0" />
+          </>
+        )}
+
+        {/* ── Filtres rapides généraux ── */}
         {QUICK_TOGGLES.map(({ key, val, label, Icon }) => {
           const active = filters[key] === val;
           return (
@@ -145,7 +197,7 @@ export default function TicketFilterBar({
           )}
           {filters.teamId && (
             <ActiveChip
-              label={teams.find(t => String(t.id) === filters.teamId)?.name || `Équipe #${filters.teamId}`}
+              label={teams?.find(t => String(t.id) === filters.teamId)?.name || `Équipe #${filters.teamId}`}
               onRemove={() => onUpdate('teamId', '')}
             />
           )}
@@ -154,7 +206,7 @@ export default function TicketFilterBar({
           )}
           {filters.assignedToId && (
             <ActiveChip
-              label={filters.assignedToId === 'none' ? 'Non assigné' : users.find(u => String(u.id) === filters.assignedToId)?.fullName || `#${filters.assignedToId}`}
+              label={filters.assignedToId === 'none' ? 'Non assigné' : users?.find(u => String(u.id) === filters.assignedToId)?.fullName || `#${filters.assignedToId}`}
               onRemove={() => onUpdate('assignedToId', '')}
             />
           )}
