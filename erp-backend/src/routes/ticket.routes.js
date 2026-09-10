@@ -368,7 +368,7 @@ router.get('/', async (req, res) => {
 
 // Export serveur : mêmes filtres que la liste, dataset complet (pas de pagination UI)
 router.get('/export', async (req, res) => {
-  const { sortBy, sortOrder } = req.query;
+  const { sortBy, sortOrder, format } = req.query;
 
   const where = buildTicketWhereClause(req.user, req.query);
 
