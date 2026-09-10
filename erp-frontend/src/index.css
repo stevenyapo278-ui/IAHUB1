@@ -2579,18 +2579,36 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 /* ── Mode édition : halo d'affilade, transition figée pendant le drag ── */
 .dashboard-grid--editing .dashboard-widget {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--skin-primary, #0067ff) 35%, transparent);
+  transition: transform 220ms cubic-bezier(0.2, 0, 0, 1), box-shadow 180ms ease;
 }
-.dashboard-grid--editing .react-grid-item.react-draggable-dragging,
+.dashboard-grid--editing .react-grid-item.react-draggable-dragging {
+  transition: none;
+  z-index: 100;
+  opacity: 0.92;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
+  border: 1px solid var(--skin-primary, #0067ff);
+  cursor: grabbing !important;
+}
 .dashboard-grid--editing .react-grid-item.react-resizable-resizing {
-  transition: none; /* sinon la géométrie court après le curseur (lag visuel) */
+  transition: none;
   z-index: 30;
+}
+
+/* ── Drag handle : curseur grab/grabbing ─────────────────────────────── */
+.dashboard-widget .drag-handle {
+  cursor: grab;
+}
+.dashboard-widget .drag-handle:active {
+  cursor: grabbing;
 }
 
 /* ── Placeholder (silhouette pendant le drag) ─────────────────────────── */
 .react-grid-item.react-grid-placeholder {
-  background: color-mix(in srgb, var(--skin-primary, #0067ff) 15%, transparent);
+  background: color-mix(in srgb, var(--skin-primary, #0067ff) 0.12, transparent) !important;
+  border: 2px dashed color-mix(in srgb, var(--skin-primary, #0067ff) 0.4, transparent) !important;
   border-radius: 12px;
-  transition-duration: 100ms;
+  opacity: 1 !important;
+  transition: all 180ms ease;
 }
 .react-grid-item.react-grid-placeholder.placeholder-resizing {
   transition: none;
@@ -2619,7 +2637,8 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   opacity: 0;
   transition: opacity 0.15s ease;
 }
-.dashboard-grid--editing .react-grid-item > .react-resizable-handle::after {
+.react-grid-item:hover .react-resizable-handle::after,
+.react-grid-item.react-resizing .react-resizable-handle::after {
   opacity: 1;
 }
 .react-grid-item > .react-resizable-handle-s {

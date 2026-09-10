@@ -11,12 +11,17 @@ const COLS = { lg: 12, md: 10, sm: 6, xs: 4 };
 const MARGIN = [12, 12];
 const ROW_HEIGHT = 90;
 
-/* Taille minimale par catégorie de widget — empêche d'écraser un graphe en 1×1 */
+/* Taille min/max par catégorie de widget — empêche les widgets trop petits ou géants */
+const SIZE_CONSTRAINTS = {
+  KPIs:       { minW: 2, minH: 2, maxW: 4, maxH: 3 },
+  Graphiques: { minW: 3, minH: 3, maxW: 8, maxH: 6 },
+  Données:    { minW: 3, minH: 2, maxW: 6, maxH: 5 },
+};
+const DEFAULT_CONSTRAINTS = { minW: 3, minH: 2, maxW: 6, maxH: 4 };
+
 function sizeFloor(widgetType) {
   const category = getWidgetMeta(widgetType)?.category;
-  if (category === 'KPIs') return { minW: 2, minH: 2 };
-  if (category === 'Graphiques') return { minW: 3, minH: 3 };
-  return { minW: 3, minH: 2 };
+  return SIZE_CONSTRAINTS[category] || DEFAULT_CONSTRAINTS;
 }
 
 /* Normalise un layout servi par l'API : coerce, dédoublonne, aligne sur les
@@ -35,10 +40,12 @@ export function normalizeLayout(layout, widgets) {
       i,
       x: Math.max(0, Math.round(Number(item.x) || 0)),
       y: Math.max(0, Math.round(Number(item.y) || 0)),
-      w: Math.max(floor.minW, Math.round(Number(item.w) || 4)),
-      h: Math.max(floor.minH, Math.round(Number(item.h) || 3)),
+      w: Math.min(floor.maxW, Math.max(floor.minW, Math.round(Number(item.w) || 4))),
+      h: Math.min(floor.maxH, Math.max(floor.minH, Math.round(Number(item.h) || 3))),
       minW: floor.minW,
       minH: floor.minH,
+      maxW: floor.maxW,
+      maxH: floor.maxH,
     });
   }
 
@@ -49,14 +56,17 @@ export function normalizeLayout(layout, widgets) {
     if (seen.has(w.id)) continue;
     const meta = getWidgetMeta(w.widgetType);
     const floor = sizeFloor(w.widgetType);
+    const defaultW = Math.min(meta?.defaultW || 4, floor.maxW);
     result.push({
       i: w.id,
       x: 0,
       y: cursorY,
-      w: Math.min(meta?.defaultW || 4, 12),
-      h: Math.max(floor.minH, meta?.defaultH || 3),
+      w: Math.max(floor.minW, defaultW),
+      h: Math.min(floor.maxH, Math.max(floor.minH, meta?.defaultH || 3)),
       minW: floor.minW,
       minH: floor.minH,
+      maxW: floor.maxW,
+      maxH: floor.maxH,
     });
     cursorY += meta?.defaultH || 3;
   }
@@ -115,7 +125,7 @@ export default function DashboardGrid({
   // v2 : les comportements passent par des objets de configuration
   // (isDraggable/isResizable/draggableHandle/compactType n'existent plus).
   const dragConfig = useMemo(
-    () => ({ enabled: isEditing, handle: '.drag-handle', threshold: 4 }),
+    () => ({ enabled: isEditing, handle: '.drag-handle', threshold: 8 }),
     [isEditing],
   );
   const resizeConfig = useMemo(
@@ -146,6 +156,8 @@ export default function DashboardGrid({
             dragConfig={dragConfig}
             resizeConfig={resizeConfig}
             preventCollision={isEditing}
+            isBounded
+            useCSSTransforms
             onLayoutChange={handleLayoutChange}
             onBreakpointChange={handleBreakpointChange}
           >
