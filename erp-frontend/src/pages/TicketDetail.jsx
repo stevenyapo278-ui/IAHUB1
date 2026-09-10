@@ -720,6 +720,17 @@ export default function TicketDetail() {
     }
   }
 
+  async function deleteFollowup(followupId) {
+    if (!window.confirm('Supprimer ce commentaire ?')) return;
+    try {
+      await api.delete(`/tickets/${id}/followups/${followupId}`);
+      toast.success('Commentaire supprimé');
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de la suppression');
+    }
+  }
+
   function startEditContent() {
     const { text, images } = extractCleanTextAndImages(ticket?.content || '');
     setEditingContentValue(text);
@@ -1744,6 +1755,15 @@ export default function TicketDetail() {
                                 className="p-1 rounded-md border border-outline-variant/40 bg-surface-container text-on-surface-variant hover:text-on-surface hover:border-outline transition-colors cursor-pointer"
                               >
                                 <Pencil className="w-3 h-3" />
+                              </button>
+                            )}
+                            {['ADMIN', 'SUPERADMIN'].includes(user?.role) && item.data.source !== 'glpi' && editingFollowupId !== item.data.id && (
+                              <button
+                                onClick={() => deleteFollowup(item.data.id)}
+                                title="Supprimer"
+                                className="p-1 rounded-md border border-outline-variant/40 bg-surface-container text-on-surface-variant hover:text-red-600 hover:border-red-500/50 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
+                              >
+                                <Trash2 className="w-3 h-3" />
                               </button>
                             )}
                           </div>
@@ -3715,6 +3735,7 @@ function eventIcon(type) {
     case 'ASSIGNED': return <UserCheck className="w-3 h-3" />;
     case 'EMAIL_RECEIVED': case 'EMAIL_SENT': return <Mail className="w-3 h-3" />;
     case 'FOLLOWUP_ADDED': return <MessageSquare className="w-3 h-3" />;
+    case 'FOLLOWUP_DELETED': return <Trash2 className="w-3 h-3" />;
     case 'AI_ANALYZED': case 'AI_DRAFT_GENERATED': case 'AI_FOLLOWUP_DRAFT_GENERATED':
     case 'AI_AUTO_REPLY_IGNORED': case 'AI_CONVERSATION_ESCALATED': return <Sparkles className="w-3 h-3" />;
     case 'KNOWLEDGE_CREATED': return <FileText className="w-3 h-3" />;
@@ -3744,6 +3765,7 @@ function eventLabel(type) {
     EMAIL_RECEIVED: 'Email reçu',
     EMAIL_SENT: 'Email envoyé',
     FOLLOWUP_ADDED: 'Commentaire ajouté',
+    FOLLOWUP_DELETED: 'Commentaire supprimé',
     AI_ANALYZED: 'Analyse IA',
     AI_DRAFT_GENERATED: 'Brouillon IA généré',
     AI_FOLLOWUP_DRAFT_GENERATED: 'Brouillon de réponse IA',

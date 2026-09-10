@@ -1838,6 +1838,31 @@ router.patch('/:id/followups/:followupId', requirePermission('tickets.assign', [
   return res.json({ followup: updated });
 });
 
+// Supprimer un commentaire (ADMIN / SUPERADMIN uniquement)
+router.delete('/:id/followups/:followupId', requirePermission('tickets.assign', ['ADMIN', 'SUPERADMIN']), async (req, res) => {
+  const ticketId = Number(req.params.id);
+  const followupId = Number(req.params.followupId);
+
+  const followup = await prisma.followup.findFirst({
+    where: { id: followupId, ticketId },
+  });
+  if (!followup) return res.status(404).json({ error: 'Commentaire introuvable' });
+
+  if (followup.source === 'glpi') {
+    return res.status(403).json({ error: 'Impossible de supprimer un commentaire synchronisé depuis GLPI' });
+  }
+
+  await prisma.followup.delete({ where: { id: followupId } });
+
+  try {
+    await logEvent(ticketId, 'FOLLOWUP_DELETED', req.user.sub, { followupId });
+  } catch (err) {
+    console.error('[ticket.routes] Log suppression commentaire échoué:', err.message);
+  }
+
+  return res.json({ success: true });
+});
+
 // ── Tickets liés ────────────────────────────────────────────────────────
 router.post('/:id/links', forbidTechnicianTicketEdits, requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   const ticketId = Number(req.params.id);
