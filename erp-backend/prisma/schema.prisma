@@ -148,6 +148,7 @@ model User {
   ticketsAssignedMultiple      Ticket[]                @relation("TicketAssignees")
   ticketsApproved              Ticket[]                @relation("TicketApprover")
   ticketsModified              Ticket[]                @relation("TicketLastModifier")
+  ticketsCreated               Ticket[]                @relation("TicketCreator")
   ticketsDeleted               Ticket[]                @relation("TicketDeletedBy")
   ticketsObserved              Ticket[]                @relation("TicketObservers")
   followups                    Followup[]
@@ -344,6 +345,9 @@ model Ticket {
   assignedToId Int?
 
   assignees User[] @relation("TicketAssignees")
+
+  createdBy   User? @relation("TicketCreator", fields: [createdById], references: [id])
+  createdById Int?
 
   lastModifiedBy   User? @relation("TicketLastModifier", fields: [lastModifiedById], references: [id])
   lastModifiedById Int?

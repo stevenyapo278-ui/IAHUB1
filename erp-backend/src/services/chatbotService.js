@@ -509,6 +509,7 @@ async function createTicketFromChat(title, description, priority, userId) {
       status: 'NEW',
       source: 'Chatbot',
       requesterId: userId,
+      createdById: userId,
       type: 'INCIDENT',
     },
   });
@@ -529,6 +530,7 @@ async function escalateToTechnician(message, userId) {
       status: 'NEW',
       source: 'Chatbot',
       requesterId: userId,
+      createdById: userId,
       type: 'INCIDENT',
     },
   });
