@@ -797,12 +797,15 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                           {t.source || 'Email'}{t.sourceEmail ? ` · ${t.sourceEmail}` : ''}
                         </span>
                       )}
-                      {t.origin && ORIGIN_CONFIG[t.origin] && (
-                        <span className={`px-2 py-0.5 rounded-md border flex items-center gap-1 ${ORIGIN_CONFIG[t.origin].bg}`}>
-                          <ORIGIN_CONFIG[t.origin].Icon className="w-3 h-3" />
-                          {ORIGIN_CONFIG[t.origin].label}
-                        </span>
-                      )}
+                      {t.origin && ORIGIN_CONFIG[t.origin] && (() => {
+                        const OriginIcon = ORIGIN_CONFIG[t.origin].Icon;
+                        return (
+                          <span className={`px-2 py-0.5 rounded-md border flex items-center gap-1 ${ORIGIN_CONFIG[t.origin].bg}`}>
+                            <OriginIcon className="w-3 h-3" />
+                            {ORIGIN_CONFIG[t.origin].label}
+                          </span>
+                        );
+                      })()}
                     </div>
 
                     {/* Demandeur avec photo + date */}
@@ -2009,14 +2012,18 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                   <p className="text-xs text-on-surface">{detailTicket.source || 'Email'}{detailTicket.sourceEmail ? ` · ${detailTicket.sourceEmail}` : ''}</p>
                 </div>
 
-                {detailTicket.origin && ORIGIN_CONFIG[detailTicket.origin] && (
-                  <div className="p-3 rounded-xl bg-surface-container-low/40 border border-outline-variant/20 space-y-1">
-                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Origine</span>
-                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold border ${ORIGIN_CONFIG[detailTicket.origin].bg}`}>
-                      <ORIGIN_CONFIG[detailTicket.origin].Icon className="w-3 h-3" />
-                      {ORIGIN_CONFIG[detailTicket.origin].label}
-                    </span>
-                  </div>
+                {detailTicket.origin && ORIGIN_CONFIG[detailTicket.origin] && (() => {
+                  const DetailOriginIcon = ORIGIN_CONFIG[detailTicket.origin].Icon;
+                  return (
+                    <div className="p-3 rounded-xl bg-surface-container-low/40 border border-outline-variant/20 space-y-1">
+                      <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Origine</span>
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold border ${ORIGIN_CONFIG[detailTicket.origin].bg}`}>
+                        <DetailOriginIcon className="w-3 h-3" />
+                        {ORIGIN_CONFIG[detailTicket.origin].label}
+                      </span>
+                    </div>
+                  );
+                })()}
                 )}
 
                 {detailTicket.createdAt && (

@@ -233,12 +233,15 @@ export default function Portal() {
                           {STATUS_CONFIG[t.status].label}
                         </span>
                       )}
-                      {t.origin && ORIGIN_CONFIG[t.origin] && (
-                        <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold border ${ORIGIN_CONFIG[t.origin].bg}`}>
-                          <ORIGIN_CONFIG[t.origin].Icon className="w-2.5 h-2.5" />
-                          {ORIGIN_CONFIG[t.origin].label}
-                        </span>
-                      )}
+                      {t.origin && ORIGIN_CONFIG[t.origin] && (() => {
+                        const PortalOriginIcon = ORIGIN_CONFIG[t.origin].Icon;
+                        return (
+                          <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold border ${ORIGIN_CONFIG[t.origin].bg}`}>
+                            <PortalOriginIcon className="w-2.5 h-2.5" />
+                            {ORIGIN_CONFIG[t.origin].label}
+                          </span>
+                        );
+                      })()}
                       {t.category && <span className="text-[11px] text-on-surface-variant hidden sm:block truncate">{t.category}</span>}
                     </div>
                     <p className="font-bold text-body-sm text-on-surface truncate">{t.title}</p>
