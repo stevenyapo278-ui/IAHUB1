@@ -3323,7 +3323,6 @@ export default function TicketDetail() {
                   </button>
                 </div>
               </form>
-            )}
             </div>
           </div>
         </div>

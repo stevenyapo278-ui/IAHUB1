@@ -2024,7 +2024,6 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                     </div>
                   );
                 })()}
-                )}
 
                 {detailTicket.createdAt && (
                   <div className="p-3 rounded-xl bg-surface-container-low/40 border border-outline-variant/20 space-y-1">
