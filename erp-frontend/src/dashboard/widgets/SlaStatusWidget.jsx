@@ -5,7 +5,7 @@ const PRIORITY_COLORS = { P1: '#ef4444', P2: '#f97316', P3: '#3b82f6', P4: '#10b
 
 export default function SlaStatusWidget({ slaAnalytics, config }) {
   if (!slaAnalytics) {
-    return <p className="text-xs text-on-surface-variant italic text-center py-6">Données SLA indisponibles</p>;
+    return <p className="h-full text-xs text-on-surface-variant italic text-center py-6">Données SLA indisponibles</p>;
   }
 
   return (

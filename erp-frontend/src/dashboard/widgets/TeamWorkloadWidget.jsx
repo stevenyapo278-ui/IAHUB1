@@ -30,7 +30,7 @@ export default function TeamWorkloadWidget({ techPerformance, config }) {
   const maxAssigned = Math.max(...data.map(t => t.assigned || 0), 1);
 
   if (!data.length) {
-    return <p className="text-xs text-on-surface-variant italic text-center py-6">Aucune donnée</p>;
+    return <p className="h-full text-xs text-on-surface-variant italic text-center py-6">Aucune donnée</p>;
   }
 
   return (

@@ -16,7 +16,7 @@ export default function TechTableWidget({ techPerformance, config }) {
   const data = (techPerformance || []).slice(0, 8);
 
   if (!data.length) {
-    return <p className="text-xs text-on-surface-variant italic text-center py-6">Aucune donnée</p>;
+    return <p className="h-full text-xs text-on-surface-variant italic text-center py-6">Aucune donnée</p>;
   }
 
   return (

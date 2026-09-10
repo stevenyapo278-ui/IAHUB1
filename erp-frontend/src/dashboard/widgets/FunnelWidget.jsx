@@ -11,7 +11,7 @@ export default function FunnelWidget({ stats, config }) {
   const funnelMax = Math.max(1, ...funnelData.map((d) => d.value));
 
   if (!funnelData.length) {
-    return <p className="text-xs text-on-surface-variant italic text-center py-4">Aucun ticket</p>;
+    return <p className="h-full text-xs text-on-surface-variant italic text-center py-4">Aucun ticket</p>;
   }
 
   return (

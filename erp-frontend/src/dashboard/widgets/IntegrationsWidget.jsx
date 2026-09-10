@@ -8,7 +8,7 @@ export default function IntegrationsWidget({ integrations, config }) {
   ].slice(0, 7) : [];
 
   if (!services.length) {
-    return <p className="text-xs text-on-surface-variant italic text-center py-6">Aucune intégration configurée</p>;
+    return <p className="h-full text-xs text-on-surface-variant italic text-center py-6">Aucune intégration configurée</p>;
   }
 
   return (

@@ -50,7 +50,7 @@ export default function RecentTicketsWidget({ activity, config }) {
   const items = (activity || []).slice(0, 6);
 
   if (!items.length) {
-    return <p className="text-xs text-on-surface-variant italic text-center py-4">Aucune activité récente</p>;
+    return <p className="h-full text-xs text-on-surface-variant italic text-center py-4">Aucune activité récente</p>;
   }
 
   return (

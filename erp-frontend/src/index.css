@@ -2555,7 +2555,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   padding: 5px 10px;
   border-bottom: 1px solid var(--color-outline-variant, rgba(128, 128, 128, 0.2));
   background: var(--color-surface-container-low, rgba(128, 128, 128, 0.06));
-  cursor: move;
   user-select: none;
   touch-action: none;
 }
@@ -2609,7 +2608,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 /* ── Placeholder (silhouette pendant le drag) ─────────────────────────── */
 .react-grid-item.react-grid-placeholder {
   background: color-mix(in srgb, var(--skin-primary, #0067ff) 0.12, transparent) !important;
-  border: 2px dashed color-mix(in srgb, var(--skin-primary, #0067ff) 0.4, transparent) !important;
+  border: 2px dashed color-mix(in srgb, var(--skin-primary, #0067ff) 0.45, transparent) !important;
   border-radius: 12px;
   opacity: 1 !important;
   transition: all 180ms ease;
