@@ -1475,7 +1475,8 @@ export default function Tickets() {
         width: 200,
         cellRenderer: ObserverRenderer,
         valueGetter: (p) => (p.data?.observers || []).map((o) => o.fullName).join(', '),
-        sortable: false, // pas de tri serveur sur les relations multiples
+        sortable: true,
+        comparator: (a, b) => (a || '').localeCompare(b || '', 'fr', { sensitivity: 'base' }),
       });
     }
 
