@@ -145,6 +145,10 @@ export default function TicketDetail() {
   const [followupPrivate, setFollowupPrivate] = useState(false);
   const [events, setEvents] = useState([]);
 
+  // Suppression de suivi
+  const [followupToDelete, setFollowupToDelete] = useState(null);
+  const [deletingFollowup, setDeletingFollowup] = useState(false);
+
   // Tickets liés + fusion + modale « Relations » (tickets liés, problèmes racines, sous-tickets)
   const [relationsModalOpen, setRelationsModalOpen] = useState(false);
   const [relationsTab, setRelationsTab] = useState('tickets');
@@ -720,14 +724,18 @@ export default function TicketDetail() {
     }
   }
 
-  async function deleteFollowup(followupId) {
-    if (!window.confirm('Supprimer ce commentaire ?')) return;
+  async function confirmDeleteFollowup() {
+    if (!followupToDelete) return;
+    setDeletingFollowup(true);
     try {
-      await api.delete(`/tickets/${id}/followups/${followupId}`);
+      await api.delete(`/tickets/${id}/followups/${followupToDelete}`);
       toast.success('Commentaire supprimé');
+      setFollowupToDelete(null);
       load();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erreur lors de la suppression');
+    } finally {
+      setDeletingFollowup(false);
     }
   }
 
@@ -1759,7 +1767,7 @@ export default function TicketDetail() {
                             )}
                             {['ADMIN', 'SUPERADMIN'].includes(user?.role) && item.data.source !== 'glpi' && editingFollowupId !== item.data.id && (
                               <button
-                                onClick={() => deleteFollowup(item.data.id)}
+                                onClick={() => setFollowupToDelete(item.data.id)}
                                 title="Supprimer"
                                 className="p-1 rounded-md border border-outline-variant/40 bg-surface-container text-on-surface-variant hover:text-red-600 hover:border-red-500/50 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
                               >
@@ -2905,6 +2913,18 @@ export default function TicketDetail() {
         loading={deleting}
         onConfirm={handleDelete}
         onCancel={() => setShowDeleteConfirm(false)}
+      />
+
+      {/* Confirm Delete Followup Dialog */}
+      <ConfirmDialog
+        open={!!followupToDelete}
+        title="Supprimer le commentaire"
+        message="Supprimer définitivement ce commentaire ? Cette action est irréversible."
+        confirmLabel="Supprimer"
+        danger
+        loading={deletingFollowup}
+        onConfirm={confirmDeleteFollowup}
+        onCancel={() => setFollowupToDelete(null)}
       />
 
       {/* MODALE ESCALADE : transfert vers une autre équipe + choix du technicien */}
