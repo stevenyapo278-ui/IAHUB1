@@ -21,6 +21,7 @@ async function runSolvedAutoCloseScheduler() {
 
   const threshold = new Date();
   threshold.setDate(threshold.getDate() - autoCloseDays);
+  threshold.setHours(0, 0, 0, 0);
 
   console.log(`[solvedAutoClose] Recherche tickets SOLVED résolus avant le ${threshold.toISOString()} (délai: ${autoCloseDays}j)`);
 
