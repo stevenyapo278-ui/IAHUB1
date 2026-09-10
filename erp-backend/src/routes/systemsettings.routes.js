@@ -291,4 +291,36 @@ router.post('/solved-auto-close/run-now', requirePermission('automation.manage',
   }
 });
 
+// ── Diagnostic : liste les tickets SOLVED avec leurs dates ────────────────
+router.get('/solved-auto-close/debug', requirePermission('automation.manage', ['ADMIN']), async (req, res) => {
+  try {
+    const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+    const autoCloseDays = settings?.solvedAutoCloseDays ?? 3;
+    const threshold = new Date();
+    threshold.setDate(threshold.getDate() - autoCloseDays);
+
+    const tickets = await prisma.ticket.findMany({
+      where: { status: 'SOLVED' },
+      select: { id: true, title: true, solvedAt: true, updatedAt: true, createdAt: true },
+      orderBy: { solvedAt: 'asc' },
+    });
+
+    return res.json({
+      solvedAutoCloseDays: autoCloseDays,
+      threshold: threshold.toISOString(),
+      totalSolved: tickets.length,
+      tickets: tickets.map((t) => ({
+        id: t.id,
+        title: t.title?.substring(0, 60),
+        solvedAt: t.solvedAt,
+        updatedAt: t.updatedAt,
+        createdAt: t.createdAt,
+        shouldClose: t.solvedAt ? t.solvedAt <= threshold : t.updatedAt <= threshold,
+      })),
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
