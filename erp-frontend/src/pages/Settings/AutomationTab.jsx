@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { toast } from 'sonner';
 import api from '../../api/client';
 import { sanitizeHtml } from '../../utils/sanitize';
 import { SettingRow, IntervalRow, inputClass, itemVariants } from './SettingsComponents';
@@ -36,6 +37,7 @@ export default function AutomationTab() {
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [reminderConfig, setReminderConfig] = useState(null);
   const [reminderSaving, setReminderSaving] = useState(false);
+  const [autoClosing, setAutoClosing] = useState(false);
 
   function load() {
     api.get('/system-settings').then(({ data }) => {
@@ -71,6 +73,22 @@ export default function AutomationTab() {
       setError(err.response?.data?.error || 'Erreur lors de la mise à jour');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleRunAutoClose() {
+    setAutoClosing(true);
+    try {
+      const { data } = await api.post('/system-settings/solved-auto-close/run-now');
+      if (data.closed === 0) {
+        toast.info('Aucun ticket à fermer');
+      } else {
+        toast.success(`${data.closed} ticket(s) fermé(s) automatiquement`);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de l\'exécution');
+    } finally {
+      setAutoClosing(false);
     }
   }
 
@@ -378,6 +396,16 @@ export default function AutomationTab() {
               max={90}
               unit="jours"
             />
+            <button
+              onClick={handleRunAutoClose}
+              disabled={autoClosing || (settings?.solvedAutoCloseDays ?? 3) <= 0}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface font-body-sm text-body-sm hover:bg-surface-container-low transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              <span className={`material-symbols-outlined text-[16px] ${autoClosing ? 'animate-spin' : ''}`}>
+                {autoClosing ? 'progress_activity' : 'play_arrow'}
+              </span>
+              {autoClosing ? 'Exécution en cours...' : 'Lancer maintenant'}
+            </button>
           </div>
         </div>
 

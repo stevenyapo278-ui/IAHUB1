@@ -7,6 +7,7 @@ const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { sendDailySummary } = require('../services/dailySummary');
+const { runSolvedAutoCloseScheduler } = require('../services/solvedAutoCloseScheduler');
 const { resolveBackendUrl, resolveFrontendUrl } = require('../services/systemSettings');
 const { auditLog } = require('../services/auditLogService');
 const { validateUpload } = require('../utils/security');
@@ -277,6 +278,16 @@ router.post('/test-email', requirePermission('automation.manage', ['ADMIN']), as
   } catch (err) {
     console.error('[systemsettings] Test email échoué:', err.message);
     return res.status(502).json({ error: err.message });
+  }
+});
+
+// ── Lancer manuellement la fermeture auto des tickets résolus ─────────────
+router.post('/solved-auto-close/run-now', requirePermission('automation.manage', ['ADMIN']), async (req, res) => {
+  try {
+    const results = await runSolvedAutoCloseScheduler();
+    return res.json({ closed: results.length, results });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
   }
 });
 
