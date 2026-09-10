@@ -110,8 +110,13 @@ export default function NotificationPanel({ open, onClose }) {
     if (!notif.isRead) {
       markAsRead(notif.id);
     }
-    if (notif.link) {
-      navigate(notif.link);
+    // Construire le lien : utiliser link directement, ou fallback depuis le message (#123)
+    const link = notif.link || (() => {
+      const m = (notif.message || '').match(/#(\d+)/);
+      return m ? `/tickets/${m[1]}` : null;
+    })();
+    if (link) {
+      navigate(link);
     }
     onClose();
   };

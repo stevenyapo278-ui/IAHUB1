@@ -698,6 +698,7 @@ export default function Tickets() {
   const canDeleteRole = ['SUPERADMIN', 'ADMIN', 'HOTLINE'].includes(user?.role);
   const canDelete = canEditTicketsRole && (canDeleteRole || hasPermission(user, 'tickets.delete'));
   const canBulkDelete = canEditTicketsRole && (canDeleteRole || hasPermission(user, 'tickets.bulkDelete'));
+  const canViewTeams = user?.role === 'TECHNICIAN' || canEditTicketsRole;
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
@@ -1223,10 +1224,12 @@ export default function Tickets() {
   }, []);
 
   useEffect(() => {
-    if (!canAssign) return;
+    if (!canViewTeams) return;
     api.get('/teams').then(({ data }) => setTeams(data)).catch(() => {});
-    api.get('/users').then(({ data }) => setUsers(Array.isArray(data) ? data : (data.users || []))).catch(() => {});
-  }, [canAssign]);
+    if (canAssign) {
+      api.get('/users').then(({ data }) => setUsers(Array.isArray(data) ? data : (data.users || []))).catch(() => {});
+    }
+  }, [canViewTeams, canAssign]);
 
   useEffect(() => {
     const cat = flatCategories.find((c) => c.name === form.category);

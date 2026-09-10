@@ -166,6 +166,7 @@ function buildTicketWhereClause(user, queryParams = {}) {
       ],
     });
   } else if (isTechnicianOnly(user)) {
+    // Technicien voit : ses tickets assignés + tickets de son équipe + ses demandes + observateur
     andConditions.push({
       OR: [
         { assignedToId: user.sub },
@@ -174,6 +175,7 @@ function buildTicketWhereClause(user, queryParams = {}) {
         { secondaryRequesterId: user.sub },
         { requesterIds: { has: user.sub } },
         { observers: { some: { id: user.sub } } },
+        ...(user.teamId ? [{ teamId: user.teamId }] : []),
       ],
     });
   }
@@ -1683,7 +1685,7 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
     if (['SOLVED', 'CLOSED'].includes(ticket.status)) {
       return res.status(403).json({ error: 'Un technicien ne peut pas ajouter de suivi sur un ticket résolu ou fermé.' });
     }
-    if (ticket.assignedToId !== req.user.sub && ticket.requesterId !== req.user.sub) {
+    if (ticket.assignedToId !== req.user.sub && ticket.requesterId !== req.user.sub && ticket.teamId !== req.user.teamId) {
       const isObserver = await prisma.ticket.findFirst({
         where: { id: ticketId, observers: { some: { id: req.user.sub } } },
         select: { id: true },
