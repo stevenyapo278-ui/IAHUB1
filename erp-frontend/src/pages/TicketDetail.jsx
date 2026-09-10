@@ -1787,10 +1787,19 @@ export default function TicketDetail() {
                               }}
                               autoFocus
                             />
+                            {editingFollowupImages.length > 0 && (
+                              <div className="flex flex-wrap gap-2 p-2 rounded-xl border border-outline-variant/30 bg-surface-container-low/40">
+                                {editingFollowupImages.map((img, idx) => (
+                                  <div key={idx} className="relative group">
+                                    <div dangerouslySetInnerHTML={{ __html: img }} className="[&>img]:max-w-[120px] [&>img]:max-h-[80px] [&>img]:rounded-lg [&>img]:border [&>img]:border-outline-variant/50" />
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                             <div className="flex items-center gap-2">
                               <button
                                 onClick={() => saveEditFollowup(item.data.id)}
-                                disabled={savingFollowupEdit || !editingFollowupContent.trim()}
+                                disabled={savingFollowupEdit || (!editingFollowupContent.trim() && editingFollowupImages.length === 0)}
                                 className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary text-on-primary text-[10px] font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 cursor-pointer"
                               >
                                 {savingFollowupEdit ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
