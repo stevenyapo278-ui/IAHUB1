@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import {
   MANUAL_STATUS_OPTIONS, STATUS_LABELS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS,
-  URGENCY_IMPACT_OPTIONS, PRIORITY_CONFIG, STATUS_CONFIG, initials
+  URGENCY_IMPACT_OPTIONS, PRIORITY_CONFIG, STATUS_CONFIG, ORIGIN_CONFIG, initials
 } from '../constants/tickets';
 
 import { sanitizeHtml } from '../utils/sanitize';
@@ -1392,6 +1392,9 @@ export default function TicketDetail() {
                   </MetaChip>
                 )}
                 {ticket.source && <MetaChip icon={Inbox}>{ticket.source}</MetaChip>}
+                {ticket.origin && ORIGIN_CONFIG[ticket.origin] && (
+                  <MetaChip icon={ORIGIN_CONFIG[ticket.origin].Icon}>{ORIGIN_CONFIG[ticket.origin].label}</MetaChip>
+                )}
                 <MetaChip icon={MapPin}>{ticket.locationName || 'Aucun lieu'}</MetaChip>
                 {ticket.team?.name && <MetaChip icon={Layers}>{ticket.team.name}</MetaChip>}
               </div>

@@ -7,7 +7,7 @@ import {
   Ticket, Plus, X, Send, ChevronDown, ChevronRight, Clock, MapPin,
   Paperclip, MessageSquare, Sparkles, RefreshCw, Loader2, Star
 } from 'lucide-react';
-import { PRIORITY_CONFIG, STATUS_CONFIG, PRIORITY_OPTIONS, TYPE_OPTIONS } from '../constants/tickets';
+import { PRIORITY_CONFIG, STATUS_CONFIG, PRIORITY_OPTIONS, TYPE_OPTIONS, ORIGIN_CONFIG } from '../constants/tickets';
 import SlaBadge from '../components/SlaBadge';
 import EmptyState from '../components/EmptyState';
 import { sanitizeHtml } from '../utils/sanitize';
@@ -231,6 +231,12 @@ export default function Portal() {
                       {STATUS_CONFIG[t.status] && (
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold border ${STATUS_CONFIG[t.status].bg}`}>
                           {STATUS_CONFIG[t.status].label}
+                        </span>
+                      )}
+                      {t.origin && ORIGIN_CONFIG[t.origin] && (
+                        <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold border ${ORIGIN_CONFIG[t.origin].bg}`}>
+                          <ORIGIN_CONFIG[t.origin].Icon className="w-2.5 h-2.5" />
+                          {ORIGIN_CONFIG[t.origin].label}
                         </span>
                       )}
                       {t.category && <span className="text-[11px] text-on-surface-variant hidden sm:block truncate">{t.category}</span>}

@@ -934,6 +934,7 @@ async function processMessage(message, account) {
               status: 'OPEN',
               priority: 'P3',
               source: 'Email',
+              origin: 'EMAIL',
               sourceEmail: fromEmail || null,
               sourceName: (fromEmail || '').split('@')[0],
               sourceSubject: subject || null,

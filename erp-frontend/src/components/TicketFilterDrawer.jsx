@@ -130,6 +130,20 @@ export default function TicketFilterDrawer({
           />
 
           <SearchableSelect
+            value={filters.origin || ''}
+            onChange={(v) => onUpdate('origin', v)}
+            options={[
+              { label: 'Toutes les origines', value: '' },
+              { label: 'Manuel', value: 'MANUAL' },
+              { label: 'Portail', value: 'PORTAIL' },
+              { label: 'Email', value: 'EMAIL' },
+              { label: 'Chatbot', value: 'CHATBOT' },
+            ]}
+            placeholder="Origine"
+            searchPlaceholder="Rechercher…"
+          />
+
+          <SearchableSelect
             value={filters.category}
             onChange={(v) => onUpdate('category', v)}
             options={[

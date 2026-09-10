@@ -143,7 +143,7 @@ function buildTicketWhereClause(user, queryParams = {}) {
   const {
     status, priority, teamId, assignedToId, mine, title, search, query,
     category, locationId, aiProcessed, due, closeSuggested, approvalStatus,
-    dateFrom, dateTo, source,
+    dateFrom, dateTo, source, origin,
   } = queryParams;
 
   const andConditions = [
@@ -196,6 +196,7 @@ function buildTicketWhereClause(user, queryParams = {}) {
 
   if (priority) andConditions.push({ priority });
   if (source) andConditions.push({ source });
+  if (origin) andConditions.push({ origin });
   if (teamId) andConditions.push({ teamId: Number(teamId) });
 
   if (assignedToId === 'none') {
@@ -649,7 +650,7 @@ router.get('/pending-approval', async (req, res) => {
       take: limit,
       select: {
         id: true, title: true, content: true, status: true, priority: true,
-        category: true, type: true, source: true, sourceName: true, sourceEmail: true,
+        category: true, type: true, source: true, origin: true, sourceName: true, sourceEmail: true,
         urgency: true, impact: true, isMajorIncident: true, impactedSites: true,
         locationName: true, lowTrustSender: true, aiProcessed: true, aiSummary: true,
         approvalNote: true, approvalStatus: true,
@@ -903,6 +904,7 @@ router.post(
         locationId: finalLocationId,
         locationName: finalLocationName,
         createdById: req.user.sub,
+        origin: req.user.role === 'REQUESTER' ? 'PORTAIL' : 'MANUAL',
         ...(customFields ? { customFields } : {}),
         ...(assigneeIds.length > 0 ? { assignees: { connect: assigneeIds.map((id) => ({ id: Number(id) })) } } : {}),
         ...(observerIds.length > 0 ? { observers: { connect: observerIds.map((id) => ({ id: Number(id) })) } } : {}),
@@ -1912,6 +1914,7 @@ router.post('/:id/children', forbidTechnicianTicketEdits, requirePermission('tic
       urgency: parent.urgency,
       impact: parent.impact,
       source: 'PORTAL',
+      origin: 'PORTAIL',
       status: 'NEW',
       teamId: parent.teamId,
       assignedToId: parent.assignedToId || null,

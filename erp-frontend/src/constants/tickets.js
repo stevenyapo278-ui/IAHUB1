@@ -1,4 +1,4 @@
-import { Flame, AlertTriangle, Info, ArrowDown, Sparkles, Radio, Calendar, Clock, CheckCircle2 } from 'lucide-react';
+import { Flame, AlertTriangle, Info, ArrowDown, Sparkles, Radio, Calendar, Clock, CheckCircle2, User, Globe, Mail, Bot } from 'lucide-react';
 
 export const STATUS_OPTIONS = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER', 'SOLVED', 'CLOSED'];
 export const MANUAL_STATUS_OPTIONS = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER', 'SOLVED'];
@@ -24,6 +24,13 @@ export const SOURCE_LABELS = {
   Helpdesk: 'Helpdesk',
   Phone: 'Téléphone',
   Other: 'Autre',
+};
+export const ORIGIN_OPTIONS = ['MANUAL', 'PORTAIL', 'EMAIL', 'CHATBOT'];
+export const ORIGIN_CONFIG = {
+  MANUAL: { label: 'Manuel', bg: 'bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-400 border border-slate-200 dark:border-slate-500/25', Icon: User },
+  PORTAIL: { label: 'Portail', bg: 'bg-teal-50 text-teal-700 dark:bg-teal-500/15 dark:text-teal-400 border border-teal-200 dark:border-teal-500/25', Icon: Globe },
+  EMAIL: { label: 'Email', bg: 'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400 border border-blue-200 dark:border-blue-500/25', Icon: Mail },
+  CHATBOT: { label: 'Chatbot', bg: 'bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400 border border-violet-200 dark:border-violet-500/25', Icon: Bot },
 };
 export const URGENCY_IMPACT_OPTIONS = [
   { value: 'VERY_LOW', label: 'Très basse' },

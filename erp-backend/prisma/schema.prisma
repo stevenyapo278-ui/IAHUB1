@@ -106,6 +106,13 @@ enum TicketImpact {
   MAJOR
 }
 
+enum TicketOrigin {
+  MANUAL
+  PORTAIL
+  EMAIL
+  CHATBOT
+}
+
 enum ProblemStatus {
   NEW
   IN_PROGRESS
@@ -429,6 +436,7 @@ model Ticket {
   // Champs alignés sur le formulaire de ticket classique
   type       TicketType    @default(INCIDENT)
   source     String? // "Helpdesk", "Email", "Téléphone", etc.
+  origin     TicketOrigin? // Origine de création : MANUAL, PORTAIL, EMAIL, CHATBOT (read-only, défini à la création)
   urgency    TicketUrgency @default(MEDIUM)
   impact     TicketImpact  @default(MEDIUM)
   externalId String? // "ID externe" (référence externe optionnelle)

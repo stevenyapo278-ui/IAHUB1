@@ -137,6 +137,12 @@ export default function TicketFilterBar({
               onRemove={() => onUpdate('source', '')}
             />
           )}
+          {filters.origin && (
+            <ActiveChip
+              label={{ MANUAL: 'Manuel', PORTAIL: 'Portail', EMAIL: 'Email', CHATBOT: 'Chatbot' }[filters.origin] || filters.origin}
+              onRemove={() => onUpdate('origin', '')}
+            />
+          )}
           {filters.teamId && (
             <ActiveChip
               label={teams.find(t => String(t.id) === filters.teamId)?.name || `Équipe #${filters.teamId}`}

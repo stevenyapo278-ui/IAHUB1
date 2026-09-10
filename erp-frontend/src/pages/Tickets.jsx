@@ -63,7 +63,7 @@ import DataGrid from '../components/DataGrid';
 import TicketFilterBar from '../components/TicketFilterBar';
 import {
   STATUS_OPTIONS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS, URGENCY_IMPACT_OPTIONS,
-  STATUS_CONFIG,
+  STATUS_CONFIG, ORIGIN_CONFIG,
 } from '../constants/tickets';
 
 // Vue par défaut « à la GLPI » : tous les statuts sont visibles (NEW, OPEN,
@@ -182,6 +182,7 @@ function TicketNumberRenderer({ data, context }) {
 function TicketInfoRenderer({ data, context }) {
   if (!data) return null;
   const { debouncedSearch } = context || {};
+  const originConf = data.origin ? ORIGIN_CONFIG[data.origin] : null;
   return (
     <div className="flex flex-col justify-center h-full py-1 min-w-0 w-full overflow-hidden leading-snug">
       {/* Row 1: Title + Badges — le N° vit dans sa propre colonne « N° » */}
@@ -193,6 +194,12 @@ function TicketInfoRenderer({ data, context }) {
         >
           <HighlightText text={data.title} query={debouncedSearch} />
         </Link>
+        {originConf && (
+          <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[9px] font-bold shrink-0 ${originConf.bg}`}>
+            <originConf.Icon className="w-2.5 h-2.5" />
+            {originConf.label}
+          </span>
+        )}
         {data.aiProcessed && (
           <span className="px-1.5 py-0.5 rounded-md text-[9px] font-extrabold bg-purple-500/15 text-purple-600 dark:text-purple-400 shrink-0">
             IA
@@ -843,6 +850,7 @@ export default function Tickets() {
     approvalStatus: searchParams.get('approvalStatus') || '',
     priority: searchParams.get('priority') || '',
     source: searchParams.get('source') || '',
+    origin: searchParams.get('origin') || '',
     category: searchParams.get('category') || '',
     teamId: searchParams.get('teamId') || '',
     assignedToId: searchParams.get('assignedToId') || '',
@@ -934,6 +942,7 @@ export default function Tickets() {
     if (filters.status) p.set('status', filters.status);
     if (filters.priority) p.set('priority', filters.priority);
     if (filters.source) p.set('source', filters.source);
+    if (filters.origin) p.set('origin', filters.origin);
     if (filters.category) p.set('category', filters.category);
     if (filters.teamId) p.set('teamId', filters.teamId);
     if (filters.assignedToId) p.set('assignedToId', filters.assignedToId);
@@ -1032,6 +1041,7 @@ export default function Tickets() {
     if (filters.status) params.status = filters.status;
     if (filters.priority) params.priority = filters.priority;
     if (filters.source) params.source = filters.source;
+    if (filters.origin) params.origin = filters.origin;
     if (filters.category) params.category = filters.category;
     if (filters.teamId) params.teamId = filters.teamId;
     if (filters.assignedToId) params.assignedToId = filters.assignedToId;
@@ -1070,6 +1080,7 @@ export default function Tickets() {
     if (filters.status) params.status = filters.status;
     if (filters.priority) params.priority = filters.priority;
     if (filters.source) params.source = filters.source;
+    if (filters.origin) params.origin = filters.origin;
     if (filters.category) params.category = filters.category;
     if (filters.teamId) params.teamId = filters.teamId;
     if (filters.assignedToId) params.assignedToId = filters.assignedToId;
@@ -1136,7 +1147,7 @@ export default function Tickets() {
 
   async function exportAll(fmt = 'csv') {
     const params = {};
-    for (const key of ['status', 'priority', 'category', 'teamId', 'assignedToId', 'mine', 'approvalStatus', 'source', 'aiProcessed', 'closeSuggested']) {
+    for (const key of ['status', 'priority', 'category', 'teamId', 'assignedToId', 'mine', 'approvalStatus', 'source', 'origin', 'aiProcessed', 'closeSuggested']) {
       const v = filters[key];
       if (v !== undefined && v !== '' && v !== null) params[key] = v;
     }
