@@ -176,14 +176,9 @@ export function LoginFormCard({ title, subtitle, footer }) {
 
           {/* Mot de passe */}
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface-variant" htmlFor="login-password">
-                Mot de passe
-              </label>
-              <Link to="/forgot-password" className="text-xs text-blue-600 dark:text-blue-400 hover:underline transition-colors font-bold">
-                Oublié ?
-              </Link>
-            </div>
+            <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface-variant" htmlFor="login-password">
+              Mot de passe
+            </label>
             <div className="relative">
               <Lock className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-on-surface-variant/60 pointer-events-none" />
               <input
