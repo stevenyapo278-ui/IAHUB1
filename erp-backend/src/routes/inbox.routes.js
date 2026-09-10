@@ -351,6 +351,53 @@ router.get('/logs', requirePermission('inbox.sync', ['ADMIN', 'TECHNICIAN']), as
   }
 });
 
+// Liste des mails envoyés (OUTBOUND TicketMessages) avec pagination et recherche
+router.get('/sent', requirePermission('inbox.sync', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const offset = Number(req.query.offset) || 0;
+    const search = req.query.q || null;
+
+    const where = { direction: 'OUTBOUND' };
+    if (search) {
+      where.OR = [
+        { subject: { contains: search, mode: 'insensitive' } },
+        { sender: { contains: search, mode: 'insensitive' } },
+        { recipients: { has: search } },
+      ];
+    }
+
+    const [messages, total] = await Promise.all([
+      prisma.ticketMessage.findMany({
+        where,
+        orderBy: { timestamp: 'desc' },
+        skip: offset,
+        take: limit,
+        select: {
+          id: true,
+          ticketId: true,
+          direction: true,
+          sender: true,
+          recipients: true,
+          ccRecipients: true,
+          subject: true,
+          body: true,
+          bodyHtml: true,
+          timestamp: true,
+          summary: true,
+          ticketStatusAtTime: true,
+          ticket: { select: { id: true, title: true, status: true, priority: true } },
+        },
+      }),
+      prisma.ticketMessage.count({ where }),
+    ]);
+
+    res.json({ messages, total, limit, offset });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Détail d'un email reçu
 router.get('/:id', async (req, res) => {
   const scope = await buildEmailScope(req.user);

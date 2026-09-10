@@ -426,6 +426,15 @@ export default function Inbox() {
   const [retryTo, setRetryTo] = useState('');
   const [retryingAll, setRetryingAll] = useState(false);
 
+  // ── Modale mails envoyés ────────────────────────────────────────────
+  const [showSentModal, setShowSentModal] = useState(false);
+  const [sentEmails, setSentEmails] = useState([]);
+  const [sentTotal, setSentTotal] = useState(0);
+  const [sentLoading, setSentLoading] = useState(false);
+  const [sentPage, setSentPage] = useState(0);
+  const [sentSearch, setSentSearch] = useState('');
+  const SENT_LIMIT = 30;
+
   // Ouvre la modale de relance avec une plage par défaut : 7 derniers jours
   function openRetryModal() {
     const sevenDaysAgo = new Date(Date.now() - 7 * 86400000);
@@ -915,6 +924,29 @@ export default function Inbox() {
     fetchLogs('', 0);
   }
 
+  async function fetchSentEmails(page, q) {
+    setSentLoading(true);
+    try {
+      const params = { limit: SENT_LIMIT, offset: page * SENT_LIMIT };
+      if (q) params.q = q;
+      const { data } = await api.get('/inbox/sent', { params });
+      setSentEmails(data.messages);
+      setSentTotal(data.total);
+    } catch {
+      setSentEmails([]);
+      setSentTotal(0);
+    } finally {
+      setSentLoading(false);
+    }
+  }
+
+  function openSentModal() {
+    setSentSearch('');
+    setSentPage(0);
+    setShowSentModal(true);
+    fetchSentEmails(0, '');
+  }
+
   function keyOfEmail(email) {
     return email.conversationId || `single-${email.id}`;
   }
@@ -1013,6 +1045,14 @@ export default function Inbox() {
               <span className="hidden sm:inline">Logs IA</span>
             </button>
           )}
+          <button
+            onClick={openSentModal}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 text-xs font-semibold transition-all cursor-pointer"
+            title="Historique des mails envoyés"
+          >
+            <Send className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Mails envoyés</span>
+          </button>
           <button
             onClick={() => setShowRulesModal(true)}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-violet-500/40 text-violet-600 dark:text-violet-400 hover:bg-violet-500/10 text-xs font-semibold transition-all cursor-pointer"
@@ -1921,6 +1961,155 @@ export default function Inbox() {
                           <span className="font-bold text-red-300">#{e.id}</span> {e.subject} — {e.error}
                         </div>
                       ))}
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
+
+      {/* ── Modale Mails envoyés ─────────────────────────────────────────── */}
+      {createPortal(
+        <AnimatePresence>
+          {showSentModal && (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                onClick={() => setShowSentModal(false)}
+                className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer"
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 16 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 16 }}
+                transition={{ type: 'spring', duration: 0.35, bounce: 0.15 }}
+                className="relative bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl max-w-5xl w-full p-6 card-shadow flex flex-col gap-4 overflow-hidden max-h-[90vh]"
+              >
+                <div className="flex justify-between items-center pb-3 border-b border-outline-variant/30">
+                  <h3 className="text-base font-bold text-on-surface flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-emerald-500/10">
+                      <Send className="w-4 h-4 text-emerald-400" />
+                    </div>
+                    Mails envoyés
+                    <span className="text-xs font-normal text-on-surface-variant">({sentTotal} mails)</span>
+                  </h3>
+                  <motion.button onClick={() => setShowSentModal(false)} whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }} className="p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer">
+                    <X className="w-4 h-4" />
+                  </motion.button>
+                </div>
+
+                {/* Recherche */}
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/60" />
+                  <input
+                    type="text"
+                    placeholder="Rechercher par sujet, expéditeur, destinataire…"
+                    value={sentSearch}
+                    onChange={(e) => setSentSearch(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { setSentPage(0); fetchSentEmails(0, sentSearch); } }}
+                    className="w-full bg-surface border border-outline-variant/40 rounded-xl pl-9 pr-8 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                  />
+                  {sentSearch && (
+                    <button onClick={() => { setSentSearch(''); setSentPage(0); fetchSentEmails(0, ''); }} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant/50 hover:text-on-surface cursor-pointer">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Contenu */}
+                <div className="flex-1 overflow-y-auto min-h-0">
+                  {sentLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                      <RefreshCw className="w-5 h-5 text-emerald-400 animate-spin" />
+                      <span className="ml-2 text-sm text-on-surface-variant">Chargement...</span>
+                    </div>
+                  ) : sentEmails.length === 0 ? (
+                    <div className="text-center py-12 text-on-surface-variant/60">
+                      <Send className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                      <p className="text-sm">Aucun mail envoyé trouvé</p>
+                    </div>
+                  ) : (
+                    <div className="border border-outline-variant/30 rounded-xl overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-surface-container-high border-b border-outline-variant/30">
+                            <th className="text-left px-3 py-2.5 font-bold text-on-surface-variant uppercase tracking-wider">Date</th>
+                            <th className="text-left px-3 py-2.5 font-bold text-on-surface-variant uppercase tracking-wider">Destinataires</th>
+                            <th className="text-left px-3 py-2.5 font-bold text-on-surface-variant uppercase tracking-wider">Sujet</th>
+                            <th className="text-left px-3 py-2.5 font-bold text-on-surface-variant uppercase tracking-wider">Ticket</th>
+                            <th className="text-left px-3 py-2.5 font-bold text-on-surface-variant uppercase tracking-wider">Aperçu</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-outline-variant/20">
+                          {sentEmails.map((msg) => (
+                            <tr key={msg.id} className="hover:bg-surface-container-low/50 transition-colors">
+                              <td className="px-3 py-2.5 whitespace-nowrap">
+                                <span className="font-mono text-on-surface-variant">{new Date(msg.timestamp).toLocaleString('fr-FR')}</span>
+                              </td>
+                              <td className="px-3 py-2.5">
+                                <div className="flex flex-col gap-0.5">
+                                  {(msg.recipients || []).map((r, i) => (
+                                    <span key={i} className="text-on-surface font-medium truncate max-w-[200px]" title={r}>{r}</span>
+                                  ))}
+                                  {msg.ccRecipients?.length > 0 && (
+                                    <span className="text-[10px] text-on-surface-variant/60">CC : {msg.ccRecipients.join(', ')}</span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2.5">
+                                <span className="text-on-surface font-semibold truncate max-w-[250px] block" title={msg.subject}>{msg.subject || '—'}</span>
+                              </td>
+                              <td className="px-3 py-2.5 whitespace-nowrap">
+                                {msg.ticket ? (
+                                  <button
+                                    onClick={() => { setShowSentModal(false); navigate(`/tickets/${msg.ticket.id}`); }}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-[10px] font-bold hover:bg-primary/20 transition-colors cursor-pointer"
+                                    title={msg.ticket.title}
+                                  >
+                                    #{msg.ticket.id}
+                                    <ArrowUpRight className="w-2.5 h-2.5" />
+                                  </button>
+                                ) : (
+                                  <span className="text-on-surface-variant/40">—</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2.5">
+                                <span className="text-on-surface-variant text-[10px] line-clamp-2 leading-relaxed" title={msg.body || msg.bodyHtml?.replace(/<[^>]+>/g, ' ') || ''}>
+                                  {msg.summary || msg.body?.substring(0, 120) || msg.bodyHtml?.replace(/<[^>]+>/g, ' ').substring(0, 120) || '—'}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {/* Pagination */}
+                {sentTotal > SENT_LIMIT && (
+                  <div className="flex items-center justify-between pt-3 border-t border-outline-variant/30">
+                    <span className="text-xs text-on-surface-variant">
+                      {sentPage * SENT_LIMIT + 1}–{Math.min((sentPage + 1) * SENT_LIMIT, sentTotal)} sur {sentTotal}
+                    </span>
+                    <div className="flex gap-2">
+                      <button
+                        disabled={sentPage === 0}
+                        onClick={() => { const p = sentPage - 1; setSentPage(p); fetchSentEmails(p, sentSearch); }}
+                        className="px-3 py-1.5 rounded-lg border border-outline-variant text-on-surface text-xs font-medium hover:bg-surface-container transition-colors cursor-pointer disabled:opacity-40"
+                      >
+                        Précédent
+                      </button>
+                      <button
+                        disabled={(sentPage + 1) * SENT_LIMIT >= sentTotal}
+                        onClick={() => { const p = sentPage + 1; setSentPage(p); fetchSentEmails(p, sentSearch); }}
+                        className="px-3 py-1.5 rounded-lg border border-outline-variant text-on-surface text-xs font-medium hover:bg-surface-container transition-colors cursor-pointer disabled:opacity-40"
+                      >
+                        Suivant
+                      </button>
                     </div>
                   </div>
                 )}

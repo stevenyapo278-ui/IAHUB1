@@ -49,13 +49,41 @@ function computeDefaultPosition(widgetType, existingLayout) {
   const meta = getWidgetMeta(widgetType);
   const w = meta?.defaultW || 4;
   const h = meta?.defaultH || 3;
+  const COLS = 12;
 
   if (existingLayout.length === 0) {
     return { x: 0, y: 0, w, h };
   }
 
-  const maxY = Math.max(...existingLayout.map((l) => l.y + l.h));
-  return { x: 0, y: maxY, w, h };
+  // Construire l'ensemble des cellules occupées
+  const occupied = new Set();
+  for (const { x, y, w: ew, h: eh } of existingLayout) {
+    for (let dx = 0; dx < ew; dx++) {
+      for (let dy = 0; dy < eh; dy++) {
+        occupied.add(`${x + dx},${y + dy}`);
+      }
+    }
+  }
+
+  // Plafond de recherche : 5 lignes au-delà du bas du layout existant
+  const maxY = Math.max(...existingLayout.map((l) => l.y + l.h)) + 5;
+
+  // Chercher le premier emplacement libre (gauche→droite, haut→bas)
+  for (let y = 0; y <= maxY; y++) {
+    for (let x = 0; x <= COLS - w; x++) {
+      let fits = true;
+      for (let dx = 0; dx < w && fits; dx++) {
+        for (let dy = 0; dy < h && fits; dy++) {
+          if (occupied.has(`${x + dx},${y + dy}`)) fits = false;
+        }
+      }
+      if (fits) return { x, y, w, h };
+    }
+  }
+
+  // Fallback : tout en bas à gauche
+  const bottomY = Math.max(...existingLayout.map((l) => l.y + l.h));
+  return { x: 0, y: bottomY, w, h };
 }
 
 export default function DashboardPage() {

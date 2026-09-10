@@ -140,7 +140,7 @@ export default function TicketDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { autonomousMode } = useSystemSettings();
+  const { autonomousMode, settings: systemSettings } = useSystemSettings();
   const [ticket, setTicket] = useState(null);    const [followup, setFollowup] = useState('');
   const [followupPrivate, setFollowupPrivate] = useState(false);
   const [events, setEvents] = useState([]);
@@ -1311,6 +1311,40 @@ export default function TicketDetail() {
                   {pConfig.label}
                 </span>
                 <SlaBadge ticket={ticket} />
+                {ticket.status === 'SOLVED' && ticket.solvedAt && canAssign && (() => {
+                  const autoCloseDays = systemSettings?.solvedAutoCloseDays ?? 3;
+                  if (autoCloseDays <= 0) return null;
+                  const solvedDate = new Date(ticket.solvedAt);
+                  const threshold = new Date(solvedDate);
+                  threshold.setDate(threshold.getDate() + autoCloseDays);
+                  const now = new Date();
+                  const canClose = now >= threshold;
+                  const remainingMs = threshold.getTime() - now.getTime();
+                  const remainingDays = Math.ceil(remainingMs / (1000 * 60 * 60 * 24));
+                  return (
+                    <button
+                      onClick={async () => {
+                        try {
+                          await api.patch(`/tickets/${id}`, { status: 'CLOSED' });
+                          toast.success('Ticket fermé avec succès');
+                          load();
+                        } catch (err) {
+                          toast.error(err.response?.data?.error || 'Échec de la fermeture');
+                        }
+                      }}
+                      disabled={!canClose}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                        canClose
+                          ? 'bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-400 border border-slate-300 dark:border-slate-500/25 hover:bg-slate-200 dark:hover:bg-slate-500/25'
+                          : 'bg-slate-50 text-slate-400 dark:bg-slate-500/5 dark:text-slate-500 border border-slate-200 dark:border-slate-500/10 cursor-not-allowed opacity-60'
+                      }`}
+                      title={canClose ? 'Appliquer la fermeture maintenant' : `Fermeture automatique dans ${remainingDays} jour${remainingDays > 1 ? 's' : ''}`}
+                    >
+                      <Lock className="w-3.5 h-3.5" />
+                      {canClose ? 'Appliquer la fermeture' : `Fermeture dans ${remainingDays}j`}
+                    </button>
+                  );
+                })()}
                 {linkedProblems.length > 0 && (
                   <div className="flex items-center gap-1.5 flex-wrap">
                     {linkedProblems.map((p) => (
@@ -1428,11 +1462,14 @@ export default function TicketDetail() {
               </div>
 
               {/* Grille d'informations rapides */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+              <div className={`grid gap-2.5 ${(ticket.status === 'SOLVED' || ticket.status === 'CLOSED') ? 'grid-cols-2 lg:grid-cols-5' : 'grid-cols-2 lg:grid-cols-4'}`}>
                 <InfoTile icon={User} label="Demandeur" value={ticket.requester?.fullName || ticket.sourceName || ticket.sourceEmail || '—'} />
                 <InfoTile icon={Layers} label="Équipe" value={ticket.team?.name || 'Non assignée'} />
                 <InfoTile icon={MapPin} label="Lieu" value={ticket.locationName || '—'} tone="violet" />
                 <InfoTile icon={Clock} label="Créé le" value={new Date(ticket.createdAt).toLocaleDateString('fr-FR')} tone="amber" />
+                {(ticket.status === 'SOLVED' || ticket.status === 'CLOSED') && ticket.solvedAt && (
+                  <InfoTile icon={CheckCircle2} label="Résolu le" value={new Date(ticket.solvedAt).toLocaleDateString('fr-FR')} tone="emerald" />
+                )}
               </div>
 
               {/* Dates en ligne */}
@@ -1460,6 +1497,20 @@ export default function TicketDetail() {
                     </span>
                   )}
                 </span>
+                {ticket.solvedAt && (
+                  <span className="flex items-center gap-1.5 shrink-0">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                    <span className="font-semibold">Résolu :</span>
+                    <span className="font-mono">{new Date(ticket.solvedAt).toLocaleString('fr-FR')}</span>
+                  </span>
+                )}
+                {ticket.closedAt && (
+                  <span className="flex items-center gap-1.5 shrink-0">
+                    <Clock className="w-3 h-3 text-slate-400" />
+                    <span className="font-semibold">Fermé :</span>
+                    <span className="font-mono">{new Date(ticket.closedAt).toLocaleString('fr-FR')}</span>
+                  </span>
+                )}
               </div>
             </div>
 

@@ -334,6 +334,7 @@ function ActionsRenderer({ data, context }) {
   if (!data) return null;
   const { canDelete, askDeleteOne } = context || {};
   const btnCls = "inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground";
+  const [hovered, setHovered] = useState(false);
   return (
     <div className="flex h-full items-center gap-1">
       {canDelete && (
@@ -342,14 +343,56 @@ function ActionsRenderer({ data, context }) {
           <Trash2 className="h-4 w-4" />
         </button>
       )}
-      <Link
-        to={`/tickets/${data.id}`}
-        aria-label="Voir"
-        className={btnCls}
-        onClick={(e) => e.stopPropagation()}
+      <div
+        className="relative"
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
       >
-        <ChevronRight className="h-4 w-4" />
-      </Link>
+        <Link
+          to={`/tickets/${data.id}`}
+          aria-label="Voir"
+          className={btnCls}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <ChevronRight className="h-4 w-4" />
+        </Link>
+        {hovered && (
+          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 pointer-events-none">
+            <div className="rounded-xl border border-border/40 bg-surface shadow-xl p-3 min-w-[220px] max-w-[300px] space-y-1.5">
+              <p className="text-[11px] font-bold text-foreground truncate">{data.title || `Ticket #${data.id}`}</p>
+              <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full font-bold ${STATUS_CONFIG[data.status]?.bg || ''}`}>
+                  {STATUS_CONFIG[data.status]?.label || data.status}
+                </span>
+                <span className="font-bold">{data.priority}</span>
+              </div>
+              {data.requester?.fullName && (
+                <p className="text-[10px] text-muted-foreground">
+                  <span className="font-semibold">Demandeur :</span> {data.requester.fullName}
+                </p>
+              )}
+              {data.assignedTo?.fullName && (
+                <p className="text-[10px] text-muted-foreground">
+                  <span className="font-semibold">Assigné à :</span> {data.assignedTo.fullName}
+                </p>
+              )}
+              <p className="text-[10px] text-muted-foreground">
+                <span className="font-semibold">Créé le :</span> {new Date(data.createdAt).toLocaleString('fr-FR')}
+              </p>
+              {data.solvedAt && (
+                <p className="text-[10px] text-emerald-600 dark:text-emerald-400">
+                  <span className="font-semibold">Résolu le :</span> {new Date(data.solvedAt).toLocaleString('fr-FR')}
+                </p>
+              )}
+              {data.closedAt && (
+                <p className="text-[10px] text-muted-foreground">
+                  <span className="font-semibold">Fermé le :</span> {new Date(data.closedAt).toLocaleString('fr-FR')}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -563,6 +606,8 @@ const DEFAULT_COLUMNS = [
   { key: 'observers', label: 'Observateurs', visible: true },
   { key: 'createdAt', label: 'Ouvert', visible: true },
   { key: 'updatedAt', label: 'Modifié', visible: true },
+  { key: 'solvedAt', label: 'Résolu', visible: false },
+  { key: 'closedAt', label: 'Fermé', visible: false },
 ];
 
 // Champs de tri supportés par GET /tickets (paramètre sortBy) —
@@ -1436,6 +1481,24 @@ export default function Tickets() {
       cols.push({
         field: 'updatedAt',
         headerName: 'MODIFIÉ',
+        width: 120,
+        valueFormatter: (p) => formatDateShort(p.value),
+      });
+    }
+
+    if (visibleKeys.has('solvedAt')) {
+      cols.push({
+        field: 'solvedAt',
+        headerName: 'RÉSOLU',
+        width: 120,
+        valueFormatter: (p) => formatDateShort(p.value),
+      });
+    }
+
+    if (visibleKeys.has('closedAt')) {
+      cols.push({
+        field: 'closedAt',
+        headerName: 'Fermé',
         width: 120,
         valueFormatter: (p) => formatDateShort(p.value),
       });

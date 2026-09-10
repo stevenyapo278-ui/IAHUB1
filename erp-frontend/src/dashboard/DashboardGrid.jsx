@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef } from 'react';
-import { ResponsiveGridLayout, useContainerWidth, verticalCompactor } from 'react-grid-layout';
+import { ResponsiveGridLayout, useContainerWidth, verticalCompactor, noCompactor } from 'react-grid-layout';
 import { motion } from 'framer-motion';
 import { GripVertical, X } from 'lucide-react';
 import 'react-grid-layout/css/styles.css';
@@ -142,9 +142,10 @@ export default function DashboardGrid({
             rowHeight={ROW_HEIGHT}
             margin={MARGIN}
             containerPadding={[0, 0]}
-            compactor={verticalCompactor}
+            compactor={isEditing ? noCompactor : verticalCompactor}
             dragConfig={dragConfig}
             resizeConfig={resizeConfig}
+            preventCollision={isEditing}
             onLayoutChange={handleLayoutChange}
             onBreakpointChange={handleBreakpointChange}
           >
