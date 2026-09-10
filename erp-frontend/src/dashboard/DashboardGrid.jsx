@@ -15,6 +15,7 @@ const ROW_HEIGHT = 90;
 const SIZE_CONSTRAINTS = {
   KPIs:       { minW: 2, minH: 2, maxW: 4, maxH: 3 },
   Graphiques: { minW: 3, minH: 3, maxW: 8, maxH: 6 },
+  Tableaux:   { minW: 4, minH: 3, maxW: 8, maxH: 8 },
   Données:    { minW: 3, minH: 2, maxW: 6, maxH: 5 },
 };
 const DEFAULT_CONSTRAINTS = { minW: 3, minH: 2, maxW: 6, maxH: 4 };

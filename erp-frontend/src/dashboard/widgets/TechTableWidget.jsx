@@ -20,7 +20,7 @@ export default function TechTableWidget({ techPerformance, config }) {
   }
 
   return (
-    <div className="overflow-x-auto">
+    <div className="h-full overflow-x-auto">
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr className="border-b border-outline-variant/20">

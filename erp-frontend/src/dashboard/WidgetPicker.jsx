@@ -28,7 +28,7 @@ const ICON_MAP = {
   CheckCircle2,
 };
 
-const CATEGORY_ORDER = ['KPIs', 'Graphiques', 'Données'];
+const CATEGORY_ORDER = ['KPIs', 'Graphiques', 'Tableaux', 'Données'];
 
 export default function WidgetPicker({ open, onClose, onSelect, existingWidgets = [] }) {
   const [search, setSearch] = useState('');

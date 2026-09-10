@@ -23,16 +23,18 @@ export const WIDGET_CATALOG = [
   { type: 'chart_gauge',          name: 'Jauge',                 category: 'Graphiques', defaultW: 3, defaultH: 3, icon: 'Gauge',         description: 'Jauge circulaire' },
   { type: 'chart_donut',          name: 'Donut',                 category: 'Graphiques', defaultW: 4, defaultH: 4, icon: 'PieChart',      description: 'Donut avec légende' },
   { type: 'chart_heatmap',        name: 'Activité tickets',      category: 'Graphiques', defaultW: 8, defaultH: 4, icon: 'Grid3X3',       description: 'Heatmap jour × semaine' },
-  { type: 'team_workload',        name: 'Équipe',                category: 'Données',   defaultW: 6, defaultH: 4, icon: 'Users',         description: 'Charge par membre' },
 
-  // ── Data widgets ──
-  { type: 'tech_performance',     name: 'Performance techniciens', category: 'Données', defaultW: 6, defaultH: 4, icon: 'Users',         description: 'Classement techniciens' },
-  { type: 'recent_tickets',       name: 'Derniers tickets',       category: 'Données', defaultW: 6, defaultH: 4, icon: 'Activity',      description: 'Activité récente' },
-  { type: 'sla_status',           name: 'Statut SLA',             category: 'Données', defaultW: 6, defaultH: 3, icon: 'Clock',         description: 'Tableau SLA par priorité' },
-  { type: 'team_breakdown',       name: 'Charge par équipe',      category: 'Données', defaultW: 6, defaultH: 4, icon: 'Users',         description: 'Répartition par équipe' },
-  { type: 'ai_pipeline',          name: 'Pipeline IA',            category: 'Données', defaultW: 4, defaultH: 3, icon: 'Sparkles',      description: 'Stats traitement IA' },
-  { type: 'quick_access',         name: 'Accès rapides',          category: 'Données', defaultW: 3, defaultH: 2, icon: 'Zap',           description: 'Raccourcis modules' },
-  { type: 'integrations_health',  name: 'Santé intégrations',     category: 'Données', defaultW: 4, defaultH: 3, icon: 'ShieldCheck',   description: 'État des connecteurs' },
+  // ── Tableaux / Listes ──
+  { type: 'team_workload',        name: 'Équipe',                category: 'Tableaux',  defaultW: 6, defaultH: 4, icon: 'Users',         description: 'Charge par membre' },
+  { type: 'tech_performance',     name: 'Performance techniciens', category: 'Tableaux', defaultW: 6, defaultH: 4, icon: 'Users',         description: 'Classement techniciens' },
+  { type: 'recent_tickets',       name: 'Derniers tickets',       category: 'Tableaux', defaultW: 6, defaultH: 4, icon: 'Activity',      description: 'Activité récente' },
+  { type: 'sla_status',           name: 'Statut SLA',             category: 'Tableaux', defaultW: 6, defaultH: 3, icon: 'Clock',         description: 'Tableau SLA par priorité' },
+
+  // ── Données / Autres ──
+  { type: 'team_breakdown',       name: 'Charge par équipe',      category: 'Données',  defaultW: 6, defaultH: 4, icon: 'Users',         description: 'Répartition par équipe' },
+  { type: 'ai_pipeline',          name: 'Pipeline IA',            category: 'Données',  defaultW: 4, defaultH: 3, icon: 'Sparkles',      description: 'Stats traitement IA' },
+  { type: 'quick_access',         name: 'Accès rapides',          category: 'Données',  defaultW: 3, defaultH: 2, icon: 'Zap',           description: 'Raccourcis modules' },
+  { type: 'integrations_health',  name: 'Santé intégrations',     category: 'Données',  defaultW: 4, defaultH: 3, icon: 'ShieldCheck',   description: 'État des connecteurs' },
 ];
 
 // Map type → component path (lazy loaded)
