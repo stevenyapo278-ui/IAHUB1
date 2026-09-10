@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Search, Check, Plus,
   BarChart3, TrendingUp, Activity, Sparkles, Users, Clock,
-  PieChart, Layers, Gauge, Radar, ListChecks, Target, Zap,
+  PieChart, Layers, Gauge, Radar, ListChecks, Grid3X3, Zap,
   ShieldCheck, Ticket, AlertTriangle, CheckCircle2,
 } from 'lucide-react';
 import { WIDGET_CATALOG } from './widgetCatalog';
@@ -20,7 +20,7 @@ const ICON_MAP = {
   Gauge,
   Radar,
   ListChecks,
-  Target,
+  Grid3X3,
   Zap,
   ShieldCheck,
   Ticket,
