@@ -385,6 +385,7 @@ router.get('/export', async (req, res) => {
     select: {
       id: true, title: true, status: true, priority: true, category: true, type: true,
       source: true, requesterId: true, assignedToId: true, teamId: true,
+      locationName: true,
       createdAt: true, solvedAt: true, closedAt: true,
       slaResponseDueAt: true, slaResolutionDueAt: true, slaBreachedAt: true, firstResponseAt: true,
       aiProcessed: true, approvalStatus: true, requester: { select: { email: true, fullName: true, avatarUrl: true } },
@@ -442,7 +443,7 @@ router.get('/export', async (req, res) => {
         requester: t.requester?.fullName ? `${t.requester.fullName} (${t.requester.email})` : (t.requester?.email || ''),
         technician: t.assignedTo?.fullName ? `${t.assignedTo.fullName} (${t.assignedTo.email})` : (t.assignedTo?.email || ''),
         team: t.team?.name || '',
-        location: '',
+        location: t.locationName || '',
         createdAt: t.createdAt,
         solvedAt: t.solvedAt,
         closedAt: t.closedAt,
@@ -464,7 +465,7 @@ router.get('/export', async (req, res) => {
     const rows = tickets.map((t) => [
       t.id, `"${(t.title || '').replace(/"/g, '""')}"`, t.status, t.priority, `"${(t.category || '').replace(/"/g, '""')}"`,
       t.type, t.source || '', t.requester?.fullName ? `${t.requester.fullName} (${t.requester.email})` : (t.requester?.email || ''), t.assignedTo?.fullName ? `${t.assignedTo.fullName} (${t.assignedTo.email})` : (t.assignedTo?.email || ''), t.team?.name || '',
-      '', t.createdAt?.toISOString() || '', t.solvedAt?.toISOString() || '',
+      t.locationName || '', t.createdAt?.toISOString() || '', t.solvedAt?.toISOString() || '',
       t.closedAt?.toISOString() || '', t.slaResponseDueAt?.toISOString() || '', t.slaResolutionDueAt?.toISOString() || '',
       t.slaBreachedAt?.toISOString() || '', t.firstResponseAt?.toISOString() || '', t.aiProcessed ? 'oui' : 'non', t.approvalStatus,
     ]);
