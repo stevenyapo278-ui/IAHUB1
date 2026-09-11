@@ -4,6 +4,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import MainLayout from './layouts/MainLayout';
 import ProtectedRoute from './components/ProtectedRoute';
 import ErrorBoundary from './components/ErrorBoundary';
+import MarieLoader from './components/MarieLoader';
 
 // ─── Code splitting par route ────────────────────────────────────────────────
 // Chaque page est un chunk séparé chargé à la demande : la page de login ne
@@ -55,44 +56,16 @@ function PageLoader() {
       aria-busy="true"
       aria-label="Chargement de la plateforme"
     >
-      {/* Logo animé : halo pulsant + pastille dégradée */}
-      <div className="relative flex items-center justify-center">
-        <motion.span
-          className="absolute w-20 h-20 rounded-full border-2 border-primary/40"
-          animate={{ scale: [1, 1.45], opacity: [0.6, 0] }}
-          transition={{ duration: 1.6, repeat: Infinity, ease: 'easeOut' }}
-        />
-        <motion.span
-          className="absolute w-20 h-20 rounded-full border-2 border-primary/25"
-          animate={{ scale: [1, 1.45], opacity: [0.6, 0] }}
-          transition={{ duration: 1.6, repeat: Infinity, ease: 'easeOut', delay: 0.8 }}
-        />
-        <motion.div
-          initial={{ opacity: 0, scale: 0.85 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.35, ease: EASE }}
-          className="relative w-14 h-14 rounded-2xl bg-gradient-to-br from-primary to-primary/70 shadow-xl shadow-primary/25 flex items-center justify-center"
-        >
-          <svg viewBox="0 0 24 24" fill="none" className="w-7 h-7 text-primary-foreground">
-            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </motion.div>
-      </div>
-
-      {/* Nom + points bondissants */}
-      <div className="flex flex-col items-center gap-2.5">
-        <span className="text-sm font-bold tracking-wide text-on-surface">ERP ITSM</span>
-        <div className="flex items-center gap-1.5">
-          {[0, 1, 2].map((i) => (
-            <motion.span
-              key={i}
-              className="w-1.5 h-1.5 rounded-full bg-primary"
-              animate={{ y: [0, -5, 0], opacity: [0.35, 1, 0.35] }}
-              transition={{ duration: 0.9, repeat: Infinity, delay: i * 0.15, ease: 'easeInOut' }}
-            />
-          ))}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.85 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.35, ease: EASE }}
+        className="flex flex-col items-center gap-4"
+      >
+        <div className="[&>div]:scale-150">
+          <MarieLoader />
         </div>
-      </div>
+      </motion.div>
 
       {/* Barre de progression fine */}
       <div className="h-0.5 w-40 overflow-hidden rounded-full bg-surface-container-high">
