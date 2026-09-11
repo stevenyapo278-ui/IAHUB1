@@ -51,24 +51,17 @@ function forbidTechnicianTicketEdits(req, res, next) {
 }
 
 // Middleware PATCH : un technicien assigné ne peut changer que le statut.
-// Pour tout autre champ, on bloque. Les autres rôles passent directement.
+// Un technicien peut modifier tous les champs d'un ticket appartenant à son équipe.
+// Les autres rôles passent directement.
 async function allowTechnicianStatusOnly(req, res, next) {
   if (!req.user || req.user.role !== 'TECHNICIAN') return next();
 
   const id = Number(req.params.id);
-  const bodyKeys = Object.keys(req.body);
 
-  // Vérifier que seul le champ "status" est envoyé
-  const forbiddenFields = bodyKeys.filter((k) => k !== 'status');
-  if (forbiddenFields.length > 0) {
-    return res.status(403).json({ error: TECHNICIAN_EDIT_ERROR });
-  }
-
-  // Vérifier que le technicien est bien assigné à ce ticket
   try {
     const ticket = await prisma.ticket.findUnique({
       where: { id },
-      select: { status: true, assignedToId: true, assignees: { select: { id: true } } },
+      select: { status: true, teamId: true, assignedToId: true, assignees: { select: { id: true } } },
     });
     if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
 
@@ -77,12 +70,28 @@ async function allowTechnicianStatusOnly(req, res, next) {
       return res.status(403).json({ error: 'Aucune modification ne peut être apportée par un technicien sur un ticket résolu ou fermé.' });
     }
 
+    // Ticket de l'équipe du technicien → tous les champs autorisés
+    if (ticket.teamId && ticket.teamId === req.user.teamId) {
+      req.isTechnicianTeamEdit = true;
+      return next();
+    }
+
+    // Ticket assigné au technicien → statut uniquement
     const isAssigned =
       ticket.assignedToId === req.user.sub ||
       ticket.assignees.some((a) => a.id === req.user.sub);
+
+    const bodyKeys = Object.keys(req.body);
+    const forbiddenFields = bodyKeys.filter((k) => k !== 'status');
+
     if (!isAssigned) {
-      return res.status(403).json({ error: 'Vous ne pouvez modifier que les tickets qui vous sont assignés.' });
+      return res.status(403).json({ error: 'Vous ne pouvez modifier que les tickets de votre équipe ou qui vous sont assignés.' });
     }
+
+    if (forbiddenFields.length > 0) {
+      return res.status(403).json({ error: TECHNICIAN_EDIT_ERROR });
+    }
+
     req.isTechnicianStatusOnly = true;
   } catch (err) {
     return res.status(500).json({ error: 'Erreur lors de la vérification des droits.' });
@@ -92,7 +101,7 @@ async function allowTechnicianStatusOnly(req, res, next) {
 }
 
 function requireTicketAssignOrTechnicianStatusOnly(req, res, next) {
-  if (req.isTechnicianStatusOnly) return next();
+  if (req.isTechnicianStatusOnly || req.isTechnicianTeamEdit) return next();
   return requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN'])(req, res, next);
 }
 
@@ -700,33 +709,39 @@ router.get('/:id', async (req, res) => {
 
 // Télécharge le contenu d'une pièce jointe locale
 router.get('/:id/attachments/:attachmentId/file', async (req, res) => {
-  const attachment = await prisma.ticketAttachment.findFirst({
-    where: { id: Number(req.params.attachmentId), ticketId: Number(req.params.id) },
-  });
-  if (!attachment) return res.status(404).json({ error: 'Pièce jointe introuvable' });
+  try {
+    const attachment = await prisma.ticketAttachment.findFirst({
+      where: { id: Number(req.params.attachmentId), ticketId: Number(req.params.id) },
+    });
+    if (!attachment) return res.status(404).json({ error: 'Pièce jointe introuvable' });
 
-  // Un demandeur ne télécharge que les pièces jointes de ses propres tickets ou observés
-  if (isRequesterOnly(req.user)) {
-    const ownerTicket = await prisma.ticket.findFirst({ where: { id: attachment.ticketId, requesterId: req.user.sub }, select: { id: true } });
-    const isObserver = await prisma.ticket.findFirst({ where: { id: attachment.ticketId, observers: { some: { id: req.user.sub } } }, select: { id: true } });
-    if (!ownerTicket && !isObserver) return res.status(404).json({ error: 'Pièce jointe introuvable' });
-  }
-
-  if (attachment.localFilepath) {
-    // Résolution relative à process.cwd() (= /app/erp-backend) : les chemins sont stockés
-    // sous la forme 'uploads/<sous-dossier>/<fichier>' et le volume Docker est monté sur
-    // <WORKDIR>/uploads. __dirname pointerait vers src/routes/ → fichiers introuvables.
-    const localPath = path.isAbsolute(attachment.localFilepath)
-      ? attachment.localFilepath
-      : path.join(process.cwd(), attachment.localFilepath);
-    if (fs.existsSync(localPath)) {
-      res.setHeader('Content-Type', attachment.mimeType || 'application/octet-stream');
-      res.setHeader('Content-Disposition', `inline; filename="${attachment.filename}"`);
-      return res.sendFile(localPath);
+    // Un demandeur ne télécharge que les pièces jointes de ses propres tickets ou observés
+    if (isRequesterOnly(req.user)) {
+      const ownerTicket = await prisma.ticket.findFirst({ where: { id: attachment.ticketId, requesterId: req.user.sub }, select: { id: true } });
+      const isObserver = await prisma.ticket.findFirst({ where: { id: attachment.ticketId, observers: { some: { id: req.user.sub } } }, select: { id: true } });
+      if (!ownerTicket && !isObserver) return res.status(404).json({ error: 'Pièce jointe introuvable' });
     }
-  }
 
-  return res.status(404).json({ error: 'Fichier non disponible sur ce serveur' });
+    if (attachment.localFilepath) {
+      // Résolution relative à process.cwd() (= /app/erp-backend) : les chemins sont stockés
+      // sous la forme 'uploads/<sous-dossier>/<fichier>' et le volume Docker est monté sur
+      // <WORKDIR>/uploads. __dirname pointerait vers src/routes/ → fichiers introuvables.
+      const localPath = path.isAbsolute(attachment.localFilepath)
+        ? attachment.localFilepath
+        : path.join(process.cwd(), attachment.localFilepath);
+      if (fs.existsSync(localPath)) {
+        res.setHeader('Content-Type', attachment.mimeType || 'application/octet-stream');
+        res.setHeader('Content-Disposition', `inline; filename="${attachment.filename}"`);
+        return res.sendFile(localPath);
+      }
+      console.error(`[ticket.routes] Fichier introuvable sur le disque: ${localPath}`);
+    }
+
+    return res.status(404).json({ error: 'Fichier non disponible sur ce serveur' });
+  } catch (err) {
+    console.error('[ticket.routes] Erreur téléchargement pièce jointe:', err);
+    return res.status(500).json({ error: 'Erreur lors du téléchargement' });
+  }
 });
 
 // Create ticket

@@ -512,6 +512,7 @@ async function createTicketFromChat(title, description, priority, userId) {
       requesterId: userId,
       createdById: userId,
       type: 'INCIDENT',
+      approvalStatus: 'PENDING',
     },
   });
   emitTicketCreated(ticket);
@@ -534,6 +535,7 @@ async function escalateToTechnician(message, userId) {
       requesterId: userId,
       createdById: userId,
       type: 'INCIDENT',
+      approvalStatus: 'PENDING',
     },
   });
   emitTicketCreated(ticket);

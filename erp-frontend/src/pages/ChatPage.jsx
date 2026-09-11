@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import MarkdownContent from '../components/MarkdownContent';
+import MarieLoader from '../components/MarieLoader';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip } from 'recharts';
 import {
   Send, Paperclip, Plus, MessageSquare, Trash2, BarChart2, Download,
   ThumbsUp, ThumbsDown, Copy, Reply, X, Bot, TrendingUp, AlertTriangle,
-  Timer, BarChart3, HelpCircle, Loader2, Pin, PinOff, Archive, ArchiveRestore,
+  Timer, BarChart3, HelpCircle, Pin, PinOff, Archive, ArchiveRestore,
   MoreHorizontal, Search, Users, Edit3, Check, ChevronDown, PlusCircle,
   Mic, MicOff, Volume2, VolumeX,
 } from 'lucide-react';
@@ -116,7 +117,11 @@ function MessageActions({ msg, onReply }) {
 }
 
 async function rateMessage(messageId, rating) {
-  try { await api.post('/chat/feedback', { messageId, rating }); } catch {}
+  try {
+    await api.post('/chat/feedback', { messageId, rating });
+  } catch (err) {
+    console.error('[ChatPage] Échec du feedback:', err);
+  }
 }
 
 // ── Sidebar conversation item ───────────────────────────────────────────
@@ -226,7 +231,7 @@ function WelcomeScreen({ onAction, userRole }) {
         <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-primary/30">
           <Bot className="w-8 h-8 text-white" />
         </div>
-        <h1 className="text-2xl font-bold text-on-surface mb-2">Assistant IA Helpdesk</h1>
+        <h1 className="text-2xl font-bold text-on-surface mb-2">MARIE</h1>
         <p className="text-on-surface-variant text-sm">Je peux vous aider avec vos tickets, statistiques, équipements et bien plus.</p>
       </motion.div>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 w-full">
@@ -268,7 +273,7 @@ export default function ChatPage() {
   const fileInputRef = useRef(null);
 
   // Voice recognition & synthesis
-  const [ttsEnabled, setTtsEnabled] = useState(true);
+  const [ttsEnabled, setTtsEnabled] = useState(false);
   const { isListening, transcript, error: voiceError, isSupported: voiceSupported, startListening, stopListening, resetTranscript } = useVoiceRecognition({
     onResult: (text) => {
       setInput(text);
@@ -564,7 +569,7 @@ export default function ChatPage() {
                 <Bot className="w-4 h-4 text-white" />
               </div>
               <div>
-                <h2 className="text-sm font-bold text-on-surface leading-tight">Assistant IA</h2>
+                <h2 className="text-sm font-bold text-on-surface leading-tight">MARIE</h2>
                 <p className="text-[10px] text-on-surface-variant leading-tight">Helpdesk IT Prosuma</p>
               </div>
             </div>
@@ -635,9 +640,8 @@ export default function ChatPage() {
               ))}
               {loading && (
                 <div className="flex justify-start">
-                  <div className="bg-surface-container border border-outline-variant/40 rounded-2xl rounded-bl-md px-4 py-3 flex items-center gap-2">
-                    <Loader2 className="w-4 h-4 text-primary animate-spin" />
-                    <span className="text-[12px] text-on-surface-variant">Réflexion...</span>
+                  <div className="bg-surface-container border border-outline-variant/40 rounded-2xl rounded-bl-md px-4 py-3 flex items-center">
+                    <MarieLoader />
                   </div>
                 </div>
               )}
@@ -668,7 +672,7 @@ export default function ChatPage() {
             )}
             <div className={`flex items-end gap-2 bg-surface-container border rounded-2xl px-4 py-3 shadow-sm ${isArchived ? 'border-amber-500/30 opacity-60' : 'border-outline-variant/60'}`}>
               <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept="image/*" className="hidden" />
-              <button onClick={() => fileInputRef.current?.click()} className="p-1.5 rounded-lg hover:bg-surface-container-high transition-colors cursor-pointer shrink-0 mb-0.5" title="Joindre une image" disabled={isArchived}>
+              <button onClick={() => fileInputRef.current?.click()} className="p-2 rounded-xl hover:bg-surface-container-high transition-colors cursor-pointer shrink-0 mb-0.5" title="Joindre une image" disabled={isArchived}>
                 <Paperclip className="w-4 h-4 text-on-surface-variant" />
               </button>
               <textarea
@@ -727,7 +731,7 @@ export default function ChatPage() {
               <div className="text-center mt-2 text-[12px] text-red-500">{voiceError}</div>
             )}
             <p className="text-[10px] text-on-surface-variant/50 text-center mt-2">
-              Assistant IA Prosuma — Peut faire des erreurs. Vérifiez les informations importantes.
+              MARIE — Peut faire des erreurs. Vérifiez les informations importantes.
             </p>
           </div>
         </div>

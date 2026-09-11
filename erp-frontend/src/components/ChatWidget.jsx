@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import MarkdownContent from './MarkdownContent';
+import MarieLoader from './MarieLoader';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip } from 'recharts';
 import { Download, BarChart2, Send, Paperclip, MessageSquare, Users, TrendingUp, AlertTriangle, Timer, BarChart3, HelpCircle, PlusCircle, X, Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
 import VoiceVisualizer from './VoiceVisualizer';
@@ -109,7 +110,7 @@ async function rateMessage(messageId, rating) {
 
 const WELCOME_MESSAGE = {
   role: 'assistant',
-  content: "Bonjour ! Je suis votre Assistant IA & Analyste Helpdesk IT. Posez-moi des questions sur vos tickets ou des demandes de statistiques sur vos magasins/lieux !",
+  content: "Bonjour ! Je suis MARIE, votre Assistante IA & Analyste Helpdesk IT. Posez-moi des questions sur vos tickets ou des demandes de statistiques sur vos magasins/lieux !",
 };
 
 function getDefaultPosition() {
@@ -149,7 +150,7 @@ export default function ChatWidget() {
   const fileInputRef = useRef(null);
 
   // Voice recognition & synthesis
-  const [ttsEnabled, setTtsEnabled] = useState(true);
+  const [ttsEnabled, setTtsEnabled] = useState(false);
   const { isListening, transcript, error: voiceError, isSupported: voiceSupported, startListening, stopListening, resetTranscript } = useVoiceRecognition({
     onResult: (text) => {
       setInput(text);
@@ -413,7 +414,7 @@ export default function ChatWidget() {
               <div className="flex items-center gap-2">
                 <span className="material-symbols-outlined text-[20px]">smart_toy</span>
                 <div>
-                  <h3 className="font-semibold text-sm">Assistant IA</h3>
+                  <h3 className="font-semibold text-sm">MARIE</h3>
                   <p className="text-[10px] opacity-80">Helpdesk IT Prosuma</p>
                 </div>
               </div>
@@ -489,10 +490,8 @@ export default function ChatWidget() {
               ))}
               {loading && (
                 <div className="flex justify-start">
-                  <div className="bg-surface-container border border-outline-variant/40 rounded-2xl rounded-bl-md px-4 py-3 flex items-center gap-1.5">
-                    <span className="w-2 h-2 bg-primary/60 rounded-full animate-bounce [animation-delay:0ms]" />
-                    <span className="w-2 h-2 bg-primary/60 rounded-full animate-bounce [animation-delay:150ms]" />
-                    <span className="w-2 h-2 bg-primary/60 rounded-full animate-bounce [animation-delay:300ms]" />
+                  <div className="bg-surface-container border border-outline-variant/40 rounded-2xl rounded-bl-md px-4 py-3 flex items-center">
+                    <MarieLoader />
                   </div>
                 </div>
               )}

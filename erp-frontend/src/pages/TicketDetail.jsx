@@ -298,7 +298,9 @@ export default function TicketDetail() {
 
   // Plafond par RÔLE (miroir du garde-fou serveur allowTechnicianStatusOnly) : un TECHNICIAN
   // ne modifie jamais les éléments d'un ticket — il consulte et ajoute des suivis, quel que
-  // soit son groupe de permissions. Exception : technicien assigné → peut changer le statut.
+  // soit son groupe de permissions. Exceptions :
+  // - technicien assigné → peut changer le statut
+  // - technicien dont l'équipe correspond au ticket → peut modifier tous les champs
   const canEditTicketsRole = canEditTickets(user);
   const isAssignedTechnician = user?.role === 'TECHNICIAN' &&
     ticket != null &&
@@ -306,7 +308,11 @@ export default function TicketDetail() {
       ticket.assignedToId === user?.id ||
       (Array.isArray(ticket.assignees) && ticket.assignees.some((a) => a.id === user?.id))
     );
-  const canAssign = canEditTicketsRole && (hasPermission(user, 'tickets.assign') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN');
+  const isTeamTicket = user?.role === 'TECHNICIAN' &&
+    ticket != null &&
+    ticket.teamId != null &&
+    ticket.teamId === user?.teamId;
+  const canAssign = (canEditTicketsRole || isTeamTicket) && (hasPermission(user, 'tickets.assign') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN');
   const canApprove = canEditTicketsRole && (hasPermission(user, 'tickets.approve') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN');
   // Escalade = transfert d'équipe : droit tickets.assign restreint aux acteurs support désignés
   // (l'ADMIN peut l'avoir retiré de son groupe de droits — la hotline l'a par défaut côté serveur).
@@ -322,7 +328,7 @@ export default function TicketDetail() {
   const canDeleteRole = ['SUPERADMIN', 'ADMIN', 'HOTLINE'].includes(user?.role);
   const canDelete = canEditTicketsRole && (canDeleteRole || hasPermission(user, 'tickets.delete'));
   const canManageProblems = canEditTicketsRole && (hasPermission(user, 'problems.manage') || user?.role === 'SUPERADMIN');
-  const canEdit = canEditTicketsRole && (hasPermission(user, 'tickets.edit') || user?.role === 'ADMIN' || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN');
+  const canEdit = (canEditTicketsRole || isTeamTicket) && (hasPermission(user, 'tickets.edit') || user?.role === 'ADMIN' || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN' || isTeamTicket);
 
   const followupContainerRef = useRef(null);
   const followupBlobUrlsRef = useRef([]);
@@ -1756,7 +1762,7 @@ export default function TicketDetail() {
                                 <Lock className="w-3 h-3" />
                               </button>
                             )}
-                            {canAssign && item.data.source !== 'glpi' && item.data.authorId === user?.id && editingFollowupId !== item.data.id && (
+                            {(canAssign || isAssignedTechnician) && item.data.source !== 'glpi' && item.data.authorId === user?.id && editingFollowupId !== item.data.id && (
                               <button
                                 onClick={() => startEditFollowup(item.data)}
                                 title="Modifier"

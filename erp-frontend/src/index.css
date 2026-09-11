@@ -2198,6 +2198,26 @@ html[data-compact-mode] .sidebar-nav {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════ */
+/* MARIE LOADER — animation de lettres dessinées                                */
+/* ═══════════════════════════════════════════════════════════════════════════════ */
+
+.marie-dash {
+  animation: marie-dash-array 2s ease-in-out infinite,
+             marie-dash-offset 2s linear infinite;
+}
+
+@keyframes marie-dash-array {
+  0% { stroke-dasharray: 0 1 359 0; }
+  50% { stroke-dasharray: 0 359 1 0; }
+  100% { stroke-dasharray: 359 1 0 0; }
+}
+
+@keyframes marie-dash-offset {
+  0% { stroke-dashoffset: 365; }
+  100% { stroke-dashoffset: 5; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════ */
 /* FONT UTILITIES — Katalyst style                                             */
 /* ═══════════════════════════════════════════════════════════════════════════════ */
 
