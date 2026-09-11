@@ -700,10 +700,6 @@ html.theme-animating *::after {
     --user-font-size:  14px;
   }
 
-  /* Base font-size from user preferences */
-  .theme {
-    font-size: var(--user-font-size, 14px);
-  }
   /* ─── Shadcn-compatible tokens → mapped to M3 design tokens ──────────────── */
   :root {
     --background:                  var(--color-background);

@@ -108,6 +108,7 @@ export function UserPreferencesProvider({ children }) {
   // ── Taille de police : appliquée sur <html> via --user-font-size ──
   useEffect(() => {
     document.documentElement.style.setProperty('--user-font-size', `${prefs.fontSize}px`);
+    document.documentElement.style.fontSize = `${prefs.fontSize}px`;
   }, [prefs.fontSize]);
 
   const setFontFamily = useCallback((fontFamily) => {
