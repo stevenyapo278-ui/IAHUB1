@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import MainLayout from './layouts/MainLayout';
@@ -79,12 +79,23 @@ function PageLoader() {
   );
 }
 
+function MinTimeLoader({ children, minMs = 1500 }) {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setReady(true), minMs);
+    return () => clearTimeout(t);
+  }, [minMs]);
+  if (!ready) return <PageLoader />;
+  return children;
+}
+
 export default function App() {
   // Les transitions de pages sont gérées dans MainLayout (Outlet uniquement).
   // La sidebar ne re-monte plus à chaque navigation.
   return (
     <ErrorBoundary>
       <Suspense fallback={<PageLoader />}>
+        <MinTimeLoader>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/approve/:token" element={<ApprovalPage />} />
@@ -229,6 +240,7 @@ export default function App() {
             />
           </Route>
         </Routes>
+        </MinTimeLoader>
       </Suspense>
     </ErrorBoundary>
   );
