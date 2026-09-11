@@ -483,6 +483,11 @@ export default function Portal() {
                               <MapPin className="w-3 h-3" />{detail.locationName}
                             </span>
                           )}
+                          {detail.requester?.fullName && (
+                            <span className="flex items-center gap-1">
+                              <User className="w-3 h-3" />{detail.requester.fullName}
+                            </span>
+                          )}
                           {detail.assignedTo?.fullName && (
                             <span className="flex items-center gap-1">
                               <User className="w-3 h-3" />{detail.assignedTo.fullName}
