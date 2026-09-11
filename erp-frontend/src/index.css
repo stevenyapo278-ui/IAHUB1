@@ -2202,8 +2202,8 @@ html[data-compact-mode] .sidebar-nav {
 /* ═══════════════════════════════════════════════════════════════════════════════ */
 
 .marie-dash {
-  animation: marie-dash-array 2s ease-in-out infinite,
-             marie-dash-offset 2s linear infinite;
+  animation: marie-dash-array 3s ease-in-out infinite,
+             marie-dash-offset 3s linear infinite;
 }
 
 @keyframes marie-dash-array {
