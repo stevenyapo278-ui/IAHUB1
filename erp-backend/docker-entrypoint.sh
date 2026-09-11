@@ -39,6 +39,22 @@ else
   echo "Colonne loginThemeMode déjà présente — rien à faire."
 fi
 
+# Colonnes observerSummary (récapitulatif hebdomadaaire observateurs)
+# (contourne le drift DB — migration 20260912000000 parfois absente de l'image déployée)
+COL_OBS=$(PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -t -A -c "SELECT 1 FROM information_schema.columns WHERE table_name='SystemSettings' AND column_name='observerSummaryEnabled'" 2>/dev/null || true)
+if [ "$COL_OBS" != "1" ]; then
+  echo "Colonnes observerSummary absentes — application directe du SQL..."
+  set +e
+  PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -c "ALTER TABLE \"SystemSettings\" ADD COLUMN IF NOT EXISTS \"observerSummaryEnabled\" BOOLEAN NOT NULL DEFAULT false;"
+  PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -c "ALTER TABLE \"SystemSettings\" ADD COLUMN IF NOT EXISTS \"observerSummaryDay\" INTEGER NOT NULL DEFAULT 1;"
+  PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -c "ALTER TABLE \"SystemSettings\" ADD COLUMN IF NOT EXISTS \"observerSummaryTime\" TEXT NOT NULL DEFAULT '09:00';"
+  PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -c "ALTER TABLE \"SystemSettings\" ADD COLUMN IF NOT EXISTS \"observerSummaryLastSentDate\" TEXT;"
+  set -e
+  echo "Colonnes observerSummary ajoutées avec succès."
+else
+  echo "Colonne observerSummaryEnabled déjà présente — rien à faire."
+fi
+
 # Colonnes secondaryRequester / location / emailFailureNotificationRecipients
 # (contourne le drift DB — ces colonnes peuvent manquer si les migrations n'ont pas été appliquées)
 COL_SR=$(PGCONNECT_TIMEOUT=5 psql "${PG_URL}" -t -A -c "SELECT 1 FROM information_schema.columns WHERE table_name='Ticket' AND column_name='secondaryRequesterId'" 2>/dev/null || true)
