@@ -5,7 +5,7 @@ const fs = require('fs');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
-const { notifyMajorIncidentResolved, sendTicketStatusNotification, sendResolvedNotificationEmail, sendTicketCreationNotification, sendAcknowledgement, sendAssignmentNotificationEmail, sendObserverFollowupNotification } = require('../services/emailSender');
+const { notifyMajorIncidentResolved, sendTicketStatusNotification, sendResolvedNotificationEmail, sendTicketCreationNotification, sendAcknowledgement, sendAssignmentNotificationEmail } = require('../services/emailSender');
 const { approveTicket } = require('../services/ticketApproval');
 const { autoAssignTechnician } = require('../services/ticketAutoAssign');
 const { logEvent } = require('../services/ticketEvent');
@@ -1753,29 +1753,6 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
     } catch (err) {
       console.error('[ticket.routes] Enregistrement première réponse échoué:', err.message);
     }
-  }
-
-  // Notifier les observateurs (hors auteur du commentaire)
-  try {
-    const ticketWithObservers = await prisma.ticket.findUnique({
-      where: { id: ticketId },
-      include: { observers: { select: { id: true, email: true, fullName: true } } },
-    });
-    if (ticketWithObservers?.observers?.length) {
-      const observerEmails = ticketWithObservers.observers
-        .filter((o) => o.id !== req.user.sub && o.email)
-        .map((o) => o.email);
-      if (observerEmails.length) {
-        sendObserverFollowupNotification({
-          ticketId,
-          ticketTitle: ticketWithObservers.title,
-          authorName: req.user.fullName || req.user.email,
-          observerEmails,
-        }).catch((err) => console.error('[ticket.routes] Notification observateurs échouée:', err.message));
-      }
-    }
-  } catch (err) {
-    console.error('[ticket.routes] Erreur notification observateurs:', err.message);
   }
 
   return res.status(201).json({ followup, imageAttachments });
