@@ -1268,6 +1268,30 @@ html.theme-animating *::after {
   overflow: hidden;
 }
 
+.sidebar-logo-m {
+  display: none;
+}
+
+.sidebar-logo-full {
+  display: block;
+}
+
+.app-sidebar:not(.expanded) .sidebar-logo-m {
+  display: block;
+}
+
+.app-sidebar:not(.expanded) .sidebar-logo-full {
+  display: none;
+}
+
+.app-sidebar.expanded .sidebar-logo-m {
+  display: none;
+}
+
+.app-sidebar.expanded .sidebar-logo-full {
+  display: block;
+}
+
 .sidebar-logo-icon .marie-dash {
   animation-duration: 4s;
 }

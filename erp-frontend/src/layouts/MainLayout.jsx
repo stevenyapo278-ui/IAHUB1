@@ -336,7 +336,10 @@ export default function MainLayout() {
         {/* Logo */}
         <div className="sidebar-logo flex items-center gap-3">
           <div className="sidebar-logo-icon">
-            <span className="text-base font-bold tracking-wider bg-gradient-to-r from-primary to-info bg-clip-text text-transparent">
+            <span className="sidebar-logo-m text-base font-bold tracking-wider bg-gradient-to-r from-primary to-info bg-clip-text text-transparent">
+              M
+            </span>
+            <span className="sidebar-logo-full text-base font-bold tracking-wider bg-gradient-to-r from-primary to-info bg-clip-text text-transparent">
               MARIE IA
             </span>
           </div>
