@@ -738,6 +738,7 @@ export default function Tickets() {
 
   const [tickets, setTickets] = useState([]);
   const [serverStats, setServerStats] = useState({ open: 0, pending: 0, solved: 0, closed: 0, resolved: 0, p1: 0, p2: 0, ai: 0, unassigned: 0 });
+  const [globalStats, setGlobalStats] = useState({ open: 0, pending: 0, solved: 0, closed: 0, resolved: 0, p1: 0, p2: 0, ai: 0, unassigned: 0, total: 0 });
   const [teams, setTeams] = useState([]);
   const [users, setUsers] = useState([]);
   const [locations, setLocations] = useState([]);
@@ -1130,6 +1131,24 @@ export default function Tickets() {
   }, [page, pageSize, sortBy, sortOrder, filters, debouncedSearch]);
 
   useEffect(() => { loadTickets(); }, [filters, page, pageSize, debouncedSearch, sortBy, sortOrder, showTrash]);
+
+  // ── Stats globales (sans filtres) : toujours fixes ──
+  const loadGlobalStats = useCallback(function loadGlobalStats() {
+    api.get('/tickets', { params: { page: 1, limit: 1 } })
+      .then(({ data }) => {
+        if (data.stats) setGlobalStats({ ...data.stats, total: data.total });
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => { loadGlobalStats(); }, [loadGlobalStats]);
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.visibilityState === 'visible') loadGlobalStats();
+    }, 30000);
+    return () => clearInterval(id);
+  }, [loadGlobalStats]);
+
   useEffect(() => {
     if (showTrash) return undefined; // fige le polling pendant la corbeille
     const intervalId = setInterval(() => {
@@ -1696,11 +1715,11 @@ export default function Tickets() {
       {/* ── STATS BAR ──────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 px-4 sm:px-6 py-3 shrink-0">
         {[
-          { label: 'Total', value: totalCount, filterVal: '', color: 'text-on-surface' },
-          { label: 'Ouverts', value: serverStats.open, filterVal: 'OPEN_GROUP', color: 'text-amber-600 dark:text-amber-400' },
-          { label: 'En attente', value: serverStats.pending, filterVal: 'PENDING_GROUP', color: 'text-sky-600 dark:text-sky-400' },
-          { label: 'Résolus', value: serverStats.solved ?? 0, filterVal: 'SOLVED', color: 'text-emerald-600 dark:text-emerald-400' },
-          { label: 'Fermés', value: serverStats.closed ?? 0, filterVal: 'CLOSED', color: 'text-slate-600 dark:text-slate-400' },
+          { label: 'Total', value: globalStats.total, filterVal: '', color: 'text-on-surface', borderActive: 'border-on-surface/40' },
+          { label: 'Ouverts', value: globalStats.open, filterVal: 'OPEN_GROUP', color: 'text-amber-600 dark:text-amber-400', borderActive: 'border-amber-500/60' },
+          { label: 'En attente', value: globalStats.pending, filterVal: 'PENDING_GROUP', color: 'text-sky-600 dark:text-sky-400', borderActive: 'border-sky-500/60' },
+          { label: 'Résolus', value: globalStats.solved ?? 0, filterVal: 'SOLVED', color: 'text-emerald-600 dark:text-emerald-400', borderActive: 'border-emerald-500/60' },
+          { label: 'Fermés', value: globalStats.closed ?? 0, filterVal: 'CLOSED', color: 'text-slate-600 dark:text-slate-400', borderActive: 'border-slate-500/60' },
         ].map((s) => {
           const isActive = s.filterVal !== '' && (
             filters.status === s.filterVal ||
@@ -1711,8 +1730,8 @@ export default function Tickets() {
               key={s.label}
               type="button"
               onClick={() => updateFilter('status', isActive ? '' : s.filterVal)}
-              className={`bg-surface-container rounded-xl p-3 text-center transition-all cursor-pointer hover:bg-surface-container-high border ${
-                isActive ? 'border-primary/50 ring-1 ring-primary/20 shadow-xs' : 'border-transparent'
+              className={`bg-surface-container rounded-xl p-3 text-center transition-all cursor-pointer hover:bg-surface-container-high border-2 ${
+                isActive ? `${s.borderActive} shadow-xs` : 'border-transparent'
               }`}
             >
               <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
