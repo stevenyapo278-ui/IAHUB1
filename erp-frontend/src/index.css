@@ -1250,7 +1250,6 @@ html.theme-animating *::after {
 .sidebar-logo {
   display: flex;
   align-items: center;
-  gap: 10px;
   padding: 0 14px;
   height: 64px;
   flex-shrink: 0;
@@ -1263,15 +1262,9 @@ html.theme-animating *::after {
 }
 
 .sidebar-logo-icon {
-  width: 36px;
-  height: 36px;
-  min-width: 36px;
-  background: var(--color-primary);
-  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.2s ease;
   overflow: hidden;
 }
 
@@ -1280,8 +1273,8 @@ html.theme-animating *::after {
 }
 
 .sidebar-logo-icon svg[height="28"] {
-  height: 16px;
-  width: 16px;
+  height: 28px;
+  width: 28px;
 }
 
 .sidebar-logo-text {
