@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import MarieLoader from '../components/MarieLoader';
 import {
   LayoutDashboard,
   Ticket,
@@ -335,10 +336,10 @@ export default function MainLayout() {
         {/* Logo */}
         <div className="sidebar-logo flex items-center gap-3">
           <div className="sidebar-logo-icon">
-            <Sparkles className="w-4 h-4 text-white" />
+            <MarieLoader />
           </div>
           <span className="sidebar-logo-text">
-            IA Hub
+            SUPPORT IT
           </span>
           {/* Bouton épingler/détacher la sidebar */}
           {isSidebarExpanded && (

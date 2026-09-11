@@ -1266,6 +1266,16 @@ html.theme-animating *::after {
   align-items: center;
   justify-content: center;
   transition: background 0.2s ease;
+  overflow: hidden;
+}
+
+.sidebar-logo-icon .marie-dash {
+  animation-duration: 4s;
+}
+
+.sidebar-logo-icon svg[height="28"] {
+  height: 16px;
+  width: 16px;
 }
 
 .sidebar-logo-text {
