@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../api/client';
 import {
   Mail, UserCheck, AlertTriangle, Clock, RefreshCw, CheckCircle2,
-  TrendingUp, Shield, Send, Bell, Volume2, MousePointer2, FlaskConical,
+  TrendingUp, Shield, Send, Bell, Volume2, MousePointer2, FlaskConical, Eye,
 } from 'lucide-react';
 import {
   isSoundsEnabled,
@@ -535,6 +535,63 @@ export default function EmailNotificationsTab() {
           </div>
 
           <div className="space-y-md">
+            {/* Récapitulatif observateurs */}
+            <motion.div variants={itemVariants} className="bento-card p-lg">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-violet-500/10 flex items-center justify-center">
+                  <Eye className="w-5 h-5 text-violet-600 dark:text-violet-400" />
+                </div>
+                <div>
+                  <h3 className="font-headline-sm text-headline-sm text-on-surface font-bold">Récapitulatif observateurs</h3>
+                  <p className="font-body-xs text-body-xs text-on-surface-variant">Envoie un résumé des tickets ouverts à chaque observateur.</p>
+                </div>
+              </div>
+
+              <SettingRow
+                title="Activer le récapitulatif"
+                description="Envoyez automatiquement la liste des tickets ouverts aux observateurs."
+                icon={Mail}
+                checked={settings.observerSummaryEnabled}
+                onChange={(v) => updateSetting('observerSummaryEnabled', v)}
+                disabled={saving}
+              />
+
+              <motion.div variants={itemVariants} className="bento-card flex items-center justify-between gap-lg p-lg">
+                <div>
+                  <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">Jour d'envoi</div>
+                  <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 font-medium">Jour de la semaine.</p>
+                </div>
+                <select
+                  value={settings.observerSummaryDay ?? 1}
+                  onChange={(e) => updateSetting('observerSummaryDay', Number(e.target.value))}
+                  disabled={saving || !settings.observerSummaryEnabled}
+                  className={`${inputClass} disabled:opacity-50`}
+                >
+                  <option value={0}>Dimanche</option>
+                  <option value={1}>Lundi</option>
+                  <option value={2}>Mardi</option>
+                  <option value={3}>Mercredi</option>
+                  <option value={4}>Jeudi</option>
+                  <option value={5}>Vendredi</option>
+                  <option value={6}>Samedi</option>
+                </select>
+              </motion.div>
+
+              <motion.div variants={itemVariants} className="bento-card flex items-center justify-between gap-lg p-lg">
+                <div>
+                  <div className="font-headline-sm text-headline-sm text-on-surface font-semibold">Heure d'envoi</div>
+                  <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 font-medium">Heure locale du serveur.</p>
+                </div>
+                <input
+                  type="time"
+                  value={settings.observerSummaryTime || '09:00'}
+                  onChange={(e) => updateSetting('observerSummaryTime', e.target.value)}
+                  disabled={saving || !settings.observerSummaryEnabled}
+                  className={`${inputClass} disabled:opacity-50`}
+                />
+              </motion.div>
+            </motion.div>
+
             {/* Notification email en cas d'échec de traitement */}
             <motion.div
               variants={itemVariants}

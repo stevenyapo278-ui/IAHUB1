@@ -670,6 +670,12 @@ model SystemSettings {
   dailySummaryRecipients   String[] @default([]) // liste libre d'adresses email, indépendante des comptes ERP
   dailySummaryLastSentDate String? // date "YYYY-MM-DD" du dernier envoi, pour ne déclencher qu'une fois par jour
 
+  // Récapitulatif hebdomadaire des tickets ouverts pour les observateurs (Paramètres > Automatisation).
+  observerSummaryEnabled      Boolean  @default(false)
+  observerSummaryDay          Int      @default(1) // 0=Dimanche, 1=Lundi, ..., 6=Samedi
+  observerSummaryTime         String   @default("09:00") // heure locale au format "HH:mm"
+  observerSummaryLastSentDate String? // date "YYYY-MM-DD" du dernier envoi
+
   // Notification email envoyée aux boîtes configurées à chaque création de ticket par un demandeur
   // (formulaire, portail, chatbot). Paramètres > Notifications email.
   chatbotNotifyEmail            String?

@@ -230,6 +230,13 @@ setInterval(() => {
   trackedDailySummary().catch((err) => logger.error('Erreur récapitulatif quotidien:', { error: err.message, stack: err.stack }));
 }, DAILY_SUMMARY_CHECK_INTERVAL_MS);
 
+// Récapitulatif tickets ouverts pour les observateurs — vérifie chaque minute
+const { sendObserverSummary } = require('./services/observerSummary');
+const trackedObserverSummary = withHealthTracking('récapitulatif observateurs', sendObserverSummary);
+setInterval(() => {
+  trackedObserverSummary().catch((err) => logger.error('Erreur récapitulatif observateurs:', { error: err.message, stack: err.stack }));
+}, DAILY_SUMMARY_CHECK_INTERVAL_MS);
+
 // Fermeture automatique des tickets SOLVED depuis 3 jours → CLOSED
 const trackedSolvedAutoClose = withHealthTracking('fermeture auto tickets résolus', runSolvedAutoCloseScheduler);
 trackedSolvedAutoClose().catch((err) => logger.error('Erreur fermeture auto tickets résolus:', { error: err.message, stack: err.stack }));
