@@ -1978,63 +1978,10 @@ export default function Tickets() {
           </select>
         </div>
 
-        {/* Filtres actifs au centre */}
-        {activeFilterCount > 0 && (
-          <div className="flex items-center gap-1.5 flex-wrap justify-center">
-            {filters.status && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary/10 text-primary border border-primary/20">
-                {STATUS_LABELS[filters.status] || filters.status}
-              </span>
-            )}
-            {filters.priority && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20">
-                {filters.priority}
-              </span>
-            )}
-            {filters.category && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                {filters.category}
-              </span>
-            )}
-            {filters.teamId && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
-                Équipe
-              </span>
-            )}
-            {filters.assignedToId && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20">
-                Technicien
-              </span>
-            )}
-            {filters.source && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                {filters.source}
-              </span>
-            )}
-            {filters.mine && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
-                Mes tickets
-              </span>
-            )}
-            {filters.aiProcessed && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20">
-                IA
-              </span>
-            )}
-            {filters.approvalStatus && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
-                {filters.approvalStatus === 'PENDING' ? 'En attente' : filters.approvalStatus}
-              </span>
-            )}
-            <button
-              onClick={clearFilters}
-              className="ml-1 text-[10px] text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
-              title="Effacer les filtres"
-            >
-              ✕
-            </button>
-          </div>
-        )}
+        {/* Nombre de résultats au centre */}
+        <div className="text-sm font-bold text-on-surface tabular-nums">
+          {totalCount > 0 ? `${totalCount.toLocaleString('fr-FR')} ticket${totalCount > 1 ? 's' : ''}` : '0 ticket'}
+        </div>
 
         <PaginationButtons page={page} totalPages={Math.max(totalPages, 1)} onPageChange={setPage} />
       </div>
