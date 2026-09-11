@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import {
   Ticket, Plus, X, Send, Clock, MapPin, Paperclip, MessageSquare,
   RefreshCw, Loader2, Star, Search, SlidersHorizontal, ArrowUpDown,
-  Calendar, User, ChevronRight, Circle,
+  Calendar, User, ChevronRight, Circle, Eye, Users,
 } from 'lucide-react';
 import { PRIORITY_CONFIG, STATUS_CONFIG, PRIORITY_OPTIONS, TYPE_OPTIONS, ORIGIN_CONFIG } from '../constants/tickets';
 import SlaBadge from '../components/SlaBadge';
@@ -65,6 +65,14 @@ export default function Portal() {
   const [csatComment, setCsatComment] = useState('');
   const [csatHover, setCsatHover] = useState(0);
   const [csatSaving, setCsatSaving] = useState(false);
+
+  function getTicketRole(ticket) {
+    if (ticket.requesterId === user?.id) return 'REQUESTER';
+    if (ticket.secondaryRequesterId === user?.id) return 'REQUESTER';
+    if (ticket.requesterIds?.includes(user?.id)) return 'REQUESTER';
+    if (ticket.observers?.some((o) => o.id === user?.id)) return 'OBSERVER';
+    return null;
+  }
 
   const loadTickets = useCallback(() => {
     setLoading(true);
@@ -346,6 +354,7 @@ export default function Portal() {
             const st = STATUS_CONFIG[t.status];
             const pr = PRIORITY_CONFIG[t.priority];
             const orig = ORIGIN_CONFIG[t.origin];
+            const ticketRole = getTicketRole(t);
             return (
               <motion.button
                 key={t.id}
@@ -363,11 +372,19 @@ export default function Portal() {
                       </span>
                       <span className="font-mono text-xs font-bold text-on-surface-variant">#{t.id}</span>
                     </div>
-                    {st && (
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold border ${st.bg}`}>
-                        {st.label}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1.5">
+                      {ticketRole === 'OBSERVER' && (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold border border-violet-300 dark:border-violet-500/30 bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400">
+                          <Eye className="w-2.5 h-2.5" />
+                          Observateur
+                        </span>
+                      )}
+                      {st && (
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold border ${st.bg}`}>
+                          {st.label}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {/* Titre */}
@@ -487,6 +504,23 @@ export default function Portal() {
                       <div className="text-[11px] font-black uppercase tracking-widest text-on-surface-variant mb-1.5">Description</div>
                       <p className="text-sm text-on-surface whitespace-pre-wrap leading-relaxed">{detail.content}</p>
                     </div>
+
+                    {/* Observateurs */}
+                    {detail.observers?.length > 0 && (
+                      <div>
+                        <div className="text-[11px] font-black uppercase tracking-widest text-on-surface-variant mb-1.5">
+                          Observateurs ({detail.observers.length})
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {detail.observers.map((obs) => (
+                            <span key={obs.id} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-outline-variant/40 text-xs text-on-surface-variant">
+                              <Eye className="w-3 h-3 text-violet-500" />
+                              {obs.fullName || obs.email || `#${obs.id}`}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Pièces jointes */}
                     {detail.attachments?.length > 0 && (

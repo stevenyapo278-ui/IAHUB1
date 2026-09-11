@@ -1149,6 +1149,33 @@ async function sendTicketCreationNotification(ticket) {
   }
 }
 
+// ── Notification observateurs : ajout de commentaire ─────────────────────────
+async function sendObserverFollowupNotification({ ticketId, ticketTitle, authorName, observerEmails }) {
+  if (!observerEmails?.length) return null;
+  try {
+    const signature = await getEmailSignature();
+    const ticketLink = `${process.env.PORTAL_URL || 'http://localhost:3000'}/tickets/${ticketId}`;
+    const subject = `[Ticket #${ticketId}] Nouveau commentaire — ${ticketTitle || ''}`;
+    const bodyHtml = buildEmailLayout(`
+      <p style="margin:0 0 12px;font-size:14px;color:#1a1a2e;">
+        <strong>${authorName || 'Un membre de l'équipe'</strong> a ajouté un commentaire sur le ticket <strong>#${ticketId}</strong>.
+      </p>
+      <p style="margin:0 0 20px;font-size:14px;color:#4a4a6a;">
+        <strong>Titre :</strong> ${ticketTitle || ''}
+      </p>
+      <a href="${ticketLink}" style="display:inline-block;padding:12px 24px;background:#0067ff;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;">
+        Voir le ticket
+      </a>
+      ${signature || ''}
+    `);
+    await sendEmail({ ticketId, to: observerEmails, subject, bodyHtml, saveAsMessage: false });
+    return { sent: true, recipients: observerEmails };
+  } catch (err) {
+    console.error('[emailSender] Notification observateurs échouée:', err.message);
+    return null;
+  }
+}
+
 module.exports = {
   sendEmail,
   sendAcknowledgement,
@@ -1187,4 +1214,5 @@ module.exports = {
   getEmailSignature,
   wrapDraftContentForSend,
   sendAiDraftEmail,
+  sendObserverFollowupNotification,
 };
