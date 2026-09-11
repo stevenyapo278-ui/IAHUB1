@@ -2218,7 +2218,7 @@ export default function Inbox() {
         document.body
       )}
 
-      {/* ── Modal Création Ticket depuis Email (Assistant IA Enrichi) ────── */}
+      {/* ── Modal Création Ticket depuis Email (MARIE IA Enrichi) ────── */}
       {createPortal(
         <AnimatePresence>
           {showCreateTicket && (
@@ -2245,7 +2245,7 @@ export default function Inbox() {
                     </div>
                     <div>
                       <h3 className="text-base font-extrabold text-on-surface flex items-center gap-2">
-                        Assistant IA — Création de Ticket
+                        MARIE IA — Création de Ticket
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
                           Mail &rarr; Ticket
                         </span>

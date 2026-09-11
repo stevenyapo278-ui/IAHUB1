@@ -63,7 +63,7 @@ const ChatWidget = lazy(() => import('../components/ChatWidget'));
 const platformItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, color: 'text-amber-400', end: true, permission: null },
   { to: '/portal', label: 'Portail', icon: Monitor, color: 'text-teal-400', permission: null },
-  { to: '/chat', label: 'Assistant IA', icon: Bot, color: 'text-blue-400', permission: null },
+  { to: '/chat', label: 'MARIE IA', icon: Bot, color: 'text-blue-400', permission: null },
   { to: '/tickets', label: 'Tickets', icon: Ticket, color: 'text-gold-400', permission: null },
   { to: '/problems', label: 'Problèmes', icon: AlertTriangle, color: 'text-amber-400', permission: 'problems.manage', fallbackRoles: ['ADMIN', 'HOTLINE'] },
   { to: '/email-drafts', label: 'Centre de Validation', icon: MailCheck, color: 'text-amber-400', permission: 'emaildrafts.manage', fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
@@ -338,7 +338,6 @@ export default function MainLayout() {
           <div className="sidebar-logo-icon">
             <MarieLoader />
           </div>
-        </div>
           {/* Bouton épingler/détacher la sidebar */}
           {isSidebarExpanded && (
             <button

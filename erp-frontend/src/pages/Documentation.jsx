@@ -79,7 +79,7 @@ export default function Documentation() {
   const toc = [
     { id: 'overview', label: 'Architecture', icon: List },
     { id: 'validation', label: 'Centre de Validation', icon: ShieldCheck },
-    { id: 'analytics', label: 'Assistant IA Stats BI', icon: BarChart2 },
+    { id: 'analytics', label: 'MARIE IA Stats BI', icon: BarChart2 },
     { id: 'kb', label: 'Base de Connaissances', icon: BookOpen },
     { id: 'triage', label: 'Triage Intelligent', icon: Zap },
     { id: 'glpi-sync', label: 'Synchro GLPI', icon: RefreshCw },
@@ -140,7 +140,7 @@ export default function Documentation() {
             />
             <FeatureCard
               icon={BarChart2}
-              title="Assistant IA Analyste BI"
+              title="MARIE IA Analyste BI"
               desc="Requêtes statistiques en langage naturel, graphiques Recharts et exports CSV par magasin."
               tag="Analytics"
             />
@@ -195,10 +195,10 @@ export default function Documentation() {
         </Section>
 
         {/* 3. ASSISTANT IA STATISTIQUES & BI */}
-        <Section title="3. Assistant IA Analyste Statistiques & Business Intelligence" icon={BarChart2} id="analytics" badge="Text-to-Analytics">
+        <Section title="3. MARIE IA Analyste Statistiques & Business Intelligence" icon={BarChart2} id="analytics" badge="Text-to-Analytics">
           <div className="space-y-4">
             <p className="text-xs text-on-surface leading-relaxed">
-              L'Assistant IA intégré dans le chatbot (<Code>ChatWidget.jsx</Code>) embarque un moteur de **Tool-Calling d'analyse statistique** (<Code>analyticsTools.js</Code>).
+              L'MARIE IA intégré dans le chatbot (<Code>ChatWidget.jsx</Code>) embarque un moteur de **Tool-Calling d'analyse statistique** (<Code>analyticsTools.js</Code>).
             </p>
 
             <div className="space-y-3">
