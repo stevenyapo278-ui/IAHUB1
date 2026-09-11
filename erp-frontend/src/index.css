@@ -1276,6 +1276,15 @@ html.theme-animating *::after {
   display: block;
 }
 
+.sidebar-logo-full svg {
+  height: 18px !important;
+  width: 18px !important;
+}
+
+.sidebar-logo-full .w-3 {
+  width: 4px !important;
+}
+
 .app-sidebar:not(.expanded) .sidebar-logo-m {
   display: block;
 }
@@ -1290,15 +1299,6 @@ html.theme-animating *::after {
 
 .app-sidebar.expanded .sidebar-logo-full {
   display: block;
-}
-
-.sidebar-logo-icon .marie-dash {
-  animation-duration: 4s;
-}
-
-.sidebar-logo-icon svg[height="28"] {
-  height: 28px;
-  width: 28px;
 }
 
 .sidebar-logo-text {
