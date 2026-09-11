@@ -953,7 +953,8 @@ async function processMessage(message, account) {
             data: {
               title: (subject || '(Email sans analyse IA)').substring(0, 200),
               content: (bodyPreview || bodyHtml || '').substring(0, 5000),
-              status: 'OPEN',
+              status: 'NEW',
+              approvalStatus: 'PENDING',
               priority: 'P3',
               source: 'Email',
               origin: 'EMAIL',
