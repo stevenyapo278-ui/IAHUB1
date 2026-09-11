@@ -320,7 +320,22 @@ router.post('/', authenticate, chatLimiter, dailyQuotaCheck, async (req, res) =>
     }
 
     // Passer le pendingTicketData existant au handler
-    const result = await handleMessage(message.trim(), history, req.user, conv?.pendingTicketData || null);
+    // Filet de sécurité : une erreur non prévue dans le handler (ex: outil analytics en échec)
+    // ne doit pas provoquer de 500 — on renvoie une réponse dégradée mais utilisable.
+    let result;
+    try {
+      result = await handleMessage(message.trim(), history, req.user, conv?.pendingTicketData || null);
+    } catch (handlerErr) {
+      console.error('[chatbot] Erreur handleMessage:', handlerErr.stack || handlerErr);
+      result = {
+        reply: "Désolé, je n'ai pas pu traiter cette demande (erreur interne sur les données). Réessayez ou reformulez votre question.",
+        intent: 'general',
+        action: null,
+        widget: null,
+        sources: [],
+        pendingTicketData: null,
+      };
+    }
     const durationMs = Date.now() - startTime;
 
     const inputTokens = Math.ceil(message.length / 4);
@@ -366,7 +381,7 @@ router.post('/', authenticate, chatLimiter, dailyQuotaCheck, async (req, res) =>
 
     res.json({ ...result, conversationId: convId });
   } catch (err) {
-    console.error('[chatbot] Erreur:', err.message);
+    console.error('[chatbot] Erreur:', err.stack || err);
     res.status(500).json({ error: 'Erreur interne du chatbot.' });
   }
 });

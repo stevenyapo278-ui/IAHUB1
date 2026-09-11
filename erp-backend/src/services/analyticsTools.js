@@ -23,7 +23,7 @@ function parsePeriod(period) {
 /**
  * 1. Classement & Agrégation des Tickets par Magasin / Lieu GLPI
  */
-async function getTopLocationsStats({ filterKeyword, period, limit = 5 }) {
+async function getTopLocationsStats({ filterKeyword, period, limit = 5, sortByUrgent = false }) {
   const startDate = parsePeriod(period);
   
   const where = {};
@@ -37,12 +37,12 @@ async function getTopLocationsStats({ filterKeyword, period, limit = 5 }) {
     where.OR = [
       { title: { contains: kw, mode: 'insensitive' } },
       { content: { contains: kw, mode: 'insensitive' } },
-      { location: { name: { contains: kw, mode: 'insensitive' } } },
-      { location: { completename: { contains: kw, mode: 'insensitive' } } },
+      // Ticket n'a pas de relation `location` — seulement locationId/locationName (nom résolu)
+      { locationName: { contains: kw, mode: 'insensitive' } },
     ];
   }
 
-  // Récupère les tickets avec leur location
+  // Récupère les tickets (locationName = nom complet résolu du lieu, cf. schema.prisma)
   const tickets = await prisma.ticket.findMany({
     where,
     select: {
@@ -51,13 +51,7 @@ async function getTopLocationsStats({ filterKeyword, period, limit = 5 }) {
       status: true,
       createdAt: true,
       locationId: true,
-      location: {
-        select: {
-          id: true,
-          name: true,
-          completename: true,
-        },
-      },
+      locationName: true,
     },
   });
 
@@ -65,7 +59,7 @@ async function getTopLocationsStats({ filterKeyword, period, limit = 5 }) {
   const locationMap = new Map();
 
   for (const t of tickets) {
-    const locName = t.location?.completename || t.location?.name || 'Non spécifié / Magasin Inconnu';
+    const locName = t.locationName || 'Non spécifié / Magasin Inconnu';
     const locId = t.locationId || 'unknown';
 
     if (!locationMap.has(locName)) {
@@ -80,13 +74,17 @@ async function getTopLocationsStats({ filterKeyword, period, limit = 5 }) {
 
     const item = locationMap.get(locName);
     item.total += 1;
-    if (t.priority === 'P1' || t.priority === 'URGENT') item.urgentCount += 1;
-    if (t.status === 'RESOLVED' || t.status === 'CLOSED') item.resolvedCount += 1;
+    if (t.priority === 'P1') item.urgentCount += 1; // P1 = priorité critique (TicketPriority)
+    if (t.status === 'SOLVED' || t.status === 'CLOSED') item.resolvedCount += 1; // pas de statut RESOLVED dans TicketStatus
   }
 
-  // Tri par total décroissant
+  // Tri : par tickets critiques (P1) décroissants si demandé, sinon par total décroissant
   const sorted = Array.from(locationMap.values())
-    .sort((a, b) => b.total - a.total)
+    .sort((a, b) =>
+      sortByUrgent
+        ? (b.urgentCount - a.urgentCount) || (b.total - a.total)
+        : b.total - a.total
+    )
     .slice(0, Number(limit) || 5);
 
   const grandTotal = tickets.length;
@@ -212,26 +210,19 @@ async function getPerformanceMetrics({ teamId, period }) {
  */
 async function analyzeRootCause({ locationName, filterKeyword, limit = 15 }) {
   const where = {};
-  
+
+  // Ticket n'a pas de relation `location` — filtrer sur le nom résolu locationName
   if (locationName) {
-    where.OR = [
-      { location: { name: { contains: locationName, mode: 'insensitive' } } },
-      { location: { completename: { contains: locationName, mode: 'insensitive' } } },
-    ];
+    where.locationName = { contains: locationName, mode: 'insensitive' };
   }
 
   if (filterKeyword) {
+    // Les conditions de premier niveau sont combinées en AND par Prisma
     const kw = filterKeyword.trim();
-    const kwCond = [
+    where.OR = [
       { title: { contains: kw, mode: 'insensitive' } },
       { content: { contains: kw, mode: 'insensitive' } },
     ];
-    if (where.OR) {
-      where.AND = [{ OR: where.OR }, { OR: kwCond }];
-      delete where.OR;
-    } else {
-      where.OR = kwCond;
-    }
   }
 
   const tickets = await prisma.ticket.findMany({
@@ -245,7 +236,7 @@ async function analyzeRootCause({ locationName, filterKeyword, limit = 15 }) {
       category: true,
       status: true,
       createdAt: true,
-      location: { select: { completename: true } },
+      locationName: true,
     },
   });
 
@@ -254,7 +245,7 @@ async function analyzeRootCause({ locationName, filterKeyword, limit = 15 }) {
     locationTarget: locationName || 'Global',
     ticketsSample: tickets.map((t) => ({
       id: t.id,
-      title: t.title,
+      subject: t.title, // les consommateurs attendent `subject`
       category: t.category,
       summarySnippet: (t.content || '').slice(0, 150),
     })),

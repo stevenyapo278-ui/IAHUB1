@@ -767,7 +767,9 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
           rootCause.ticketsSample.map(t => `• Ticket #${t.id} [${t.category || 'Général'}]: ${t.subject}`).join('\n')
         );
       } else {
-        const stats = await analyticsTools.getTopLocationsStats({ filterKeyword: kw, period: '30d', limit: 5 });
+        // "le plus critique" → classement par nombre de tickets critiques (P1)
+        const wantsUrgent = /critique|urgent|grave|s[ée]v[èe]re|p1/i.test(message) || /critical|urgent/i.test(params?.keyword || '');
+        const stats = await analyticsTools.getTopLocationsStats({ filterKeyword: kw, period: '30d', limit: 5, sortByUrgent: wantsUrgent });
         if (stats.rankings.length > 0) {
           widget = {
             type: 'chart',
