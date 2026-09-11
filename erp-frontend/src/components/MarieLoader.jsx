@@ -24,6 +24,14 @@ export default function MarieLoader() {
               <stop stopColor="var(--skin-primary, #0067ff)"></stop>
               <stop stopColor="var(--skin-info, #0ea5e9)" offset="1"></stop>
             </linearGradient>
+            <linearGradient gradientUnits="userSpaceOnUse" y2="2" x2="0" y1="62" x1="0" id="g-i2">
+              <stop stopColor="var(--skin-info, #0ea5e9)"></stop>
+              <stop stopColor="var(--skin-primary, #0067ff)" offset="1"></stop>
+            </linearGradient>
+            <linearGradient gradientUnits="userSpaceOnUse" y2="2" x2="0" y1="62" x1="0" id="g-a2">
+              <stop stopColor="var(--skin-primary, #0067ff)"></stop>
+              <stop stopColor="var(--skin-info, #0ea5e9)" offset="1"></stop>
+            </linearGradient>
           </defs>
         </svg>
 
@@ -41,6 +49,13 @@ export default function MarieLoader() {
         </svg>
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 64 64" height="28" width="28" className="inline-block">
           <path strokeLinejoin="round" strokeLinecap="round" strokeWidth="8" stroke="url(#g-e)" d="M 50,12 L 16,12 L 16,56 L 50,56 M 16,34 L 42,34" className="marie-dash" pathLength="360"></path>
+        </svg>
+        <div className="w-3"></div>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 64 64" height="28" width="28" className="inline-block">
+          <path strokeLinejoin="round" strokeLinecap="round" strokeWidth="8" stroke="url(#g-i2)" d="M 32,12 L 32,56" className="marie-dash" pathLength="360"></path>
+        </svg>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 64 64" height="28" width="28" className="inline-block">
+          <path strokeLinejoin="round" strokeLinecap="round" strokeWidth="8" stroke="url(#g-a2)" d="M 12,56 L 32,12 L 52,56 M 22,40 L 42,40" className="marie-dash" pathLength="360"></path>
         </svg>
       </div>
     </div>

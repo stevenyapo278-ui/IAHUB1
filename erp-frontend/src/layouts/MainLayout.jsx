@@ -339,9 +339,9 @@ export default function MainLayout() {
             <span className="sidebar-logo-m text-base font-bold tracking-wider bg-gradient-to-r from-primary to-info bg-clip-text text-transparent">
               M
             </span>
-            <span className="sidebar-logo-full text-base font-bold tracking-wider bg-gradient-to-r from-primary to-info bg-clip-text text-transparent">
-              MARIE IA
-            </span>
+            <div className="sidebar-logo-full">
+              <MarieLoader />
+            </div>
           </div>
           {/* Bouton épingler/détacher la sidebar */}
           {isSidebarExpanded && (
