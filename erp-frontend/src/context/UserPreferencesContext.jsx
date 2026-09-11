@@ -44,6 +44,7 @@ const DEFAULT_PREFERENCES = {
   soundNotifications: true,
   layoutDensity: 'comfortable', // 'compact' | 'comfortable' | 'spacious'
   fontFamily: 'ubuntu', // clé config/fonts.js — police personnalisée par utilisateur
+  fontSize: 14, // taille de police en px (12–20)
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -104,10 +105,24 @@ export function UserPreferencesProvider({ children }) {
     document.documentElement.style.setProperty(FONT_CSS_VAR, getFontFamily(prefs.fontFamily));
   }, [prefs.fontFamily]);
 
+  // ── Taille de police : appliquée sur <html> via --user-font-size ──
+  useEffect(() => {
+    document.documentElement.style.setProperty('--user-font-size', `${prefs.fontSize}px`);
+  }, [prefs.fontSize]);
+
   const setFontFamily = useCallback((fontFamily) => {
     if (!FONT_STACKS[fontFamily]) return;
     setPrefs((prev) => {
       const next = { ...prev, fontFamily };
+      savePreferences(next, user);
+      return next;
+    });
+  }, [user]);
+
+  const setFontSize = useCallback((fontSize) => {
+    const clamped = Math.min(20, Math.max(12, Number(fontSize) || 14));
+    setPrefs((prev) => {
+      const next = { ...prev, fontSize: clamped };
       savePreferences(next, user);
       return next;
     });
@@ -207,12 +222,15 @@ export function UserPreferencesProvider({ children }) {
     // Police
     fontFamily: prefs.fontFamily,
     setFontFamily,
+    // Taille de police
+    fontSize: prefs.fontSize,
+    setFontSize,
     // Reset
     resetPreferences,
   }), [
     prefs, setTablePreferences, setTableDensity, toggleShortcut,
     reorderShortcuts, setLayoutDensity, toggleSoundNotifications,
-    setFontFamily, resetPreferences,
+    setFontFamily, setFontSize, resetPreferences,
   ]);
 
   return (

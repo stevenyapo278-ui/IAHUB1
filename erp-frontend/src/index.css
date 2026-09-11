@@ -697,6 +697,12 @@ html.theme-animating *::after {
   .theme {
     --font-heading:      var(--font-sans);
     --font-sans:      var(--user-font, 'Ubuntu'), system-ui, sans-serif;
+    --user-font-size:  14px;
+  }
+
+  /* Base font-size from user preferences */
+  .theme {
+    font-size: var(--user-font-size, 14px);
   }
   /* ─── Shadcn-compatible tokens → mapped to M3 design tokens ──────────────── */
   :root {

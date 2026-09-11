@@ -31,6 +31,7 @@ import {
   Pin,
   MessageCircle,
   Move,
+  Type,
 } from 'lucide-react';
 import { useUserPreferences } from '../context/UserPreferencesContext';
 import DEFAULT_VISIBILITY from '../config/navigationDefaults';
@@ -145,10 +146,52 @@ export default function CustomizerDrawer({ open, onClose }) {
 
 // ── Tables Tab ─────────────────────────────────────────────────────────────
 function TablesTab() {
-  const { tablePreferences, setTableDensity } = useUserPreferences();
+  const { tablePreferences, setTableDensity, fontSize, setFontSize } = useUserPreferences();
+
+  const FONT_SIZES = [12, 13, 14, 15, 16, 18, 20];
 
   return (
     <div className="space-y-5">
+      {/* Font Size */}
+      <div>
+        <label className="text-xs font-semibold mb-2 block text-foreground flex items-center gap-2">
+          <Type className="w-3.5 h-3.5 text-primary" />
+          Taille du texte
+        </label>
+        <p className="text-[10px] text-muted-foreground mb-3">
+          Ajustez la taille de police pour plus de confort de lecture.
+        </p>
+        <div className="flex items-center gap-2">
+          <input
+            type="range"
+            min={12}
+            max={20}
+            step={1}
+            value={fontSize}
+            onChange={(e) => setFontSize(Number(e.target.value))}
+            className="flex-1 h-1.5 rounded-full appearance-none bg-surface-container-highest cursor-pointer accent-primary"
+          />
+          <span className="text-xs font-semibold text-primary min-w-[36px] text-center bg-primary/10 rounded-lg px-2 py-1">
+            {fontSize}px
+          </span>
+        </div>
+        <div className="flex justify-between mt-1.5 px-0.5">
+          {FONT_SIZES.map((size) => (
+            <button
+              key={size}
+              onClick={() => setFontSize(size)}
+              className={`text-[9px] px-1 py-0.5 rounded transition-colors ${
+                fontSize === size
+                  ? 'text-primary font-semibold'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {size}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Density */}
       <div>
         <label className="text-xs font-semibold mb-2 block text-foreground">
