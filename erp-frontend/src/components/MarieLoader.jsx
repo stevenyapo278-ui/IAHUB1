@@ -43,7 +43,6 @@ export default function MarieLoader() {
           <path strokeLinejoin="round" strokeLinecap="round" strokeWidth="8" stroke="url(#g-e)" d="M 50,12 L 16,12 L 16,56 L 50,56 M 16,34 L 42,34" className="marie-dash" pathLength="360"></path>
         </svg>
       </div>
-      <span className="text-[11px] font-medium text-on-surface-variant tracking-wide">SUPPORT IT</span>
     </div>
   );
 }

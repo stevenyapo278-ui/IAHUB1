@@ -338,9 +338,7 @@ export default function MainLayout() {
           <div className="sidebar-logo-icon">
             <MarieLoader />
           </div>
-          <span className="sidebar-logo-text">
-            SUPPORT IT
-          </span>
+        </div>
           {/* Bouton épingler/détacher la sidebar */}
           {isSidebarExpanded && (
             <button
