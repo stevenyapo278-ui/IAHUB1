@@ -71,6 +71,7 @@
     poppins: "'Poppins', 'Ubuntu', system-ui, sans-serif",
     montserrat: "'Montserrat', 'Ubuntu', system-ui, sans-serif",
     lato: "'Lato', 'Ubuntu', system-ui, sans-serif",
+    'tt-firs-neue': "'TT Firs Neue', 'Ubuntu', system-ui, sans-serif",
   };
   var stack = DEFAULT_STACK;
   try {

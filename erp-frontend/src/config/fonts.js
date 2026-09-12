@@ -45,6 +45,10 @@ export const FONT_STACKS = {
     label: 'Lato',
     family: "'Lato', 'Ubuntu', system-ui, sans-serif",
   },
+  'tt-firs-neue': {
+    label: 'TT Firs Neue',
+    family: "'TT Firs Neue', 'Ubuntu', system-ui, sans-serif",
+  },
 };
 
 /** Variable CSS racine qui porte la pile de la police choisie */
