@@ -2564,7 +2564,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
    react-grid-layout pilote left/top/width/height en inline styles :
    le widget remplit 100% de sa cellule, jamais l'inverse. */
 .react-grid-item {
-  transition: transform 220ms cubic-bezier(0.2, 0, 0, 1);
+  transition: transform 150ms cubic-bezier(0.2, 0, 0, 1);
 }
 .dashboard-widget {
   height: 100%;
@@ -2631,7 +2631,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 /* ── Mode édition : halo d'affilade, transition figée pendant le drag ── */
 .dashboard-grid--editing .dashboard-widget {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--skin-primary, #0067ff) 35%, transparent);
-  transition: transform 220ms cubic-bezier(0.2, 0, 0, 1), box-shadow 180ms ease;
+  transition: transform 150ms cubic-bezier(0.2, 0, 0, 1), box-shadow 180ms ease;
 }
 .dashboard-grid--editing .react-grid-item.react-draggable-dragging {
   transition: none;

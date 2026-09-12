@@ -4,19 +4,52 @@ const prisma = require('../prismaClient');
  * Normalise une période en date de début
  */
 function parsePeriod(period) {
+  if (!period) return null;
   const now = new Date();
-  if (period === '7d' || period === '7_days') {
-    return new Date(now.setDate(now.getDate() - 7));
+
+  // Périodes nommées
+  if (period === '1d' || period === 'yesterday') {
+    const d = period === 'yesterday' ? new Date(now.getTime() - 86400000) : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return d;
   }
-  if (period === '30d' || period === '30_days' || period === 'this_month') {
-    return new Date(now.setDate(now.getDate() - 30));
+  if (period === 'this_week') {
+    const dayOfWeek = now.getDay() === 0 ? 6 : now.getDay() - 1;
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek);
   }
-  if (period === '90d' || period === '90_days') {
-    return new Date(now.setDate(now.getDate() - 90));
+  if (period === 'last_week') {
+    const dayOfWeek = now.getDay() === 0 ? 6 : now.getDay() - 1;
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek - 7);
+  }
+  if (period === 'this_month') {
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  }
+  if (period === 'last_month') {
+    return new Date(now.getFullYear(), now.getMonth() - 1, 1);
   }
   if (period === 'year' || period === '365d') {
-    return new Date(now.setDate(now.getDate() - 365));
+    return new Date(now.getFullYear(), 0, 1);
   }
+  if (period === 'last_year') {
+    return new Date(now.getFullYear() - 1, 0, 1);
+  }
+
+  // Périodes en jours
+  if (period === '7d' || period === '7_days') {
+    return new Date(now.getTime() - 7 * 86400000);
+  }
+  if (period === '30d' || period === '30_days') {
+    return new Date(now.getTime() - 30 * 86400000);
+  }
+  if (period === '90d' || period === '90_days') {
+    return new Date(now.getTime() - 90 * 86400000);
+  }
+
+  // "Xj" dynamique
+  const dayMatch = period.match(/^(\d+)d$/);
+  if (dayMatch) {
+    return new Date(now.getTime() - parseInt(dayMatch[1]) * 86400000);
+  }
+
   return null; // tout l'historique
 }
 
@@ -178,7 +211,7 @@ async function getPerformanceMetrics({ teamId, period }) {
   });
 
   const total = tickets.length;
-  const resolved = tickets.filter((t) => t.status === 'RESOLVED' || t.status === 'CLOSED');
+  const resolved = tickets.filter((t) => t.status === 'SOLVED' || t.status === 'CLOSED');
 
   let totalResolutionHours = 0;
   let resolvedWithTime = 0;

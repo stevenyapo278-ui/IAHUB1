@@ -186,4 +186,15 @@ router.get('/stats/accuracy', async (req, res) => {
   }
 });
 
+// ── Statistiques d'apprentissage automatique ────────────────────────────
+router.get('/learning-stats', requirePermission('skills.view', ['ADMIN', 'SUPERADMIN']), async (req, res) => {
+  try {
+    const { getLearningStats } = require('../services/skillLearningService');
+    const stats = await getLearningStats();
+    return res.json(stats);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

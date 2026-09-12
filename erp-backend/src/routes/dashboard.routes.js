@@ -56,6 +56,45 @@ router.get('/stats', async (req, res) => {
   });
 });
 
+// Charge active par équipe — tickets ouverts (NEW, OPEN, PLANNED, PENDING, WAITING_FOR_USER) groupés par équipe
+router.get('/workload-by-team', async (req, res) => {
+  const ACTIVE_STATUSES = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER'];
+
+  const byTeam = await prisma.ticket.groupBy({
+    by: ['teamId'],
+    where: {
+      status: { in: ACTIVE_STATUSES },
+      approvalStatus: { notIn: ['PENDING', 'REJECTED'] },
+    },
+    _count: { _all: true },
+    orderBy: { _count: { _all: 'desc' } },
+  });
+
+  const teamIds = byTeam.map((t) => t.teamId).filter((id) => id !== null);
+  const teams = await prisma.team.findMany({
+    where: { id: { in: teamIds } },
+    select: { id: true, name: true },
+  });
+  const teamNameById = Object.fromEntries(teams.map((t) => [t.id, t.name]));
+
+  // Compter aussi les tickets non assignés à une équipe
+  const unassigned = byTeam.find((t) => t.teamId === null);
+
+  const result = byTeam
+    .filter((t) => t.teamId !== null)
+    .map((t) => ({
+      teamId: t.teamId,
+      teamName: teamNameById[t.teamId] || 'Inconnue',
+      count: t._count._all,
+    }));
+
+  if (unassigned) {
+    result.push({ teamId: null, teamName: 'Non assignée', count: unassigned._count._all });
+  }
+
+  return res.json(result);
+});
+
 // Tickets en attente d'approbation
 router.get('/pending-approvals', async (req, res) => {
   const tickets = await prisma.ticket.findMany({

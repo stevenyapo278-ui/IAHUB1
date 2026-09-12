@@ -11,6 +11,20 @@ async function createTicketFromEmail({ subject, body, from, fromName, analysis, 
   // Titre EN MAJUSCULES, partie LIEU = lieu strictement résolu en base (INDÉTERMINÉ sinon)
   const title = formatTicketTitle(analysis.suggestedTitle || subject, locationName || null);
 
+  // Résoudre l'équipe suggérée par l'IA en teamId (si pas déjà résolu par le validateur)
+  let resolvedTeamId = analysis._teamId || null;
+  if (!resolvedTeamId && analysis.team) {
+    try {
+      const matchedTeam = await tx.team.findFirst({
+        where: { name: { equals: analysis.team, mode: 'insensitive' } },
+        select: { id: true },
+      });
+      resolvedTeamId = matchedTeam?.id || null;
+    } catch (err) {
+      console.error('[ticketCreator] Résolution équipe IA échouée:', err.message);
+    }
+  }
+
   const erpTicket = await tx.ticket.create({
     data: {
       title,
@@ -29,6 +43,7 @@ async function createTicketFromEmail({ subject, body, from, fromName, analysis, 
       lowTrustSender,
       locationId: locationId || null,
       locationName: locationName || null,
+      teamId: resolvedTeamId,
     },
   });
 

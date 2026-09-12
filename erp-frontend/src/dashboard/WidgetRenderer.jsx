@@ -14,6 +14,7 @@ import TechTableWidget from './widgets/TechTableWidget';
 import RecentTicketsWidget from './widgets/RecentTicketsWidget';
 import SlaStatusWidget from './widgets/SlaStatusWidget';
 import TeamBreakdownWidget from './widgets/TeamBreakdownWidget';
+import WorkloadTeamsWidget from './widgets/WorkloadTeamsWidget';
 import AiPipelineWidget from './widgets/AiPipelineWidget';
 import QuickAccessWidget from './widgets/QuickAccessWidget';
 import IntegrationsWidget from './widgets/IntegrationsWidget';
@@ -30,7 +31,7 @@ function Skeleton() {
 
 function resolveWidget(widget, allData) {
   const { widgetType } = widget;
-  const { stats, trend, activity, techPerformance, slaAnalytics, integrations, pendingApprovals, pendingAiDrafts, needsReview, heatmap } = allData;
+  const { stats, trend, activity, techPerformance, slaAnalytics, integrations, pendingApprovals, pendingAiDrafts, needsReview, heatmap, workloadByTeam } = allData;
 
   switch (widgetType) {
     case 'kpi_open_tickets':
@@ -76,6 +77,9 @@ function resolveWidget(widget, allData) {
 
     case 'chart_heatmap':
       return <HeatmapWidget heatmap={heatmap} config={widget.config} />;
+
+    case 'chart_workload_teams':
+      return <WorkloadTeamsWidget workloadByTeam={workloadByTeam} config={widget.config} />;
 
     case 'team_workload':
       return <TeamWorkloadWidget techPerformance={techPerformance} config={widget.config} />;

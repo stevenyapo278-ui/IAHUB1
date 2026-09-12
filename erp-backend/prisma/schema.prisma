@@ -614,6 +614,12 @@ model SystemSettings {
   autoApproveManualTickets Boolean @default(false) // auto-approuve les tickets créés manuellement (formulaire/portail) — les tickets créés par email/IA restent soumis à validation
   enableAutoCreateSkills   Boolean @default(false) // crée automatiquement les compétences suggérées par l'IA lors de l'analyse email si elles n'existent pas encore
 
+  // ── Contrôle global de l'IA (Paramètres > Intelligence Artificielle) ──────
+  aiEnabled                Boolean @default(true)  // toggle global : désactive tous les appels IA (pipeline, chatbot, scanner, etc.)
+  aiDailyTokenBudget       Int     @default(100000) // budget journalier en tokens (0 = illimité)
+  aiTokenAlertThreshold    Float   @default(0.8)    // seuil d'alerte (0.8 = alerte à 80% du budget)
+  aiTokenAlertRecipients   String[] @default([])    // adresses email pour les alertes de quota
+
   // URLs absolues du serveur, utilisées pour générer des liens/ressources dans les emails sortants
   // (logo de signature, lien d'approbation de brouillon, lien de réinitialisation de mot de passe).
   // Configurables ici plutôt que seulement via BACKEND_URL/FRONTEND_URL (variables d'environnement
@@ -1601,4 +1607,20 @@ model DashboardWidget {
   dashboard Dashboard @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
 
   @@index([dashboardId])
+}
+
+// Suivi de consommation de tokens IA — chaque appel API est loggé.
+// Permet le monitoring des quotas et l'alerte en cas de dépassement de budget.
+model AiUsageLog {
+  id              Int      @id @default(autoincrement())
+  provider        String   // nom du provider (gemini, openai, anthropic, etc.)
+  usage           String   // contexte d'utilisation (email, chatbot, background, vision)
+  promptTokens    Int      @default(0)
+  completionTokens Int     @default(0)
+  totalTokens     Int      @default(0)
+  createdAt       DateTime @default(now())
+
+  @@index([provider])
+  @@index([createdAt])
+  @@index([usage])
 }

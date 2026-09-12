@@ -35,7 +35,14 @@ async function findBestTechnician(category, aiCategory) {
       return (loadByUserId[a.user.id] || 0) - (loadByUserId[b.user.id] || 0);
     });
 
-    return { team: null, technician: sorted[0].user, skillLevel: sorted[0].level, method: 'skill' };
+    const bestTech = sorted[0].user;
+    // Résoudre l'équipe du technicien sélectionné
+    const techWithTeam = await prisma.user.findUnique({
+      where: { id: bestTech.id },
+      select: { id: true, fullName: true, teamId: true, team: { select: { id: true, name: true } } },
+    });
+    const resolvedTeam = techWithTeam?.team || null;
+    return { team: resolvedTeam, technician: { id: bestTech.id, fullName: bestTech.fullName }, skillLevel: sorted[0].level, method: 'skill' };
   }
 
   // Étape 1b : chercher par compétence partielle (ex: "PORT USB" contient "USB")
@@ -63,7 +70,14 @@ async function findBestTechnician(category, aiCategory) {
           if (b.level !== a.level) return b.level - a.level;
           return (loadByUserId[a.user.id] || 0) - (loadByUserId[b.user.id] || 0);
         });
-        return { team: null, technician: sorted[0].user, skillLevel: sorted[0].level, method: 'skill_partial' };
+        const bestTech = sorted[0].user;
+        // Résoudre l'équipe du technicien sélectionné
+        const techWithTeam = await prisma.user.findUnique({
+          where: { id: bestTech.id },
+          select: { id: true, fullName: true, teamId: true, team: { select: { id: true, name: true } } },
+        });
+        const resolvedTeam = techWithTeam?.team || null;
+        return { team: resolvedTeam, technician: { id: bestTech.id, fullName: bestTech.fullName }, skillLevel: sorted[0].level, method: 'skill_partial' };
       }
     }
   }

@@ -18,10 +18,11 @@ const CONFIDENCE_THRESHOLD_CREATE = 0.70;
  * @param {Object} rawAnalysis - Objet JSON retourné par le LLM
  * @param {Array<Object>} [availableSkills] - Liste des compétences BDD [{ name: string }]
  * @param {Array<Object>} [availableLocations] - Liste des lieux BDD [{ completename: string }]
+ * @param {Array<Object>} [availableTeams] - Liste des équipes BDD [{ name: string }]
  * @param {Object} [options] - Options supplémentaires (ex: { body: string })
  * @returns {Promise<Object>} Analyse nettoyée, validée et sécurisée
  */
-async function validateAndCleanAnalysis(rawAnalysis = {}, availableSkills = [], availableLocations = [], options = {}) {
+async function validateAndCleanAnalysis(rawAnalysis = {}, availableSkills = [], availableLocations = [], options = {}, availableTeams = []) {
   const analysis = { ...rawAnalysis };
   const rawBody = options.body || '';
 
@@ -129,9 +130,11 @@ async function validateAndCleanAnalysis(rawAnalysis = {}, availableSkills = [], 
   analysis.priority = calculatePriority(impact, urgency, requestType);
 
   // 5. Validation des entités suggérées avec la base de données
-  if (analysis.suggestedSkill && availableSkills.length > 0) {
+  if (analysis.suggestedSkill) {
     const normSkill = String(analysis.suggestedSkill).trim().toLowerCase();
-    const matchSkill = availableSkills.find((s) => s.name?.toLowerCase().trim() === normSkill);
+    const matchSkill = availableSkills.length > 0
+      ? availableSkills.find((s) => s.name?.toLowerCase().trim() === normSkill)
+      : null;
     if (matchSkill) {
       analysis.suggestedSkill = matchSkill.name;
     } else if (options.enableAutoCreateSkills) {
@@ -150,8 +153,25 @@ async function validateAndCleanAnalysis(rawAnalysis = {}, availableSkills = [], 
     } else {
       analysis.suggestedSkill = null;
     }
-  } else if (!analysis.suggestedSkill) {
+  } else {
     analysis.suggestedSkill = null;
+  }
+
+  // 5b. Validation du champ team contre la base de données
+  if (analysis.team && availableTeams.length > 0) {
+    const normTeam = String(analysis.team).trim().toLowerCase();
+    const matchTeam = availableTeams.find((t) => t.name?.toLowerCase().trim() === normTeam);
+    if (matchTeam) {
+      analysis.team = matchTeam.name;
+      analysis._teamId = matchTeam.id;
+    } else {
+      console.log(`[emailAnalysisValidator] Équipe IA "${analysis.team}" introuvable en base → null`);
+      analysis.team = null;
+      analysis._teamId = null;
+    }
+  } else if (!analysis.team) {
+    analysis.team = null;
+    analysis._teamId = null;
   }
 
   // ── RÈGLE STRICTE SUR LE LIEU ────────────────────────────────────────────

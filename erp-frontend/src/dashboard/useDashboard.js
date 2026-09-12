@@ -66,3 +66,10 @@ export function useTicketHeatmap(weeks = 20) {
   const { data, error, isLoading } = useSWR(`/dashboard/ticket-heatmap?weeks=${weeks}`, fetcher);
   return { heatmap: data, isLoading, error };
 }
+
+export function useWorkloadByTeam() {
+  const { data, error, isLoading } = useSWR('/dashboard/workload-by-team', fetcher, {
+    refreshInterval: 30000,
+  });
+  return { workloadByTeam: data || [], isLoading, error };
+}

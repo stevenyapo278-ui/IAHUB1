@@ -16,6 +16,7 @@ import {
   usePendingAiDrafts,
   useNeedsReview,
   useTicketHeatmap,
+  useWorkloadByTeam,
 } from './useDashboard';
 import DashboardGrid from './DashboardGrid';
 import DashboardToolbar from './DashboardToolbar';
@@ -116,6 +117,7 @@ export default function DashboardPage() {
   const { pendingAiDrafts } = usePendingAiDrafts();
   const { needsReview } = useNeedsReview();
   const { heatmap } = useTicketHeatmap(20);
+  const { workloadByTeam } = useWorkloadByTeam();
 
   // Active dashboard data
   const activeDashboard = useMemo(
@@ -464,6 +466,7 @@ export default function DashboardPage() {
                 pendingAiDrafts,
                 needsReview,
                 heatmap,
+                workloadByTeam,
                 period: activePeriod,
               }}
             />

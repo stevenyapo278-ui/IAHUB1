@@ -119,6 +119,14 @@ router.patch(
     body('emailMajorIncidentResolvedEnabled').optional().isBoolean(),
     body('emailApprovalEnabled').optional().isBoolean(),
     body('solvedAutoCloseDays').optional().isInt({ min: 0, max: 365 }),
+    body('observerSummaryEnabled').optional().isBoolean(),
+    body('observerSummaryDay').optional().isInt({ min: 0, max: 6 }),
+    body('observerSummaryTime').optional().matches(/^([01]\d|2[0-3]):([0-5]\d)$/),
+    body('aiEnabled').optional().isBoolean(),
+    body('aiDailyTokenBudget').optional().isInt({ min: 0, max: 100000000 }),
+    body('aiTokenAlertThreshold').optional().isFloat({ min: 0, max: 1 }),
+    body('aiTokenAlertRecipients').optional().isArray(),
+    body('aiTokenAlertRecipients.*').optional().isEmail(),
     body('voiceAiModelId').optional({ nullable: true }).isInt(),
   ],
   async (req, res) => {
@@ -157,6 +165,13 @@ router.patch(
     if (req.body.emailEscalationEnabled !== undefined) data.emailEscalationEnabled = req.body.emailEscalationEnabled;
     if (req.body.emailMajorIncidentResolvedEnabled !== undefined) data.emailMajorIncidentResolvedEnabled = req.body.emailMajorIncidentResolvedEnabled;
     if (req.body.emailApprovalEnabled !== undefined) data.emailApprovalEnabled = req.body.emailApprovalEnabled;
+    if (req.body.observerSummaryEnabled !== undefined) data.observerSummaryEnabled = req.body.observerSummaryEnabled;
+    if (req.body.observerSummaryDay !== undefined) data.observerSummaryDay = req.body.observerSummaryDay;
+    if (req.body.observerSummaryTime !== undefined) data.observerSummaryTime = req.body.observerSummaryTime;
+    if (req.body.aiEnabled !== undefined) data.aiEnabled = req.body.aiEnabled;
+    if (req.body.aiDailyTokenBudget !== undefined) data.aiDailyTokenBudget = req.body.aiDailyTokenBudget;
+    if (req.body.aiTokenAlertThreshold !== undefined) data.aiTokenAlertThreshold = req.body.aiTokenAlertThreshold;
+    if (req.body.aiTokenAlertRecipients !== undefined) data.aiTokenAlertRecipients = req.body.aiTokenAlertRecipients;
     if (req.body.voiceAiModelId !== undefined) data.voiceAiModelId = req.body.voiceAiModelId || null;
 
     const updated = await prisma.systemSettings.update({ where: { id: 1 }, data });

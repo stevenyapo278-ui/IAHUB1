@@ -138,7 +138,13 @@ async function callOpenAICompat(provider, apiKey, model, prompt, usage) {
       throwHttpError(provider, res.status, bodyText, res);
     }
     const data = await res.json();
-    return data.choices?.[0]?.message?.content || '';
+    const text = data.choices?.[0]?.message?.content || '';
+    const tokenUsage = data.usage ? {
+      promptTokens: data.usage.prompt_tokens || 0,
+      completionTokens: data.usage.completion_tokens || 0,
+      totalTokens: data.usage.total_tokens || 0,
+    } : null;
+    return { text, usage: tokenUsage };
   });
 }
 
@@ -161,7 +167,13 @@ async function callGemini(provider, apiKey, prompt, modelName, usage) {
       throwHttpError(provider, res.status, bodyText, res);
     }
     const data = await res.json();
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const tokenUsage = data.usageMetadata ? {
+      promptTokens: data.usageMetadata.promptTokenCount || 0,
+      completionTokens: data.usageMetadata.candidatesTokenCount || 0,
+      totalTokens: data.usageMetadata.totalTokenCount || 0,
+    } : null;
+    return { text, usage: tokenUsage };
   });
 }
 
@@ -181,7 +193,13 @@ async function callAnthropic(provider, apiKey, prompt, modelName, usage) {
       throwHttpError(provider, res.status, bodyText, res);
     }
     const data = await res.json();
-    return data.content?.[0]?.text || '';
+    const text = data.content?.[0]?.text || '';
+    const tokenUsage = data.usage ? {
+      promptTokens: data.usage.input_tokens || 0,
+      completionTokens: data.usage.output_tokens || 0,
+      totalTokens: (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0),
+    } : null;
+    return { text, usage: tokenUsage };
   });
 }
 
@@ -210,19 +228,20 @@ async function callProvider(provider, prompt, usage = 'email', forcedModelId = n
   for (const key of keys) {
     for (const modelCandidate of modelCandidates) {
       try {
-        let raw;
+        let result;
         switch (provider.name) {
           case 'gemini':
-            raw = await callGemini(provider, key.apiKey, prompt, modelCandidate, usage);
+            result = await callGemini(provider, key.apiKey, prompt, modelCandidate, usage);
             break;
           case 'anthropic':
-            raw = await callAnthropic(provider, key.apiKey, prompt, modelCandidate, usage);
+            result = await callAnthropic(provider, key.apiKey, prompt, modelCandidate, usage);
             break;
           default:
-            raw = await callOpenAICompat(provider, key.apiKey, modelCandidate || 'meta/llama-3.1-8b-instruct', prompt, usage);
+            result = await callOpenAICompat(provider, key.apiKey, modelCandidate || 'meta/llama-3.1-8b-instruct', prompt, usage);
         }
         recordAiSuccess(provider.name);
-        return raw;
+        // result est { text, usage } — propager les deux
+        return result;
       } catch (err) {
         lastError = err.message;
         // Gérer le 429 : appliquer un cooldown au provider
@@ -241,9 +260,28 @@ async function callProvider(provider, prompt, usage = 'email', forcedModelId = n
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// DERNIÈRE USAGE IA TRACKÉE (side-effect, sans casser l'API string existante)
+// ═══════════════════════════════════════════════════════════════════════════
+let _lastAiUsage = null;
+let _lastAiProvider = null;
+
+function consumeLastAiUsage() {
+  const result = { usage: _lastAiUsage, provider: _lastAiProvider };
+  _lastAiUsage = null;
+  _lastAiProvider = null;
+  return result;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // FALLBACK INTER-PROVIDERS (avec skip cooldown)
 // ═══════════════════════════════════════════════════════════════════════════
 async function callProviderWithFallback(providers, prompt, usage = 'email', options = {}) {
+  // Vérifier le toggle global IA
+  const { isAiEnabled } = require('./aiUsageTracker');
+  if (!(await isAiEnabled())) {
+    throw new Error('L\'intelligence artificielle est désactivée (Paramètres > Intelligence Artificielle)');
+  }
+
   if (!providers || providers.length === 0) {
     throw new Error('Aucun provider IA configuré (Paramètres → Intelligence Artificielle)');
   }
@@ -261,7 +299,19 @@ async function callProviderWithFallback(providers, prompt, usage = 'email', opti
       if (errors.length > 0) {
         logger.warn(`[AI] Fallback utilisé : "${provider.label}" a répondu après ${errors.length} échec(s)`);
       }
-      return result;
+      // result est { text, usage } — extraire le texte pour les appelants existants
+      // et stocker l'usage en side-effect pour le tracking
+      const text = result.text !== undefined ? result.text : result;
+      _lastAiUsage = result.usage || null;
+      _lastAiProvider = provider.name;
+
+      // Tracker les tokens de manière asynchrone (ne pas bloquer l'appelant)
+      if (result.usage && result.usage.totalTokens > 0) {
+        const { trackAiUsage } = require('./aiUsageTracker');
+        trackAiUsage(result.usage, provider.name, usage).catch(() => {});
+      }
+
+      return text;
     } catch (err) {
       logger.warn(`[AI] Provider "${provider.label}" indisponible, tentative suivante : ${err.message}`);
       errors.push({ label: provider.label, full: compactErrorMessage(err.message, 700) });
@@ -357,6 +407,11 @@ async function getAllLocations() {
   catch (err) { console.error('[mailAnalyzer] Échec récupération lieux:', err.message); return []; }
 }
 
+async function getAllTeams() {
+  try { return await prisma.team.findMany({ select: { id: true, name: true }, orderBy: { name: 'asc' } }); }
+  catch (err) { console.error('[mailAnalyzer] Échec récupération équipes:', err.message); return []; }
+}
+
 function formatSkillsForPrompt(skills) {
   return skills.length === 0 ? 'Aucune compétence configurée.' : skills.map((s) => `- ${s.name}`).join('\n');
 }
@@ -398,6 +453,7 @@ async function analyzeEmail({ subject, body, from, fromName, senderRole, senderT
   const settings = await getSystemSettings();
   const skills = await getAllSkills();
   const locations = await getAllLocations();
+  const teams = await getAllTeams();
 
   const { getPrompt } = require('./promptTemplates');
   const prompt = await getPrompt('analyzeEmail', {
@@ -417,7 +473,7 @@ async function analyzeEmail({ subject, body, from, fromName, senderRole, senderT
   const rawResult = JSON.parse(jsonMatch[0]);
 
   const { validateAndCleanAnalysis } = require('./emailAnalysisValidator');
-  const result = await validateAndCleanAnalysis(rawResult, skills, locations, { body: body || '', enableAutoCreateSkills: !!settings?.enableAutoCreateSkills });
+  const result = await validateAndCleanAnalysis(rawResult, skills, locations, { body: body || '', enableAutoCreateSkills: !!settings?.enableAutoCreateSkills }, teams);
 
   if (!result.suggestedSkill) {
     const guessed = guessSkillFromText(subject, body, skills);
@@ -552,4 +608,5 @@ module.exports = {
   analyzeEmail, getActiveProvider, getActiveProviders,
   callProvider, callProviderWithFallback, callAiWithRetry,
   getAiMetrics, isProviderOnCooldown, analyzeImageAttachments,
+  consumeLastAiUsage,
 };

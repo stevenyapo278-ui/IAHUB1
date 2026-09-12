@@ -117,6 +117,7 @@ const PUT_FIELDS = [
   'emailApprovalEnabled', 'slaHours', 'navigationConfig',
   'portalAllowNewRequest',
   'loginThemeMode', 'loginThemeFixedVariant', 'loginThemeEnabledVariants',
+  'aiEnabled', 'aiDailyTokenBudget', 'aiTokenAlertThreshold', 'aiTokenAlertRecipients',
 ];
 
 async function handleSaveSettings(req, res) {

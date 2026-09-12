@@ -449,6 +449,33 @@ Règles strictes de format :
 Réponds UNIQUEMENT avec un objet JSON strict, sans markdown, au format :
 {"canAnswer": true ou false, "replyHtml": "réponse en HTML simple (paragraphes, listes), sans formule de politesse ni signature, vide si canAnswer est false", "usedKnowledgeChunkIds": [identifiants numériques des extraits de connaissance réellement utilisés], "confidence": 0.0 à 1.0}`,
   },
+
+  extractSkill: {
+    label: "Extraction de compétence fine depuis un ticket résolu",
+    template: `Tu es un expert ITSM. Analyse ce ticket résolu et extrais UNE compétence technique précise et spécifique (max 40 caractères).
+
+Le but est de créer une compétence fine pour le système d'auto-apprentissage, plus précise que la catégorie générale.
+
+EXEMPLES de bonnes extractions :
+- Ticket catégorie "Matériel", titre "Imprimante HP ne s'imprime plus" → skill: "Imprimante HP"
+- Ticket catégorie "Réseau", titre "Switch Cisco port 24 down" → skill: "Switch Cisco"
+- Ticket catégorie "Logiciel", titre "Outlook plante à l'ouverture" → skill: "Microsoft Outlook"
+- Ticket catégorie "Système", titre "Compte Active Directory verrouillé" → skill: "Active Directory"
+- Ticket catégorie "Téléphonie", titre "Poste Yealink ne démarre pas" → skill: "Téléphonie Yealink"
+
+RÈGLES STRICTES :
+- Le skill doit être technique et spécifique (pas un mot courant comme "erreur" ou "problème")
+- Max 40 caractères
+- Pas de doublon avec la catégorie (si la catégorie est déjà précise, retourne null)
+- Si le titre/contenu ne permet pas d'extraire une compétence fine, retourne { "skill": null, "category": null }
+
+Catégorie du ticket : {{ticketCategory}}
+Titre : {{ticketTitle}}
+Contenu (extrait) : {{ticketContent}}
+
+Retourne UNIQUEMENT ce JSON :
+{"skill": "nom de la compétence fine ou null", "category": "catégorie de la compétence ou null"}`,
+  },
 };
 
 // Remplace {{nomVariable}} par la valeur correspondante dans vars. Une clé absente de vars est

@@ -549,6 +549,15 @@ router.post(
             }).catch(() => {});
         }
         if (data.status) notifyRequesterOnStatusChange(id, data.status);
+
+        // Auto-apprentissage pour les bulk-resolutions
+        if (data.status === 'SOLVED' || data.status === 'CLOSED') {
+          const { learnFromResolution } = require('../services/skillLearningService');
+          learnFromResolution(id).catch((err) =>
+            console.error(`[ticket.routes] Échec apprentissage bulk ticket ${id}:`, err.message)
+          );
+        }
+
         updatedCount += 1;
       } catch (err) {
         failures.push({ id, error: err.message });
@@ -1287,6 +1296,14 @@ router.patch('/:id', allowTechnicianStatusOnly, requireTicketAssignOrTechnicianS
       }
     }
 
+    // Auto-apprentissage : créer compétences et associer technicien quand le ticket est résolu
+    if (data.status === 'SOLVED' || data.status === 'CLOSED') {
+      const { learnFromResolution } = require('../services/skillLearningService');
+      learnFromResolution(id).catch((err) =>
+        console.error(`[ticket.routes] Échec apprentissage ticket ${id}:`, err.message)
+      );
+    }
+
     return res.json(ticket);
   } catch (err) {
     if (err.code === 'P2025') return res.status(404).json({ error: 'Ticket introuvable' });
@@ -1434,6 +1451,13 @@ router.post('/:id/validate-close', forbidTechnicianTicketEdits, requirePermissio
 
     emitTicketUpdated(ticket, { status: 'SOLVED', closeSuggested: false });
     notifyRequesterOnStatusChange(id, 'SOLVED');
+
+    // Auto-apprentissage : créer compétences et associer technicien
+    const { learnFromResolution } = require('../services/skillLearningService');
+    learnFromResolution(id).catch((err) =>
+      console.error(`[ticket.routes] Échec apprentissage ticket ${id} (validate-close):`, err.message)
+    );
+
     return res.json(ticket);
   } catch (err) {
     return res.status(500).json({ error: err.message });

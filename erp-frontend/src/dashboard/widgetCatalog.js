@@ -23,6 +23,7 @@ export const WIDGET_CATALOG = [
   { type: 'chart_gauge',          name: 'Jauge',                 category: 'Graphiques', defaultW: 3, defaultH: 3, icon: 'Gauge',         description: 'Jauge circulaire' },
   { type: 'chart_donut',          name: 'Donut',                 category: 'Graphiques', defaultW: 4, defaultH: 4, icon: 'PieChart',      description: 'Donut avec légende' },
   { type: 'chart_heatmap',        name: 'Activité tickets',      category: 'Graphiques', defaultW: 8, defaultH: 4, icon: 'Grid3X3',       description: 'Heatmap jour × semaine' },
+  { type: 'chart_workload_teams', name: 'Charge par équipe',     category: 'Graphiques', defaultW: 5, defaultH: 4, icon: 'PieChart',      description: 'Tickets actifs par équipe' },
 
   // ── Tableaux / Listes ──
   { type: 'team_workload',        name: 'Équipe',                category: 'Tableaux',  defaultW: 6, defaultH: 4, icon: 'Users',         description: 'Charge par membre' },
@@ -57,6 +58,7 @@ export const WIDGET_MAP = {
   chart_ticket_flow:   './widgets/TicketFlowWidget',
   chart_gauge:         './widgets/GaugeWidget',
   chart_heatmap:       './widgets/HeatmapWidget',
+  chart_workload_teams: './widgets/WorkloadTeamsWidget',
   team_workload:       './widgets/TeamWorkloadWidget',
   tech_performance:    './widgets/TechTableWidget',
   recent_tickets:      './widgets/RecentTicketsWidget',

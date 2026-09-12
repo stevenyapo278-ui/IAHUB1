@@ -4,6 +4,7 @@ import api from '../../api/client';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import Toggle from '../../components/Toggle';
 import DataGrid from '../../components/DataGrid';
+import { Zap, BarChart3, AlertTriangle } from 'lucide-react';
 
 const inputClass =
   'bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300';
@@ -437,6 +438,9 @@ export default function AiProvidersTab() {
   const [deleting, setDeleting] = useState(false);
   const [voiceModelId, setVoiceModelId] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [aiSettings, setAiSettings] = useState({ aiEnabled: true, aiDailyTokenBudget: 100000, aiTokenAlertThreshold: 0.8, aiTokenAlertRecipients: [] });
+  const [aiUsage, setAiUsage] = useState(null);
+  const [loadingUsage, setLoadingUsage] = useState(false);
 
   // Liste de tous les modèles pour le sélecteur vocal
   const allModels = useMemo(() => {
@@ -463,8 +467,22 @@ export default function AiProvidersTab() {
       .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
     // Charger le modèle vocal depuis les settings
     api.get('/system-settings')
-      .then(({ data }) => setVoiceModelId(data.voiceAiModelId || null))
+      .then(({ data }) => {
+        setVoiceModelId(data.voiceAiModelId || null);
+        setAiSettings({
+          aiEnabled: data.aiEnabled !== false,
+          aiDailyTokenBudget: data.aiDailyTokenBudget || 100000,
+          aiTokenAlertThreshold: data.aiTokenAlertThreshold || 0.8,
+          aiTokenAlertRecipients: data.aiTokenAlertRecipients || [],
+        });
+      })
       .catch(() => {});
+    // Charger les stats d'usage IA
+    setLoadingUsage(true);
+    api.get('/system/ai-usage?days=7')
+      .then(({ data }) => setAiUsage(data))
+      .catch(() => {})
+      .finally(() => setLoadingUsage(false));
   }
 
   useEffect(() => refresh(), []);
@@ -526,6 +544,132 @@ export default function AiProvidersTab() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Toggle global IA + Budget */}
+      <motion.div variants={itemVariants} className="bento-card p-lg">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-xl bg-violet-500/10 flex items-center justify-center">
+            <Zap className="w-5 h-5 text-violet-600 dark:text-violet-400" />
+          </div>
+          <div>
+            <h3 className="font-headline-sm text-headline-sm text-on-surface font-bold">Contrôle global de l'IA</h3>
+            <p className="font-body-xs text-body-xs text-on-surface-variant">Active ou désactive toutes les fonctionnalités IA d'un coup.</p>
+          </div>
+        </div>
+        <div className="space-y-md">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="font-body-sm text-body-sm text-on-surface font-semibold">Intelligence artificielle</div>
+              <p className="text-xs text-on-surface-variant">Désactive le pipeline email, le chatbot, le scanner de clôture et l'auto-assignation.</p>
+            </div>
+            <Toggle
+              checked={aiSettings.aiEnabled}
+              onChange={async (v) => {
+                setSaving(true);
+                try {
+                  await api.patch('/system-settings', { aiEnabled: v });
+                  setAiSettings((prev) => ({ ...prev, aiEnabled: v }));
+                } catch (err) {
+                  setError(err.response?.data?.error || 'Erreur');
+                } finally {
+                  setSaving(false);
+                }
+              }}
+              disabled={saving}
+            />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-md">
+            <label className="flex flex-col gap-xs">
+              <span className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider">Budget journalier (tokens)</span>
+              <input type="number" className={inputClass} value={aiSettings.aiDailyTokenBudget}
+                onChange={(e) => setAiSettings((prev) => ({ ...prev, aiDailyTokenBudget: parseInt(e.target.value) || 0 }))}
+                onBlur={async () => {
+                  setSaving(true);
+                  try {
+                    await api.patch('/system-settings', { aiDailyTokenBudget: aiSettings.aiDailyTokenBudget });
+                  } catch (err) { setError(err.response?.data?.error || 'Erreur'); }
+                  finally { setSaving(false); }
+                }}
+                disabled={!aiSettings.aiEnabled}
+              />
+            </label>
+            <label className="flex flex-col gap-xs">
+              <span className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider">Seuil d'alerte (%)</span>
+              <input type="number" step="0.05" min="0" max="1" className={inputClass} value={aiSettings.aiTokenAlertThreshold}
+                onChange={(e) => setAiSettings((prev) => ({ ...prev, aiTokenAlertThreshold: parseFloat(e.target.value) || 0.8 }))}
+                onBlur={async () => {
+                  setSaving(true);
+                  try {
+                    await api.patch('/system-settings', { aiTokenAlertThreshold: aiSettings.aiTokenAlertThreshold });
+                  } catch (err) { setError(err.response?.data?.error || 'Erreur'); }
+                  finally { setSaving(false); }
+                }}
+                disabled={!aiSettings.aiEnabled}
+              />
+            </label>
+          </div>
+        </div>
+      </motion.div>
+
+      {/* Consommation IA (7 derniers jours) */}
+      {aiUsage && (
+        <motion.div variants={itemVariants} className="bento-card p-lg">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
+              <BarChart3 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            </div>
+            <div>
+              <h3 className="font-headline-sm text-headline-sm text-on-surface font-bold">Consommation IA</h3>
+              <p className="font-body-xs text-body-xs text-on-surface-variant">7 derniers jours</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-md">
+            <div className="text-center p-3 bg-surface-container-lowest rounded-xl">
+              <div className="text-2xl font-bold text-on-surface">{(aiUsage.todayTokens || 0).toLocaleString()}</div>
+              <div className="text-[11px] text-on-surface-variant">Aujourd'hui</div>
+            </div>
+            <div className="text-center p-3 bg-surface-container-lowest rounded-xl">
+              <div className="text-2xl font-bold text-on-surface">{(aiUsage.totalTokens || 0).toLocaleString()}</div>
+              <div className="text-[11px] text-on-surface-variant">7 jours</div>
+            </div>
+            <div className="text-center p-3 bg-surface-container-lowest rounded-xl">
+              <div className="text-2xl font-bold text-on-surface">{aiUsage.totalCalls || 0}</div>
+              <div className="text-[11px] text-on-surface-variant">Appels IA</div>
+            </div>
+            <div className="text-center p-3 bg-surface-container-lowest rounded-xl">
+              {aiUsage.budgetUsagePercent !== null ? (
+                <>
+                  <div className={`text-2xl font-bold ${aiUsage.budgetUsagePercent > 80 ? 'text-red-500' : aiUsage.budgetUsagePercent > 50 ? 'text-amber-500' : 'text-green-500'}`}>
+                    {aiUsage.budgetUsagePercent}%
+                  </div>
+                  <div className="text-[11px] text-on-surface-variant">Budget utilisé</div>
+                </>
+              ) : (
+                <>
+                  <div className="text-2xl font-bold text-on-surface-variant">∞</div>
+                  <div className="text-[11px] text-on-surface-variant">Budget</div>
+                </>
+              )}
+            </div>
+          </div>
+          {aiUsage.byProvider?.length > 0 && (
+            <div className="mt-4 space-y-2">
+              {aiUsage.byProvider.map((p) => (
+                <div key={p.provider} className="flex items-center justify-between text-xs">
+                  <span className="text-on-surface-variant capitalize">{p.provider}</span>
+                  <span className="text-on-surface font-medium">{(p._sum?.totalTokens || 0).toLocaleString()} tokens · {p._count?.id || 0} appels</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {aiUsage.todayTokens > 0 && aiUsage.dailyBudget > 0 && aiUsage.todayTokens > aiUsage.dailyBudget * 0.8 && (
+            <div className="mt-4 flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-600">
+              <AlertTriangle className="w-4 h-4" />
+              Budget journalier à {Math.round(aiUsage.todayTokens / aiUsage.dailyBudget * 100)}%
+            </div>
+          )}
+        </motion.div>
+      )}
 
       {/* Ajouter un fournisseur */}
       <motion.div variants={itemVariants} className="bento-card p-lg">

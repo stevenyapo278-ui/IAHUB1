@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from 'react';
+import { memo, useCallback, useMemo, useRef } from 'react';
 import { ResponsiveGridLayout, useContainerWidth, verticalCompactor, noCompactor } from 'react-grid-layout';
 import { motion } from 'framer-motion';
 import { GripVertical, X } from 'lucide-react';
@@ -80,7 +80,7 @@ function stripLayout(layout) {
   return (layout || []).map(({ i, x, y, w, h }) => ({ i, x, y, w, h }));
 }
 
-export default function DashboardGrid({
+export default memo(function DashboardGrid({
   layout = [],
   widgets = [],
   isEditing = false,
@@ -114,11 +114,20 @@ export default function DashboardGrid({
     breakpointRef.current = newBreakpoint;
   }, []);
 
+  // Throttle onLayoutChange via requestAnimationFrame : évite de déclencher
+  // un re-render du parent à chaque mousemove (~60-120/s) pendant le drag.
+  // Le layout interne de RGL reste à jour (son propre state), on throttle
+  // uniquement la remontée vers DashboardPage pour la persistance.
+  const rafRef = useRef(null);
   const handleLayoutChange = useCallback(
     (newLayout) => {
       if (!isEditing) return;
       if (breakpointRef.current !== 'lg') return;
-      onLayoutChange?.(stripLayout(newLayout), widgetsRef.current);
+      if (rafRef.current) return; // frame déjà en attente
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
+        onLayoutChange?.(stripLayout(newLayout), widgetsRef.current);
+      });
     },
     [isEditing, onLayoutChange],
   );
@@ -197,4 +206,4 @@ export default function DashboardGrid({
       </div>
     </motion.div>
   );
-}
+})

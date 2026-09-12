@@ -198,6 +198,7 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads'), {
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.get('/api/system/circuit-breakers', (req, res) => res.json(allBreakerStatuses()));
+app.get('/api/system/ai-usage', require('./routes/aiUsage.routes'));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/tickets', ticketRoutes);

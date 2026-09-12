@@ -106,7 +106,7 @@ async function searchKnowledge(query, limit = 5) {
 
 // ── Recherche de tickets ERP en base ───────────────────────────────────
 
-async function searchTickets(query, limit = 5, user = null) {
+async function searchTickets(query, limit = 5, user = null, period = null) {
   if (!query || !query.trim()) return [];
   const clean = query.trim();
   const lower = clean.toLowerCase();
@@ -127,6 +127,13 @@ async function searchTickets(query, limit = 5, user = null) {
 
   try {
     const where = {};
+
+    // ── Filtrage temporel ──────────────────────────────────────────────
+    if (period) {
+      const { start, end } = resolvePeriodDates(period);
+      if (start) where.createdAt = { gte: start };
+      if (end) where.createdAt = { ...where.createdAt, lt: end };
+    }
 
     // ── Filtrage par rôle ──────────────────────────────────────────────
     if (user && user.role === 'REQUESTER') {
@@ -271,33 +278,151 @@ async function callIntentAI(message) {
   return null;
 }
 
+// ── Extraction de période depuis le message utilisateur ────────────────
+
+function parsePeriodFromText(text) {
+  const lower = text.toLowerCase();
+
+  // Jour
+  if (/\b(aujourd.?hui|ce jour|ce matin|cette nuit)\b/.test(lower)) return '1d';
+  if (/\b(hier|la veille)\b/.test(lower)) return 'yesterday';
+
+  // Semaine
+  if (/\b(cette semaine|depuis lundi|depuis le lundi)\b/.test(lower)) return 'this_week';
+  if (/\b(semaine derni[èe]re|la semaine pass[ée]e)\b/.test(lower)) return 'last_week';
+  if (/\b(\d+)\s*semaines?\b/.test(lower)) {
+    const days = parseInt(lower.match(/(\d+)\s*semaines?/)[1]) * 7;
+    return `${days}d`;
+  }
+
+  // Mois
+  if (/\b(ce mois|le mois en cours|depuis le 1er)\b/.test(lower)) return 'this_month';
+  if (/\b(mois dernier|le mois pass[ée]e?|mois pr[ée]c[ée]dent)\b/.test(lower)) return 'last_month';
+  if (/\b(\d+)\s*mois\b/.test(lower)) {
+    const months = parseInt(lower.match(/(\d+)\s*mois/)[1]);
+    return `${months * 30}d`;
+  }
+
+  // Année
+  if (/\b(cette ann[ée]e|en \d{4})\b/.test(lower)) {
+    const yearMatch = lower.match(/en (\d{4})/);
+    return yearMatch ? `year_${yearMatch[1]}` : 'year';
+  }
+  if (/\b(ann[ée]e derni[èe]re|l'ann[ée]e pass[ée]e)\b/.test(lower)) return 'last_year';
+
+  // Périodes explicitement nommées
+  if (/\b(7j|7 jours?|une semaine)\b/.test(lower)) return '7d';
+  if (/\b(30j|30 jours?|un mois)\b/.test(lower)) return '30d';
+  if (/\b(90j|90 jours?|3 mois)\b/.test(lower)) return '90d';
+
+  return null; // pas de période détectée
+}
+
+/**
+ * Convertit une clé période en objets Date { start, end }
+ */
+function resolvePeriodDates(periodKey) {
+  const now = new Date();
+  let start = null;
+  let end = null;
+
+  switch (periodKey) {
+    case '1d': {
+      start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      break;
+    }
+    case 'yesterday': {
+      start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+      end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      break;
+    }
+    case 'this_week': {
+      const dayOfWeek = now.getDay() === 0 ? 6 : now.getDay() - 1; // lundi = 0
+      start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek);
+      end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      break;
+    }
+    case 'last_week': {
+      const dayOfWeek2 = now.getDay() === 0 ? 6 : now.getDay() - 1;
+      start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek2 - 7);
+      end = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek2);
+      break;
+    }
+    case 'this_month': {
+      start = new Date(now.getFullYear(), now.getMonth(), 1);
+      end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      break;
+    }
+    case 'last_month': {
+      start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      end = new Date(now.getFullYear(), now.getMonth(), 1);
+      break;
+    }
+    case 'year': {
+      start = new Date(now.getFullYear(), 0, 1);
+      end = new Date(now.getFullYear() + 1, 0, 1);
+      break;
+    }
+    case 'last_year': {
+      start = new Date(now.getFullYear() - 1, 0, 1);
+      end = new Date(now.getFullYear(), 0, 1);
+      break;
+    }
+    default: {
+      // "7d", "30d", "90d" etc.
+      const dayMatch = periodKey.match(/^(\d+)d$/);
+      if (dayMatch) {
+        start = new Date(now.getTime() - parseInt(dayMatch[1]) * 86400000);
+        end = now;
+      }
+      // "year_2025"
+      const yearMatch = periodKey.match(/^year_(\d{4})$/);
+      if (yearMatch) {
+        start = new Date(parseInt(yearMatch[1]), 0, 1);
+        end = new Date(parseInt(yearMatch[1]) + 1, 0, 1);
+      }
+    }
+  }
+
+  return { start, end };
+}
+
 // ── Intent detection (IA + regex fallback) ─────────────────────────────
 
 function detectIntentRegex(message) {
   const lower = message.toLowerCase();
-  if (lower.match(/\b(r[ée]sume|r[ée]sum[ée])\b/)) return 'summary';
-  if (lower.match(/\b(similaire|doublon|m[êe]me (probl[èe]me|incident|sujet)|y a-t-il|d[ée]j[à])\b/)) return 'similar_tickets';
-  if (lower.match(/\b(ferme|clôtur|cloture|passe|r[ée]solu|resolu|change.*statut|met.*statut)\b/)) return 'change_status';
-  if (lower.match(/\b(assigne|affecte|donne.*[àa]|attribue|passe.*[àa])\b/)) return 'assign_ticket';
-  if (lower.match(/\b(inventaire|[ée]quipement|asset|pc portable|imprimante|mat[ée]riel)\b/)) return 'search_inventory';
-  if (lower.match(/\b(utilisateur|user|qui est|email de|t[ée]l[ée]phone de|nom de)\b/)) return 'search_users';
-  if (lower.match(/\b(lieu|site|o[uù] se trouve|adresse|localisation|magasin\s+(de\s+)?[a-z])\b/)) return 'search_locations';
-  if (lower.match(/\b(r[ée]partition|par[ée]quipe|par[ée]quipe|bilan.*quipe|r[ée]union|hebdo|ouverts par|quipe)\b/)) return 'team_report';
-  if (lower.match(/\b(magasin|lieu|top|comparer|plus de probl[èe]mes?|statistiques?|stats?|analyse|pourquoi|cause)\b/)) return 'analytics';
-  if (lower.match(/^\s*(oui|yes|go|confirme|c'est bon|vas-y|ok|d'accord|je confirme|oui crée|oui vas)\b/i)) return 'confirm_create_ticket';
-  if (lower.match(/\b(cr[ée]er?|ouvrir?|nouveau ticket|nouvelle demande|signaler|probl[èe]me|incident)\b/.test(lower) && /\b(pour|au nom de|pour le compte)\b/.test(lower))) return 'create_ticket_for';
-  if (lower.match(/\b(cr[ée]er?|ouvrir?|nouveau ticket|nouvelle demande|signaler|probl[èe]me|incident|panne|souci|ne marche|fonctionne plus|erreur|assistance)\b/)) return 'create_ticket';
-  if (lower.match(/\b(statut|état|avancement|suiv[ie]|ticket\s*#?\s*\d+|#\d+|num[ée]ro)\b/)) return 'check_ticket';
-  if (lower.match(/\b(rapport|synth[èe]se|combien|nombre|total)\b/)) return 'report';
-  if (lower.match(/\b(escalade|technicien|humain|agent|support|parler|[aà] quelqu'un|transfer)\b/)) return 'escalate';
-  if (lower.match(/\b(aide|commandes?|fonctionnalit[ée]s?|que sais|que peux|help|menu)\b/)) return 'help';
-  return 'general';
+  const period = parsePeriodFromText(message);
+
+  if (lower.match(/\b(r[ée]sume|r[ée]sum[ée])\b/)) return { intent: 'summary', params: { period } };
+  if (lower.match(/\b(similaire|doublon|m[êe]me (probl[èe]me|incident|sujet)|y a-t-il|d[ée]j[à])\b/)) return { intent: 'similar_tickets', params: { period } };
+  if (lower.match(/\b(ferme|clôtur|cloture|passe|r[ée]solu|resolu|change.*statut|met.*statut)\b/)) return { intent: 'change_status', params: { period } };
+  if (lower.match(/\b(assigne|affecte|donne.*[àa]|attribue|passe.*[àa])\b/)) return { intent: 'assign_ticket', params: { period } };
+  if (lower.match(/\b(inventaire|[ée]quipement|asset|pc portable|imprimante|mat[ée]riel)\b/)) return { intent: 'search_inventory', params: { period } };
+  if (lower.match(/\b(utilisateur|user|qui est|email de|t[ée]l[ée]phone de|nom de)\b/)) return { intent: 'search_users', params: { period } };
+  if (lower.match(/\b(lieu|site|o[uù] se trouve|adresse|localisation|magasin\s+(de\s+)?[a-z])\b/)) return { intent: 'search_locations', params: { period } };
+  if (lower.match(/\b(r[ée]partition|par[ée]quipe|par[ée]quipe|bilan.*quipe|r[ée]union|hebdo|ouverts par|quipe)\b/)) return { intent: 'team_report', params: { period } };
+  if (lower.match(/\b(magasin|lieu|top|comparer|plus de probl[èe]mes?|statistiques?|stats?|analyse|pourquoi|cause)\b/)) return { intent: 'analytics', params: { period } };
+  if (lower.match(/^\s*(oui|yes|go|confirme|c'est bon|vas-y|ok|d'accord|je confirme|oui crée|oui vas)\b/i)) return { intent: 'confirm_create_ticket', params: { period } };
+  if (lower.match(/\b(cr[ée]er?|ouvrir?|nouveau ticket|nouvelle demande|signaler|probl[èe]me|incident)\b/.test(lower) && /\b(pour|au nom de|pour le compte)\b/.test(lower))) return { intent: 'create_ticket_for', params: { period } };
+  if (lower.match(/\b(cr[ée]er?|ouvrir?|nouveau ticket|nouvelle demande|signaler|probl[èe]me|incident|panne|souci|ne marche|fonctionne plus|erreur|assistance)\b/)) return { intent: 'create_ticket', params: { period } };
+  if (lower.match(/\b(statut|état|avancement|suiv[ie]|ticket\s*#?\s*\d+|#\d+|num[ée]ro)\b/)) return { intent: 'check_ticket', params: { period } };
+  if (lower.match(/\b(rapport|synth[èe]se|combien|nombre|total)\b/)) return { intent: 'report', params: { period } };
+  if (lower.match(/\b(escalade|technicien|humain|agent|support|parler|[aà] quelqu'un|transfer)\b/)) return { intent: 'escalate', params: { period } };
+  if (lower.match(/\b(aide|commandes?|fonctionnalit[ée]s?|que sais|que peux|help|menu)\b/)) return { intent: 'help', params: { period } };
+  return { intent: 'general', params: { period } };
 }
 
 async function detectIntent(message) {
   const aiResult = await callIntentAI(message);
-  if (aiResult?.intent) return aiResult;
-  return { intent: detectIntentRegex(message), params: {} };
+  if (aiResult?.intent) {
+    // Enrichir avec la période extraite du texte (l'IA ne la détecte pas toujours)
+    const textPeriod = parsePeriodFromText(message);
+    if (textPeriod && !aiResult.params) aiResult.params = {};
+    if (textPeriod && !aiResult.params.period) aiResult.params.period = textPeriod;
+    return aiResult;
+  }
+  return detectIntentRegex(message);
 }
 
 // ── Contexte utilisateur ──────────────────────────────────────────────
@@ -331,14 +456,34 @@ async function getUserContext(userId) {
 const STATUS_LABEL = { NEW: 'Nouveau', OPEN: 'Ouvert', PENDING: 'En attente', SOLVED: 'Résolu', CLOSED: 'Fermé' };
 const PRIORITY_LABEL = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' };
 
-async function generateReport() {
-  const tickets = await prisma.ticket.findMany({
-    where: { status: { notIn: ['CLOSED'] } },
-    include: { assignedTo: { select: { fullName: true } }, team: { select: { name: true } } },
-    orderBy: [{ priority: 'asc' }, { createdAt: 'desc' }],
-  });
+async function generateReport(period = null) {
+  const where = { status: { notIn: ['CLOSED', 'SOLVED'] } };
 
-  if (tickets.length === 0) return 'Aucun ticket ouvert en ce moment.';
+  // Filtrage temporel optionnel
+  let dateFilter = {};
+  if (period) {
+    const { start, end } = resolvePeriodDates(period);
+    if (start) dateFilter.gte = start;
+    if (end) dateFilter.lt = end;
+    if (Object.keys(dateFilter).length > 0) where.createdAt = dateFilter;
+  }
+
+  const [tickets, totalAll, resolvedCount] = await Promise.all([
+    prisma.ticket.findMany({
+      where,
+      include: { assignedTo: { select: { fullName: true } }, team: { select: { name: true } } },
+      orderBy: [{ priority: 'asc' }, { createdAt: 'desc' }],
+    }),
+    prisma.ticket.count({ where: Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {} }),
+    prisma.ticket.count({
+      where: {
+        status: { in: ['SOLVED', 'CLOSED'] },
+        ...(Object.keys(dateFilter).length > 0 ? { solvedAt: dateFilter } : {}),
+      },
+    }),
+  ]);
+
+  if (tickets.length === 0 && resolvedCount === 0) return 'Aucun ticket pour cette période.';
 
   const byStatus = {};
   const byPriority = {};
@@ -347,14 +492,21 @@ async function generateReport() {
     byPriority[t.priority] = (byPriority[t.priority] || 0) + 1;
   }
 
-  let report = `**Rapport des tickets ouverts** (${tickets.length} total)\n\n`;
-  report += `**Par statut :**\n`;
-  for (const [s, c] of Object.entries(byStatus)) report += `• ${STATUS_LABEL[s] || s} : ${c}\n`;
-  report += `\n**Par priorité :**\n`;
-  for (const [p, c] of Object.entries(byPriority)) report += `• ${PRIORITY_LABEL[p] || p} : ${c}\n`;
-  report += `\n**5 tickets les plus récents :**\n`;
-  for (const t of tickets.slice(0, 5)) {
-    report += `• **#${t.id}** ${t.title} — ${PRIORITY_LABEL[t.priority] || t.priority} — ${t.assignedTo?.fullName || 'Non assigné'}\n`;
+  const periodLabel = period ? ` (${period})` : '';
+  let report = `**Rapport${periodLabel}**\n\n`;
+  report += `• Total tickets : **${totalAll}**\n`;
+  report += `• Ouverts : **${tickets.length}**\n`;
+  report += `• Résolus/Fermés : **${resolvedCount}**\n\n`;
+
+  if (tickets.length > 0) {
+    report += `**Par statut (ouverts) :**\n`;
+    for (const [s, c] of Object.entries(byStatus)) report += `• ${STATUS_LABEL[s] || s} : ${c}\n`;
+    report += `\n**Par priorité (ouverts) :**\n`;
+    for (const [p, c] of Object.entries(byPriority)) report += `• ${PRIORITY_LABEL[p] || p} : ${c}\n`;
+    report += `\n**5 tickets les plus récents :**\n`;
+    for (const t of tickets.slice(0, 5)) {
+      report += `• **#${t.id}** ${t.title} — ${PRIORITY_LABEL[t.priority] || t.priority} — ${t.assignedTo?.fullName || 'Non assigné'}\n`;
+    }
   }
   return report;
 }
@@ -647,7 +799,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   // Recherche simultanée : RAG + Tickets + (selon intent) inventaire/users/locations
   const searches = [
     searchKnowledge(message, 3),
-    searchTickets(message, 5, user),
+    searchTickets(message, 5, user, params?.period),
   ];
 
   if (intent === 'search_inventory') searches.push(searchAssets(params?.keyword || message, 5));
@@ -769,7 +921,8 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
       } else {
         // "le plus critique" → classement par nombre de tickets critiques (P1)
         const wantsUrgent = /critique|urgent|grave|s[ée]v[èe]re|p1/i.test(message) || /critical|urgent/i.test(params?.keyword || '');
-        const stats = await analyticsTools.getTopLocationsStats({ filterKeyword: kw, period: '30d', limit: 5, sortByUrgent: wantsUrgent });
+        const period = params?.period || '30d';
+        const stats = await analyticsTools.getTopLocationsStats({ filterKeyword: kw, period, limit: 5, sortByUrgent: wantsUrgent });
         if (stats.rankings.length > 0) {
           widget = {
             type: 'chart',
@@ -1021,7 +1174,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
         contextParts.push(`**Accès refusé :** Le rapport des tickets n'est accessible qu'aux équipes support.`);
         break;
       }
-      const report = await generateReport();
+      const report = await generateReport(params?.period || null);
       contextParts.push(`**Rapport :**\n${report}`);
       break;
     }
