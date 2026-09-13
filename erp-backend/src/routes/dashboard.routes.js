@@ -25,10 +25,10 @@ router.get('/stats', async (req, res) => {
   }
 
   const [byStatus, byPriority, byTeam, byCategory, total, openCount] = await Promise.all([
-    prisma.ticket.groupBy({ by: ['status'], where, _count: { _all: true } }),
-    prisma.ticket.groupBy({ by: ['priority'], where, _count: { _all: true } }),
-    prisma.ticket.groupBy({ by: ['teamId'], where, _count: { _all: true } }),
-    prisma.ticket.groupBy({ by: ['category'], where, _count: { _all: true } }),
+    prisma.ticket.groupBy({ by: ['status'], where, _count: true }),
+    prisma.ticket.groupBy({ by: ['priority'], where, _count: true }),
+    prisma.ticket.groupBy({ by: ['teamId'], where, _count: true }),
+    prisma.ticket.groupBy({ by: ['category'], where, _count: true }),
     prisma.ticket.count({ where }),
     prisma.ticket.count({ where: { ...where, status: { in: ['NEW', 'OPEN', 'PLANNED', 'PENDING'] } } }),
   ]);
@@ -43,15 +43,15 @@ router.get('/stats', async (req, res) => {
   return res.json({
     total,
     open: openCount,
-    byStatus: byStatus.map((s) => ({ status: s.status, count: s._count._all })),
-    byPriority: byPriority.map((p) => ({ priority: p.priority, count: p._count._all })),
+    byStatus: byStatus.map((s) => ({ status: s.status, count: s._count })),
+    byPriority: byPriority.map((p) => ({ priority: p.priority, count: p._count })),
     byCategory: byCategory
-      .map((c) => ({ category: c.category || 'Sans catégorie', count: c._count._all }))
+      .map((c) => ({ category: c.category || 'Sans catégorie', count: c._count }))
       .sort((a, b) => b.count - a.count),
     byTeam: byTeam.map((t) => ({
       teamId: t.teamId,
       teamName: t.teamId ? teamNameById[t.teamId] || 'Inconnue' : 'Non assignée',
-      count: t._count._all,
+      count: t._count,
     })),
   });
 });
@@ -66,7 +66,7 @@ router.get('/workload-by-team', async (req, res) => {
       status: { in: ACTIVE_STATUSES },
       approvalStatus: { notIn: ['PENDING', 'REJECTED'] },
     },
-    _count: { _all: true },
+    _count: true,
     orderBy: { _count: { _all: 'desc' } },
   });
 
@@ -85,11 +85,11 @@ router.get('/workload-by-team', async (req, res) => {
     .map((t) => ({
       teamId: t.teamId,
       teamName: teamNameById[t.teamId] || 'Inconnue',
-      count: t._count._all,
+      count: t._count,
     }));
 
   if (unassigned) {
-    result.push({ teamId: null, teamName: 'Non assignée', count: unassigned._count._all });
+    result.push({ teamId: null, teamName: 'Non assignée', count: unassigned._count });
   }
 
   return res.json(result);
@@ -678,11 +678,11 @@ router.get('/closure-stats', async (req, res) => {
   const groups = await prisma.ticketEvent.groupBy({
     by: ['type'],
     where: { createdAt: { gte: since }, type: { in: ['CLOSURE_VALIDATED', 'CLOSURE_REJECTED'] } },
-    _count: { _all: true },
+    _count: true,
   });
 
-  const validated = groups.find((g) => g.type === 'CLOSURE_VALIDATED')?._count._all || 0;
-  const rejected = groups.find((g) => g.type === 'CLOSURE_REJECTED')?._count._all || 0;
+  const validated = groups.find((g) => g.type === 'CLOSURE_VALIDATED')?._count || 0;
+  const rejected = groups.find((g) => g.type === 'CLOSURE_REJECTED')?._count || 0;
   const total = validated + rejected;
 
   // Série temporelle journalière : événements de clôture (suggérées + décisions Hotline)

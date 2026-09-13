@@ -171,10 +171,10 @@ async function checkClosureSuggestionHealth() {
   const groups = await prisma.ticketEvent.groupBy({
     by: ['type'],
     where: { createdAt: { gte: since }, type: { in: ['CLOSURE_VALIDATED', 'CLOSURE_REJECTED'] } },
-    _count: { _all: true },
+    _count: true,
   });
-  const validated = groups.find((g) => g.type === 'CLOSURE_VALIDATED')?._count._all || 0;
-  const rejected = groups.find((g) => g.type === 'CLOSURE_REJECTED')?._count._all || 0;
+  const validated = groups.find((g) => g.type === 'CLOSURE_VALIDATED')?._count || 0;
+  const rejected = groups.find((g) => g.type === 'CLOSURE_REJECTED')?._count || 0;
   const total = validated + rejected;
   if (total >= 5 && validated / total < 0.5) {
     throw new Error(

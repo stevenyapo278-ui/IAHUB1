@@ -311,7 +311,7 @@ router.get('/', async (req, res) => {
       orderBy,
     }),
     prisma.ticket.count({ where }),
-    prisma.ticket.groupBy({ where, by: ['status', 'priority'], _count: { _all: true } }),
+    prisma.ticket.groupBy({ where, by: ['status', 'priority'], _count: true }),
     prisma.ticket.count({ where: { ...where, aiProcessed: true } }),
     prisma.ticket.count({ where: { ...where, assignedToId: null } }),
   ]);
@@ -320,7 +320,7 @@ router.get('/', async (req, res) => {
   // au plus ~6 statuts × 4 priorités lignes retournées par le GROUP BY).
   let openCount = 0, pendingCount = 0, solvedCount = 0, closedCount = 0, p1Count = 0, p2Count = 0;
   for (const row of breakdown) {
-    const n = row._count._all;
+    const n = row._count;
     if (['NEW', 'OPEN', 'PLANNED'].includes(row.status)) openCount += n;
     else if (['PENDING', 'WAITING_FOR_USER'].includes(row.status)) pendingCount += n;
     else if (row.status === 'SOLVED') solvedCount += n;
