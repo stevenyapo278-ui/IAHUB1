@@ -80,29 +80,40 @@ function stripLayout(layout) {
   return (layout || []).map(({ i, x, y, w, h }) => ({ i, x, y, w, h }));
 }
 
-/** Vérifie si deux rectangles se chevauchent */
-function overlaps(a, b) {
-  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-}
-
 /**
  * Après un drag, restaure les widgets déplacés involontairement à leur position
  * d'origine. Seul le widget glissé conserve sa nouvelle position.
  * Compaction verticale légère pour résoudre les chevauchements restants.
  */
-function restoreDisplaced(originalLayout, newLayout, draggedId) {
-  const origMap = new Map(originalLayout.map((l) => [l.i, l]));
+function restoreDisplaced(prevLayout, newLayout) {
+  const prevMap = new Map(prevLayout.map((l) => [l.i, l]));
   const newMap = new Map(newLayout.map((l) => [l.i, { ...l }]));
-  const dragged = newMap.get(draggedId);
-  if (!dragged) return newLayout;
 
-  // Restaurer tous les widgets non-guissés à leur position d'origine
-  for (const [id, orig] of origMap) {
+  // Détecter quel widget a bougé le plus (le widget glissé)
+  let maxDelta = 0;
+  let draggedId = null;
+  for (const [id, curr] of newMap) {
+    const prev = prevMap.get(id);
+    if (!prev) continue;
+    const dx = Math.abs(curr.x - prev.x);
+    const dy = Math.abs(curr.y - prev.y);
+    const delta = dx + dy;
+    if (delta > maxDelta) {
+      maxDelta = delta;
+      draggedId = id;
+    }
+  }
+
+  // Si aucun mouvement significatif, pas de snap-back nécessaire
+  if (!draggedId || maxDelta <= 1) return newLayout;
+
+  // Restaurer tous les widgets non-guissés à leur position précédente
+  for (const [id, prev] of prevMap) {
     if (id === draggedId) continue;
     const curr = newMap.get(id);
     if (curr) {
-      curr.x = orig.x;
-      curr.y = orig.y;
+      curr.x = prev.x;
+      curr.y = prev.y;
     }
   }
 
@@ -113,25 +124,24 @@ function restoreDisplaced(originalLayout, newLayout, draggedId) {
 
   for (const item of sorted) {
     if (item.i === draggedId) {
-      // Le widget glissé garde sa position finale (potentiellement décalée par RGL)
+      // Le widget glissé garde sa position finale
       placed.push(item);
       continue;
     }
     // Pour chaque widget non-glissé, trouver la première position libre en bas
     let testY = item.y;
-    let found = false;
     for (let attempt = 0; attempt < 100; attempt++) {
       const test = { ...item, y: testY };
-      const collision = placed.some((p) => overlaps(test, p));
+      const collision = placed.some((p) =>
+        test.x < p.x + p.w && test.x + test.w > p.x && test.y < p.y + p.h && test.y + test.h > p.y
+      );
       if (!collision) {
         item.y = testY;
-        placed.push(item);
-        found = true;
         break;
       }
       testY++;
     }
-    if (!found) placed.push(item);
+    placed.push(item);
   }
 
   return placed.map(({ minW, minH, maxW, maxH, ...rest }) => rest);
@@ -160,20 +170,14 @@ export default memo(function DashboardGrid({
   const layouts = useMemo(() => ({ lg: baseLayout }), [baseLayout]);
 
   // ── Snap-back : restaure les widgets déplacés involontairement ────────────
-  // Sauvegarde des positions originales au début du drag
-  const preDragLayoutRef = useRef(null);
-  const draggedIdRef = useRef(null);
+  // On track le layout précédent pour détecter le drag via onLayoutChange.
+  const prevLayoutRef = useRef(baseLayout);
+  const isDraggingRef = useRef(false);
 
-  const handleDragStart = useCallback((_layout, _oldItem, newItem) => {
-    // Snapshot des positions actuelles avant le drag
-    preDragLayoutRef.current = baseLayout.map((l) => ({ i: l.i, x: l.x, y: l.y, w: l.w, h: l.h }));
-    draggedIdRef.current = newItem.i;
-  }, [baseLayout]);
-
-  const handleDragStop = useCallback((_layout, _oldItem, newItem, _placeholder, e) => {
-    draggedIdRef.current = null;
-    // Laisser onLayoutChange traiter le snap-back
-  }, []);
+  // Mettre à jour le ref quand le layout est servi depuis l'API (pas pendant un drag)
+  if (!isDraggingRef.current) {
+    prevLayoutRef.current = baseLayout;
+  }
 
   // Commit unique : RGL appelle onLayoutChange après drag, resize ET
   // compaction — c'est la seule source de vérité pour la persistance.
@@ -197,17 +201,19 @@ export default memo(function DashboardGrid({
       if (!isEditing) return;
       if (breakpointRef.current !== 'lg') return;
 
-      // Snap-back : si un drag est en cours, restaurer les widgets déplacés
-      let finalLayout = newLayout;
-      const preDrag = preDragLayoutRef.current;
-      if (preDrag && draggedIdRef.current) {
-        finalLayout = restoreDisplaced(preDrag, newLayout, draggedIdRef.current);
-      }
+      // Snap-back : restaurer les widgets déplacés involontairement
+      const prevLayout = prevLayoutRef.current;
+      const cleaned = (prevLayout && prevLayout.length === newLayout.length)
+        ? restoreDisplaced(prevLayout, newLayout)
+        : newLayout;
 
-      if (rafRef.current) return; // frame déjà en attente
+      // Mettre à jour le ref du layout précédent
+      prevLayoutRef.current = cleaned;
+
+      if (rafRef.current) return;
       rafRef.current = requestAnimationFrame(() => {
         rafRef.current = null;
-        onLayoutChange?.(stripLayout(finalLayout), widgetsRef.current);
+        onLayoutChange?.(stripLayout(cleaned), widgetsRef.current);
       });
     },
     [isEditing, onLayoutChange],
@@ -251,8 +257,6 @@ export default memo(function DashboardGrid({
             useCSSTransforms
             onLayoutChange={handleLayoutChange}
             onBreakpointChange={handleBreakpointChange}
-            onDragStart={isEditing ? handleDragStart : undefined}
-            onDragStop={isEditing ? handleDragStop : undefined}
           >
             {widgets.map((widget) => (
               <div
