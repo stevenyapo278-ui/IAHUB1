@@ -186,7 +186,10 @@ export function SocketProvider({ children }) {
     setSocket(newSocket);
 
     return () => {
-      newSocket.disconnect();
+      if (newSocket.connected || newSocket.connecting) {
+        newSocket.removeAllListeners();
+        newSocket.disconnect();
+      }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);

@@ -281,9 +281,9 @@ export default function DashboardToolbar({
           </AnimatePresence>
 
           {/* Reorganize presets dropdown (edit mode only) */}
-          <AnimatePresence>
-            {isEditing && (
-              <div className="relative" ref={presetRef}>
+          <div className="relative" ref={presetRef}>
+            <AnimatePresence>
+              {isEditing && (
                 <motion.button
                   initial={{ opacity: 0, scale: 0.9 }}
                   animate={{ opacity: 1, scale: 1 }}
@@ -298,6 +298,8 @@ export default function DashboardToolbar({
                   <span className="hidden sm:inline">Réorganiser</span>
                   <ChevronDown className={`w-3 h-3 transition-transform ${presetOpen ? 'rotate-180' : ''}`} />
                 </motion.button>
+              )}
+            </AnimatePresence>
 
                 <AnimatePresence>
                   {presetOpen && (
@@ -326,9 +328,7 @@ export default function DashboardToolbar({
                     </motion.div>
                   )}
                 </AnimatePresence>
-              </div>
-            )}
-          </AnimatePresence>
+          </div>
 
           {/* Auto-distribute button (edit mode only) */}
           <AnimatePresence>
