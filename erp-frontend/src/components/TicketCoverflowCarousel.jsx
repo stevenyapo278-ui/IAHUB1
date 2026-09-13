@@ -59,82 +59,76 @@ const slideTransition = { x: { type: 'tween', duration: 0.35, ease: 'easeInOut' 
 
 // ─── Ticket Card ──────────────────────────────────────────────────────────────
 
-function TicketSlide({ ticket, isDark }) {
+function TicketSlide({ ticket }) {
   const navigate = useNavigate();
   const pTheme = PRIORITY_THEMES[ticket.priority] || PRIORITY_THEMES.P3;
   const sTheme = STATUS_THEMES[ticket.status] || STATUS_THEMES.OPEN;
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-xl border border-border bg-surface-muted">
-      {/* Priority stripe */}
       <div className="absolute top-0 left-0 right-0 h-1 rounded-t-xl" style={{ background: pTheme.stripe }} />
 
-      {/* Card content */}
-      <div className="p-6 sm:p-8 flex flex-col h-full">
-        {/* Header */}
-        <div className="flex items-center justify-between gap-3 border-b border-border/30 pb-4">
-          <div className="flex items-center gap-2.5 flex-wrap">
-            <span className="px-3 py-1 rounded-xl bg-primary/10 text-primary font-mono font-bold text-sm border border-primary/20">
+      <div className="p-3 sm:p-4 flex flex-col h-full">
+        <div className="flex items-center justify-between gap-2 border-b border-border/30 pb-2.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="px-2.5 py-0.5 rounded-lg bg-primary/10 text-primary font-mono font-bold text-xs border border-primary/20">
               #{ticket.id}
             </span>
-            <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${sTheme.bg}`}>
+            <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${sTheme.bg}`}>
               {sTheme.label}
             </span>
             {ticket.aiProcessed && (
-              <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-purple-500/10 text-purple-400 text-xs font-bold border border-purple-500/25">
-                <Sparkles className="size-3.5" /> IA Triage
+              <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 text-[11px] font-bold border border-purple-500/25">
+                <Sparkles className="size-3" /> IA
               </span>
             )}
           </div>
-          <div className={`flex items-center gap-1.5 px-3 py-1 rounded-xl border text-xs font-bold ${pTheme.bg} ${pTheme.border} ${pTheme.text}`}>
+          <div className={`flex items-center gap-1 px-2.5 py-0.5 rounded-lg border text-[11px] font-bold ${pTheme.bg} ${pTheme.border} ${pTheme.text}`}>
             {pTheme.label}
           </div>
         </div>
 
-        {/* Body */}
-        <div className="flex-1 py-5 space-y-2">
-          <h3 className="text-xl sm:text-2xl font-bold text-on-surface leading-snug line-clamp-2">
+        <div className="flex-1 py-3 space-y-1.5">
+          <h3 className="text-sm sm:text-base font-bold text-on-surface leading-snug line-clamp-2">
             {ticket.title}
           </h3>
-          <p className="text-sm text-on-surface-variant line-clamp-3 leading-relaxed">
+          <p className="text-xs text-on-surface-variant line-clamp-2 leading-relaxed">
             {ticket.content || 'Aucune description fournie.'}
           </p>
         </div>
 
-        {/* Meta grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs text-on-surface-variant pt-4 border-t border-border/30">
-          <div className="flex items-center gap-2 truncate">
-            <User className="size-4 text-primary shrink-0" />
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] text-on-surface-variant pt-2.5 border-t border-border/30">
+          <div className="flex items-center gap-1.5 truncate">
+            <User className="size-3.5 text-primary shrink-0" />
             <span className="truncate">{ticket.requester?.fullName || 'Demandeur'}</span>
           </div>
-          <div className="flex items-center gap-2 truncate">
-            <Tag className="size-4 text-blue-400 shrink-0" />
+          <div className="flex items-center gap-1.5 truncate">
+            <Tag className="size-3.5 text-blue-400 shrink-0" />
             <span className="truncate">{ticket.category || 'Général'}</span>
           </div>
-          <div className="flex items-center gap-2 truncate">
-            <MapPin className="size-4 text-emerald-400 shrink-0" />
+          <div className="flex items-center gap-1.5 truncate">
+            <MapPin className="size-3.5 text-emerald-400 shrink-0" />
             <span className="truncate">{ticket.locationName || 'Prosuma'}</span>
           </div>
-          <div className="flex items-center gap-2">
-            <Clock className="size-4 text-amber-400 shrink-0" />
+          <div className="flex items-center gap-1.5">
+            <Clock className="size-3.5 text-amber-400 shrink-0" />
             <span>{new Date(ticket.createdAt).toLocaleDateString('fr-FR')}</span>
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="pt-4 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <UserAvatar user={ticket.assignedTo} name={ticket.assignedTo?.fullName} size="md" colorClass="bg-primary/10 text-primary" />
-            <span className="text-xs text-on-surface-variant font-medium truncate max-w-[200px]">
+        <div className="pt-2.5 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <UserAvatar user={ticket.assignedTo} name={ticket.assignedTo?.fullName} size="sm" colorClass="bg-primary/10 text-primary" />
+            <span className="text-[11px] text-on-surface-variant font-medium truncate max-w-[160px]">
               {ticket.assignedTo?.fullName || 'Non assigné'}
             </span>
           </div>
           <button
             onClick={() => navigate(`/tickets/${ticket.id}`)}
-            className="btn-primary px-5 py-2.5 text-xs flex items-center gap-2"
+            className="btn-primary px-2.5 py-1 text-[11px] flex items-center gap-1.5"
           >
             Consulter
-            <ExternalLink className="size-3.5" />
+            <ExternalLink className="size-3" />
           </button>
         </div>
       </div>
@@ -146,7 +140,6 @@ function TicketSlide({ ticket, isDark }) {
 
 export default function TicketCoverflowCarousel({ tickets = [] }) {
   const [[index, direction], setIndex] = useState([0, 0]);
-  const [isPaused, setIsPaused] = useState(false);
 
   const count = tickets.length;
 
@@ -166,13 +159,6 @@ export default function TicketCoverflowCarousel({ tickets = [] }) {
     const prev = (index - 1 + count) % count;
     setIndex([prev, -1]);
   }, [index, count]);
-
-  // Autoplay
-  useEffect(() => {
-    if (isPaused || count <= 1) return;
-    const timer = setInterval(goNext, 4000);
-    return () => clearInterval(timer);
-  }, [isPaused, goNext, count]);
 
   // Keyboard
   useEffect(() => {
@@ -195,11 +181,9 @@ export default function TicketCoverflowCarousel({ tickets = [] }) {
   return (
     <div
       className="relative overflow-hidden rounded-xl border border-border bg-surface-muted"
-      onMouseEnter={() => setIsPaused(true)}
-      onMouseLeave={() => setIsPaused(false)}
     >
       {/* Slides */}
-      <div className="relative aspect-[16/7]">
+      <div className="relative aspect-[5/2] max-h-[280px]">
         <AnimatePresence initial={false} custom={direction} mode="popLayout">
           <motion.div
             key={tickets[index]?.id || index}

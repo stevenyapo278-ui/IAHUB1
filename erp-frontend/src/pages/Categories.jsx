@@ -8,79 +8,14 @@ import { flattenCategoryTree } from '../utils/categoryTree';
 import ConfirmDialog from '../components/ConfirmDialog';
 import DataGrid from '../components/DataGrid';
 import FormDrawer from '../components/FormDrawer';
+import PaginationButtons from '../components/PaginationButtons';
+
+const inputCls = 'px-3.5 py-2 rounded-xl border border-outline-variant/60 bg-surface text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all';
 
 function formatDate(d) {
   if (!d) return '—';
   return new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
-
-function PaginationButtons({ page, totalPages, onPageChange }) {
-  const pages = useMemo(() => {
-    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
-    const r = [];
-    r.push(1);
-    if (page > 3) r.push('...');
-    const start = Math.max(2, page - 1);
-    const end = Math.min(totalPages - 1, page + 1);
-    for (let i = start; i <= end; i++) r.push(i);
-    if (page < totalPages - 2) r.push('...');
-    r.push(totalPages);
-    return r;
-  }, [page, totalPages]);
-
-  const btnBase = 'h-10 min-w-[40px] flex items-center justify-center rounded-lg text-xs font-semibold transition-all duration-150 active:scale-95';
-  const btnEnabled = 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface';
-  const btnDisabled = 'text-on-surface-variant/30 cursor-not-allowed';
-  const btnActive = 'bg-primary text-on-primary shadow-sm shadow-primary/20';
-
-  return (
-    <div className="flex items-center gap-1">
-      <button onClick={() => onPageChange(1)} disabled={page <= 1}
-        className={`${btnBase} px-1.5 ${page <= 1 ? btnDisabled : btnEnabled}`}>
-        <ChevronsLeft className="w-4 h-4" />
-      </button>
-      <button onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page <= 1}
-        className={`${btnBase} px-1.5 ${page <= 1 ? btnDisabled : btnEnabled}`}>
-        <ChevronLeft className="w-4 h-4" />
-      </button>
-      {pages.map((p, i) =>
-        p === '...' ? (
-          <span key={`dots-${i}`} className="w-8 h-10 flex items-center justify-center text-xs text-on-surface-variant/30">…</span>
-        ) : (
-          <button key={p} onClick={() => onPageChange(p)}
-            className={`${btnBase} px-1 ${p === page ? btnActive : btnEnabled}`}>
-            {p}
-          </button>
-        )
-      )}
-      <button onClick={() => onPageChange(Math.min(totalPages, page + 1))} disabled={page >= totalPages}
-        className={`${btnBase} px-1.5 ${page >= totalPages ? btnDisabled : btnEnabled}`}>
-        <ChevronRight className="w-4 h-4" />
-      </button>
-      <button onClick={() => onPageChange(totalPages)} disabled={page >= totalPages}
-        className={`${btnBase} px-1.5 ${page >= totalPages ? btnDisabled : btnEnabled}`}>
-        <ChevronsRight className="w-4 h-4" />
-      </button>
-    </div>
-  );
-}
-
-function ChevronsLeft({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m11 17-5-5 5-5" /><path d="m18 17-5-5 5-5" />
-    </svg>
-  );
-}
-function ChevronsRight({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m6 17 5-5-5-5" /><path d="m13 17 5-5-5-5" />
-    </svg>
-  );
-}
-
-const inputCls = 'px-3.5 py-2 rounded-xl border border-outline-variant/60 bg-surface text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all';
 
 export default function Categories() {
   const { user } = useAuth();

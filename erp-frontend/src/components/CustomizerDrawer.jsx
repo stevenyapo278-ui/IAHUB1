@@ -45,11 +45,6 @@ const TABS = [
   { id: 'chat', label: 'Chat', icon: MessageCircle },
 ];
 
-const DENSITY_OPTIONS = [
-  { id: 'compact', label: 'Compact', description: 'Lignes serrées, moins d\'espace' },
-  { id: 'comfortable', label: 'Confortable', description: 'Espacement standard' },
-];
-
 const COMMON_SHORTCUTS = [
   { path: '/tickets', label: 'Tickets', icon: '🎫' },
   { path: '/tickets?new=1', label: 'Nouveau ticket', icon: '➕' },
@@ -146,7 +141,7 @@ export default function CustomizerDrawer({ open, onClose }) {
 
 // ── Tables Tab ─────────────────────────────────────────────────────────────
 function TablesTab() {
-  const { tablePreferences, setTableDensity, fontSize, setFontSize } = useUserPreferences();
+  const { fontSize, setFontSize } = useUserPreferences();
 
   const FONT_SIZES = [12, 13, 14, 15, 16, 18, 20];
 
@@ -192,50 +187,14 @@ function TablesTab() {
         </div>
       </div>
 
-      {/* Density */}
-      <div>
-        <label className="text-xs font-semibold mb-2 block text-foreground">
-          Densité des tables
-        </label>
-        <p className="text-[10px] text-muted-foreground mb-3">
-          Contrôle l'espacement des lignes dans toutes les tables.
-        </p>
-        <div className="grid grid-cols-2 gap-2">
-          {DENSITY_OPTIONS.map((opt) => {
-            const isActive = tablePreferences.density === opt.id;
-            return (
-              <button
-                key={opt.id}
-                onClick={() => setTableDensity(opt.id)}
-                className={`relative flex flex-col items-center gap-1 p-3 rounded-xl border transition-all ${
-                  isActive
-                    ? 'bg-primary/5 border-primary'
-                    : 'bg-surface-container border-border hover:border-border'
-                }`}
-              >
-                {isActive && (
-                  <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-primary text-primary-foreground flex items-center justify-center">
-                    <Check className="w-2.5 h-2.5" />
-                  </span>
-                )}
-                <span className="text-xs font-semibold text-foreground">{opt.label}</span>
-                <span className="text-[10px] text-muted-foreground text-center">{opt.description}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
       {/* Preview */}
       <div className="rounded-xl border border-border bg-surface-container p-4">
         <p className="text-xs font-semibold mb-2 text-foreground">Aperçu</p>
-        <div className={`space-y-0 ${tablePreferences.density === 'compact' ? 'text-[11px]' : 'text-xs'}`}>
+        <div className="space-y-0 text-xs">
           {['Ticket #1234 — Problème réseau', 'Ticket #1235 — Imprimante bloquée', 'Ticket #1236 — Accès refusé'].map((text, i) => (
             <div
               key={i}
-              className={`flex items-center gap-2 border-b border-border/50 ${
-                tablePreferences.density === 'compact' ? 'py-1 px-2' : 'py-2 px-3'
-              } ${i === 2 ? 'border-b-0' : ''}`}
+              className={`flex items-center gap-2 border-b border-border/50 py-2 px-3 ${i === 2 ? 'border-b-0' : ''}`}
             >
               <div className="w-2 h-2 rounded-full bg-primary shrink-0" />
               <span className="text-foreground truncate">{text}</span>

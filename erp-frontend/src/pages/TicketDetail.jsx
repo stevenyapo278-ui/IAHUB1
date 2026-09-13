@@ -1151,76 +1151,124 @@ export default function TicketDetail() {
   return (
     <div className="p-4 sm:p-6 lg:p-8 flex flex-col gap-6 max-w-7xl mx-auto overflow-x-hidden">
       {/* Top Header Bar (Fixe) */}
-      <div className="flex items-center justify-between gap-4 pb-4 border-b border-outline-variant/30 shrink-0">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => ((window.history.state?.idx ?? 0) > 0 ? navigate(-1) : navigate('/tickets'))}
-            className="p-2 rounded-xl border border-outline-variant/40 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer"
-            title="Retour aux tickets"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
+      <div className="flex items-center gap-3 pb-4 border-b border-outline-variant/30 shrink-0">
+        <button
+          onClick={() => ((window.history.state?.idx ?? 0) > 0 ? navigate(-1) : navigate('/tickets'))}
+          className="p-2 rounded-xl border border-outline-variant/40 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer shrink-0"
+          title="Retour aux tickets"
+        >
+          <ArrowLeft className="w-4 h-4" />
+        </button>
 
-          {/* Navigation entre tickets : premier ← → dernier par ordre de numéro */}
-          <div className="flex items-center gap-0.5">
-            <button
-              onClick={() => {
-                if (adjacent.first) {
-                  slideDirectionRef.current = 'prev';
-                  navigate(`/tickets/${adjacent.first}${navQueryString}`, { replace: true });
-                }
-              }}
-              disabled={!adjacent.first}
-              className="p-1.5 rounded-lg border border-outline-variant/30 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-              title={adjacent.first ? `Premier ticket (#${adjacent.first})` : 'Déjà au premier ticket'}
-            >
-              <ChevronsLeft className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => {
-                if (adjacent.prev) {
-                  slideDirectionRef.current = 'prev';
-                  navigate(`/tickets/${adjacent.prev}${navQueryString}`, { replace: true });
-                }
-              }}
-              disabled={!adjacent.prev}
-              className="p-1.5 rounded-lg border border-outline-variant/30 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-              title={adjacent.prev ? `Ticket précédent (#${adjacent.prev})` : 'Pas de ticket précédent'}
-            >
-              <ChevronLeft className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => {
-                if (adjacent.next) {
-                  slideDirectionRef.current = 'next';
-                  navigate(`/tickets/${adjacent.next}${navQueryString}`, { replace: true });
-                }
-              }}
-              disabled={!adjacent.next}
-              className="p-1.5 rounded-lg border border-outline-variant/30 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-              title={adjacent.next ? `Ticket suivant (#${adjacent.next})` : 'Pas de ticket suivant'}
-            >
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => {
-                if (adjacent.last) {
-                  slideDirectionRef.current = 'next';
-                  navigate(`/tickets/${adjacent.last}${navQueryString}`, { replace: true });
-                }
-              }}
-              disabled={!adjacent.last}
-              className="p-1.5 rounded-lg border border-outline-variant/30 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-              title={adjacent.last ? `Dernier ticket (#${adjacent.last})` : 'Déjà au dernier ticket'}
-            >
-              <ChevronsRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
+        {/* Navigation entre tickets */}
+        <div className="flex items-center gap-0.5 shrink-0">
+          <button
+            onClick={() => {
+              if (adjacent.first) {
+                slideDirectionRef.current = 'prev';
+                navigate(`/tickets/${adjacent.first}${navQueryString}`, { replace: true });
+              }
+            }}
+            disabled={!adjacent.first}
+            className="p-1.5 rounded-lg border border-outline-variant/30 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+            title={adjacent.first ? `Premier ticket (#${adjacent.first})` : 'Déjà au premier ticket'}
+          >
+            <ChevronsLeft className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => {
+              if (adjacent.prev) {
+                slideDirectionRef.current = 'prev';
+                navigate(`/tickets/${adjacent.prev}${navQueryString}`, { replace: true });
+              }
+            }}
+            disabled={!adjacent.prev}
+            className="p-1.5 rounded-lg border border-outline-variant/30 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+            title={adjacent.prev ? `Ticket précédent (#${adjacent.prev})` : 'Pas de ticket précédent'}
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+          </button>
+          <span className="text-[11px] font-bold text-on-surface-variant px-1.5 tabular-nums select-none">
+            #{ticket.id}
+          </span>
+          <button
+            onClick={() => {
+              if (adjacent.next) {
+                slideDirectionRef.current = 'next';
+                navigate(`/tickets/${adjacent.next}${navQueryString}`, { replace: true });
+              }
+            }}
+            disabled={!adjacent.next}
+            className="p-1.5 rounded-lg border border-outline-variant/30 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+            title={adjacent.next ? `Ticket suivant (#${adjacent.next})` : 'Pas de ticket suivant'}
+          >
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => {
+              if (adjacent.last) {
+                slideDirectionRef.current = 'next';
+                navigate(`/tickets/${adjacent.last}${navQueryString}`, { replace: true });
+              }
+            }}
+            disabled={!adjacent.last}
+            className="p-1.5 rounded-lg border border-outline-variant/30 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+            title={adjacent.last ? `Dernier ticket (#${adjacent.last})` : 'Déjà au dernier ticket'}
+          >
+            <ChevronsRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {/* Titre éditable — même ligne que navigation */}
+        <div className="flex-1 min-w-0">
+          {editingTitle ? (
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={editingTitleValue}
+                onChange={(e) => setEditingTitleValue(e.target.value.toLocaleUpperCase('fr-FR'))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleTitleSave();
+                  if (e.key === 'Escape') setEditingTitle(false);
+                }}
+                autoFocus
+                className="flex-1 text-base sm:text-lg font-bold text-on-surface bg-surface-container-low border border-primary/40 rounded-xl px-4 py-2 uppercase focus:outline-none focus:ring-2 focus:ring-primary/30"
+              />
+              <button
+                onClick={handleTitleSave}
+                disabled={savingField === 'title'}
+                className="p-2 rounded-xl bg-primary text-on-primary hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50 shrink-0"
+                title="Enregistrer"
+              >
+                <Save className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setEditingTitle(false)}
+                className="p-2 rounded-xl border border-outline-variant/40 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer shrink-0"
+                title="Annuler"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 group/title min-w-0">
+              <h1 className="text-base sm:text-lg font-black text-on-surface leading-tight tracking-tight line-clamp-1 uppercase truncate">{ticket.title}</h1>
+              {canEdit && (
+                <button
+                  onClick={() => { setEditingTitleValue(ticket.title); setEditingTitle(true); }}
+                  className="p-1.5 rounded-lg text-on-surface-variant/40 hover:text-on-surface hover:bg-surface-container transition-all opacity-0 group-hover/title:opacity-100 cursor-pointer shrink-0"
+                  title="Modifier le titre"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
       {/* Zone de contenu Ticket — carrousel directionnel (sortie + entrée) via AnimatePresence keyed par ticket.id */}
-      <div className="relative overflow-hidden" style={{ minHeight: 400 }}>
+      <div className="relative overflow-x-clip" style={{ minHeight: 400 }}>
         <AnimatePresence mode="popLayout" initial={false} custom={slideDirectionRef.current}>
           {ticket && (
             <motion.div
@@ -1233,67 +1281,14 @@ export default function TicketDetail() {
               className="w-full space-y-6"
               style={{ willChange: 'transform, opacity' }}
             >
-            {/* Header info (Titre #ID, badges, actions) */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-outline-variant/30">
-              <div className="flex items-center gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-sm font-black text-primary bg-primary/10 border border-primary/20 rounded-lg px-2 py-0.5 leading-6">#{ticket.id}</span>
-                    {ticket.glpiTicketId && (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 dark:bg-surface-container-high dark:text-on-surface-variant border border-slate-200 dark:border-outline-variant/40 flex items-center gap-1">
-                        <RefreshCw className="w-2.5 h-2.5" />
-                        GLPI #{ticket.glpiTicketId}
-                      </span>
-                    )}
-                  </div>
-                  {editingTitle ? (
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={editingTitleValue}
-                        onChange={(e) => setEditingTitleValue(e.target.value.toLocaleUpperCase('fr-FR'))}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleTitleSave();
-                          if (e.key === 'Escape') setEditingTitle(false);
-                        }}
-                        autoFocus
-                        className="flex-1 text-lg font-bold text-on-surface bg-surface-container-low border border-primary/40 rounded-xl px-3 py-1.5 uppercase focus:outline-none focus:ring-2 focus:ring-primary/30"
-                      />
-                      <button
-                        onClick={handleTitleSave}
-                        disabled={savingField === 'title'}
-                        className="p-2 rounded-xl bg-primary text-on-primary hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
-                        title="Enregistrer"
-                      >
-                        <Save className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => setEditingTitle(false)}
-                        className="p-2 rounded-xl border border-outline-variant/40 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer"
-                        title="Annuler"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2 group/title">
-                      <h1 className="text-xl sm:text-2xl font-black text-on-surface leading-tight tracking-tight line-clamp-2 uppercase">{ticket.title}</h1>
-                      {canEdit && (
-                        <button
-                          onClick={() => { setEditingTitleValue(ticket.title); setEditingTitle(true); }}
-                          className="p-1.5 rounded-lg text-on-surface-variant/40 hover:text-on-surface hover:bg-surface-container transition-all opacity-0 group-hover/title:opacity-100 cursor-pointer"
-                          title="Modifier le titre"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Right Badges & Actions */}
-              <div className="flex items-center gap-2 flex-wrap shrink-0">
+            {/* Badges & Actions */}
+            <div className="flex items-center gap-2 flex-wrap pb-4 border-b border-outline-variant/30">
+                {ticket.glpiTicketId && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 dark:bg-surface-container-high dark:text-on-surface-variant border border-slate-200 dark:border-outline-variant/40 flex items-center gap-1">
+                    <RefreshCw className="w-2.5 h-2.5" />
+                    GLPI #{ticket.glpiTicketId}
+                  </span>
+                )}
                 {ticket.escalationLevel > 0 && (
                   <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-orange-50 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400 border border-orange-500/30">
                     Niv. escalade {ticket.escalationLevel}
@@ -1395,7 +1390,6 @@ export default function TicketDetail() {
                   </button>
                 )}
               </div>
-            </div>
 
               {/* Méta strip : acteurs, dates et contexte */}
               <div className="flex flex-wrap items-center gap-2 pb-1">
@@ -2107,7 +2101,7 @@ export default function TicketDetail() {
         </div>
 
         {/* ── RIGHT COLUMN: Actions, AI, Approvals ──────────────────────── */}
-        <div className="flex flex-col gap-5 order-3">
+        <div className="flex flex-col gap-5 order-3 xl:sticky xl:top-6 xl:self-start">
           {/* Source Email Details */}
           {ticket.sourceEmail && (
             <div className="bento-card p-5 space-y-3">

@@ -13,48 +13,7 @@ import useSystemSettings from '../hooks/useSystemSettings';
 import ConfirmDialog from '../components/ConfirmDialog';
 import DataGrid from '../components/DataGrid';
 import FormDrawer from '../components/FormDrawer';
-
-function PaginationButtons({ page, totalPages, onPageChange }) {
-  const pages = useMemo(() => {
-    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
-    const r = [1];
-    if (page > 3) r.push('...');
-    for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) r.push(i);
-    if (page < totalPages - 2) r.push('...');
-    r.push(totalPages);
-    return r;
-  }, [page, totalPages]);
-
-  const btn = 'h-10 min-w-[40px] flex items-center justify-center rounded-lg text-xs font-semibold transition-all duration-150 active:scale-95';
-  const on = 'text-muted-foreground hover:bg-surface-muted hover:text-foreground';
-  const off = 'text-muted-foreground/30 cursor-not-allowed';
-  const active = 'bg-primary text-primary-foreground shadow-sm shadow-primary/20';
-
-  return (
-    <div className="flex items-center gap-1">
-      <button onClick={() => onPageChange(1)} disabled={page <= 1} className={`${btn} px-1.5 ${page <= 1 ? off : on}`}>
-        <ChevronsLeft className="w-4 h-4" />
-      </button>
-      <button onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page <= 1} className={`${btn} px-1.5 ${page <= 1 ? off : on}`}>
-        <ChevronLeft className="w-4 h-4" />
-      </button>
-      {pages.map((p, i) => p === '...' ? (
-        <span key={`dots-${i}`} className="w-8 h-10 flex items-center justify-center text-xs text-muted-foreground/40">…</span>
-      ) : (
-        <button key={p} onClick={() => onPageChange(p)} className={`${btn} px-1 ${p === page ? active : on}`}>{p}</button>
-      ))}
-      <button onClick={() => onPageChange(Math.min(totalPages, page + 1))} disabled={page >= totalPages} className={`${btn} px-1.5 ${page >= totalPages ? off : on}`}>
-        <ChevronRight className="w-4 h-4" />
-      </button>
-    </div>
-  );
-}
-
-const ChevronsLeft = ({ className }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/>
-  </svg>
-);
+import PaginationButtons from '../components/PaginationButtons';
 
 const emptyForm = { name: '', completename: '', address: '', postcode: '', town: '', country: '', building: '', room: '' };
 

@@ -44,31 +44,33 @@
     <div id="root">
       <!-- Boot loader — plein écran centré, remplacé au montage React. Styles inline :
           aucune dépendance au bundle CSS (affiché avant son chargement). -->
-      <div id="boot-loader" style="position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;background:var(--boot-bg,#F8FAFC);font-family:var(--user-font,Ubuntu),system-ui,sans-serif;">
-        <div style="position:relative;display:flex;align-items:center;justify-content:center;width:80px;height:80px;">
-          <span style="position:absolute;inset:0;border:2px solid var(--boot-primary-40,rgba(37,99,235,.4));border-radius:9999px;animation:bootHalo 1.6s ease-out infinite;"></span>
-          <span style="position:absolute;inset:0;border:2px solid var(--boot-primary-25,rgba(37,99,235,.25));border-radius:9999px;animation:bootHalo 1.6s ease-out .8s infinite;"></span>
-          <div style="position:relative;width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,var(--boot-primary,#2563eb),var(--boot-primary-dark,#1d4ed8));box-shadow:0 12px 24px var(--boot-primary-25,rgba(37,99,235,.25));display:flex;align-items:center;justify-content:center;">
-            <svg viewBox="0 0 24 24" fill="none" style="width:28px;height:28px;color:#fff;">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </div>
-        </div>
-        <div style="display:flex;flex-direction:column;align-items:center;gap:10px;">
-          <span style="font-size:14px;font-weight:700;color:var(--boot-text,#0f172a);letter-spacing:.02em;">ERP ITSM</span>
-          <div style="display:flex;gap:6px;">
-            <span style="width:6px;height:6px;border-radius:9999px;background:var(--boot-primary,#2563eb);animation:bootDot .9s ease-in-out infinite;"></span>
-            <span style="width:6px;height:6px;border-radius:9999px;background:var(--boot-primary,#2563eb);animation:bootDot .9s ease-in-out .15s infinite;"></span>
-            <span style="width:6px;height:6px;border-radius:9999px;background:var(--boot-primary,#2563eb);animation:bootDot .9s ease-in-out .3s infinite;"></span>
-          </div>
-        </div>
+      <div id="boot-loader" style="position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;background:var(--boot-bg,#F8FAFC);font-family:var(--user-font,Ubuntu),system-ui,sans-serif;">
+        <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="bg-g" x1="0" y1="0" x2="64" y2="64"><stop offset="0%" stop-color="#0099ff"/><stop offset="100%" stop-color="#5856d8"/></linearGradient>
+            <linearGradient id="g-m" x1="12" y1="12" x2="12" y2="56"><stop offset="0%" stop-color="#0099ff"/><stop offset="100%" stop-color="#5856d8"/></linearGradient>
+            <linearGradient id="g-a" x1="32" y1="12" x2="32" y2="56"><stop offset="0%" stop-color="#5856d8"/><stop offset="100%" stop-color="#0099ff"/></linearGradient>
+            <linearGradient id="g-r" x1="32" y1="12" x2="32" y2="56"><stop offset="0%" stop-color="#0099ff"/><stop offset="100%" stop-color="#5856d8"/></linearGradient>
+            <linearGradient id="g-i" x1="32" y1="12" x2="32" y2="56"><stop offset="0%" stop-color="#5856d8"/><stop offset="100%" stop-color="#0099ff"/></linearGradient>
+            <linearGradient id="g-e" x1="32" y1="12" x2="32" y2="56"><stop offset="0%" stop-color="#0099ff"/><stop offset="100%" stop-color="#5856d8"/></linearGradient>
+            <linearGradient id="g-i2" x1="32" y1="12" x2="32" y2="56"><stop offset="0%" stop-color="#5856d8"/><stop offset="100%" stop-color="#0099ff"/></linearGradient>
+            <linearGradient id="g-a2" x1="32" y1="12" x2="32" y2="56"><stop offset="0%" stop-color="#0099ff"/><stop offset="100%" stop-color="#5856d8"/></linearGradient>
+          </defs>
+          <rect width="64" height="64" rx="16" fill="url(#bg-g)"/>
+          <path stroke-linejoin="round" stroke-linecap="round" stroke-width="4" stroke="url(#g-m)" d="M 12,56 L 12,12 L 32,36 L 52,12 L 52,56" style="animation:marie-dash 2s ease forwards;stroke-dasharray:360;stroke-dashoffset:360"/>
+          <path stroke-linejoin="round" stroke-linecap="round" stroke-width="4" stroke="url(#g-a)" d="M 12,56 L 32,12 L 52,56 M 22,40 L 42,40" style="animation:marie-dash 2s ease .3s forwards;stroke-dasharray:360;stroke-dashoffset:360"/>
+          <path stroke-linejoin="round" stroke-linecap="round" stroke-width="4" stroke="url(#g-r)" d="M 16,56 L 16,12 C 45,12 45,36 16,36 L 48,56" style="animation:marie-dash 2s ease .6s forwards;stroke-dasharray:360;stroke-dashoffset:360"/>
+          <path stroke-linejoin="round" stroke-linecap="round" stroke-width="4" stroke="url(#g-i)" d="M 32,12 L 32,56" style="animation:marie-dash 2s ease .9s forwards;stroke-dasharray:360;stroke-dashoffset:360"/>
+          <path stroke-linejoin="round" stroke-linecap="round" stroke-width="4" stroke="url(#g-e)" d="M 50,12 L 16,12 L 16,56 L 50,56 M 16,34 L 42,34" style="animation:marie-dash 2s ease 1.2s forwards;stroke-dasharray:360;stroke-dashoffset:360"/>
+          <path stroke-linejoin="round" stroke-linecap="round" stroke-width="4" stroke="url(#g-i2)" d="M 32,12 L 32,56" style="animation:marie-dash 2s ease 1.5s forwards;stroke-dasharray:360;stroke-dashoffset:360"/>
+          <path stroke-linejoin="round" stroke-linecap="round" stroke-width="4" stroke="url(#g-a2)" d="M 12,56 L 32,12 L 52,56 M 22,40 L 42,40" style="animation:marie-dash 2s ease 1.8s forwards;stroke-dasharray:360;stroke-dashoffset:360"/>
+        </svg>
         <div style="height:2px;width:160px;border-radius:9999px;background:var(--boot-track,#e2e8f0);overflow:hidden;">
-          <div style="height:100%;width:33%;border-radius:9999px;background:var(--boot-primary,#2563eb);animation:bootBar 1.2s ease-in-out infinite;"></div>
+          <div style="height:100%;width:33%;border-radius:9999px;background:linear-gradient(90deg,#0099ff,#5856d8);animation:bootBar 1.2s ease-in-out infinite;"></div>
         </div>
       </div>
       <style>
-        @keyframes bootHalo { 0% { transform:scale(1);opacity:.6 } 100% { transform:scale(1.45);opacity:0 } }
-        @keyframes bootDot { 0%,100% { transform:translateY(0);opacity:.35 } 50% { transform:translateY(-5px);opacity:1 } }
+        @keyframes marie-dash { to { stroke-dashoffset: 0 } }
         @keyframes bootBar { 0% { transform:translateX(-100%) } 100% { transform:translateX(300%) } }
       </style>
     </div>

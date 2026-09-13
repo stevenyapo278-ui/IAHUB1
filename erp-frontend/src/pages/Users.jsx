@@ -14,6 +14,8 @@ import api from '../api/client';
 import ConfirmDialog from '../components/ConfirmDialog';
 import UserAvatar from '../components/UserAvatar';
 import Toggle from '../components/Toggle';
+import PaginationButtons from '../components/PaginationButtons';
+import BulkActionsBar from '../components/BulkActionsBar';
 import { useAuth } from '../context/AuthContext';
 import { useFilterParam } from '../hooks/useFilterParam';
 import useSystemSettings from '../hooks/useSystemSettings';
@@ -59,92 +61,6 @@ const ROLE_CONFIG = {
   TECHNICIAN: { label: 'Technicien',   color: 'text-emerald-700 dark:text-emerald-400',bg: 'bg-emerald-500/15',border: 'border-emerald-500/25',icon: 'build'                 },
   REQUESTER:  { label: 'Demandeur',    color: 'text-zinc-700 dark:text-zinc-400',   bg: 'bg-zinc-500/15',   border: 'border-zinc-500/25',   icon: 'person'                },
 };
-
-function ChevronsLeft({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m11 17-5-5 5-5" /><path d="m18 17-5-5 5-5" />
-    </svg>
-  );
-}
-function ChevronsRight({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m6 17 5-5-5-5" /><path d="m13 17 5-5-5-5" />
-    </svg>
-  );
-}
-
-function PaginationButtons({ page, totalPages, onPageChange }) {
-  const [jumpValue, setJumpValue] = useState('');
-  const jumpRef = useRef(null);
-
-  const pages = useMemo(() => {
-    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
-    const result = [];
-    result.push(1);
-    if (page > 3) result.push('...');
-    const start = Math.max(2, page - 1);
-    const end = Math.min(totalPages - 1, page + 1);
-    for (let i = start; i <= end; i++) result.push(i);
-    if (page < totalPages - 2) result.push('...');
-    result.push(totalPages);
-    return result;
-  }, [page, totalPages]);
-
-  function handleKeyDown(e) {
-    if (e.key === 'ArrowLeft') { e.preventDefault(); onPageChange(Math.max(1, page - 1)); }
-    else if (e.key === 'ArrowRight') { e.preventDefault(); onPageChange(Math.min(totalPages, page + 1)); }
-    else if (e.key === 'Home') { e.preventDefault(); onPageChange(1); }
-    else if (e.key === 'End') { e.preventDefault(); onPageChange(totalPages); }
-  }
-
-  function handleJump(e) {
-    e.preventDefault();
-    const val = parseInt(jumpValue, 10);
-    if (!isNaN(val) && val >= 1 && val <= totalPages && val !== page) onPageChange(val);
-    setJumpValue('');
-    jumpRef.current?.blur();
-  }
-
-  const btnBase = 'h-10 min-w-[40px] flex items-center justify-center rounded-lg text-xs font-semibold transition-all duration-150 active:scale-95';
-  const btnEnabled = 'text-muted-foreground hover:bg-surface-muted hover:text-foreground';
-  const btnDisabled = 'text-muted-foreground/30 cursor-not-allowed';
-  const btnActive = 'bg-primary text-primary-foreground shadow-sm shadow-primary/20';
-
-  return (
-    <div className="flex items-center gap-2" onKeyDown={handleKeyDown} role="navigation" aria-label="Pagination">
-      <div className="flex items-center gap-1">
-        <button onClick={() => onPageChange(1)} disabled={page <= 1} aria-label="Première page" className={`${btnBase} px-1.5 ${page <= 1 ? btnDisabled : btnEnabled}`}>
-          <ChevronsLeft className="w-4 h-4" />
-        </button>
-        <button onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page <= 1} aria-label="Page précédente" className={`${btnBase} px-1.5 ${page <= 1 ? btnDisabled : btnEnabled}`}>
-          <ChevronLeft className="w-4 h-4" />
-        </button>
-        {pages.map((p, i) =>
-          p === '...' ? (
-            <span key={`dots-${i}`} className="w-8 h-10 flex items-center justify-center text-xs text-muted-foreground/40">…</span>
-          ) : (
-            <button key={p} onClick={() => onPageChange(p)} aria-label={`Page ${p}`} aria-current={p === page ? 'page' : undefined}
-              className={`${btnBase} px-1 ${p === page ? btnActive : btnEnabled}`}>{p}</button>
-          )
-        )}
-        <button onClick={() => onPageChange(Math.min(totalPages, page + 1))} disabled={page >= totalPages} aria-label="Page suivante" className={`${btnBase} px-1.5 ${page >= totalPages ? btnDisabled : btnEnabled}`}>
-          <ChevronRight className="w-4 h-4" />
-        </button>
-        <button onClick={() => onPageChange(totalPages)} disabled={page >= totalPages} aria-label="Dernière page" className={`${btnBase} px-1.5 ${page >= totalPages ? btnDisabled : btnEnabled}`}>
-          <ChevronsRight className="w-4 h-4" />
-        </button>
-      </div>
-      <form onSubmit={handleJump} className="flex items-center gap-1.5 ml-2">
-        <span className="text-[11px] text-muted-foreground">→</span>
-        <input ref={jumpRef} type="number" min={1} max={totalPages} value={jumpValue} onChange={(e) => setJumpValue(e.target.value)}
-          placeholder={`1–${totalPages}`}
-          className="w-16 h-8 px-2 text-[11px] text-center font-semibold bg-surface border border-border/40 rounded-lg text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-primary/30 transition-all" />
-      </form>
-    </div>
-  );
-}
 
 const inputCls = 'px-3.5 py-2 rounded-xl border border-outline-variant/60 bg-surface text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all';
 
@@ -621,14 +537,10 @@ export default function Users() {
       )}
 
       {/* Bulk action bar */}
-      <AnimatePresence>
-        {selectedIds.length > 0 && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden border-b border-blue-500/20 bg-blue-500/5">
-            <div className="px-4 sm:px-6 py-2.5 flex flex-wrap items-center gap-3">
-              <span className="text-[11px] font-bold text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
-                <CheckCircle2 className="w-3.5 h-3.5" />{selectedIds.length} sélectionné(s)
-              </span>
+      <div className="fixed bottom-4 sm:bottom-6 inset-x-0 z-50 flex justify-center px-3 pointer-events-none">
+        <AnimatePresence>
+          {selectedIds.length > 0 && (
+            <BulkActionsBar count={selectedIds.length} onClear={() => setSelectedIds([])}>
               <div className="flex items-center gap-1.5">
                 <select value={assignGroupId} onChange={e => setAssignGroupId(e.target.value)}
                   className="bg-surface border border-outline-variant/40 rounded-xl px-3.5 py-2 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer">
@@ -649,13 +561,14 @@ export default function Users() {
                   className="px-2.5 py-1.5 rounded-lg border border-outline-variant/40 text-xs font-semibold text-on-surface hover:bg-surface-container transition-colors disabled:opacity-40">OK</button>
               </div>
               <button onClick={handleBulkDelete} disabled={bulkDeleting}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 text-xs font-semibold hover:bg-red-500/15 transition-all disabled:opacity-40 ml-auto">
-                <Trash2 className="w-3 h-3" />Supprimer ({selectedIds.length})
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/30 text-red-500 text-xs font-semibold hover:bg-red-500/10 transition-colors disabled:opacity-50">
+                <Trash2 className="w-3.5 h-3.5" />
+                Supprimer
               </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            </BulkActionsBar>
+          )}
+        </AnimatePresence>
+      </div>
 
       {/* ── MAIN CONTENT ── */}
       <div className="flex-1 min-h-0 relative flex flex-col">

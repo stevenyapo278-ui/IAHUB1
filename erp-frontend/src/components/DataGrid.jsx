@@ -17,9 +17,11 @@
  *   animateRows  – boolean (default true)
  *   className    – classe CSS sur le conteneur extérieur
  *   extraGridOptions – options supplémentaires passées à AgGridReact
+ *   totalFilteredCount – nombre total de résultats filtrés (pour "Sélectionner les X")
+ *   onSelectAllFiltered – callback quand l'utilisateur clique "Sélectionner les X correspondants"
  */
 
-import { useMemo, useRef, useCallback, useEffect, useState } from 'react';
+import { useMemo, useRef, useCallback, useEffect } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
 import { RefreshCw } from 'lucide-react';
@@ -242,6 +244,8 @@ export default function DataGrid({
   noRowsText = 'Aucune donnée',
   getRowId,
   height,
+  totalFilteredCount,
+  onSelectAllFiltered,
 }) {
   const gridRef = useRef(null);
   const containerRef = useRef(null);
@@ -296,6 +300,18 @@ export default function DataGrid({
             <RefreshCw className="w-4 h-4 animate-spin text-primary" />
             <span className="text-xs font-semibold text-muted-foreground">Chargement...</span>
           </div>
+        </div>
+      )}
+      {/* Select all filtered banner */}
+      {rowSelection === 'multiple' && totalFilteredCount != null && selectedIds?.length > 0 && totalFilteredCount > selectedIds.length && onSelectAllFiltered && (
+        <div className="flex items-center justify-center gap-2 px-3 py-1.5 bg-primary/5 border-b border-primary/10 text-xs">
+          <span className="text-muted-foreground">
+            {selectedIds.length} sélectionné{selectedIds.length > 1 ? 's' : ''} sur cette page
+          </span>
+          <button onClick={onSelectAllFiltered}
+            className="font-semibold text-primary hover:underline transition-colors">
+            Sélectionner les {totalFilteredCount.toLocaleString('fr-FR')} correspondants
+          </button>
         </div>
       )}
       <div

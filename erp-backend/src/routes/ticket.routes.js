@@ -2141,4 +2141,23 @@ router.post('/bulk-delete', forbidTechnicianTicketEdits, requireDeleteTicketPerm
   return res.json({ deleted: result.count });
 });
 
+// Restore tickets in bulk — body: { ids: [1, 2, 3] }
+router.post('/bulk-restore', forbidTechnicianTicketEdits, requireDeleteTicketPermission, [body('ids').isArray({ min: 1 })], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+  const ids = req.body.ids.map(Number).filter((n) => !Number.isNaN(n));
+  if (ids.length === 0) return res.status(400).json({ error: 'Aucun identifiant valide fourni' });
+
+  const result = await prisma.ticket.updateMany({
+    where: { id: { in: ids }, deletedAt: { not: null } },
+    data: { deletedAt: null, deletedById: null },
+  });
+  for (const id of ids) {
+    await logEvent(id, 'RESTORED', req.user.email || 'SYSTEM').catch(() => {});
+  }
+  await auditLog('TICKETS_RESTORED', { actor: req.user, targetType: 'Ticket', metadata: { count: result.count, ids } });
+  return res.json({ restored: result.count });
+});
+
 module.exports = router;

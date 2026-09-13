@@ -12,7 +12,6 @@ import {
   AlertTriangle,
   Info,
   ArrowDown,
-  Sparkles,
   Table,
   LayoutGrid,
   RefreshCw,
@@ -49,9 +48,12 @@ import { hasPermission, canEditTickets } from '../utils/permissions';
 import useSystemSettings from '../hooks/useSystemSettings';
 import ConfirmDialog from '../components/ConfirmDialog';
 import UserAvatar from '../components/UserAvatar';
+import PaginationButtons from '../components/PaginationButtons';
+import BulkActionsBar from '../components/BulkActionsBar';
+import UndoToast from '../components/UndoToast';
 import { flattenCategoryTree } from '../utils/categoryTree';
 import EmptyState from '../components/EmptyState';
-import TicketCoverflowCarousel from '../components/TicketCoverflowCarousel';
+
 import KanbanBoard from '../components/KanbanBoard';
 import SearchableSelect from '../components/SearchableSelect';
 import TicketFilterDrawer from '../components/TicketFilterDrawer';
@@ -474,128 +476,6 @@ function TableSkeleton() {
   );
 }
 
-function PaginationButtons({ page, totalPages, onPageChange }) {
-  const [jumpValue, setJumpValue] = useState('');
-  const jumpRef = useRef(null);
-
-  const pages = useMemo(() => {
-    if (totalPages <= 7) {
-      return Array.from({ length: totalPages }, (_, i) => i + 1);
-    }
-    const result = [];
-    result.push(1);
-    if (page > 3) result.push('...');
-    const start = Math.max(2, page - 1);
-    const end = Math.min(totalPages - 1, page + 1);
-    for (let i = start; i <= end; i++) result.push(i);
-    if (page < totalPages - 2) result.push('...');
-    result.push(totalPages);
-    return result;
-  }, [page, totalPages]);
-
-  function handleKeyDown(e) {
-    if (e.key === 'ArrowLeft') {
-      e.preventDefault();
-      onPageChange(Math.max(1, page - 1));
-    } else if (e.key === 'ArrowRight') {
-      e.preventDefault();
-      onPageChange(Math.min(totalPages, page + 1));
-    } else if (e.key === 'Home') {
-      e.preventDefault();
-      onPageChange(1);
-    } else if (e.key === 'End') {
-      e.preventDefault();
-      onPageChange(totalPages);
-    }
-  }
-
-  function handleJump(e) {
-    e.preventDefault();
-    const val = parseInt(jumpValue, 10);
-    if (!isNaN(val) && val >= 1 && val <= totalPages && val !== page) {
-      onPageChange(val);
-    }
-    setJumpValue('');
-    jumpRef.current?.blur();
-  }
-
-  const btnBase = 'h-10 min-w-[40px] flex items-center justify-center rounded-lg text-xs font-semibold transition-all duration-150 active:scale-95';
-  const btnEnabled = 'text-muted-foreground hover:bg-surface-muted hover:text-foreground';
-  const btnDisabled = 'text-muted-foreground/30 cursor-not-allowed';
-  const btnActive = 'bg-primary text-primary-foreground shadow-sm shadow-primary/20';
-
-  return (
-    <div className="flex items-center gap-2" onKeyDown={handleKeyDown} role="navigation" aria-label="Pagination">
-      <div className="flex items-center gap-1">
-        <button
-          onClick={() => onPageChange(1)}
-          disabled={page <= 1}
-          aria-label="Première page"
-          className={`${btnBase} px-1.5 ${page <= 1 ? btnDisabled : btnEnabled}`}
-        >
-          <ChevronsLeft className="w-4 h-4" />
-        </button>
-        <button
-          onClick={() => onPageChange(Math.max(1, page - 1))}
-          disabled={page <= 1}
-          aria-label="Page précédente"
-          className={`${btnBase} px-1.5 ${page <= 1 ? btnDisabled : btnEnabled}`}
-        >
-          <ChevronLeft className="w-4 h-4" />
-        </button>
-
-        {pages.map((p, i) =>
-          p === '...' ? (
-            <span key={`dots-${i}`} className="w-8 h-10 flex items-center justify-center text-xs text-muted-foreground/40">…</span>
-          ) : (
-            <button
-              key={p}
-              onClick={() => onPageChange(p)}
-              aria-label={`Page ${p}`}
-              aria-current={p === page ? 'page' : undefined}
-              className={`${btnBase} px-1 ${p === page ? btnActive : btnEnabled}`}
-            >
-              {p}
-            </button>
-          )
-        )}
-
-        <button
-          onClick={() => onPageChange(Math.min(totalPages, page + 1))}
-          disabled={page >= totalPages}
-          aria-label="Page suivante"
-          className={`${btnBase} px-1.5 ${page >= totalPages ? btnDisabled : btnEnabled}`}
-        >
-          <ChevronRight className="w-4 h-4" />
-        </button>
-        <button
-          onClick={() => onPageChange(totalPages)}
-          disabled={page >= totalPages}
-          aria-label="Dernière page"
-          className={`${btnBase} px-1.5 ${page >= totalPages ? btnDisabled : btnEnabled}`}
-        >
-          <ChevronsRight className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* Jump-to */}
-      <form onSubmit={handleJump} className="flex items-center gap-1.5 ml-2">
-        <span className="text-[11px] text-muted-foreground">→</span>
-        <input
-          ref={jumpRef}
-          type="number"
-          min={1}
-          max={totalPages}
-          value={jumpValue}
-          onChange={(e) => setJumpValue(e.target.value)}
-          placeholder={`1–${totalPages}`}
-          className="w-16 h-8 px-2 text-[11px] text-center font-semibold bg-surface border border-border/40 rounded-lg text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-primary/30 transition-all"
-        />
-      </form>
-    </div>
-  );
-}
-
 function ColumnConfigPanel({ columns, onChange }) {
   const [open, setOpen] = useState(false);
 
@@ -703,22 +583,6 @@ function FormField({ label, children, error }) {
 }
 
 const FIELD_CLS = "w-full px-3 py-2 text-sm bg-surface border border-outline-variant/30 rounded-xl text-on-surface placeholder-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all";
-
-// ── ChevronsRight icon (small) ───────────────────────────────────────────────
-function ChevronsLeft({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m11 17-5-5 5-5" /><path d="m18 17-5-5 5-5" />
-    </svg>
-  );
-}
-function ChevronsRight({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m6 17 5-5-5-5" /><path d="m13 17 5-5-5-5" />
-    </svg>
-  );
-}
 
 export default function Tickets() {
   const { user } = useAuth();
@@ -1233,6 +1097,7 @@ export default function Tickets() {
   }, []);
 
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [pendingBulkUndo, setPendingBulkUndo] = useState(null); // { ids: [], count: N }
   const askDeleteOne = useCallback((id) => { setConfirmDelete({ mode: 'one', id }); }, []);
   function askDeleteSelected() { if (selectedIds.length > 0) setConfirmDelete({ mode: 'bulk' }); }
 
@@ -1245,22 +1110,33 @@ export default function Tickets() {
         toast.success('Ticket supprimé');
         loadTickets();
       } else {
-        const { data } = await api.post('/tickets/bulk-delete', { ids: selectedIds });
-        toast.success(`${data?.deleted ?? selectedIds.length} ticket(s) supprimé(s)`);
-        // Vide la sélection AVANT le rechargement : sinon la barre reste
-        // affichée avec des tickets qui n'existent plus.
+        const idsToDelete = [...selectedIds];
+        const { data } = await api.post('/tickets/bulk-delete', { ids: idsToDelete });
+        const count = data?.deleted ?? idsToDelete.length;
+        toast.success(`${count} ticket(s) supprimé(s)`);
         setSelectedIds([]);
         setBulkChanges({ status: '', priority: '', assignedToId: '' });
         loadTickets();
+        setPendingBulkUndo({ ids: idsToDelete, count });
       }
       setConfirmDelete(null);
     } catch (err) {
-      // Affiché DANS la dialog (la bannière page serait cachée derrière la modale)
       const msg = err.response?.data?.error || 'Erreur lors de la suppression';
       setError(msg);
       toast.error(msg);
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function handleUndoBulkDelete() {
+    if (!pendingBulkUndo) return;
+    try {
+      await api.post('/tickets/bulk-restore', { ids: pendingBulkUndo.ids });
+      toast.success(`${pendingBulkUndo.count} ticket(s) restauré(s)`);
+      loadTickets();
+    } catch {
+      toast.error('Erreur lors de la restauration');
     }
   }
 
@@ -1665,7 +1541,6 @@ export default function Tickets() {
             {[
               { mode: 'table', Icon: Table, label: 'Tableau' },
               { mode: 'grid', Icon: LayoutGrid, label: 'Grille' },
-              { mode: 'carousel', Icon: Sparkles, label: 'Carousel' },
               { mode: 'kanban', Icon: KanbanSquare, label: 'Kanban' },
             ].map(({ mode, Icon, label }) => (
               <button key={mode} onClick={() => changeViewMode(mode)} title={label}
@@ -1825,8 +1700,6 @@ export default function Tickets() {
               </div>
             )}
           </div>
-        ) : viewMode === 'carousel' ? (
-          <TicketCoverflowCarousel tickets={tickets} isDark={isDark} />
         ) : viewMode === 'kanban' ? (
           <KanbanBoard
             tickets={tickets} canAssign={canAssign}
@@ -1912,55 +1785,51 @@ export default function Tickets() {
       </div>
 
       {/* ── BULK ACTIONS BAR ──────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {selectedIds.length > 0 && (
-          <div className="fixed bottom-4 sm:bottom-6 inset-x-0 z-50 flex justify-center px-3 pointer-events-none">
-          <motion.div initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 80, opacity: 0 }}
-            transition={{ type: 'spring', stiffness: 400, damping: 40 }}
-            className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border border-border/30 bg-surface shadow-2xl shadow-black/20 max-w-full">
-            <span className="text-xs font-bold text-muted-foreground pr-2 border-r border-border/30 mr-1">
-              {selectedIds.length} sélectionné{selectedIds.length > 1 ? 's' : ''}
-            </span>
-            {canAssign && (
-              <>
-                <select value={bulkChanges.status} onChange={(e) => setBulkChanges((b) => ({ ...b, status: e.target.value }))}
-                  className="text-xs font-semibold px-2 py-1.5 rounded-lg border border-border/40 bg-background text-foreground cursor-pointer focus:outline-none">
-                  <option value="">Statut…</option>
-                  {MANUAL_STATUS_OPTIONS.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
-                </select>
-                <select value={bulkChanges.priority} onChange={(e) => setBulkChanges((b) => ({ ...b, priority: e.target.value }))}
-                  className="text-xs font-semibold px-2 py-1.5 rounded-lg border border-border/40 bg-background text-foreground cursor-pointer focus:outline-none">
-                  <option value="">Priorité…</option>
-                  {PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
-                </select>
-                <select value={bulkChanges.assignedToId} onChange={(e) => setBulkChanges((b) => ({ ...b, assignedToId: e.target.value }))}
-                  className="text-xs font-semibold px-2 py-1.5 rounded-lg border border-border/40 bg-background text-foreground cursor-pointer focus:outline-none max-w-[120px]">
-                  <option value="">Assigner…</option>
-                  <option value="none">Non assigné</option>
-                  {users.filter((u) => u.isActive && u.role !== 'REQUESTER').map((u) => <option key={u.id} value={u.id}>{u.fullName}</option>)}
-                </select>
-                <button onClick={handleBulkUpdate} disabled={bulkUpdating}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold hover:opacity-90 transition-opacity disabled:opacity-50">
-                  <CheckSquare className="w-3.5 h-3.5" />
-                  {bulkUpdating ? 'Application…' : 'Appliquer'}
+      <div className="fixed bottom-4 sm:bottom-6 inset-x-0 z-50 flex justify-center px-3 pointer-events-none">
+        <AnimatePresence>
+          {selectedIds.length > 0 && (
+            <BulkActionsBar count={selectedIds.length} filteredCount={totalCount} onClear={() => { setSelectedIds([]); setBulkChanges({ status: '', priority: '', assignedToId: '' }); }}>
+              {canAssign && (
+                <>
+                  <select value={bulkChanges.status} onChange={(e) => setBulkChanges((b) => ({ ...b, status: e.target.value }))}
+                    className="text-xs font-semibold px-2 py-1.5 rounded-lg border border-border/40 bg-background text-foreground cursor-pointer focus:outline-none">
+                    <option value="">Statut…</option>
+                    {MANUAL_STATUS_OPTIONS.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
+                  </select>
+                  <select value={bulkChanges.priority} onChange={(e) => setBulkChanges((b) => ({ ...b, priority: e.target.value }))}
+                    className="text-xs font-semibold px-2 py-1.5 rounded-lg border border-border/40 bg-background text-foreground cursor-pointer focus:outline-none">
+                    <option value="">Priorité…</option>
+                    {PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                  <select value={bulkChanges.assignedToId} onChange={(e) => setBulkChanges((b) => ({ ...b, assignedToId: e.target.value }))}
+                    className="text-xs font-semibold px-2 py-1.5 rounded-lg border border-border/40 bg-background text-foreground cursor-pointer focus:outline-none max-w-[120px]">
+                    <option value="">Assigner…</option>
+                    <option value="none">Non assigné</option>
+                    {users.filter((u) => u.isActive && u.role !== 'REQUESTER').map((u) => <option key={u.id} value={u.id}>{u.fullName}</option>)}
+                  </select>
+                  <button onClick={handleBulkUpdate} disabled={bulkUpdating}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold hover:opacity-90 transition-opacity disabled:opacity-50">
+                    <CheckSquare className="w-3.5 h-3.5" />
+                    {bulkUpdating ? 'Application…' : 'Appliquer'}
+                  </button>
+                </>
+              )}
+              {canBulkDelete && (
+                <button onClick={askDeleteSelected} disabled={deleting}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/30 text-red-500 text-xs font-semibold hover:bg-red-500/10 transition-colors disabled:opacity-50">
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Supprimer
                 </button>
-              </>
-            )}
-            {canBulkDelete && (
-              <button onClick={askDeleteSelected} disabled={deleting}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/30 text-red-500 text-xs font-semibold hover:bg-red-500/10 transition-colors disabled:opacity-50">
-                <Trash2 className="w-3.5 h-3.5" />
-                Supprimer
-              </button>
-            )}
-            <button onClick={() => { setSelectedIds([]); setBulkChanges({ status: '', priority: '', assignedToId: '' }); }}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-surface-muted transition-all">
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+              )}
+            </BulkActionsBar>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* ── UNDO TOAST (après suppression bulk) ──────────────────────────── */}
+      {pendingBulkUndo && (
+        <UndoToast message={`${pendingBulkUndo.count} ticket${pendingBulkUndo.count > 1 ? 's' : ''} supprimé${pendingBulkUndo.count > 1 ? 's' : ''}`} onUndo={handleUndoBulkDelete} />
+      )}
 
       {/* ── PAGINATION ───────────────────────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-4 sm:px-6 py-3 border-t border-border/20 bg-surface shrink-0">

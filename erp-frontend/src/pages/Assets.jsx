@@ -13,6 +13,8 @@ import useSystemSettings from '../hooks/useSystemSettings';
 import ConfirmDialog from '../components/ConfirmDialog';
 import DataGrid from '../components/DataGrid';
 import FormDrawer from '../components/FormDrawer';
+import PaginationButtons from '../components/PaginationButtons';
+import BulkActionsBar from '../components/BulkActionsBar';
 
 const TYPE_META = {
   COMPUTER: { label: 'Ordinateur', icon: Monitor, color: 'text-blue-400', bg: 'bg-blue-500/10' },
@@ -41,76 +43,6 @@ function fmtDate(d) {
 }
 
 const inputCls = 'px-3.5 py-2 rounded-xl border border-outline-variant/60 bg-surface text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all';
-
-function PaginationButtons({ page, totalPages, onPageChange }) {
-  const [jumpValue, setJumpValue] = useState('');
-  const jumpRef = useRef(null);
-
-  const pages = useMemo(() => {
-    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
-    const r = [1];
-    if (page > 3) r.push('...');
-    for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) r.push(i);
-    if (page < totalPages - 2) r.push('...');
-    r.push(totalPages);
-    return r;
-  }, [page, totalPages]);
-
-  function handleJump(e) {
-    e.preventDefault();
-    const val = parseInt(jumpValue, 10);
-    if (!isNaN(val) && val >= 1 && val <= totalPages && val !== page) {
-      onPageChange(val);
-    }
-    setJumpValue('');
-    jumpRef.current?.blur();
-  }
-
-  const btn = 'h-10 min-w-[40px] flex items-center justify-center rounded-lg text-xs font-semibold transition-all duration-150 active:scale-95';
-  const on = 'text-muted-foreground hover:bg-surface-muted hover:text-foreground';
-  const off = 'text-muted-foreground/30 cursor-not-allowed';
-  const active = 'bg-primary text-primary-foreground shadow-sm shadow-primary/20';
-
-  return (
-    <div className="flex items-center gap-1">
-      <button onClick={() => onPageChange(1)} disabled={page <= 1} aria-label="Première page"
-        className={`${btn} px-1.5 ${page <= 1 ? off : on}`}><ChevronsLeft className="w-4 h-4" /></button>
-      <button onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page <= 1} aria-label="Page précédente"
-        className={`${btn} px-1.5 ${page <= 1 ? off : on}`}><ChevronLeft className="w-4 h-4" /></button>
-      {pages.map((p, i) => p === '...' ? (
-        <span key={`dots-${i}`} className="w-8 h-10 flex items-center justify-center text-xs text-muted-foreground/40">…</span>
-      ) : (
-        <button key={p} onClick={() => onPageChange(p)} aria-label={`Page ${p}`} aria-current={p === page ? 'page' : undefined}
-          className={`${btn} px-1 ${p === page ? active : on}`}>{p}</button>
-      ))}
-      <button onClick={() => onPageChange(Math.min(totalPages, page + 1))} disabled={page >= totalPages} aria-label="Page suivante"
-        className={`${btn} px-1.5 ${page >= totalPages ? off : on}`}><ChevronRight className="w-4 h-4" /></button>
-      <button onClick={() => onPageChange(totalPages)} disabled={page >= totalPages} aria-label="Dernière page"
-        className={`${btn} px-1.5 ${page >= totalPages ? off : on}`}><ChevronsRight className="w-4 h-4" /></button>
-      <form onSubmit={handleJump} className="flex items-center gap-1.5 ml-2">
-        <span className="text-[11px] text-muted-foreground">→</span>
-        <input ref={jumpRef} type="number" min={1} max={totalPages} value={jumpValue}
-          onChange={(e) => setJumpValue(e.target.value)} placeholder={`1–${totalPages}`}
-          className="w-16 h-8 px-2 text-[11px] text-center font-semibold bg-surface border border-border/40 rounded-lg text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-primary/30 transition-all" />
-      </form>
-    </div>
-  );
-}
-
-function ChevronsLeft({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m11 17-5-5 5-5" /><path d="m18 17-5-5 5-5" />
-    </svg>
-  );
-}
-function ChevronsRight({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m6 17 5-5-5-5" /><path d="m13 17 5-5-5-5" />
-    </svg>
-  );
-}
 
 export default function Assets() {
   const { user } = useAuth();
@@ -474,30 +406,19 @@ export default function Assets() {
       )}
 
       {/* ── BULK ACTION BAR ────────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {selectedIds.length > 0 && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden mx-4 sm:mx-6 mb-3"
-          >
-            <div className="px-4 py-2.5 flex items-center gap-3 rounded-xl border border-red-500/20 bg-red-500/5">
-              <span className="text-[11px] font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                {selectedIds.length} sélectionné(s)
-              </span>
-              <button onClick={() => setSelectedIds([])}
-                className="text-[10px] font-bold text-on-surface-variant hover:text-on-surface transition-colors cursor-pointer">
-                Tout désélectionner
-              </button>
+      <div className="fixed bottom-4 sm:bottom-6 inset-x-0 z-50 flex justify-center px-3 pointer-events-none">
+        <AnimatePresence>
+          {selectedIds.length > 0 && (
+            <BulkActionsBar count={selectedIds.length} filteredCount={assets.length} onClear={() => setSelectedIds([])}>
               <button onClick={() => setPendingBulkDelete(true)}
-                className="ml-auto flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-500/10 text-red-600 dark:text-red-400 text-[11px] font-bold hover:bg-red-500/20 cursor-pointer transition-colors">
-                <Trash2 className="w-3 h-3" />
-                Supprimer ({selectedIds.length})
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/30 text-red-500 text-xs font-semibold hover:bg-red-500/10 transition-colors">
+                <Trash2 className="w-3.5 h-3.5" />
+                Supprimer
               </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            </BulkActionsBar>
+          )}
+        </AnimatePresence>
+      </div>
 
       {/* ── MAIN CONTENT ───────────────────────────────────────────────────── */}
       <div className="flex-1 min-h-0 relative flex flex-col">
