@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
+import { toast } from 'sonner';
 import { LayoutDashboard, RotateCcw } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -23,6 +24,7 @@ import DashboardToolbar from './DashboardToolbar';
 import WidgetPicker from './WidgetPicker';
 import WidgetRenderer from './WidgetRenderer';
 import { getWidgetMeta } from './widgetCatalog';
+import { LAYOUT_PRESETS, applyPreset, autoDistribute } from './layoutPresets';
 
 const PERIOD_MAP = { '7d': 7, '30d': 30, '90d': 90, '180d': 180 };
 
@@ -345,6 +347,55 @@ export default function DashboardPage() {
     }
   }, [activePeriod, days]);
 
+  // ── Preset layout / Auto-distribute ──────────────────────────────────────
+  const handleApplyPreset = useCallback(
+    (presetKey) => {
+      const preset = LAYOUT_PRESETS[presetKey];
+      if (!preset || !currentWidgets.length) return;
+
+      // Enrichir les widgets avec leur position actuelle pour un tri stable
+      const layoutMap = new Map((currentLayout || []).map(l => [l.i, l]));
+      const enriched = currentWidgets.map(w => ({
+        ...w,
+        _x: layoutMap.get(w.id)?.x ?? 0,
+        _y: layoutMap.get(w.id)?.y ?? 0,
+      }));
+
+      const newLayout = applyPreset(enriched, preset, 12);
+      if (!newLayout.length) return;
+      handleLayoutChange(newLayout);
+      toast.success(`Disposition appliquée : ${preset.label}`);
+    },
+    [currentWidgets, currentLayout, handleLayoutChange],
+  );
+
+  const handleAutoDistribute = useCallback(() => {
+    if (!currentLayout?.length) return;
+
+    // Construire le layout avec minW/minH depuis le catalogue
+    const layoutWithConstraints = currentLayout.map(item => {
+      const widget = currentWidgets.find(w => w.id === item.i);
+      const floor = widget ? (getWidgetMeta(widget.widgetType)?.category === 'KPIs'
+        ? { minW: 2, minH: 2 }
+        : getWidgetMeta(widget.widgetType)?.category === 'Graphiques'
+        ? { minW: 3, minH: 3 }
+        : getWidgetMeta(widget.widgetType)?.category === 'Tableaux'
+        ? { minW: 4, minH: 3 }
+        : { minW: 3, minH: 2 })
+        : { minW: 3, minH: 2 };
+      return {
+        ...item,
+        w: Math.max(floor.minW, item.w),
+        h: Math.max(floor.minH, item.h),
+      };
+    });
+
+    const newLayout = autoDistribute(layoutWithConstraints, 12);
+    if (!newLayout.length) return;
+    handleLayoutChange(newLayout);
+    toast.success('Widgets répartis automatiquement');
+  }, [currentLayout, currentWidgets, handleLayoutChange]);
+
   // Renommer un dashboard
   const handleRenameDashboard = useCallback(
     async (dashboardId, newName) => {
@@ -422,6 +473,8 @@ export default function DashboardPage() {
           });
         }}
         onAddWidget={() => setShowPicker(true)}
+        onApplyPreset={handleApplyPreset}
+        onAutoDistribute={handleAutoDistribute}
         onReset={handleResetDashboard}
         resetting={resetting}
         activePeriod={activePeriod}

@@ -2,8 +2,9 @@ import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, Pencil, Plus, Download, X, Check,
-  ChevronDown, RotateCcw, Trash2,
+  ChevronDown, RotateCcw, Trash2, Shuffle, AlignVerticalSpaceAround,
 } from 'lucide-react';
+import { LAYOUT_PRESETS } from './layoutPresets';
 
 const PERIODS = [
   { key: '7d', label: '7 jours', days: 7 },
@@ -46,6 +47,8 @@ export default function DashboardToolbar({
   onToggleEdit,
   onAddWidget,
   onReset,
+  onApplyPreset,
+  onAutoDistribute,
   resetting = false,
   activePeriod,
   onPeriodChange,
@@ -55,8 +58,10 @@ export default function DashboardToolbar({
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState('');
+  const [presetOpen, setPresetOpen] = useState(false);
   const dropdownRef = useRef(null);
   const editInputRef = useRef(null);
+  const presetRef = useRef(null);
 
   const activeDashboard = dashboards.find((d) => d.id === activeDashboardId);
 
@@ -65,6 +70,9 @@ export default function DashboardToolbar({
       if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
         setDropdownOpen(false);
         setEditingId(null);
+      }
+      if (presetRef.current && !presetRef.current.contains(e.target)) {
+        setPresetOpen(false);
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
@@ -268,6 +276,75 @@ export default function DashboardToolbar({
               >
                 <Plus className="w-3.5 h-3.5" />
                 Widget
+              </motion.button>
+            )}
+          </AnimatePresence>
+
+          {/* Reorganize presets dropdown (edit mode only) */}
+          <AnimatePresence>
+            {isEditing && (
+              <div className="relative" ref={presetRef}>
+                <motion.button
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => setPresetOpen(!presetOpen)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/30 bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors text-xs font-semibold"
+                  title="Réorganiser les widgets avec un preset"
+                >
+                  <Shuffle className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Réorganiser</span>
+                  <ChevronDown className={`w-3 h-3 transition-transform ${presetOpen ? 'rotate-180' : ''}`} />
+                </motion.button>
+
+                <AnimatePresence>
+                  {presetOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -4, scale: 0.97 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -4, scale: 0.97 }}
+                      transition={{ duration: 0.15 }}
+                      className="absolute top-full right-0 mt-1.5 w-64 rounded-xl border border-outline-variant/30 bg-surface-container-lowest shadow-xl z-50 overflow-hidden"
+                    >
+                      <div className="p-1">
+                        {Object.entries(LAYOUT_PRESETS).map(([key, preset]) => (
+                          <button
+                            key={key}
+                            onClick={() => {
+                              setPresetOpen(false);
+                              onApplyPreset?.(key);
+                            }}
+                            className="w-full flex flex-col gap-0.5 px-3 py-2.5 rounded-lg text-left hover:bg-surface-container-high transition-colors cursor-pointer"
+                          >
+                            <span className="text-xs font-bold text-on-surface">{preset.label}</span>
+                            <span className="text-[10px] text-on-surface-variant leading-tight">{preset.description}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
+          </AnimatePresence>
+
+          {/* Auto-distribute button (edit mode only) */}
+          <AnimatePresence>
+            {isEditing && (
+              <motion.button
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={onAutoDistribute}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/30 bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors text-xs font-semibold"
+                title="Répartir les widgets automatiquement (sans trou)"
+              >
+                <AlignVerticalSpaceAround className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Répartir</span>
               </motion.button>
             )}
           </AnimatePresence>
