@@ -58,17 +58,14 @@ router.get('/stats', async (req, res) => {
 
 // Charge active par équipe — tickets ouverts (NEW, OPEN, PLANNED, PENDING, WAITING_FOR_USER) groupés par équipe
 router.get('/workload-by-team', async (req, res) => {
-  const ACTIVE_STATUSES = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER'];
-
-  const byTeam = await prisma.ticket.groupBy({
-    by: ['teamId'],
-    where: {
-      status: { in: ACTIVE_STATUSES },
-      approvalStatus: { notIn: ['PENDING', 'REJECTED'] },
-    },
-    _count: true,
-    orderBy: { _count: { _all: 'desc' } },
-  });
+  const byTeam = await prisma.$queryRaw`
+    SELECT "teamId"::int, COUNT(*)::int AS count
+    FROM "Ticket"
+    WHERE status IN ('NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER')
+      AND "approvalStatus" NOT IN ('PENDING', 'REJECTED')
+    GROUP BY "teamId"
+    ORDER BY count DESC
+  `;
 
   const teamIds = byTeam.map((t) => t.teamId).filter((id) => id !== null);
   const teams = await prisma.team.findMany({
@@ -85,11 +82,11 @@ router.get('/workload-by-team', async (req, res) => {
     .map((t) => ({
       teamId: t.teamId,
       teamName: teamNameById[t.teamId] || 'Inconnue',
-      count: t._count,
+      count: t.count,
     }));
 
   if (unassigned) {
-    result.push({ teamId: null, teamName: 'Non assignée', count: unassigned._count });
+    result.push({ teamId: null, teamName: 'Non assignée', count: unassigned.count });
   }
 
   return res.json(result);

@@ -348,12 +348,28 @@ export default function DashboardPage() {
   }, [activePeriod, days]);
 
   // ── Preset layout / Auto-distribute ──────────────────────────────────────
+  // Sauvegarde immédiate + re-fetch pour que la grille se mette à jour visuellement.
+  const saveLayoutImmediate = useCallback(
+    async (newLayout) => {
+      if (!activeDashboardId) return;
+      pendingLayoutRef.current = null;
+      if (layoutSaveTimeout.current) {
+        clearTimeout(layoutSaveTimeout.current);
+        layoutSaveTimeout.current = null;
+      }
+      try {
+        await api.patch(`/dashboards/${activeDashboardId}`, { layout: newLayout });
+        await mutateDashboards();
+      } catch { /* silently fail */ }
+    },
+    [activeDashboardId, mutateDashboards],
+  );
+
   const handleApplyPreset = useCallback(
     (presetKey) => {
       const preset = LAYOUT_PRESETS[presetKey];
       if (!preset || !currentWidgets.length) return;
 
-      // Enrichir les widgets avec leur position actuelle pour un tri stable
       const layoutMap = new Map((currentLayout || []).map(l => [l.i, l]));
       const enriched = currentWidgets.map(w => ({
         ...w,
@@ -363,25 +379,21 @@ export default function DashboardPage() {
 
       const newLayout = applyPreset(enriched, preset, 12);
       if (!newLayout.length) return;
-      handleLayoutChange(newLayout);
+      saveLayoutImmediate(newLayout);
       toast.success(`Disposition appliquée : ${preset.label}`);
     },
-    [currentWidgets, currentLayout, handleLayoutChange],
+    [currentWidgets, currentLayout, saveLayoutImmediate],
   );
 
   const handleAutoDistribute = useCallback(() => {
     if (!currentLayout?.length) return;
 
-    // Construire le layout avec minW/minH depuis le catalogue
     const layoutWithConstraints = currentLayout.map(item => {
       const widget = currentWidgets.find(w => w.id === item.i);
-      const floor = widget ? (getWidgetMeta(widget.widgetType)?.category === 'KPIs'
-        ? { minW: 2, minH: 2 }
-        : getWidgetMeta(widget.widgetType)?.category === 'Graphiques'
-        ? { minW: 3, minH: 3 }
-        : getWidgetMeta(widget.widgetType)?.category === 'Tableaux'
-        ? { minW: 4, minH: 3 }
-        : { minW: 3, minH: 2 })
+      const category = widget ? getWidgetMeta(widget.widgetType)?.category : null;
+      const floor = category === 'KPIs' ? { minW: 2, minH: 2 }
+        : category === 'Graphiques' ? { minW: 3, minH: 3 }
+        : category === 'Tableaux' ? { minW: 4, minH: 3 }
         : { minW: 3, minH: 2 };
       return {
         ...item,
@@ -392,9 +404,9 @@ export default function DashboardPage() {
 
     const newLayout = autoDistribute(layoutWithConstraints, 12);
     if (!newLayout.length) return;
-    handleLayoutChange(newLayout);
+    saveLayoutImmediate(newLayout);
     toast.success('Widgets répartis automatiquement');
-  }, [currentLayout, currentWidgets, handleLayoutChange]);
+  }, [currentLayout, currentWidgets, saveLayoutImmediate]);
 
   // Renommer un dashboard
   const handleRenameDashboard = useCallback(
