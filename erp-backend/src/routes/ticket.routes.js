@@ -672,6 +672,42 @@ router.get('/pending-approval', async (req, res) => {
   return res.json({ items, total });
 });
 
+// ── Preview tooltip : données allégées pour le hover ─────────────────────────
+router.get('/:id/preview', async (req, res) => {
+  try {
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: Number(req.params.id) },
+      select: {
+        id: true, title: true, status: true, priority: true, category: true,
+        locationName: true, aiSummary: true, createdAt: true, solvedAt: true, closedAt: true,
+        slaResolutionDueAt: true, slaBreachedAt: true, firstResponseAt: true,
+        source: true, origin: true, sourceName: true, isMajorIncident: true,
+        team: { select: { id: true, name: true } },
+        followups: {
+          take: 3,
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true, content: true, createdAt: true, isPrivate: true,
+            author: { select: { id: true, fullName: true, avatarUrl: true } },
+          },
+        },
+      },
+    });
+
+    if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
+
+    // Masquer les commentaires privés aux demandeurs
+    if (['REQUESTER'].includes(req.user.role)) {
+      ticket.followups = ticket.followups.filter((f) => !f.isPrivate);
+    }
+
+    return res.json(ticket);
+  } catch (err) {
+    console.error('[ticket.routes] Erreur preview:', err);
+    return res.status(500).json({ error: 'Erreur lors du chargement de l\'aperçu' });
+  }
+});
+
 router.get('/:id', async (req, res) => {
   const ticket = await prisma.ticket.findUnique({
     where: { id: Number(req.params.id) },

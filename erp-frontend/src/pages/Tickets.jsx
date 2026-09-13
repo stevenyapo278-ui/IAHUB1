@@ -373,11 +373,212 @@ function DateCellRenderer({ value, titlePrefix }) {
   );
 }
 
+// ── Ticket preview tooltip (hover sur bouton >) ─────────────────────────────
+// Cache partagé entre les instances pour éviter de re-fetch le même ticket
+const _previewCache = new Map();
+
+function TicketPreviewTooltip({ ticketId, data, anchorRef }) {
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [preview, setPreview] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  // Position fixe basée sur le bouton
+  useEffect(() => {
+    if (!anchorRef?.current) return;
+    const rect = anchorRef.current.getBoundingClientRect();
+    setPos({ x: rect.left, y: rect.top });
+  }, [anchorRef]);
+
+  // Fetch lazy des followups + données enrichies
+  useEffect(() => {
+    if (!ticketId) return;
+    if (_previewCache.has(ticketId)) {
+      setPreview(_previewCache.get(ticketId));
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    api.get(`/tickets/${ticketId}/preview`)
+      .then((res) => {
+        if (cancelled) return;
+        _previewCache.set(ticketId, res.data);
+        setPreview(res.data);
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [ticketId]);
+
+  const st = STATUS_CONFIG[data?.status] || STATUS_CONFIG.NEW;
+  const pr = PRIORITY_DOT[data?.priority] || PRIORITY_DOT.P4;
+
+  // Calcul SLA restant
+  const slaDue = preview?.slaResolutionDueAt;
+  const slaBreached = preview?.slaBreachedAt;
+  let slaPct = null;
+  let slaLabel = null;
+  if (slaDue && !slaBreached) {
+    const total = new Date(slaDue) - new Date(data?.createdAt);
+    const remaining = new Date(slaDue) - new Date();
+    slaPct = Math.max(0, Math.min(100, Math.round((remaining / total) * 100)));
+    const h = Math.floor(remaining / (1000 * 60 * 60));
+    const m = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+    slaLabel = h > 0 ? `${h}h${m > 0 ? m : ''}` : `${m}min`;
+  } else if (slaBreached) {
+    slaPct = 0;
+    slaLabel = 'Breach';
+  }
+
+  return createPortal(
+    <div
+      className="fixed z-[9999] pointer-events-none"
+      style={{ left: pos.x, top: pos.y }}
+    >
+      <div className="relative -translate-x-full -translate-y-full -mt-1 -ml-2">
+        <div className="rounded-xl border border-border/40 bg-surface shadow-2xl p-3 min-w-[280px] max-w-[340px] space-y-2">
+          {/* Header : titre + badges */}
+          <div className="space-y-1.5">
+            <p className="text-[11px] font-bold text-foreground leading-tight line-clamp-2">
+              {data?.title || `Ticket #${data?.id}`}
+            </p>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold ${st.bg}`}>
+                {st.label}
+              </span>
+              <span className={`text-[10px] font-bold ${pr.text}`}>{pr.label}</span>
+              {data?.category && (
+                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[9px] font-medium bg-surface-muted text-muted-foreground">
+                  {data.category}
+                </span>
+              )}
+              {data?.isMajorIncident && (
+                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400">
+                  Majeur
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* SLA jauge */}
+          {slaPct !== null && (
+            <div className="space-y-0.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] font-semibold text-muted-foreground">SLA résolution</span>
+                <span className={`text-[9px] font-bold ${slaPct === 0 ? 'text-red-500' : slaPct < 25 ? 'text-amber-500' : 'text-emerald-600'}`}>
+                  {slaLabel}
+                </span>
+              </div>
+              <div className="h-1.5 rounded-full bg-border/40 overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${slaPct === 0 ? 'bg-red-500' : slaPct < 25 ? 'bg-amber-400' : 'bg-emerald-500'}`}
+                  style={{ width: `${Math.max(slaPct, 2)}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Personnes */}
+          <div className="space-y-1">
+            {data?.requester?.fullName && (
+              <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                <User className="w-3 h-3 shrink-0" />
+                <span className="font-semibold">Demandeur :</span>
+                <span className="truncate">{data.requester.fullName}</span>
+              </div>
+            )}
+            {data?.assignedTo?.fullName && (
+              <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                <User className="w-3 h-3 shrink-0" />
+                <span className="font-semibold">Assigné :</span>
+                <span className="truncate">{data.assignedTo.fullName}</span>
+              </div>
+            )}
+            {preview?.team?.name && (
+              <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                <Tag className="w-3 h-3 shrink-0" />
+                <span className="font-semibold">Équipe :</span>
+                <span className="truncate">{preview.team.name}</span>
+              </div>
+            )}
+            {data?.locationName && (
+              <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                <MapPin className="w-3 h-3 shrink-0" />
+                <span className="truncate">{data.locationName}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Source */}
+          {(data?.source || data?.origin || preview?.sourceName) && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {data?.source && (
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[9px] font-medium bg-surface-muted text-muted-foreground">
+                  {data.source}
+                </span>
+              )}
+              {data?.origin && (
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[9px] font-medium bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400">
+                  {data.origin}
+                </span>
+              )}
+              {preview?.sourceName && (
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[9px] font-medium bg-surface-muted text-muted-foreground truncate max-w-[120px]">
+                  {preview.sourceName}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Résumé IA tronqué */}
+          {preview?.aiSummary && (
+            <p className="text-[9px] text-muted-foreground leading-relaxed line-clamp-2 italic">
+              {preview.aiSummary}
+            </p>
+          )}
+
+          {/* Dates */}
+          <div className="space-y-0.5 text-[9px] text-muted-foreground">
+            <p><span className="font-semibold">Créé le :</span> {new Date(data?.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+            {data?.solvedAt && (
+              <p className="text-emerald-600 dark:text-emerald-400"><span className="font-semibold">Résolu le :</span> {new Date(data.solvedAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+            )}
+          </div>
+
+          {/* Derniers suivis */}
+          {preview?.followups?.length > 0 && (
+            <div className="border-t border-border/30 pt-1.5 space-y-1">
+              <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wide">Activité récente</p>
+              {preview.followups.slice(0, 3).map((f) => (
+                <div key={f.id} className="flex items-start gap-1.5">
+                  <div className="w-1 h-1 rounded-full bg-primary mt-1.5 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-[9px] text-foreground font-medium leading-tight truncate">{f.author?.fullName || 'Anonyme'}</p>
+                    <p className="text-[8px] text-muted-foreground line-clamp-1">{f.content}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {loading && !preview && (
+            <div className="flex items-center gap-1.5 text-[9px] text-muted-foreground">
+              <div className="w-2.5 h-2.5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+              Chargement...
+            </div>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 function ActionsRenderer({ data, context }) {
   if (!data) return null;
   const { canDelete, askDeleteOne } = context || {};
   const btnCls = "inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground";
   const [hovered, setHovered] = useState(false);
+  const anchorRef = useRef(null);
   return (
     <div className="flex h-full items-center gap-1">
       {canDelete && (
@@ -392,6 +593,7 @@ function ActionsRenderer({ data, context }) {
         onMouseLeave={() => setHovered(false)}
       >
         <Link
+          ref={anchorRef}
           to={`/tickets/${data.id}`}
           aria-label="Voir"
           className={btnCls}
@@ -400,40 +602,7 @@ function ActionsRenderer({ data, context }) {
           <ChevronRight className="h-4 w-4" />
         </Link>
         {hovered && (
-          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 pointer-events-none">
-            <div className="rounded-xl border border-border/40 bg-surface shadow-xl p-3 min-w-[220px] max-w-[300px] space-y-1.5">
-              <p className="text-[11px] font-bold text-foreground truncate">{data.title || `Ticket #${data.id}`}</p>
-              <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full font-bold ${STATUS_CONFIG[data.status]?.bg || ''}`}>
-                  {STATUS_CONFIG[data.status]?.label || data.status}
-                </span>
-                <span className="font-bold">{data.priority}</span>
-              </div>
-              {data.requester?.fullName && (
-                <p className="text-[10px] text-muted-foreground">
-                  <span className="font-semibold">Demandeur :</span> {data.requester.fullName}
-                </p>
-              )}
-              {data.assignedTo?.fullName && (
-                <p className="text-[10px] text-muted-foreground">
-                  <span className="font-semibold">Assigné à :</span> {data.assignedTo.fullName}
-                </p>
-              )}
-              <p className="text-[10px] text-muted-foreground">
-                <span className="font-semibold">Créé le :</span> {new Date(data.createdAt).toLocaleString('fr-FR')}
-              </p>
-              {data.solvedAt && (
-                <p className="text-[10px] text-emerald-600 dark:text-emerald-400">
-                  <span className="font-semibold">Résolu le :</span> {new Date(data.solvedAt).toLocaleString('fr-FR')}
-                </p>
-              )}
-              {data.closedAt && (
-                <p className="text-[10px] text-muted-foreground">
-                  <span className="font-semibold">Fermé le :</span> {new Date(data.closedAt).toLocaleString('fr-FR')}
-                </p>
-              )}
-            </div>
-          </div>
+          <TicketPreviewTooltip ticketId={data.id} data={data} anchorRef={anchorRef} />
         )}
       </div>
     </div>
