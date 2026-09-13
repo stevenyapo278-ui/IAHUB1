@@ -2,6 +2,7 @@ const express = require('express');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
+const { generateReport } = require('../services/pdfReportService');
 
 const router = express.Router();
 router.use(authenticate);
@@ -449,9 +450,10 @@ router.get('/activity-trend', async (req, res) => {
       periodStr = `${days} derniers jours`;
     }
 
-    const [tickets, techPerf, aiDrafts] = await Promise.all([
+    const dateFilter = { gte: since, lte: until };
+    const [tickets, techPerf, aiDrafts, byStatus, byPriority, byCategory, byTeam, slaTickets, teams] = await Promise.all([
       prisma.ticket.findMany({
-        where: { createdAt: { gte: since, lte: until } },
+        where: { createdAt: dateFilter },
         include: {
           requester: { select: { fullName: true, email: true, avatarUrl: true } },
           assignedTo: { select: { fullName: true, avatarUrl: true } },
@@ -463,7 +465,19 @@ router.get('/activity-trend', async (req, res) => {
         where: { role: { in: ['TECHNICIAN', 'ADMIN'] }, isActive: true },
         select: { fullName: true, email: true, avatarUrl: true },
       }),
-      prisma.aiEmailDraft.count({ where: { status: 'APPROVED', createdAt: { gte: since, lte: until } } }),
+      prisma.aiEmailDraft.count({ where: { status: 'APPROVED', createdAt: dateFilter } }),
+      prisma.ticket.groupBy({ by: ['status'], where: { createdAt: dateFilter }, _count: true }),
+      prisma.ticket.groupBy({ by: ['priority'], where: { createdAt: dateFilter }, _count: true }),
+      prisma.ticket.groupBy({ by: ['category'], where: { createdAt: dateFilter }, _count: true }),
+      prisma.ticket.groupBy({ by: ['teamId'], where: { createdAt: dateFilter }, _count: true }),
+      prisma.ticket.findMany({
+        where: { createdAt: dateFilter },
+        select: {
+          priority: true, status: true, slaBreachedAt: true, slaResolutionDueAt: true,
+          firstResponseAt: true, csatScore: true, createdAt: true, solvedAt: true, closedAt: true,
+        },
+      }),
+      prisma.team.findMany({ select: { id: true, name: true } }),
     ]);
 
     const totalTickets = tickets.length;
@@ -509,64 +523,90 @@ router.get('/activity-trend', async (req, res) => {
     }
 
     if (format === 'pdf') {
-      // Génération PDF via pdfkit
-      const PDFDocument = require('pdfkit');
-      const doc = new PDFDocument({ size: 'A4', margin: 48 });
-      const chunks = [];
-      doc.on('data', (c) => chunks.push(c));
-      doc.on('end', () => {
-        const filename = `rapport-itsm-${new Date().toISOString().slice(0, 10)}.pdf`;
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-        res.send(Buffer.concat(chunks));
+      // SLA data pour le rapport
+      const RESOLVED = ['SOLVED', 'CLOSED'];
+      const OPEN = ['NEW', 'OPEN', 'PLANNED', 'PENDING'];
+      const slaByPriority = {};
+      for (const p of ['P1', 'P2', 'P3', 'P4']) {
+        const pool = slaTickets.filter((t) => t.priority === p);
+        const resolvedPool = pool.filter((t) => RESOLVED.includes(t.status));
+        const breached = pool.filter((t) => t.slaBreachedAt);
+        const withSla = pool.filter((t) => t.slaResolutionDueAt);
+        const avgResolutionH = resolvedPool.length
+          ? Math.round(resolvedPool.reduce((sum, t) => sum + (new Date(t.solvedAt) - new Date(t.createdAt)), 0) / resolvedPool.length / (1000 * 60 * 60) * 10) / 10
+          : null;
+        slaByPriority[p] = {
+          total: pool.length,
+          resolved: resolvedPool.length,
+          breached: breached.length,
+          breachRate: withSla.length ? Math.round((breached.length / withSla.length) * 100) : 0,
+          avgResolutionHours: avgResolutionH,
+        };
+      }
+      const slaTotals = {
+        total: slaTickets.length,
+        breached: slaTickets.filter((t) => t.slaBreachedAt).length,
+        breachRate: slaTickets.filter((t) => t.slaResolutionDueAt).length
+          ? Math.round((slaTickets.filter((t) => t.slaBreachedAt).length / slaTickets.filter((t) => t.slaResolutionDueAt).length) * 100)
+          : 0,
+      };
+      const rated = slaTickets.filter((t) => t.csatScore);
+      const csat = {
+        average: rated.length ? Math.round((rated.reduce((s, t) => s + t.csatScore, 0) / rated.length) * 10) / 10 : null,
+      };
+
+      // Stats techniciens pour le rapport
+      const techStats = await prisma.user.findMany({
+        where: { role: { in: ['TECHNICIAN', 'ADMIN'] }, isActive: true },
+        select: { id: true, fullName: true },
+      });
+      const techIds = techStats.map((t) => t.id);
+      const techTickets = await prisma.ticket.findMany({
+        where: { assignedToId: { in: techIds }, createdAt: dateFilter },
+        select: { assignedToId: true, status: true, slaBreachedAt: true, slaResolutionDueAt: true, csatScore: true, createdAt: true, solvedAt: true, closedAt: true },
       });
 
-      const head = (text) => { doc.font('Helvetica-Bold').fontSize(9).fillColor('#334155').text(text, { continued: false }); };
-      const cell = (text, x, y, w) => doc.font('Helvetica').fontSize(7).fillColor('#0f172a').text(text, x, y, { width: w, lineBreak: false, ellipsis: true });
+      const enrichedTechStats = techStats.map((tech) => {
+        const mine = techTickets.filter((t) => t.assignedToId === tech.id);
+        const myResolved = mine.filter((t) => RESOLVED.includes(t.status));
+        const withSla = myResolved.filter((t) => t.slaResolutionDueAt);
+        const slaRespected = myResolved.filter((t) => !t.slaBreachedAt);
+        const csatPool = myResolved.filter((t) => t.csatScore != null);
+        const avgH = myResolved.length
+          ? Math.round(myResolved.reduce((s, t) => s + (new Date(t.solvedAt || t.closedAt) - new Date(t.createdAt)), 0) / myResolved.length / (1000 * 60 * 60) * 10) / 10
+          : null;
+        return {
+          fullName: tech.fullName,
+          assigned: mine.length,
+          resolved: myResolved.length,
+          slaCompliancePct: withSla.length ? Math.round((slaRespected.length / withSla.length) * 100) : null,
+          csatAvg: csatPool.length ? Math.round((csatPool.reduce((s, t) => s + t.csatScore, 0) / csatPool.length) * 10) / 10 : null,
+          avgResolutionHours: avgH,
+        };
+      }).filter((t) => t.assigned > 0).sort((a, b) => b.resolved - a.resolved);
 
-      doc.font('Helvetica-Bold').fontSize(16).fillColor('#0f172a').text('Rapport ERP ITSM', 48, 48);
-      doc.font('Helvetica').fontSize(9).fillColor('#64748b').text(`Période : ${periodStr} — généré le ${new Date().toLocaleString('fr-FR')}`, 48, 70);
+      const pdfBuffer = await generateReport({
+        periodStr,
+        tickets,
+        totalTickets,
+        resolved,
+        p1,
+        avgResolution,
+        aiDrafts,
+        techCount: techPerf.length,
+        byStatus,
+        byPriority,
+        byCategory,
+        byTeam,
+        teams,
+        slaData: { byPriority: slaByPriority, totals: slaTotals, csat },
+        techStats: enrichedTechStats,
+      });
 
-      doc.font('Helvetica-Bold').fontSize(11).fillColor('#0f172a').text('Résumé', 48, 96);
-      let y = 114;
-      const summaryRows = [
-        ['Total tickets', totalTickets],
-        ['Tickets résolus', resolved],
-        ['Taux de résolution', `${totalTickets > 0 ? Math.round((resolved / totalTickets) * 100) : 0}%`],
-        ['Tickets P1 critiques', p1],
-        ['Délai résolution moyen', `${avgResolution} h`],
-        ['Brouillons IA approuvés', aiDrafts],
-        ['Techniciens actifs', techPerf.length],
-      ];
-      for (const [label, value] of summaryRows) {
-        doc.font('Helvetica').fontSize(8).fillColor('#334155').text(label, 48, y, { width: 200 });
-        doc.font('Helvetica-Bold').fontSize(8).fillColor('#0f172a').text(String(value), 250, y, { width: 100 });
-        y += 14;
-      }
-
-      doc.font('Helvetica-Bold').fontSize(11).fillColor('#0f172a').text('Tickets', 48, y + 8);
-      y += 26;
-      const cols = [28, 150, 45, 42, 120, 100, 75, 60];
-      const headers = ['ID', 'Titre', 'Statut', 'Priorité', 'Demandeur', 'Assigné', 'Équipe', 'Créé le'];
-      let x = 48;
-      doc.rect(48, y - 14, 500, 14).fill('#f1f5f9');
-      headers.forEach((h, i) => { cell(h, x, y - 12, cols[i]); x += cols[i]; });
-      y += 8;
-      for (const t of tickets) {
-        if (y > 780) { doc.addPage(); y = 48; }
-        x = 48;
-        cell(String(t.id), x, y, cols[0]); x += cols[0];
-        cell(t.title || '', x, y, cols[1]); x += cols[1];
-        cell(t.status, x, y, cols[2]); x += cols[2];
-        cell(t.priority, x, y, cols[3]); x += cols[3];
-        cell(t.requester?.fullName || '', x, y, cols[4]); x += cols[4];
-        cell(t.assignedTo?.fullName || '', x, y, cols[5]); x += cols[5];
-        cell(t.team?.name || 'Non assignée', x, y, cols[6]); x += cols[6];
-        cell(new Date(t.createdAt).toLocaleDateString('fr-FR'), x, y, cols[7]);
-        y += 12;
-      }
-
-      doc.end();
+      const filename = `rapport-itsm-${new Date().toISOString().slice(0, 10)}.pdf`;
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.send(pdfBuffer);
       return;
     }
 
