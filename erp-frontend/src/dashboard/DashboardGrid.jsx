@@ -1,5 +1,5 @@
 import { memo, useCallback, useMemo, useRef } from 'react';
-import { ResponsiveGridLayout, useContainerWidth, verticalCompactor, noCompactor } from 'react-grid-layout';
+import { ResponsiveGridLayout, useContainerWidth, verticalCompactor } from 'react-grid-layout';
 import { motion } from 'framer-motion';
 import { GripVertical, X } from 'lucide-react';
 import 'react-grid-layout/css/styles.css';
@@ -80,73 +80,6 @@ function stripLayout(layout) {
   return (layout || []).map(({ i, x, y, w, h }) => ({ i, x, y, w, h }));
 }
 
-/**
- * Après un drag, restaure les widgets déplacés involontairement à leur position
- * d'origine. Seul le widget glissé conserve sa nouvelle position.
- * Compaction verticale légère pour résoudre les chevauchements restants.
- */
-function restoreDisplaced(prevLayout, newLayout) {
-  const prevMap = new Map(prevLayout.map((l) => [l.i, l]));
-  const newMap = new Map(newLayout.map((l) => [l.i, { ...l }]));
-
-  // Détecter quel widget a bougé le plus (le widget glissé)
-  let maxDelta = 0;
-  let draggedId = null;
-  for (const [id, curr] of newMap) {
-    const prev = prevMap.get(id);
-    if (!prev) continue;
-    const dx = Math.abs(curr.x - prev.x);
-    const dy = Math.abs(curr.y - prev.y);
-    const delta = dx + dy;
-    if (delta > maxDelta) {
-      maxDelta = delta;
-      draggedId = id;
-    }
-  }
-
-  // Si aucun mouvement significatif, pas de snap-back nécessaire
-  if (!draggedId || maxDelta <= 1) return newLayout;
-
-  // Restaurer tous les widgets non-guissés à leur position précédente
-  for (const [id, prev] of prevMap) {
-    if (id === draggedId) continue;
-    const curr = newMap.get(id);
-    if (curr) {
-      curr.x = prev.x;
-      curr.y = prev.y;
-    }
-  }
-
-  // Compaction verticale légère : repack du haut vers le bas sans chevauchement
-  const cols = COLS.lg;
-  const placed = [];
-  const sorted = [...newMap.values()].sort((a, b) => a.y - b.y || a.x - b.x);
-
-  for (const item of sorted) {
-    if (item.i === draggedId) {
-      // Le widget glissé garde sa position finale
-      placed.push(item);
-      continue;
-    }
-    // Pour chaque widget non-glissé, trouver la première position libre en bas
-    let testY = item.y;
-    for (let attempt = 0; attempt < 100; attempt++) {
-      const test = { ...item, y: testY };
-      const collision = placed.some((p) =>
-        test.x < p.x + p.w && test.x + test.w > p.x && test.y < p.y + p.h && test.y + test.h > p.y
-      );
-      if (!collision) {
-        item.y = testY;
-        break;
-      }
-      testY++;
-    }
-    placed.push(item);
-  }
-
-  return placed.map(({ minW, minH, maxW, maxH, ...rest }) => rest);
-}
-
 export default memo(function DashboardGrid({
   layout = [],
   widgets = [],
@@ -155,72 +88,34 @@ export default memo(function DashboardGrid({
   onRemoveWidget,
   renderWidget,
 }) {
-  // Mesure dynamique du conteneur (ResizeObserver) — obligatoire en v2 :
-  // `width` est une prop requise, sans elle tout le positionnement est NaN.
-  // measureBeforeMount : aucun rendu avec une largeur supposée (anti-flash).
   const { width, containerRef, mounted } = useContainerWidth({ measureBeforeMount: true });
 
   const widgetsRef = useRef(widgets);
   widgetsRef.current = widgets;
 
   const baseLayout = useMemo(() => normalizeLayout(layout, widgets), [layout, widgets]);
-
-  // Un seul objet `layouts` stable par version du layout servi : la génération
-  // des layouts de breakpoints reste déterministe entre les re-renders.
   const layouts = useMemo(() => ({ lg: baseLayout }), [baseLayout]);
 
-  // ── Snap-back : restaure les widgets déplacés involontairement ────────────
-  // On track le layout précédent pour détecter le drag via onLayoutChange.
-  const prevLayoutRef = useRef(baseLayout);
-  const isDraggingRef = useRef(false);
-
-  // Mettre à jour le ref quand le layout est servi depuis l'API (pas pendant un drag)
-  if (!isDraggingRef.current) {
-    prevLayoutRef.current = baseLayout;
-  }
-
-  // Commit unique : RGL appelle onLayoutChange après drag, resize ET
-  // compaction — c'est la seule source de vérité pour la persistance.
-  //
-  // Garde-fou breakpoints : le layout persisté est toujours celui du
-  // breakpoint `lg` (12 colonnes). Une édition faite sur un viewport plus
-  // étroit (md/sm/xs) est appliquée localement par la grille mais NE doit
-  // pas écraser le layout canonique servi par l'API.
   const breakpointRef = useRef('lg');
   const handleBreakpointChange = useCallback((newBreakpoint) => {
     breakpointRef.current = newBreakpoint;
   }, []);
 
-  // Throttle onLayoutChange via requestAnimationFrame : évite de déclencher
-  // un re-render du parent à chaque mousemove (~60-120/s) pendant le drag.
-  // Le layout interne de RGL reste à jour (son propre state), on throttle
-  // uniquement la remontée vers DashboardPage pour la persistance.
+  // Throttle onLayoutChange via requestAnimationFrame
   const rafRef = useRef(null);
   const handleLayoutChange = useCallback(
     (newLayout) => {
       if (!isEditing) return;
       if (breakpointRef.current !== 'lg') return;
-
-      // Snap-back : restaurer les widgets déplacés involontairement
-      const prevLayout = prevLayoutRef.current;
-      const cleaned = (prevLayout && prevLayout.length === newLayout.length)
-        ? restoreDisplaced(prevLayout, newLayout)
-        : newLayout;
-
-      // Mettre à jour le ref du layout précédent
-      prevLayoutRef.current = cleaned;
-
       if (rafRef.current) return;
       rafRef.current = requestAnimationFrame(() => {
         rafRef.current = null;
-        onLayoutChange?.(stripLayout(cleaned), widgetsRef.current);
+        onLayoutChange?.(stripLayout(newLayout), widgetsRef.current);
       });
     },
     [isEditing, onLayoutChange],
   );
 
-  // v2 : les comportements passent par des objets de configuration
-  // (isDraggable/isResizable/draggableHandle/compactType n'existent plus).
   const dragConfig = useMemo(
     () => ({ enabled: isEditing, handle: '.drag-handle', threshold: 8 }),
     [isEditing],
@@ -249,10 +144,9 @@ export default memo(function DashboardGrid({
             rowHeight={ROW_HEIGHT}
             margin={MARGIN}
             containerPadding={[0, 0]}
-            compactor={isEditing ? noCompactor : verticalCompactor}
+            compactor={verticalCompactor}
             dragConfig={dragConfig}
             resizeConfig={resizeConfig}
-            preventCollision={isEditing}
             isBounded
             useCSSTransforms
             onLayoutChange={handleLayoutChange}
