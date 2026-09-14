@@ -204,7 +204,7 @@ function buildTicketWhereClause(user, queryParams = {}) {
 
   if (status) {
     if (status === 'OPEN_GROUP') {
-      andConditions.push({ status: { in: ['NEW', 'OPEN', 'PLANNED'] } });
+      andConditions.push({ status: { in: ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER'] } });
     } else if (status === 'PENDING_GROUP' || status === 'PENDING') {
       andConditions.push({ status: { in: ['PENDING', 'WAITING_FOR_USER'] } });
     } else if (status === 'CLOSED_GROUP') {

@@ -126,7 +126,10 @@ async function applyIntentActions(ticketId, { intent, confidence, newIssueSummar
     return intent;
   }
 
-  const ticket = await prisma.ticket.findUnique({ where: { id: ticketId } });
+  const ticket = await prisma.ticket.findUnique({
+    where: { id: ticketId },
+    include: { assignedTo: { select: { email: true, fullName: true } } },
+  });
   const lifetimeExceeded = daysSince(ticket?.firstOpenedAt || ticket?.createdAt) > MAX_TICKET_LIFETIME_DAYS;
 
   const updates = {};
@@ -234,6 +237,23 @@ async function applyIntentActions(ticketId, { intent, confidence, newIssueSummar
 
     if (updates.status === 'WAITING_FOR_USER') {
       await logEvent(ticketId, 'NEEDS_HUMAN_REVIEW', actor, { intent, confidence, reason: 'low_confidence_or_split_limit' });
+    }
+
+    // Si le ticket était SOLVED/CLOSED et repasse en OPEN → notifier le technicien assigné
+    const wasClosed = ['SOLVED', 'CLOSED'].includes(ticket?.status);
+    const isOpenNow = updates.status === 'OPEN';
+    if (wasClosed && isOpenNow && ticket?.assignedTo?.email) {
+      const { sendReopenNotificationEmail } = require('./emailSender');
+      sendReopenNotificationEmail({
+        ticketId: ticket.id,
+        glpiTicketId: ticket.glpiTicketId,
+        ticketTitle: ticket.title,
+        priority: ticket.priority,
+        category: ticket.category,
+        technicianEmail: ticket.assignedTo.email,
+        technicianName: ticket.assignedTo.fullName,
+        requesterName: context?.fromName || context?.fromEmail || 'Utilisateur',
+      }).catch((err) => console.error(`[intentAnalyzer] Échec email réouverture (ticket ${ticketId}):`, err.message));
     }
   }
 

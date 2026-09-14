@@ -1149,6 +1149,46 @@ async function sendTicketCreationNotification(ticket) {
   }
 }
 
+// ── Template : Réouverture de ticket ─────────────────────────────────────────
+function buildReopenNotificationHtml({ technicianName, glpiTicketId, ticketId, ticketTitle, priority, category, requesterName, signature, ticketLink }) {
+  const displayId = glpiTicketId || ticketId || 'N/A';
+  const priorityLabel = buildPriorityLabel(priority);
+  const priorityColor = buildPriorityColor(priority);
+  return buildEmailLayout({
+    headerTitle: 'Ticket rouvert',
+    headerSubtitle: `Ticket #${displayId}`,
+    signature,
+    children: `
+<p style="margin:0 0 12px">Bonjour ${technicianName || ''},</p>
+<p style="margin:0 0 12px">Le ticket <strong>#${displayId} — ${ticketTitle}</strong> a été <strong>rouvert</strong> par ${requesterName || 'le demandeur'}.</p>
+<p style="margin:0 0 12px">Le demandeur a répondu à l'email de résolution — le problème semble toujours présent.</p>
+${buildStyledTable([
+  { label: 'Numéro de ticket', value: `<strong>#${displayId}</strong>` },
+  { label: 'Sujet', value: ticketTitle },
+  { label: 'Demandeur', value: requesterName || '—' },
+  category ? { label: 'Catégorie', value: category } : null,
+  { label: 'Priorité', value: `<strong style="color:${priorityColor}">${priorityLabel}</strong>` },
+  { label: 'Nouveau statut', value: '<strong style="color:#2563eb">Réouvert</strong>' },
+].filter(Boolean))}
+${buildActionLink(ticketLink, 'Reprendre le ticket')}
+<p style="margin:0 0 12px;color:#6b7280;font-size:12px">Connectez-vous pour prendre en charge le ticket et répondre au demandeur.</p>`,
+  });
+}
+
+// Notifie le technicien assigné qu'un ticket résolu/fermé a été rouvert par le demandeur.
+async function sendReopenNotificationEmail({ ticketId, glpiTicketId, ticketTitle, priority, category, technicianEmail, technicianName, requesterName }) {
+  const settings = await getSystemSettings();
+  if (settings.emailStatusChangeEnabled === false) return null;
+  const displayId = glpiTicketId || ticketId || 'N/A';
+  const subject = `[Réouvert] Ticket #${displayId} — ${ticketTitle}`;
+  const signature = await getEmailSignature();
+  const frontendUrl = resolveFrontendUrl(settings);
+  const ticketLink = `${frontendUrl}/tickets/${ticketId}`;
+  const bodyHtml = buildReopenNotificationHtml({ technicianName, glpiTicketId, ticketId, ticketTitle, priority, category, requesterName, signature, ticketLink });
+
+  return sendEmail({ ticketId, to: technicianEmail, subject, bodyHtml, saveAsMessage: false });
+}
+
 module.exports = {
   sendEmail,
   sendAcknowledgement,
@@ -1184,6 +1224,8 @@ module.exports = {
   buildApprovalNotificationHtml,
   buildResolvedNotificationHtml,
   buildTicketCreationNotificationHtml,
+  buildReopenNotificationHtml,
+  sendReopenNotificationEmail,
   getEmailSignature,
   wrapDraftContentForSend,
   sendAiDraftEmail,

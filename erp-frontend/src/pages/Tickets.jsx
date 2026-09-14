@@ -1823,17 +1823,16 @@ export default function Tickets() {
       </div>
 
       {/* ── STATS BAR ──────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 px-4 sm:px-6 py-3 shrink-0">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 px-4 sm:px-6 py-3 shrink-0">
         {[
           { label: 'Total', value: globalStats.total, filterVal: '', color: 'text-on-surface', borderActive: 'border-on-surface/40' },
-          { label: 'Ouverts', value: globalStats.open, filterVal: 'OPEN_GROUP', color: 'text-amber-600 dark:text-amber-400', borderActive: 'border-amber-500/60' },
-          { label: 'En attente', value: globalStats.pending, filterVal: 'PENDING_GROUP', color: 'text-sky-600 dark:text-sky-400', borderActive: 'border-sky-500/60' },
+          { label: 'Ouverts', value: (globalStats.open || 0) + (globalStats.pending || 0), filterVal: 'OPEN_GROUP', color: 'text-amber-600 dark:text-amber-400', borderActive: 'border-amber-500/60' },
           { label: 'Résolus', value: globalStats.solved ?? 0, filterVal: 'SOLVED', color: 'text-emerald-600 dark:text-emerald-400', borderActive: 'border-emerald-500/60' },
           { label: 'Fermés', value: globalStats.closed ?? 0, filterVal: 'CLOSED', color: 'text-slate-600 dark:text-slate-400', borderActive: 'border-slate-500/60' },
         ].map((s) => {
           const isActive = s.filterVal !== '' && (
             filters.status === s.filterVal ||
-            (s.filterVal === 'PENDING_GROUP' && filters.status === 'PENDING')
+            (s.filterVal === 'OPEN_GROUP' && filters.status === 'PENDING_GROUP')
           );
           return (
             <button
