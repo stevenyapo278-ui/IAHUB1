@@ -1,57 +1,44 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
 import { useNotifications } from '../context/NotificationContext';
 import {
   Bell, Inbox as InboxIcon, UserPlus, RefreshCw, AlertTriangle, TrendingUp,
-  Check, CheckCheck, X, Flame, Zap
+  Check, CheckCheck, X, Trash2
 } from 'lucide-react';
 
-// ── Configuration par type de notification ─────────────────────────────────
-const TYPE_CONFIG = {
-  ticket_created:   { label: 'Nouveau ticket', icon: InboxIcon,       chip: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20' },
-  ticket_assigned:  { label: 'Assignation',    icon: UserPlus,        chip: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20' },
-  ticket_updated:   { label: 'Mise à jour',    icon: RefreshCw,       chip: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' },
-  sla_breached:     { label: 'SLA dépassé',    icon: AlertTriangle,   chip: 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20' },
-  ticket_escalated: { label: 'Escalade',       icon: TrendingUp,      chip: 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20' },
+const TYPE_ICONS = {
+  ticket_created:   InboxIcon,
+  ticket_assigned:  UserPlus,
+  ticket_updated:   RefreshCw,
+  sla_breached:     AlertTriangle,
+  ticket_escalated: TrendingUp,
 };
 
-const DEFAULT_TYPE_CONFIG = {
-  label: 'Notification',
-  icon: Bell,
-  chip: 'bg-surface-container text-on-surface-variant border-outline-variant/30',
+const TYPE_COLORS = {
+  ticket_created:   'bg-blue-500',
+  ticket_assigned:  'bg-indigo-500',
+  ticket_updated:   'bg-amber-500',
+  sla_breached:     'bg-red-500',
+  ticket_escalated: 'bg-orange-500',
 };
 
-// Priorités (badge sur les notifications de ticket)
-const PRIORITY_CONFIG = {
-  P1: { label: 'P1', color: 'text-red-600 dark:text-red-400', bg: 'bg-red-500/10 border-red-500/25' },
-  P2: { label: 'P2', color: 'text-orange-600 dark:text-orange-400', bg: 'bg-orange-500/10 border-orange-500/25' },
-  P3: { label: 'P3', color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-500/10 border-amber-500/25' },
-  P4: { label: 'P4', color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-500/10 border-blue-500/25' },
-};
-
-function formatTimeAgo(dateString) {
-  const now = Date.now();
-  const date = new Date(dateString).getTime();
-  const diffSec = Math.floor((now - date) / 1000);
-  const diffMin = Math.floor(diffSec / 60);
-  const diffHour = Math.floor(diffMin / 60);
-  const diffDay = Math.floor(diffHour / 24);
-
-  if (diffSec < 10) return "À l'instant";
-  if (diffSec < 60) return `Il y a ${diffSec}s`;
-  if (diffMin < 60) return `Il y a ${diffMin}min`;
-  if (diffHour < 24) return `Il y a ${diffHour}h`;
-  if (diffDay < 7) return `Il y a ${diffDay}j`;
+function timeAgo(dateString) {
+  const s = Math.floor((Date.now() - new Date(dateString).getTime()) / 1000);
+  if (s < 60) return "à l'instant";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}min`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}j`;
   return new Date(dateString).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
 }
 
-// Libellés de groupe par jour
 function dayLabel(iso) {
   const d = new Date(iso);
   const now = new Date();
-  const startOfDay = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate());
-  const diff = Math.round((startOfDay(now) - startOfDay(d)) / 86400000);
+  const start = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate());
+  const diff = Math.round((start(now) - start(d)) / 86400000);
   if (diff === 0) return "Aujourd'hui";
   if (diff === 1) return 'Hier';
   if (diff < 7) return d.toLocaleDateString('fr-FR', { weekday: 'long' });
@@ -63,7 +50,6 @@ function dayKey(iso) {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
 
-// Extrait le numéro de ticket d'un lien "/tickets/123"
 function ticketIdFromLink(link) {
   if (!link) return null;
   const m = String(link).match(/\/tickets\/(\d+)/);
@@ -71,66 +57,44 @@ function ticketIdFromLink(link) {
 }
 
 export default function NotificationPanel({ open, onClose }) {
-  const { notifications, unreadCount, hasMore, loadMore, markAsRead, markAllAsRead, dismissNotification } = useNotifications();
+  const { notifications, unreadCount, hasMore, loadMore, markAsRead, markAllAsRead, dismissNotification, clearAll } = useNotifications();
   const navigate = useNavigate();
   const panelRef = useRef(null);
   const scrollRef = useRef(null);
-  const [scrolledToBottom, setScrolledToBottom] = useState(false);
-  const [filter, setFilter] = useState('all'); // all | unread
+  const [filter, setFilter] = useState('all');
 
-  // Fermeture au clic à l'extérieur
   useEffect(() => {
-    function handleClickOutside(event) {
-      if (panelRef.current && !panelRef.current.contains(event.target)) {
-        onClose();
-      }
-    }
-    if (open) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    if (!open) return;
+    const handler = (e) => {
+      if (panelRef.current && !panelRef.current.contains(e.target)) onClose();
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
   }, [open, onClose]);
 
-  // Détection du scroll pour la pagination
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [open, onClose]);
+
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el || !hasMore) return;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 100) loadMore();
+  }, [hasMore, loadMore]);
 
-    const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
-    if (isNearBottom && !scrolledToBottom) {
-      setScrolledToBottom(true);
-      loadMore();
-    } else if (!isNearBottom) {
-      setScrolledToBottom(false);
-    }
-  }, [hasMore, loadMore, scrolledToBottom]);
-
-  // Traitement des notifications groupées par date
-  const handleNotifClick = (notif) => {
-    if (!notif.isRead) {
-      markAsRead(notif.id);
-    }
-    // Construire le lien : utiliser link directement, ou fallback depuis le message (#123)
+  const handleClick = (notif) => {
+    if (!notif.isRead) markAsRead(notif.id);
     const link = notif.link || (() => {
       const m = (notif.message || '').match(/#(\d+)/);
       return m ? `/tickets/${m[1]}` : null;
     })();
-    if (link) {
-      navigate(link);
-    }
+    if (link) navigate(link);
     onClose();
   };
 
-  const handleMarkOneRead = (e, notif) => {
-    e.stopPropagation();
-    markAsRead(notif.id);
-  };
-
-  const handleMarkAllRead = () => {
-    markAllAsRead();
-  };
-
-  // Filtre + regroupement par jour
   const filtered = useMemo(() => {
     if (filter === 'unread') return notifications.filter((n) => !n.isRead);
     return notifications;
@@ -148,322 +112,249 @@ export default function NotificationPanel({ open, onClose }) {
 
   const hasUnread = unreadCount > 0;
 
+  if (!open) return null;
+
   return (
-    <AnimatePresence>
-      {open && (
-        <>
-          {/* Overlay mobile */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
-            className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm md:hidden"
-            onClick={onClose}
-          />
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} aria-hidden />
 
-          {/* Panel */}
-          <motion.div
-            ref={panelRef}
-            initial={{ opacity: 0, scale: 0.96, y: -8, originX: 1, originY: 0 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: -8 }}
-            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="fixed md:absolute top-[calc(100%+8px)] right-0 left-0 md:left-auto z-50
-                       mx-4 md:mx-0 md:w-[420px] max-h-[80vh] md:max-h-[600px]
-                       rounded-2xl border shadow-xl overflow-hidden flex flex-col"
-            style={{
-              backgroundColor: 'var(--color-surface-container-lowest)',
-              borderColor: 'var(--color-outline-variant)',
-            }}
-          >
-            {/* Header */}
-            <div
-              className="shrink-0 border-b px-4 pt-3 pb-2.5"
-              style={{ borderColor: 'var(--color-outline-variant)' }}
+      <div
+        ref={panelRef}
+        className="fixed md:absolute z-50
+                   top-[calc(100%+6px)] right-0
+                   w-[calc(100vw-24px)] md:w-[400px]
+                   max-h-[80vh] md:max-h-[520px]
+                   flex flex-col overflow-hidden
+                   rounded-2xl"
+        style={{
+          backgroundColor: 'var(--color-surface)',
+          border: '1px solid var(--color-outline-variant)',
+          boxShadow: '0 8px 40px rgba(0,0,0,0.12)',
+        }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--color-outline-variant)' }}>
+          <div className="flex items-center gap-2">
+            <span className="text-[13px] font-semibold" style={{ color: 'var(--color-on-surface)' }}>
+              Notifications
+            </span>
+            {hasUnread && (
+              <span
+                className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold"
+                style={{ backgroundColor: 'var(--color-primary)', color: 'var(--color-surface)' }}
+              >
+                {unreadCount}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1">
+            {hasUnread && (
+              <button
+                onClick={markAllAsRead}
+                className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer"
+                style={{ color: 'var(--color-on-surface-variant)' }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--color-surface-container)'}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+              >
+                <CheckCheck className="w-3 h-3" />
+                Tout lire
+              </button>
+            )}
+            {notifications.length > 0 && (
+              <button
+                onClick={clearAll}
+                className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer"
+                style={{ color: 'var(--color-on-surface-variant)' }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--color-surface-container)'}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                title="Supprimer toutes les notifications"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="w-6 h-6 flex items-center justify-center rounded-md transition-colors cursor-pointer"
+              style={{ color: 'var(--color-on-surface-variant)' }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--color-surface-container)'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
             >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="material-symbols-outlined" style={{ fontSize: '18px', color: 'var(--color-on-surface-variant)' }}>
-                    notifications
-                  </span>
-                  <span className="text-[14px] font-semibold" style={{ color: 'var(--color-on-surface)' }}>
-                    Notifications
-                  </span>
-                  {hasUnread && (
-                    <span
-                      className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full text-[10px] font-bold text-white"
-                      style={{ backgroundColor: 'var(--color-primary)' }}
-                    >
-                      {unreadCount}
-                    </span>
-                  )}
-                </div>
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
 
-                <div className="flex items-center gap-1">
-                  {hasUnread && (
-                    <button
-                      onClick={handleMarkAllRead}
-                      className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium transition-colors cursor-pointer"
-                      style={{ color: 'var(--color-on-surface-variant)' }}
-                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--color-surface-container-high)'}
-                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                    >
-                      <CheckCheck className="w-3.5 h-3.5" />
-                      Tout lire
-                    </button>
-                  )}
-                  <button
-                    onClick={onClose}
-                    className="w-7 h-7 flex items-center justify-center rounded-lg transition-colors cursor-pointer"
-                    style={{ color: 'var(--color-on-surface-variant)' }}
-                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--color-surface-container-high)'}
-                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
+        {/* Tabs */}
+        <div className="flex" style={{ borderBottom: '1px solid var(--color-outline-variant)' }}>
+          {[
+            { id: 'all', label: 'Toutes' },
+            { id: 'unread', label: `Non lues${hasUnread ? ` (${unreadCount})` : ''}` },
+          ].map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setFilter(t.id)}
+              className="flex-1 py-2.5 text-[12px] font-medium border-b-2 transition-colors cursor-pointer"
+              style={{
+                color: filter === t.id ? 'var(--color-on-surface)' : 'var(--color-on-surface-variant)',
+                borderBottomColor: filter === t.id ? 'var(--color-primary)' : 'transparent',
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
 
-              {/* Onglets de filtre */}
-              <div className="flex items-center gap-1 mt-2.5 p-1 rounded-xl bg-surface-container/70 border border-outline-variant/30">
-                {[
-                  { id: 'all', label: 'Toutes' },
-                  { id: 'unread', label: `Non lues${hasUnread ? ` (${unreadCount})` : ''}` },
-                ].map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => setFilter(t.id)}
-                    className={`flex-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all cursor-pointer ${
-                      filter === t.id
-                        ? 'bg-surface-container-high text-on-surface shadow-sm'
-                        : 'text-on-surface-variant hover:text-on-surface'
-                    }`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
+        {/* Liste */}
+        <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto overscroll-y-contain">
+          {groups.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 py-16 px-6 text-center">
+              <div
+                className="w-12 h-12 rounded-full flex items-center justify-center"
+                style={{ backgroundColor: 'var(--color-surface-container)' }}
+              >
+                <Bell className="w-5 h-5" style={{ color: 'var(--color-outline)' }} />
               </div>
+              <p className="text-[13px] font-medium" style={{ color: 'var(--color-on-surface-variant)' }}>
+                {filter === 'unread' ? 'Tout est lu' : 'Aucune notification'}
+              </p>
             </div>
-
-            {/* Liste des notifications */}
-            <div
-              ref={scrollRef}
-              onScroll={handleScroll}
-              className="overflow-y-auto flex-1"
-              style={{ maxHeight: 'calc(80vh - 110px)' }}
-            >
-              {groups.length === 0 ? (
-                <div className="flex flex-col items-center gap-3 py-12 px-4 text-center">
-                  <div className="p-4 rounded-full bg-surface-container">
-                    <Bell className="w-7 h-7" style={{ color: 'var(--color-on-surface-variant)', opacity: 0.5 }} />
+          ) : (
+            <div>
+              {groups.map(([key, items]) => (
+                <div key={key}>
+                  <div
+                    className="px-4 pt-3 pb-1 sticky top-0 z-10"
+                    style={{ backgroundColor: 'var(--color-surface)' }}
+                  >
+                    <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-on-surface-variant)' }}>
+                      {dayLabel(items[0].createdAt)}
+                    </span>
                   </div>
-                  <div>
-                    <p className="text-[13px] font-medium" style={{ color: 'var(--color-on-surface)' }}>
-                      {filter === 'unread' ? 'Aucune notification non lue' : 'Aucune notification'}
-                    </p>
-                    <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-on-surface-variant)' }}>
-                      {filter === 'unread'
-                        ? 'Vous avez tout lu. Bravo !'
-                        : "Les alertes de tickets et d'assignations apparaîtront ici"}
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="px-2 py-2 space-y-4">
-                  {groups.map(([key, items]) => (
-                    <div key={key}>
-                      <div
-                        className="flex items-center gap-2 px-2 pb-1.5 pt-0.5"
-                        style={{ color: 'var(--color-on-surface-variant)' }}
-                      >
-                        <span className="text-[10px] font-bold uppercase tracking-wider">
-                          {dayLabel(items[0].createdAt)}
-                        </span>
-                        <div className="flex-1 h-px" style={{ backgroundColor: 'var(--color-outline-variant)' }} />
-                        <span className="text-[9px] font-medium opacity-70">{items.length}</span>
-                      </div>
-                      <div className="space-y-0.5">
-                        {items.map((notif) => (
-                          <NotifItem
-                            key={notif.id}
-                            notif={notif}
-                            onClick={handleNotifClick}
-                            onMarkRead={handleMarkOneRead}
-                            onDismiss={(e, id) => { e.stopPropagation(); dismissNotification(id); }}
-                          />
-                        ))}
-                      </div>
-                    </div>
+                  {items.map((notif) => (
+                    <NotifItem
+                      key={notif.id}
+                      notif={notif}
+                      onClick={handleClick}
+                      onMarkRead={(e) => { e.stopPropagation(); markAsRead(notif.id); }}
+                      onDismiss={(e) => { e.stopPropagation(); dismissNotification(notif.id); }}
+                    />
                   ))}
                 </div>
-              )}
-
-              {/* Load more */}
-              {hasMore && (
-                <div className="flex justify-center py-3">
-                  <button
-                    onClick={loadMore}
-                    className="text-[11px] font-medium px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
-                    style={{ color: 'var(--color-on-surface-variant)' }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = 'var(--color-surface-container-high)';
-                      e.currentTarget.style.color = 'var(--color-on-surface)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = 'transparent';
-                      e.currentTarget.style.color = 'var(--color-on-surface-variant)';
-                    }}
-                  >
-                    Voir plus
-                  </button>
-                </div>
-              )}
-
-              {/* Bottom padding */}
-              <div className="h-2" />
+              ))}
             </div>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+          )}
+
+          {hasMore && (
+            <div className="flex justify-center py-3" style={{ borderTop: '1px solid var(--color-outline-variant)' }}>
+              <button
+                onClick={loadMore}
+                className="text-[11px] font-medium transition-colors cursor-pointer"
+                style={{ color: 'var(--color-on-surface-variant)' }}
+              >
+                Charger plus
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
   );
 }
 
 function NotifItem({ notif, onClick, onMarkRead, onDismiss }) {
   const read = notif.isRead;
-  const typeCfg = TYPE_CONFIG[notif.type] || DEFAULT_TYPE_CONFIG;
-  const Icon = typeCfg.icon;
+  const Icon = TYPE_ICONS[notif.type] || Bell;
+  const dotColor = TYPE_COLORS[notif.type] || 'bg-gray-400';
   const metadata = notif.metadata || {};
-  const priorityCfg = PRIORITY_CONFIG[metadata.priority];
   const ticketId = ticketIdFromLink(notif.link);
 
   return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, y: -4 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, x: -16 }}
-      transition={{ duration: 0.15 }}
+    <div
       role="button"
       tabIndex={0}
       onClick={() => onClick(notif)}
       onKeyDown={(e) => { if (e.key === 'Enter') onClick(notif); }}
-      className={`group relative w-full flex items-start gap-3 px-2.5 py-2.5 rounded-xl text-left transition-all duration-150 cursor-pointer ${
-        !read ? 'font-medium' : ''
-      }`}
+      className="group flex items-start gap-3 px-4 py-3 cursor-pointer transition-colors"
       style={{
-        backgroundColor: !read ? 'var(--color-surface-container-high)' : 'transparent',
+        backgroundColor: !read ? 'color-mix(in srgb, var(--color-primary) 4%, transparent)' : 'transparent',
       }}
       onMouseEnter={(e) => {
-        if (read) e.currentTarget.style.backgroundColor = 'var(--color-surface-container-high)';
+        e.currentTarget.style.backgroundColor = !read ? 'color-mix(in srgb, var(--color-primary) 8%, transparent)' : 'var(--color-surface-container)';
       }}
       onMouseLeave={(e) => {
-        if (read) e.currentTarget.style.backgroundColor = 'transparent';
+        e.currentTarget.style.backgroundColor = !read ? 'color-mix(in srgb, var(--color-primary) 4%, transparent)' : 'transparent';
       }}
     >
-      {/* Accent gauche si non lu */}
-      {!read && (
-        <div
-          className="absolute left-0 top-3 bottom-3 w-[3px] rounded-full"
-          style={{ backgroundColor: 'var(--color-primary)' }}
-        />
-      )}
-
-      {/* Icône par type */}
-      <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center border ${typeCfg.chip} ${!read ? 'ring-1 ring-inset' : ''}`}>
-        <Icon className="w-4 h-4" />
+      {/* Avatar */}
+      <div className={`relative w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${dotColor}`}>
+        <Icon className="w-4 h-4 text-white" />
+        {!read && (
+          <div
+            className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2"
+            style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-surface)' }}
+          />
+        )}
       </div>
 
-      {/* Contenu */}
-      <div className="flex-1 min-w-0 pr-6">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-            <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md border ${typeCfg.chip}`}>
-              {typeCfg.label}
-            </span>
-            {priorityCfg && (
-              <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border text-[9px] font-bold ${priorityCfg.bg} ${priorityCfg.color}`}>
-                <Flame className="w-2.5 h-2.5" />
-                {priorityCfg.label}
-              </span>
-            )}
-          </div>
-          <span
-            className="shrink-0 text-[10px] whitespace-nowrap"
-            style={{ color: 'var(--color-on-surface-variant)' }}
-          >
-            {formatTimeAgo(notif.createdAt)}
-          </span>
-        </div>
-
+      {/* Texte */}
+      <div className="flex-1 min-w-0">
         <p
-          className="text-[13px] mt-1"
-          style={{ color: 'var(--color-on-surface)' }}
+          className="text-[13px] leading-snug truncate"
+          style={{
+            color: 'var(--color-on-surface)',
+            fontWeight: !read ? 600 : 400,
+          }}
         >
           {notif.title}
         </p>
-        <p
-          className="text-[12px] mt-0.5 line-clamp-2"
-          style={{ color: 'var(--color-on-surface-variant)' }}
-        >
-          {notif.message}
-        </p>
-
-        {/* Sous-métadonnées */}
-        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+        {notif.message && (
+          <p className="text-[12px] mt-0.5 truncate" style={{ color: 'var(--color-on-surface-variant)' }}>
+            {notif.message}
+          </p>
+        )}
+        <div className="flex items-center gap-2 mt-1">
           {ticketId && (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border border-outline-variant/40 bg-surface-container text-[9px] font-bold text-on-surface-variant">
-              <span className="material-symbols-outlined" style={{ fontSize: '11px' }}>confirmation_number</span>
-              #{ticketId}
-            </span>
+            <span className="text-[10px]" style={{ color: 'var(--color-outline)' }}>#{ticketId}</span>
           )}
           {metadata.methodLabel && (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-semibold" style={{ color: 'var(--color-primary)' }}>
-              <Zap className="w-2.5 h-2.5" />
-              {metadata.methodLabel}
-            </span>
+            <span className="text-[10px]" style={{ color: 'var(--color-outline)' }}>{metadata.methodLabel}</span>
           )}
           {metadata.escalationLevel && (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20 text-[9px] font-bold">
-              <TrendingUp className="w-2.5 h-2.5" />
-              Niveau {metadata.escalationLevel}
-            </span>
+            <span className="text-[10px] font-medium text-orange-500">Nv.{metadata.escalationLevel}</span>
           )}
         </div>
       </div>
 
-      {/* Actions au survol */}
-      <div className="absolute right-2 top-2.5 flex items-center gap-1">
-        {!read && (
+      {/* Temps + actions */}
+      <div className="flex flex-col items-end gap-1 shrink-0">
+        <span className="text-[10px] whitespace-nowrap" style={{ color: 'var(--color-outline)' }}>
+          {timeAgo(notif.createdAt)}
+        </span>
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          {!read && (
+            <button
+              onClick={onMarkRead}
+              title="Marquer comme lue"
+              className="w-5 h-5 rounded flex items-center justify-center transition-colors cursor-pointer"
+              style={{ color: 'var(--color-on-surface-variant)' }}
+              onMouseEnter={(e) => e.currentTarget.style.color = 'var(--color-primary)'}
+              onMouseLeave={(e) => e.currentTarget.style.color = 'var(--color-on-surface-variant)'}
+            >
+              <Check className="w-3 h-3" />
+            </button>
+          )}
           <button
-            onClick={(e) => onMarkRead(e, notif)}
-            title="Marquer comme lue"
-            className="w-6 h-6 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
-            style={{ color: 'var(--color-on-surface-variant)', backgroundColor: 'var(--color-surface-container-high)' }}
-            onMouseEnter={(e) => e.currentTarget.style.color = 'var(--color-on-surface)'}
+            onClick={onDismiss}
+            title="Supprimer"
+            className="w-5 h-5 rounded flex items-center justify-center transition-colors cursor-pointer"
+            style={{ color: 'var(--color-on-surface-variant)' }}
+            onMouseEnter={(e) => e.currentTarget.style.color = '#ef4444'}
             onMouseLeave={(e) => e.currentTarget.style.color = 'var(--color-on-surface-variant)'}
           >
-            <Check className="w-3.5 h-3.5" />
+            <X className="w-3 h-3" />
           </button>
-        )}
-        <button
-          onClick={(e) => onDismiss(e, notif.id)}
-          title="Fermer la notification"
-          className="w-6 h-6 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer hover:bg-red-500/10 hover:text-red-500"
-          style={{ color: 'var(--color-on-surface-variant)' }}
-        >
-          <X className="w-3.5 h-3.5" />
-        </button>
+        </div>
       </div>
-
-      {/* Indicateur non-lu (petit point) */}
-      {!read && (
-        <div
-          className="absolute right-2.5 top-2.5 w-2 h-2 rounded-full md:hidden"
-          style={{ backgroundColor: 'var(--color-primary)' }}
-        />
-      )}
-    </motion.div>
+    </div>
   );
 }

@@ -24,7 +24,14 @@ RÈGLES STRICTES DE FORMATAGE :
    - Tableau Markdown
    - 1 phrase de conclusion maximum
 9. Si tu génères un graphique (widget), dis juste une phrase courte. Le graphique s'affiche automatiquement.
-10. Capacités :
+
+RÈGLES ABSOLUES SUR LES DONNÉES :
+10. N'invente JAMAIS de tickets, numéros, statuts ou données. Utilise UNIQUEMENT les informations présentes dans le contexte fourni.
+11. Si aucun ticket n'est trouvé dans le contexte, indique clairement "Aucun ticket trouvé" ou "Aucun ticket ne correspond à votre recherche". Ne crée pas de numéros de ticket ni de détails inventés.
+12. Si le contexte dit "Aucun ticket ouvert", c'est la réalité. Ne contredis jamais ces données.
+13. Quand on te demande une liste de tickets, vérifie que chaque ticket mentionné existe bien dans les résultats de recherche fournis. Si la liste est vide, dis-le explicitement.
+
+14. Capacités :
    - Informations TICKETS (statut, priorité, détails)
    - STATISTIQUES & ANALYSES (top magasins, répartitions, causes racines)
    - Base de Connaissances IT
@@ -112,12 +119,15 @@ async function searchTickets(query, limit = 5, user = null, period = null) {
   const lower = clean.toLowerCase();
 
   const idMatch = clean.match(/#?(\d+)/);
-  const statusMatch = lower.match(/\b(nouveau|ouvert|attente|résolu|resolu|fermé|ferme)\b/);
+  const statusMatch = lower.match(/\b(nouveaux?|ouverts?|attente|résolus?|resolu[s]?|fermés?|ferme[s]?)\b/);
   const priorityMatch = lower.match(/\b(p1|p2|p3|p4|critique|haute|moyenne|basse)\b/);
 
   const STATUS_MAP = {
-    nouveau: 'NEW', ouvert: 'OPEN', attente: 'PENDING',
-    résolu: 'SOLVED', resolu: 'SOLVED', fermé: 'CLOSED', ferme: 'CLOSED',
+    nouveau: 'NEW', nouveaux: 'NEW',
+    ouvert: 'OPEN', ouverts: 'OPEN',
+    attente: 'PENDING',
+    résolu: 'SOLVED', résolus: 'SOLVED', resolu: 'SOLVED', resolus: 'SOLVED',
+    fermé: 'CLOSED', fermés: 'CLOSED', ferme: 'CLOSED', fermes: 'CLOSED',
   };
 
   const PRIORITY_MAP = {
@@ -126,7 +136,7 @@ async function searchTickets(query, limit = 5, user = null, period = null) {
   };
 
   try {
-    const where = {};
+    const where = { deletedAt: null };
 
     // ── Filtrage temporel ──────────────────────────────────────────────
     if (period) {
@@ -159,8 +169,16 @@ async function searchTickets(query, limit = 5, user = null, period = null) {
       'bonjour', 'bonsoir', 'salut', 'hello', 'coucou', 'hey', 'hi', 'merci', 'svp', 'stp', 're', 'salutations'
     ]);
 
+    const STATUS_WORDS = new Set([
+      'nouveau', 'nouveaux', 'ouvert', 'ouverts', 'attente',
+      'résolu', 'résolus', 'resolu', 'resolus', 'fermé', 'fermés', 'ferme', 'fermes',
+    ]);
+    const PRIORITY_WORDS = new Set([
+      'p1', 'p2', 'p3', 'p4', 'critique', 'haute', 'moyenne', 'basse',
+    ]);
+
     const words = clean.split(/\s+/).filter(
-      (w) => w.length > 2 && !STOP_WORDS.has(w.toLowerCase())
+      (w) => w.length > 2 && !STOP_WORDS.has(w.toLowerCase()) && !STATUS_WORDS.has(w.toLowerCase()) && !PRIORITY_WORDS.has(w.toLowerCase())
     );
 
     if (words.length === 0 && !idMatch && !statusMatch && !priorityMatch) return [];
@@ -839,6 +857,8 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
       ticketContext += `\n  - *Description :* ${(t.content || '').substring(0, 200)}...\n\n`;
     }
     contextParts.push(ticketContext);
+  } else {
+    contextParts.push("**Aucun ticket trouvé dans la base de données** pour cette recherche. Ne pas inventer de tickets — indiquer simplement qu'aucun résultat n'a été trouvé.");
   }
 
   if (assets.length > 0) {

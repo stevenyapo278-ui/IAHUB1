@@ -6,6 +6,7 @@ import { Ticket, Flame, UserCheck, RefreshCw, ExternalLink } from 'lucide-react'
 import { useAuth } from './AuthContext';
 import { sendBrowserNotification, requestBrowserNotifPermission } from '../utils/browserNotification';
 import { playTicketCreated, playTicketAssigned, playTicketUpdated, playAlertP1 } from '../utils/sounds';
+import { wasRecentlyUpdatedByMe } from '../utils/recentlyUpdatedTickets';
 
 const SocketContext = createContext(null);
 
@@ -144,8 +145,26 @@ export function SocketProvider({ children }) {
     });
 
     // ── Ticket mis à jour ──────────────────────────────────────────────
+    // Dedup: backend emits to 'assignments' room + 'user:X' rooms,
+    // so ADMIN users who are also assigned receive the event TWICE.
+    const recentUpdates = new Map(); // ticketId -> timestamp
+    const UPDATE_DEDUP_MS = 3000;
+
     newSocket.on('ticket_updated', (data) => {
       if (data.changes?.status) {
+        // Skip toast if the current user just updated this ticket themselves
+        if (wasRecentlyUpdatedByMe(data.id)) return;
+        // Dedup: skip if same ticket updated within dedup window
+        const now = Date.now();
+        const last = recentUpdates.get(data.id);
+        if (last && now - last < UPDATE_DEDUP_MS) return;
+        recentUpdates.set(data.id, now);
+        if (recentUpdates.size > 100) {
+          for (const [k, v] of recentUpdates) {
+            if (now - v > UPDATE_DEDUP_MS) recentUpdates.delete(k);
+          }
+        }
+
         playTicketUpdated();
         sendBrowserNotification(
           'Ticket mis à jour',

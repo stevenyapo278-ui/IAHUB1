@@ -1,7 +1,7 @@
-import { memo, useCallback, useMemo, useRef } from 'react';
+import { memo, useCallback, useMemo, useRef, useState } from 'react';
 import { ResponsiveGridLayout, useContainerWidth, verticalCompactor } from 'react-grid-layout';
-import { motion } from 'framer-motion';
-import { GripVertical, X } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { GripVertical, X, Plus } from 'lucide-react';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import { getWidgetMeta } from './widgetCatalog';
@@ -86,9 +86,12 @@ export default memo(function DashboardGrid({
   isEditing = false,
   onLayoutChange,
   onRemoveWidget,
+  onWidgetDrop,
   renderWidget,
 }) {
   const { width, containerRef, mounted } = useContainerWidth({ measureBeforeMount: true });
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [dropPosition, setDropPosition] = useState(null);
 
   const widgetsRef = useRef(widgets);
   widgetsRef.current = widgets;
@@ -125,6 +128,57 @@ export default memo(function DashboardGrid({
     [isEditing],
   );
 
+  // ── Drop zone handlers ──────────────────────────────────────────────────────
+  const handleDragOver = useCallback((e) => {
+    if (!isEditing || !onWidgetDrop) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    setIsDragOver(true);
+
+    // Calculer la position grid du drop
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const colWidth = (width - MARGIN[0] * (COLS.lg - 1)) / COLS.lg;
+    const gridX = Math.max(0, Math.min(COLS.lg - 1, Math.floor(x / (colWidth + MARGIN[0]))));
+    const gridY = Math.max(0, Math.floor(y / (ROW_HEIGHT + MARGIN[1])));
+    setDropPosition({ x: gridX, y: gridY });
+  }, [isEditing, onWidgetDrop, width]);
+
+  const handleDragLeave = useCallback((e) => {
+    if (!isEditing) return;
+    // Ne fermer que si on sort vraiment du conteneur
+    if (!e.currentTarget.contains(e.relatedTarget)) {
+      setIsDragOver(false);
+      setDropPosition(null);
+    }
+  }, [isEditing]);
+
+  const handleDrop = useCallback((e) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    setDropPosition(null);
+    if (!isEditing || !onWidgetDrop) return;
+
+    const widgetType = e.dataTransfer.getData('application/x-widget-type')
+      || e.dataTransfer.getData('text/plain');
+    if (!widgetType) return;
+
+    // Calculer la position grid du drop
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const colWidth = (width - MARGIN[0] * (COLS.lg - 1)) / COLS.lg;
+    const meta = getWidgetMeta(widgetType);
+    const floor = sizeFloor(widgetType);
+    const w = Math.min(floor.maxW, Math.max(floor.minW, meta?.defaultW || 4));
+    const h = Math.min(floor.maxH, Math.max(floor.minH, meta?.defaultH || 3));
+    const gridX = Math.max(0, Math.min(COLS.lg - w, Math.floor(x / (colWidth + MARGIN[0]))));
+    const gridY = Math.max(0, Math.floor(y / (ROW_HEIGHT + MARGIN[1])));
+
+    onWidgetDrop(widgetType, { x: gridX, y: gridY, w, h });
+  }, [isEditing, onWidgetDrop, width]);
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -133,8 +187,29 @@ export default memo(function DashboardGrid({
     >
       <div
         ref={containerRef}
-        className={`dashboard-grid${isEditing ? ' dashboard-grid--editing' : ''}`}
+        className={`dashboard-grid${isEditing ? ' dashboard-grid--editing' : ''} relative`}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
       >
+        {/* Drop zone overlay */}
+        <AnimatePresence>
+          {isDragOver && isEditing && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="absolute inset-0 z-40 rounded-xl border-2 border-dashed border-primary bg-primary/5 pointer-events-none flex items-center justify-center"
+            >
+              <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/10 text-primary text-sm font-semibold backdrop-blur-sm">
+                <Plus className="w-4 h-4" />
+                Déposer le widget ici
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {mounted && width > 0 && widgets.length > 0 && (
           <ResponsiveGridLayout
             width={width}

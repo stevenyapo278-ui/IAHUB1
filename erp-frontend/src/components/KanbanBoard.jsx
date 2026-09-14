@@ -38,7 +38,7 @@ export default function KanbanBoard({ tickets, canAssign, onStatusChange }) {
   };
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 min-w-0">
       {KANBAN_STATUSES.map((status) => {
         const color = COLORS[status];
         const colTickets = byStatus[status];
@@ -56,21 +56,21 @@ export default function KanbanBoard({ tickets, canAssign, onStatusChange }) {
               e.preventDefault();
               handleDrop(status);
             }}
-            className={`rounded-2xl border flex flex-col max-h-[65vh] transition-colors ${
+            className={`min-w-0 rounded-2xl border flex flex-col max-h-[70vh] transition-colors ${
               isOver ? 'border-primary/60 bg-primary/5' : 'border-outline-variant/30 bg-surface-container-low/30'
             }`}
           >
-            <div className="flex items-center gap-2 px-4 py-3 border-b border-outline-variant/20">
-              <span className={`w-2.5 h-2.5 rounded-full ${color.dot}`} />
-              <span className={`text-[11px] font-black uppercase tracking-widest ${color.head}`}>
+            <div className="flex items-center gap-2 px-3 py-2.5 border-b border-outline-variant/20 shrink-0">
+              <span className={`w-2 h-2 rounded-full shrink-0 ${color.dot}`} />
+              <span className={`text-[10px] font-black uppercase tracking-widest ${color.head} truncate`}>
                 {STATUS_CONFIG[status]?.label || status}
               </span>
-              <span className={`ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full ${color.count}`}>
+              <span className={`ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${color.count}`}>
                 {colTickets.length}
               </span>
             </div>
 
-            <div className={`p-2.5 space-y-2 overflow-y-auto flex-1 ${isOver ? 'bg-primary/5' : ''}`}>
+            <div className={`p-2 space-y-1.5 overflow-y-auto flex-1 min-h-0 ${isOver ? 'bg-primary/5' : ''}`}>
               <AnimatePresence>
                 {colTickets.map((t) => (
                   <motion.div
@@ -83,40 +83,40 @@ export default function KanbanBoard({ tickets, canAssign, onStatusChange }) {
                     onDragStart={() => setDraggingId(t.id)}
                     onDragEnd={() => { setDraggingId(null); setDragOverCol(null); }}
                     onClick={() => navigate(`/tickets/${t.id}`)}
-                    className={`p-3 rounded-xl border bg-surface-container-lowest shadow-sm transition-all hover:shadow-md group cursor-pointer ${
+                    className={`p-2.5 rounded-xl border bg-surface-container-lowest shadow-sm transition-all hover:shadow-md cursor-pointer min-w-0 ${
                       draggingId === t.id ? 'opacity-50 scale-95' : ''
                     } ${canAssign ? 'hover:border-primary/40' : ''}`}
                   >
-                    <div className="flex items-start gap-2">
+                    <div className="flex items-start gap-1.5">
                       {canAssign && (
-                        <GripVertical className="w-3.5 h-3.5 text-outline/50 mt-0.5 shrink-0 group-hover:text-on-surface-variant transition-colors" />
+                        <GripVertical className="w-3 h-3 text-outline/50 mt-0.5 shrink-0" />
                       )}
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5 mb-1">
-                          <span className="font-mono text-[10px] font-bold text-primary">#{t.id}</span>
+                        <div className="flex items-center gap-1 mb-1 flex-wrap">
+                          <span className="font-mono text-[9px] font-bold text-primary">#{t.id}</span>
                           {t.priority && (
-                            <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${t.priority === 'P1' ? 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/25' : t.priority === 'P2' ? 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/25' : 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/25'}`}>
+                            <span className={`text-[8px] font-black px-1 py-0.5 rounded ${t.priority === 'P1' ? 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/25' : t.priority === 'P2' ? 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/25' : 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/25'}`}>
                               {t.priority}
                             </span>
                           )}
                           {t.category && (
-                            <span className="text-[9px] text-on-surface-variant truncate max-w-[100px] bg-surface-container-high px-1.5 py-0.5 rounded-full font-medium">
+                            <span className="text-[8px] text-on-surface-variant truncate max-w-[80px] bg-surface-container-high px-1 py-0.5 rounded-full font-medium">
                               {t.category}
                             </span>
                           )}
                         </div>
-                        <p className="text-xs font-bold text-on-surface line-clamp-2 leading-snug group-hover:text-primary transition-colors">
+                        <p className="text-[11px] font-bold text-on-surface line-clamp-2 leading-snug group-hover:text-primary transition-colors">
                           {t.title}
                         </p>
-                        <div className="mt-1.5 flex items-center gap-1.5">
+                        <div className="mt-1 flex items-center gap-1">
                           <SlaBadge ticket={t} compact />
                           {t.assignedTo ? (
-                            <span className="flex items-center gap-1 text-[9px] text-on-surface-variant truncate max-w-[90px]">
+                            <span className="flex items-center gap-0.5 text-[8px] text-on-surface-variant truncate max-w-[80px]">
                               <User className="w-2.5 h-2.5 shrink-0" />
                               <span className="truncate">{t.assignedTo.fullName}</span>
                             </span>
                           ) : (
-                            <span className="text-[9px] text-outline italic">Non assigné</span>
+                            <span className="text-[8px] text-outline italic">Non assigné</span>
                           )}
                         </div>
                       </div>
@@ -126,9 +126,9 @@ export default function KanbanBoard({ tickets, canAssign, onStatusChange }) {
               </AnimatePresence>
 
               {colTickets.length === 0 && (
-                <div className="flex flex-col items-center gap-2 py-6 text-on-surface-variant/60 border border-dashed border-outline-variant/40 rounded-xl">
-                  <ScrollText className="w-4 h-4" />
-                  <p className="text-[10px] font-semibold">Aucun ticket</p>
+                <div className="flex flex-col items-center gap-1.5 py-5 text-on-surface-variant/60 border border-dashed border-outline-variant/40 rounded-xl">
+                  <ScrollText className="w-3.5 h-3.5" />
+                  <p className="text-[9px] font-semibold">Aucun ticket</p>
                 </div>
               )}
             </div>

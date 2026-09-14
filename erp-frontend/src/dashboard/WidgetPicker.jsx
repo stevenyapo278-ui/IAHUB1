@@ -1,7 +1,7 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  X, Search, Check, Plus,
+  X, Search, Check, Plus, GripVertical,
   BarChart3, TrendingUp, Activity, Sparkles, Users, Clock,
   PieChart, Layers, Gauge, Radar, ListChecks, Grid3X3, Zap,
   ShieldCheck, Ticket, AlertTriangle, CheckCircle2,
@@ -30,7 +30,7 @@ const ICON_MAP = {
 
 const CATEGORY_ORDER = ['KPIs', 'Graphiques', 'Tableaux', 'Données'];
 
-export default function WidgetPicker({ open, onClose, onSelect, existingWidgets = [] }) {
+export default function WidgetPicker({ open, onClose, onSelect, isDragging = false, existingWidgets = [] }) {
   const [search, setSearch] = useState('');
 
   const grouped = useMemo(() => {
@@ -61,16 +61,17 @@ export default function WidgetPicker({ open, onClose, onSelect, existingWidgets 
           {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
+            animate={{ opacity: isDragging ? 0 : 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[90] bg-black/30 backdrop-blur-sm"
+            style={isDragging ? { pointerEvents: 'none' } : undefined}
             onClick={onClose}
           />
 
           {/* Panel */}
           <motion.div
             initial={{ x: '100%' }}
-            animate={{ x: 0 }}
+            animate={{ x: isDragging ? '110%' : 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 30, stiffness: 300 }}
             className="fixed right-0 top-0 bottom-0 z-[91] w-[420px] max-w-[90vw] flex flex-col bg-surface border-l border-border shadow-2xl"
@@ -140,11 +141,30 @@ export default function WidgetPicker({ open, onClose, onSelect, existingWidgets 
                                 onClick={() => {
                                   if (!added) onSelect(widget.type);
                                 }}
+                                draggable={!added}
+                                onDragStart={(e) => {
+                                  if (added) return;
+                                  e.dataTransfer.setData('application/x-widget-type', widget.type);
+                                  e.dataTransfer.setData('text/plain', widget.type);
+                                  e.dataTransfer.effectAllowed = 'copy';
+                                  const ghost = e.currentTarget.cloneNode(true);
+                                  ghost.style.width = '200px';
+                                  ghost.style.opacity = '0.85';
+                                  ghost.style.position = 'fixed';
+                                  ghost.style.top = '-9999px';
+                                  ghost.style.pointerEvents = 'none';
+                                  ghost.style.borderRadius = '12px';
+                                  ghost.style.boxShadow = '0 8px 30px rgba(0,0,0,0.25)';
+                                  ghost.style.border = '2px solid var(--color-primary, #6366f1)';
+                                  document.body.appendChild(ghost);
+                                  e.dataTransfer.setDragImage(ghost, 100, 25);
+                                  requestAnimationFrame(() => ghost.remove());
+                                }}
                                 disabled={added}
-                                className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-all text-left ${
+                                className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-all text-left group ${
                                   added
                                     ? 'bg-surface-container/50 border-border/50 opacity-60 cursor-not-allowed'
-                                    : 'bg-surface-container-low border-border hover:border-primary/40 hover:bg-surface-container cursor-pointer'
+                                    : 'bg-surface-container-low border-border hover:border-primary/40 hover:bg-surface-container cursor-grab active:cursor-grabbing'
                                 }`}
                               >
                                 <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
@@ -169,7 +189,10 @@ export default function WidgetPicker({ open, onClose, onSelect, existingWidgets 
                                   </span>
                                 </div>
                                 {!added && (
-                                  <Plus className="w-4 h-4 text-muted-foreground shrink-0" />
+                                  <span className="flex items-center gap-1 text-muted-foreground shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <GripVertical className="w-3.5 h-3.5" />
+                                    <Plus className="w-3.5 h-3.5" />
+                                  </span>
                                 )}
                               </motion.button>
                             );

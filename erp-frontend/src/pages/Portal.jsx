@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import api from '../api/client';
@@ -38,6 +39,7 @@ const SORT_OPTIONS = [
 
 export default function Portal() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const { settings } = useSystemSettings();
   const canCreate = settings?.portalAllowNewRequest !== false;
   const isRequester = user?.role === 'REQUESTER';
@@ -55,6 +57,7 @@ export default function Portal() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [comment, setComment] = useState('');
   const [sendingComment, setSendingComment] = useState(false);
+  const [pastedImages, setPastedImages] = useState([]);
 
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -136,17 +139,51 @@ export default function Portal() {
   function closeModal() {
     setModalTicketId(null);
     setDetail(null);
+    setComment('');
+    setPastedImages([]);
+  }
+
+  function handlePaste(e) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type?.startsWith('image/')) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (!file) continue;
+        const id = `paste-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const dataUrl = URL.createObjectURL(file);
+        setPastedImages((prev) => [...prev, { id, file, dataUrl }]);
+        toast.success('Image collée — elle sera envoyée avec le commentaire');
+      }
+    }
+  }
+
+  function removePastedImage(id) {
+    setPastedImages((prev) => {
+      const img = prev.find((i) => i.id === id);
+      if (img) URL.revokeObjectURL(img.dataUrl);
+      return prev.filter((i) => i.id !== id);
+    });
   }
 
   async function submitComment(ticketId) {
-    if (!comment.trim()) return;
+    if (!comment.trim() && pastedImages.length === 0) return;
     setSendingComment(true);
     try {
       const fd = new FormData();
-      fd.append('content', comment.trim());
+      let content = comment.trim();
+      if (pastedImages.length > 0) {
+        pastedImages.forEach((img, idx) => {
+          fd.append('images', img.file);
+          content += `\n\n<!--IMAGE_${idx}-->`;
+        });
+      }
+      fd.append('content', content);
       await api.post(`/tickets/${ticketId}/followups`, fd);
       toast.success('Commentaire ajouté');
       setComment('');
+      setPastedImages([]);
       const { data } = await api.get(`/tickets/${ticketId}`);
       setDetail(data);
     } catch (err) {
@@ -496,6 +533,9 @@ export default function Portal() {
                           <SlaBadge ticket={detail} />
                         </div>
                       </div>
+                      <button onClick={() => { closeModal(); navigate(`/tickets/${detail.id}`); }} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-primary bg-primary/10 hover:bg-primary/20 transition-colors cursor-pointer shrink-0">
+                        <Eye className="w-3 h-3" /> Voir le ticket
+                      </button>
                       <button onClick={closeModal} className="p-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low shrink-0 cursor-pointer">
                         <X className="w-4 h-4" />
                       </button>
@@ -623,18 +663,34 @@ export default function Portal() {
 
                   {/* Footer modal : commentaire */}
                   <div className="px-6 py-4 border-t border-outline-variant/20 shrink-0">
+                    {pastedImages.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mb-2">
+                        {pastedImages.map((img) => (
+                          <div key={img.id} className="relative group">
+                            <img src={img.dataUrl} alt="image collée" className="h-16 w-16 object-cover rounded-xl border border-outline-variant/40" />
+                            <button
+                              onClick={() => removePastedImage(img.id)}
+                              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-error text-on-error flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     <div className="flex gap-2">
-                      <input
-                        type="text"
+                      <textarea
+                        rows={1}
                         value={comment}
                         onChange={(e) => setComment(e.target.value)}
+                        onPaste={handlePaste}
                         onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitComment(detail.id); } }}
-                        placeholder="Ajouter un commentaire..."
-                        className="flex-1 bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                        placeholder="Ajouter un commentaire... (Ctrl+V pour coller une image)"
+                        className="flex-1 bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-none"
                       />
                       <button
                         onClick={() => submitComment(detail.id)}
-                        disabled={sendingComment || !comment.trim()}
+                        disabled={sendingComment || (!comment.trim() && pastedImages.length === 0)}
                         className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-on-primary font-bold text-sm hover:opacity-90 transition-all disabled:opacity-50 cursor-pointer shrink-0"
                       >
                         {sendingComment ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}

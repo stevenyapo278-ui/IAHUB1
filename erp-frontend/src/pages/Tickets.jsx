@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
+import { markTicketUpdated, markCreationStarted } from '../utils/recentlyUpdatedTickets';
 import {
   Ticket,
   Radio,
@@ -42,6 +43,7 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 import api from '../api/client';
+import ExportModal from '../components/ExportModal';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { hasPermission, canEditTickets } from '../utils/permissions';
@@ -871,6 +873,7 @@ export default function Tickets() {
 
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('tickets_view_mode') || 'table');
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
   const [showTrash, setShowTrash] = useState(false);
   const [trashItems, setTrashItems] = useState([]);
   const [trashLoading, setTrashLoading] = useState(false);
@@ -1217,6 +1220,7 @@ export default function Tickets() {
     if (bulkChanges.priority) payload.priority = bulkChanges.priority;
     if (bulkChanges.assignedToId) payload.assignedToId = Number(bulkChanges.assignedToId);
     if (Object.keys(payload).length === 1) return toast.error('Choisissez une modification à appliquer');
+    selectedIds.forEach((id) => markTicketUpdated(id));
     setBulkUpdating(true);
     try {
       const { data } = await api.post('/tickets/bulk-update', payload);
@@ -1232,14 +1236,17 @@ export default function Tickets() {
     }
   }
 
-  async function exportAll(fmt = 'csv') {
+  async function exportAll({ format: fmt = 'csv', scope = 'filtered', columns = [] } = {}) {
     const params = {};
-    for (const key of ['status', 'priority', 'category', 'teamId', 'assignedToId', 'mine', 'approvalStatus', 'source', 'origin', 'aiProcessed', 'closeSuggested']) {
-      const v = filters[key];
-      if (v !== undefined && v !== '' && v !== null) params[key] = v;
+    if (scope === 'filtered') {
+      for (const key of ['status', 'priority', 'category', 'teamId', 'assignedToId', 'mine', 'approvalStatus', 'source', 'origin', 'aiProcessed', 'closeSuggested', 'dateFrom', 'dateTo']) {
+        const v = filters[key];
+        if (v !== undefined && v !== '' && v !== null) params[key] = v;
+      }
+      if (debouncedSearch) params.search = debouncedSearch;
     }
-    if (debouncedSearch) params.search = debouncedSearch;
     params.sortBy = sortBy; params.sortOrder = sortOrder; params.format = fmt;
+    if (columns.length > 0) params.columns = columns.join(',');
     try {
       const res = await api.get('/tickets/export', { params, responseType: 'blob' });
       const url = window.URL.createObjectURL(res.data);
@@ -1256,6 +1263,7 @@ export default function Tickets() {
 
   const handleQuickStatusChange = useCallback(async (ticketId, newStatus, e) => {
     if (e) e.stopPropagation();
+    markTicketUpdated(ticketId);
     try {
       await api.patch(`/tickets/${ticketId}`, { status: newStatus });
       toast.success(`Statut : ${STATUS_LABELS[newStatus] || newStatus}`);
@@ -1416,6 +1424,7 @@ export default function Tickets() {
 
       if (Object.keys(customValues).length > 0) payload.append('customFields', JSON.stringify(customValues));
       if (attachment) payload.append('attachment', attachment);
+      markCreationStarted();
       await api.post('/tickets', payload, { headers: { 'Content-Type': 'multipart/form-data' } });
       toast.success('Ticket créé');
       pastedImages.forEach((img) => URL.revokeObjectURL(img.dataUrl));
@@ -1587,7 +1596,7 @@ export default function Tickets() {
         field: 'createdAt',
         headerName: 'OUVERT',
         width: 120,
-        valueFormatter: (p) => formatDateShort(p.value),
+        valueFormatter: (p) => formatDateTimeShort(p.value),
       });
     }
 
@@ -1596,7 +1605,7 @@ export default function Tickets() {
         field: 'updatedAt',
         headerName: 'MODIFIÉ',
         width: 120,
-        valueFormatter: (p) => formatDateShort(p.value),
+        valueFormatter: (p) => formatDateTimeShort(p.value),
       });
     }
 
@@ -1605,7 +1614,7 @@ export default function Tickets() {
         field: 'solvedAt',
         headerName: 'RÉSOLU',
         width: 120,
-        valueFormatter: (p) => formatDateShort(p.value),
+        valueFormatter: (p) => formatDateTimeShort(p.value),
       });
     }
 
@@ -1614,7 +1623,7 @@ export default function Tickets() {
         field: 'closedAt',
         headerName: 'Fermé',
         width: 120,
-        valueFormatter: (p) => formatDateShort(p.value),
+        valueFormatter: (p) => formatDateTimeShort(p.value),
       });
     }
 
@@ -1682,24 +1691,13 @@ export default function Tickets() {
         <div className="flex-1" />
 
         <div className="flex items-center gap-1.5 shrink-0">
-          <div className="relative group">
-            <button className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-surface-muted transition-all" title="Exporter">
-              <FileSpreadsheet className="w-4 h-4" />
-            </button>
-            <div className="absolute right-0 top-full pt-1 z-30 hidden group-hover:block">
-              <div className="rounded-xl border border-border/30 bg-surface shadow-xl p-1.5 min-w-[180px]">
-                <button onClick={() => exportAll('xlsx')} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-foreground hover:bg-surface-muted transition-colors cursor-pointer text-left">
-                  <FileSpreadsheet className="w-3.5 h-3.5 text-green-600" /> Exporter tout (XLSX)
-                </button>
-                <button onClick={() => exportAll('csv')} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-foreground hover:bg-surface-muted transition-colors cursor-pointer text-left">
-                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" /> Exporter tout (CSV)
-                </button>
-                <button onClick={() => exportAll('json')} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-foreground hover:bg-surface-muted transition-colors cursor-pointer text-left">
-                  <FileCode2 className="w-3.5 h-3.5 text-blue-500" /> Exporter tout (JSON)
-                </button>
-              </div>
-            </div>
-          </div>
+          <button
+            onClick={() => setExportModalOpen(true)}
+            className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-surface-muted transition-all"
+            title="Exporter"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+          </button>
 
           <button onClick={() => loadTickets(true)} disabled={refreshing}
             className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-surface-muted transition-all disabled:opacity-40" title="Rafraîchir">
@@ -1870,10 +1868,12 @@ export default function Tickets() {
             )}
           </div>
         ) : viewMode === 'kanban' ? (
-          <KanbanBoard
-            tickets={tickets} canAssign={canAssign}
-            onStatusChange={(ticket, newStatus) => handleQuickStatusChange(ticket.id, newStatus)}
-          />
+          <div className="flex-1 min-h-0 overflow-auto p-4 sm:p-6">
+            <KanbanBoard
+              tickets={tickets} canAssign={canAssign}
+              onStatusChange={(ticket, newStatus) => handleQuickStatusChange(ticket.id, newStatus)}
+            />
+          </div>
         ) : viewMode === 'grid' ? (
           /* ── GRID VIEW ── */
           <div className="p-4 sm:p-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -2001,6 +2001,7 @@ export default function Tickets() {
       )}
 
       {/* ── PAGINATION ───────────────────────────────────────────────────────── */}
+      {viewMode !== 'kanban' && (
       <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-4 sm:px-6 py-3 border-t border-border/20 bg-surface shrink-0">
         <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
           <span className="font-medium tabular-nums">
@@ -2023,6 +2024,7 @@ export default function Tickets() {
 
         <PaginationButtons page={page} totalPages={Math.max(totalPages, 1)} onPageChange={setPage} />
       </div>
+      )}
 
       {/* ── DRAWER DE FILTRES ────────────────────────────────────────────────── */}
       <TicketFilterDrawer
@@ -2295,6 +2297,16 @@ export default function Tickets() {
         </AnimatePresence>,
         document.body
       )}
+
+      {/* ── EXPORT MODAL ────────────────────────────────────────────────────── */}
+      <ExportModal
+        open={exportModalOpen}
+        onClose={() => setExportModalOpen(false)}
+        onExport={exportAll}
+        filters={filters}
+        searchQuery={debouncedSearch}
+        totalFiltered={totalCount}
+      />
 
       {/* ── CONFIRM DELETE ───────────────────────────────────────────────────── */}
       {confirmDelete && (

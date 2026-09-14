@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
+import { markTicketUpdated } from '../utils/recentlyUpdatedTickets';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -515,6 +516,7 @@ export default function TicketDetail() {
   async function updateField(field, value) {
     try {
       setSavingField(field);
+      markTicketUpdated(Number(id));
       await api.patch(`/tickets/${id}`, { [field]: value });
       toast.success('Mise à jour enregistrée');
       load();
@@ -1345,6 +1347,7 @@ export default function TicketDetail() {
                     <button
                       onClick={async () => {
                         try {
+                          markTicketUpdated(Number(id));
                           await api.patch(`/tickets/${id}`, { status: 'CLOSED' });
                           toast.success('Ticket fermé avec succès');
                           load();
@@ -2157,8 +2160,8 @@ export default function TicketDetail() {
             </div>
           )}
 
-          {/* Approval Workflow Card */}
-          {ticket.approvalStatus !== 'NOT_REQUIRED' && (
+          {/* Approval Workflow Card — only for AI-processed tickets or active approvals */}
+          {(ticket.aiProcessed || ticket.approvalStatus === 'PENDING' || ticket.approvalStatus === 'REJECTED') && (
             <div className="bento-card p-5 space-y-4">
               <h3 className="text-xs font-semibold flex items-center gap-2 pb-3 border-b" style={{ color: 'var(--color-foreground)', borderColor: 'var(--color-border)' }}>
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />

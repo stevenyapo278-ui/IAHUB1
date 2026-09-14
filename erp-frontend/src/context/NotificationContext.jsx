@@ -71,7 +71,34 @@ export function NotificationProvider({ children }) {
   useEffect(() => {
     if (!socket) return;
 
+    // Dedup: track recently added ticket IDs to prevent duplicate notifs
+    // (e.g. ticket_created + ticket_assigned_to_you firing within seconds)
+    const recentTicketIds = new Map(); // ticketId -> timestamp
+    const DEDUP_WINDOW_MS = 3000;
+
+    function isDuplicate(ticketId) {
+      if (!ticketId) return false;
+      const now = Date.now();
+      const last = recentTicketIds.get(ticketId);
+      if (last && now - last < DEDUP_WINDOW_MS) return true;
+      recentTicketIds.set(ticketId, now);
+      // Cleanup old entries
+      if (recentTicketIds.size > 50) {
+        for (const [k, v] of recentTicketIds) {
+          if (now - v > DEDUP_WINDOW_MS) recentTicketIds.delete(k);
+        }
+      }
+      return false;
+    }
+
+    function addNotif(notif) {
+      setNotifications((prev) => [notif, ...prev]);
+      setUnreadCount((prev) => prev + 1);
+    }
+
     function handleTicketCreated(data) {
+      if (isDuplicate(data.id)) return;
+
       const notif = {
         id: Date.now() + Math.random(),
         type: 'ticket_created',
@@ -88,11 +115,12 @@ export function NotificationProvider({ children }) {
         notif.message = `#${data.id} — ${data.title}`;
       }
 
-      setNotifications((prev) => [notif, ...prev]);
-      setUnreadCount((prev) => prev + 1);
+      addNotif(notif);
     }
 
     function handleTicketAssignedToYou(data) {
+      if (isDuplicate(data.ticketId)) return;
+
       const methodLabel = data.method === 'ai_skills' ? 'Assigné par compétence IA'
         : data.method === 'by_category' ? 'Assigné par catégorie'
         : 'Assigné manuellement';
@@ -108,12 +136,12 @@ export function NotificationProvider({ children }) {
         metadata: { method: data.method, methodLabel },
       };
 
-      setNotifications((prev) => [notif, ...prev]);
-      setUnreadCount((prev) => prev + 1);
+      addNotif(notif);
     }
 
     function handleTicketUpdated(data) {
       if (!data.changes?.status) return;
+      if (isDuplicate(data.id)) return;
 
       const notif = {
         id: Date.now() + Math.random(),
@@ -126,11 +154,12 @@ export function NotificationProvider({ children }) {
         metadata: { changes: data.changes },
       };
 
-      setNotifications((prev) => [notif, ...prev]);
-      setUnreadCount((prev) => prev + 1);
+      addNotif(notif);
     }
 
     function handleSlaBreached(data) {
+      if (isDuplicate(data.id)) return;
+
       const notif = {
         id: Date.now() + Math.random(),
         type: 'sla_breached',
@@ -141,11 +170,12 @@ export function NotificationProvider({ children }) {
         createdAt: new Date().toISOString(),
         metadata: { priority: data.priority, status: data.status },
       };
-      setNotifications((prev) => [notif, ...prev]);
-      setUnreadCount((prev) => prev + 1);
+      addNotif(notif);
     }
 
     function handleTicketEscalated(data) {
+      if (isDuplicate(data.id)) return;
+
       const notif = {
         id: Date.now() + Math.random(),
         type: 'ticket_escalated',
@@ -156,8 +186,7 @@ export function NotificationProvider({ children }) {
         createdAt: new Date().toISOString(),
         metadata: { priority: data.priority, escalationLevel: data.escalationLevel },
       };
-      setNotifications((prev) => [notif, ...prev]);
-      setUnreadCount((prev) => prev + 1);
+      addNotif(notif);
     }
 
     socket.on('ticket_created', handleTicketCreated);
@@ -215,12 +244,25 @@ export function NotificationProvider({ children }) {
 
   // ── Supprimer / fermer une notification ─────────────────────────
   const dismissNotification = useCallback(async (id) => {
+    const notif = notifications.find((n) => n.id === id);
+    const wasUnread = notif && !notif.isRead;
     setNotifications((prev) => prev.filter((n) => n.id !== id));
-    setUnreadCount((prev) => Math.max(0, prev - 1));
+    if (wasUnread) setUnreadCount((prev) => Math.max(0, prev - 1));
     try {
       await api.delete(`/notifications/${id}`).catch(() => api.patch(`/notifications/${id}/read`));
     } catch (err) {
       console.error('[NotificationContext] Erreur suppression notif:', err.message);
+    }
+  }, [notifications]);
+
+  // ── Supprimer toutes les notifications ─────────────────────────
+  const clearAll = useCallback(async () => {
+    setNotifications([]);
+    setUnreadCount(0);
+    try {
+      await api.delete('/notifications/all');
+    } catch (err) {
+      console.error('[NotificationContext] Erreur suppression toutes:', err.message);
     }
   }, []);
 
@@ -235,6 +277,7 @@ export function NotificationProvider({ children }) {
         markAsRead,
         markAllAsRead,
         dismissNotification,
+        clearAll,
         refresh: () => loadNotifications(),
       }}
     >

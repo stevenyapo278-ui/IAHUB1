@@ -26,6 +26,32 @@ const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); // 20 Mo max
 const router = express.Router();
 router.use(authenticate);
 
+// ── Matrice de transitions de statut autorisées ─────────────────────────
+// Seules ces transitions sont permises côté API. Les changements système
+// (auto-close, email pipeline, etc.) utilisent Prisma directement et
+// ne passent pas par ces endpoints.
+const VALID_TRANSITIONS = {
+  NEW:              ['OPEN', 'WAITING_FOR_USER', 'CLOSED', 'SOLVED'],
+  OPEN:             ['PLANNED', 'PENDING', 'WAITING_FOR_USER', 'SOLVED', 'CLOSED'],
+  PLANNED:          ['OPEN', 'PENDING', 'WAITING_FOR_USER', 'SOLVED', 'CLOSED'],
+  PENDING:          ['OPEN', 'PLANNED', 'WAITING_FOR_USER', 'SOLVED', 'CLOSED'],
+  WAITING_FOR_USER: ['OPEN', 'PENDING', 'SOLVED', 'CLOSED'],
+  SOLVED:           ['OPEN', 'CLOSED'],
+  CLOSED:           ['OPEN'],
+};
+
+function canTransition(from, to) {
+  if (from === to) return true;
+  const allowed = VALID_TRANSITIONS[from];
+  return allowed ? allowed.includes(to) : false;
+}
+
+const STATUS_LABELS = {
+  NEW: 'Nouveau', OPEN: 'Ouvert', PLANNED: 'Planifié',
+  PENDING: 'En attente', WAITING_FOR_USER: 'En attente utilisateur',
+  SOLVED: 'Résolu', CLOSED: 'Fermé',
+};
+
 // Un compte REQUESTER (créé automatiquement via AD/LDAP ou manuellement) ne voit que ses propres
 // tickets : liste, détail, pièces jointes, corrections et export sont forcés sur ses tickets —
 // aucun contenu des autres demandeurs ne doit fuiter, même si le client manipule les filtres.
@@ -252,7 +278,8 @@ function buildTicketWhereClause(user, queryParams = {}) {
     if (dateFrom) dateCond.gte = new Date(dateFrom);
     if (dateTo) {
       const end = new Date(dateTo);
-      end.setHours(23, 59, 59, 999);
+      // Only append end-of-day if no time was provided (plain date like "2026-09-13")
+      if (!dateTo.includes('T')) end.setHours(23, 59, 59, 999);
       dateCond.lte = end;
     }
     andConditions.push({ createdAt: dateCond });
@@ -517,6 +544,12 @@ router.post(
           select: { status: true, priority: true },
         });
         if (!before) { failures.push({ id, error: 'Ticket introuvable' }); continue; }
+
+        // Valider la transition de statut
+        if (status && !canTransition(before.status, status)) {
+          failures.push({ id, error: `Transition invalide : ${STATUS_LABELS[before.status] || before.status} → ${STATUS_LABELS[status] || status}` });
+          continue;
+        }
 
         const ticket = await prisma.ticket.update({
           where: { id },
@@ -1100,6 +1133,17 @@ router.patch('/:id', allowTechnicianStatusOnly, requireTicketAssignOrTechnicianS
   for (const key of Object.keys(req.body)) {
     if (!allowed.includes(key)) {
       return res.status(400).json({ error: `Champ non autorisé : ${key}` });
+    }
+  }
+
+  // ── Validation de la transition de statut ──────────────────────────────
+  if (status !== undefined) {
+    const current = await prisma.ticket.findUnique({ where: { id }, select: { status: true } });
+    if (!current) return res.status(404).json({ error: 'Ticket introuvable' });
+    if (!canTransition(current.status, status)) {
+      return res.status(400).json({
+        error: `Transition invalide : ${STATUS_LABELS[current.status] || current.status} → ${STATUS_LABELS[status] || status}. Transitions autorisées : ${(VALID_TRANSITIONS[current.status] || []).map((s) => STATUS_LABELS[s] || s).join(', ') || 'aucune'}`,
+      });
     }
   }
 

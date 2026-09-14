@@ -93,6 +93,7 @@ export default function DashboardPage() {
   const [activeDashboardId, setActiveDashboardId] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
+  const [isDraggingFromPicker, setIsDraggingFromPicker] = useState(false);
   const [activePeriod, setActivePeriod] = useState('30d');
   const [reportLoading, setReportLoading] = useState(false);
   const [resetting, setResetting] = useState(false);
@@ -219,9 +220,16 @@ export default function DashboardPage() {
     };
   }, []);
 
+  // Réinitialiser isDragging quand le drag native se termine (drop ou cancel)
+  useEffect(() => {
+    const handleDragEnd = () => setIsDraggingFromPicker(false);
+    document.addEventListener('dragend', handleDragEnd);
+    return () => document.removeEventListener('dragend', handleDragEnd);
+  }, []);
+
   // Add widget
   const handleAddWidget = useCallback(
-    async (widgetType) => {
+    async (widgetType, position) => {
       if (!activeDashboardId) return;
 
       try {
@@ -235,7 +243,7 @@ export default function DashboardPage() {
         const liveLayout = currentLayout.filter((l) =>
           currentWidgets.some((w) => w.id === l.i),
         );
-        const pos = computeDefaultPosition(widgetType, liveLayout);
+        const pos = position || computeDefaultPosition(widgetType, liveLayout);
         const layoutEntry = { i: newWidget.id, ...pos };
 
         await api.patch(`/dashboards/${activeDashboardId}`, {
@@ -249,6 +257,15 @@ export default function DashboardPage() {
       }
     },
     [activeDashboardId, currentLayout, currentWidgets, mutateDashboards],
+  );
+
+  // Drop handler: called when a widget is dropped from the picker onto the grid
+  const handleWidgetDrop = useCallback(
+    (widgetType, position) => {
+      setIsDraggingFromPicker(false);
+      handleAddWidget(widgetType, position);
+    },
+    [handleAddWidget],
   );
 
   // Remove widget
@@ -517,6 +534,7 @@ export default function DashboardPage() {
           isEditing={isEditing}
           onLayoutChange={handleLayoutChange}
           onRemoveWidget={handleRemoveWidget}
+          onWidgetDrop={isEditing ? handleWidgetDrop : null}
           renderWidget={(widget) => (
             <WidgetRenderer
               widget={widget}
@@ -571,8 +589,9 @@ export default function DashboardPage() {
       {/* Widget Picker */}
       <WidgetPicker
         open={showPicker}
-        onClose={() => setShowPicker(false)}
+        onClose={() => { setShowPicker(false); setIsDraggingFromPicker(false); }}
         onSelect={handleAddWidget}
+        isDragging={isDraggingFromPicker}
         existingWidgets={currentWidgets.map((w) => w.widgetType)}
       />
 
