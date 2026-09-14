@@ -96,7 +96,22 @@ const userSelect = {
   createdAt: true,
 };
 
-router.get('/', authorizeAdmin, async (req, res) => {
+// Résolution par liste d'IDs : accessible à tout utilisateur authentifié (utilisé par
+// RemoteUserMultiSelect pour afficher les noms des demandeurs/assignés/observateurs).
+// Doit être AVANT la route GET / avec authorizeAdmin.
+router.get('/', (req, res, next) => {
+  if (req.query.ids) {
+    const ids = String(req.query.ids).split(',').map((v) => Number(v)).filter((v) => Number.isInteger(v) && v > 0);
+    if (ids.length > 0) {
+      return prisma.user.findMany({
+        where: { id: { in: ids } },
+        select: userSelect,
+        orderBy: { fullName: 'asc' },
+      }).then((users) => res.json(users)).catch(() => res.json([]));
+    }
+  }
+  next();
+}, authorizeAdmin, async (req, res) => {
   const { search, limit, page, role, teamId, isActive, all, onlyStaff, excludeRole } = req.query;
   const where = {};
   if (search && search.trim()) {
@@ -113,19 +128,6 @@ router.get('/', authorizeAdmin, async (req, res) => {
   if (teamId) where.teamId = teamId === 'null' ? null : Number(teamId);
   if (isActive === 'true') where.isActive = true;
   else if (isActive === 'false') where.isActive = false;
-  // Filtre par liste d'IDs explicite (ex: résoudre les libellés des utilisateurs déjà sélectionnés
-  // dans un composant distant sans recharger toute la liste) — prioritaire sur la pagination.
-  if (req.query.ids) {
-    const ids = String(req.query.ids).split(',').map((v) => Number(v)).filter((v) => Number.isInteger(v) && v > 0);
-    if (ids.length > 0) {
-      const users = await prisma.user.findMany({
-        where: { id: { in: ids } },
-        select: userSelect,
-        orderBy: { fullName: 'asc' },
-      });
-      return res.json(users);
-    }
-  }
 
   if (!page || all === 'true') {
     const users = await prisma.user.findMany({
