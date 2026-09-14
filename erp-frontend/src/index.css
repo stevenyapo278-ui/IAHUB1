@@ -2711,3 +2711,17 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   height: 7px;
   border-bottom: none;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════════ */
+/* FLIP COUNTER — animation de volets mécaniques                                 */
+/* ═══════════════════════════════════════════════════════════════════════════════ */
+
+@keyframes flipTop {
+  0%   { transform: rotateX(0deg); }
+  100% { transform: rotateX(-90deg); }
+}
+
+@keyframes flipBottom {
+  0%   { transform: rotateX(90deg); }
+  100% { transform: rotateX(0deg); }
+}

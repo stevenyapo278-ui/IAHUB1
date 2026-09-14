@@ -755,6 +755,108 @@ function FormField({ label, children, error }) {
 
 const FIELD_CLS = "w-full px-3 py-2 text-sm bg-surface border border-outline-variant/30 rounded-xl text-on-surface placeholder-on-surface-variant/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all";
 
+/* ── Flip Counter (style horloge mécanique) ──────────────────────────────── */
+function FlipDigit({ digit }) {
+  const [current, setCurrent] = useState(digit);
+  const [previous, setPrevious] = useState(digit);
+  const [flipping, setFlipping] = useState(false);
+
+  useEffect(() => {
+    if (digit !== current) {
+      setPrevious(current);
+      setFlipping(true);
+      const t = setTimeout(() => {
+        setCurrent(digit);
+        setFlipping(false);
+      }, 300);
+      return () => clearTimeout(t);
+    }
+  }, [digit, current]);
+
+  const card = 'absolute inset-0 flex items-center justify-center text-sm font-bold tabular-nums';
+
+  return (
+    <div className="relative w-[22px] h-[28px] rounded-md overflow-hidden"
+      style={{ perspective: '200px' }}>
+      {/* Fond */}
+      <div className="absolute inset-0 rounded-md"
+        style={{ backgroundColor: 'var(--color-surface-container, #1c1b1f)', border: '1px solid var(--color-outline-variant, #333)' }} />
+
+      {/* Ligne de séparation centrale */}
+      <div className="absolute left-0 right-0 top-1/2 -translate-y-px h-px z-20"
+        style={{ backgroundColor: 'var(--color-outline-variant, #333)', opacity: 0.5 }} />
+
+      {/* Moitié haute — static (previous) */}
+      <div className="absolute inset-x-0 top-0 h-1/2 overflow-hidden rounded-t-md z-10"
+        style={{ color: 'var(--color-on-surface, #fff)' }}>
+        <div className={card}>{previous}</div>
+      </div>
+
+      {/* Moitié basse — static (previous) */}
+      <div className="absolute inset-x-0 bottom-0 h-1/2 overflow-hidden rounded-b-md z-10"
+        style={{ color: 'var(--color-on-surface, #fff)' }}>
+        <div className={card} style={{ transform: 'translateY(-100%)' }}>{previous}</div>
+      </div>
+
+      {/* Flip animation — top half falls */}
+      {flipping && (
+        <div className="absolute inset-x-0 top-0 h-1/2 overflow-hidden rounded-t-md z-30"
+          style={{
+            transformOrigin: 'bottom center',
+            animation: 'flipTop 0.3s ease-in forwards',
+            backfaceVisibility: 'hidden',
+          }}>
+          <div className={card} style={{ color: 'var(--color-on-surface, #fff)' }}>{previous}</div>
+        </div>
+      )}
+
+      {/* Flip animation — bottom half rises with new value */}
+      {flipping && (
+        <div className="absolute inset-x-0 bottom-0 h-1/2 overflow-hidden rounded-b-md z-30"
+          style={{
+            transformOrigin: 'top center',
+            transform: 'rotateX(90deg)',
+            animation: 'flipBottom 0.3s ease-out 0.15s forwards',
+            backfaceVisibility: 'hidden',
+          }}>
+          <div className={card} style={{ transform: 'translateY(-100%)', color: 'var(--color-on-surface, #fff)' }}>{current}</div>
+        </div>
+      )}
+
+      {/* New value static (shown after flip completes) */}
+      {!flipping && (
+        <>
+          <div className="absolute inset-x-0 top-0 h-1/2 overflow-hidden rounded-t-md z-10"
+            style={{ color: 'var(--color-on-surface, #fff)' }}>
+            <div className={card}>{current}</div>
+          </div>
+          <div className="absolute inset-x-0 bottom-0 h-1/2 overflow-hidden rounded-b-md z-10"
+            style={{ color: 'var(--color-on-surface, #fff)' }}>
+            <div className={card} style={{ transform: 'translateY(-100%)' }}>{current}</div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function FlipCounter({ value }) {
+  const formatted = value.toLocaleString('fr-FR');
+  const chars = formatted.split('');
+
+  return (
+    <div className="flex items-center gap-0.5">
+      {chars.map((ch, i) =>
+        ch === '.' || ch === ',' ? (
+          <span key={`sep-${i}`} className="text-sm font-bold text-on-surface tabular-nums mx-px">.</span>
+        ) : (
+          <FlipDigit key={`d-${i}`} digit={ch} />
+        )
+      )}
+    </div>
+  );
+}
+
 export default function Tickets() {
   const { user } = useAuth();
   const { autonomousMode } = useSystemSettings();
@@ -2017,9 +2119,12 @@ export default function Tickets() {
           </select>
         </div>
 
-        {/* Nombre de résultats au centre */}
-        <div className="text-sm font-bold text-on-surface tabular-nums">
-          {totalCount > 0 ? `${totalCount.toLocaleString('fr-FR')} ticket${totalCount > 1 ? 's' : ''}` : '0 ticket'}
+        {/* Nombre de résultats au centre — Flip Counter */}
+        <div className="flex items-center gap-1.5">
+          <FlipCounter value={totalCount} />
+          <span className="text-sm font-bold text-on-surface tabular-nums">
+            ticket{totalCount > 1 ? 's' : ''}
+          </span>
         </div>
 
         <PaginationButtons page={page} totalPages={Math.max(totalPages, 1)} onPageChange={setPage} />
