@@ -3,13 +3,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import MarkdownContent from './MarkdownContent';
 import MarieLoader from './MarieLoader';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip } from 'recharts';
-import { Download, BarChart2, Send, Paperclip, MessageSquare, Users, TrendingUp, AlertTriangle, Timer, BarChart3, HelpCircle, PlusCircle, X, Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
+import { Download, BarChart2, Send, Paperclip, MessageSquare, Users, TrendingUp, AlertTriangle, Timer, BarChart3, HelpCircle, PlusCircle, X, Mic, MicOff } from 'lucide-react';
 import VoiceVisualizer from './VoiceVisualizer';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
 import { useVoiceRecognition } from '../hooks/useVoiceRecognition';
-import { useSpeechSynthesis } from '../hooks/useSpeechSynthesis';
 
 const STORAGE_KEY = 'chatwidget_position';
 
@@ -149,15 +148,13 @@ export default function ChatWidget() {
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // Voice recognition & synthesis
-  const [ttsEnabled, setTtsEnabled] = useState(false);
+  // Voice recognition
   const { isListening, transcript, error: voiceError, isSupported: voiceSupported, startListening, stopListening, resetTranscript } = useVoiceRecognition({
     onResult: (text) => {
       setInput(text);
       setTimeout(() => sendMessage(text), 100);
     }
   });
-  const { isSpeaking, isSupported: ttsSupported, speak, stop: stopSpeaking } = useSpeechSynthesis();
 
   // Conversation management
   const [conversationId, setConversationId] = useState(null);
@@ -255,23 +252,6 @@ export default function ChatWidget() {
 
   // Sauvegarder position au changement
   useEffect(() => { if (!dragging) savePosition(position); }, [position, dragging]);
-
-  // Auto-read last assistant message with TTS (seulement si le widget est ouvert)
-  useEffect(() => {
-    if (!isOpen || !ttsEnabled || !ttsSupported || isSpeaking) return;
-    const lastMessage = messages[messages.length - 1];
-    if (lastMessage?.role === 'assistant' && lastMessage.content) {
-      const cleanText = lastMessage.content
-        .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
-        .replace(/#{1,6}\s+/g, '')
-        .replace(/\*\*(.*?)\*\*/g, '$1')
-        .replace(/[\[\]]/g, '')
-        .trim();
-      if (cleanText.length > 0 && cleanText.length < 500) {
-        speak(cleanText);
-      }
-    }
-  }, [messages, ttsEnabled, ttsSupported]);
 
   async function handleNewConversation() {
     if (clearing || loading) return;
@@ -562,20 +542,6 @@ export default function ChatWidget() {
                     title={isListening ? 'Arrêter l\'écoute' : 'Parler'}
                   >
                     {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                  </button>
-                )}
-                {ttsSupported && (
-                  <button
-                    onClick={() => setTtsEnabled(!ttsEnabled)}
-                    className={`p-1.5 rounded-lg transition-colors cursor-pointer ${ttsEnabled ? 'text-primary' : 'text-on-surface-variant hover:bg-surface-container-high'}`}
-                    title={ttsEnabled ? 'Désactiver la lecture vocale' : 'Activer la lecture vocale'}
-                  >
-                    {ttsEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-                  </button>
-                )}
-                {isSpeaking && (
-                  <button onClick={stopSpeaking} className="p-1.5 rounded-lg hover:bg-surface-container-high text-red-500 transition-colors cursor-pointer" title="Arrêter la lecture">
-                    <span className="material-symbols-outlined text-[16px]">stop</span>
                   </button>
                 )}
               </div>

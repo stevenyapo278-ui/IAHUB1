@@ -8,13 +8,12 @@ import {
   ThumbsUp, ThumbsDown, Copy, Reply, X, Bot, TrendingUp, AlertTriangle,
   Timer, BarChart3, HelpCircle, Pin, PinOff, Archive, ArchiveRestore,
   MoreHorizontal, Search, Users, Edit3, Check, ChevronDown, PlusCircle,
-  Mic, MicOff, Volume2, VolumeX,
+  Mic, MicOff,
 } from 'lucide-react';
 import VoiceVisualizer from '../components/VoiceVisualizer';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
 import { useVoiceRecognition } from '../hooks/useVoiceRecognition';
-import { useSpeechSynthesis } from '../hooks/useSpeechSynthesis';
 
 const QUICK_ACTIONS = [
   { label: 'Répartition équipe', icon: Users, message: 'Répartition des tickets ouverts par équipe', color: 'text-emerald-500', roles: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'] },
@@ -272,15 +271,13 @@ export default function ChatPage() {
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // Voice recognition & synthesis
-  const [ttsEnabled, setTtsEnabled] = useState(false);
+  // Voice recognition
   const { isListening, transcript, error: voiceError, isSupported: voiceSupported, startListening, stopListening, resetTranscript } = useVoiceRecognition({
     onResult: (text) => {
       setInput(text);
       setTimeout(() => sendMessage(text), 100);
     }
   });
-  const { isSpeaking, isSupported: ttsSupported, speak, stop: stopSpeaking } = useSpeechSynthesis();
 
   // Déterminer si la conversation active est archivée
   const activeConv = conversations.find(c => c.id === conversationId);
@@ -292,23 +289,6 @@ export default function ChatPage() {
 
   useEffect(scrollToBottom, [messages, loading, scrollToBottom]);
   useEffect(() => { inputRef.current?.focus(); }, []);
-
-  // Auto-read last assistant message with TTS
-  useEffect(() => {
-    if (!ttsEnabled || !ttsSupported || isSpeaking) return;
-    const lastMessage = messages[messages.length - 1];
-    if (lastMessage?.role === 'assistant' && lastMessage.content) {
-      const cleanText = lastMessage.content
-        .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
-        .replace(/#{1,6}\s+/g, '')
-        .replace(/\*\*(.*?)\*\*/g, '$1')
-        .replace(/[\[\]]/g, '')
-        .trim();
-      if (cleanText.length > 0 && cleanText.length < 500) {
-        speak(cleanText);
-      }
-    }
-  }, [messages, ttsEnabled, ttsSupported]);
 
   // Charger les conversations
   const fetchConversations = useCallback(async () => {
@@ -703,20 +683,6 @@ export default function ChatPage() {
                   disabled={isArchived}
                 >
                   {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                </button>
-              )}
-              {ttsSupported && (
-                <button
-                  onClick={() => setTtsEnabled(!ttsEnabled)}
-                  className={`p-2 rounded-xl transition-colors cursor-pointer shrink-0 mb-0.5 ${ttsEnabled ? 'text-primary' : 'text-on-surface-variant hover:bg-surface-container-high'}`}
-                  title={ttsEnabled ? 'Désactiver la lecture vocale' : 'Activer la lecture vocale'}
-                >
-                  {ttsEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-                </button>
-              )}
-              {isSpeaking && (
-                <button onClick={stopSpeaking} className="p-2 rounded-xl hover:bg-surface-container-high text-red-500 transition-colors cursor-pointer shrink-0 mb-0.5" title="Arrêter la lecture">
-                  <span className="material-symbols-outlined text-[16px]">stop</span>
                 </button>
               )}
             </div>
