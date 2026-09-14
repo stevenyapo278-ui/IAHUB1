@@ -775,35 +775,32 @@ function FlipDigit({ digit }) {
     }
   }, [digit]);
 
-  const base = 'absolute inset-x-0 h-1/2 flex items-center justify-center font-bold tabular-nums overflow-hidden';
-  const fs = { fontSize: '18px', color: 'var(--color-on-surface, #fff)' };
+  const halfStyle = { height: '50%', width: '100%', position: 'absolute', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' };
+  const fs = { fontSize: '18px', lineHeight: '1', color: 'var(--color-on-surface, #fff)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' };
 
   return (
     <div className="relative w-[26px] h-[34px] rounded-lg"
       style={{ backgroundColor: 'var(--color-surface-container, #1c1b1f)', border: '1px solid var(--color-outline-variant, #444)' }}>
       {/* Static top half — shows current */}
-      <div className={`${base} top-0 rounded-t-lg z-10`}>
+      <div style={{ ...halfStyle, top: 0, borderRadius: '8px 8px 0 0', zIndex: 10 }}>
         <span style={fs}>{display}</span>
       </div>
       {/* Static bottom half — shows current */}
-      <div className={`${base} bottom-0 rounded-b-lg z-10`}>
+      <div style={{ ...halfStyle, bottom: 0, borderRadius: '0 0 8px 8px', zIndex: 10 }}>
         <span style={{ ...fs, transform: 'translateY(-100%)' }}>{display}</span>
       </div>
       {/* Center line */}
-      <div className="absolute left-0 right-0 top-1/2 h-px z-20"
-        style={{ backgroundColor: 'var(--color-surface, #000)', opacity: 0.5 }} />
+      <div style={{ position: 'absolute', left: 0, right: 0, top: '50%', height: '1px', zIndex: 20, backgroundColor: 'var(--color-surface, #000)', opacity: 0.5 }} />
 
       {/* Animated top flap — old value sliding down */}
       {flipping && (
-        <div className={`${base} top-0 rounded-t-lg z-30`}
-          style={{ transformOrigin: 'bottom', animation: 'flipSlideDown 0.25s ease-in forwards' }}>
+        <div style={{ ...halfStyle, top: 0, borderRadius: '8px 8px 0 0', zIndex: 30, transformOrigin: 'bottom', animation: 'flipSlideDown 0.25s ease-in forwards' }}>
           <span style={fs}>{prevDisplay}</span>
         </div>
       )}
       {/* Animated bottom flap — new value sliding up */}
       {flipping && (
-        <div className={`${base} bottom-0 rounded-b-lg z-30`}
-          style={{ transformOrigin: 'top', transform: 'translateY(-100%)', animation: 'flipSlideUp 0.25s ease-out 0.12s forwards' }}>
+        <div style={{ ...halfStyle, bottom: 0, borderRadius: '0 0 8px 8px', zIndex: 30, transformOrigin: 'top', transform: 'translateY(-100%)', animation: 'flipSlideUp 0.25s ease-out 0.12s forwards' }}>
           <span style={fs}>{digit}</span>
         </div>
       )}
