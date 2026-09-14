@@ -189,6 +189,8 @@ async function searchTickets(query, limit = 5, user = null, period = null) {
         { content: { contains: w, mode: 'insensitive' } },
         { category: { contains: w, mode: 'insensitive' } },
         { locationName: { contains: w, mode: 'insensitive' } },
+        { requester: { fullName: { contains: w, mode: 'insensitive' } } },
+        { assignedTo: { fullName: { contains: w, mode: 'insensitive' } } },
       ]);
 
       // REQUESTER/TECHNICIAN : leur filtre role EST déjà dans where.OR
