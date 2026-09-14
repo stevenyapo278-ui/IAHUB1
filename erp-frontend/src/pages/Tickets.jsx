@@ -757,84 +757,55 @@ const FIELD_CLS = "w-full px-3 py-2 text-sm bg-surface border border-outline-var
 
 /* ── Flip Counter (style horloge mécanique) ──────────────────────────────── */
 function FlipDigit({ digit }) {
-  const [current, setCurrent] = useState(digit);
-  const [previous, setPrevious] = useState(digit);
+  const [display, setDisplay] = useState(digit);
+  const [prevDisplay, setPrevDisplay] = useState(digit);
   const [flipping, setFlipping] = useState(false);
+  const prevRef = useRef(digit);
 
   useEffect(() => {
-    if (digit !== current) {
-      setPrevious(current);
+    if (digit !== prevRef.current) {
+      setPrevDisplay(prevRef.current);
+      prevRef.current = digit;
       setFlipping(true);
       const t = setTimeout(() => {
-        setCurrent(digit);
+        setDisplay(digit);
         setFlipping(false);
-      }, 300);
+      }, 250);
       return () => clearTimeout(t);
     }
-  }, [digit, current]);
+  }, [digit]);
 
-  const card = 'absolute inset-0 flex items-center justify-center text-sm font-bold tabular-nums';
+  const base = 'absolute inset-x-0 h-1/2 flex items-center justify-center font-bold tabular-nums overflow-hidden';
+  const fs = { fontSize: '18px', color: 'var(--color-on-surface, #fff)' };
 
   return (
-    <div className="relative w-[22px] h-[28px] rounded-md overflow-hidden"
-      style={{ perspective: '200px' }}>
-      {/* Fond */}
-      <div className="absolute inset-0 rounded-md"
-        style={{ backgroundColor: 'var(--color-surface-container, #1c1b1f)', border: '1px solid var(--color-outline-variant, #333)' }} />
-
-      {/* Ligne de séparation centrale */}
-      <div className="absolute left-0 right-0 top-1/2 -translate-y-px h-px z-20"
-        style={{ backgroundColor: 'var(--color-outline-variant, #333)', opacity: 0.5 }} />
-
-      {/* Moitié haute — static (previous) */}
-      <div className="absolute inset-x-0 top-0 h-1/2 overflow-hidden rounded-t-md z-10"
-        style={{ color: 'var(--color-on-surface, #fff)' }}>
-        <div className={card}>{previous}</div>
+    <div className="relative w-[26px] h-[34px] rounded-lg"
+      style={{ backgroundColor: 'var(--color-surface-container, #1c1b1f)', border: '1px solid var(--color-outline-variant, #444)' }}>
+      {/* Static top half — shows current */}
+      <div className={`${base} top-0 rounded-t-lg z-10`}>
+        <span style={fs}>{display}</span>
       </div>
-
-      {/* Moitié basse — static (previous) */}
-      <div className="absolute inset-x-0 bottom-0 h-1/2 overflow-hidden rounded-b-md z-10"
-        style={{ color: 'var(--color-on-surface, #fff)' }}>
-        <div className={card} style={{ transform: 'translateY(-100%)' }}>{previous}</div>
+      {/* Static bottom half — shows current */}
+      <div className={`${base} bottom-0 rounded-b-lg z-10`}>
+        <span style={{ ...fs, transform: 'translateY(-100%)' }}>{display}</span>
       </div>
+      {/* Center line */}
+      <div className="absolute left-0 right-0 top-1/2 h-px z-20"
+        style={{ backgroundColor: 'var(--color-surface, #000)', opacity: 0.5 }} />
 
-      {/* Flip animation — top half falls */}
+      {/* Animated top flap — old value sliding down */}
       {flipping && (
-        <div className="absolute inset-x-0 top-0 h-1/2 overflow-hidden rounded-t-md z-30"
-          style={{
-            transformOrigin: 'bottom center',
-            animation: 'flipTop 0.3s ease-in forwards',
-            backfaceVisibility: 'hidden',
-          }}>
-          <div className={card} style={{ color: 'var(--color-on-surface, #fff)' }}>{previous}</div>
+        <div className={`${base} top-0 rounded-t-lg z-30`}
+          style={{ transformOrigin: 'bottom', animation: 'flipSlideDown 0.25s ease-in forwards' }}>
+          <span style={fs}>{prevDisplay}</span>
         </div>
       )}
-
-      {/* Flip animation — bottom half rises with new value */}
+      {/* Animated bottom flap — new value sliding up */}
       {flipping && (
-        <div className="absolute inset-x-0 bottom-0 h-1/2 overflow-hidden rounded-b-md z-30"
-          style={{
-            transformOrigin: 'top center',
-            transform: 'rotateX(90deg)',
-            animation: 'flipBottom 0.3s ease-out 0.15s forwards',
-            backfaceVisibility: 'hidden',
-          }}>
-          <div className={card} style={{ transform: 'translateY(-100%)', color: 'var(--color-on-surface, #fff)' }}>{current}</div>
+        <div className={`${base} bottom-0 rounded-b-lg z-30`}
+          style={{ transformOrigin: 'top', transform: 'translateY(-100%)', animation: 'flipSlideUp 0.25s ease-out 0.12s forwards' }}>
+          <span style={fs}>{digit}</span>
         </div>
-      )}
-
-      {/* New value static (shown after flip completes) */}
-      {!flipping && (
-        <>
-          <div className="absolute inset-x-0 top-0 h-1/2 overflow-hidden rounded-t-md z-10"
-            style={{ color: 'var(--color-on-surface, #fff)' }}>
-            <div className={card}>{current}</div>
-          </div>
-          <div className="absolute inset-x-0 bottom-0 h-1/2 overflow-hidden rounded-b-md z-10"
-            style={{ color: 'var(--color-on-surface, #fff)' }}>
-            <div className={card} style={{ transform: 'translateY(-100%)' }}>{current}</div>
-          </div>
-        </>
       )}
     </div>
   );
@@ -842,13 +813,12 @@ function FlipDigit({ digit }) {
 
 function FlipCounter({ value }) {
   const formatted = value.toLocaleString('fr-FR');
-  const chars = formatted.split('');
 
   return (
-    <div className="flex items-center gap-0.5">
-      {chars.map((ch, i) =>
+    <div className="flex items-center gap-1">
+      {formatted.split('').map((ch, i) =>
         ch === '.' || ch === ',' ? (
-          <span key={`sep-${i}`} className="text-sm font-bold text-on-surface tabular-nums mx-px">.</span>
+          <span key={`sep-${i}`} className="text-base font-bold tabular-nums" style={{ color: 'var(--color-on-surface)' }}>.</span>
         ) : (
           <FlipDigit key={`d-${i}`} digit={ch} />
         )
@@ -2120,9 +2090,9 @@ export default function Tickets() {
         </div>
 
         {/* Nombre de résultats au centre — Flip Counter */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
           <FlipCounter value={totalCount} />
-          <span className="text-sm font-bold text-on-surface tabular-nums">
+          <span className="text-sm font-bold tabular-nums" style={{ color: 'var(--color-on-surface)' }}>
             ticket{totalCount > 1 ? 's' : ''}
           </span>
         </div>
