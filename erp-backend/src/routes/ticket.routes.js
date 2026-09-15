@@ -1156,10 +1156,14 @@ router.patch('/:id', allowTechnicianStatusOnly, requireTicketAssignOrTechnicianS
   if (teamId !== undefined) data.teamId = teamId;
   
   if (assigneeIds !== undefined) {
-    const ids = Array.isArray(assigneeIds) ? assigneeIds.map((a) => Number(a)) : [];
-    data.assignees = { set: ids.map((id) => ({ id })) };
+    const ids = Array.isArray(assigneeIds) ? assigneeIds.map((a) => Number(a)).filter((id) => id > 0) : [];
+    // Vérifier que les users existent avant de set (évite les erreurs d'orphelins dans la table de jointure)
+    const existingIds = ids.length > 0
+      ? (await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true } })).map((u) => u.id)
+      : [];
+    data.assignees = { set: existingIds.map((id) => ({ id })) };
     if (assignedToId === undefined) {
-      data.assignedToId = ids.length > 0 ? ids[0] : null;
+      data.assignedToId = existingIds.length > 0 ? existingIds[0] : null;
     } else {
       data.assignedToId = assignedToId ? Number(assignedToId) : null;
     }
@@ -1167,7 +1171,8 @@ router.patch('/:id', allowTechnicianStatusOnly, requireTicketAssignOrTechnicianS
     const singleId = assignedToId ? Number(assignedToId) : null;
     data.assignedToId = singleId;
     if (singleId) {
-      data.assignees = { set: [{ id: singleId }] };
+      const exists = await prisma.user.findUnique({ where: { id: singleId }, select: { id: true } });
+      data.assignees = exists ? { set: [{ id: singleId }] } : { set: [] };
     } else {
       data.assignees = { set: [] };
     }
@@ -1260,9 +1265,12 @@ router.patch('/:id', allowTechnicianStatusOnly, requireTicketAssignOrTechnicianS
   // Observateurs : remplacement complet de la liste (many-to-many implicite)
   if (req.body.observerIds !== undefined) {
     const ids = Array.isArray(req.body.observerIds)
-      ? req.body.observerIds.map(Number)
+      ? req.body.observerIds.map(Number).filter((id) => id > 0)
       : [];
-    data.observers = { set: ids.map((id) => ({ id })) };
+    const existingIds = ids.length > 0
+      ? (await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true } })).map((u) => u.id)
+      : [];
+    data.observers = { set: existingIds.map((id) => ({ id })) };
   }
 
   // Track who last modified the ticket

@@ -93,8 +93,11 @@ router.patch('/:id', requirePermission('teams.manage', ['ADMIN', 'HOTLINE']), as
   if (category !== undefined) data.category = category;
   if (groupEmail !== undefined) data.groupEmail = groupEmail || null;
   if (defaultObserverIds !== undefined) {
-    const ids = Array.isArray(defaultObserverIds) ? defaultObserverIds.map(Number) : [];
-    data.defaultObservers = { set: ids.map((id) => ({ id })) };
+    const ids = Array.isArray(defaultObserverIds) ? defaultObserverIds.map(Number).filter((id) => id > 0) : [];
+    const existingIds = ids.length > 0
+      ? (await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true } })).map((u) => u.id)
+      : [];
+    data.defaultObservers = { set: existingIds.map((id) => ({ id })) };
   }
 
   try {
