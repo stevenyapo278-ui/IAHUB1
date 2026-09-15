@@ -1501,7 +1501,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                 </div>
               ))}
             </div>
-          )}
+          ))}
 
           {/* Liste des clôtures rejetées */}
           {closureSubTab === 'rejected' && (
