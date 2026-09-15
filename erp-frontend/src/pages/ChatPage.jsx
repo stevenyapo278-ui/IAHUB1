@@ -262,7 +262,9 @@ export default function ChatPage() {
   const [replyTo, setReplyTo] = useState(null);
   const [attachment, setAttachment] = useState(null);
   const [attachmentPreview, setAttachmentPreview] = useState(null);
-  const [conversationId, setConversationId] = useState(null);
+  const [conversationId, setConversationId] = useState(() => {
+    try { return Number(localStorage.getItem('chat_active_conversation')) || null; } catch { return null; }
+  });
   const [conversations, setConversations] = useState([]);
   const [showArchived, setShowArchived] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -289,6 +291,22 @@ export default function ChatPage() {
 
   useEffect(scrollToBottom, [messages, loading, scrollToBottom]);
   useEffect(() => { inputRef.current?.focus(); }, []);
+
+  // Persister le conversationId dans localStorage
+  useEffect(() => {
+    if (conversationId) {
+      localStorage.setItem('chat_active_conversation', conversationId);
+    } else {
+      localStorage.removeItem('chat_active_conversation');
+    }
+  }, [conversationId]);
+
+  // Restaurer la conversation au chargement de la page
+  useEffect(() => {
+    if (conversationId) {
+      selectConversation(conversationId);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Charger les conversations
   const fetchConversations = useCallback(async () => {

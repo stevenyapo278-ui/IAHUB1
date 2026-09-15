@@ -4,6 +4,15 @@ const { emitTicketCreated, emitTicketAssigned } = require('../utils/socket');
 const { sendTicketCreationNotification, sendAssignmentNotificationEmail } = require('./emailSender');
 const analyticsTools = require('./analyticsTools');
 
+// ── Compteurs de vérification (monitoring) ─────────────────────────────
+const factCheckCounters = {
+  totalChecks: 0,
+  corrections: 0,
+  ghostTickets: 0,
+  crossVerifyWarnings: 0,
+  lastResetAt: Date.now(),
+};
+
 const SYSTEM_PROMPT = `Tu es l'Assistant IA Helpdesk IT de Prosuma.
 
 RÈGLES STRICTES DE FORMATAGE :
@@ -31,7 +40,13 @@ RÈGLES ABSOLUES SUR LES DONNÉES :
 12. Si le contexte dit "Aucun ticket ouvert", c'est la réalité. Ne contredis jamais ces données.
 13. Quand on te demande une liste de tickets, vérifie que chaque ticket mentionné existe bien dans les résultats de recherche fournis. Si la liste est vide, dis-le explicitement.
 
-14. Capacités :
+RÈGLES DE CITATION :
+14. Tu dois renvoyer citedTicketIds avec UNIQUEMENT les IDs de tickets qui apparaissent dans le contexte "Tickets pertinents trouvés".
+15. Tu dois renvoyer citedKnowledgeIds avec UNIQUEMENT les documentId qui apparaissent dans le contexte "Base de connaissances".
+16. Si tu ne cites aucun ticket, renvoie citedTicketIds: [].
+17. Si tu ne cites aucun document KB, renvoie citedKnowledgeIds: [].
+
+18. Capacités :
    - Informations TICKETS (statut, priorité, détails)
    - STATISTIQUES & ANALYSES (top magasins, répartitions, causes racines)
    - Base de Connaissances IT
@@ -113,7 +128,7 @@ async function searchKnowledge(query, limit = 5) {
 
 // ── Recherche de tickets ERP en base ───────────────────────────────────
 
-async function searchTickets(query, limit = 5, user = null, period = null) {
+async function searchTickets(query, limit = 20, user = null, period = null) {
   if (!query || !query.trim()) return [];
   const clean = query.trim();
   const lower = clean.toLowerCase();
@@ -121,6 +136,9 @@ async function searchTickets(query, limit = 5, user = null, period = null) {
   const idMatch = clean.match(/#?(\d+)/);
   const statusMatch = lower.match(/\b(nouveaux?|ouverts?|attente|résolus?|resolu[s]?|fermés?|ferme[s]?)\b/);
   const priorityMatch = lower.match(/\b(p1|p2|p3|p4|critique|haute|moyenne|basse)\b/);
+
+  // Détecter si l'utilisateur veut une liste complète ("liste tous", "montre tous", etc.)
+  const wantsFullList = /\b(tous?|toute?|liste|liste[s]?|montre|affiche|donne-moi)\b/i.test(lower);
 
   const STATUS_MAP = {
     nouveau: 'NEW', nouveaux: 'NEW',
@@ -166,7 +184,8 @@ async function searchTickets(query, limit = 5, user = null, period = null) {
       'les', 'des', 'que', 'sur', 'pour', 'avec', 'par', 'dans', 'un', 'une', 'qui', 'est',
       'ticket', 'tickets', 'montre', 'cherche', 'donne', 'combien', 'quels', 'quelle', 'quelles',
       'est-ce', 'base', 'propos', 'avez-vous', 'avez', 'nous', 'vous',
-      'bonjour', 'bonsoir', 'salut', 'hello', 'coucou', 'hey', 'hi', 'merci', 'svp', 'stp', 're', 'salutations'
+      'bonjour', 'bonsoir', 'salut', 'hello', 'coucou', 'hey', 'hi', 'merci', 'svp', 'stp', 're', 'salutations',
+      'tous', 'toute', 'tout', 'liste', 'listes', 'affiche', 'donne-moi',
     ]);
 
     const STATUS_WORDS = new Set([
@@ -181,6 +200,7 @@ async function searchTickets(query, limit = 5, user = null, period = null) {
       (w) => w.length > 2 && !STOP_WORDS.has(w.toLowerCase()) && !STATUS_WORDS.has(w.toLowerCase()) && !PRIORITY_WORDS.has(w.toLowerCase())
     );
 
+    // Si pas de mots-clés mais filtre status/priority/id → rechercher par filtre uniquement
     if (words.length === 0 && !idMatch && !statusMatch && !priorityMatch) return [];
 
     if (words.length > 0) {
@@ -210,9 +230,12 @@ async function searchTickets(query, limit = 5, user = null, period = null) {
       where.OR.push({ id: numId }, { glpiTicketId: numId });
     }
 
+    // Si "liste tous" → pas de limit (max 100 pour sécurité)
+    const effectiveLimit = wantsFullList ? 100 : limit;
+
     return await prisma.ticket.findMany({
       where,
-      take: limit,
+      take: effectiveLimit,
       include: {
         requester: { select: { fullName: true, email: true } },
         assignedTo: { select: { fullName: true } },
@@ -269,18 +292,97 @@ async function searchLocations(query, limit = 10) {
 
 // ── Appel IA ───────────────────────────────────────────────────────────
 
+// Estimation rapide du nombre de tokens (~4 caractères par token, rule of thumb)
+function estimateTokens(text) {
+  return Math.ceil((text || '').length / 4);
+}
+
 async function callAI(messages, options = {}) {
   const providers = await getActiveProviders();
   if (providers.length === 0) throw new Error('Aucun fournisseur IA configuré.');
 
-  const formattedMessages = messages.map((m) => `${m.role === 'user' ? 'Utilisateur' : 'Assistant'} : ${m.content}`).join('\n\n');
-  const prompt = `${SYSTEM_PROMPT}\n\n---\n\n${formattedMessages}`;
+  // ── Multi-turn : séparer system / user / assistant ──
+  const intentHint = options.intentHint || '';
+  const systemContent = SYSTEM_PROMPT + intentHint;
 
-  return callAiWithRetry(() => callProviderWithFallback(providers, prompt, 'chatbot', options), {
+  // Construire l'historique en messages API (user/assistant alternés)
+  const apiMessages = [];
+  const recentHistory = (options.conversationHistory || []).slice(-10);
+  for (const msg of recentHistory) {
+    if (!msg || !msg.content || typeof msg.content !== 'string') continue;
+    // Filtrer les messages d'erreur
+    if (msg.content.includes('Désolé, je rencontre un problème technique') || msg.content.includes('Tous les providers IA ont échoué')) continue;
+    apiMessages.push({
+      role: msg.role === 'assistant' ? 'assistant' : 'user',
+      content: msg.content,
+    });
+  }
+
+  // Ajouter le message actuel avec le contexte
+  const lastMsg = messages[messages.length - 1];
+  apiMessages.push({ role: 'user', content: lastMsg.content });
+
+  // Budget token dynamique : garder l'historique dans ~1500 tokens
+  const MAX_HISTORY_TOKENS = 1500;
+  let trimmedMessages = [...apiMessages];
+
+  // Calculer le total des tokens de l'historique (sans le message actuel)
+  let totalHistoryTokens = 0;
+  for (let i = 0; i < trimmedMessages.length - 1; i++) {
+    totalHistoryTokens += estimateTokens(trimmedMessages[i].content);
+  }
+
+  // Tronquer depuis les messages les plus anciens tant qu'on dépasse le budget
+  while (trimmedMessages.length > 1 && totalHistoryTokens > MAX_HISTORY_TOKENS) {
+    const removed = trimmedMessages.shift();
+    totalHistoryTokens -= estimateTokens(removed.content);
+  }
+
+  // Valider l'alternance user/assistant (Anthropic l'exige strictement)
+  // Le premier message doit être 'user', et pas deux user/assistant consécutifs
+  if (trimmedMessages.length > 1) {
+    const cleaned = [trimmedMessages[0]];
+    for (let i = 1; i < trimmedMessages.length; i++) {
+      const prev = cleaned[cleaned.length - 1];
+      const curr = trimmedMessages[i];
+      if (curr.role === prev.role) {
+        // Fusionner les messages consécutifs du même rôle
+        prev.content = `${prev.content}\n\n${curr.content}`;
+      } else {
+        cleaned.push(curr);
+      }
+    }
+    trimmedMessages = cleaned;
+  }
+
+  // S'assurer que le premier message est 'user' (Anthropic requirement)
+  if (trimmedMessages.length > 0 && trimmedMessages[0].role !== 'user') {
+    trimmedMessages.unshift({ role: 'user', content: '(Contexte de conversation précédente)' });
+  }
+
+  // Logging du prompt complet
+  const promptSize = estimateTokens(systemContent) + trimmedMessages.reduce((sum, m) => sum + estimateTokens(m.content), 0);
+  console.log(`[chatbot] callAI — ${trimmedMessages.length} messages, ~${promptSize} tokens estimés, intent: ${options.intentHint ? 'include' : 'none'}`);
+
+  // Structured output si demandé
+  const providerOptions = {
+    messages: trimmedMessages,
+    system: systemContent,
+  };
+  if (options.responseFormat) {
+    providerOptions.responseFormat = options.responseFormat;
+  }
+
+  return callAiWithRetry(() => callProviderWithFallback(providers, null, 'chatbot', {
+    ...providerOptions,
+    forcedModelId: options.forcedModelId,
+  }), {
     maxRetries: 2,
     baseDelay: 1500,
   });
 }
+
+// ── Appel Intent AI (legacy, conservé comme fallback) ──────────────────
 
 async function callIntentAI(message) {
   const providers = await getActiveProviders();
@@ -427,6 +529,7 @@ function detectIntentRegex(message) {
   if (lower.match(/\b(cr[ée]er?|ouvrir?|nouveau ticket|nouvelle demande|signaler|probl[èe]me|incident)\b/.test(lower) && /\b(pour|au nom de|pour le compte)\b/.test(lower))) return { intent: 'create_ticket_for', params: { period } };
   if (lower.match(/\b(cr[ée]er?|ouvrir?|nouveau ticket|nouvelle demande|signaler|probl[èe]me|incident|panne|souci|ne marche|fonctionne plus|erreur|assistance)\b/)) return { intent: 'create_ticket', params: { period } };
   if (lower.match(/\b(statut|état|avancement|suiv[ie]|ticket\s*#?\s*\d+|#\d+|num[ée]ro)\b/)) return { intent: 'check_ticket', params: { period } };
+  if (lower.match(/\b(quels?|liste|listes|montre|affiche|donne[- ]?moi|cherche|recherche|tous?|toute?)\s+(des?\s+)?tickets?\b/)) return { intent: 'search_tickets', params: { period } };
   if (lower.match(/\b(rapport|synth[èe]se|combien|nombre|total)\b/)) return { intent: 'report', params: { period } };
   if (lower.match(/\b(escalade|technicien|humain|agent|support|parler|[aà] quelqu'un|transfer)\b/)) return { intent: 'escalate', params: { period } };
   if (lower.match(/\b(aide|commandes?|fonctionnalit[ée]s?|que sais|que peux|help|menu)\b/)) return { intent: 'help', params: { period } };
@@ -818,8 +921,8 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
 
   // Recherche simultanée : RAG + Tickets + (selon intent) inventaire/users/locations
   const searches = [
-    searchKnowledge(message, 3),
-    searchTickets(message, 5, user, params?.period),
+    searchKnowledge(message, 8),
+    searchTickets(message, 20, user, params?.period),
   ];
 
   if (intent === 'search_inventory') searches.push(searchAssets(params?.keyword || message, 5));
@@ -834,7 +937,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   const [knowledgeChunks, matchingTickets, assets, users, locations] = await Promise.all(searches);
 
   const knowledgeContext = knowledgeChunks.length > 0
-    ? knowledgeChunks.map((c) => `[${c.title}] : ${c.content.substring(0, 500)}`).join('\n\n')
+    ? knowledgeChunks.map((c) => `[doc:${c.documentId} | ${c.title}] : ${c.content.substring(0, 500)}`).join('\n\n')
     : '';
 
   const contextParts = [];
@@ -848,15 +951,23 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   }
 
   if (matchingTickets.length > 0) {
-    let ticketContext = "**Tickets pertinents trouvés dans la base de données (/tickets) :**\n";
-    for (const t of matchingTickets) {
-      ticketContext += `• **Ticket #${t.id}** : "${t.title}"\n  - Statut : ${STATUS_LABEL[t.status] || t.status} | Priorité : ${PRIORITY_LABEL[t.priority] || t.priority}`;
-      if (t.category) ticketContext += ` | Catégorie : ${t.category}`;
-      if (t.requester) ticketContext += ` | Demandeur : ${t.requester.fullName}`;
-      if (t.assignedTo) ticketContext += ` | Assigné à : ${t.assignedTo.fullName}`;
-      if (t.locationName) ticketContext += ` | Lieu : ${t.locationName}`;
-      if (t.glpiTicketId) ticketContext += ` | GLPI #${t.glpiTicketId}`;
-      ticketContext += `\n  - *Description :* ${(t.content || '').substring(0, 200)}...\n\n`;
+    let ticketContext = `**Tickets pertinents trouvés (${matchingTickets.length}) :**\n`;
+    // Format tableau compact pour beaucoup de résultats
+    if (matchingTickets.length > 5) {
+      ticketContext += `| # | Titre | Statut | Priorité | Demandeur | Lieu |\n|---|-------|--------|----------|-----------|------|\n`;
+      for (const t of matchingTickets) {
+        ticketContext += `| ${t.id} | ${(t.title || '').substring(0, 50)} | ${STATUS_LABEL[t.status] || t.status} | ${PRIORITY_LABEL[t.priority] || t.priority} | ${t.requester?.fullName || '-'} | ${t.locationName || '-'} |\n`;
+      }
+    } else {
+      for (const t of matchingTickets) {
+        ticketContext += `• **Ticket #${t.id}** : "${t.title}"\n  - Statut : ${STATUS_LABEL[t.status] || t.status} | Priorité : ${PRIORITY_LABEL[t.priority] || t.priority}`;
+        if (t.category) ticketContext += ` | Catégorie : ${t.category}`;
+        if (t.requester) ticketContext += ` | Demandeur : ${t.requester.fullName}`;
+        if (t.assignedTo) ticketContext += ` | Assigné à : ${t.assignedTo.fullName}`;
+        if (t.locationName) ticketContext += ` | Lieu : ${t.locationName}`;
+        if (t.glpiTicketId) ticketContext += ` | GLPI #${t.glpiTicketId}`;
+        ticketContext += `\n  - *Description :* ${(t.content || '').substring(0, 200)}...\n\n`;
+      }
     }
     contextParts.push(ticketContext);
   } else {
@@ -1290,7 +1401,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     report: "Maximum 5 lignes + un tableau si nécessaire. Sois extrêmement concis.",
     summary: "Résumé en 4-6 lignes maximum. Pas de tableau.",
     general: "Réponse courte et naturelle (3-6 lignes).",
-    search_tickets: "Liste les tickets trouvés avec ID, titre, statut et lieu. Maximum 5 résultats.",
+    search_tickets: "Liste les tickets trouvés avec ID, titre, statut et lieu. Si beaucoup de résultats, utilise un tableau Markdown. Ne limite pas artificiellement le nombre.",
     check_ticket: "Donne le statut, la priorité, le lieu et le technicien assigné. Sois factuel.",
     create_ticket: "Confirme la création avec le numéro de ticket et un lien.",
     create_ticket_for: "Confirme la création pour l'utilisateur mentionné.",
@@ -1299,20 +1410,22 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     search_locations: "Liste les lieux trouvés avec nom et adresse.",
   };
 
-  // Messages pour l'IA
-  const aiMessages = [];
-  const recentHistory = conversationHistory.slice(-10);
-  for (const msg of recentHistory) {
-    if (!msg || !msg.content || typeof msg.content !== 'string') continue;
-    if (msg.content.includes('Désolé, je rencontre un problème technique') || msg.content.includes('Tous les providers IA ont échoué')) continue;
-    aiMessages.push({ role: msg.role, content: msg.content });
-  }
+  // ── Classification intents info vs action ──
+  const ACTION_INTENTS = new Set([
+    'create_ticket', 'create_ticket_for', 'confirm_create_ticket',
+    'change_status', 'assign_ticket', 'escalate',
+  ]);
 
-  const intentHint = intentInstructions[intent] ? `\n\nINSTRUCTION SPÉCIFIQUE POUR CETTE INTENT : ${intentInstructions[intent]}` : '';
+  const isActionIntent = ACTION_INTENTS.has(intent);
+
+  // ── Construire le contexte système ──
+  const intentHint = intentInstructions[intent]
+    ? `\n\nINSTRUCTION SPÉCIFIQUE POUR CETTE INTENT : ${intentInstructions[intent]}`
+    : '';
+
   const systemContext = contextParts.length > 0 ? `\n\n${contextParts.join('\n\n')}` : '';
-  aiMessages.push({ role: 'user', content: `${message}${systemContext}${intentHint}` });
 
-  // Récupérer le modèle vocal configuré (optionnel)
+  // ── Récupérer le modèle vocal configuré (optionnel) ──
   let voiceModelOptions = {};
   try {
     const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
@@ -1321,13 +1434,110 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     }
   } catch {}
 
+  // ── Construire le message utilisateur avec contexte ──
+  const userMessageWithCtx = `${message}${systemContext}${intentHint}`;
+
   let reply;
-  try {
-    reply = await callAI(aiMessages, voiceModelOptions);
-    reply = cleanAiReply(reply);
-  } catch (err) {
-    console.error('[chatbot] Échec de la génération de réponse IA:', err.message);
-    reply = "Désolé, je rencontre une difficulté temporaire d'accès aux services IA. Veuillez réentreprendre votre demande dans quelques instants.";
+  let citedTicketIds = [];
+  let citedKnowledgeIds = [];
+
+  if (isActionIntent) {
+    // ═══ INTENTS ACTION : la mutation est déjà exécutée par le switch/case ═══
+    // On extraie la confirmation directement du résultat (contextParts)
+    // Zéro appel LLM supplémentaire — la réponse est déterministe et fiable.
+    const confirmPatterns = [
+      { match: /\*\*Statut modifié\*\*/, template: (m) => m.replace(/\*\*/g, '') },
+      { match: /\*\*Ticket créé\*\*/, template: (m) => m.replace(/\*\*/g, '') },
+      { match: /\*\*Ticket assigné\*\*/, template: (m) => m.replace(/\*\*/g, '') },
+      { match: /\*\*Escalade\*\*/, template: (m) => m.replace(/\*\*/g, '') },
+      { match: /Erreur/i, template: (m) => m.replace(/\*\*/g, '') },
+    ];
+
+    const confirmMsg = contextParts.find(p => confirmPatterns.some(cp => cp.match.test(p)));
+    if (confirmMsg) {
+      const pattern = confirmPatterns.find(cp => cp.match.test(confirmMsg));
+      reply = pattern ? pattern.template(confirmMsg) : confirmMsg.replace(/\*\*/g, '');
+    } else {
+      reply = generateActionReply(intent, message);
+    }
+  } else {
+    // ═══ INTENTS INFORMATION : structured output pour reply + citations ═══
+    const responseSchema = {
+      type: 'object',
+      properties: {
+        reply: { type: 'string', description: 'Réponse en français, concise, sans emojis ni titres markdown' },
+        citedTicketIds: { type: 'array', items: { type: 'integer' }, description: 'IDs de tickets cités dans la réponse (uniquement ceux du contexte)' },
+        citedKnowledgeIds: { type: 'array', items: { type: 'string' }, description: 'IDs des documents KB cités (uniquement ceux du contexte)' },
+      },
+      required: ['reply', 'citedTicketIds', 'citedKnowledgeIds'],
+      additionalProperties: false,
+    };
+
+    try {
+      const raw = await callAI(
+        [{ role: 'user', content: userMessageWithCtx }],
+        {
+          ...voiceModelOptions,
+          conversationHistory,
+          intentHint: '',
+          responseFormat: { type: 'json_object', schema: responseSchema },
+        }
+      );
+
+      const parsed = parseStructuredResponse(raw);
+      if (parsed && parsed.reply) {
+        reply = cleanAiReply(parsed.reply);
+        // Validation post-appel des IDs cités — filtre les fantômes
+        const validated = await validateCitedIds(parsed.citedTicketIds, parsed.citedKnowledgeIds, intent);
+        citedTicketIds = validated.ticketIds;
+        citedKnowledgeIds = validated.knowledgeIds;
+      } else {
+        console.warn('[chatbot] Structured output parsing échoué, fallback texte brut');
+        reply = cleanAiReply(raw);
+      }
+    } catch (err) {
+      console.error('[chatbot] Échec structured output, fallback classique:', err.message);
+      try {
+        const raw = await callAI(
+          [{ role: 'user', content: userMessageWithCtx }],
+          { ...voiceModelOptions, conversationHistory, intentHint }
+        );
+        reply = cleanAiReply(raw);
+      } catch (fallbackErr) {
+        console.error('[chatbot] Échec fallback classique:', fallbackErr.message);
+        reply = "Désolé, je rencontre une difficulté temporaire d'accès aux services IA. Veuillez réentreprendre votre demande dans quelques instants.";
+      }
+    }
+  }
+
+  // ═══ DOUBLE VÉRIFICATION : fact-checking post-réponse ═══
+  // Vérifie que les IDs mentionnés dans la réponse existent vraiment en base
+  // AVANT d'envoyer la réponse à l'utilisateur.
+  if (reply && !isActionIntent) {
+    const verification = await verifyResponseFacts(reply, contextParts, intent, matchingTickets);
+    if (verification.corrected) {
+      // Si des erreurs critiques ont été trouvées (ghost tickets), retry avec contexte corrigé
+      if (verification.needsRetry && verification.retryContext) {
+        const retriedReply = await retryWithCorrectiveContext(
+          message, systemContext, verification.retryContext, voiceModelOptions, conversationHistory
+        );
+        if (retriedReply) {
+          reply = retriedReply;
+          // Re-vérifier la réponse régénérée
+          const reVerification = await verifyResponseFacts(reply, contextParts, intent, matchingTickets);
+          if (reVerification.corrected) {
+            reply = reVerification.reply; // Prendre la meilleure version disponible
+          }
+        } else {
+          reply = verification.reply; // Fallback sur la réponse corrigée
+        }
+      } else {
+        reply = verification.reply;
+      }
+      console.warn(`[chatbot] Réponse corrigée par fact-check: ${verification.corrections.join(', ')}`);
+    }
+    // Vérification croisée (logs uniquement, pas de correction)
+    crossVerifyWithContext(reply, matchingTickets, intent);
   }
 
   return {
@@ -1336,8 +1546,289 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     action,
     widget,
     sources: knowledgeChunks.map((c) => ({ title: c.title, id: c.documentId })),
+    citedTicketIds,
+    citedKnowledgeIds,
     pendingTicketData: pendingTicket || null,
   };
+}
+
+// ── Helpers pour le structured output ──────────────────────────────────
+
+function parseStructuredResponse(raw) {
+  if (!raw) return null;
+
+  // 1. Tenter de parser directement
+  try {
+    return JSON.parse(raw);
+  } catch {}
+
+  // 2. Extraire JSON des markdown fences (```json ... ```)
+  const fenceMatch = raw.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+  if (fenceMatch) {
+    try {
+      return JSON.parse(fenceMatch[1]);
+    } catch {}
+  }
+
+  // 3. Extraire le premier objet JSON trouvé
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      return JSON.parse(jsonMatch[0]);
+    } catch {}
+  }
+
+  return null;
+}
+
+async function validateCitedIds(ticketIds, knowledgeIds, intent) {
+  const result = { ticketIds: ticketIds || [], knowledgeIds: knowledgeIds || [], issues: [] };
+
+  if (result.ticketIds.length > 0) {
+    try {
+      const existing = await prisma.ticket.findMany({
+        where: { id: { in: result.ticketIds } },
+        select: { id: true },
+      });
+      const existingIds = new Set(existing.map(t => t.id));
+      const ghostIds = result.ticketIds.filter(id => !existingIds.has(id));
+      if (ghostIds.length > 0) {
+        result.issues.push(`Tickets fantômes: ${ghostIds.join(', ')}`);
+        console.warn(`[chatbot] IDs tickets fantômes cités par l'IA: ${ghostIds.join(', ')} (intent: ${intent})`);
+        result.ticketIds = result.ticketIds.filter(id => existingIds.has(id));
+      }
+    } catch (err) {
+      console.error('[chatbot] Erreur validation citedTicketIds:', err.message);
+    }
+  }
+
+  if (result.knowledgeIds.length > 0) {
+    try {
+      const validIds = result.knowledgeIds.map(Number).filter(n => !isNaN(n));
+      if (validIds.length > 0) {
+        const existing = await prisma.knowledgeDocument.findMany({
+          where: { id: { in: validIds } },
+          select: { id: true },
+        });
+        const existingIds = new Set(existing.map(d => d.id));
+        const ghostIds = result.knowledgeIds.filter(id => !existingIds.has(Number(id)));
+        if (ghostIds.length > 0) {
+          result.issues.push(`Knowledge fantômes: ${ghostIds.join(', ')}`);
+          console.warn(`[chatbot] IDs knowledge fantômes cités par l'IA: ${ghostIds.join(', ')} (intent: ${intent})`);
+          result.knowledgeIds = result.knowledgeIds.filter(id => existingIds.has(Number(id)));
+        }
+      }
+    } catch (err) {
+      console.error('[chatbot] Erreur validation citedKnowledgeIds:', err.message);
+    }
+  }
+
+  if (result.issues.length > 0) {
+    console.warn(`[chatbot] Validation IDs: ${result.issues.join(' | ')}`);
+  }
+
+  return result;
+}
+
+function generateActionReply(intent, message) {
+  const replies = {
+    change_status: "Le statut du ticket a été modifié avec succès.",
+    assign_ticket: "Le ticket a été assigné avec succès.",
+    create_ticket: "Le ticket a été créé avec succès.",
+    create_ticket_for: "Le ticket a été créé pour l'utilisateur demandé.",
+    confirm_create_ticket: "Le ticket a été créé avec succès.",
+    escalate: "L'escalade a été effectuée. Un technicien a été notifié.",
+  };
+  return replies[intent] || "Action effectuée avec succès.";
+}
+
+// ── Double vérification : fact-checking post-réponse IA ───────────────
+// Vérifie que les claims de l'IA (IDs de tickets, statuts, comptes)
+// correspondent à la réalité en base AVANT d'envoyer la réponse.
+
+const STATUS_LABEL_TO_DB = {
+  'nouveau': 'NEW', 'nouveaux': 'NEW',
+  'ouvert': 'OPEN', 'ouverts': 'OPEN',
+  'en attente': 'PENDING', 'attente': 'PENDING',
+  'résolu': 'SOLVED', 'résolus': 'SOLVED', 'resolu': 'SOLVED',
+  'fermé': 'CLOSED', 'fermés': 'CLOSED', 'ferme': 'CLOSED',
+};
+
+const DB_STATUS_TO_FR = {
+  'NEW': 'Nouveau', 'OPEN': 'Ouvert', 'PENDING': 'En attente',
+  'SOLVED': 'Résolu', 'CLOSED': 'Fermé',
+};
+
+async function verifyResponseFacts(replyText, contextParts, intent, matchingTickets) {
+  if (!replyText) return { reply: replyText, corrected: false, needsRetry: false };
+
+  factCheckCounters.totalChecks++;
+  const corrections = [];
+  let needsRetry = false;
+  let retryContext = '';
+
+  // ═══ 1. Extraire tous les IDs de tickets mentionnés ═══
+  const ticketIdPattern = /#(\d+)|ticket\s*#?\s*(\d+)/gi;
+  const mentionedIds = new Set();
+  let match;
+  while ((match = ticketIdPattern.exec(replyText)) !== null) {
+    const id = parseInt(match[1] || match[2], 10);
+    if (id > 0 && id < 1000000) mentionedIds.add(id);
+  }
+
+  // ═══ 2. Vérifier chaque ID existe en base + récupérer statuts réels ═══
+  const realTicketData = new Map(); // id → { status, title }
+  if (mentionedIds.size > 0) {
+    try {
+      // UNE SEULE QUERY pour existence + statuts (pas deux)
+      const existingTickets = await prisma.ticket.findMany({
+        where: { id: { in: [...mentionedIds] } },
+        select: { id: true, status: true, title: true },
+      });
+      for (const t of existingTickets) {
+        realTicketData.set(t.id, t);
+      }
+
+      for (const id of mentionedIds) {
+        if (!realTicketData.has(id)) {
+          corrections.push(`Ticket #${id} introuvable`);
+          factCheckCounters.ghostTickets++;
+          // Supprimer complètement la référence fantôme (pas de [introuvable])
+          const ghostRegex = new RegExp(`[#]?${id}\\b|ticket\\s*#?\\s*${id}\\b`, 'gi');
+          replyText = replyText.replace(ghostRegex, '').replace(/\s{2,}/g, ' ').trim();
+          needsRetry = true;
+          retryContext += `Le ticket #${id} n'existe pas en base. `;
+        }
+      }
+    } catch (err) {
+      console.error('[chatbot] Erreur vérification ticket IDs:', err.message);
+    }
+  }
+
+  // ═══ 3. Vérifier les claims de statut ═══
+  // Extraire les statuts du contexte (source de vérité)
+  const contextStatuses = new Map(); // id → dbStatus
+  const statusPattern = /Ticket\s*#(\d+).*?Statut\s*:\s*(Nouveau|Ouvert|En attente|Résolu|Fermé)/gi;
+  for (const part of contextParts) {
+    while ((match = statusPattern.exec(part)) !== null) {
+      const id = parseInt(match[1], 10);
+      const frStatus = match[2];
+      contextStatuses.set(id, STATUS_LABEL_TO_DB[frStatus.toLowerCase()] || frStatus);
+    }
+  }
+
+  // Si on a les données DB réelles, les utiliser comme source de vérité
+  for (const [id, realData] of realTicketData) {
+    contextStatuses.set(id, realData.status);
+  }
+
+  // Patterns pour détecter les claims de statut dans la réponse IA
+  const claimPatterns = [
+    { regex: /#(\d+).*?(?:est|passe?\s+(?:à|a))\s+(?:le\s+)?statut\s+(?:de\s+)?["']?(nouveau|ouvert|en attente|résolu|fermé)["']?/gi, idGroup: 1, statusGroup: 2 },
+    { regex: /#(\d+).*?(?:statut|état)\s*[:=]\s*["']?(nouveau|ouvert|en attente|résolu|fermé)["']?/gi, idGroup: 1, statusGroup: 2 },
+    { regex: /ticket\s*#?(\d+).*?(?:est|été)\s+(?:mis|passé|classé)\s+(?:en|à|au)\s+["']?(nouveau|ouvert|en attente|résolu|fermé)["']?/gi, idGroup: 1, statusGroup: 2 },
+    { regex: /#(\d+).*?(nouveau|ouvert|en attente|résolu|fermé)/gi, idGroup: 1, statusGroup: 2 },
+  ];
+
+  for (const { regex, idGroup, statusGroup } of claimPatterns) {
+    while ((match = regex.exec(replyText)) !== null) {
+      const ticketId = parseInt(match[idGroup], 10);
+      const claimedFrStatus = match[statusGroup].toLowerCase();
+      const claimedDbStatus = STATUS_LABEL_TO_DB[claimedFrStatus];
+
+      if (ticketId && claimedDbStatus && contextStatuses.has(ticketId)) {
+        const realStatus = contextStatuses.get(ticketId);
+        if (realStatus !== claimedDbStatus) {
+          const realFr = DB_STATUS_TO_FR[realStatus] || realStatus;
+          corrections.push(`#${ticketId}: IA dit "${claimedFrStatus}" mais statut réel = "${realFr}"`);
+          // Corriger le statut dans la réponse
+          const wrongFr = match[statusGroup];
+          replyText = replyText.replace(new RegExp(`#${ticketId}.*?${wrongFr}`, 'gi'), `#${ticketId} (${realFr})`);
+        }
+      }
+    }
+  }
+
+  // ═══ 4. Vérifier les comptes/totaux ═══
+  // Pattern: "X tickets" ou "total: X"
+  const countPatterns = [
+    /(\d+)\s*tickets?\s*(?:trouvé|ouvert|ouverts?|en|total)/gi,
+    /total\s*[:=]?\s*(\d+)/gi,
+    /(?:il y a|il existe)\s+(\d+)\s*ticket/gi,
+  ];
+
+  // Source de vérité pour les comptes : utiliser matchingTickets si dispo
+  const actualCount = matchingTickets ? matchingTickets.length : null;
+  if (actualCount !== null) {
+    for (const regex of countPatterns) {
+      while ((match = regex.exec(replyText)) !== null) {
+        const claimedCount = parseInt(match[1], 10);
+        if (claimedCount !== actualCount) {
+          corrections.push(`Compte: IA dit ${claimedCount} mais réel = ${actualCount}`);
+          // Corriger le compte dans la réponse
+          replyText = replyText.replace(
+            new RegExp(`${claimedCount}\\s*tickets?`, 'gi'),
+            `${actualCount} tickets`
+          );
+        }
+      }
+    }
+  }
+
+  // ═══ 5. Logger les corrections ═══
+  if (corrections.length > 0) {
+    factCheckCounters.corrections++;
+    console.warn(`[chatbot] Fact-check corrections (${intent}): ${corrections.join(' | ')}`);
+  }
+
+  return { reply: replyText, corrected: corrections.length > 0, corrections, needsRetry, retryContext };
+}
+
+// ── Vérification croisée : comparer la réponse IA aux données du contexte ─
+
+function crossVerifyWithContext(replyText, matchingTickets, intent) {
+  if (!replyText || !matchingTickets) return;
+
+  // Vérifier le compte — seuil > 0 (tout écart est une erreur)
+  const countClaim = replyText.match(/(\d+)\s*ticket/i);
+  if (countClaim) {
+    const claimedCount = parseInt(countClaim[1], 10);
+    const actualCount = matchingTickets.length;
+    if (claimedCount !== actualCount) {
+      factCheckCounters.crossVerifyWarnings++;
+      console.warn(`[chatbot] Cross-verify: IA dit ${claimedCount} tickets, réel = ${actualCount} (intent: ${intent})`);
+    }
+  }
+
+  // Vérifier que chaque ticket # mentionné est dans matchingTickets
+  const ticketIdPattern = /#(\d+)/g;
+  let match;
+  while ((match = ticketIdPattern.exec(replyText)) !== null) {
+    const id = parseInt(match[1], 10);
+    if (id > 0 && !matchingTickets.some(t => t.id === id)) {
+      factCheckCounters.crossVerifyWarnings++;
+      console.warn(`[chatbot] Cross-verify: #${id} mentionné mais absent du contexte (intent: ${intent})`);
+    }
+  }
+}
+
+// ── Retry avec contexte corrigé ───────────────────────────────────────
+// Si le fact-check a trouvé des erreurs, relance l'IA avec un contexte
+// correctif pour régénérer une réponse sans les références fausses.
+
+async function retryWithCorrectiveContext(originalMessage, systemContext, retryContext, voiceModelOptions, conversationHistory) {
+  const correctiveMessage = `${originalMessage}\n\n⚠️ CONTEXTE CORRECTIF : ${retryContext}Ne mentionne PAS ces éléments dans ta réponse. Utilise UNIQUEMENT les données du contexte initial.`;
+
+  try {
+    const raw = await callAI(
+      [{ role: 'user', content: `${correctiveMessage}${systemContext}` }],
+      { ...voiceModelOptions, conversationHistory, intentHint: '' }
+    );
+    return cleanAiReply(raw);
+  } catch (err) {
+    console.error('[chatbot] Échec retry avec contexte corrigé:', err.message);
+    return null;
+  }
 }
 
 module.exports = { handleMessage };

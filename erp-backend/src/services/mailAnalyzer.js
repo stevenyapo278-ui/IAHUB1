@@ -122,15 +122,78 @@ async function getActiveProvider() {
 
 // ═══════════════════════════════════════════════════════════════════════════
 // APPELS HTTP PAR PROVIDER (avec extraction Retry-After)
+// Supporte les deux modes :
+//   - Prompt unique (string) → legacy, converti en messages[] interne
+//   - Messages multi-turn (array) → mode conversationnel / structured output
 // ═══════════════════════════════════════════════════════════════════════════
-async function callOpenAICompat(provider, apiKey, model, prompt, usage) {
+
+// Conversion JSON Schema → Gemini OpenAPI 3.0 schema
+function convertToGeminiSchema(schema) {
+  if (!schema || schema.type === 'string') return schema;
+
+  const geminiTypeMap = {
+    'string': 'STRING',
+    'integer': 'INTEGER',
+    'number': 'NUMBER',
+    'boolean': 'BOOLEAN',
+    'array': 'ARRAY',
+    'object': 'OBJECT',
+  };
+
+  const result = {};
+  result.type = geminiTypeMap[schema.type] || schema.type;
+
+  if (schema.description) result.description = schema.description;
+
+  if (schema.properties) {
+    result.properties = {};
+    for (const [key, val] of Object.entries(schema.properties)) {
+      result.properties[key] = convertToGeminiSchema(val);
+    }
+  }
+
+  if (schema.items) {
+    result.items = convertToGeminiSchema(schema.items);
+  }
+
+  if (schema.required) {
+    result.required = schema.required;
+  }
+
+  return result;
+}
+
+async function callOpenAICompat(provider, apiKey, model, prompt, usage, options = {}) {
   return getBreakerForProvider(provider.name, usage).call(async () => {
     const baseUrl = provider.baseUrl || 'https://api.openai.com/v1';
+
+    // Construire les messages : multi-turn si fourni, sinon legacy
+    const apiMessages = options.messages
+      ? options.messages
+      : [{ role: 'user', content: prompt }];
+
+    const body = {
+      model,
+      messages: apiMessages,
+      temperature: 0.1,
+      max_tokens: 2048,
+    };
+
+    // System prompt séparé (optionnel)
+    if (options.system) {
+      body.messages = [{ role: 'system', content: options.system }, ...body.messages];
+    }
+
+    // Structured output : response_format JSON
+    if (options.responseFormat) {
+      body.response_format = options.responseFormat;
+    }
+
     const res = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       signal: AbortSignal.timeout(25000),
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], temperature: 0.1, max_tokens: 2048 }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       const bodyText = await res.text();
@@ -148,18 +211,49 @@ async function callOpenAICompat(provider, apiKey, model, prompt, usage) {
   });
 }
 
-async function callGemini(provider, apiKey, prompt, modelName, usage) {
+async function callGemini(provider, apiKey, prompt, modelName, usage, options = {}) {
   return getBreakerForProvider(provider.name, usage).call(async () => {
     const base = provider.baseUrl || 'https://generativelanguage.googleapis.com/v1beta';
     const model = modelName || 'gemini-1.5-flash';
+
+    // Construire les contents : multi-turn si fourni, sinon legacy
+    // IMPORTANT: Gemini utilise 'model' au lieu de 'assistant' pour le rôle assistant
+    let contents;
+    if (options.messages) {
+      contents = options.messages.map((m) => ({
+        role: m.role === 'assistant' ? 'model' : m.role,
+        parts: [{ text: m.content }],
+      }));
+    } else {
+      contents = [{ parts: [{ text: prompt }] }];
+    }
+
+    const payload = {
+      contents,
+      generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
+    };
+
+    // System prompt séparé (Gemini utilise systemInstruction)
+    if (options.system) {
+      payload.systemInstruction = { parts: [{ text: options.system }] };
+    }
+
+    // Structured output : response_mime_type + response_schema
+    if (options.responseFormat) {
+      if (options.responseFormat.type === 'json_object') {
+        payload.generationConfig.responseMimeType = 'application/json';
+        if (options.responseFormat.schema) {
+          // Gemini utilise le format OpenAPI 3.0 (types en majuscules)
+          payload.generationConfig.responseSchema = convertToGeminiSchema(options.responseFormat.schema);
+        }
+      }
+    }
+
     const res = await fetch(`${base}/models/${model}:generateContent`, {
       method: 'POST',
       signal: AbortSignal.timeout(30000),
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
-      }),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) {
       const bodyText = await res.text();
@@ -177,15 +271,45 @@ async function callGemini(provider, apiKey, prompt, modelName, usage) {
   });
 }
 
-async function callAnthropic(provider, apiKey, prompt, modelName, usage) {
+async function callAnthropic(provider, apiKey, prompt, modelName, usage, options = {}) {
   return getBreakerForProvider(provider.name, usage).call(async () => {
     const baseUrl = provider.baseUrl || 'https://api.anthropic.com';
     const model = modelName || 'claude-3-5-haiku-20241022';
+
+    // Construire les messages : multi-turn si fourni, sinon legacy
+    // IMPORTANT: Anthropic exige que le premier message soit 'user'
+    const apiMessages = options.messages
+      ? options.messages
+      : [{ role: 'user', content: prompt }];
+
+    const body = {
+      model,
+      max_tokens: 2048,
+      messages: apiMessages,
+    };
+
+    // System prompt séparé (Anthropic le prend en paramètre séparé, pas dans messages[])
+    if (options.system) {
+      body.system = options.system;
+    }
+
+    // Structured output : output_config.format (Anthropic GA — json_schema strict)
+    if (options.responseFormat) {
+      if (options.responseFormat.type === 'json_object') {
+        body.output_config = {
+          format: {
+            type: 'json_schema',
+            schema: options.responseFormat.schema,
+          },
+        };
+      }
+    }
+
     const res = await fetch(`${baseUrl}/v1/messages`, {
       method: 'POST',
       signal: AbortSignal.timeout(25000),
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model, max_tokens: 2048, messages: [{ role: 'user', content: prompt }] }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       const bodyText = await res.text();
@@ -205,8 +329,9 @@ async function callAnthropic(provider, apiKey, prompt, modelName, usage) {
 
 // ═══════════════════════════════════════════════════════════════════════════
 // APPEL SINGLE PROVIDER (itération clés × modèles + gestion 429)
+// options: { messages, system, responseFormat, forcedModelId }
 // ═══════════════════════════════════════════════════════════════════════════
-async function callProvider(provider, prompt, usage = 'email', forcedModelId = null) {
+async function callProvider(provider, prompt, usage = 'email', forcedModelId = null, options = {}) {
   // Ignorer le provider s'il est en cooldown 429
   if (isProviderOnCooldown(provider.name)) {
     throw new Error(`Provider "${provider.label}" en cooldown 429 — skipped`);
@@ -229,26 +354,29 @@ async function callProvider(provider, prompt, usage = 'email', forcedModelId = n
     for (const modelCandidate of modelCandidates) {
       try {
         let result;
+        const callOpts = {
+          messages: options.messages || undefined,
+          system: options.system || undefined,
+          responseFormat: options.responseFormat || undefined,
+        };
         switch (provider.name) {
           case 'gemini':
-            result = await callGemini(provider, key.apiKey, prompt, modelCandidate, usage);
+            result = await callGemini(provider, key.apiKey, prompt, modelCandidate, usage, callOpts);
             break;
           case 'anthropic':
-            result = await callAnthropic(provider, key.apiKey, prompt, modelCandidate, usage);
+            result = await callAnthropic(provider, key.apiKey, prompt, modelCandidate, usage, callOpts);
             break;
           default:
-            result = await callOpenAICompat(provider, key.apiKey, modelCandidate || 'meta/llama-3.1-8b-instruct', prompt, usage);
+            result = await callOpenAICompat(provider, key.apiKey, modelCandidate || 'meta/llama-3.1-8b-instruct', prompt, usage, callOpts);
         }
         recordAiSuccess(provider.name);
-        // result est { text, usage } — propager les deux
         return result;
       } catch (err) {
         lastError = err.message;
-        // Gérer le 429 : appliquer un cooldown au provider
         if (err.status === 429) {
           const cooldownMs = err.retryAfterMs || 30000;
           setProviderCooldown(provider.name, cooldownMs);
-          throw err; // Sortir immédiatement, ne pas essayer les autres clés/modèles
+          throw err;
         }
         logger.warn(`[AI] Échec appel ${provider.label} (modèle=${modelCandidate || 'défaut'}) : ${err.message}`);
         continue;
@@ -286,7 +414,7 @@ async function callProviderWithFallback(providers, prompt, usage = 'email', opti
     throw new Error('Aucun provider IA configuré (Paramètres → Intelligence Artificielle)');
   }
 
-  const { forcedModelId } = options;
+  const { forcedModelId, messages, system, responseFormat } = options;
   const errors = [];
   for (const provider of providers) {
     // Skip les providers en cooldown 429
@@ -295,7 +423,7 @@ async function callProviderWithFallback(providers, prompt, usage = 'email', opti
       continue;
     }
     try {
-      const result = await callProvider(provider, prompt, usage, forcedModelId);
+      const result = await callProvider(provider, prompt, usage, forcedModelId, { messages, system, responseFormat });
       if (errors.length > 0) {
         logger.warn(`[AI] Fallback utilisé : "${provider.label}" a répondu après ${errors.length} échec(s)`);
       }
