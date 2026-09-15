@@ -1601,6 +1601,100 @@ router.post('/:id/reject-close', forbidTechnicianTicketEdits, requirePermission(
     return res.status(500).json({ error: err.message });
   }
 });
+// ── Suggestions de clôture rejetées — récupération ─────────────────────
+// Liste les tickets dont la dernière suggestion de clôture a été rejetée par la Hotline,
+// avec le motif et la date de rejet. Permet de visualiser et récupérer ces suggestions.
+router.get('/rejected-closures', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+
+    // Récupère les événements CLOSURE_REJECTED récents (dernier par ticket)
+    const events = await prisma.ticketEvent.findMany({
+      where: { type: 'CLOSURE_REJECTED' },
+      orderBy: { createdAt: 'desc' },
+      take: limit * 2, // on prend large pour compenser les doublons
+      include: {
+        ticket: {
+          select: {
+            id: true, title: true, content: true, status: true, priority: true,
+            category: true, closeSuggested: true, closeSuggestionCount: true,
+            sourceEmail: true, sourceName: true, createdAt: true,
+            requester: { select: { id: true, fullName: true, email: true } },
+            assignedTo: { select: { id: true, fullName: true } },
+          },
+        },
+      },
+    });
+
+    // Grouper par ticket : ne garder que le dernier rejet par ticket
+    const seen = new Set();
+    const rejected = [];
+    for (const ev of events) {
+      if (!ev.ticket || seen.has(ev.ticket.id)) continue;
+      // Exclure les tickets déjà résolus/fermés ou avec une suggestion active
+      if (['SOLVED', 'CLOSED'].includes(ev.ticket.status)) continue;
+      if (ev.ticket.closeSuggested) continue;
+      seen.add(ev.ticket.id);
+      rejected.push({
+        ...ev.ticket,
+        rejectedAt: ev.createdAt,
+        rejectionReason: ev.payload?.reason || null,
+        rejectionConfidence: ev.payload?.confidence ?? null,
+        canRecover: (ev.ticket.closeSuggestionCount || 0) < 2,
+      });
+      if (rejected.length >= limit) break;
+    }
+
+    return res.json(rejected);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Récupérer une suggestion de clôture rejetée : réinitialise le compteur et ré active
+// la suggestion pour qu'elle réapparaisse dans le Centre de Validation.
+router.post('/:id/recover-closure', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+  const id = Number(req.params.id);
+  try {
+    const existing = await prisma.ticket.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ error: 'Ticket introuvable' });
+    if (['SOLVED', 'CLOSED'].includes(existing.status)) {
+      return res.status(400).json({ error: 'Ce ticket est déjà résolu/fermé.' });
+    }
+    if (existing.closeSuggested) {
+      return res.status(400).json({ error: 'Une suggestion de clôture est déjà active sur ce ticket.' });
+    }
+    if (!existing.closeSuggestionCount || existing.closeSuggestionCount === 0) {
+      return res.status(400).json({ error: 'Aucune suggestion de clôture rejetée à récupérer sur ce ticket.' });
+    }
+
+    const ticket = await prisma.ticket.update({
+      where: { id },
+      data: {
+        closeSuggested: true,
+        closeSuggestedAt: new Date(),
+        closeSuggestionConfidence: existing.closeSuggestionConfidence,
+        closeSuggestionCount: 0, // réinitialiser pour autoriser de nouvelles suggestions
+      },
+    });
+
+    await logEvent(id, 'CLOSURE_SUGGESTED', req.user.email || 'HOTLINE', {
+      confidence: existing.closeSuggestionConfidence,
+      reason: 'manual_recovery',
+    });
+    await auditLog('TICKET_CLOSURE_RECOVERED', {
+      actor: req.user, targetType: 'Ticket', targetId: id,
+      targetLabel: ticket.title,
+      metadata: { confidence: existing.closeSuggestionConfidence },
+    });
+
+    emitTicketUpdated(ticket, { closeSuggested: true });
+    return res.json(ticket);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // Analyse proactive : scanne les tickets ouverts sans réponse utilisateur récente pour détecter
 // les résolutions probables et proposer des clôtures à la Hotline (bouton « Analyse des tickets »).
 router.post('/analyze-closures', forbidTechnicianTicketEdits, requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {

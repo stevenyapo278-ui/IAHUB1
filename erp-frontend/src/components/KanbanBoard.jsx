@@ -5,7 +5,7 @@ import { ScrollText, GripVertical, User } from 'lucide-react';
 import SlaBadge from './SlaBadge';
 import { STATUS_CONFIG } from '../constants/tickets';
 
-const KANBAN_STATUSES = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'SOLVED'];
+const KANBAN_STATUSES = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER', 'SOLVED', 'CLOSED'];
 
 export default function KanbanBoard({ tickets, canAssign, onStatusChange }) {
   const navigate = useNavigate();
@@ -34,11 +34,13 @@ export default function KanbanBoard({ tickets, canAssign, onStatusChange }) {
     OPEN: { dot: 'bg-blue-500', head: 'text-blue-600 dark:text-blue-400', count: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/25' },
     PLANNED: { dot: 'bg-purple-500', head: 'text-purple-600 dark:text-purple-400', count: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/25' },
     PENDING: { dot: 'bg-yellow-500', head: 'text-yellow-600 dark:text-yellow-400', count: 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border border-yellow-500/25' },
+    WAITING_FOR_USER: { dot: 'bg-sky-500', head: 'text-sky-600 dark:text-sky-400', count: 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/25' },
     SOLVED: { dot: 'bg-emerald-500', head: 'text-emerald-600 dark:text-emerald-400', count: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25' },
+    CLOSED: { dot: 'bg-slate-400', head: 'text-slate-500 dark:text-slate-400', count: 'bg-slate-400/10 text-slate-500 dark:text-slate-400 border border-slate-400/25' },
   };
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 min-w-0">
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3 min-w-0">
       {KANBAN_STATUSES.map((status) => {
         const color = COLORS[status];
         const colTickets = byStatus[status];

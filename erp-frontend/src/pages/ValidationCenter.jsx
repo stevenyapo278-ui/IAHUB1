@@ -77,7 +77,11 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   const [reminderDrafts, setReminderDrafts] = useState([]);
   const [pendingKnowledgeDrafts, setPendingKnowledgeDrafts] = useState([]);
   const [pendingClosures, setPendingClosures] = useState([]);
+  const [rejectedClosures, setRejectedClosures] = useState([]);
   const [closureStats, setClosureStats] = useState(null);
+  // Sous-onglet dans Clôtures IA : 'pending' | 'rejected'
+  const [closureSubTab, setClosureSubTab] = useState('pending');
+  const [recoveringClosureId, setRecoveringClosureId] = useState(null);
   // Analyse des clôtures portée par le store module (survit à la navigation et au reload)
   const analysis = useSyncExternalStore(subscribeClosureAnalysis, getClosureAnalysisState);
   const [loading, setLoading] = useState(true);
@@ -149,8 +153,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
       api.get('/dashboard/pending-ai-drafts').catch(() => ({ data: [] })),
       api.get('/knowledge/drafts').catch(() => ({ data: [] })),
       api.get('/dashboard/closure-stats?days=30').catch(() => null),
+      api.get('/tickets/rejected-closures?limit=50').catch(() => ({ data: [] })),
     ])
-      .then(([ticketsRes, closuresRes, draftsRes, knowledgeRes, closureStatsRes]) => {
+      .then(([ticketsRes, closuresRes, draftsRes, knowledgeRes, closureStatsRes, rejectedRes]) => {
         const ticketList = Array.isArray(ticketsRes.data)
           ? ticketsRes.data
           : ticketsRes.data?.items || [];
@@ -161,6 +166,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
           : closuresRes.data?.items || [];
         closureList.sort((a, b) => new Date(b.closeSuggestedAt || 0) - new Date(a.closeSuggestedAt || 0));
         setPendingClosures(closureList);
+
+        const rejectedList = Array.isArray(rejectedRes.data) ? rejectedRes.data : [];
+        setRejectedClosures(rejectedList);
 
         const draftList = Array.isArray(draftsRes.data) ? draftsRes.data : [];
         setPendingDrafts(draftList.filter((d) => d.draftKind !== 'REMINDER'));
@@ -348,6 +356,21 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
       toast.error(err.response?.data?.error || 'Erreur lors du rejet de la clôture');
     } finally {
       setRejectingClosure(false);
+    }
+  }
+
+  async function handleRecoverClosure(ticketId) {
+    setRecoveringClosureId(ticketId);
+    try {
+      await api.post(`/tickets/${ticketId}/recover-closure`);
+      playApproval();
+      toast.success('Suggestion de clôture récupérée — elle réapparaît dans la file de validation');
+      loadAllData(true);
+    } catch (err) {
+      playError();
+      toast.error(err.response?.data?.error || 'Erreur lors de la récupération');
+    } finally {
+      setRecoveringClosureId(null);
     }
   }
 
@@ -1116,8 +1139,34 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
           </div>
           )}
 
+          {/* Sous-onglets Clôtures IA */}
+          <div className="flex gap-1 p-1 rounded-2xl bg-surface-container-low border border-outline-variant/30">
+            <button
+              onClick={() => setClosureSubTab('pending')}
+              className={`flex-1 py-2 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+                closureSubTab === 'pending'
+                  ? 'bg-cyan-600 text-white shadow-md'
+                  : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
+              }`}
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              En attente ({pendingClosures.length})
+            </button>
+            <button
+              onClick={() => setClosureSubTab('rejected')}
+              className={`flex-1 py-2 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+                closureSubTab === 'rejected'
+                  ? 'bg-amber-600 text-white shadow-md'
+                  : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
+              }`}
+            >
+              <XCircle className="w-3.5 h-3.5" />
+              Rejetées ({rejectedClosures.length})
+            </button>
+          </div>
+
           {/* Résultats détaillés de la dernière analyse IA */}
-          {analysis.results && (
+          {closureSubTab === 'pending' && analysis.results && (
             <div className="space-y-4">
               {/* Résumé rapide */}
               <div className="bento-card p-6 space-y-4" style={{ borderColor: 'color-mix(in srgb, #06b6d4 20%, var(--color-border))' }}>
@@ -1281,7 +1330,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
           )}
 
           {/* Suivi de l'évolution : file actuelle + tendance 30 jours (ADMIN/HOTLINE uniquement) */}
-          {closureStats && user?.role !== 'TECHNICIAN' && (
+          {closureSubTab === 'pending' && closureStats && user?.role !== 'TECHNICIAN' && (
             <div className="bento-card p-6 space-y-5">
               <div className="flex items-center gap-2">
                 <TrendingUp className="w-4 h-4 text-cyan-500" />
@@ -1357,7 +1406,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             </div>
           )}
 
-          {loading ? (
+          {closureSubTab === 'pending' && (loading ? (
             <div className="space-y-3">
               {[1, 2, 3].map((i) => (
                 <div key={i} className="h-32 bento-card animate-pulse" />
@@ -1451,6 +1500,90 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Liste des clôtures rejetées */}
+          {closureSubTab === 'rejected' && (
+            <div className="space-y-3">
+              {rejectedClosures.length === 0 ? (
+                <div className="p-12 text-center bento-card border-dashed space-y-3">
+                  <XCircle className="w-12 h-12 text-amber-500 mx-auto" />
+                  <h3 className="text-base font-bold text-on-surface">Aucune clôture rejetée</h3>
+                  <p className="text-xs text-on-surface-variant max-w-md mx-auto">
+                    Les suggestions de clôture rejetées par la Hotline apparaissent ici pour pouvoir être récupérées.
+                  </p>
+                </div>
+              ) : (
+                rejectedClosures.map((t) => (
+                  <div
+                    key={t.id}
+                    className="bento-card p-6 flex flex-col md:flex-row md:items-center justify-between gap-6 hover-interactive transition-all"
+                    style={{ borderColor: 'color-mix(in srgb, #f59e0b 25%, var(--color-border))' }}
+                  >
+                    <div className="space-y-2 flex-1 min-w-0">
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <span className="px-2.5 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-400 text-[10px] font-extrabold border border-amber-500/30 uppercase tracking-wider">
+                          ❌ Clôture rejetée
+                        </span>
+                        {t.rejectionConfidence != null && (
+                          <span className="px-2.5 py-0.5 rounded-md bg-surface-container text-on-surface-variant text-[10px] font-bold border border-outline-variant/30">
+                            Confiance IA : {Math.round(t.rejectionConfidence * 100)}%
+                          </span>
+                        )}
+                        {t.category && (
+                          <span className="px-2.5 py-0.5 rounded-md bg-surface-container text-on-surface-variant text-[10px] font-bold border border-outline-variant/30">
+                            {t.category}
+                          </span>
+                        )}
+                        <span className="text-[11px] text-on-surface-variant font-mono">#{t.id}</span>
+                      </div>
+
+                      <h3 className="text-base font-bold text-on-surface truncate">{t.title}</h3>
+                      <p className="text-xs text-on-surface-variant line-clamp-2">{t.content}</p>
+
+                      {t.rejectionReason && (
+                        <div className="p-2 rounded-xl bg-amber-500/5 border border-amber-500/15">
+                          <p className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mb-0.5">Motif du rejet :</p>
+                          <p className="text-[11px] text-on-surface-variant italic">"{t.rejectionReason}"</p>
+                        </div>
+                      )}
+
+                      <div className="flex items-center gap-4 text-[11px] text-on-surface-variant pt-1 flex-wrap">
+                        <span className="flex items-center gap-1">
+                          <User className="w-3.5 h-3.5 text-primary" />
+                          {t.requester?.fullName || t.sourceName || t.sourceEmail || 'Demandeur anonyme'}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5 text-primary" />
+                          Rejetée le {t.rejectedAt ? new Date(t.rejectedAt).toLocaleString('fr-FR') : '—'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex items-center gap-2 shrink-0 border-t md:border-t-0 pt-4 md:pt-0 border-outline-variant/20">
+                      <button
+                        onClick={() => navigate(`/tickets/${t.id}`)}
+                        className="px-3.5 py-2 rounded-xl text-xs font-semibold border border-outline-variant/40 hover:bg-surface-container text-on-surface transition-all flex items-center gap-1"
+                      >
+                        <span>Détails</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        onClick={() => handleRecoverClosure(t.id)}
+                        disabled={recoveringClosureId === t.id || !t.canRecover}
+                        title={!t.canRecover ? 'Limite de suggestions atteinte pour ce ticket' : 'Remettre cette suggestion en file de validation'}
+                        className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-500/20 transition-all flex items-center gap-1.5 disabled:opacity-50"
+                      >
+                        <RefreshCw className={`w-4 h-4 ${recoveringClosureId === t.id ? 'animate-spin' : ''}`} />
+                        <span>{recoveringClosureId === t.id ? 'Récupération...' : 'Récupérer'}</span>
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           )}
         </div>
