@@ -1177,7 +1177,8 @@ export default function Tickets() {
     } else {
       setRefreshing(true);
     }
-    const params = { page, limit: pageSize, sortBy, sortOrder };
+    const isKanbanView = viewMode === 'kanban';
+    const params = { page: isKanbanView ? 1 : page, limit: isKanbanView ? 500 : pageSize, sortBy, sortOrder };
     if (filters.status) params.status = filters.status;
     if (filters.priority) params.priority = filters.priority;
     if (filters.source) params.source = filters.source;
@@ -1213,10 +1214,11 @@ export default function Tickets() {
         setLoading(false);
         setRefreshing(false);
       });
-  }, [page, pageSize, sortBy, sortOrder, filters, debouncedSearch]);
+  }, [page, pageSize, sortBy, sortOrder, filters, debouncedSearch, viewMode]);
 
   const refreshTicketsSilently = useCallback(function refreshTicketsSilently() {
-    const params = { page, limit: pageSize, sortBy, sortOrder };
+    const isKanbanView = viewMode === 'kanban';
+    const params = { page: isKanbanView ? 1 : page, limit: isKanbanView ? 500 : pageSize, sortBy, sortOrder };
     if (filters.status) params.status = filters.status;
     if (filters.priority) params.priority = filters.priority;
     if (filters.source) params.source = filters.source;
@@ -1232,9 +1234,9 @@ export default function Tickets() {
     if (filters.dateTo) params.dateTo = filters.dateTo;
     if (debouncedSearch) params.search = debouncedSearch;
     api.get('/tickets', { params }).then(({ data }) => { setTickets(data.items); setTotalPages(data.pages); setTotalCount(data.total); if (data.stats) setServerStats(data.stats); }).catch(() => {});
-  }, [page, pageSize, sortBy, sortOrder, filters, debouncedSearch]);
+  }, [page, pageSize, sortBy, sortOrder, filters, debouncedSearch, viewMode]);
 
-  useEffect(() => { loadTickets(); }, [filters, page, pageSize, debouncedSearch, sortBy, sortOrder, showTrash]);
+  useEffect(() => { loadTickets(); }, [filters, page, pageSize, debouncedSearch, sortBy, sortOrder, showTrash, viewMode]);
 
   // ── Stats globales (sans filtres) : toujours fixes ──
   const loadGlobalStats = useCallback(function loadGlobalStats() {
