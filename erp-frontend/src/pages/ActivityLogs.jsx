@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -90,6 +90,45 @@ export default function ActivityLogs({ embedded = false } = {}) {
   const [showFilters, setShowFilters] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
+  // Recherche live avec debounce : met à jour l'URL (donc le filtre réel) 300 ms après la
+  // dernière frappe, pour éviter de recharger la liste à chaque touche. Le ref local garde
+  // le curseur réactif dès la première frappe (le state global n'arrive qu'après debounce).
+  const [searchInput, setSearchInput] = useState(searchFilter);
+  const searchDebounceRef = useRef(null);
+  const searchInputRef = useRef(null);
+
+  // Synchronise le champ local si le filtre est changé depuis ailleurs (reset, filtres avancés)
+  useEffect(() => { setSearchInput(searchFilter); }, [searchFilter]);
+
+  function handleSearchInput(value) {
+    setSearchInput(value);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => setSearchFilter(value), 300);
+  }
+
+  function clearSearch() {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    setSearchInput('');
+    setSearchFilter('');
+    searchInputRef.current?.focus();
+  }
+
+  // Raccourci clavier « / » pour focus la recherche, Escape pour vider
+  useEffect(() => {
+    function onKey(e) {
+      const target = e.target;
+      const isTyping = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
+      if (e.key === '/' && !isTyping) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      } else if (e.key === 'Escape' && target === searchInputRef.current) {
+        clearSearch();
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   function load(page = 1) {
     setLoading(true);
     const pageSizeNum = parseInt(pageSize, 10) || 50;
@@ -116,6 +155,7 @@ export default function ActivityLogs({ embedded = false } = {}) {
   function applyFilters() { load(1); }
 
   function resetFilters() {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     setTypeFilter('');
     setCategoryFilter('');
     setTicketIdFilter('');
@@ -155,6 +195,7 @@ export default function ActivityLogs({ embedded = false } = {}) {
   }
 
   const hasActiveFilters = typeFilter || categoryFilter || ticketIdFilter || actorFilter || searchFilter || startDate || endDate || orderFilter === 'asc';
+  const hasSearchText = searchInput.length > 0;
 
   const view = (
     <PageShell
@@ -185,37 +226,51 @@ export default function ActivityLogs({ embedded = false } = {}) {
     >
 
       {/* ── Advanced Filters Strip ───────────────────────────────────────────── */}
-      {/* Barre outils inline — indispensable en mode embarqué (hub) où l'en-tête PageShell
-          est masqué : sans elle, ni la recherche ni le bouton Filtres ne seraient accessibles. */}
-      {embedded && (
-        <div className="flex items-center gap-2 mb-3 flex-wrap px-4 sm:px-6 lg:px-8 pt-4">
-          <div className="relative flex-1 min-w-[200px] max-w-md">
-            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50" />
-            <input
-              type="text"
-              placeholder="Rechercher (titre, n° ticket, acteur)..."
-              value={searchFilter}
-              onChange={(e) => setSearchFilter(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') applyFilters(); }}
-              className="input-katalyst pl-8 pr-8 py-2 text-xs w-full"
-            />
-          </div>
-          <button
-            onClick={() => setShowFilters(!showFilters)}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
-              showFilters || hasActiveFilters
-                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20'
-                : 'btn-secondary'
-            }`}
-          >
-            <Filter className="w-3.5 h-3.5" />
-            <span>Filtres</span>
-            {hasActiveFilters && (
-              <span className="w-2 h-2 rounded-full bg-blue-500 dark:bg-blue-400 animate-pulse" />
-            )}
-          </button>
+      {/* Barre outils toujours visible (page autonome ET hub embarqué) : la recherche est
+          l'action principale de cette vue, elle ne doit pas dépendre du mode d'affichage.
+          Live + debounce : plus besoin d'appuyer sur Entrée pour lancer la recherche. */}
+      <div className={`flex items-center gap-2 mb-3 flex-wrap px-4 sm:px-6 lg:px-8 ${embedded ? 'pt-4' : 'pt-1'}`}>
+        <div className="relative flex-1 min-w-[220px] max-w-xl">
+          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50" />
+          <input
+            ref={searchInputRef}
+            type="text"
+            placeholder="Rechercher un événement (titre, n° ticket, acteur, type)...   [/]"
+            value={searchInput}
+            onChange={(e) => handleSearchInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') applyFilters(); }}
+            className="input-katalyst pl-8 pr-20 py-2 text-xs w-full"
+          />
+          {hasSearchText && (
+            <button
+              onClick={clearSearch}
+              title="Effacer la recherche (Échap)"
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-lg text-on-surface-variant/60 hover:text-on-surface hover:bg-surface-container-high/60 transition-colors cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+          {!hasSearchText && (
+            <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 hidden sm:inline-block px-1.5 py-0.5 rounded-md border border-outline-variant/40 bg-surface-container-high/40 text-[10px] font-mono text-on-surface-variant/50 pointer-events-none">
+              /
+            </kbd>
+          )}
         </div>
-      )}
+        <button
+          onClick={() => setShowFilters(!showFilters)}
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+            showFilters || hasActiveFilters
+              ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20'
+              : 'btn-secondary'
+          }`}
+        >
+          <Filter className="w-3.5 h-3.5" />
+          <span>Filtres</span>
+          {hasActiveFilters && (
+            <span className="w-2 h-2 rounded-full bg-blue-500 dark:bg-blue-400 animate-pulse" />
+          )}
+        </button>
+      </div>}
       <AnimatePresence>
         {showFilters && (
           <motion.div

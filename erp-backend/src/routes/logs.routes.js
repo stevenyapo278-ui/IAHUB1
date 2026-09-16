@@ -74,9 +74,12 @@ router.get('/', async (req, res) => {
           { title: { contains: search, mode: 'insensitive' } },
         ].filter(Boolean),
       };
+      // La recherche couvre aussi le type d'événement : label métier (ex « rouvert »),
+      // code technique (ex REOPENED) — filtré via la liste blanche des catégories ci-dessus.
       where.OR = [
         { ticket: ticketFilter },
         { actor: { contains: search, mode: 'insensitive' } },
+        { type: { contains: search, mode: 'insensitive' } },
       ];
     }
 
