@@ -197,13 +197,19 @@ const SEARCH_PARAMS_SCHEMA = {
 };
 
 async function callSearchParamsAI(message) {
+  const _plog = (step, detail) => console.log(`[chatbot] callSearchParamsAI step=${step} ${detail || ''}`);
   const providers = await getActiveProviders();
-  if (providers.length === 0) return null;
+  if (providers.length === 0) { _plog('no-providers', ''); return null; }
+
+  _plog('start', `providers=${providers.length} msg="${message.substring(0, 60)}"`);
 
   let modelOptions = {};
   try {
     const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
-    if (settings?.intentAiModelId) modelOptions = { forcedModelId: settings.intentAiModelId };
+    if (settings?.intentAiModelId) {
+      modelOptions = { forcedModelId: settings.intentAiModelId };
+      _plog('model', `forcedModelId=${settings.intentAiModelId}`);
+    }
   } catch {}
 
   const systemPrompt = `Tu extrais les paramètres de recherche de tickets à partir du message de l'utilisateur.
@@ -227,12 +233,16 @@ Réponds UNIQUEMENT avec le JSON, pas de commentaire.`;
       [{ role: 'user', content: message }],
       { forcedSystem: systemPrompt, ...modelOptions }
     );
+    _plog('ai-raw', `rawLen=${(raw || '').length} raw="${(raw || '').substring(0, 200)}"`);
     // Extraire le JSON du texte brut (peut être entouré de ```json ou non)
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-    return JSON.parse(jsonMatch[0]);
+    if (!jsonMatch) { _plog('no-json', ''); return null; }
+    const parsed = JSON.parse(jsonMatch[0]);
+    _plog('parsed', JSON.stringify(parsed));
+    return parsed;
   } catch (err) {
     console.error('[chatbot] Erreur searchParams AI:', err.message);
+    _plog('error', err.message);
     return null;
   }
 }
@@ -324,14 +334,19 @@ function buildSearchQuery(params, user) {
 async function searchTickets(query, limit = 20, user = null, period = null) {
   if (!query || !query.trim()) return { tickets: [], totalCount: 0 };
 
+  const _slog = (step, detail) => console.log(`[chatbot] searchTickets step=${step} ${detail || ''}`);
+  _slog('start', `query="${query.substring(0, 80)}" limit=${limit} userId=${user?.sub} period=${period}`);
+
   try {
     // 1. Essai LLM pour extraire les paramètres structurés
     let params = null;
     try {
+      _slog('llm-start', 'calling callSearchParamsAI...');
       params = await Promise.race([
         callSearchParamsAI(query),
         new Promise((_, reject) => setTimeout(() => reject(new Error('searchParams timeout')), 15000)),
       ]);
+      _slog('llm-done', `params=${JSON.stringify(params || {})}`);
     } catch (e) {
       console.warn('[chatbot] searchParams LLM échoué, fallback regex:', e.message);
     }
@@ -339,13 +354,16 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
     // 2. Fallback regex si le LLM échoue
     if (!params || Object.keys(params).length === 0) {
       params = extractSearchParamsRegex(query);
+      _slog('regex-fallback', `params=${JSON.stringify(params || {})}`);
     }
 
     if (!params || Object.keys(params).length === 0) {
+      _slog('no-params', 'returning empty');
       return { tickets: [], totalCount: 0 };
     }
 
     const where = buildSearchQuery(params, user);
+    _stepLog('buildQuery', `whereKeys=${Object.keys(where).join(',')}`);
 
     // Filtrage temporel optionnel (depuis l'extérieur)
     if (period) {
@@ -370,9 +388,10 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
       prisma.ticket.count({ where }),
     ]);
 
+    _slog('db-done', `tickets=${tickets.length} totalCount=${totalCount} limit=${effectiveLimit}`);
     return { tickets, totalCount };
   } catch (err) {
-    console.error('[chatbot] Erreur recherche tickets:', err.message);
+    console.error('[chatbot] Erreur recherche tickets:', err.message, err.stack);
     return { tickets: [], totalCount: 0 };
   }
 }
@@ -1086,10 +1105,29 @@ function isAdminOrAbove(user) {
 
 async function handleMessage(message, conversationHistory = [], user = null, pendingTicketData = null) {
   const userId = user?.sub || null;
-  const { intent, params } = await detectIntent(message);
+  const _stepLog = (step, detail) => console.log(`[chatbot] handleMessage step=${step} ${detail || ''}`);
+
+  _stepLog('start', `msg="${message.substring(0, 80)}" userId=${userId} historyLen=${conversationHistory.length}`);
+  let intent, params;
+  try {
+    const intentResult = await detectIntent(message);
+    intent = intentResult.intent;
+    params = intentResult.params;
+    _stepLog('intent', `intent=${intent} params=${JSON.stringify(params || {})}`);
+  } catch (intentErr) {
+    _stepLog('intent-error', intentErr.message);
+    throw intentErr;
+  }
 
   // Contexte utilisateur
-  const userContext = await getUserContext(userId);
+  let userContext;
+  try {
+    userContext = await getUserContext(userId);
+    _stepLog('userContext', `len=${(userContext || '').length}`);
+  } catch (ucErr) {
+    _stepLog('userContext-error', ucErr.message);
+    userContext = '';
+  }
 
   // ── Vérification des permissions pour les intents sensibles ────────
   if (intent === 'change_status' && !isStaff(user)) {
@@ -1125,9 +1163,12 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
 
   // Recherche simultanée : RAG + Tickets + (selon intent) inventaire/users/locations
   // Pour les intents déterministes (report, analytics, team_report), pas besoin de searchTickets
+  const isDet = DETERMINISTIC_INTENTS.has(intent);
+  _stepLog('searches', `deterministic=${isDet} intent=${intent}`);
+
   const searches = [
     searchKnowledge(message, 8),
-    DETERMINISTIC_INTENTS.has(intent)
+    isDet
       ? Promise.resolve({ tickets: [], totalCount: 0 })
       : searchTickets(message, 20, user, params?.period),
   ];
@@ -1142,6 +1183,8 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   else searches.push(Promise.resolve([]));
 
   const [knowledgeChunks, ticketsResult, assets, users, locations] = await Promise.all(searches);
+  _stepLog('searches-done', `knowledge=${knowledgeChunks.length} tickets=${ticketsResult.tickets?.length || ticketsResult.length || 0} total=${ticketsResult.totalCount ?? '?'} assets=${assets.length} users=${users.length} locations=${locations.length}`);
+
   const matchingTickets = ticketsResult.tickets || ticketsResult; // compat: array ou { tickets, totalCount }
   const totalTicketCount = ticketsResult.totalCount ?? matchingTickets.length;
 
@@ -1220,6 +1263,8 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   let action = null;
   let widget = null;
   let pendingTicket = null;
+
+  _stepLog('pre-switch', `intent=${intent} contextParts=${contextParts.length}`);
 
   switch (intent) {
     case 'analytics': {
@@ -1652,6 +1697,8 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   let citedTicketIds = [];
   let citedKnowledgeIds = [];
 
+  _stepLog('pre-llm', `isAction=${isActionIntent} isDet=${isDeterministic} contextLen=${userMessageWithCtx.length}`);
+
   if (isActionIntent || isDeterministic) {
     // ═══ INTENTS DÉTERMINISTES : la réponse est déjà dans contextParts ═══
     // report, analytics, team_report, help → zéro appel LLM, données exactes.
@@ -1685,6 +1732,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
       const parsed = parseStructuredResponse(raw);
       if (parsed && parsed.reply) {
         reply = cleanAiReply(parsed.reply);
+        _stepLog('llm-structured', `replyLen=${reply.length} citedTickets=${parsed.citedTicketIds?.length || 0} citedKB=${parsed.citedKnowledgeIds?.length || 0}`);
         // Validation post-appel des IDs cités — filtre les fantômes
         const validated = await validateCitedIds(parsed.citedTicketIds, parsed.citedKnowledgeIds, intent);
         citedTicketIds = validated.ticketIds;
@@ -1742,6 +1790,8 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     // Vérification croisée (logs uniquement)
     crossVerifyWithContext(reply, matchingTickets, intent, totalTicketCount);
   }
+
+  _stepLog('done', `intent=${intent} replyLen=${(reply || '').length} action=${action?.type || 'null'} citedTickets=${citedTicketIds.length}`);
 
   return {
     reply,

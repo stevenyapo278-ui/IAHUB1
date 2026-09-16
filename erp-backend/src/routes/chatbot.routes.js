@@ -326,7 +326,15 @@ router.post('/', authenticate, chatLimiter, dailyQuotaCheck, async (req, res) =>
     try {
       result = await handleMessage(message.trim(), history, req.user, conv?.pendingTicketData || null);
     } catch (handlerErr) {
-      console.error('[chatbot] Erreur handleMessage:', handlerErr.stack || handlerErr);
+      console.error('[chatbot] ═══ ERREUR HANDLEMESSAGE ═══');
+      console.error('[chatbot] Message:', message.trim().substring(0, 200));
+      console.error('[chatbot] User:', req.user?.sub, req.user?.email);
+      console.error('[chatbot] ConversationId:', convId);
+      console.error('[chatbot] History length:', history?.length || 0);
+      console.error('[chatbot] Error name:', handlerErr?.name);
+      console.error('[chatbot] Error message:', handlerErr?.message);
+      console.error('[chatbot] Error stack:', handlerErr?.stack);
+      console.error('[chatbot] ═══ FIN ERREUR HANDLEMESSAGE ═══');
       result = {
         reply: "Désolé, je n'ai pas pu traiter cette demande (erreur interne sur les données). Réessayez ou reformulez votre question.",
         intent: 'general',
