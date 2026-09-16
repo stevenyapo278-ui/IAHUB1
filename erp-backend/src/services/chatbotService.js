@@ -2008,7 +2008,7 @@ async function verifyResponseFacts(replyText, contextParts, intent, matchingTick
     /(?:il y a|il existe)\s+(\d+)\s*ticket/gi,
   ];
 
-  const actualCount = matchingTickets && matchingTickets.length > 0 ? totalTicketCount : null;
+  const actualCount = matchingTickets && matchingTickets.length > 0 ? matchingTickets.length : null;
   if (actualCount !== null) {
     for (const regex of countPatterns) {
       while ((match = regex.exec(replyText)) !== null) {
