@@ -186,7 +186,7 @@ Réponds UNIQUEMENT avec le JSON, pas de commentaire.`;
   try {
     const raw = await callAI(
       [{ role: 'user', content: message }],
-      { system: systemPrompt, responseFormat: { type: 'json_schema', schema: SEARCH_PARAMS_SCHEMA }, ...modelOptions }
+      { forcedSystem: systemPrompt, responseFormat: { type: 'json_schema', schema: SEARCH_PARAMS_SCHEMA }, ...modelOptions }
     );
     const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
     return JSON.parse(cleaned);
