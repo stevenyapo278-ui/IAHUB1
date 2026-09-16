@@ -579,7 +579,7 @@ async function getUserContext(userId) {
 const STATUS_LABEL = { NEW: 'Nouveau', OPEN: 'Ouvert', PENDING: 'En attente', SOLVED: 'Résolu', CLOSED: 'Fermé' };
 const PRIORITY_LABEL = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' };
 
-async function generateReport(period = null) {
+async function generateReport(period = null, fullList = false) {
   const where = { status: { notIn: ['CLOSED', 'SOLVED'] } };
 
   // Filtrage temporel optionnel
@@ -594,8 +594,13 @@ async function generateReport(period = null) {
   const [tickets, totalAll, resolvedCount] = await Promise.all([
     prisma.ticket.findMany({
       where,
-      include: { assignedTo: { select: { fullName: true } }, team: { select: { name: true } } },
+      include: {
+        assignedTo: { select: { fullName: true } },
+        team: { select: { name: true } },
+        requester: { select: { fullName: true } },
+      },
       orderBy: [{ priority: 'asc' }, { createdAt: 'desc' }],
+      ...(fullList ? {} : { take: 50 }),
     }),
     prisma.ticket.count({ where: Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {} }),
     prisma.ticket.count({
@@ -626,9 +631,21 @@ async function generateReport(period = null) {
     for (const [s, c] of Object.entries(byStatus)) report += `• ${STATUS_LABEL[s] || s} : ${c}\n`;
     report += `\n**Par priorité (ouverts) :**\n`;
     for (const [p, c] of Object.entries(byPriority)) report += `• ${PRIORITY_LABEL[p] || p} : ${c}\n`;
-    report += `\n**5 tickets les plus récents :**\n`;
-    for (const t of tickets.slice(0, 5)) {
-      report += `• **#${t.id}** ${t.title} — ${PRIORITY_LABEL[t.priority] || t.priority} — ${t.assignedTo?.fullName || 'Non assigné'}\n`;
+
+    if (fullList) {
+      report += `\n**Tous les tickets ouverts (${tickets.length}) :**\n`;
+      report += `| # | Titre | Statut | Priorité | Assigné | Lieu |\n|---|-------|--------|----------|---------|------|\n`;
+      for (const t of tickets) {
+        report += `| ${t.id} | ${(t.title || '').substring(0, 50)} | ${STATUS_LABEL[t.status] || t.status} | ${PRIORITY_LABEL[t.priority] || t.priority} | ${t.assignedTo?.fullName || '-'} | ${t.locationName || '-'} |\n`;
+      }
+    } else {
+      report += `\n**5 tickets les plus récents :**\n`;
+      for (const t of tickets.slice(0, 5)) {
+        report += `• **#${t.id}** ${t.title} — ${PRIORITY_LABEL[t.priority] || t.priority} — ${t.assignedTo?.fullName || 'Non assigné'}\n`;
+      }
+      if (tickets.length > 5) {
+        report += `\n*...et ${tickets.length - 5} autres. Demandez "liste tous les tickets ouverts" pour voir la liste complète.*\n`;
+      }
     }
   }
   return report;
@@ -1307,7 +1324,8 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
         contextParts.push(`**Accès refusé :** Le rapport des tickets n'est accessible qu'aux équipes support.`);
         break;
       }
-      const report = await generateReport(params?.period || null);
+      const wantsFull = /\b(tous?|toute?|liste|liste[s]?|montre|affiche|donne[- ]?moi)\b/i.test(message);
+      const report = await generateReport(params?.period || null, wantsFull);
       contextParts.push(`**Rapport :**\n${report}`);
       break;
     }
@@ -1398,7 +1416,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   const intentInstructions = {
     analytics: "Réponds uniquement avec un tableau Markdown propre suivi d'une seule phrase de conclusion. Pas d'introduction.",
     team_report: "Utilise un tableau avec les colonnes : Équipe | Ouverts | En cours | Résolus. Maximum 1 phrase après.",
-    report: "Maximum 5 lignes + un tableau si nécessaire. Sois extrêmement concis.",
+    report: "Transmets le rapport tel quel. Si c'est une liste complète, affiche le tableau entièrement sans tronquer.",
     summary: "Résumé en 4-6 lignes maximum. Pas de tableau.",
     general: "Réponse courte et naturelle (3-6 lignes).",
     search_tickets: "Liste les tickets trouvés avec ID, titre, statut et lieu. Si beaucoup de résultats, utilise un tableau Markdown. Ne limite pas artificiellement le nombre.",
