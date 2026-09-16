@@ -186,10 +186,12 @@ Réponds UNIQUEMENT avec le JSON, pas de commentaire.`;
   try {
     const raw = await callAI(
       [{ role: 'user', content: message }],
-      { forcedSystem: systemPrompt, responseFormat: { type: 'json_schema', schema: SEARCH_PARAMS_SCHEMA }, ...modelOptions }
+      { forcedSystem: systemPrompt, ...modelOptions }
     );
-    const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    return JSON.parse(cleaned);
+    // Extraire le JSON du texte brut (peut être entouré de ```json ou non)
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+    return JSON.parse(jsonMatch[0]);
   } catch (err) {
     console.error('[chatbot] Erreur searchParams AI:', err.message);
     return null;
