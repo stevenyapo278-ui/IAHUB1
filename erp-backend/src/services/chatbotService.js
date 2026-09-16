@@ -993,10 +993,14 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     };
   }
 
+  // Intents dont la réponse est 100% déterministe (pas besoin d'appel LLM pour la réponse)
+  const DETERMINISTIC_INTENTS = new Set(['report', 'analytics', 'team_report', 'help']);
+
   // Recherche simultanée : RAG + Tickets + (selon intent) inventaire/users/locations
+  // Pour les intents déterministes (report, analytics, team_report), pas besoin de searchTickets
   const searches = [
     searchKnowledge(message, 8),
-    searchTickets(message, 20, user, params?.period),
+    DETERMINISTIC_INTENTS.has(intent) ? Promise.resolve([]) : searchTickets(message, 20, user, params?.period),
   ];
 
   if (intent === 'search_inventory') searches.push(searchAssets(params?.keyword || message, 5));
@@ -1489,11 +1493,6 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   const ACTION_INTENTS = new Set([
     'create_ticket', 'create_ticket_for', 'confirm_create_ticket',
     'change_status', 'assign_ticket', 'escalate',
-  ]);
-
-  // Intents dont la réponse est 100% déterministe (pas besoin d'appel LLM)
-  const DETERMINISTIC_INTENTS = new Set([
-    'report', 'analytics', 'team_report', 'help',
   ]);
 
   const isActionIntent = ACTION_INTENTS.has(intent);
