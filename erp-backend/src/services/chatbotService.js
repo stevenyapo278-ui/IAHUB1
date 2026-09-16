@@ -1126,7 +1126,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
       }
     }
     contextParts.push(ticketContext);
-  } else {
+  } else if (!DETERMINISTIC_INTENTS.has(intent)) {
     contextParts.push("**Aucun ticket trouvé dans la base de données** pour cette recherche. Ne pas inventer de tickets — indiquer simplement qu'aucun résultat n'a été trouvé.");
   }
 
