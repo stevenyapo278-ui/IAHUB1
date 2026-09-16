@@ -156,6 +156,13 @@ async function approveTicket(id, { approvedById, approvedByEmail = 'HOTLINE', ap
       .catch((err) => console.error('[senderReputation] Échec enregistrement approbation:', err.message));
   }
 
+  // 3. Notification "Votre demande a bien été enregistrée" — envoyée APRÈS approbation
+  // (les tickets PENDING ne reçoivent pas cet email à la création)
+  const { sendTicketCreationNotification } = require('./emailSender');
+  sendTicketCreationNotification(ticket).catch((err) =>
+    console.error(`[ticketApproval] Notification création ticket ${id} échouée:`, err.message)
+  );
+
   return ticket;
 }
 

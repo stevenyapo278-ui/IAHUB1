@@ -1056,9 +1056,12 @@ async function createTicketFromChat(title, description, priority, userId) {
   });
   emitTicketCreated(ticket);
   // Notification aux boîtes configurées dans les Paramètres (best-effort, non bloquant)
-  sendTicketCreationNotification(ticket).catch((err) =>
-    console.error('[chatbot] Notification création ticket échouée:', err.message)
-  );
+  // Uniquement si le ticket est approuvé — sinon on attend l'approbation (ticketApproval.js)
+  if (ticket.approvalStatus === 'APPROVED') {
+    sendTicketCreationNotification(ticket).catch((err) =>
+      console.error('[chatbot] Notification création ticket échouée:', err.message)
+    );
+  }
   return ticket;
 }
 
@@ -1078,9 +1081,11 @@ async function escalateToTechnician(message, userId) {
     },
   });
   emitTicketCreated(ticket);
-  sendTicketCreationNotification(ticket).catch((err) =>
-    console.error('[chatbot] Notification escalade échouée:', err.message)
-  );
+  if (ticket.approvalStatus === 'APPROVED') {
+    sendTicketCreationNotification(ticket).catch((err) =>
+      console.error('[chatbot] Notification escalade échouée:', err.message)
+    );
+  }
   return ticket;
 }
 

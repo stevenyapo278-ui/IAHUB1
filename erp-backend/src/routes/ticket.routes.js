@@ -1160,9 +1160,12 @@ router.post(
       }
 
       // Notification email aux boîtes configurées dans les Paramètres (best-effort, non bloquant)
-      sendTicketCreationNotification(finalTicket).catch((err) =>
-        console.error('[ticket.routes] Notification création échouée:', err.message)
-      );
+      // Uniquement si le ticket est approuvé — sinon on attend l'approbation (ticketApproval.js)
+      if (finalTicket.approvalStatus === 'APPROVED') {
+        sendTicketCreationNotification(finalTicket).catch((err) =>
+          console.error('[ticket.routes] Notification création échouée:', err.message)
+        );
+      }
     }
 
     return res.status(201).json(finalTicket);
