@@ -1705,6 +1705,17 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
 
   _stepLog('pre-llm', `isAction=${isActionIntent} isDet=${isDeterministic} contextLen=${userMessageWithCtx.length}`);
 
+  const responseSchema = {
+    type: 'object',
+    properties: {
+      reply: { type: 'string', description: 'Réponse en français, concise, sans emojis ni titres markdown' },
+      citedTicketIds: { type: 'array', items: { type: 'integer' }, description: 'IDs de tickets cités dans la réponse (uniquement ceux du contexte)' },
+      citedKnowledgeIds: { type: 'array', items: { type: 'string' }, description: 'IDs des documents KB cités (uniquement ceux du contexte)' },
+    },
+    required: ['reply', 'citedTicketIds', 'citedKnowledgeIds'],
+    additionalProperties: false,
+  };
+
   if (isActionIntent || isDeterministic) {
     // ═══ INTENTS DÉTERMINISTES : la réponse est déjà dans contextParts ═══
     // report, analytics, team_report, help → zéro appel LLM, données exactes.
@@ -1713,16 +1724,6 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     reply = allText.replace(/\*\*/g, '').trim();
   } else {
     // ═══ INTENTS INFORMATION : structured output pour reply + citations ═══
-    const responseSchema = {
-      type: 'object',
-      properties: {
-        reply: { type: 'string', description: 'Réponse en français, concise, sans emojis ni titres markdown' },
-        citedTicketIds: { type: 'array', items: { type: 'integer' }, description: 'IDs de tickets cités dans la réponse (uniquement ceux du contexte)' },
-        citedKnowledgeIds: { type: 'array', items: { type: 'string' }, description: 'IDs des documents KB cités (uniquement ceux du contexte)' },
-      },
-      required: ['reply', 'citedTicketIds', 'citedKnowledgeIds'],
-      additionalProperties: false,
-    };
 
     try {
       const raw = await callAI(
