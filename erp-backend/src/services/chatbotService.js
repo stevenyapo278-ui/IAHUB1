@@ -1491,7 +1491,13 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     'change_status', 'assign_ticket', 'escalate',
   ]);
 
+  // Intents dont la réponse est 100% déterministe (pas besoin d'appel LLM)
+  const DETERMINISTIC_INTENTS = new Set([
+    'report', 'analytics', 'team_report', 'help',
+  ]);
+
   const isActionIntent = ACTION_INTENTS.has(intent);
+  const isDeterministic = DETERMINISTIC_INTENTS.has(intent);
 
   // ── Construire le contexte système ──
   const intentHint = intentInstructions[intent]
@@ -1516,25 +1522,12 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   let citedTicketIds = [];
   let citedKnowledgeIds = [];
 
-  if (isActionIntent) {
-    // ═══ INTENTS ACTION : la mutation est déjà exécutée par le switch/case ═══
-    // On extraie la confirmation directement du résultat (contextParts)
-    // Zéro appel LLM supplémentaire — la réponse est déterministe et fiable.
-    const confirmPatterns = [
-      { match: /\*\*Statut modifié\*\*/, template: (m) => m.replace(/\*\*/g, '') },
-      { match: /\*\*Ticket créé\*\*/, template: (m) => m.replace(/\*\*/g, '') },
-      { match: /\*\*Ticket assigné\*\*/, template: (m) => m.replace(/\*\*/g, '') },
-      { match: /\*\*Escalade\*\*/, template: (m) => m.replace(/\*\*/g, '') },
-      { match: /Erreur/i, template: (m) => m.replace(/\*\*/g, '') },
-    ];
-
-    const confirmMsg = contextParts.find(p => confirmPatterns.some(cp => cp.match.test(p)));
-    if (confirmMsg) {
-      const pattern = confirmPatterns.find(cp => cp.match.test(confirmMsg));
-      reply = pattern ? pattern.template(confirmMsg) : confirmMsg.replace(/\*\*/g, '');
-    } else {
-      reply = generateActionReply(intent, message);
-    }
+  if (isActionIntent || isDeterministic) {
+    // ═══ INTENTS DÉTERMINISTES : la réponse est déjà dans contextParts ═══
+    // report, analytics, team_report, help → zéro appel LLM, données exactes.
+    // action intents → mutation déjà exécutée par le switch/case.
+    const allText = contextParts.join('\n\n');
+    reply = allText.replace(/\*\*/g, '').trim();
   } else {
     // ═══ INTENTS INFORMATION : structured output pour reply + citations ═══
     const responseSchema = {
