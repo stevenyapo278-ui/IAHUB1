@@ -363,7 +363,7 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
     }
 
     const where = buildSearchQuery(params, user);
-    _stepLog('buildQuery', `whereKeys=${Object.keys(where).join(',')}`);
+    _slog('buildQuery', `whereKeys=${Object.keys(where).join(',')}`);
 
     // Filtrage temporel optionnel (depuis l'extérieur)
     if (period) {
