@@ -373,18 +373,24 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
       params = regexParams;
       _slog('regex-fallback', `params=${JSON.stringify(params || {})}`);
     } else {
-      // Toujours prioriser le regex pour les statuts si les deux ont des statuts
-      // (le LLM peut omettre PLANNED, le regex est la source de vérité pour les statuts)
-      if (regexParams && regexParams.statuses && params.statuses) {
-        const missingPlanned = regexParams.statuses.includes('PLANNED') && !params.statuses.includes('PLANNED');
-        if (missingPlanned) {
-          _slog('regex-add-planned', `llm=${JSON.stringify(params.statuses)} → adding PLANNED`);
+      // Quand le regex détecte des statuts, prioriser le regex pour les statuts
+      // et supprimer les keyword qui sont juste des mots de statut (ex: "ouverts")
+      if (regexParams && regexParams.statuses) {
+        if (params.statuses) {
+          const missingPlanned = regexParams.statuses.includes('PLANNED') && !params.statuses.includes('PLANNED');
+          if (missingPlanned) {
+            _slog('regex-add-planned', `llm=${JSON.stringify(params.statuses)} → adding PLANNED`);
+            params.statuses = regexParams.statuses;
+          }
+        } else {
+          _slog('regex-override-statuses', `llm=${JSON.stringify(params)} regex statuses=${JSON.stringify(regexParams.statuses)}`);
           params.statuses = regexParams.statuses;
         }
-      } else if (regexParams && regexParams.statuses && !params.statuses) {
-        // Le LLM n'a pas détecté de statuts mais l'regex oui → priorité au regex pour les statuts
-        _slog('regex-override-statuses', `llm=${JSON.stringify(params)} regex statuses=${JSON.stringify(regexParams.statuses)}`);
-        params.statuses = regexParams.statuses;
+        // Supprimer le keyword LLM si c'est un mot de statut (pour éviter filtre titre parasite)
+        if (params.keyword && /^(ouvert|ouverts?|nouveau|nouveaux?|attente|résolu|resolu|fermé|ferme|planned)$/i.test(params.keyword)) {
+          _slog('regex-remove-keyword', `removed keyword="${params.keyword}" (status word)`);
+          delete params.keyword;
+        }
       }
       if (regexParams && regexParams.wantFullList) params.wantFullList = true;
     }
