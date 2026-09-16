@@ -615,10 +615,10 @@ model SystemSettings {
   enableAutoCreateSkills   Boolean @default(false) // crée automatiquement les compétences suggérées par l'IA lors de l'analyse email si elles n'existent pas encore
 
   // ── Contrôle global de l'IA (Paramètres > Intelligence Artificielle) ──────
-  aiEnabled                Boolean @default(true)  // toggle global : désactive tous les appels IA (pipeline, chatbot, scanner, etc.)
-  aiDailyTokenBudget       Int     @default(100000) // budget journalier en tokens (0 = illimité)
-  aiTokenAlertThreshold    Float   @default(0.8)    // seuil d'alerte (0.8 = alerte à 80% du budget)
-  aiTokenAlertRecipients   String[] @default([])    // adresses email pour les alertes de quota
+  aiEnabled              Boolean  @default(true) // toggle global : désactive tous les appels IA (pipeline, chatbot, scanner, etc.)
+  aiDailyTokenBudget     Int      @default(100000) // budget journalier en tokens (0 = illimité)
+  aiTokenAlertThreshold  Float    @default(0.8) // seuil d'alerte (0.8 = alerte à 80% du budget)
+  aiTokenAlertRecipients String[] @default([]) // adresses email pour les alertes de quota
 
   // URLs absolues du serveur, utilisées pour générer des liens/ressources dans les emails sortants
   // (logo de signature, lien d'approbation de brouillon, lien de réinitialisation de mot de passe).
@@ -660,7 +660,7 @@ model SystemSettings {
 
   // Adresse email de notification en cas d'échec de traitement d'un email entrant.
   // Laisser vide = pas d'email de notification (les notifications in-app restent actives).
-  emailFailureNotificationEmail String?
+  emailFailureNotificationEmail      String?
   emailFailureNotificationRecipients String[] @default([])
 
   // Signature HTML insérée en bas de tous les emails automatiques (accusé de réception, relance,
@@ -677,9 +677,9 @@ model SystemSettings {
   dailySummaryLastSentDate String? // date "YYYY-MM-DD" du dernier envoi, pour ne déclencher qu'une fois par jour
 
   // Récapitulatif hebdomadaire des tickets ouverts pour les observateurs (Paramètres > Automatisation).
-  observerSummaryEnabled      Boolean  @default(false)
-  observerSummaryDay          Int      @default(1) // 0=Dimanche, 1=Lundi, ..., 6=Samedi
-  observerSummaryTime         String   @default("09:00") // heure locale au format "HH:mm"
+  observerSummaryEnabled      Boolean @default(false)
+  observerSummaryDay          Int     @default(1) // 0=Dimanche, 1=Lundi, ..., 6=Samedi
+  observerSummaryTime         String  @default("09:00") // heure locale au format "HH:mm"
   observerSummaryLastSentDate String? // date "YYYY-MM-DD" du dernier envoi
 
   // Notification email envoyée aux boîtes configurées à chaque création de ticket par un demandeur
@@ -729,8 +729,13 @@ model SystemSettings {
 
   // ── Assistant vocal (Paramètres > IA) ──────────────────────────────────────
   // ID du modèle dédié à l'assistant vocal (optionnel). Si null, utilise le modèle par défaut.
-  voiceAiModelId Int?    @unique
-  voiceAiModel   AiModel? @relation(fields: [voiceAiModelId], references: [id], onDelete: SetNull)
+  voiceAiModelId Int?     @unique
+  voiceAiModel   AiModel? @relation("VoiceAiModel", fields: [voiceAiModelId], references: [id], onDelete: SetNull)
+
+  // ── Classification d'intent (Paramètres > IA) ──────────────────────────────
+  // ID du modèle léger dédié à la classification d'intent (optionnel). Si null, utilise le modèle par défaut.
+  intentAiModelId Int?     @unique
+  intentAiModel   AiModel? @relation("IntentAiModel", fields: [intentAiModelId], references: [id], onDelete: SetNull)
 
   // ── Apparence de la page de connexion (configurable par SUPERADMIN) ─────────
   // loginThemeMode: "daily_rotation" = rotation déterministe (jour de l'année) sur les variantes activées,
@@ -795,7 +800,10 @@ model AiModel {
   keys AiKey[]
 
   // Lien inverse : modèle utilisé pour l'assistant vocal
-  voiceSetting SystemSettings?
+  voiceSetting SystemSettings? @relation("VoiceAiModel")
+
+  // Lien inverse : modèle utilisé pour la classification d'intent
+  intentSetting SystemSettings? @relation("IntentAiModel")
 
   @@unique([providerId, name])
 }
@@ -1612,13 +1620,13 @@ model DashboardWidget {
 // Suivi de consommation de tokens IA — chaque appel API est loggé.
 // Permet le monitoring des quotas et l'alerte en cas de dépassement de budget.
 model AiUsageLog {
-  id              Int      @id @default(autoincrement())
-  provider        String   // nom du provider (gemini, openai, anthropic, etc.)
-  usage           String   // contexte d'utilisation (email, chatbot, background, vision)
-  promptTokens    Int      @default(0)
-  completionTokens Int     @default(0)
-  totalTokens     Int      @default(0)
-  createdAt       DateTime @default(now())
+  id               Int      @id @default(autoincrement())
+  provider         String // nom du provider (gemini, openai, anthropic, etc.)
+  usage            String // contexte d'utilisation (email, chatbot, background, vision)
+  promptTokens     Int      @default(0)
+  completionTokens Int      @default(0)
+  totalTokens      Int      @default(0)
+  createdAt        DateTime @default(now())
 
   @@index([provider])
   @@index([createdAt])

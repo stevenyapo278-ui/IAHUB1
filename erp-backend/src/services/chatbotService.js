@@ -423,10 +423,19 @@ async function callIntentAI(message) {
   const providers = await getActiveProviders();
   if (providers.length === 0) return null;
 
+  // Modèle léger dédié à la classification (optionnel)
+  let intentModelOptions = {};
+  try {
+    const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+    if (settings?.intentAiModelId) {
+      intentModelOptions = { forcedModelId: settings.intentAiModelId };
+    }
+  } catch {}
+
   try {
     const raw = await callAI(
       [{ role: 'user', content: `${INTENT_PROMPT}\n\nUser: "${message}"` }],
-      { responseFormat: { type: 'json_schema', schema: INTENT_SCHEMA } }
+      { responseFormat: { type: 'json_schema', schema: INTENT_SCHEMA }, ...intentModelOptions }
     );
     const parsed = parseStructuredResponse(raw);
     if (parsed?.intent) return parsed;
@@ -574,15 +583,22 @@ function detectIntentRegex(message) {
 }
 
 async function detectIntent(message) {
+  // 1. Regex d'abord — instantané, pas d'appel LLM
+  const regexResult = detectIntentRegex(message);
+  if (regexResult.intent !== 'general') {
+    return regexResult;
+  }
+
+  // 2. LLM en fallback uniquement pour les cas ambigus (regex → "general")
   const aiResult = await callIntentAI(message);
   if (aiResult?.intent) {
-    // Enrichir avec la période extraite du texte (l'IA ne la détecte pas toujours)
     const textPeriod = parsePeriodFromText(message);
     if (textPeriod && !aiResult.params) aiResult.params = {};
     if (textPeriod && !aiResult.params.period) aiResult.params.period = textPeriod;
     return aiResult;
   }
-  return detectIntentRegex(message);
+
+  return regexResult;
 }
 
 // ── Contexte utilisateur ──────────────────────────────────────────────
