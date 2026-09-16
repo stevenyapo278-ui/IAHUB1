@@ -45,6 +45,7 @@ RÈGLES ABSOLUES SUR LES DONNÉES :
 8. N'invente JAMAIS de tickets, numéros, statuts ou données. Utilise UNIQUEMENT les informations présentes dans le contexte fourni.
 9. Si aucun ticket n'est trouvé dans le contexte, indique "Aucun ticket trouvé". Ne crée pas de numéros inventés.
 10. Quand on te demande une liste, vérifie que chaque ticket mentionné existe dans le contexte. Si la liste est vide, dis-le explicitement.
+11. Pour les comptages ("X tickets"), utilise EXACTEMENT le nombre indiqué dans le contexte après "Tickets pertinents trouvés (X)". Ne JAMAIS inventer un nombre.
 
 RÈGLES DE CITATION :
 11. citedTicketIds : UNIQUEMENT les IDs du contexte "Tickets pertinents trouvés".
@@ -193,7 +194,7 @@ const SEARCH_PARAMS_SCHEMA = {
     statuses: {
       type: 'array',
       items: { type: 'string', enum: ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER', 'SOLVED', 'CLOSED'] },
-      description: 'Statuts recherchés. "ouverts" = [NEW,OPEN,PENDING,WAITING_FOR_USER]; "ouvert" = [OPEN]; "en attente" = [PENDING]; "résolus" = [SOLVED]; "fermés" = [CLOSED]',
+      description: 'Statuts recherchés. "ouverts" = [NEW,OPEN,PLANNED,PENDING,WAITING_FOR_USER]; "ouvert" = [OPEN]; "en attente" = [PENDING]; "résolus" = [SOLVED]; "fermés" = [CLOSED]',
     },
     priorities: {
       type: 'array',
@@ -387,8 +388,13 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
           params.statuses = regexParams.statuses;
         }
         // Supprimer le keyword LLM si c'est un mot de statut (pour éviter filtre titre parasite)
-        if (params.keyword && /^(ouvert|ouverts?|nouveau|nouveaux?|attente|résolu|resolu|fermé|ferme|planned)$/i.test(params.keyword)) {
-          _slog('regex-remove-keyword', `removed keyword="${params.keyword}" (status word)`);
+        if (params.keyword && /^(ouvert|ouverts?|nouveau|nouveaux?|attente|résolu|resolu|fermé|ferme|planned|tickets?|ticket)$/i.test(params.keyword)) {
+          _slog('regex-remove-keyword', `removed keyword="${params.keyword}" (status/generic word)`);
+          delete params.keyword;
+        }
+        // Quand le regex détecte "ouverts" (pluriel = liste complète), supprimer tout keyword LLM parasite
+        if (regexParams.statuses && regexParams.statuses.length >= 4 && params.keyword) {
+          _slog('regex-remove-keyword-full-list', `removed keyword="${params.keyword}" (full list query)`);
           delete params.keyword;
         }
       }
@@ -1694,7 +1700,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     report: "INTERDICTION de modifier, arrondir ou réécrire les chiffres du rapport. Copie EXACTEMENT les nombres du contexte. Ne fais AUCUNE approximation. Si le contexte dit 76, écris 76 — pas 50, pas 100.",
     summary: "Résumé en 4-6 lignes maximum. Pas de tableau.",
     general: "Réponse courte et naturelle (3-6 lignes).",
-    search_tickets: "Tableau Markdown obligatoire avec ces colonnes exactes en EN-TÊTES EN GRAS : **| ID | Titre | Statut | Priorite | Lieu |**. Statuts en français (Nouveau/Ouvert/En attente/En attente utilisateur/Resolu/Ferme). Priorites (Critique/Haute/Moyenne/Basse). Titres tronqués a 40 car. 1 phrase d'intro courte + tableau. Ne supprime JAMAIS de colonnes.",
+    search_tickets: "Tableau Markdown obligatoire avec ces colonnes exactes en EN-TÊTES EN GRAS : **| ID | Titre | Statut | Priorite | Lieu |**. Statuts en français (Nouveau/Ouvert/En attente/En attente utilisateur/Resolu/Ferme). Priorites (Critique/Haute/Moyenne/Basse). Titres tronqués a 40 car. 1 phrase d'intro courte + tableau. Ne supprime JAMAIS de colonnes. Pour le comptage, utilise EXACTEMENT le nombre du contexte (Tickets pertinents trouvés (X)).",
     check_ticket: "Donne le statut, la priorité, le lieu et le technicien assigné. Sois factuel.",
     create_ticket: "Confirme la création avec le numéro de ticket et un lien.",
     create_ticket_for: "Confirme la création pour l'utilisateur mentionné.",
