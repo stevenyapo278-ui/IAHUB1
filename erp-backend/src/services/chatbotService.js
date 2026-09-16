@@ -644,7 +644,9 @@ async function generateReport(period = null, fullList = false) {
     if (Object.keys(dateFilter).length > 0) where.createdAt = dateFilter;
   }
 
-  const [tickets, totalAll, resolvedCount] = await Promise.all([
+  const openWhere = { ...where };
+
+  const [tickets, openCount, totalAll, resolvedCount] = await Promise.all([
     prisma.ticket.findMany({
       where,
       include: {
@@ -655,6 +657,7 @@ async function generateReport(period = null, fullList = false) {
       orderBy: [{ priority: 'asc' }, { createdAt: 'desc' }],
       ...(fullList ? {} : { take: 50 }),
     }),
+    prisma.ticket.count({ where: openWhere }),
     prisma.ticket.count({ where: Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {} }),
     prisma.ticket.count({
       where: {
@@ -664,7 +667,7 @@ async function generateReport(period = null, fullList = false) {
     }),
   ]);
 
-  if (tickets.length === 0 && resolvedCount === 0) return 'Aucun ticket pour cette période.';
+  if (openCount === 0 && resolvedCount === 0) return 'Aucun ticket pour cette période.';
 
   const byStatus = {};
   const byPriority = {};
@@ -676,17 +679,17 @@ async function generateReport(period = null, fullList = false) {
   const periodLabel = period ? ` (${period})` : '';
   let report = `**Rapport${periodLabel}**\n\n`;
   report += `• Total tickets : **${totalAll}**\n`;
-  report += `• Ouverts : **${tickets.length}**\n`;
+  report += `• Ouverts : **${openCount}**\n`;
   report += `• Résolus/Fermés : **${resolvedCount}**\n\n`;
 
-  if (tickets.length > 0) {
+  if (openCount > 0) {
     report += `**Par statut (ouverts) :**\n`;
     for (const [s, c] of Object.entries(byStatus)) report += `• ${STATUS_LABEL[s] || s} : ${c}\n`;
     report += `\n**Par priorité (ouverts) :**\n`;
     for (const [p, c] of Object.entries(byPriority)) report += `• ${PRIORITY_LABEL[p] || p} : ${c}\n`;
 
     if (fullList) {
-      report += `\n**Tous les tickets ouverts (${tickets.length}) :**\n`;
+      report += `\n**Tous les tickets ouverts (${openCount}) :**\n`;
       report += `| # | Titre | Statut | Priorité | Assigné | Lieu |\n|---|-------|--------|----------|---------|------|\n`;
       for (const t of tickets) {
         report += `| ${t.id} | ${(t.title || '').substring(0, 50)} | ${STATUS_LABEL[t.status] || t.status} | ${PRIORITY_LABEL[t.priority] || t.priority} | ${t.assignedTo?.fullName || '-'} | ${t.locationName || '-'} |\n`;
@@ -696,8 +699,8 @@ async function generateReport(period = null, fullList = false) {
       for (const t of tickets.slice(0, 5)) {
         report += `• **#${t.id}** ${t.title} — ${PRIORITY_LABEL[t.priority] || t.priority} — ${t.assignedTo?.fullName || 'Non assigné'}\n`;
       }
-      if (tickets.length > 5) {
-        report += `\n*...et ${tickets.length - 5} autres. Demandez "liste tous les tickets ouverts" pour voir la liste complète.*\n`;
+      if (openCount > 5) {
+        report += `\n*...et ${openCount - 5} autres. Demandez "liste tous les tickets ouverts" pour voir la liste complète.*\n`;
       }
     }
   }
