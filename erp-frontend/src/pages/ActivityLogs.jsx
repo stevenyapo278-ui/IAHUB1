@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../api/client';
 import { useTheme } from '../context/ThemeContext';
-import { useFilterParam } from '../hooks/useFilterParam';
+import { useFilterParam, useFilterParams } from '../hooks/useFilterParam';
 import PageShell from '../components/PageShell';
 import Pagination from '../components/Pagination';
 import {
@@ -85,6 +85,8 @@ export default function ActivityLogs({ embedded = false } = {}) {
   const [endDate, setEndDate] = useFilterParam('endDate');
   const [orderFilter, setOrderFilter] = useFilterParam('order', 'desc');
   const [pageSize, setPageSize] = useFilterParam('pageSize', '50');
+  // Mise à jour groupée : une seule navigation URL pour plusieurs filtres (voir useFilterParams)
+  const updateFilters = useFilterParams({ order: 'desc', pageSize: '50' });
   const [quickRange, setQuickRange] = useState('');
   const [expandedId, setExpandedId] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
@@ -156,22 +158,21 @@ export default function ActivityLogs({ embedded = false } = {}) {
 
   function resetFilters() {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-    setTypeFilter('');
-    setCategoryFilter('');
-    setTicketIdFilter('');
-    setActorFilter('');
-    setSearchFilter('');
-    setStartDate('');
-    setEndDate('');
-    setOrderFilter('desc');
-    setPageSize('50');
+    setSearchInput('');
     setQuickRange('');
+    updateFilters({
+      type: '', category: '', ticketId: '', actor: '',
+      search: '', startDate: '', endDate: '',
+      order: 'desc', pageSize: '50',
+    });
   }
 
   function applyQuickRange(days) {
     setQuickRange(days);
-    setStartDate(days ? rangeToStartDate(days) : '');
-    setEndDate('');
+    updateFilters({
+      startDate: days ? rangeToStartDate(days) : '',
+      endDate: '',
+    });
   }
 
   function formatDate(iso) {
@@ -270,7 +271,7 @@ export default function ActivityLogs({ embedded = false } = {}) {
             <span className="w-2 h-2 rounded-full bg-blue-500 dark:bg-blue-400 animate-pulse" />
           )}
         </button>
-      </div>}
+      </div>
       <AnimatePresence>
         {showFilters && (
           <motion.div
@@ -303,7 +304,7 @@ export default function ActivityLogs({ embedded = false } = {}) {
                   <span>Catégorie</span>
                   <select
                     value={categoryFilter}
-                    onChange={(e) => { setCategoryFilter(e.target.value); setTypeFilter(''); }}
+                    onChange={(e) => updateFilters({ category: e.target.value, type: '' })}
                     className="input-katalyst"
                   >
                     <option value="">Toutes catégories</option>
@@ -317,7 +318,7 @@ export default function ActivityLogs({ embedded = false } = {}) {
                   <span>Type d'événement</span>
                   <select
                     value={typeFilter}
-                    onChange={(e) => { setTypeFilter(e.target.value); setCategoryFilter(''); }}
+                    onChange={(e) => updateFilters({ type: e.target.value, category: '' })}
                     className="input-katalyst"
                   >
                     <option value="">Tous les types</option>
