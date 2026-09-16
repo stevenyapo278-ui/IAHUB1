@@ -130,6 +130,45 @@ async function searchKnowledge(query, limit = 5) {
 
 // ── Recherche de tickets ERP en base ───────────────────────────────────
 
+// ── Fallback regex quand le LLM est indisponible ──────────────────────
+function extractSearchParamsRegex(query) {
+  const lower = query.toLowerCase();
+  const params = {};
+
+  // Statuts
+  if (/\bouverts?\b/.test(lower) && !/\b(nouveau|résolu|fermé|attente)\b/.test(lower)) {
+    params.statuses = ['NEW', 'OPEN', 'PENDING', 'WAITING_FOR_USER'];
+  } else if (/\bnouveaux?\b/.test(lower)) {
+    params.statuses = ['NEW'];
+  } else if (/\battente\b/.test(lower)) {
+    params.statuses = ['PENDING'];
+  } else if (/\brésolus?\b/.test(lower) || /\bresolu[s]?\b/.test(lower)) {
+    params.statuses = ['SOLVED'];
+  } else if (/\bferm[ée]s?\b/.test(lower)) {
+    params.statuses = ['CLOSED'];
+  }
+
+  // Priorités
+  const prioMatch = lower.match(/\b(p1|p2|p3|p4|critique|haute|moyenne|basse)\b/);
+  if (prioMatch) {
+    const MAP = { p1: 'P1', critique: 'P1', p2: 'P2', haute: 'P2', p3: 'P3', moyenne: 'P3', p4: 'P4', basse: 'P4' };
+    params.priorities = [MAP[prioMatch[1]]];
+  }
+
+  // Équipe
+  const teamMatch = lower.match(/\b(?:equipe|équipe|team)\s+([a-zà-ÿ0-9\- ]+)/i);
+  if (teamMatch) params.teamName = teamMatch[1].trim();
+
+  // ID
+  const idMatch = query.match(/#(\d+)/);
+  if (idMatch) params.ticketId = parseInt(idMatch[1], 10);
+
+  // Liste complète
+  if (/\b(tous?|liste|montre|affiche|donne[- ]?moi)\b/.test(lower)) params.wantFullList = true;
+
+  return Object.keys(params).length > 0 ? params : null;
+}
+
 // ── Recherche de tickets par paramètres structurés (LLM → Prisma) ─────
 const SEARCH_PARAMS_SCHEMA = {
   type: 'object',
@@ -286,10 +325,22 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
   if (!query || !query.trim()) return { tickets: [], totalCount: 0 };
 
   try {
-    // Appel LLM pour extraire les paramètres structurés
-    const params = await callSearchParamsAI(query);
+    // 1. Essai LLM pour extraire les paramètres structurés
+    let params = null;
+    try {
+      params = await Promise.race([
+        callSearchParamsAI(query),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('searchParams timeout')), 15000)),
+      ]);
+    } catch (e) {
+      console.warn('[chatbot] searchParams LLM échoué, fallback regex:', e.message);
+    }
 
-    // Si l'IA retourne null ou un objet vide → pas de recherche
+    // 2. Fallback regex si le LLM échoue
+    if (!params || Object.keys(params).length === 0) {
+      params = extractSearchParamsRegex(query);
+    }
+
     if (!params || Object.keys(params).length === 0) {
       return { tickets: [], totalCount: 0 };
     }
