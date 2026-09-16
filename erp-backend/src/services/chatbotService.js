@@ -140,6 +140,10 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
   const priorityMatch = lower.match(/\b(p1|p2|p3|p4|critique|haute|moyenne|basse)\b/);
   const teamMatch = lower.match(/\b(equipe|équipe|team)\s+([a-zà-ÿ0-9\- ]+)/i);
 
+  // "ouverts" (pluriel) = tous les statuts ouverts ; "ouvert" (singulier) = statut OPEN uniquement
+  const isOpenGeneric = /\bouverts?\b/.test(lower) && !/\b(nouveau|nouveaux|attente|résolu|resolu|fermé|ferme)\b/.test(lower);
+  const isSpecificStatus = statusMatch && !isOpenGeneric;
+
   // Détecter si l'utilisateur veut une liste complète ("liste tous", "montre tous", etc.)
   const wantsFullList = /\b(tous?|toute?|liste|liste[s]?|montre|affiche|donne-moi)\b/i.test(lower);
 
@@ -180,7 +184,12 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
       ];
     }
 
-    if (statusMatch) where.status = STATUS_MAP[statusMatch[1]];
+    if (isOpenGeneric) {
+      // "tickets ouverts" = tous les statuts sauf CLOSED/SOLVED
+      where.status = { notIn: ['CLOSED', 'SOLVED'] };
+    } else if (statusMatch) {
+      where.status = STATUS_MAP[statusMatch[1]];
+    }
     if (priorityMatch) where.priority = PRIORITY_MAP[priorityMatch[1]];
     if (teamMatch) {
       const teamName = teamMatch[2].trim();
@@ -213,7 +222,7 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
     );
 
     // Si pas de mots-clés mais filtre status/priority/id/team → rechercher par filtre uniquement
-    if (words.length === 0 && !idMatch && !statusMatch && !priorityMatch && !teamMatch) return [];
+    if (words.length === 0 && !idMatch && !statusMatch && !priorityMatch && !teamMatch && !isOpenGeneric) return [];
 
     if (words.length > 0) {
       const keywordFilter = words.flatMap((w) => [
