@@ -1573,7 +1573,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     if (verification.needsRetry && verification.retryContext) {
       // Relancer avec le structured output + contexte correctif dans le system prompt
       try {
-        const correctiveSystem = `${systemContext}\n\n⚠️ CONTEXTE CORRECTIF (respecte-le strictement) :\n${verification.retryContext}Ne mentionne PAS ces éléments erronés dans ta réponse. Utilise UNIQUEMENT les données du contexte initial.`;
+        const correctiveSystem = `${SYSTEM_PROMPT}${intentHint}${systemContext}\n\n⚠️ CONTEXTE CORRECTIF (respecte-le strictement) :\n${verification.retryContext}Ne mentionne PAS ces éléments erronés dans ta réponse. Utilise UNIQUEMENT les données du contexte initial.`;
         const retryRaw = await callAI(
           [{ role: 'user', content: userMessageWithCtx }],
           {
@@ -1587,7 +1587,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
         const retryParsed = parseStructuredResponse(retryRaw);
         if (retryParsed && retryParsed.reply) {
           reply = cleanAiReply(retryParsed.reply);
-          const retryValidated = await validateCitedIds(retryParsed.citedTicketIds, retryParsed.knowledgeIds || retryParsed.citedKnowledgeIds, intent);
+          const retryValidated = await validateCitedIds(retryParsed.citedTicketIds, retryParsed.citedKnowledgeIds, intent);
           citedTicketIds = retryValidated.ticketIds;
           citedKnowledgeIds = retryValidated.knowledgeIds;
           console.warn(`[chatbot] Retry structuré réussi après fact-check: ${verification.corrections.join(', ')}`);
