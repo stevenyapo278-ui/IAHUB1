@@ -9,10 +9,10 @@ function preprocessMarkdown(content) {
 
   // 1) Séparer les lignes de tableau concaténées sur une même ligne
   //    Pattern: "| cell | cell | | cell | cell |" → lignes séparées
-  //    On matche "| " suivi de contenu non-pipe, puis " |" suivi de " |" ou " | "
+  //    Coupe sur " | " suivi de "|" (début de ligne suivante)
   formatted = formatted.replace(
-    /(\|[^\n|]+\|)\s+\|\s+(\|)/g,
-    '$1\n$2'
+    /(\|[^\n]+\|)\s+\|(?=\s)/g,
+    '$1\n|'
   );
 
   // 2) Séparer les doubles pipes vides (ex: "Urgents || :--- |")
