@@ -437,6 +437,7 @@ export default function AiProvidersTab() {
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [voiceModelId, setVoiceModelId] = useState(null);
+  const [intentModelId, setIntentModelId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [aiSettings, setAiSettings] = useState({ aiEnabled: true, aiDailyTokenBudget: 100000, aiTokenAlertThreshold: 0.8, aiTokenAlertRecipients: [] });
   const [aiUsage, setAiUsage] = useState(null);
@@ -469,6 +470,7 @@ export default function AiProvidersTab() {
     api.get('/system-settings')
       .then(({ data }) => {
         setVoiceModelId(data.voiceAiModelId || null);
+        setIntentModelId(data.intentAiModelId || null);
         setAiSettings({
           aiEnabled: data.aiEnabled !== false,
           aiDailyTokenBudget: data.aiDailyTokenBudget || 100000,
@@ -492,6 +494,18 @@ export default function AiProvidersTab() {
     try {
       await api.patch('/system-settings', { voiceAiModelId: modelId });
       setVoiceModelId(modelId);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur lors de la mise à jour');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleUpdateIntentModel(modelId) {
+    setSaving(true);
+    try {
+      await api.patch('/system-settings', { intentAiModelId: modelId });
+      setIntentModelId(modelId);
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la mise à jour');
     } finally {
@@ -834,6 +848,34 @@ export default function AiProvidersTab() {
         </div>
         <p className="text-[11px] text-on-surface-variant/60 mt-2">
           Si aucun modèle n'est sélectionné, l'assistant vocal utilise le même modèle que le chat textuel.
+        </p>
+      </motion.div>
+
+      {/* Configuration du modèle de classification d'intent */}
+      <motion.div variants={itemVariants} className="bg-surface-container rounded-3xl border border-outline-variant/30 p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <span className="material-symbols-outlined text-primary">psychology</span>
+          <div>
+            <h3 className="text-base font-semibold text-on-surface">Classification d'intent</h3>
+            <p className="text-xs text-on-surface-variant">Modèle léger dédié à la classification des demandes (regex d'abord, LLM en fallback)</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <select
+            value={intentModelId || ''}
+            onChange={(e) => handleUpdateIntentModel(e.target.value ? parseInt(e.target.value) : null)}
+            disabled={saving}
+            className="flex-1 bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-300"
+          >
+            <option value="">Modèle par défaut (même que le chat)</option>
+            {allModels.map((m) => (
+              <option key={m.id} value={m.id}>{m.providerLabel} — {m.name}</option>
+            ))}
+          </select>
+          {saving && <span className="material-symbols-outlined text-primary animate-spin text-[18px]">progress_activity</span>}
+        </div>
+        <p className="text-[11px] text-on-surface-variant/60 mt-2">
+          Un modèle léger (Gemini Flash, Haiku, GPT-4o-mini) réduit la latence et le coût de classification sans impacter la qualité des réponses.
         </p>
       </motion.div>
 
