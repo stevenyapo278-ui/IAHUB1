@@ -1575,7 +1575,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
       try {
         const correctiveSystem = `${SYSTEM_PROMPT}${intentHint}${systemContext}\n\n⚠️ CONTEXTE CORRECTIF (respecte-le strictement) :\n${verification.retryContext}Ne mentionne PAS ces éléments erronés dans ta réponse. Utilise UNIQUEMENT les données du contexte initial.`;
         const retryRaw = await callAI(
-          [{ role: 'user', content: userMessageWithCtx }],
+          [{ role: 'user', content: message }],
           {
             ...voiceModelOptions,
             conversationHistory,
