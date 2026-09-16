@@ -633,7 +633,7 @@ const STATUS_LABEL = { NEW: 'Nouveau', OPEN: 'Ouvert', PENDING: 'En attente', SO
 const PRIORITY_LABEL = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' };
 
 async function generateReport(period = null, fullList = false) {
-  const where = { status: { notIn: ['CLOSED', 'SOLVED'] } };
+  const where = { deletedAt: null, status: { notIn: ['CLOSED', 'SOLVED'] } };
 
   // Filtrage temporel optionnel
   let dateFilter = {};
@@ -644,9 +644,9 @@ async function generateReport(period = null, fullList = false) {
     if (Object.keys(dateFilter).length > 0) where.createdAt = dateFilter;
   }
 
-  const openWhere = { ...where };
+  const baseWhere = { deletedAt: null, ...(Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {}) };
 
-  const [tickets, openCount, totalAll, resolvedCount] = await Promise.all([
+  const [tickets, openCount, totalAll, resolvedCount, statusCounts, priorityCounts] = await Promise.all([
     prisma.ticket.findMany({
       where,
       include: {
@@ -657,24 +657,25 @@ async function generateReport(period = null, fullList = false) {
       orderBy: [{ priority: 'asc' }, { createdAt: 'desc' }],
       ...(fullList ? {} : { take: 50 }),
     }),
-    prisma.ticket.count({ where: openWhere }),
-    prisma.ticket.count({ where: Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {} }),
+    prisma.ticket.count({ where }),
+    prisma.ticket.count({ where: baseWhere }),
     prisma.ticket.count({
       where: {
+        deletedAt: null,
         status: { in: ['SOLVED', 'CLOSED'] },
         ...(Object.keys(dateFilter).length > 0 ? { solvedAt: dateFilter } : {}),
       },
     }),
+    prisma.ticket.groupBy({ by: ['status'], _count: true, where }),
+    prisma.ticket.groupBy({ by: ['priority'], _count: true, where }),
   ]);
 
   if (openCount === 0 && resolvedCount === 0) return 'Aucun ticket pour cette période.';
 
   const byStatus = {};
+  for (const s of statusCounts) byStatus[s.status] = s._count;
   const byPriority = {};
-  for (const t of tickets) {
-    byStatus[t.status] = (byStatus[t.status] || 0) + 1;
-    byPriority[t.priority] = (byPriority[t.priority] || 0) + 1;
-  }
+  for (const p of priorityCounts) byPriority[p.priority] = p._count;
 
   const periodLabel = period ? ` (${period})` : '';
   let report = `**Rapport${periodLabel}**\n\n`;
