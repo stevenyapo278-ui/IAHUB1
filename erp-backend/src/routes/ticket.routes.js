@@ -1009,9 +1009,10 @@ router.post(
         ...(finalStatus === 'SOLVED' ? { solvedAt: new Date() } : {}),
         ...(finalStatus === 'CLOSED' ? { closedAt: new Date() } : {}),
         ...(openedAt ? { createdAt: new Date(openedAt) } : {}),
-        // Les tickets créés manuellement sont directement approuvés — seuls les tickets
-        // créés par email/IA (createTicketFromEmail, aiProcessed=true) passent par la validation Hotline.
-        approvalStatus: 'APPROVED',
+        // Les tickets créés manuellement sont directement approuvés sauf si le modèle
+        // exige une validation (requiresApproval=true). Les tickets email/IA passent
+        // toujours par la validation Hotline (PENDING dans createTicketFromEmail).
+        approvalStatus: requiresApproval ? 'PENDING' : 'APPROVED',
         type: type || 'INCIDENT',
         urgency: urgency || 'MEDIUM',
         impact: impact || 'MEDIUM',
