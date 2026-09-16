@@ -1686,7 +1686,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
       }
     }
     // Vérification croisée (logs uniquement)
-    crossVerifyWithContext(reply, matchingTickets, intent);
+    crossVerifyWithContext(reply, matchingTickets, intent, totalTicketCount);
   }
 
   return {
@@ -1922,14 +1922,14 @@ async function verifyResponseFacts(replyText, contextParts, intent, matchingTick
 
 // ── Vérification croisée : comparer la réponse IA aux données du contexte ─
 
-function crossVerifyWithContext(replyText, matchingTickets, intent) {
+function crossVerifyWithContext(replyText, matchingTickets, intent, ticketCount) {
   if (!replyText || !matchingTickets) return;
 
   // Vérifier le compte — seuil > 0 (tout écart est une erreur)
   const countClaim = replyText.match(/(\d+)\s*ticket/i);
   if (countClaim) {
     const claimedCount = parseInt(countClaim[1], 10);
-    const actualCount = totalTicketCount;
+    const actualCount = ticketCount ?? matchingTickets.length;
     if (claimedCount !== actualCount) {
       factCheckCounters.crossVerifyWarnings++;
       console.warn(`[chatbot] Cross-verify: IA dit ${claimedCount} tickets, réel = ${actualCount} (intent: ${intent})`);
