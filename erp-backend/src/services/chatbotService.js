@@ -153,7 +153,7 @@ function extractSearchParamsRegex(query) {
 
   // Statuts
   if (/\bouverts?\b/.test(lower) && !/\b(nouveau|résolu|fermé|attente)\b/.test(lower)) {
-    params.statuses = ['NEW', 'OPEN', 'PENDING', 'WAITING_FOR_USER'];
+    params.statuses = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER'];
   } else if (/\bnouveaux?\b/.test(lower)) {
     params.statuses = ['NEW'];
   } else if (/\battente\b/.test(lower)) {
@@ -192,7 +192,7 @@ const SEARCH_PARAMS_SCHEMA = {
     ticketId: { type: 'integer', description: 'Numéro de ticket (#123)' },
     statuses: {
       type: 'array',
-      items: { type: 'string', enum: ['NEW', 'OPEN', 'PENDING', 'WAITING_FOR_USER', 'SOLVED', 'CLOSED'] },
+      items: { type: 'string', enum: ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER', 'SOLVED', 'CLOSED'] },
       description: 'Statuts recherchés. "ouverts" = [NEW,OPEN,PENDING,WAITING_FOR_USER]; "ouvert" = [OPEN]; "en attente" = [PENDING]; "résolus" = [SOLVED]; "fermés" = [CLOSED]',
     },
     priorities: {
@@ -230,7 +230,7 @@ async function callSearchParamsAI(message) {
 
   const systemPrompt = `Tu extrais les paramètres de recherche de tickets à partir du message de l'utilisateur.
 Règles:
-- "tickets ouverts" ou "tous les tickets ouverts" → statuses: ["NEW","OPEN","PENDING","WAITING_FOR_USER"]
+- "tickets ouverts" ou "tous les tickets ouverts" → statuses: ["NEW","OPEN","PLANNED","PENDING","WAITING_FOR_USER"]
 - "ticket ouvert" (singulier) → statuses: ["OPEN"]
 - "en attente" → statuses: ["PENDING"]
 - "résolus" → statuses: ["SOLVED"]
