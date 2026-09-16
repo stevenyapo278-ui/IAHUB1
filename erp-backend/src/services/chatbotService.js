@@ -264,7 +264,7 @@ Réponds UNIQUEMENT avec le JSON, pas de commentaire.`;
 }
 
 function buildSearchQuery(params, user) {
-  const where = { deletedAt: null };
+  const where = { deletedAt: null, approvalStatus: { notIn: ['PENDING', 'REJECTED'] } };
 
   // Filtrage par rôle
   if (user && user.role === 'REQUESTER') {
@@ -800,7 +800,7 @@ const STATUS_LABEL = { NEW: 'Nouveau', OPEN: 'Ouvert', PENDING: 'En attente', SO
 const PRIORITY_LABEL = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' };
 
 async function generateReport(period = null, fullList = false) {
-  const where = { deletedAt: null, status: { notIn: ['CLOSED', 'SOLVED'] } };
+  const where = { deletedAt: null, approvalStatus: { notIn: ['PENDING', 'REJECTED'] }, status: { notIn: ['CLOSED', 'SOLVED'] } };
 
   // Filtrage temporel optionnel
   let dateFilter = {};
@@ -811,7 +811,7 @@ async function generateReport(period = null, fullList = false) {
     if (Object.keys(dateFilter).length > 0) where.createdAt = dateFilter;
   }
 
-  const baseWhere = { deletedAt: null, ...(Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {}) };
+  const baseWhere = { deletedAt: null, approvalStatus: { notIn: ['PENDING', 'REJECTED'] }, ...(Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {}) };
 
   const [tickets, openCount, totalAll, resolvedCount, statusCounts, priorityCounts] = await Promise.all([
     prisma.ticket.findMany({
