@@ -130,130 +130,178 @@ async function searchKnowledge(query, limit = 5) {
 
 // ── Recherche de tickets ERP en base ───────────────────────────────────
 
-async function searchTickets(query, limit = 20, user = null, period = null) {
-  if (!query || !query.trim()) return [];
-  const clean = query.trim();
-  const lower = clean.toLowerCase();
+// ── Recherche de tickets par paramètres structurés (LLM → Prisma) ─────
+const SEARCH_PARAMS_SCHEMA = {
+  type: 'object',
+  properties: {
+    ticketId: { type: 'integer', description: 'Numéro de ticket (#123)' },
+    statuses: {
+      type: 'array',
+      items: { type: 'string', enum: ['NEW', 'OPEN', 'PENDING', 'WAITING_FOR_USER', 'SOLVED', 'CLOSED'] },
+      description: 'Statuts recherchés. "ouverts" = [NEW,OPEN,PENDING,WAITING_FOR_USER]; "ouvert" = [OPEN]; "en attente" = [PENDING]; "résolus" = [SOLVED]; "fermés" = [CLOSED]',
+    },
+    priorities: {
+      type: 'array',
+      items: { type: 'string', enum: ['P1', 'P2', 'P3', 'P4'] },
+      description: 'Priorités recherchées',
+    },
+    teamName: { type: 'string', description: "Nom d'équipe (ex: 'Abidjan', 'Support')" },
+    locationName: { type: 'string', description: 'Lieu (ex: "Casino", "Super U")' },
+    requesterName: { type: 'string', description: 'Nom du demandeur' },
+    assignedToName: { type: 'string', description: 'Nom du technicien assigné' },
+    keyword: { type: 'string', description: 'Mot-clé pour titre/contenu/catégorie (un seul mot significatif, PAS les articles/pronoms)' },
+    dateFrom: { type: 'string', description: 'Date début ISO (ex: 2026-09-01)' },
+    dateTo: { type: 'string', description: 'Date fin ISO (ex: 2026-09-16)' },
+    wantFullList: { type: 'boolean', description: 'Vrai si l\'utilisateur veut une liste complète ("tous", "liste", "montre")' },
+  },
+  required: [],
+};
 
-  const idMatch = clean.match(/#?(\d+)/);
-  const statusMatch = lower.match(/\b(nouveaux?|ouverts?|attente|résolus?|resolu[s]?|fermés?|ferme[s]?)\b/);
-  const priorityMatch = lower.match(/\b(p1|p2|p3|p4|critique|haute|moyenne|basse)\b/);
-  const teamMatch = lower.match(/\b(equipe|équipe|team)\s+([a-zà-ÿ0-9\- ]+)/i);
+async function callSearchParamsAI(message) {
+  const providers = await getActiveProviders();
+  if (providers.length === 0) return null;
 
-  // "ouverts" (pluriel) = tous les statuts ouverts ; "ouvert" (singulier) = statut OPEN uniquement
-  const isOpenGeneric = /\bouverts?\b/.test(lower) && !/\b(nouveau|nouveaux|attente|résolu|resolu|fermé|ferme)\b/.test(lower);
-  const isSpecificStatus = statusMatch && !isOpenGeneric;
+  let modelOptions = {};
+  try {
+    const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+    if (settings?.intentAiModelId) modelOptions = { forcedModelId: settings.intentAiModelId };
+  } catch {}
 
-  // Détecter si l'utilisateur veut une liste complète ("liste tous", "montre tous", etc.)
-  const wantsFullList = /\b(tous?|toute?|liste|liste[s]?|montre|affiche|donne-moi)\b/i.test(lower);
+  const systemPrompt = `Tu extrais les paramètres de recherche de tickets à partir du message de l'utilisateur.
+Règles:
+- "tickets ouverts" ou "tous les tickets ouverts" → statuses: ["NEW","OPEN","PENDING","WAITING_FOR_USER"]
+- "ticket ouvert" (singulier) → statuses: ["OPEN"]
+- "en attente" → statuses: ["PENDING"]
+- "résolus" → statuses: ["SOLVED"]
+- "fermés" → statuses: ["CLOSED"]
+- "P1" ou "critique" → priorities: ["P1"]
+- "équipe Abidjan" → teamName: "Abidjan"
+- "Casino" → locationName: "Casino"
+- Extrais UN seul mot-clé significatif si présent (ex: "VPN" dans "tickets VPN"). PAS de mots vides (la, les, des, un, une, qui, pour, etc.)
+- wantFullList: vrai si "liste", "tous", "montre", "donne-moi" est présent
+- Si le message ne concerne PAS une recherche de tickets, retourne un objet vide {}
 
-  const STATUS_MAP = {
-    nouveau: 'NEW', nouveaux: 'NEW',
-    ouvert: 'OPEN', ouverts: 'OPEN',
-    attente: 'PENDING',
-    résolu: 'SOLVED', résolus: 'SOLVED', resolu: 'SOLVED', resolus: 'SOLVED',
-    fermé: 'CLOSED', fermés: 'CLOSED', ferme: 'CLOSED', fermes: 'CLOSED',
-  };
-
-  const PRIORITY_MAP = {
-    p1: 'P1', critique: 'P1', p2: 'P2', haute: 'P2',
-    p3: 'P3', moyenne: 'P3', p4: 'P4', basse: 'P4',
-  };
+Réponds UNIQUEMENT avec le JSON, pas de commentaire.`;
 
   try {
-    const where = { deletedAt: null };
+    const raw = await callAI(
+      [{ role: 'user', content: message }],
+      { system: systemPrompt, responseFormat: { type: 'json_schema', schema: SEARCH_PARAMS_SCHEMA }, ...modelOptions }
+    );
+    const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    return JSON.parse(cleaned);
+  } catch (err) {
+    console.error('[chatbot] Erreur searchParams AI:', err.message);
+    return null;
+  }
+}
 
-    // ── Filtrage temporel ──────────────────────────────────────────────
+function buildSearchQuery(params, user) {
+  const where = { deletedAt: null };
+
+  // Filtrage par rôle
+  if (user && user.role === 'REQUESTER') {
+    where.OR = [
+      { requesterId: user.sub },
+      { observers: { some: { id: user.sub } } },
+    ];
+  } else if (user && user.role === 'TECHNICIAN') {
+    where.OR = [
+      { assignedToId: user.sub },
+      { requesterId: user.sub },
+      { observers: { some: { id: user.sub } } },
+    ];
+  }
+
+  // Statut
+  if (params.statuses && params.statuses.length > 0) {
+    if (params.statuses.length === 1) {
+      where.status = params.statuses[0];
+    } else {
+      where.status = { in: params.statuses };
+    }
+  }
+
+  // Priorité
+  if (params.priorities && params.priorities.length > 0) {
+    where.priority = params.priorities.length === 1 ? params.priorities[0] : { in: params.priorities };
+  }
+
+  // Équipe
+  if (params.teamName) {
+    where.team = { name: { contains: params.teamName, mode: 'insensitive' } };
+  }
+
+  // Lieu
+  if (params.locationName) {
+    where.locationName = { contains: params.locationName, mode: 'insensitive' };
+  }
+
+  // Demandeur
+  if (params.requesterName) {
+    where.requester = { fullName: { contains: params.requesterName, mode: 'insensitive' } };
+  }
+
+  // Assigné à
+  if (params.assignedToName) {
+    where.assignedTo = { fullName: { contains: params.assignedToName, mode: 'insensitive' } };
+  }
+
+  // ID
+  if (params.ticketId) {
+    where.OR = [...(where.OR || []), { id: params.ticketId }, { glpiTicketId: params.ticketId }];
+  }
+
+  // Mot-clé (titre, contenu, catégorie)
+  if (params.keyword && params.keyword.length > 1) {
+    const kw = params.keyword;
+    const keywordFilter = [
+      { title: { contains: kw, mode: 'insensitive' } },
+      { content: { contains: kw, mode: 'insensitive' } },
+      { category: { contains: kw, mode: 'insensitive' } },
+    ];
+
+    if (user && (user.role === 'REQUESTER' || user.role === 'TECHNICIAN')) {
+      const roleFilter = { OR: where.OR || [] };
+      where.AND = [roleFilter, { OR: keywordFilter }];
+      delete where.OR;
+    } else {
+      where.OR = [...(where.OR || []), ...keywordFilter];
+    }
+  }
+
+  // Dates
+  if (params.dateFrom || params.dateTo) {
+    where.createdAt = {};
+    if (params.dateFrom) where.createdAt.gte = new Date(params.dateFrom);
+    if (params.dateTo) where.createdAt.lt = new Date(params.dateTo + 'T23:59:59');
+  }
+
+  return where;
+}
+
+async function searchTickets(query, limit = 20, user = null, period = null) {
+  if (!query || !query.trim()) return { tickets: [], totalCount: 0 };
+
+  try {
+    // Appel LLM pour extraire les paramètres structurés
+    const params = await callSearchParamsAI(query);
+
+    // Si l'IA retourne null ou un objet vide → pas de recherche
+    if (!params || Object.keys(params).length === 0) {
+      return { tickets: [], totalCount: 0 };
+    }
+
+    const where = buildSearchQuery(params, user);
+
+    // Filtrage temporel optionnel (depuis l'extérieur)
     if (period) {
       const { start, end } = resolvePeriodDates(period);
-      if (start) where.createdAt = { gte: start };
+      if (start) where.createdAt = { ...where.createdAt, gte: start };
       if (end) where.createdAt = { ...where.createdAt, lt: end };
     }
 
-    // ── Filtrage par rôle ──────────────────────────────────────────────
-    if (user && user.role === 'REQUESTER') {
-      where.OR = [
-        { requesterId: user.sub },
-        { observers: { some: { id: user.sub } } },
-      ];
-    } else if (user && user.role === 'TECHNICIAN') {
-      where.OR = [
-        { assignedToId: user.sub },
-        { requesterId: user.sub },
-        { observers: { some: { id: user.sub } } },
-      ];
-    }
-
-    if (isOpenGeneric) {
-      // "tickets ouverts" = tous les statuts sauf CLOSED/SOLVED
-      where.status = { notIn: ['CLOSED', 'SOLVED'] };
-    } else if (statusMatch) {
-      where.status = STATUS_MAP[statusMatch[1]];
-    }
-    if (priorityMatch) where.priority = PRIORITY_MAP[priorityMatch[1]];
-    if (teamMatch) {
-      const teamName = teamMatch[2].trim();
-      where.team = { name: { contains: teamName, mode: 'insensitive' } };
-    }
-
-    const STOP_WORDS = new Set([
-      'les', 'des', 'que', 'sur', 'pour', 'avec', 'par', 'dans', 'un', 'une', 'qui', 'est',
-      'ticket', 'tickets', 'montre', 'cherche', 'donne', 'combien', 'quels', 'quelle', 'quelles',
-      'est-ce', 'base', 'propos', 'avez-vous', 'avez', 'nous', 'vous',
-      'bonjour', 'bonsoir', 'salut', 'hello', 'coucou', 'hey', 'hi', 'merci', 'svp', 'stp', 're', 'salutations',
-      'tous', 'toute', 'tout', 'liste', 'listes', 'affiche', 'donne-moi',
-    ]);
-
-    const STATUS_WORDS = new Set([
-      'nouveau', 'nouveaux', 'ouvert', 'ouverts', 'attente',
-      'résolu', 'résolus', 'resolu', 'resolus', 'fermé', 'fermés', 'ferme', 'fermes',
-    ]);
-    const PRIORITY_WORDS = new Set([
-      'p1', 'p2', 'p3', 'p4', 'critique', 'haute', 'moyenne', 'basse',
-    ]);
-    const TEAM_WORDS = new Set(['equipe', 'équipe', 'team']);
-
-    const words = clean.split(/\s+/).filter(
-      (w) => w.length > 2
-        && !STOP_WORDS.has(w.toLowerCase())
-        && !STATUS_WORDS.has(w.toLowerCase())
-        && !PRIORITY_WORDS.has(w.toLowerCase())
-        && !TEAM_WORDS.has(w.toLowerCase())
-    );
-
-    // Si pas de mots-clés mais filtre status/priority/id/team → rechercher par filtre uniquement
-    if (words.length === 0 && !idMatch && !statusMatch && !priorityMatch && !teamMatch && !isOpenGeneric) return [];
-
-    if (words.length > 0) {
-      const keywordFilter = words.flatMap((w) => [
-        { title: { contains: w, mode: 'insensitive' } },
-        { content: { contains: w, mode: 'insensitive' } },
-        { category: { contains: w, mode: 'insensitive' } },
-        { locationName: { contains: w, mode: 'insensitive' } },
-        { requester: { fullName: { contains: w, mode: 'insensitive' } } },
-        { assignedTo: { fullName: { contains: w, mode: 'insensitive' } } },
-        { team: { name: { contains: w, mode: 'insensitive' } } },
-      ]);
-
-      // REQUESTER/TECHNICIAN : leur filtre role EST déjà dans where.OR
-      // → on utilise AND pour combiner role + keyword
-      if (user && (user.role === 'REQUESTER' || user.role === 'TECHNICIAN')) {
-        const roleFilter = { OR: where.OR };
-        where.AND = [roleFilter, { OR: keywordFilter }];
-        delete where.OR;
-      } else {
-        where.OR = keywordFilter;
-      }
-    }
-
-    if (idMatch) {
-      const numId = parseInt(idMatch[1], 10);
-      if (!where.OR) where.OR = [];
-      where.OR.push({ id: numId }, { glpiTicketId: numId });
-    }
-
-    // Si "liste tous" → pas de limit (max 100 pour sécurité)
-    const effectiveLimit = wantsFullList ? 100 : limit;
+    const effectiveLimit = params.wantFullList ? 100 : limit;
 
     const [tickets, totalCount] = await Promise.all([
       prisma.ticket.findMany({
@@ -272,7 +320,7 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
     return { tickets, totalCount };
   } catch (err) {
     console.error('[chatbot] Erreur recherche tickets:', err.message);
-    return [];
+    return { tickets: [], totalCount: 0 };
   }
 }
 
