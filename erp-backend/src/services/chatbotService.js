@@ -35,7 +35,7 @@ RÈGLES STRICTES DE FORMATAGE :
 9. Si tu génères un graphique (widget), dis juste une phrase courte. Le graphique s'affiche automatiquement.
 
 RÈGLES ABSOLUES SUR LES DONNÉES :
-10. N'invente JAMAIS de tickets, numéros, statuts ou données. Utilise UNIQUEMENT les informations présentes dans le contexte fourni.
+10. N'invente JAMAIS de tickets, numéros, statuts ou données. Utilise UNIQUEMENT les informations présentes dans le contexte fourni. Les chiffres du contexte (ex: "Ouverts : **76**") sont la seule source de vérité — ne les modifie JAMAIS.
 11. Si aucun ticket n'est trouvé dans le contexte, indique clairement "Aucun ticket trouvé" ou "Aucun ticket ne correspond à votre recherche". Ne crée pas de numéros de ticket ni de détails inventés.
 12. Si le contexte dit "Aucun ticket ouvert", c'est la réalité. Ne contredis jamais ces données.
 13. Quand on te demande une liste de tickets, vérifie que chaque ticket mentionné existe bien dans les résultats de recherche fournis. Si la liste est vide, dis-le explicitement.
@@ -1473,7 +1473,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   const intentInstructions = {
     analytics: "Réponds uniquement avec un tableau Markdown propre suivi d'une seule phrase de conclusion. Pas d'introduction.",
     team_report: "Utilise un tableau avec les colonnes : Équipe | Ouverts | En cours | Résolus. Maximum 1 phrase après.",
-    report: "Transmets le rapport tel quel. Si c'est une liste complète, affiche le tableau entièrement sans tronquer.",
+    report: "INTERDICTION de modifier, arrondir ou réécrire les chiffres du rapport. Copie EXACTEMENT les nombres du contexte. Ne fais AUCUNE approximation. Si le contexte dit 76, écris 76 — pas 50, pas 100.",
     summary: "Résumé en 4-6 lignes maximum. Pas de tableau.",
     general: "Réponse courte et naturelle (3-6 lignes).",
     search_tickets: "Liste les tickets trouvés avec ID, titre, statut et lieu. Si beaucoup de résultats, utilise un tableau Markdown. Ne limite pas artificiellement le nombre.",
