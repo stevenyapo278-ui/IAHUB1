@@ -234,39 +234,51 @@ router.get('/:id/requesters', async (req, res) => {
   res.json({ location, requesters: links });
 });
 
-// Associer manuellement un expéditeur à un lieu
+// Associer manuellement un ou plusieurs expéditeurs à un lieu
 router.post(
   '/requesters',
   requirePermission('locations.manage', ['ADMIN', 'HOTLINE']),
-  [body('email').isEmail().normalizeEmail(), body('locationId').isInt()],
+  [body('email').isString().trim().notEmpty(), body('locationId').isInt()],
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const email = req.body.email.toLowerCase().trim();
+    const rawEmails = req.body.email.split(/[,;\n]+/).map((e) => e.trim().toLowerCase()).filter(Boolean);
     const locationId = Number(req.body.locationId);
 
     const location = await prisma.location.findUnique({ where: { id: locationId } });
     if (!location) return res.status(404).json({ error: 'Lieu introuvable' });
 
-    const link = await prisma.requesterLocation.upsert({
-      where: { email_locationId: { email, locationId } },
-      update: {
-        assignmentCount: { increment: 1 },
-        lastUsedAt: new Date(),
-        assignedById: req.user.sub,
-      },
-      create: {
-        email,
-        locationId,
-        assignedById: req.user.sub,
-      },
-      include: {
-        location: { select: { id: true, name: true, completename: true } },
-      },
-    });
+    const created = [];
+    const skipped = [];
 
-    res.status(201).json(link);
+    for (const email of rawEmails) {
+      // Valider que c'est bien un email
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        skipped.push(email);
+        continue;
+      }
+      try {
+        const link = await prisma.requesterLocation.upsert({
+          where: { email_locationId: { email, locationId } },
+          update: {
+            assignmentCount: { increment: 1 },
+            lastUsedAt: new Date(),
+            assignedById: req.user.sub,
+          },
+          create: {
+            email,
+            locationId,
+            assignedById: req.user.sub,
+          },
+        });
+        created.push(link);
+      } catch {
+        skipped.push(email);
+      }
+    }
+
+    res.status(201).json({ created: created.length, skipped, total: rawEmails.length });
   }
 );
 

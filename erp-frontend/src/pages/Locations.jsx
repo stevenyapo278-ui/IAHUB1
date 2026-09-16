@@ -149,12 +149,16 @@ function LocationDetailModal({ open, onClose, locationId, locations, canManage, 
   }
 
   async function handleAdd() {
-    const targetEmail = (selectedEmail || searchInput).trim();
-    if (!targetEmail) return;
+    const raw = (selectedEmail || searchInput).trim();
+    if (!raw) return;
     setAdding(true);
     try {
-      await api.post('/locations/requesters', { email: targetEmail, locationId: locationId });
-      toast.success(`« ${selectedLabel || targetEmail} » associé au lieu`);
+      const { data } = await api.post('/locations/requesters', { email: raw, locationId: locationId });
+      if (data.created > 0) {
+        toast.success(`${data.created} demandeur(s) associé(s) au lieu${data.skipped?.length > 0 ? ` (${data.skipped.length} ignoré(s))` : ''}`);
+      } else {
+        toast.warning('Aucun email valide à associer');
+      }
       setSelectedEmail('');
       setSelectedLabel('');
       setSearchInput('');
@@ -257,7 +261,7 @@ function LocationDetailModal({ open, onClose, locationId, locations, canManage, 
                         onChange={(e) => { setSearchInput(e.target.value); setShowDropdown(true); }}
                         onFocus={() => setShowDropdown(true)}
                         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAdd(); } }}
-                        placeholder="Rechercher un utilisateur ou demandeur..."
+                        placeholder="Email(s) — séparez par virgule pour en ajouter plusieurs..."
                         className="w-full pl-9 pr-4 py-2 rounded-xl border border-outline-variant/60 bg-surface text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
                       />
                     )}
@@ -593,7 +597,7 @@ export default function Locations() {
       },
       {
         field: 'requesterCount', headerName: 'Demandeurs', width: 120,
-        valueGetter: (params) => params.data._count?.requesters ?? params.data.requesters?.length ?? 0,
+        valueGetter: (params) => params.data._count?.requesterLinks ?? params.data.requesters?.length ?? 0,
         cellRenderer: (params) => <span className="text-xs font-semibold text-on-surface">{params.value}</span>,
       },
     ];
