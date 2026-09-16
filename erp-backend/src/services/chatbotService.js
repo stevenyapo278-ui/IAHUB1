@@ -351,10 +351,16 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
       console.warn('[chatbot] searchParams LLM échoué, fallback regex:', e.message);
     }
 
-    // 2. Fallback regex si le LLM échoue
+    // 2. Fallback regex si le LLM échoue ou retourne des params incomplets
+    const regexParams = extractSearchParamsRegex(query);
     if (!params || Object.keys(params).length === 0) {
-      params = extractSearchParamsRegex(query);
+      params = regexParams;
       _slog('regex-fallback', `params=${JSON.stringify(params || {})}`);
+    } else if (regexParams && regexParams.statuses && !params.statuses) {
+      // Le LLM n'a pas détecté de statuts mais l'regex oui → priorité au regex pour les statuts
+      _slog('regex-override-statuses', `llm=${JSON.stringify(params)} regex statuses=${JSON.stringify(regexParams.statuses)}`);
+      params.statuses = regexParams.statuses;
+      if (regexParams.wantFullList) params.wantFullList = true;
     }
 
     if (!params || Object.keys(params).length === 0) {
@@ -363,7 +369,7 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
     }
 
     const where = buildSearchQuery(params, user);
-    _slog('buildQuery', `whereKeys=${Object.keys(where).join(',')}`);
+    _slog('buildQuery', `where=${JSON.stringify(where, null, 0)}`);
 
     // Filtrage temporel optionnel (depuis l'extérieur)
     if (period) {
@@ -1222,7 +1228,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
       }
     }
     contextParts.push(ticketContext);
-  } else if (!DETERMINISTIC_INTENTS.has(intent)) {
+  } else if (!DETERMINISTIC_INTENTS.has(intent) && !['general'].includes(intent)) {
     contextParts.push("**Aucun ticket trouvé dans la base de données** pour cette recherche. Ne pas inventer de tickets — indiquer simplement qu'aucun résultat n'a été trouvé.");
   }
 
