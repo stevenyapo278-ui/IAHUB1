@@ -255,16 +255,21 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
     // Si "liste tous" → pas de limit (max 100 pour sécurité)
     const effectiveLimit = wantsFullList ? 100 : limit;
 
-    return await prisma.ticket.findMany({
-      where,
-      take: effectiveLimit,
-      include: {
-        requester: { select: { fullName: true, email: true } },
-        assignedTo: { select: { fullName: true } },
-        team: { select: { name: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    const [tickets, totalCount] = await Promise.all([
+      prisma.ticket.findMany({
+        where,
+        take: effectiveLimit,
+        include: {
+          requester: { select: { fullName: true, email: true } },
+          assignedTo: { select: { fullName: true } },
+          team: { select: { name: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.ticket.count({ where }),
+    ]);
+
+    return { tickets, totalCount };
   } catch (err) {
     console.error('[chatbot] Erreur recherche tickets:', err.message);
     return [];
@@ -1020,7 +1025,9 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   // Pour les intents déterministes (report, analytics, team_report), pas besoin de searchTickets
   const searches = [
     searchKnowledge(message, 8),
-    DETERMINISTIC_INTENTS.has(intent) ? Promise.resolve([]) : searchTickets(message, 20, user, params?.period),
+    DETERMINISTIC_INTENTS.has(intent)
+      ? Promise.resolve({ tickets: [], totalCount: 0 })
+      : searchTickets(message, 20, user, params?.period),
   ];
 
   if (intent === 'search_inventory') searches.push(searchAssets(params?.keyword || message, 5));
@@ -1032,7 +1039,9 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   if (intent === 'search_locations' && isStaff(user)) searches.push(searchLocations(params?.locationName || message, 10));
   else searches.push(Promise.resolve([]));
 
-  const [knowledgeChunks, matchingTickets, assets, users, locations] = await Promise.all(searches);
+  const [knowledgeChunks, ticketsResult, assets, users, locations] = await Promise.all(searches);
+  const matchingTickets = ticketsResult.tickets || ticketsResult; // compat: array ou { tickets, totalCount }
+  const totalTicketCount = ticketsResult.totalCount ?? matchingTickets.length;
 
   const knowledgeContext = knowledgeChunks.length > 0
     ? knowledgeChunks.map((c) => `[doc:${c.documentId} | ${c.title}] : ${c.content.substring(0, 500)}`).join('\n\n')
@@ -1049,7 +1058,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   }
 
   if (matchingTickets.length > 0) {
-    let ticketContext = `**Tickets pertinents trouvés (${matchingTickets.length}) :**\n`;
+    let ticketContext = `**Tickets pertinents trouvés (${totalTicketCount}) :**\n`;
     // Format tableau compact pour beaucoup de résultats
     if (matchingTickets.length > 5) {
       ticketContext += `| # | Titre | Statut | Priorité | Demandeur | Lieu |\n|---|-------|--------|----------|-----------|------|\n`;
@@ -1840,7 +1849,7 @@ async function verifyResponseFacts(replyText, contextParts, intent, matchingTick
     /(?:il y a|il existe)\s+(\d+)\s*ticket/gi,
   ];
 
-  const actualCount = matchingTickets ? matchingTickets.length : null;
+  const actualCount = matchingTickets && matchingTickets.length > 0 ? totalTicketCount : null;
   if (actualCount !== null) {
     for (const regex of countPatterns) {
       while ((match = regex.exec(replyText)) !== null) {
@@ -1872,7 +1881,7 @@ function crossVerifyWithContext(replyText, matchingTickets, intent) {
   const countClaim = replyText.match(/(\d+)\s*ticket/i);
   if (countClaim) {
     const claimedCount = parseInt(countClaim[1], 10);
-    const actualCount = matchingTickets.length;
+    const actualCount = totalTicketCount;
     if (claimedCount !== actualCount) {
       factCheckCounters.crossVerifyWarnings++;
       console.warn(`[chatbot] Cross-verify: IA dit ${claimedCount} tickets, réel = ${actualCount} (intent: ${intent})`);
