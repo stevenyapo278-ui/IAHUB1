@@ -780,8 +780,6 @@ export default function TicketDetail() {
     uploadContentImages(files).then((uploaded) => {
       if (uploaded.length > 0) {
         setEditingContentNewImages((prev) => [...prev, ...uploaded]);
-        const markers = uploaded.map((img) => `<img src="${img.url}" alt="image" />`).join('\n');
-        setEditingContentValue((prev) => prev + (prev ? '\n' : '') + markers);
       }
     });
   }
@@ -792,19 +790,27 @@ export default function TicketDetail() {
     uploadContentImages(files).then((uploaded) => {
       if (uploaded.length > 0) {
         setEditingContentNewImages((prev) => [...prev, ...uploaded]);
-        const markers = uploaded.map((img) => `<img src="${img.url}" alt="image" />`).join('\n');
-        setEditingContentValue((prev) => prev + (prev ? '\n' : '') + markers);
       }
     });
     e.target.value = '';
+  }
+
+  function removeContentNewImage(idx) {
+    setEditingContentNewImages((prev) => prev.filter((_, i) => i !== idx));
   }
 
   async function handleSaveContent() {
     setSavingContent(true);
     try {
       let finalContent = editingContentValue.trim();
+      // Réattacher les images existantes (non éditables)
       if (editingContentImages.length > 0) {
         finalContent += (finalContent ? '\n\n' : '') + editingContentImages.join('\n\n');
+      }
+      // Insérer les nouvelles images à la fin
+      if (editingContentNewImages.length > 0) {
+        const newImgTags = editingContentNewImages.map((img) => `<img src="${img.url}" alt="image" />`).join('\n');
+        finalContent += (finalContent ? '\n\n' : '') + newImgTags;
       }
       await api.patch(`/tickets/${id}`, { content: finalContent });
       toast.success('Description du ticket modifiée');
@@ -1601,10 +1607,25 @@ export default function TicketDetail() {
                     autoFocus
                   />
                   {(editingContentImages.length > 0 || editingContentNewImages.length > 0) && (
-                    <div className="text-[10px] text-on-surface-variant/70 italic">
-                      {editingContentImages.length > 0 && `${editingContentImages.length} image${editingContentImages.length > 1 ? 's' : ''} existante${editingContentImages.length > 1 ? 's' : ''}`}
-                      {editingContentImages.length > 0 && editingContentNewImages.length > 0 && ' · '}
-                      {editingContentNewImages.length > 0 && `${editingContentNewImages.length} image${editingContentNewImages.length > 1 ? 's' : ''} ajoutée${editingContentNewImages.length > 1 ? 's' : ''}`}
+                    <div className="flex flex-wrap gap-2">
+                      {editingContentImages.map((url, i) => (
+                        <div key={`old-${i}`} className="relative group/img">
+                          <img src={url} alt="" className="h-16 w-16 object-cover rounded-lg border border-outline-variant/40" />
+                          <span className="absolute -top-1 -right-1 text-[8px] bg-surface-container-high rounded px-1 opacity-0 group-hover/img:opacity-100 transition-opacity">existant</span>
+                        </div>
+                      ))}
+                      {editingContentNewImages.map((img, i) => (
+                        <div key={`new-${i}`} className="relative group/img">
+                          <img src={img.url} alt="" className="h-16 w-16 object-cover rounded-lg border border-primary/40" />
+                          <button
+                            type="button"
+                            onClick={() => removeContentNewImage(i)}
+                            className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity cursor-pointer"
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   )}
                   <div className="flex items-center gap-2">
