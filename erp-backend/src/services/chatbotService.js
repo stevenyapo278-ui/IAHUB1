@@ -305,7 +305,7 @@ async function callAI(messages, options = {}) {
 
   // ── Multi-turn : séparer system / user / assistant ──
   const intentHint = options.intentHint || '';
-  const systemContent = SYSTEM_PROMPT + intentHint;
+  const systemContent = options.forcedSystem || (SYSTEM_PROMPT + intentHint);
 
   // Construire l'historique en messages API (user/assistant alternés)
   const apiMessages = [];
@@ -384,18 +384,53 @@ async function callAI(messages, options = {}) {
   });
 }
 
-// ── Appel Intent AI (legacy, conservé comme fallback) ──────────────────
+// ── Appel Intent AI (structured output) ─────────────────────────────────
+
+const INTENT_SCHEMA = {
+  type: 'object',
+  properties: {
+    intent: {
+      type: 'string',
+      description: "Nom de l'intent détecté",
+      enum: [
+        'analytics', 'team_report', 'general', 'search_tickets', 'create_ticket',
+        'create_ticket_for', 'confirm_create_ticket', 'check_ticket', 'summary',
+        'similar_tickets', 'change_status', 'assign_ticket', 'search_inventory',
+        'search_users', 'search_locations', 'report', 'escalate', 'help',
+      ],
+    },
+    params: {
+      type: 'object',
+      description: 'Paramètres extraits du message',
+      properties: {
+        keyword: { type: 'string' },
+        ticketId: { type: 'integer' },
+        title: { type: 'string' },
+        description: { type: 'string' },
+        personName: { type: 'string' },
+        locationName: { type: 'string' },
+        teamName: { type: 'string' },
+        forUser: { type: 'string' },
+        period: { type: 'string' },
+        isWhy: { type: 'boolean' },
+      },
+    },
+  },
+  required: ['intent'],
+};
 
 async function callIntentAI(message) {
   const providers = await getActiveProviders();
   if (providers.length === 0) return null;
 
   try {
-    const formatted = `${INTENT_PROMPT}\n\nUser: "${message}"\nJSON:`;
-    const raw = await callProviderWithFallback(providers, formatted, 'chatbot');
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (jsonMatch) return JSON.parse(jsonMatch[0]);
-    console.warn('[chatbot] callIntentAI: pas de JSON valide dans la réponse IA, fallback regex');
+    const raw = await callAI(
+      [{ role: 'user', content: `${INTENT_PROMPT}\n\nUser: "${message}"` }],
+      { responseFormat: { type: 'json_schema', schema: INTENT_SCHEMA } }
+    );
+    const parsed = parseStructuredResponse(raw);
+    if (parsed?.intent) return parsed;
+    console.warn('[chatbot] callIntentAI: structured output invalide, fallback regex');
   } catch (err) {
     console.warn('[chatbot] callIntentAI échoué, fallback regex:', err.message);
   }
@@ -1531,32 +1566,37 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   }
 
   // ═══ DOUBLE VÉRIFICATION : fact-checking post-réponse ═══
-  // Vérifie que les IDs mentionnés dans la réponse existent vraiment en base
-  // AVANT d'envoyer la réponse à l'utilisateur.
+  // Détecte les erreurs (tickets fantômes, statuts erronés) et relance si nécessaire.
+  // verifyResponseFacts ne MUTATION plus le texte — détection + logs uniquement.
   if (reply && !isActionIntent) {
     const verification = await verifyResponseFacts(reply, contextParts, intent, matchingTickets);
-    if (verification.corrected) {
-      // Si des erreurs critiques ont été trouvées (ghost tickets), retry avec contexte corrigé
-      if (verification.needsRetry && verification.retryContext) {
-        const retriedReply = await retryWithCorrectiveContext(
-          message, systemContext, verification.retryContext, voiceModelOptions, conversationHistory
-        );
-        if (retriedReply) {
-          reply = retriedReply;
-          // Re-vérifier la réponse régénérée
-          const reVerification = await verifyResponseFacts(reply, contextParts, intent, matchingTickets);
-          if (reVerification.corrected) {
-            reply = reVerification.reply; // Prendre la meilleure version disponible
+    if (verification.needsRetry && verification.retryContext) {
+      // Relancer avec le structured output + contexte correctif dans le system prompt
+      try {
+        const correctiveSystem = `${systemContext}\n\n⚠️ CONTEXTE CORRECTIF (respecte-le strictement) :\n${verification.retryContext}Ne mentionne PAS ces éléments erronés dans ta réponse. Utilise UNIQUEMENT les données du contexte initial.`;
+        const retryRaw = await callAI(
+          [{ role: 'user', content: userMessageWithCtx }],
+          {
+            ...voiceModelOptions,
+            conversationHistory,
+            intentHint: '',
+            responseFormat: { type: 'json_object', schema: responseSchema },
+            forcedSystem: correctiveSystem,
           }
-        } else {
-          reply = verification.reply; // Fallback sur la réponse corrigée
+        );
+        const retryParsed = parseStructuredResponse(retryRaw);
+        if (retryParsed && retryParsed.reply) {
+          reply = cleanAiReply(retryParsed.reply);
+          const retryValidated = await validateCitedIds(retryParsed.citedTicketIds, retryParsed.knowledgeIds || retryParsed.citedKnowledgeIds, intent);
+          citedTicketIds = retryValidated.ticketIds;
+          citedKnowledgeIds = retryValidated.knowledgeIds;
+          console.warn(`[chatbot] Retry structuré réussi après fact-check: ${verification.corrections.join(', ')}`);
         }
-      } else {
-        reply = verification.reply;
+      } catch (retryErr) {
+        console.error('[chatbot] Retry structuré échoué:', retryErr.message);
       }
-      console.warn(`[chatbot] Réponse corrigée par fact-check: ${verification.corrections.join(', ')}`);
     }
-    // Vérification croisée (logs uniquement, pas de correction)
+    // Vérification croisée (logs uniquement)
     crossVerifyWithContext(reply, matchingTickets, intent);
   }
 
@@ -1680,7 +1720,7 @@ const DB_STATUS_TO_FR = {
 };
 
 async function verifyResponseFacts(replyText, contextParts, intent, matchingTickets) {
-  if (!replyText) return { reply: replyText, corrected: false, needsRetry: false };
+  if (!replyText) return { reply: replyText, corrected: false, needsRetry: false, retryContext: '' };
 
   factCheckCounters.totalChecks++;
   const corrections = [];
@@ -1697,10 +1737,9 @@ async function verifyResponseFacts(replyText, contextParts, intent, matchingTick
   }
 
   // ═══ 2. Vérifier chaque ID existe en base + récupérer statuts réels ═══
-  const realTicketData = new Map(); // id → { status, title }
+  const realTicketData = new Map();
   if (mentionedIds.size > 0) {
     try {
-      // UNE SEULE QUERY pour existence + statuts (pas deux)
       const existingTickets = await prisma.ticket.findMany({
         where: { id: { in: [...mentionedIds] } },
         select: { id: true, status: true, title: true },
@@ -1713,9 +1752,6 @@ async function verifyResponseFacts(replyText, contextParts, intent, matchingTick
         if (!realTicketData.has(id)) {
           corrections.push(`Ticket #${id} introuvable`);
           factCheckCounters.ghostTickets++;
-          // Supprimer complètement la référence fantôme (pas de [introuvable])
-          const ghostRegex = new RegExp(`[#]?${id}\\b|ticket\\s*#?\\s*${id}\\b`, 'gi');
-          replyText = replyText.replace(ghostRegex, '').replace(/\s{2,}/g, ' ').trim();
           needsRetry = true;
           retryContext += `Le ticket #${id} n'existe pas en base. `;
         }
@@ -1725,9 +1761,8 @@ async function verifyResponseFacts(replyText, contextParts, intent, matchingTick
     }
   }
 
-  // ═══ 3. Vérifier les claims de statut ═══
-  // Extraire les statuts du contexte (source de vérité)
-  const contextStatuses = new Map(); // id → dbStatus
+  // ═══ 3. Vérifier les claims de statut (détection seule, pas de mutation) ═══
+  const contextStatuses = new Map();
   const statusPattern = /Ticket\s*#(\d+).*?Statut\s*:\s*(Nouveau|Ouvert|En attente|Résolu|Fermé)/gi;
   for (const part of contextParts) {
     while ((match = statusPattern.exec(part)) !== null) {
@@ -1737,12 +1772,10 @@ async function verifyResponseFacts(replyText, contextParts, intent, matchingTick
     }
   }
 
-  // Si on a les données DB réelles, les utiliser comme source de vérité
   for (const [id, realData] of realTicketData) {
     contextStatuses.set(id, realData.status);
   }
 
-  // Patterns pour détecter les claims de statut dans la réponse IA
   const claimPatterns = [
     { regex: /#(\d+).*?(?:est|passe?\s+(?:à|a))\s+(?:le\s+)?statut\s+(?:de\s+)?["']?(nouveau|ouvert|en attente|résolu|fermé)["']?/gi, idGroup: 1, statusGroup: 2 },
     { regex: /#(\d+).*?(?:statut|état)\s*[:=]\s*["']?(nouveau|ouvert|en attente|résolu|fermé)["']?/gi, idGroup: 1, statusGroup: 2 },
@@ -1761,23 +1794,20 @@ async function verifyResponseFacts(replyText, contextParts, intent, matchingTick
         if (realStatus !== claimedDbStatus) {
           const realFr = DB_STATUS_TO_FR[realStatus] || realStatus;
           corrections.push(`#${ticketId}: IA dit "${claimedFrStatus}" mais statut réel = "${realFr}"`);
-          // Corriger le statut dans la réponse
-          const wrongFr = match[statusGroup];
-          replyText = replyText.replace(new RegExp(`#${ticketId}.*?${wrongFr}`, 'gi'), `#${ticketId} (${realFr})`);
+          needsRetry = true;
+          retryContext += `Le ticket #${ticketId} a le statut "${realFr}", pas "${claimedFrStatus}". `;
         }
       }
     }
   }
 
-  // ═══ 4. Vérifier les comptes/totaux ═══
-  // Pattern: "X tickets" ou "total: X"
+  // ═══ 4. Vérifier les comptes/totaux (détection seule) ═══
   const countPatterns = [
     /(\d+)\s*tickets?\s*(?:trouvé|ouvert|ouverts?|en|total)/gi,
     /total\s*[:=]?\s*(\d+)/gi,
     /(?:il y a|il existe)\s+(\d+)\s*ticket/gi,
   ];
 
-  // Source de vérité pour les comptes : utiliser matchingTickets si dispo
   const actualCount = matchingTickets ? matchingTickets.length : null;
   if (actualCount !== null) {
     for (const regex of countPatterns) {
@@ -1785,11 +1815,8 @@ async function verifyResponseFacts(replyText, contextParts, intent, matchingTick
         const claimedCount = parseInt(match[1], 10);
         if (claimedCount !== actualCount) {
           corrections.push(`Compte: IA dit ${claimedCount} mais réel = ${actualCount}`);
-          // Corriger le compte dans la réponse
-          replyText = replyText.replace(
-            new RegExp(`${claimedCount}\\s*tickets?`, 'gi'),
-            `${actualCount} tickets`
-          );
+          needsRetry = true;
+          retryContext += `Le nombre réel de tickets est ${actualCount}, pas ${claimedCount}. `;
         }
       }
     }
@@ -1829,25 +1856,6 @@ function crossVerifyWithContext(replyText, matchingTickets, intent) {
       factCheckCounters.crossVerifyWarnings++;
       console.warn(`[chatbot] Cross-verify: #${id} mentionné mais absent du contexte (intent: ${intent})`);
     }
-  }
-}
-
-// ── Retry avec contexte corrigé ───────────────────────────────────────
-// Si le fact-check a trouvé des erreurs, relance l'IA avec un contexte
-// correctif pour régénérer une réponse sans les références fausses.
-
-async function retryWithCorrectiveContext(originalMessage, systemContext, retryContext, voiceModelOptions, conversationHistory) {
-  const correctiveMessage = `${originalMessage}\n\n⚠️ CONTEXTE CORRECTIF : ${retryContext}Ne mentionne PAS ces éléments dans ta réponse. Utilise UNIQUEMENT les données du contexte initial.`;
-
-  try {
-    const raw = await callAI(
-      [{ role: 'user', content: `${correctiveMessage}${systemContext}` }],
-      { ...voiceModelOptions, conversationHistory, intentHint: '' }
-    );
-    return cleanAiReply(raw);
-  } catch (err) {
-    console.error('[chatbot] Échec retry avec contexte corrigé:', err.message);
-    return null;
   }
 }
 
