@@ -74,13 +74,16 @@ router.get('/', async (req, res) => {
           { title: { contains: search, mode: 'insensitive' } },
         ].filter(Boolean),
       };
-      // La recherche couvre aussi le type d'événement : label métier (ex « rouvert »),
-      // code technique (ex REOPENED) — filtré via la liste blanche des catégories ci-dessus.
+      // Le type est un enum — on ne peut pas utiliser contains.
+      // On cherche parmi les valeurs d'enum celles qui matchent le terme de recherche.
+      const ALL_TYPES = Object.values(require('@prisma/client').TicketEventType || {});
+      const matchingTypes = ALL_TYPES.filter(t => t.toUpperCase().includes(search.toUpperCase()));
+      const typeFilter = matchingTypes.length > 0 ? { type: { in: matchingTypes } } : {};
       where.OR = [
         { ticket: ticketFilter },
         { actor: { contains: search, mode: 'insensitive' } },
-        { type: { contains: search, mode: 'insensitive' } },
-      ];
+        typeFilter,
+      ].filter(f => Object.keys(f).length > 0);
     }
 
     const [events, total] = await Promise.all([
