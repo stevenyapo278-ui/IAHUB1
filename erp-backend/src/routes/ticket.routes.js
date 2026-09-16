@@ -1850,6 +1850,38 @@ const followupUpload = multer({
   limits: { fileSize: 10 * 1024 * 1024 },
 });
 
+// Upload d'images pour édition de description (collage/clic)
+router.post('/:id/content-images', followupUpload.array('images', 10), async (req, res) => {
+  const ticketId = Number(req.params.id);
+  const ticket = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { id: true } });
+  if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
+
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({ error: 'Aucune image fournie' });
+  }
+
+  const uploaded = [];
+  for (const file of req.files) {
+    const fileValidation = validateUpload(file.originalname, file.mimetype, 'followup');
+    if (!fileValidation.valid) {
+      for (const f of req.files) { try { fs.unlinkSync(f.path); } catch {} }
+      return res.status(400).json({ error: fileValidation.error });
+    }
+    const ext = path.extname(file.originalname) || '.png';
+    const safeFilename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+    const destPath = path.join(FOLLOWUP_IMAGES_DIR, safeFilename);
+    try {
+      fs.renameSync(file.path, destPath);
+    } catch {
+      fs.copyFileSync(file.path, destPath);
+      fs.unlinkSync(file.path);
+    }
+    uploaded.push({ url: `/uploads/followup-images/${safeFilename}`, filename: file.originalname });
+  }
+
+  res.json({ images: uploaded });
+});
+
 // Add followup / comment (supporte le collage d'images via FormData)
 router.post('/:id/followups', followupUpload.array('images', 10), [body('content').notEmpty()], async (req, res) => {
   const errors = validationResult(req);

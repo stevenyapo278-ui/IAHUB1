@@ -21,7 +21,7 @@ import {
   Flame, Radio, Info, ArrowDown, UserCheck, HelpCircle, Layers, History,
   TrendingUp, Lock, Link2, Merge, Plus, GitBranch, Timer, Play, Square, ListChecks, Boxes,
   ChevronDown, Inbox, Pencil, Save, Search,
-  ChevronsLeft, ChevronLeft, ChevronsRight, Eye, Copy, ShieldAlert, ShieldOff, Loader2
+  ChevronsLeft, ChevronLeft, ChevronsRight, Eye, Copy, ShieldAlert, ShieldOff, Loader2, Image as ImageIcon
 } from 'lucide-react';
 import {
   MANUAL_STATUS_OPTIONS, STATUS_LABELS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS,
@@ -234,6 +234,7 @@ export default function TicketDetail() {
   const [editingContent, setEditingContent] = useState(false);
   const [editingContentValue, setEditingContentValue] = useState('');
   const [editingContentImages, setEditingContentImages] = useState([]);
+  const [editingContentNewImages, setEditingContentNewImages] = useState([]);
   const [savingContent, setSavingContent] = useState(false);
 
   const openEscalateModal = async () => {
@@ -751,7 +752,51 @@ export default function TicketDetail() {
     const { text, images } = extractCleanTextAndImages(ticket?.content || '');
     setEditingContentValue(text);
     setEditingContentImages(images);
+    setEditingContentNewImages([]);
     setEditingContent(true);
+  }
+
+  async function uploadContentImages(files) {
+    const fd = new FormData();
+    for (const file of files) fd.append('images', file);
+    try {
+      const { data } = await api.post(`/tickets/${id}/content-images`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      return data.images || [];
+    } catch (err) {
+      toast.error(err.response?.data?.error || "Erreur upload image");
+      return [];
+    }
+  }
+
+  function handleContentPaste(e) {
+    const items = Array.from(e.clipboardData?.items || []);
+    const imageItems = items.filter((it) => it.type?.startsWith('image/'));
+    if (imageItems.length === 0) return;
+    e.preventDefault();
+    const files = imageItems.map((it) => it.getAsFile()).filter(Boolean);
+    if (files.length === 0) return;
+    uploadContentImages(files).then((uploaded) => {
+      if (uploaded.length > 0) {
+        setEditingContentNewImages((prev) => [...prev, ...uploaded]);
+        const markers = uploaded.map((img) => `<img src="${img.url}" alt="image" />`).join('\n');
+        setEditingContentValue((prev) => prev + (prev ? '\n' : '') + markers);
+      }
+    });
+  }
+
+  function handleContentFileSelect(e) {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    uploadContentImages(files).then((uploaded) => {
+      if (uploaded.length > 0) {
+        setEditingContentNewImages((prev) => [...prev, ...uploaded]);
+        const markers = uploaded.map((img) => `<img src="${img.url}" alt="image" />`).join('\n');
+        setEditingContentValue((prev) => prev + (prev ? '\n' : '') + markers);
+      }
+    });
+    e.target.value = '';
   }
 
   async function handleSaveContent() {
@@ -1548,18 +1593,26 @@ export default function TicketDetail() {
                     rows={7}
                     value={editingContentValue}
                     onChange={(e) => setEditingContentValue(e.target.value)}
+                    onPaste={handleContentPaste}
                     onKeyDown={(e) => {
                       if (e.key === 'Escape') setEditingContent(false);
                       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') handleSaveContent();
                     }}
                     autoFocus
                   />
-                  {editingContentImages.length > 0 && (
+                  {(editingContentImages.length > 0 || editingContentNewImages.length > 0) && (
                     <div className="text-[10px] text-on-surface-variant/70 italic">
-                      {editingContentImages.length} image{editingContentImages.length > 1 ? 's' : ''} conservée{editingContentImages.length > 1 ? 's' : ''} (non modifiables ici)
+                      {editingContentImages.length > 0 && `${editingContentImages.length} image${editingContentImages.length > 1 ? 's' : ''} existante${editingContentImages.length > 1 ? 's' : ''}`}
+                      {editingContentImages.length > 0 && editingContentNewImages.length > 0 && ' · '}
+                      {editingContentNewImages.length > 0 && `${editingContentNewImages.length} image${editingContentNewImages.length > 1 ? 's' : ''} ajoutée${editingContentNewImages.length > 1 ? 's' : ''}`}
                     </div>
                   )}
                   <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-outline-variant/40 bg-surface-container text-on-surface-variant text-[10px] font-semibold hover:bg-surface-container-high transition-colors cursor-pointer">
+                      <ImageIcon className="w-3 h-3" />
+                      Ajouter une image
+                      <input type="file" accept="image/*" multiple className="hidden" onChange={handleContentFileSelect} />
+                    </label>
                     <button
                       type="button"
                       onClick={handleSaveContent}
