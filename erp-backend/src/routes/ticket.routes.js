@@ -741,6 +741,52 @@ router.get('/:id/preview', async (req, res) => {
   }
 });
 
+// ── Suggestions de clôture rejetées — récupération ─────────────────────
+// AVANT /:id pour éviter le matching "rejected-closures" comme un id
+router.get('/rejected-closures', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+
+    const events = await prisma.ticketEvent.findMany({
+      where: { type: 'CLOSURE_REJECTED' },
+      orderBy: { createdAt: 'desc' },
+      take: limit * 2,
+      include: {
+        ticket: {
+          select: {
+            id: true, title: true, content: true, status: true, priority: true,
+            category: true, closeSuggested: true, closeSuggestionCount: true,
+            sourceEmail: true, sourceName: true, createdAt: true,
+            requester: { select: { id: true, fullName: true, email: true } },
+            assignedTo: { select: { id: true, fullName: true } },
+          },
+        },
+      },
+    });
+
+    const seen = new Set();
+    const rejected = [];
+    for (const ev of events) {
+      if (!ev.ticket || seen.has(ev.ticket.id)) continue;
+      if (['SOLVED', 'CLOSED'].includes(ev.ticket.status)) continue;
+      if (ev.ticket.closeSuggested) continue;
+      seen.add(ev.ticket.id);
+      rejected.push({
+        ...ev.ticket,
+        rejectedAt: ev.createdAt,
+        rejectionReason: ev.payload?.reason || null,
+        rejectionConfidence: ev.payload?.confidence ?? null,
+        canRecover: (ev.ticket.closeSuggestionCount || 0) < 2,
+      });
+      if (rejected.length >= limit) break;
+    }
+
+    return res.json(rejected);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/:id', async (req, res) => {
   const ticket = await prisma.ticket.findUnique({
     where: { id: Number(req.params.id) },
@@ -1605,55 +1651,6 @@ router.post('/:id/reject-close', forbidTechnicianTicketEdits, requirePermission(
     emitTicketUpdated(ticket, { status: 'OPEN', closeSuggested: false });
     notifyRequesterOnStatusChange(id, 'OPEN');
     return res.json(ticket);
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-// ── Suggestions de clôture rejetées — récupération ─────────────────────
-// Liste les tickets dont la dernière suggestion de clôture a été rejetée par la Hotline,
-// avec le motif et la date de rejet. Permet de visualiser et récupérer ces suggestions.
-router.get('/rejected-closures', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
-  try {
-    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
-
-    // Récupère les événements CLOSURE_REJECTED récents (dernier par ticket)
-    const events = await prisma.ticketEvent.findMany({
-      where: { type: 'CLOSURE_REJECTED' },
-      orderBy: { createdAt: 'desc' },
-      take: limit * 2, // on prend large pour compenser les doublons
-      include: {
-        ticket: {
-          select: {
-            id: true, title: true, content: true, status: true, priority: true,
-            category: true, closeSuggested: true, closeSuggestionCount: true,
-            sourceEmail: true, sourceName: true, createdAt: true,
-            requester: { select: { id: true, fullName: true, email: true } },
-            assignedTo: { select: { id: true, fullName: true } },
-          },
-        },
-      },
-    });
-
-    // Grouper par ticket : ne garder que le dernier rejet par ticket
-    const seen = new Set();
-    const rejected = [];
-    for (const ev of events) {
-      if (!ev.ticket || seen.has(ev.ticket.id)) continue;
-      // Exclure les tickets déjà résolus/fermés ou avec une suggestion active
-      if (['SOLVED', 'CLOSED'].includes(ev.ticket.status)) continue;
-      if (ev.ticket.closeSuggested) continue;
-      seen.add(ev.ticket.id);
-      rejected.push({
-        ...ev.ticket,
-        rejectedAt: ev.createdAt,
-        rejectionReason: ev.payload?.reason || null,
-        rejectionConfidence: ev.payload?.confidence ?? null,
-        canRecover: (ev.ticket.closeSuggestionCount || 0) < 2,
-      });
-      if (rejected.length >= limit) break;
-    }
-
-    return res.json(rejected);
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
