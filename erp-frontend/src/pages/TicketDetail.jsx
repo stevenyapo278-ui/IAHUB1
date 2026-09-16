@@ -799,6 +799,10 @@ export default function TicketDetail() {
     setEditingContentNewImages((prev) => prev.filter((_, i) => i !== idx));
   }
 
+  function removeContentExistingImage(idx) {
+    setEditingContentImages((prev) => prev.filter((_, i) => i !== idx));
+  }
+
   async function handleSaveContent() {
     setSavingContent(true);
     try {
@@ -1611,7 +1615,13 @@ export default function TicketDetail() {
                       {editingContentImages.map((url, i) => (
                         <div key={`old-${i}`} className="relative group/img">
                           <img src={url} alt="" className="h-16 w-16 object-cover rounded-lg border border-outline-variant/40" />
-                          <span className="absolute -top-1 -right-1 text-[8px] bg-surface-container-high rounded px-1 opacity-0 group-hover/img:opacity-100 transition-opacity">existant</span>
+                          <button
+                            type="button"
+                            onClick={() => removeContentExistingImage(i)}
+                            className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity cursor-pointer"
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </button>
                         </div>
                       ))}
                       {editingContentNewImages.map((img, i) => (
