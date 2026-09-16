@@ -847,7 +847,8 @@ async function findSimilarTickets(title, description) {
 
   return await prisma.ticket.findMany({
     where: {
-      status: { notIn: ['CLOSED'] },
+      deletedAt: null,
+      status: { notIn: ['CLOSED', 'SOLVED'] },
       OR: words.flatMap((w) => [
         { title: { contains: w, mode: 'insensitive' } },
         { content: { contains: w, mode: 'insensitive' } },
