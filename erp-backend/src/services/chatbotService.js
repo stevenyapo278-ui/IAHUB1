@@ -22,50 +22,52 @@ RÈGLES STRICTES DE FORMATAGE :
 3. N'utilise JAMAIS de formules creuses ("Bien sûr", "Voici les informations", "Avec plaisir", etc.).
 4. N'utilise PAS d'emojis.
 5. N'utilise PAS de titres Markdown (# ## ###).
-6. N'utilise PAS de gras (**texte**) sauf pour les totaux importants.
-7. Pour les données chiffrées :
+6. Pour les données chiffrées et les listes de tickets :
    - Utilise UNIQUEMENT un tableau Markdown propre
+   - En-têtes en GRAS : **| Colonne |**
    - Maximum 6 colonnes
-   - Maximum 10 lignes de données
-   - Une seule phrase courte après le tableau si nécessaire
-8. Structure préférée pour les statistiques :
-   - 1 phrase d'intro très courte (optionnelle)
-   - Tableau Markdown
-   - 1 phrase de conclusion maximum
-9. Si tu génères un graphique (widget), dis juste une phrase courte. Le graphique s'affiche automatiquement.
+   - Maximum 10 lignes de données ( sinon résume par statut/lieu)
+   - Colonnes alignées verticalement
+   - 1 phrase d'intro courte (ex: "8 tickets en attente :") + tableau + 1 phrase de conclusion max
+7. Pour les réponses textuelles (hors tableaux) :
+   - Pas de gras sauf totaux chiffrés (ex: "Total : **406**")
+   - Maximum 4 lignes
+
+STRUCTURE DES TABLEAUX DE TICKETS :
+- En-têtes TOUJOURS en gras et en français : **| ID | Titre | Statut | Priorite | Lieu |**
+- Statuts en français : Nouveau, Ouvert, En attente, En attente utilisateur, Resolu, Ferme
+- Priorites : Critique, Haute, Moyenne, Basse
+- Titres tronques a 40 caracteres max si trop longs
+- Lieu : uniquement le niveau le plus pertinent (pas l'arbre complet sauf si court)
+- Commencer par la ligne de separateur : |---|---|---|---|---|
 
 RÈGLES ABSOLUES SUR LES DONNÉES :
-10. N'invente JAMAIS de tickets, numéros, statuts ou données. Utilise UNIQUEMENT les informations présentes dans le contexte fourni. Les chiffres du contexte (ex: "Ouverts : **76**") sont la seule source de vérité — ne les modifie JAMAIS.
-11. Si aucun ticket n'est trouvé dans le contexte, indique clairement "Aucun ticket trouvé" ou "Aucun ticket ne correspond à votre recherche". Ne crée pas de numéros de ticket ni de détails inventés.
-12. Si le contexte dit "Aucun ticket ouvert", c'est la réalité. Ne contredis jamais ces données.
-13. Quand on te demande une liste de tickets, vérifie que chaque ticket mentionné existe bien dans les résultats de recherche fournis. Si la liste est vide, dis-le explicitement.
+8. N'invente JAMAIS de tickets, numéros, statuts ou données. Utilise UNIQUEMENT les informations présentes dans le contexte fourni.
+9. Si aucun ticket n'est trouvé dans le contexte, indique "Aucun ticket trouvé". Ne crée pas de numéros inventés.
+10. Quand on te demande une liste, vérifie que chaque ticket mentionné existe dans le contexte. Si la liste est vide, dis-le explicitement.
 
 RÈGLES DE CITATION :
-14. Tu dois renvoyer citedTicketIds avec UNIQUEMENT les IDs de tickets qui apparaissent dans le contexte "Tickets pertinents trouvés".
-15. Tu dois renvoyer citedKnowledgeIds avec UNIQUEMENT les documentId qui apparaissent dans le contexte "Base de connaissances".
-16. Si tu ne cites aucun ticket, renvoie citedTicketIds: [].
-17. Si tu ne cites aucun document KB, renvoie citedKnowledgeIds: [].
+11. citedTicketIds : UNIQUEMENT les IDs du contexte "Tickets pertinents trouvés".
+12. citedKnowledgeIds : UNIQUEMENT les documentId du contexte "Base de connaissances".
+13. Si tu ne cites aucun ticket, renvoie citedTicketIds: [].
+14. Si tu ne cites aucun document KB, renvoie citedKnowledgeIds: [].
 
-18. Capacités :
+15. Capacités :
    - Informations TICKETS (statut, priorité, détails)
    - STATISTIQUES & ANALYSES (top magasins, répartitions, causes racines)
    - Base de Connaissances IT
    - Création/escalade de tickets
-   - Recherche inventaire, utilisateurs, lieux
-   - Changement statut/assignation (si autorisé)
    - Résumés et détection de doublons`;
 
 // ── Nettoyage des réponses IA ──────────────────────────────────────────
 
 function cleanAiReply(text) {
   if (!text) return '';
-  return text
+  let cleaned = text
     // Supprime les formules creuses en début de réponse
     .replace(/^(Bien sûr|Avec plaisir|Voici|Absolument|Certainement|Ok|D'accord|Je vais|Je peux)[ !,. :]*/i, '')
     // Supprime les titres markdown
     .replace(/^#{1,6}\s+/gm, '')
-    // Supprime le gras excessif
-    .replace(/\*\*(.*?)\*\*/g, '$1')
     // Supprime les emojis en début de ligne ou isolés
     .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
     // Limite les sauts de ligne
@@ -74,6 +76,20 @@ function cleanAiReply(text) {
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n+$/, '')
     .trim();
+
+  // Préserver le gras dans les en-têtes de tableau (lignes commençant par |)
+  // et dans les totaux importants, mais supprimer le gras ailleurs
+  const lines = cleaned.split('\n');
+  const result = lines.map(line => {
+    // Ligne de tableau ou séparateur → garder telle quelle
+    if (/^\|/.test(line)) return line;
+    // Ligne contenant un total important → garder le gras
+    if (/\b\d+\b/.test(line) && /\b(total|ouvert|résolu|fermé|critique|urgent)\b/i.test(line)) return line;
+    // Autres lignes → supprimer le gras
+    return line.replace(/\*\*(.*?)\*\*/g, '$1');
+  });
+
+  return result.join('\n');
 }
 
 const INTENT_PROMPT = `Tu es un classificateur d'intentions. Analyse le message utilisateur et réponds UNIQUEMENT avec un JSON valide (pas de texte avant ou après).
@@ -1662,7 +1678,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     report: "INTERDICTION de modifier, arrondir ou réécrire les chiffres du rapport. Copie EXACTEMENT les nombres du contexte. Ne fais AUCUNE approximation. Si le contexte dit 76, écris 76 — pas 50, pas 100.",
     summary: "Résumé en 4-6 lignes maximum. Pas de tableau.",
     general: "Réponse courte et naturelle (3-6 lignes).",
-    search_tickets: "Liste les tickets trouvés avec ID, titre, statut et lieu. Si beaucoup de résultats, utilise un tableau Markdown. Ne limite pas artificiellement le nombre.",
+    search_tickets: "Tableau Markdown obligatoire avec ces colonnes exactes en EN-TÊTES EN GRAS : **| ID | Titre | Statut | Priorite | Lieu |**. Statuts en français (Nouveau/Ouvert/En attente/En attente utilisateur/Resolu/Ferme). Priorites (Critique/Haute/Moyenne/Basse). Titres tronqués a 40 car. 1 phrase d'intro courte + tableau. Ne supprime JAMAIS de colonnes.",
     check_ticket: "Donne le statut, la priorité, le lieu et le technicien assigné. Sois factuel.",
     create_ticket: "Confirme la création avec le numéro de ticket et un lien.",
     create_ticket_for: "Confirme la création pour l'utilisateur mentionné.",
