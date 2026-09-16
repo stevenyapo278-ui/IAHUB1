@@ -138,6 +138,7 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
   const idMatch = clean.match(/#?(\d+)/);
   const statusMatch = lower.match(/\b(nouveaux?|ouverts?|attente|résolus?|resolu[s]?|fermés?|ferme[s]?)\b/);
   const priorityMatch = lower.match(/\b(p1|p2|p3|p4|critique|haute|moyenne|basse)\b/);
+  const teamMatch = lower.match(/\b(equipe|équipe|team)\s+([a-zà-ÿ0-9\- ]+)/i);
 
   // Détecter si l'utilisateur veut une liste complète ("liste tous", "montre tous", etc.)
   const wantsFullList = /\b(tous?|toute?|liste|liste[s]?|montre|affiche|donne-moi)\b/i.test(lower);
@@ -181,6 +182,10 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
 
     if (statusMatch) where.status = STATUS_MAP[statusMatch[1]];
     if (priorityMatch) where.priority = PRIORITY_MAP[priorityMatch[1]];
+    if (teamMatch) {
+      const teamName = teamMatch[2].trim();
+      where.team = { name: { contains: teamName, mode: 'insensitive' } };
+    }
 
     const STOP_WORDS = new Set([
       'les', 'des', 'que', 'sur', 'pour', 'avec', 'par', 'dans', 'un', 'une', 'qui', 'est',
@@ -197,13 +202,18 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
     const PRIORITY_WORDS = new Set([
       'p1', 'p2', 'p3', 'p4', 'critique', 'haute', 'moyenne', 'basse',
     ]);
+    const TEAM_WORDS = new Set(['equipe', 'équipe', 'team']);
 
     const words = clean.split(/\s+/).filter(
-      (w) => w.length > 2 && !STOP_WORDS.has(w.toLowerCase()) && !STATUS_WORDS.has(w.toLowerCase()) && !PRIORITY_WORDS.has(w.toLowerCase())
+      (w) => w.length > 2
+        && !STOP_WORDS.has(w.toLowerCase())
+        && !STATUS_WORDS.has(w.toLowerCase())
+        && !PRIORITY_WORDS.has(w.toLowerCase())
+        && !TEAM_WORDS.has(w.toLowerCase())
     );
 
-    // Si pas de mots-clés mais filtre status/priority/id → rechercher par filtre uniquement
-    if (words.length === 0 && !idMatch && !statusMatch && !priorityMatch) return [];
+    // Si pas de mots-clés mais filtre status/priority/id/team → rechercher par filtre uniquement
+    if (words.length === 0 && !idMatch && !statusMatch && !priorityMatch && !teamMatch) return [];
 
     if (words.length > 0) {
       const keywordFilter = words.flatMap((w) => [
@@ -213,6 +223,7 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
         { locationName: { contains: w, mode: 'insensitive' } },
         { requester: { fullName: { contains: w, mode: 'insensitive' } } },
         { assignedTo: { fullName: { contains: w, mode: 'insensitive' } } },
+        { team: { name: { contains: w, mode: 'insensitive' } } },
       ]);
 
       // REQUESTER/TECHNICIAN : leur filtre role EST déjà dans where.OR
