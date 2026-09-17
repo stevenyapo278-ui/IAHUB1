@@ -541,7 +541,7 @@ async function callAI(messages, options = {}) {
 
   // Construire l'historique en messages API (user/assistant alternés)
   const apiMessages = [];
-  const recentHistory = (options.conversationHistory || []).slice(-15);
+  const recentHistory = (options.conversationHistory || []).slice(-30);
   for (const msg of recentHistory) {
     if (!msg || !msg.content || typeof msg.content !== 'string') continue;
     // Filtrer les messages d'erreur
@@ -556,8 +556,8 @@ async function callAI(messages, options = {}) {
   const lastMsg = messages[messages.length - 1];
   apiMessages.push({ role: 'user', content: lastMsg.content });
 
-  // Budget token dynamique : garder l'historique dans ~8000 tokens
-  const MAX_HISTORY_TOKENS = 8000;
+  // Budget token dynamique : garder l'historique dans ~16000 tokens
+  const MAX_HISTORY_TOKENS = 16000;
   let trimmedMessages = [...apiMessages];
 
   // Calculer le total des tokens de l'historique (sans le message actuel)
