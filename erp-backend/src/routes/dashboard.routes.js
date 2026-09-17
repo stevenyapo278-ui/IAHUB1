@@ -99,6 +99,7 @@ router.get('/pending-approvals', async (req, res) => {
     where: { approvalStatus: 'PENDING' },
     include: {
       requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+      assignedTo: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
       team: { select: { id: true, name: true } },
     },
     orderBy: { createdAt: 'asc' },

@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../api/client';
-import { useFilterParam } from '../hooks/useFilterParam';
+import { useFilterParam, useFilterParams } from '../hooks/useFilterParam';
 import PageShell from '../components/PageShell';
 import Pagination from '../components/Pagination';
 import {
@@ -103,6 +103,8 @@ export default function AuditLogs({ embedded = false } = {}) {
   const [endDate, setEndDate] = useFilterParam('endDate');
   const [orderFilter, setOrderFilter] = useFilterParam('order', 'desc');
   const [pageSize, setPageSize] = useFilterParam('pageSize', '50');
+  // Mise à jour groupée : une seule navigation URL pour plusieurs filtres (voir useFilterParams)
+  const updateFilters = useFilterParams({ order: 'desc', pageSize: '50' });
   const [quickRange, setQuickRange] = useState('');
   const [expandedId, setExpandedId] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
@@ -135,23 +137,20 @@ export default function AuditLogs({ embedded = false } = {}) {
   function applyFilters() { load(1); }
 
   function resetFilters() {
-    setActionFilter('');
-    setDomainFilter('');
-    setTargetTypeFilter('');
-    setTargetIdFilter('');
-    setActorFilter('');
-    setSearchFilter('');
-    setStartDate('');
-    setEndDate('');
-    setOrderFilter('desc');
-    setPageSize('50');
     setQuickRange('');
+    updateFilters({
+      action: '', domain: '', targetType: '', targetId: '',
+      actor: '', search: '', startDate: '', endDate: '',
+      order: 'desc', pageSize: '50',
+    });
   }
 
   function applyQuickRange(days) {
     setQuickRange(days);
-    setStartDate(days ? rangeToStartDate(days) : '');
-    setEndDate('');
+    updateFilters({
+      startDate: days ? rangeToStartDate(days) : '',
+      endDate: '',
+    });
   }
 
   function formatDate(iso) {
@@ -267,7 +266,7 @@ export default function AuditLogs({ embedded = false } = {}) {
                   <span>Domaine</span>
                   <select
                     value={domainFilter}
-                    onChange={(e) => { setDomainFilter(e.target.value); setActionFilter(''); }}
+                    onChange={(e) => updateFilters({ domain: e.target.value, action: '' })}
                     className="input-katalyst"
                   >
                     <option value="">Tous domaines</option>
@@ -281,7 +280,7 @@ export default function AuditLogs({ embedded = false } = {}) {
                   <span>Action précise</span>
                   <select
                     value={actionFilter}
-                    onChange={(e) => { setActionFilter(e.target.value); setDomainFilter(''); }}
+                    onChange={(e) => updateFilters({ action: e.target.value, domain: '' })}
                     className="input-katalyst"
                   >
                     <option value="">Toutes les actions</option>

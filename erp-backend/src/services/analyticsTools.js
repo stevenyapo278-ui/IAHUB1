@@ -107,7 +107,7 @@ async function getTopLocationsStats({ filterKeyword, period, limit = 5, sortByUr
 
     const item = locationMap.get(locName);
     item.total += 1;
-    if (t.priority === 'P1') item.urgentCount += 1; // P1 = priorité critique (TicketPriority)
+    if (t.priority === 'P1' || t.priority === 'P2') item.urgentCount += 1; // P1+P2 = urgent
     if (t.status === 'SOLVED' || t.status === 'CLOSED') item.resolvedCount += 1; // pas de statut RESOLVED dans TicketStatus
   }
 

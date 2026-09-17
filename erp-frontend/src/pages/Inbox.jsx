@@ -10,7 +10,7 @@ import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import { staggerContainer, staggerItem } from '../utils/animations';
 import { useSocket } from '../context/SocketContext';
-import { useFilterParam } from '../hooks/useFilterParam';
+import { useFilterParam, useFilterParams } from '../hooks/useFilterParam';
 import { sanitizeHtml } from '../utils/sanitize';
 import {
   Inbox as InboxIcon, MailOpen, RefreshCw, Clock, CheckCircle2, XCircle, Ban,
@@ -307,6 +307,8 @@ export default function Inbox() {
   const [dateTo, setDateTo] = useFilterParam('dateTo', '');
   const [fromEmail, setFromEmail] = useFilterParam('fromEmail', '');
   const [toEmail, setToEmail] = useFilterParam('toEmail', '');
+  // Mise à jour groupée : une seule navigation URL pour plusieurs filtres (voir useFilterParams)
+  const updateFilters = useFilterParams({ folder: 'all', sort: 'date', density: 'comfortable' });
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
   const folderCfg = FOLDERS.find((f) => f.id === folder) || FOLDERS[0];
@@ -1274,7 +1276,7 @@ export default function Inbox() {
                     <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Filtres avancés</span>
                     {(dateFrom || dateTo || fromEmail || toEmail) && (
                       <button
-                        onClick={() => { setDateFrom(''); setDateTo(''); setFromEmail(''); setToEmail(''); }}
+                        onClick={() => updateFilters({ dateFrom: '', dateTo: '', fromEmail: '', toEmail: '' })}
                         className="ml-auto text-[10px] text-violet-400 hover:text-violet-300 cursor-pointer"
                       >
                         Tout effacer
