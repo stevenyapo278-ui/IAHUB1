@@ -402,7 +402,7 @@ export default function ChatPage() {
     setLoading(true);
 
     try {
-      const history = [...messages, newUserMsg].slice(-10).map((m) => ({ role: m.role, content: m.content }));
+      const history = [...messages, newUserMsg].slice(-15).map((m) => ({ role: m.role, content: m.content }));
 
       let data;
       const payload = { message: userMessage, history, conversationId };

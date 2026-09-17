@@ -175,8 +175,8 @@ async function callOpenAICompat(provider, apiKey, model, prompt, usage, options 
     const body = {
       model,
       messages: apiMessages,
-      temperature: 0.1,
-      max_tokens: 2048,
+      temperature: options.temperature ?? 0.1,
+      max_tokens: options.maxTokens ?? 2048,
     };
 
     // System prompt séparé (optionnel)
@@ -230,7 +230,7 @@ async function callGemini(provider, apiKey, prompt, modelName, usage, options = 
 
     const payload = {
       contents,
-      generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
+      generationConfig: { temperature: options.temperature ?? 0.1, maxOutputTokens: options.maxTokens ?? 2048 },
     };
 
     // System prompt séparé (Gemini utilise systemInstruction)
@@ -284,8 +284,9 @@ async function callAnthropic(provider, apiKey, prompt, modelName, usage, options
 
     const body = {
       model,
-      max_tokens: 2048,
+      max_tokens: options.maxTokens ?? 2048,
       messages: apiMessages,
+      temperature: options.temperature ?? 0.1,
     };
 
     // System prompt séparé (Anthropic le prend en paramètre séparé, pas dans messages[])

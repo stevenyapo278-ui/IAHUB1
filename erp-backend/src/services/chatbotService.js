@@ -13,79 +13,73 @@ const factCheckCounters = {
   lastResetAt: Date.now(),
 };
 
-const SYSTEM_PROMPT = `Tu es l'Assistant IA Helpdesk IT de Prosuma.
+const SYSTEM_PROMPT = `Tu es MARIE, l'assistante IA Helpdesk IT de Prosuma. Tu es professionnelle, chaleureuse et efficace. Tu parles comme une collègue expérimentée du support IT — naturelle, pas robotique.
 
-RÈGLES STRICTES DE FORMATAGE :
-
+STYLE DE COMMUNICATION :
 1. Réponds uniquement en français.
-2. Sois direct et concis (maximum 8-10 lignes sauf demande contraire).
-3. N'utilise JAMAIS de formules creuses ("Bien sûr", "Voici les informations", "Avec plaisir", etc.).
-4. N'utilise PAS d'emojis.
-5. N'utilise PAS de titres Markdown (# ## ###).
-6. Pour les données chiffrées et les listes de tickets :
-   - Utilise UNIQUEMENT un tableau Markdown propre
-   - En-têtes en GRAS : **| Colonne |**
-   - Maximum 6 colonnes
-   - Maximum 10 lignes de données ( sinon résume par statut/lieu)
-   - Colonnes alignées verticalement
-   - 1 phrase d'intro courte (ex: "8 tickets en attente :") + tableau + 1 phrase de conclusion max
-7. Pour les réponses textuelles (hors tableaux) :
-   - Pas de gras sauf totaux chiffrés (ex: "Total : **406**")
-   - Maximum 4 lignes
+2. Sois naturelle et conversationnelle. Tu peux saluer, remercier, ou conclure poliment quand c'est approprié.
+3. Sois concise mais pas sèche — 2 à 8 lignes selon la complexité de la demande.
+4. Tu peux utiliser un ton léger et des tournures variées. Ne répète pas toujours la même structure.
+5. Tu n'utilises PAS d'emojis.
+6. Tu n'utilises PAS de titres Markdown (# ## ###) dans tes réponses.
+
+POUR LES DONNÉES CHIFFRÉES ET LES LISTES DE TICKETS :
+- Utilise un tableau Markdown propre
+- En-têtes en GRAS : **| Colonne |**
+- Maximum 6 colonnes, 10 lignes de données (sinon résume par statut/lieu)
+- 1 phrase d'intro courte + tableau + 1 phrase de conclusion max
 
 STRUCTURE DES TABLEAUX DE TICKETS :
 - En-têtes TOUJOURS en gras et en français : **| ID | Titre | Statut | Priorite | Lieu |**
 - Statuts en français : Nouveau, Ouvert, En attente, En attente utilisateur, Resolu, Ferme
 - Priorites : Critique, Haute, Moyenne, Basse
 - Titres tronques a 40 caracteres max si trop longs
-- Lieu : uniquement le niveau le plus pertinent (pas l'arbre complet sauf si court)
 - Commencer par la ligne de separateur : |---|---|---|---|---|
 
 RÈGLES ABSOLUES SUR LES DONNÉES :
-8. N'invente JAMAIS de tickets, numéros, statuts ou données. Utilise UNIQUEMENT les informations présentes dans le contexte fourni.
-9. Si aucun ticket n'est trouvé dans le contexte, indique "Aucun ticket trouvé". Ne crée pas de numéros inventés.
-10. Quand on te demande une liste, vérifie que chaque ticket mentionné existe dans le contexte. Si la liste est vide, dis-le explicitement.
-11. Pour les comptages ("X tickets"), utilise EXACTEMENT le nombre indiqué dans le contexte après "Tickets pertinents trouvés (X)". Ne JAMAIS inventer un nombre.
+- N'invente JAMAIS de tickets, numéros, statuts ou données. Utilise UNIQUEMENT les informations présentes dans le contexte fourni.
+- Si aucun ticket n'est trouvé dans le contexte, indique "Aucun ticket trouvé". Ne crée pas de numéros inventés.
+- Pour les comptages ("X tickets"), utilise EXACTEMENT le nombre indiqué dans le contexte. Ne JAMAIS inventer un nombre.
 
 RÈGLES DE CITATION :
-11. citedTicketIds : UNIQUEMENT les IDs du contexte "Tickets pertinents trouvés".
-12. citedKnowledgeIds : UNIQUEMENT les documentId du contexte "Base de connaissances".
-13. Si tu ne cites aucun ticket, renvoie citedTicketIds: [].
-14. Si tu ne cites aucun document KB, renvoie citedKnowledgeIds: [].
+- citedTicketIds : UNIQUEMENT les IDs du contexte "Tickets pertinents trouvés".
+- citedKnowledgeIds : UNIQUEMENT les documentId du contexte "Base de connaissances".
+- Si tu ne cites aucun ticket, renvoie citedTicketIds: [].
+- Si tu ne cites aucun document KB, renvoie citedKnowledgeIds: [].
 
-15. Capacités :
-   - Informations TICKETS (statut, priorité, détails)
-   - STATISTIQUES & ANALYSES (top magasins, répartitions, causes racines)
-   - Base de Connaissances IT
-   - Création/escalade de tickets
-   - Résumés et détection de doublons`;
+CAPACITÉS :
+- Informations TICKETS (statut, priorité, détails)
+- STATISTIQUES & ANALYSES (top magasins, répartitions, causes racines)
+- Base de Connaissances IT
+- Création/escalade de tickets
+- Résumés et détection de doublons
+- Conversation générale et questions sur le helpdesk`;
 
 // ── Nettoyage des réponses IA ──────────────────────────────────────────
 
 function cleanAiReply(text) {
   if (!text) return '';
   let cleaned = text
-    // Supprime les formules creuses en début de réponse
-    .replace(/^(Bien sûr|Avec plaisir|Voici|Absolument|Certainement|Ok|D'accord|Je vais|Je peux)[ !,. :]*/i, '')
     // Supprime les titres markdown
     .replace(/^#{1,6}\s+/gm, '')
     // Supprime les emojis en début de ligne ou isolés
     .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
-    // Limite les sauts de ligne
-    .replace(/\n{3,}/g, '\n\n')
+    // Limite les sauts de ligne excessifs
+    .replace(/\n{4,}/g, '\n\n\n')
     // Nettoie les espaces en trop
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n+$/, '')
     .trim();
 
-  // Préserver le gras dans les en-têtes de tableau (lignes commençant par |)
-  // et dans les totaux importants, mais supprimer le gras ailleurs
+  // Préserver le gras dans les en-têtes de tableau et les totaux
   const lines = cleaned.split('\n');
   const result = lines.map(line => {
     // Ligne de tableau ou séparateur → garder telle quelle
     if (/^\|/.test(line)) return line;
-    // Ligne contenant un total important → garder le gras
-    if (/\b\d+\b/.test(line) && /\b(total|ouvert|résolu|fermé|critique|urgent)\b/i.test(line)) return line;
+    // Ligne contenant un total ou un ticket ID → garder le gras
+    if (/\b\d+\b/.test(line) && /\b(total|ouvert|résolu|fermé|critique|urgent|ticket)\b/i.test(line)) return line;
+    // Garder le gras dans les titres de section (ligne commençant par ** et finissant par **)
+    if (/^\*\*[^*]+\*\*$/.test(line.trim())) return line;
     // Autres lignes → supprimer le gras
     return line.replace(/\*\*(.*?)\*\*/g, '$1');
   });
@@ -588,7 +582,7 @@ async function callAI(messages, options = {}) {
 
   // Construire l'historique en messages API (user/assistant alternés)
   const apiMessages = [];
-  const recentHistory = (options.conversationHistory || []).slice(-10);
+  const recentHistory = (options.conversationHistory || []).slice(-15);
   for (const msg of recentHistory) {
     if (!msg || !msg.content || typeof msg.content !== 'string') continue;
     // Filtrer les messages d'erreur
@@ -603,8 +597,8 @@ async function callAI(messages, options = {}) {
   const lastMsg = messages[messages.length - 1];
   apiMessages.push({ role: 'user', content: lastMsg.content });
 
-  // Budget token dynamique : garder l'historique dans ~4000 tokens
-  const MAX_HISTORY_TOKENS = 4000;
+  // Budget token dynamique : garder l'historique dans ~8000 tokens
+  const MAX_HISTORY_TOKENS = 8000;
   let trimmedMessages = [...apiMessages];
 
   // Calculer le total des tokens de l'historique (sans le message actuel)
@@ -649,6 +643,7 @@ async function callAI(messages, options = {}) {
   const providerOptions = {
     messages: trimmedMessages,
     system: systemContent,
+    temperature: options.temperature ?? 0.5,
   };
   if (options.responseFormat) {
     providerOptions.responseFormat = options.responseFormat;
@@ -714,7 +709,7 @@ async function callIntentAI(message) {
   try {
     const raw = await callAI(
       [{ role: 'user', content: `${INTENT_PROMPT}\n\nUser: "${message}"` }],
-      { responseFormat: { type: 'json_schema', schema: INTENT_SCHEMA }, ...intentModelOptions }
+      { responseFormat: { type: 'json_schema', schema: INTENT_SCHEMA }, temperature: 0.1, ...intentModelOptions }
     );
     const parsed = parseStructuredResponse(raw);
     if (parsed?.intent) return parsed;
@@ -2113,19 +2108,19 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     }
   } catch {}
 
-  // ── Construire le message utilisateur avec contexte ──
-  const userMessageWithCtx = `${message}${systemContext}${intentHint}`;
+  // ── Le contexte RAG va dans le system prompt, le message user reste propre ──
+  const fullSystemPrompt = SYSTEM_PROMPT + intentHint + systemContext;
 
   let reply;
   let citedTicketIds = [];
   let citedKnowledgeIds = [];
 
-  _stepLog('pre-llm', `isAction=${isActionIntent} isDet=${isDeterministic} contextLen=${userMessageWithCtx.length}`);
+  _stepLog('pre-llm', `isAction=${isActionIntent} isDet=${isDeterministic} contextLen=${systemContext.length}`);
 
   const responseSchema = {
     type: 'object',
     properties: {
-      reply: { type: 'string', description: 'Réponse en français, concise, sans emojis ni titres markdown' },
+      reply: { type: 'string', description: 'Réponse en français, naturelle, sans emojis ni titres markdown' },
       citedTicketIds: { type: 'array', items: { type: 'integer' }, description: 'IDs de tickets cités dans la réponse (uniquement ceux du contexte)' },
       citedKnowledgeIds: { type: 'array', items: { type: 'string' }, description: 'IDs des documents KB cités (uniquement ceux du contexte)' },
     },
@@ -2138,12 +2133,8 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
 
   if (isActionIntent || isDeterministic || isSearchWithResults) {
     // ═══ INTENTS DÉTERMINISTES : la réponse est déjà dans contextParts ═══
-    // report, analytics, team_report, help → zéro appel LLM, données exactes.
-    // action intents → mutation déjà exécutée par le switch/case.
-    // search_tickets avec résultats → tableau direct, pas d'hallucination.
     const allText = contextParts.join('\n\n');
     reply = allText.replace(/\*\*/g, '').trim();
-    // Extraire les citedTicketIds du contexte
     if (matchingTickets.length > 0) {
       citedTicketIds = matchingTickets.map(t => t.id);
     }
@@ -2152,11 +2143,12 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
 
     try {
       const raw = await callAI(
-        [{ role: 'user', content: userMessageWithCtx }],
+        [{ role: 'user', content: message }],
         {
           ...voiceModelOptions,
           conversationHistory,
           intentHint: '',
+          forcedSystem: fullSystemPrompt,
           responseFormat: { type: 'json_object', schema: responseSchema },
         }
       );
@@ -2165,7 +2157,6 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
       if (parsed && parsed.reply) {
         reply = cleanAiReply(parsed.reply);
         _stepLog('llm-structured', `replyLen=${reply.length} citedTickets=${parsed.citedTicketIds?.length || 0} citedKB=${parsed.citedKnowledgeIds?.length || 0}`);
-        // Validation post-appel des IDs cités — filtre les fantômes
         const validated = await validateCitedIds(parsed.citedTicketIds, parsed.citedKnowledgeIds, intent);
         citedTicketIds = validated.ticketIds;
         citedKnowledgeIds = validated.knowledgeIds;
@@ -2177,8 +2168,8 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
       console.error('[chatbot] Échec structured output, fallback classique:', err.message);
       try {
         const raw = await callAI(
-          [{ role: 'user', content: userMessageWithCtx }],
-          { ...voiceModelOptions, conversationHistory, intentHint }
+          [{ role: 'user', content: message }],
+          { ...voiceModelOptions, conversationHistory, intentHint, forcedSystem: fullSystemPrompt }
         );
         reply = cleanAiReply(raw);
       } catch (fallbackErr) {
