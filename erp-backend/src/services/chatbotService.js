@@ -4,15 +4,6 @@ const { emitTicketCreated, emitTicketAssigned } = require('../utils/socket');
 const { sendTicketCreationNotification, sendAssignmentNotificationEmail } = require('./emailSender');
 const analyticsTools = require('./analyticsTools');
 
-// ── Compteurs de vérification (monitoring) ─────────────────────────────
-const factCheckCounters = {
-  totalChecks: 0,
-  corrections: 0,
-  ghostTickets: 0,
-  crossVerifyWarnings: 0,
-  lastResetAt: Date.now(),
-};
-
 const SYSTEM_PROMPT = `Tu es MARIE, l'assistante IA Helpdesk IT de Prosuma. Tu es professionnelle, chaleureuse et efficace. Tu parles comme une collègue expérimentée du support IT — naturelle, pas robotique.
 
 STYLE DE COMMUNICATION :
@@ -1286,10 +1277,6 @@ function isStaff(user) {
   return user && STAFF_ROLES.includes(user.role);
 }
 
-function isAdminOrAbove(user) {
-  return user && ADMIN_ROLES.includes(user.role);
-}
-
 // ── Message handler ────────────────────────────────────────────────────
 
 async function handleMessage(message, conversationHistory = [], user = null, pendingTicketData = null) {
@@ -1323,21 +1310,14 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     userContext = '';
   }
 
-  // Intents dont la réponse est 100% déterministe (pas besoin d'appel LLM pour la réponse)
-  const DETERMINISTIC_INTENTS = new Set(['report', 'analytics', 'team_report', 'help', 'top_locations', 'top_technicians']);
-
   // Recherche simultanée : RAG + Tickets + (selon intent) inventaire/users/locations
-  // Pour les intents déterministes (report, analytics, team_report), pas besoin de searchTickets
-  const isDet = DETERMINISTIC_INTENTS.has(intent);
-  _stepLog('searches', `deterministic=${isDet} intent=${intent}`);
+  _stepLog('searches', `intent=${intent}`);
 
   const searches = [
     searchKnowledge(message, 8),
-    isDet
-      ? Promise.resolve({ tickets: [], totalCount: 0 })
-      : params?.inheritFrom
-        ? searchTicketsWithContext(message, 20, user, params.period, params.inheritFrom)
-        : searchTickets(message, 20, user, params?.period),
+    params?.inheritFrom
+      ? searchTicketsWithContext(message, 20, user, params.period, params.inheritFrom)
+      : searchTickets(message, 20, user, params?.period),
   ];
 
   if (intent === 'search_inventory') searches.push(searchAssets(params?.keyword || message, 5));
@@ -2028,7 +2008,6 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   ]);
 
   const isActionIntent = ACTION_INTENTS.has(intent);
-  const isDeterministic = DETERMINISTIC_INTENTS.has(intent);
 
   // ── Construire le contexte système ──
   const systemContext = contextParts.length > 0 ? `\n\n${contextParts.join('\n\n')}` : '';
@@ -2049,38 +2028,29 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   let citedTicketIds = [];
   let citedKnowledgeIds = [];
 
-  _stepLog('pre-llm', `isAction=${isActionIntent} isDet=${isDeterministic} contextLen=${systemContext.length}`);
+  _stepLog('pre-llm', `isAction=${isActionIntent} contextLen=${systemContext.length}`);
 
-  // search_tickets est déterministe quand il y a des résultats (évite les hallucinations du LLM)
-  const isSearchWithResults = intent === 'search_tickets' && matchingTickets.length > 0;
+  // ═══ TOUJOURS passer par le LLM pour une réponse naturelle ═══
+  try {
+    const raw = await callAI(
+      [{ role: 'user', content: message }],
+      {
+        ...voiceModelOptions,
+        conversationHistory,
+        forcedSystem: fullSystemPrompt,
+      }
+    );
 
-  if (isActionIntent || isDeterministic || isSearchWithResults) {
-    // ═══ INTENTS DÉTERMINISTES : la réponse est déjà dans contextParts ═══
-    const allText = contextParts.join('\n\n');
-    reply = allText.replace(/\*\*/g, '').trim();
-    if (matchingTickets.length > 0) {
-      citedTicketIds = matchingTickets.map(t => t.id);
-    }
-  } else {
-    // ═══ INTENTS INFORMATION : réponse libre du LLM ═══
+    reply = cleanAiReply(raw);
+    _stepLog('llm-free', `replyLen=${reply.length}`);
+  } catch (err) {
+    console.error('[chatbot] Échec appel LLM:', err.message);
+    reply = "Désolé, je rencontre une difficulté temporaire d'accès aux services IA. Veuillez réentreprendre votre demande dans quelques instants.";
+  }
 
-    try {
-      const raw = await callAI(
-        [{ role: 'user', content: message }],
-        {
-          ...voiceModelOptions,
-          conversationHistory,
-          intentHint: '',
-          forcedSystem: fullSystemPrompt,
-        }
-      );
-
-      reply = cleanAiReply(raw);
-      _stepLog('llm-free', `replyLen=${reply.length}`);
-    } catch (err) {
-      console.error('[chatbot] Échec appel LLM:', err.message);
-      reply = "Désolé, je rencontre une difficulté temporaire d'accès aux services IA. Veuillez réentreprendre votre demande dans quelques instants.";
-    }
+  // Extraire les citedTicketIds du contexte si disponibles
+  if (matchingTickets.length > 0) {
+    citedTicketIds = matchingTickets.map(t => t.id);
   }
 
   _stepLog('done', `intent=${intent} replyLen=${(reply || '').length} action=${action?.type || 'null'} citedTickets=${citedTicketIds.length}`);
@@ -2180,173 +2150,5 @@ async function validateCitedIds(ticketIds, knowledgeIds, intent) {
   return result;
 }
 
-function generateActionReply(intent, message) {
-  const replies = {
-    change_status: "Le statut du ticket a été modifié avec succès.",
-    assign_ticket: "Le ticket a été assigné avec succès.",
-    create_ticket: "Le ticket a été créé avec succès.",
-    create_ticket_for: "Le ticket a été créé pour l'utilisateur demandé.",
-    confirm_create_ticket: "Le ticket a été créé avec succès.",
-    escalate: "L'escalade a été effectuée. Un technicien a été notifié.",
-  };
-  return replies[intent] || "Action effectuée avec succès.";
-}
-
-// ── Double vérification : fact-checking post-réponse IA ───────────────
-// Vérifie que les claims de l'IA (IDs de tickets, statuts, comptes)
-// correspondent à la réalité en base AVANT d'envoyer la réponse.
-
-const STATUS_LABEL_TO_DB = {
-  'nouveau': 'NEW', 'nouveaux': 'NEW',
-  'ouvert': 'OPEN', 'ouverts': 'OPEN',
-  'en attente': 'PENDING', 'attente': 'PENDING',
-  'résolu': 'SOLVED', 'résolus': 'SOLVED', 'resolu': 'SOLVED',
-  'fermé': 'CLOSED', 'fermés': 'CLOSED', 'ferme': 'CLOSED',
-};
-
-const DB_STATUS_TO_FR = {
-  'NEW': 'Nouveau', 'OPEN': 'Ouvert', 'PENDING': 'En attente',
-  'SOLVED': 'Résolu', 'CLOSED': 'Fermé',
-};
-
-async function verifyResponseFacts(replyText, contextParts, intent, matchingTickets) {
-  if (!replyText) return { reply: replyText, corrected: false, needsRetry: false, retryContext: '' };
-
-  factCheckCounters.totalChecks++;
-  const corrections = [];
-  let needsRetry = false;
-  let retryContext = '';
-
-  // ═══ 1. Extraire tous les IDs de tickets mentionnés ═══
-  const ticketIdPattern = /#(\d+)|ticket\s*#?\s*(\d+)/gi;
-  const mentionedIds = new Set();
-  let match;
-  while ((match = ticketIdPattern.exec(replyText)) !== null) {
-    const id = parseInt(match[1] || match[2], 10);
-    if (id > 0 && id < 1000000) mentionedIds.add(id);
-  }
-
-  // ═══ 2. Vérifier chaque ID existe en base + récupérer statuts réels ═══
-  const realTicketData = new Map();
-  if (mentionedIds.size > 0) {
-    try {
-      const existingTickets = await prisma.ticket.findMany({
-        where: { id: { in: [...mentionedIds] } },
-        select: { id: true, status: true, title: true },
-      });
-      for (const t of existingTickets) {
-        realTicketData.set(t.id, t);
-      }
-
-      for (const id of mentionedIds) {
-        if (!realTicketData.has(id)) {
-          corrections.push(`Ticket #${id} introuvable`);
-          factCheckCounters.ghostTickets++;
-          needsRetry = true;
-          retryContext += `Le ticket #${id} n'existe pas en base. `;
-        }
-      }
-    } catch (err) {
-      console.error('[chatbot] Erreur vérification ticket IDs:', err.message);
-    }
-  }
-
-  // ═══ 3. Vérifier les claims de statut (détection seule, pas de mutation) ═══
-  const contextStatuses = new Map();
-  const statusPattern = /Ticket\s*#(\d+).*?Statut\s*:\s*(Nouveau|Ouvert|En attente|Résolu|Fermé)/gi;
-  for (const part of contextParts) {
-    while ((match = statusPattern.exec(part)) !== null) {
-      const id = parseInt(match[1], 10);
-      const frStatus = match[2];
-      contextStatuses.set(id, STATUS_LABEL_TO_DB[frStatus.toLowerCase()] || frStatus);
-    }
-  }
-
-  for (const [id, realData] of realTicketData) {
-    contextStatuses.set(id, realData.status);
-  }
-
-  const claimPatterns = [
-    { regex: /#(\d+).*?(?:est|passe?\s+(?:à|a))\s+(?:le\s+)?statut\s+(?:de\s+)?["']?(nouveau|ouvert|en attente|résolu|fermé)["']?/gi, idGroup: 1, statusGroup: 2 },
-    { regex: /#(\d+).*?(?:statut|état)\s*[:=]\s*["']?(nouveau|ouvert|en attente|résolu|fermé)["']?/gi, idGroup: 1, statusGroup: 2 },
-    { regex: /ticket\s*#?(\d+).*?(?:est|été)\s+(?:mis|passé|classé)\s+(?:en|à|au)\s+["']?(nouveau|ouvert|en attente|résolu|fermé)["']?/gi, idGroup: 1, statusGroup: 2 },
-    { regex: /#(\d+).*?(nouveau|ouvert|en attente|résolu|fermé)/gi, idGroup: 1, statusGroup: 2 },
-  ];
-
-  for (const { regex, idGroup, statusGroup } of claimPatterns) {
-    while ((match = regex.exec(replyText)) !== null) {
-      const ticketId = parseInt(match[idGroup], 10);
-      const claimedFrStatus = match[statusGroup].toLowerCase();
-      const claimedDbStatus = STATUS_LABEL_TO_DB[claimedFrStatus];
-
-      if (ticketId && claimedDbStatus && contextStatuses.has(ticketId)) {
-        const realStatus = contextStatuses.get(ticketId);
-        if (realStatus !== claimedDbStatus) {
-          const realFr = DB_STATUS_TO_FR[realStatus] || realStatus;
-          corrections.push(`#${ticketId}: IA dit "${claimedFrStatus}" mais statut réel = "${realFr}"`);
-          needsRetry = true;
-          retryContext += `Le ticket #${ticketId} a le statut "${realFr}", pas "${claimedFrStatus}". `;
-        }
-      }
-    }
-  }
-
-  // ═══ 4. Vérifier les comptes/totaux (détection seule) ═══
-  const countPatterns = [
-    /(\d+)\s*tickets?\s*(?:trouvé|ouvert|ouverts?|en|total)/gi,
-    /total\s*[:=]?\s*(\d+)/gi,
-    /(?:il y a|il existe)\s+(\d+)\s*ticket/gi,
-  ];
-
-  const actualCount = matchingTickets && matchingTickets.length > 0 ? matchingTickets.length : null;
-  if (actualCount !== null) {
-    for (const regex of countPatterns) {
-      while ((match = regex.exec(replyText)) !== null) {
-        const claimedCount = parseInt(match[1], 10);
-        if (claimedCount !== actualCount) {
-          corrections.push(`Compte: IA dit ${claimedCount} mais réel = ${actualCount}`);
-          needsRetry = true;
-          retryContext += `Le nombre réel de tickets est ${actualCount}, pas ${claimedCount}. `;
-        }
-      }
-    }
-  }
-
-  // ═══ 5. Logger les corrections ═══
-  if (corrections.length > 0) {
-    factCheckCounters.corrections++;
-    console.warn(`[chatbot] Fact-check corrections (${intent}): ${corrections.join(' | ')}`);
-  }
-
-  return { reply: replyText, corrected: corrections.length > 0, corrections, needsRetry, retryContext };
-}
-
-// ── Vérification croisée : comparer la réponse IA aux données du contexte ─
-
-function crossVerifyWithContext(replyText, matchingTickets, intent, ticketCount) {
-  if (!replyText || !matchingTickets) return;
-
-  // Vérifier le compte — seuil > 0 (tout écart est une erreur)
-  const countClaim = replyText.match(/(\d+)\s*ticket/i);
-  if (countClaim) {
-    const claimedCount = parseInt(countClaim[1], 10);
-    const actualCount = ticketCount ?? matchingTickets.length;
-    if (claimedCount !== actualCount) {
-      factCheckCounters.crossVerifyWarnings++;
-      console.warn(`[chatbot] Cross-verify: IA dit ${claimedCount} tickets, réel = ${actualCount} (intent: ${intent})`);
-    }
-  }
-
-  // Vérifier que chaque ticket # mentionné est dans matchingTickets
-  const ticketIdPattern = /#(\d+)/g;
-  let match;
-  while ((match = ticketIdPattern.exec(replyText)) !== null) {
-    const id = parseInt(match[1], 10);
-    if (id > 0 && !matchingTickets.some(t => t.id === id)) {
-      factCheckCounters.crossVerifyWarnings++;
-      console.warn(`[chatbot] Cross-verify: #${id} mentionné mais absent du contexte (intent: ${intent})`);
-    }
-  }
-}
 
 module.exports = { handleMessage };
