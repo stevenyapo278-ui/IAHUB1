@@ -8,7 +8,7 @@ const { findSimilarOpenTicket, attachSiteToTicket, saveTicketEmbedding } = requi
 const { analyzeIntent, applyIntentActions } = require('./intentAnalyzer');
 const { decideFollowupAction } = require('./followupEscalation');
 const { generateFollowupReply } = require('./followupReplyGenerator');
-const { sendAcknowledgement, sendEmail } = require('./emailSender');
+const { sendAcknowledgement, sendEmail, sendNeedsHumanReviewNotification } = require('./emailSender');
 const { notifyNewPendingTicket } = require('./approvalReminderScheduler');
 const { processIncomingAttachments } = require('./emailAttachmentProcessor');
 const { stripSignature } = require('./signatureStripper');
@@ -597,6 +597,18 @@ async function processMessage(message, account) {
         },
       });
       if (io) io.emit('email_updated', updated);
+      // Notifier les destinataires configurés que cet email nécessite une révision humaine
+      sendNeedsHumanReviewNotification({
+        incomingEmailId: incoming.id,
+        senderEmail: fromEmail,
+        senderName: fromName,
+        subject,
+        category: analysis.category || null,
+        priority: 'P4',
+        confidence: analysis.confidence || 1.0,
+        reason,
+        aiSummary: updated.aiSummary,
+      }).catch((err) => console.error(`[emailPipeline] Notification révision humaine échouée (email ${incoming.id}):`, err.message));
       return applyInboxRulesSafe(updated, 'ai-spam-info');
     }
 
@@ -616,6 +628,18 @@ async function processMessage(message, account) {
         },
       });
       if (io) io.emit('email_updated', updated);
+      // Notifier les destinataires configurés que cet email nécessite une révision humaine
+      sendNeedsHumanReviewNotification({
+        incomingEmailId: incoming.id,
+        senderEmail: fromEmail,
+        senderName: fromName,
+        subject,
+        category: analysis.category || null,
+        priority: analysis.priority || 'P3',
+        confidence: analysis.confidence || 0.5,
+        reason: 'NEEDS_REVIEW',
+        aiSummary: updated.aiSummary,
+      }).catch((err) => console.error(`[emailPipeline] Notification révision humaine échouée (email ${incoming.id}):`, err.message));
       return applyInboxRulesSafe(updated, 'needs-review');
     }
 

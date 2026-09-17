@@ -716,6 +716,11 @@ model SystemSettings {
   emailMajorIncidentResolvedEnabled Boolean @default(true) // notification résolution incident majeur aux sites impactés
   emailApprovalEnabled              Boolean @default(true) // notification d'approbation au demandeur
 
+  // Notification email envoyée quand un email nécessite une révision humaine (confiance IA faible,
+  // spam ambigu, etc.). Paramètres > Notifications email.
+  needsHumanReviewNotificationEnabled Boolean  @default(true)
+  needsHumanReviewRecipients          String[] @default([])
+
   // Configuration de visibilité de la barre latérale par rôle (Paramètres > Navigation).
   // Clé = chemin de la route (ex: "/tickets"), Valeur = liste des rôles autorisés à voir cet élément.
   // Si null ou vide, les defaults codés en dur (fallbackRoles) s'appliquent.

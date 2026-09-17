@@ -1149,6 +1149,64 @@ async function sendTicketCreationNotification(ticket) {
   }
 }
 
+// ── Template : Révision humaine requise ─────────────────────────────────────
+function buildNeedsHumanReviewNotificationHtml({ senderEmail, senderName, subject, category, priority, confidence, reason, aiSummary, signature, inboxLink }) {
+  return buildEmailLayout({
+    headerTitle: 'Révision humaine requise',
+    headerSubtitle: 'Email nécessitant une validation',
+    signature,
+    children: `
+<p style="margin:0 0 12px">Bonjour,</p>
+<p style="margin:0 0 12px">Un email entrant nécessite une <strong style="color:#f59e0b">révision humaine</strong>. L'IA n'a pas pu traiter automatiquement ce message.</p>
+${buildStyledTable([
+  { label: 'Expéditeur', value: senderName ? `${senderName} (${senderEmail})` : (senderEmail || 'Inconnu') },
+  { label: 'Sujet', value: `<strong>${subject || 'Sans objet'}</strong>` },
+  category ? { label: 'Catégorie IA', value: category } : null,
+  priority ? { label: 'Priorité IA', value: priority } : null,
+  confidence != null ? { label: 'Confiance IA', value: `${Math.round(confidence * 100)}%` } : null,
+  reason ? { label: 'Raison', value: reason } : null,
+  aiSummary ? { label: 'Résumé IA', value: aiSummary, preWrap: true } : null,
+].filter(Boolean))}
+${buildActionLink(inboxLink, 'Ouvrir l\'Inbox')}`,
+  });
+}
+
+// Notifie les destinataires configurés (SystemSettings.needsHumanReviewRecipients) quand un email
+// entrant est marqué NEEDS_REVIEW (confiance IA faible, spam ambigu, etc.). Désactivable via
+// needsHumanReviewNotificationEnabled ; best-effort : un échec d'envoi ne doit jamais bloquer le pipeline.
+async function sendNeedsHumanReviewNotification({ incomingEmailId, senderEmail, senderName, subject, category, priority, confidence, reason, aiSummary }) {
+  try {
+    const settings = await getSystemSettings();
+    if (settings.needsHumanReviewNotificationEnabled === false) return null;
+
+    const recipients = (settings.needsHumanReviewRecipients || []).filter(Boolean);
+    if (recipients.length === 0) return null;
+
+    const frontendUrl = resolveFrontendUrl(settings);
+    const inboxLink = `${frontendUrl}/inbox`;
+    const signature = await getEmailSignature();
+
+    const displayReason = {
+      'SPAM': 'Email classé comme spam',
+      'INFORMATION': 'Email d\'information sans action requise',
+      'NEEDS_REVIEW': 'Confiance IA insuffisante',
+      'AMBIGUOUS': 'Décision ambiguë',
+    }[reason] || reason || 'Révision requise';
+
+    const subjectLine = `[Révision requise] ${subject || 'Email sans objet'}`;
+    const bodyHtml = buildNeedsHumanReviewNotificationHtml({
+      senderEmail, senderName, subject, category, priority, confidence,
+      reason: displayReason, aiSummary, signature, inboxLink,
+    });
+
+    await sendEmail({ to: recipients, subject: subjectLine, bodyHtml, saveAsMessage: false });
+    return { sent: true, recipients };
+  } catch (err) {
+    console.error('[emailSender] Notification révision humaine échouée:', err.message);
+    return null;
+  }
+}
+
 // ── Template : Réouverture de ticket ─────────────────────────────────────────
 function buildReopenNotificationHtml({ technicianName, glpiTicketId, ticketId, ticketTitle, priority, category, requesterName, signature, ticketLink }) {
   const displayId = glpiTicketId || ticketId || 'N/A';
@@ -1208,6 +1266,7 @@ module.exports = {
   sendApprovalNotificationEmail,
   sendResolvedNotificationEmail,
   sendTicketCreationNotification,
+  sendNeedsHumanReviewNotification,
   buildEmailLayout,
   buildAcknowledgementHtml,
   buildReminderHtml,

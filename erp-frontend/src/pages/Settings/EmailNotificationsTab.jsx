@@ -37,6 +37,7 @@ const EMAIL_TOGGLES = [
   { key: 'emailEscalationEnabled', label: 'Escalade', description: "Notification envoyée aux admins/techniciens et au demandeur lors d'une escalade de ticket.", icon: TrendingUp, category: 'Manuelles (actions utilisateur)', subjects: ['[Escalade Niv.1] Ticket #ID : Titre du ticket', '[Ticket #ID] Votre demande a été escaladée'], testKey: null },
   { key: 'emailMajorIncidentResolvedEnabled', label: 'Résolution incident majeur', description: 'Notification envoyée aux emails des sites impactés quand un incident majeur est résolu.', icon: Shield, category: 'Manuelles (actions utilisateur)', subjects: ['[Ticket #ID] Titre du ticket'], testKey: null },
   { key: 'emailApprovalEnabled', label: 'Approbation ticket', description: 'Notification envoyée au demandeur quand son ticket est approuvé par la Hotline.', icon: Send, category: 'Manuelles (actions utilisateur)', subjects: ['[Ticket #ID] Approuvé — Titre du ticket'], testKey: null },
+  { key: 'needsHumanReviewNotificationEnabled', label: 'Révision humaine', description: "Email envoyé quand un email entrant nécessite une révision humaine (confiance IA faible, spam ambigu, etc.).", icon: AlertTriangle, category: 'Automatiques (pipeline email)', subjects: ['[Révision requise] Objet du mail'], testKey: null },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -58,6 +59,9 @@ export default function EmailNotificationsTab() {
 
   // ── Notification échec IA ──
   const [failureRecipientInput, setFailureRecipientInput] = useState('');
+
+  // ── Notification révision humaine ──
+  const [needsReviewRecipientInput, setNeedsReviewRecipientInput] = useState('');
 
   // ── Sons & notifications navigateur ──
   const [soundsEnabled, setSoundsEnabledState] = useState(isSoundsEnabled());
@@ -135,6 +139,21 @@ export default function EmailNotificationsTab() {
       ? settings.emailFailureNotificationRecipients
       : (settings.emailFailureNotificationEmail ? [settings.emailFailureNotificationEmail] : []);
     updateSetting('emailFailureNotificationRecipients', current.filter((e) => e !== email));
+  }
+
+  // ── Notification révision humaine ──
+  function addNeedsReviewRecipient() {
+    const value = needsReviewRecipientInput.trim();
+    if (!value) return;
+    const current = settings.needsHumanReviewRecipients || [];
+    if (!current.includes(value)) {
+      updateSetting('needsHumanReviewRecipients', [...current, value]);
+    }
+    setNeedsReviewRecipientInput('');
+  }
+
+  function removeNeedsReviewRecipient(email) {
+    updateSetting('needsHumanReviewRecipients', (settings.needsHumanReviewRecipients || []).filter((e) => e !== email));
   }
 
   async function testDailySummary() {
@@ -405,6 +424,80 @@ export default function EmailNotificationsTab() {
                 </motion.div>
               )}
               {(settings.ticketCreationEmailRecipients || []).length === 0 && (
+                <p className="text-xs text-on-surface-variant/70 mt-1">Aucune boîte configurée — la notification restera inactive même si le toggle est activé.</p>
+              )}
+            </motion.div>
+
+            {/* Notification révision humaine */}
+            <SettingRow
+              title="Notification révision humaine"
+              description="Envoie un email aux boîtes configurées quand un email entrant nécessite une révision humaine (confiance IA faible, spam ambigu, etc.)."
+              icon={AlertTriangle}
+              checked={settings.needsHumanReviewNotificationEnabled ?? true}
+              onChange={(v) => updateSetting('needsHumanReviewNotificationEnabled', v)}
+              disabled={saving}
+            />
+
+            <motion.div
+              variants={itemVariants}
+              className="bento-card flex flex-col gap-sm p-lg"
+            >
+              <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Boîtes mail à notifier</span>
+              <div className="flex items-center gap-sm">
+                <input
+                  type="email"
+                  value={needsReviewRecipientInput}
+                  onChange={(e) => setNeedsReviewRecipientInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      addNeedsReviewRecipient();
+                    }
+                  }}
+                  placeholder="adresse@exemple.com"
+                  disabled={saving}
+                  className={`${inputClass} flex-1`}
+                />
+                <motion.button
+                  type="button"
+                  onClick={addNeedsReviewRecipient}
+                  disabled={saving}
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.96 }}
+                  className="px-4 py-2 btn-gradient font-semibold rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm disabled:opacity-50 shrink-0"
+                >
+                  Ajouter
+                </motion.button>
+              </div>
+              {(settings.needsHumanReviewRecipients || []).length > 0 && (
+                <motion.div
+                  initial="hidden"
+                  animate="visible"
+                  variants={{ visible: { transition: { staggerChildren: 0.03 } } }}
+                  className="flex flex-wrap gap-2 mt-2"
+                >
+                  {settings.needsHumanReviewRecipients.map((email) => (
+                    <motion.span
+                      key={email}
+                      variants={itemVariants}
+                      layout
+                      className="inline-flex items-center gap-1.5 px-3 py-1 bg-surface-container-high border border-outline-variant/60 rounded-full text-on-surface text-xs font-semibold shadow-sm"
+                    >
+                      {email}
+                      <motion.button
+                        onClick={() => removeNeedsReviewRecipient(email)}
+                        disabled={saving}
+                        whileHover={{ scale: 1.2 }}
+                        whileTap={{ scale: 0.9 }}
+                        className="text-on-surface-variant hover:text-error transition-colors flex items-center"
+                      >
+                        <span className="material-symbols-outlined text-[14px]">close</span>
+                      </motion.button>
+                    </motion.span>
+                  ))}
+                </motion.div>
+              )}
+              {(settings.needsHumanReviewRecipients || []).length === 0 && (
                 <p className="text-xs text-on-surface-variant/70 mt-1">Aucune boîte configurée — la notification restera inactive même si le toggle est activé.</p>
               )}
             </motion.div>
