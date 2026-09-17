@@ -71,7 +71,28 @@ router.patch(
 
     const data = {};
     if (name !== undefined) data.name = name.trim();
-    if (parentId !== undefined) data.parentId = parentId ? Number(parentId) : null;
+    if (parentId !== undefined) {
+      const newParentId = parentId ? Number(parentId) : null;
+      // Empêcher les cycles : vérifier que le nouveau parent n'est pas un descendant de cette catégorie
+      if (newParentId && newParentId !== id) {
+        const allCategories = await prisma.ticketCategory.findMany({ select: { id: true, parentId: true } });
+        const childrenOfId = new Set();
+        const queue = [id];
+        while (queue.length > 0) {
+          const current = queue.pop();
+          for (const c of allCategories) {
+            if (c.parentId != null && Number(c.parentId) === current && !childrenOfId.has(c.id)) {
+              childrenOfId.add(c.id);
+              queue.push(c.id);
+            }
+          }
+        }
+        if (childrenOfId.has(newParentId)) {
+          return res.status(400).json({ error: 'Impossible de définir ce parent : cela créerait un cycle hiérarchique.' });
+        }
+      }
+      data.parentId = newParentId;
+    }
 
     const category = await prisma.ticketCategory.update({ where: { id }, data });
     await auditLog('CATEGORY_UPDATED', { actor: req.user, targetType: 'TicketCategory', targetId: id, targetLabel: existing.name });

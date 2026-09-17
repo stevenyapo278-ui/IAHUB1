@@ -126,8 +126,11 @@ export default function Categories() {
 
   const tableRows = useMemo(() => {
     const rows = [];
+    const visited = new Set();
     function walk(nodes, depth, parentName) {
       for (const cat of nodes) {
+        if (visited.has(cat.id)) continue;
+        visited.add(cat.id);
         rows.push({ ...cat, depth, parentName, createdByName: cat.createdBy?.fullName || '' });
         const kids = categories.filter((c) => c.parentId != null && Number(c.parentId) === cat.id);
         if (kids.length) walk(kids, depth + 1, cat.name);

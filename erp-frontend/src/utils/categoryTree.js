@@ -13,8 +13,11 @@ export function flattenCategoryTree(categories = []) {
   const sort = (list) => list.sort((a, b) => a.name.localeCompare(b.name, 'fr'));
 
   const result = [];
+  const visited = new Set();
   function walk(items, depth, prefix) {
     for (const c of sort(items)) {
+      if (visited.has(c.id)) continue;
+      visited.add(c.id);
       const label = depth === 0 ? c.name : `${prefix} › ${c.name}`;
       result.push({ id: c.id, name: c.name, depth, label, glpiCategoryId: c.glpiCategoryId, isCustom: c.isCustom, parentId: c.parentId });
       const kids = byParent.get(c.id);
