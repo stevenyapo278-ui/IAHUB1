@@ -92,12 +92,12 @@ const INTENT_PROMPT = `Tu es un classificateur d'intentions. Analyse le message 
 Intents possibles :
 - "analytics" : statistiques, comparaisons, classements, causes racines ("quel magasin a le plus de tickets", "pourquoi ce magasin a des pannes", "perf de Jean")
 - "team_report" : répartition des tickets par équipe, reunion hebdomadaire, presenting ("répartition par équipe", "tickets par technicien", "bilan équipe", "réunion hebdo", "ouverts par équipe")
-- "general" : question générale, salutation, conversation
+- "general" : question générale, salutation, conversation, OU questions de suivi sur un ticket déjà mentionné ("quand il a été créé", "quel est son statut", "qui l'a assigné", "donne plus de détails", "et pour Jean?")
 - "search_tickets" : RECHERCHE ou LISTE de tickets existants. Toute demande qui commence par "liste", "quels", "montre", "tous les", "donne-moi les tickets" → search_tickets. Exemples : "pannes vpn", "tickets imprimantes", "liste tous les tickets ouverts", "quels sont les tickets VPN", "montre les tickets en attente", "tous les tickets Critique", "je veux la liste de tous les tickets", "donne-moi les tickets P1"
 - "create_ticket" : créer/ouvrir un ticket pour soi-même, signaler un problème, demander de l'assistance, décrire un incident ("j'ai un problème", "j'ai besoin d'assistance", "mon imprimante ne marche pas", "l'imprimante du 2ème est en panne", "il y a un souci VPN", "signaler un incident", "ça ne fonctionne plus")
 - "create_ticket_for" : créer un ticket au nom d'un autre utilisateur ("crée un ticket pour Paul", "ouvre un ticket pour M. Diallo", "ticket pour la compta")
 - "confirm_create_ticket" : l'utilisateur confirme vouloir créer un ticket après avoir été demandé ("oui", "oui crée-le", "confirme", "go", "vas-y", "c'est bon", "je confirme", "oui vas-y")
-- "check_ticket" : connaître le statut d'un ticket spécifique
+- "check_ticket" : connaître le statut, la date de création, ou les détails d'un ticket spécifique ("quel est le statut du ticket #10", "quand a été créé le ticket 5", "qui a assigné le ticket #3")
 - "summary" : résumer un ticket existant ("résume-moi le ticket #123", "résumé du ticket 45")
 - "similar_tickets" : chercher des tickets similaires avant création
 - "change_status" : modifier le statut d'un ticket
@@ -108,6 +108,13 @@ Intents possibles :
 - "report" : rapport STATISTIQUE global — PAS une liste de tickets. "combien de tickets", "nombre total", "synthèse", "bilan chiffré". NE PAS utiliser pour "liste les tickets", "quels tickets", "montre les tickets".
 - "escalate" : parler à un technicien/humain, escalade
 - "help" : demande d'aide sur les fonctionnalités
+
+RÈGLES CRITIQUES POUR LES SUIVIS DE CONVERSATION :
+- Si le message contient des pronoms référant à un ticket précédent ("il", "elle", "ce ticket", "celui-ci", "son statut", "sa priorité", "quand il a été créé") → "check_ticket" ou "general" selon le contexte.
+- "quand il a été créé" = question sur la DATE de création d'un ticket existant → "check_ticket" (PAS create_ticket).
+- "quel est son statut" = question sur le statut d'un ticket déjà mentionné → "check_ticket" (PAS create_ticket).
+- "créé" seul ne signifie PAS "créer un ticket". Regarde le contexte : "quand il a été créé" = passé, question → check_ticket.
+- "et pour Jean?" ou "et ceux de Paul?" = follow-up sur une recherche précédente → herite de l'intent précédent via le contexte conversationnel.
 
 RÈGLE IMPORTANTE : "liste les tickets", "quels tickets", "tous les tickets", "montre les tickets" → search_tickets (PAS report). Report = compter/résumer, search_tickets = lister/détail.
 
@@ -693,7 +700,7 @@ const INTENT_SCHEMA = {
   required: ['intent'],
 };
 
-async function callIntentAI(message) {
+async function callIntentAI(message, conversationHistory = []) {
   const providers = await getActiveProviders();
   if (providers.length === 0) return null;
 
@@ -706,9 +713,17 @@ async function callIntentAI(message) {
     }
   } catch {}
 
+  // Construire le contexte conversationnel pour résoudre les pronoms
+  let historyContext = '';
+  if (conversationHistory.length > 0) {
+    const recent = conversationHistory.slice(-6);
+    historyContext = '\n\nCONVERSATION PRÉCÉDENTE (pour résoudre les pronoms et références) :\n'
+      + recent.map(m => `${m.role === 'user' ? 'Utilisateur' : 'MARIE'}: ${m.content.substring(0, 200)}`).join('\n');
+  }
+
   try {
     const raw = await callAI(
-      [{ role: 'user', content: `${INTENT_PROMPT}\n\nUser: "${message}"` }],
+      [{ role: 'user', content: `${INTENT_PROMPT}${historyContext}\n\nUser: "${message}"` }],
       { responseFormat: { type: 'json_schema', schema: INTENT_SCHEMA }, temperature: 0.1, ...intentModelOptions }
     );
     const parsed = parseStructuredResponse(raw);
@@ -853,7 +868,7 @@ function setConversationState(userId, intent, params, tickets = []) {
 
 function isReferenceMessage(message) {
   const lower = message.toLowerCase().trim();
-  return /^(et|et aussi|et pour|maintenant|ok et|d'accord et|sinon| sinon|pareil|m[aè]me chose|ceux[- ]?(ci|là)?|celui[- ]?(ci|là)?|les m[aè]mes?|aussi|ensuite|et toi|et nous|pour nous|pour moi|pour l['']?équipe)\b/.test(lower)
+  return /^(et|et aussi|et pour|maintenant|ok et|d'accord et|sinon| sinon|pareil|m[aè]me chose|ceux[- ]?(ci|là)?|celui[- ]?(ci|là)?|les m[aè]mes?|aussi|ensuite|et toi|et nous|pour nous|pour moi|pour l['']?équipe|il|elle|ce ticket|son|sa|ses)\b/.test(lower)
     || /^.{0,15}\b(et|aussi|pareil|ensuite)\b.{0,25}$/.test(lower)
     || /\b(aussi|pareil|comme (ça|avant)|de m[aè]me|ensuite|et|puis)\b/.test(lower) && message.length < 40;
 }
@@ -913,15 +928,18 @@ function detectIntentRegex(message, previousState = null) {
   if (lower.match(/\b(magasin|lieu|top|comparer|plus de probl[èe]mes?|statistiques?|stats?|analyse|pourquoi|cause)\b/)) return { intent: 'analytics', params: { period } };
   if (lower.match(/^\s*(oui|yes|go|confirme|c'est bon|vas-y|ok|d'accord|je confirme|oui crée|oui vas)\b/i)) return { intent: 'confirm_create_ticket', params: { period } };
   if (/\b(cr[ée]er?|ouvrir?|nouveau ticket|nouvelle demande|signaler|probl[èe]me|incident)\b/.test(lower) && /\b(pour|au nom de|pour le compte)\b/.test(lower)) return { intent: 'create_ticket_for', params: { period } };
-  if (lower.match(/\b(cr[ée]er?|ouvrir?|nouveau ticket|nouvelle demande|signaler|probl[èe]me|incident|panne|souci|ne marche|fonctionne plus|erreur|assistance)\b/)) return { intent: 'create_ticket', params: { period } };
+  // check_ticket AVANT create_ticket : "quand il a été créé", "quel est son statut", "son état"
+  if (lower.match(/\b(quand|date|qu'est-ce que|c'est quoi|donne|dis-moi)\b/) && lower.match(/\b(cr[ée][eé]|statut|état|avancement|d[ée]tail|priorit[ée]|assign[ée])\b/)) return { intent: 'check_ticket', params: { period } };
+  if (lower.match(/\b(il|elle|ce ticket|celui-ci|celui-là|le ticket)\b/) && lower.match(/\b(statut|état|avancement|cr[ée][eé]|priorit[ée]|assign[ée]|d[ée]tail|lieu|cat[ée]gorie)\b/)) return { intent: 'check_ticket', params: { period } };
   if (lower.match(/\b(statut|état|avancement|suiv[ie]|ticket\s*#?\s*\d+|#\d+|num[ée]ro)\b/)) return { intent: 'check_ticket', params: { period } };
+  if (lower.match(/\b(cr[ée]er?|ouvrir?|nouveau ticket|nouvelle demande|signaler|probl[èe]me|incident|panne|souci|ne marche|fonctionne plus|erreur|assistance)\b/)) return { intent: 'create_ticket', params: { period } };
   if (lower.match(/\b(rapport|synth[èe]se|combien|nombre|total)\b/)) return { intent: 'report', params: { period } };
   if (lower.match(/\b(escalade|technicien|humain|agent|support|parler|[aà] quelqu'un|transfer)\b/)) return { intent: 'escalate', params: { period } };
   if (lower.match(/\b(aide|commandes?|fonctionnalit[ée]s?|que sais|que peux|help|menu)\b/)) return { intent: 'help', params: { period } };
   return { intent: 'general', params: { period } };
 }
 
-async function detectIntent(message, previousState = null) {
+async function detectIntent(message, previousState = null, conversationHistory = []) {
   // 1. Regex d'abord — instantané, pas d'appel LLM
   const regexResult = detectIntentRegex(message, previousState);
   if (regexResult.intent !== 'general') {
@@ -929,7 +947,7 @@ async function detectIntent(message, previousState = null) {
   }
 
   // 2. LLM en fallback uniquement pour les cas ambigus (regex → "general")
-  const aiResult = await callIntentAI(message);
+  const aiResult = await callIntentAI(message, conversationHistory);
   if (aiResult?.intent) {
     const textPeriod = parsePeriodFromText(message);
     if (textPeriod && !aiResult.params) aiResult.params = {};
@@ -1325,7 +1343,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   _stepLog('context', `prevIntent=${previousState?.intent || 'none'} prevTickets=${previousState?.tickets?.length || 0}`);
 
   try {
-    const intentResult = await detectIntent(message, previousState);
+    const intentResult = await detectIntent(message, previousState, conversationHistory);
     intent = intentResult.intent;
     params = intentResult.params;
     _stepLog('intent', `intent=${intent} params=${JSON.stringify(params || {})}`);
