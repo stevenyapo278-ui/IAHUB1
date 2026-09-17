@@ -40,7 +40,7 @@ Retourne UNIQUEMENT ce schéma JSON :
   "emailType": "HUMAN_REQUEST|AUTOMATED_REPLY|OUT_OF_OFFICE|BOUNCE|NEWSLETTER|SYSTEM_NOTIFICATION|INFORMATION|SPAM|TECHNICIAN_COMMUNICATION",
   "requestType": "INCIDENT|SERVICE_REQUEST|INFORMATION|ACCESS_REQUEST|null",
   "summary": "description factuelle de la demande ou de l'action en 1-2 phrases",
-  "category": "Logiciel|Matériel|Réseau|Téléphonie|Système|null",
+  "category": "catégorie parmi la liste ci-dessous, ou null",
   "impact": "LOW|MEDIUM|HIGH|CRITICAL|null",
   "urgency": "LOW|MEDIUM|HIGH|CRITICAL|null",
   "team": "nom de l'équipe concernée ou null",
@@ -139,6 +139,9 @@ location (RÈGLE STRICTE — AUCUNE EXCEPTION) :
 
 Liste des compétences techniciens disponibles :
 {{availableSkills}}
+
+Catégories de tickets disponibles (hiérarchie — choisis la sous-catégorie la plus précise quand elle existe) :
+{{availableCategories}}
 
 Liste des lieux disponibles (utilise le nom complet exact — seule source de vérité) :
 {{availableLocations}}

@@ -540,6 +540,40 @@ async function getAllTeams() {
   catch (err) { console.error('[mailAnalyzer] Échec récupération équipes:', err.message); return []; }
 }
 
+async function getAllCategories() {
+  try {
+    const cats = await prisma.ticketCategory.findMany({ select: { id: true, name: true, parentId: true }, orderBy: { name: 'asc' } });
+    return cats;
+  } catch (err) { console.error('[mailAnalyzer] Échec récupération catégories:', err.message); return []; }
+}
+
+function formatCategoriesForPrompt(categories) {
+  if (categories.length === 0) return 'Aucune catégorie configurée.';
+  // Construire l'arbre hiérarchique
+  const byParent = new Map();
+  for (const c of categories) {
+    const pid = c.parentId == null ? null : Number(c.parentId);
+    if (!byParent.has(pid)) byParent.set(pid, []);
+    byParent.get(pid).push(c);
+  }
+  const lines = [];
+  function walk(items, depth) {
+    for (const c of items.sort((a, b) => a.name.localeCompare(b.name, 'fr'))) {
+      const indent = '  '.repeat(depth);
+      const children = byParent.get(c.id) || [];
+      if (children.length > 0) {
+        lines.push(`${indent}- ${c.name} (sous-catégories ci-dessous)`);
+        walk(children, depth + 1);
+      } else {
+        lines.push(`${indent}- ${c.name}`);
+      }
+    }
+  }
+  const roots = byParent.get(null) || [];
+  walk(roots, 0);
+  return lines.join('\n');
+}
+
 function formatSkillsForPrompt(skills) {
   return skills.length === 0 ? 'Aucune compétence configurée.' : skills.map((s) => `- ${s.name}`).join('\n');
 }
@@ -582,6 +616,7 @@ async function analyzeEmail({ subject, body, from, fromName, senderRole, senderT
   const skills = await getAllSkills();
   const locations = await getAllLocations();
   const teams = await getAllTeams();
+  const categories = await getAllCategories();
 
   const { getPrompt } = require('./promptTemplates');
   const prompt = await getPrompt('analyzeEmail', {
@@ -592,6 +627,7 @@ async function analyzeEmail({ subject, body, from, fromName, senderRole, senderT
     senderSkills: senderSkills || 'aucune',
     availableSkills: formatSkillsForPrompt(skills),
     availableLocations: formatLocationsForPrompt(locations),
+    availableCategories: formatCategoriesForPrompt(categories),
     signatureText: signatureText || '(signature non détectée)',
   });
 
@@ -601,7 +637,7 @@ async function analyzeEmail({ subject, body, from, fromName, senderRole, senderT
   const rawResult = JSON.parse(jsonMatch[0]);
 
   const { validateAndCleanAnalysis } = require('./emailAnalysisValidator');
-  const result = await validateAndCleanAnalysis(rawResult, skills, locations, { body: body || '', enableAutoCreateSkills: !!settings?.enableAutoCreateSkills }, teams);
+  const result = await validateAndCleanAnalysis(rawResult, skills, locations, { body: body || '', enableAutoCreateSkills: !!settings?.enableAutoCreateSkills }, teams, categories);
 
   if (!result.suggestedSkill) {
     const guessed = guessSkillFromText(subject, body, skills);

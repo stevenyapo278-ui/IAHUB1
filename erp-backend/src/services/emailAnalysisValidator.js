@@ -19,10 +19,11 @@ const CONFIDENCE_THRESHOLD_CREATE = 0.70;
  * @param {Array<Object>} [availableSkills] - Liste des compétences BDD [{ name: string }]
  * @param {Array<Object>} [availableLocations] - Liste des lieux BDD [{ completename: string }]
  * @param {Array<Object>} [availableTeams] - Liste des équipes BDD [{ name: string }]
+ * @param {Array<Object>} [availableCategories] - Liste des catégories BDD [{ id, name, parentId }]
  * @param {Object} [options] - Options supplémentaires (ex: { body: string })
  * @returns {Promise<Object>} Analyse nettoyée, validée et sécurisée
  */
-async function validateAndCleanAnalysis(rawAnalysis = {}, availableSkills = [], availableLocations = [], options = {}, availableTeams = []) {
+async function validateAndCleanAnalysis(rawAnalysis = {}, availableSkills = [], availableLocations = [], options = {}, availableTeams = [], availableCategories = []) {
   const analysis = { ...rawAnalysis };
   const rawBody = options.body || '';
 
@@ -172,6 +173,33 @@ async function validateAndCleanAnalysis(rawAnalysis = {}, availableSkills = [], 
   } else if (!analysis.team) {
     analysis.team = null;
     analysis._teamId = null;
+  }
+
+  // ── Validation de la catégorie contre la base de données ─────────────────
+  // La catégorie proposée par l'IA doit correspondre à un TicketCategory existant.
+  // On cherche d'abord une correspondance exacte, puis partielle (insensible à la casse).
+  if (analysis.category && availableCategories.length > 0) {
+    const normCat = String(analysis.category).trim().toLowerCase();
+    // Correspondance exacte (insensible à la casse)
+    let matchCat = availableCategories.find((c) => c.name?.toLowerCase().trim() === normCat);
+    // Correspondance partielle (le nom de la catégorie contient le terme proposé ou vice versa)
+    if (!matchCat) {
+      matchCat = availableCategories.find((c) => {
+        const catName = c.name?.toLowerCase().trim() || '';
+        return catName.includes(normCat) || normCat.includes(catName);
+      });
+    }
+    if (matchCat) {
+      analysis.category = matchCat.name;
+      analysis._categoryId = matchCat.id;
+    } else {
+      console.log(`[emailAnalysisValidator] Catégorie IA "${analysis.category}" introuvable en base → null`);
+      analysis.category = null;
+      analysis._categoryId = null;
+    }
+  } else if (!analysis.category) {
+    analysis.category = null;
+    analysis._categoryId = null;
   }
 
   // ── RÈGLE STRICTE SUR LE LIEU ────────────────────────────────────────────

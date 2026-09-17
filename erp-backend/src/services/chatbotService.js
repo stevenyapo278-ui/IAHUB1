@@ -1923,8 +1923,13 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
       let suggestedTeam = null;
       let suggestedTechnician = null;
       let suggestedCategory = null;
+      let suggestedCategoryId = null;
       try {
-        // Détecter la catégorie depuis le message
+        // Charger les catégories depuis la base et détecter la plus appropriée
+        const allCategories = await prisma.ticketCategory.findMany({ select: { id: true, name: true, parentId: true } });
+        const textToSearch = (ticketTitle + ' ' + ticketDesc).toLowerCase();
+        
+        // Mots-clés de fallback si aucune catégorie ne matche par nom
         const categoryKeywords = {
           'Réseau': /\b(vpn|réseau|reseau|dns|wifi|switch|pare-feu|firewall|ip|internet|connection)\b/i,
           'Matériel': /\b(imprimante|écran|clavier|souris|pc|ordinateur|disque dur|ssd|scanner)\b/i,
@@ -1934,13 +1939,35 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
           'Téléphonie': /\b(téléphone|phone|voip|standard|appel|extension)\b/i,
           'Applicatif': /\b(erp|application|api|module|import|export|rapport|dashboard)\b/i,
         };
-        for (const [cat, regex] of Object.entries(categoryKeywords)) {
-          if (regex.test(ticketTitle + ' ' + ticketDesc)) {
-            suggestedCategory = cat;
+
+        // 1. Essayer de matcher par nom de catégorie (insensible à la casse)
+        for (const cat of allCategories) {
+          const catNameLower = cat.name.toLowerCase();
+          if (textToSearch.includes(catNameLower)) {
+            suggestedCategory = cat.name;
+            suggestedCategoryId = cat.id;
             break;
           }
         }
-        // Chercher le meilleur technicien pour cette catégorie
+
+        // 2. Si pas de match par nom, utiliser les mots-clés de fallback
+        if (!suggestedCategory) {
+          for (const [catName, regex] of Object.entries(categoryKeywords)) {
+            if (regex.test(textToSearch)) {
+              // Chercher la catégorie correspondante en base
+              const matchCat = allCategories.find((c) => c.name.toLowerCase() === catName.toLowerCase());
+              if (matchCat) {
+                suggestedCategory = matchCat.name;
+                suggestedCategoryId = matchCat.id;
+              } else {
+                suggestedCategory = catName;
+              }
+              break;
+            }
+          }
+        }
+
+        // 3. Chercher le meilleur technicien pour cette catégorie
         const { team, technician } = await require('./ticketAutoAssign').findBestTechnician(suggestedCategory, suggestedCategory);
         suggestedTeam = team;
         suggestedTechnician = technician;
@@ -1978,6 +2005,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
         assignedToId: suggestedTechnician?.id || null,
         assignedToName: suggestedTechnician?.fullName || null,
         category: suggestedCategory || null,
+        categoryId: suggestedCategoryId || null,
       };
       contextParts.push(confirmMsg);
       break;
