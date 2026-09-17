@@ -1344,35 +1344,6 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     userContext = '';
   }
 
-  // ── Vérification des permissions pour les intents sensibles ────────
-  if (intent === 'change_status' && !isStaff(user)) {
-    return {
-      reply: "❌ Vous n'avez pas les droits pour modifier le statut d'un ticket. Seuls les techniciens, hotline et administrateurs peuvent effectuer cette action.",
-      intent, action: null, widget: null, sources: [],
-    };
-  }
-
-  if (intent === 'assign_ticket' && !isStaff(user)) {
-    return {
-      reply: "❌ Vous n'avez pas les droits pour assigner un ticket. Seuls les techniciens, hotline et administrateurs peuvent effectuer cette action.",
-      intent, action: null, widget: null, sources: [],
-    };
-  }
-
-  if (intent === 'search_users' && !isStaff(user)) {
-    return {
-      reply: "❌ Vous n'avez pas les droits pour rechercher des utilisateurs. Contactez un administrateur.",
-      intent, action: null, widget: null, sources: [],
-    };
-  }
-
-  if (intent === 'search_locations' && !isStaff(user)) {
-    return {
-      reply: "❌ Vous n'avez pas les droits pour rechercher des lieux. Contactez un administrateur.",
-      intent, action: null, widget: null, sources: [],
-    };
-  }
-
   // Intents dont la réponse est 100% déterministe (pas besoin d'appel LLM pour la réponse)
   const DETERMINISTIC_INTENTS = new Set(['report', 'analytics', 'team_report', 'help', 'top_locations', 'top_technicians']);
 
@@ -1393,10 +1364,10 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   if (intent === 'search_inventory') searches.push(searchAssets(params?.keyword || message, 5));
   else searches.push(Promise.resolve([]));
 
-  if (intent === 'search_users' && isStaff(user)) searches.push(searchUsers(params?.personName || message, 5));
+  if (intent === 'search_users') searches.push(searchUsers(params?.personName || message, 5));
   else searches.push(Promise.resolve([]));
 
-  if (intent === 'search_locations' && isStaff(user)) searches.push(searchLocations(params?.locationName || message, 10));
+  if (intent === 'search_locations') searches.push(searchLocations(params?.locationName || message, 10));
   else searches.push(Promise.resolve([]));
 
   const [knowledgeChunks, ticketsResult, assets, users, locations] = await Promise.all(searches);
@@ -1485,20 +1456,12 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
 
   switch (intent) {
     case 'analytics': {
-      if (!isStaff(user)) {
-        contextParts.push(`**Accès refusé :** Les statistiques et analyses ne sont accessibles qu'aux équipes support.`);
-        break;
-      }
       const lower = message.toLowerCase();
       const kwMatch = message.match(/\b(asten|caisse|vpn|réseau|reseau|imprimante|telephonie|logiciel)\b/i);
       const kw = params?.keyword || (kwMatch ? kwMatch[1] : null);
 
       // Si un nom de personne est mentionné → stats technicien (staff only)
       if (params?.personName || (lower.match(/\b(perf|performance|stats|statistiques)\b/) && lower.match(/\b([A-Z][a-z]+)\b/))) {
-        if (!isStaff(user)) {
-          contextParts.push(`**Accès refusé :** Les statistiques de performance ne sont accessibles qu'aux équipes support.`);
-          break;
-        }
         const techName = params?.personName || lower.match(/\b([A-Z][a-z]+)\b/)?.[1];
         if (techName) {
           const stats = await getTechnicianStats(techName);
@@ -1577,10 +1540,6 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     }
 
     case 'top_locations': {
-      if (!isStaff(user)) {
-        contextParts.push(`**Accès refusé :** Les classements ne sont accessibles qu'aux équipes support.`);
-        break;
-      }
       const period = params?.period || 'all';
       const startDate = period === 'all' ? null : (
         period === 'today' ? new Date(new Date().setHours(0,0,0,0)) :
@@ -1624,10 +1583,6 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     }
 
     case 'top_technicians': {
-      if (!isStaff(user)) {
-        contextParts.push(`**Accès refusé :** Les classements ne sont accessibles qu'aux équipes support.`);
-        break;
-      }
       const period = params?.period || 'all';
       const startDate = period === 'all' ? null : (
         period === 'today' ? new Date(new Date().setHours(0,0,0,0)) :
@@ -1827,10 +1782,6 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     }
 
     case 'team_report': {
-      if (!isStaff(user)) {
-        contextParts.push(`**Accès refusé :** Le rapport par équipe n'est accessible qu'aux équipes support.`);
-        break;
-      }
       const teamDist = await analyticsTools.getTeamDistribution({ period: params?.period || '30d' });
       if (teamDist.teams.length > 0) {
         widget = {
@@ -1860,10 +1811,6 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     }
 
     case 'create_ticket_for': {
-      if (!isStaff(user)) {
-        contextParts.push(`**Accès refusé :** Seuls les membres du support peuvent créer un ticket pour un autre utilisateur.`);
-        break;
-      }
       if (params?.title && params?.description && params?.forUser) {
         // Chercher l'utilisateur cible
         const targetUsers = await prisma.user.findMany({
@@ -1895,10 +1842,6 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     }
 
     case 'report': {
-      if (!isStaff(user)) {
-        contextParts.push(`**Accès refusé :** Le rapport des tickets n'est accessible qu'aux équipes support.`);
-        break;
-      }
       const wantsFull = /\b(tous?|toute?|liste|liste[s]?|montre|affiche|donne[- ]?moi)\b/i.test(message);
       const report = await generateReport(params?.period || null, wantsFull);
       contextParts.push(`**Rapport :**\n${report}`);

@@ -253,7 +253,7 @@ router.post('/conversations/:id/archive', authenticate, async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════
 
 // POST /api/chat — envoyer un message
-router.post('/', authenticate, chatLimiter, dailyQuotaCheck, async (req, res) => {
+router.post('/', authenticate, async (req, res) => {
   const startTime = Date.now();
 
   try {
