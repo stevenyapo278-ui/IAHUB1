@@ -4,30 +4,11 @@ const { emitTicketCreated, emitTicketAssigned } = require('../utils/socket');
 const { sendTicketCreationNotification, sendAssignmentNotificationEmail } = require('./emailSender');
 const analyticsTools = require('./analyticsTools');
 
-const SYSTEM_PROMPT = `Tu es MARIE, l'assistante IA Helpdesk IT de Prosuma. Tu es professionnelle, chaleureuse et efficace. Tu parles comme une collègue expérimentée du support IT — naturelle, pas robotique.
+const SYSTEM_PROMPT = `Tu es MARIE, l'assistante IA Helpdesk IT de Prosuma. Tu es une collègue expérimentée du support IT : naturelle, chaleureuse, efficace.
 
-STYLE DE COMMUNICATION :
-1. Réponds uniquement en français.
-2. Sois naturelle, chaleureuse et conversationnelle. Tu peux saluer, remercier, rassurer, ou conclure poliment.
-3. Analyse les données en profondeur et donne ton avis professionnel quand on te le demande.
-4. Tu peux utiliser un ton léger, des tournures variées, et ta personnalité. Ne répète pas toujours la même structure.
-5. Formate tes réponses comme tu le souhaites — tableaux, listes, paragraphes, gras, italique — ce qui est le plus lisible pour l'utilisateur.
-6. Tu n'utilises PAS d'emojis.
-7. Quand on te donne des données, analyse-les, identify les tendances, les anomalies, les priorités. Ne te contente pas de lister — interprète.
+Tu es TOTALEMENT LIBRE sur la forme : ton, style, longueur, structure, formatage (markdown, tableaux, listes, gras, italique), emojis ou non — fais ce qui est le plus utile et le plus agréable pour ton interlocuteur. Réponds dans la langue de l'utilisateur. Varie tes tournures, montre ta personnalité, donne ton avis professionnel quand c'est pertinent. Analyse et interprète les données plutôt que de simplement les lister.
 
-CAPACITÉS :
-- Analyse et interprétation de données (statistiques, tendances, anomalies, causes racines)
-- Informations TICKETS (statut, priorité, détails)
-- STATISTIQUES & ANALYSES (top magasins, répartitions, causes racines, performance techniciens)
-- Base de Connaissances IT
-- Création/escalade de tickets
-- Résumés et détection de doublons
-- Conversation générale, questions sur le helpdesk, et tout ce qui concerne le support IT
-
-RÈGLES ABSOLUES SUR LES DONNÉES :
-- N'invente JAMAIS de tickets, numéros, statuts ou données. Utilise UNIQUEMENT les informations présentes dans le contexte fourni.
-- Si aucun ticket n'est trouvé dans le contexte, indique "Aucun ticket trouvé".
-- Pour les comptages, utilise EXACTEMENT le nombre indiqué dans le contexte.`;
+Un contexte (profil utilisateur, tickets, statistiques, base de connaissances) est fourni après ce prompt quand il existe : appuie-toi sur ce qui est pertinent, ignore le reste. Quand tu cites des tickets, des chiffres ou des données, base-toi sur ce contexte — ne fabrique pas de numéros de tickets ou de statistiques qui n'y figurent pas. En dehors de ça, aucune contrainte : sois naturelle.`;
 
 // ── Nettoyage minimal des réponses IA ──────────────────────────────────
 
@@ -37,6 +18,31 @@ function cleanAiReply(text) {
     .replace(/\n{4,}/g, '\n\n\n')
     .replace(/\n+$/, '')
     .trim();
+}
+
+// ── Réponses directes pour les salutations ──
+const GREETING_REPLIES = [
+  'Bonjour ! Comment puis-je vous aider aujourd\'hui ?',
+  'Bonjour ! Que puis-je faire pour vous ?',
+  'Salut ! Une question, un souci, une recherche ? Je suis là.',
+  'Bonjour ! Ravi de vous lire — que cherchez-vous ?',
+  'Salut ! Dites-moi tout, je vous écoute.',
+  'Bonjour ! Besoin d\'aide sur un ticket, des stats, autre chose ?',
+];
+
+// ── Intents qui produisent leur propre contexte déterministe (pas de message "aucun ticket") ──
+const DETERMINISTIC_INTENTS = new Set([
+  'analytics', 'team_report', 'top_locations', 'top_technicians', 'report',
+  'check_ticket', 'summary', 'change_status', 'assign_ticket', 'help',
+  'search_inventory', 'search_users', 'search_locations',
+]);
+
+// ── Petites phrases (salutations, remerciements) : pas besoin de recherches ni de LLM de classification ──
+function isGreetingMessage(message) {
+  const lower = (message || '').toLowerCase().trim();
+  if (lower.length > 80) return false;
+  return /^(salut|bonjour|bonsoir|hello|hey|coucou|hi|yo|re|merci|merci beaucoup|ok|d'accord|super|parfait|top|génial|nickel|au revoir|bye|à demain|bonne journée|bonne soirée|bonne nuit)[\s!.,:?]*$/i.test(lower)
+    || /^(salut|bonjour|bonsoir|hello|hey|coucou)[\s,!.,]*(marie|ia|bot)[\s!.,?]*$/i.test(lower);
 }
 
 const INTENT_PROMPT = `Tu es un classificateur d'intentions. Analyse le message utilisateur et réponds UNIQUEMENT avec un JSON valide (pas de texte avant ou après).
@@ -377,7 +383,7 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
     }
 
     // Post-traitement : si keyword ressemble à un nom de personne, le convertir en assignedToName/requesterName
-    if (params.keyword && !params.assignedToName && !params.requesterName) {
+    if (params?.keyword && !params.assignedToName && !params.requesterName) {
       try {
         const userMatch = await prisma.user.findFirst({
           where: { fullName: { contains: params.keyword, mode: 'insensitive' }, deletedAt: null },
@@ -438,9 +444,23 @@ async function searchTicketsWithContext(message, limit, user, period, previousSt
   const lower = message.toLowerCase();
   const personMatch = lower.match(/\b(?:pour|de|à|a)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/i);
 
+  // Anti-faux-positif : "de ticket ouverts", "à date", "pour aujourd'hui"... ne sont PAS des
+  // personnes. On valide que ce "nom" correspond à un utilisateur réel avant de filtrer dessus.
+  let validPersonName = null;
   if (personMatch && previousState?.intent === 'search_tickets') {
+    const candidate = personMatch[1];
+    try {
+      const exists = await prisma.user.findFirst({
+        where: { fullName: { contains: candidate, mode: 'insensitive' }, deletedAt: null },
+        select: { id: true },
+      });
+      if (exists) validPersonName = candidate;
+    } catch {}
+  }
+
+  if (validPersonName && previousState?.intent === 'search_tickets') {
     // Extraire le nom de la personne
-    const personName = personMatch[1];
+    const personName = validPersonName;
     _slog('person-detected', `personName=${personName}`);
 
     // Chercher les tickets assignés à cette personne
@@ -475,7 +495,8 @@ async function searchTicketsWithContext(message, limit, user, period, previousSt
       return { tickets, totalCount };
     } catch (err) {
       console.error('[chatbot] Erreur searchTicketsWithContext:', err.message);
-      return { tickets: [], totalCount: 0 };
+      // Fallback utile : recherche normale au lieu de résultats vides
+      return searchTickets(message, limit, user, period);
     }
   }
 
@@ -602,7 +623,11 @@ async function callAI(messages, options = {}) {
   const providerOptions = {
     messages: trimmedMessages,
     system: systemContent,
-    temperature: options.temperature ?? 0.5,
+    // Température élevée = réponses plus naturelles et variées (garde-fou retiré)
+    temperature: options.temperature ?? 0.8,
+    // Défaut provider = 2048 tokens : coupe les analyses longues en plein milieu → effet robot.
+    // On double pour laisser MARIE développer ses analyses.
+    maxTokens: options.maxTokens ?? 4096,
   };
   if (options.responseFormat) {
     providerOptions.responseFormat = options.responseFormat;
@@ -820,6 +845,11 @@ function setConversationState(userId, intent, params, tickets = []) {
 
 function isReferenceMessage(message) {
   const lower = message.toLowerCase().trim();
+  // Les questions autonomes (comptage, listing, stats) ne sont JAMAIS de simples références
+  // au message précédent. Ex: "il y a combien de ticket ouverts à date ?" doit être traité
+  // comme une question fraîche, pas hériter de la dernière recherche (filtre VPN, etc.).
+  if (/\b(combien|nombre|total|liste|montre[rz]?|classement|stats?|statistiques?)\b/.test(lower)) return false;
+  if (/\bil y a\b/.test(lower)) return false;
   return /^(et|et aussi|et pour|maintenant|ok et|d'accord et|sinon| sinon|pareil|m[aè]me chose|ceux[- ]?(ci|là)?|celui[- ]?(ci|là)?|les m[aè]mes?|aussi|ensuite|et toi|et nous|pour nous|pour moi|pour l['']?équipe|il|elle|ce ticket|son|sa|ses)\b/.test(lower)
     || /^.{0,15}\b(et|aussi|pareil|ensuite)\b.{0,25}$/.test(lower)
     || /\b(aussi|pareil|comme (ça|avant)|de m[aè]me|ensuite|et|puis)\b/.test(lower) && message.length < 40;
@@ -869,14 +899,15 @@ function detectIntentRegex(message, previousState = null) {
   if (lower.match(/\b(quel|quelle|qui|le|la)\b.{0,30}\b(technicien|technicienne)\b.{0,30}\b(plus|moins|top|meilleur|pire|charg[ée]|résout|performant)\b/)) return { intent: 'top_technicians', params: { period } };
   if (lower.match(/\b(quel|quelle|qui|le|la)\b.{0,30}(équipe|equipe).{0,30}\b(plus|moins|top|meilleur|pire|charg[ée]|résout|performant)\b/)) return { intent: 'top_technicians', params: { period } };
   if (lower.match(/\b(plus|moins|top|meilleur|pire)\b.{0,20}\b(technicien|technicienne|équipe|equipe)\b/)) return { intent: 'top_technicians', params: { period } };
+  // Superlatifs / comparatifs sur magasins/lieux → top_locations (déterministe) — AVANT search_tickets
+  // sinon "quel magasin a le plus de problèmes" est capté par le catch-all search_tickets
+  if (lower.match(/\b(quel|quelle|quels|quelles|le|la|les)\b.{0,30}\b(magasin|lieu|site|centre)\b.{0,30}\b(plus|moins|plus grand|plus petit|top|meilleur|pire)\b/)) return { intent: 'top_locations', params: { period } };
+  if (lower.match(/\b(magasin|lieu|site)\b.{0,20}\b(fait|fait le plus|a le plus|génère|genere|cause|provoque)\b/)) return { intent: 'top_locations', params: { period } };
+  if (lower.match(/\b(classement|classe|ranking|palmar[èe]s|top)\b/) && lower.match(/\b(magasin|lieu|site|centre)\b/)) return { intent: 'top_locations', params: { period } };
   // search_tickets AVANT team_report et analytics : "montre les stats du magasin X" = recherche, pas rapport LLM
   if (lower.match(/\b(quels?|liste|listes|montre|affiche|donne[- ]?moi|cherche|recherche|tous?|toute?)\b/) && lower.match(/\b tickets?\b/)) return { intent: 'search_tickets', params: { period } };
   if (lower.match(/\b(quels?|liste|listes|montre|affiche|donne[- ]?moi|cherche|recherche|tous?|toute?)\b/) && lower.match(/\b(magasin|lieu|site|stats?|statistiques?|incident|probl[èe]me|panne|cat[ée]gorie|technicien|[ée]quipe|historique|d[ée]tail|resume|sommaire)\b/)) return { intent: 'search_tickets', params: { period } };
   if (lower.match(/\b(r[ée]partition|bilan.*quipe|r[ée]union|hebdo|ouverts par)\b/) && !lower.match(/\b tickets?\b/)) return { intent: 'team_report', params: { period } };
-  // Superlatifs / comparatifs sur magasins/lieux → top_locations (déterministe), pas analytics LLM
-  if (lower.match(/\b(quel|quelle|quels|quelles|le|la|les)\b.{0,30}\b(magasin|lieu|site|centre)\b.{0,30}\b(plus|moins|plus grand|plus petit|top|meilleur|pire)\b/)) return { intent: 'top_locations', params: { period } };
-  if (lower.match(/\b(magasin|lieu|site)\b.{0,20}\b(fait|fait le plus|a le plus|génère|genere|cause|provoque)\b/)) return { intent: 'top_locations', params: { period } };
-  if (lower.match(/\b(classement|classe|ranking|palmar[èe]s|top)\b/) && lower.match(/\b(magasin|lieu|site|centre)\b/)) return { intent: 'top_locations', params: { period } };
   if (lower.match(/\b(magasin|lieu|top|comparer|plus de probl[èe]mes?|statistiques?|stats?|analyse|pourquoi|cause)\b/)) return { intent: 'analytics', params: { period } };
   if (lower.match(/^\s*(oui|yes|go|confirme|c'est bon|vas-y|ok|d'accord|je confirme|oui crée|oui vas)\b/i)) return { intent: 'confirm_create_ticket', params: { period } };
   if (/\b(cr[ée]er?|ouvrir?|nouveau ticket|nouvelle demande|signaler|probl[èe]me|incident)\b/.test(lower) && /\b(pour|au nom de|pour le compte)\b/.test(lower)) return { intent: 'create_ticket_for', params: { period } };
@@ -1279,15 +1310,34 @@ function isStaff(user) {
 
 // ── Message handler ────────────────────────────────────────────────────
 
-async function handleMessage(message, conversationHistory = [], user = null, pendingTicketData = null) {
+async function handleMessage(message, conversationHistory = [], user = null, pendingTicketData = null, conversationId = null) {
   const userId = user?.sub || null;
+  // Clé d'état conversationnel : PAR CONVERSATION (pas par user) sinon les conversations
+  // d'un même utilisateur se polluent entre elles (filtres hérités d'une autre conversation).
+  const stateKey = conversationId ? `conv:${conversationId}` : `user:${userId}`;
   const _stepLog = (step, detail) => console.log(`[chatbot] handleMessage step=${step} ${detail || ''}`);
 
   _stepLog('start', `msg="${message.substring(0, 80)}" userId=${userId} historyLen=${conversationHistory.length}`);
   let intent, params;
 
-  // Récupérer le state conversationnel précédent
-  const previousState = getConversationState(userId);
+  // ── Petit talk (salutations, remerciements) : réponse directe, zéro recherche, zéro classification ──
+  // Évite 2-3 appels LLM + requêtes DB inutiles pour un simple "bonjour"
+  if (isGreetingMessage(message)) {
+    _stepLog('greeting', 'direct reply');
+    return {
+      reply: GREETING_REPLIES[Math.floor(Math.random() * GREETING_REPLIES.length)],
+      intent: 'general',
+      action: null,
+      widget: null,
+      sources: [],
+      citedTicketIds: [],
+      citedKnowledgeIds: [],
+      pendingTicketData: null,
+    };
+  }
+
+  // Récupérer le state conversationnel précédent (isolé par conversation)
+  const previousState = getConversationState(stateKey);
   _stepLog('context', `prevIntent=${previousState?.intent || 'none'} prevTickets=${previousState?.tickets?.length || 0}`);
 
   try {
@@ -2044,8 +2094,13 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     reply = cleanAiReply(raw);
     _stepLog('llm-free', `replyLen=${reply.length}`);
   } catch (err) {
+    // Fallback dégradé mais UTILE : si on a des données déterministes, on les renvoie telles quelles
+    // au lieu d'un message d'erreur générique. Sinon message d'attente court.
     console.error('[chatbot] Échec appel LLM:', err.message);
-    reply = "Désolé, je rencontre une difficulté temporaire d'accès aux services IA. Veuillez réentreprendre votre demande dans quelques instants.";
+    const deterministicData = contextParts.filter((p) => p.length > 30).join('\n\n');
+    reply = deterministicData
+      ? deterministicData
+      : "Je rencontre un souci temporaire d'accès aux services IA. Réessayez dans quelques instants.";
   }
 
   // Extraire les citedTicketIds du contexte si disponibles
@@ -2055,9 +2110,9 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
 
   _stepLog('done', `intent=${intent} replyLen=${(reply || '').length} action=${action?.type || 'null'} citedTickets=${citedTicketIds.length}`);
 
-  // Sauvegarder le state conversationnel pour le multi-turn
+  // Sauvegarder le state conversationnel pour le multi-turn (isolé par conversation)
   if (userId && ['search_tickets', 'report', 'analytics', 'check_ticket', 'team_report', 'search_inventory', 'search_users', 'search_locations'].includes(intent)) {
-    setConversationState(userId, intent, params, matchingTickets.map(t => ({ id: t.id, title: t.title, status: t.status })));
+    setConversationState(stateKey, intent, params, matchingTickets.map(t => ({ id: t.id, title: t.title, status: t.status })));
   }
 
   return {

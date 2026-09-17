@@ -280,15 +280,15 @@ export default function ChatMonitor() {
       <ChartCard title="Paramètres de protection" className="mb-6">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="text-center p-3 rounded-xl bg-surface-container">
-            <p className="text-lg font-bold text-primary">30</p>
+            <p className="text-lg font-bold text-primary">120</p>
             <p className="text-[10px] text-on-surface-variant">Messages / 15min</p>
           </div>
           <div className="text-center p-3 rounded-xl bg-surface-container">
-            <p className="text-lg font-bold text-primary">100</p>
+            <p className="text-lg font-bold text-primary">500</p>
             <p className="text-[10px] text-on-surface-variant">Messages / jour</p>
           </div>
           <div className="text-center p-3 rounded-xl bg-surface-container">
-            <p className="text-lg font-bold text-primary">2000</p>
+            <p className="text-lg font-bold text-primary">8000</p>
             <p className="text-[10px] text-on-surface-variant">Caractères / message</p>
           </div>
           <div className="text-center p-3 rounded-xl bg-surface-container">

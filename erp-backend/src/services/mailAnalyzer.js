@@ -233,6 +233,16 @@ async function callGemini(provider, apiKey, prompt, modelName, usage, options = 
       generationConfig: { temperature: options.temperature ?? 0.1, maxOutputTokens: options.maxTokens ?? 2048 },
     };
 
+    // Gemini 2.5+/3.x : le "thinking" est activé par défaut et ses tokens de raisonnement
+    // sont DÉDUITS de maxOutputTokens → réponses tronquées en pleine phrase. On le désactive
+    // pour les modèles Flash (0 = autorisé). Les variantes Pro exigent un budget minimal.
+    const modelLower = (modelName || '').toLowerCase();
+    if (modelLower.includes('gemini')) {
+      payload.generationConfig.thinkingConfig = modelLower.includes('pro')
+        ? { thinkingBudget: 512 }
+        : { thinkingBudget: options.thinkingBudget ?? 0 };
+    }
+
     // System prompt séparé (Gemini utilise systemInstruction)
     if (options.system) {
       payload.systemInstruction = { parts: [{ text: options.system }] };

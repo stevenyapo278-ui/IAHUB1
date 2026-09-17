@@ -8,18 +8,20 @@ const prisma = require('../prismaClient');
 
 const router = Router();
 
-// ── Rate limit par user : 30 messages / 15 min ───────────────────────
+// ── Rate limit par user : généreux, anti-abus uniquement ────────────
 
 const chatLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 30,
+  max: 120,
   keyGenerator: (req) => `chat:${req.user.sub}`,
-  message: { error: 'Trop de messages. Réessayez dans 15 minutes.' },
+  message: { error: 'Trop de messages. Réessayez dans quelques minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-// ── Quota journalier : 100 messages / jour / user ────────────────────
+// ── Quota journalier : 500 messages / jour / user ────────────────────
+
+const DAILY_QUOTA_MAX = 500;
 
 async function dailyQuotaCheck(req, res, next) {
   try {
@@ -34,11 +36,11 @@ async function dailyQuotaCheck(req, res, next) {
       },
     });
 
-    if (count >= 100) {
+    if (count >= DAILY_QUOTA_MAX) {
       return res.status(429).json({
-        error: 'Quota journalier atteint (100 messages/jour). Réessayez demain.',
+        error: `Quota journalier atteint (${DAILY_QUOTA_MAX} messages/jour). Réessayez demain.`,
         quotaUsed: count,
-        quotaMax: 100,
+        quotaMax: DAILY_QUOTA_MAX,
       });
     }
 
@@ -262,14 +264,16 @@ router.post('/', authenticate, async (req, res) => {
     if (!message || !message.trim()) {
       return res.status(400).json({ error: 'Le message ne peut pas être vide.' });
     }
-    if (message.length > 2000) {
+    if (message.length > 8000) {
       return res.status(400).json({
-        error: 'Le message est trop long (max 2000 caractères).',
+        error: 'Le message est trop long (max 8000 caractères).',
         length: message.length,
-        max: 2000,
+        max: 8000,
       });
     }
 
+    // Détection d'injection : conservée en LOG uniquement (audit), plus aucun blocage.
+    // L'utilisateur garde la liberté totale dans ses messages — MARIE gère naturellement les tentatives.
     const flagged = detectPromptInjection(message);
 
     // Créer ou récupérer la conversation
@@ -324,7 +328,7 @@ router.post('/', authenticate, async (req, res) => {
     // ne doit pas provoquer de 500 — on renvoie une réponse dégradée mais utilisable.
     let result;
     try {
-      result = await handleMessage(message.trim(), history, req.user, conv?.pendingTicketData || null);
+      result = await handleMessage(message.trim(), history, req.user, conv?.pendingTicketData || null, convId);
     } catch (handlerErr) {
       console.error('[chatbot] ═══ ERREUR HANDLEMESSAGE ═══');
       console.error('[chatbot] Message:', message.trim().substring(0, 200));
