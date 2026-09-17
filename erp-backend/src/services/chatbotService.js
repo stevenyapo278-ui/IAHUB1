@@ -903,17 +903,18 @@ function detectIntentRegex(message, previousState = null) {
   if (lower.match(/\b(qui est|qui suis)[-\s]?(je)?\b/) && !lower.match(/\b(technicien|technicienne|le plus|la plus|meilleur|pire|charg[ée]|résout)\b/)) return { intent: 'search_users', params: { period } };
   // search_locations : exclusions pour comparatifs/superlatifs qui vont en analytics
   if (lower.match(/\b(lieu|site|o[uù] se trouve|adresse|localisation|magasin\s+(de\s+)?[a-z])\b/) && !lower.match(/\b(plus|moins|top|meilleur|pire|le plus|la plus|comparer|classement)\b/)) return { intent: 'search_locations', params: { period } };
-  // Superlatifs / comparatifs sur techniciens/équipes → analytics (LLM avec outils) — AVANT search_tickets
-  if (lower.match(/\b(quel|quelle|qui|le|la)\b.{0,30}\b(technicien|technicienne|[ée]quipe)\b.{0,30}\b(plus|moins|top|meilleur|pire|charg[ée]|résout|performant)\b/)) return { intent: 'analytics', params: { period } };
-  if (lower.match(/\b(plus|moins|top|meilleur|pire)\b.{0,20}\b(technicien|technicienne|[ée]quipe)\b/)) return { intent: 'analytics', params: { period } };
+  // Superlatifs / comparatifs sur techniciens/équipes → top_technicians (déterministe) — AVANT search_tickets
+  if (lower.match(/\b(quel|quelle|qui|le|la)\b.{0,30}\b(technicien|technicienne)\b.{0,30}\b(plus|moins|top|meilleur|pire|charg[ée]|résout|performant)\b/)) return { intent: 'top_technicians', params: { period } };
+  if (lower.match(/\b(quel|quelle|qui|le|la)\b.{0,30}(équipe|equipe).{0,30}\b(plus|moins|top|meilleur|pire|charg[ée]|résout|performant)\b/)) return { intent: 'top_technicians', params: { period } };
+  if (lower.match(/\b(plus|moins|top|meilleur|pire)\b.{0,20}\b(technicien|technicienne|équipe|equipe)\b/)) return { intent: 'top_technicians', params: { period } };
   // search_tickets AVANT team_report et analytics : "montre les stats du magasin X" = recherche, pas rapport LLM
   if (lower.match(/\b(quels?|liste|listes|montre|affiche|donne[- ]?moi|cherche|recherche|tous?|toute?)\b/) && lower.match(/\b tickets?\b/)) return { intent: 'search_tickets', params: { period } };
   if (lower.match(/\b(quels?|liste|listes|montre|affiche|donne[- ]?moi|cherche|recherche|tous?|toute?)\b/) && lower.match(/\b(magasin|lieu|site|stats?|statistiques?|incident|probl[èe]me|panne|cat[ée]gorie|technicien|[ée]quipe|historique|d[ée]tail|resume|sommaire)\b/)) return { intent: 'search_tickets', params: { period } };
   if (lower.match(/\b(r[ée]partition|bilan.*quipe|r[ée]union|hebdo|ouverts par)\b/) && !lower.match(/\b tickets?\b/)) return { intent: 'team_report', params: { period } };
-  // Superlatifs / comparatifs sur magasins/lieux → search_tickets (déterministe), pas analytics LLM
-  if (lower.match(/\b(quel|quelle|quels|quelles|le|la|les)\b.{0,30}\b(magasin|lieu|site|centre)\b.{0,30}\b(plus|moins|plus grand|plus petit|top|meilleur|pire)\b/)) return { intent: 'search_tickets', params: { period } };
-  if (lower.match(/\b(magasin|lieu|site)\b.{0,20}\b(fait|fait le plus|a le plus|génère|genere|cause|provoque)\b/)) return { intent: 'search_tickets', params: { period } };
-  if (lower.match(/\b(classement|classe|ranking|palmar[èe]s|top)\b/) && lower.match(/\b(magasin|lieu|site|centre|technicien|[ée]quipe)\b/)) return { intent: 'search_tickets', params: { period } };
+  // Superlatifs / comparatifs sur magasins/lieux → top_locations (déterministe), pas analytics LLM
+  if (lower.match(/\b(quel|quelle|quels|quelles|le|la|les)\b.{0,30}\b(magasin|lieu|site|centre)\b.{0,30}\b(plus|moins|plus grand|plus petit|top|meilleur|pire)\b/)) return { intent: 'top_locations', params: { period } };
+  if (lower.match(/\b(magasin|lieu|site)\b.{0,20}\b(fait|fait le plus|a le plus|génère|genere|cause|provoque)\b/)) return { intent: 'top_locations', params: { period } };
+  if (lower.match(/\b(classement|classe|ranking|palmar[èe]s|top)\b/) && lower.match(/\b(magasin|lieu|site|centre)\b/)) return { intent: 'top_locations', params: { period } };
   if (lower.match(/\b(magasin|lieu|top|comparer|plus de probl[èe]mes?|statistiques?|stats?|analyse|pourquoi|cause)\b/)) return { intent: 'analytics', params: { period } };
   if (lower.match(/^\s*(oui|yes|go|confirme|c'est bon|vas-y|ok|d'accord|je confirme|oui crée|oui vas)\b/i)) return { intent: 'confirm_create_ticket', params: { period } };
   if (/\b(cr[ée]er?|ouvrir?|nouveau ticket|nouvelle demande|signaler|probl[èe]me|incident)\b/.test(lower) && /\b(pour|au nom de|pour le compte)\b/.test(lower)) return { intent: 'create_ticket_for', params: { period } };
@@ -1378,7 +1379,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   }
 
   // Intents dont la réponse est 100% déterministe (pas besoin d'appel LLM pour la réponse)
-  const DETERMINISTIC_INTENTS = new Set(['report', 'analytics', 'team_report', 'help']);
+  const DETERMINISTIC_INTENTS = new Set(['report', 'analytics', 'team_report', 'help', 'top_locations', 'top_technicians']);
 
   // Recherche simultanée : RAG + Tickets + (selon intent) inventaire/users/locations
   // Pour les intents déterministes (report, analytics, team_report), pas besoin de searchTickets
@@ -1577,6 +1578,98 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
           contextParts.push(statsText);
         }
       }
+      break;
+    }
+
+    case 'top_locations': {
+      if (!isStaff(user)) {
+        contextParts.push(`**Accès refusé :** Les classements ne sont accessibles qu'aux équipes support.`);
+        break;
+      }
+      const period = params?.period || 'all';
+      const startDate = period === 'all' ? null : (
+        period === 'today' ? new Date(new Date().setHours(0,0,0,0)) :
+        period === '7d' ? new Date(Date.now() - 7*86400000) :
+        period === '30d' ? new Date(Date.now() - 30*86400000) :
+        period === '90d' ? new Date(Date.now() - 90*86400000) : null
+      );
+      const where = {};
+      if (startDate) where.createdAt = { gte: startDate };
+      const tickets = await prisma.ticket.findMany({
+        where,
+        select: { id: true, priority: true, status: true, locationName: true },
+      });
+      const locationMap = new Map();
+      for (const t of tickets) {
+        const loc = t.locationName || 'Non spécifié';
+        if (!locationMap.has(loc)) locationMap.set(loc, { total: 0, urgent: 0, byStatus: {} });
+        const item = locationMap.get(loc);
+        item.total++;
+        if (t.priority === 'P1' || t.priority === 'P2') item.urgent++;
+        item.byStatus[t.status] = (item.byStatus[t.status] || 0) + 1;
+      }
+      const ranked = [...locationMap.entries()]
+        .map(([name, data]) => ({ name, ...data }))
+        .sort((a, b) => b.total - a.total)
+        .slice(0, 10);
+      if (ranked.length === 0) {
+        contextParts.push(`**Aucun ticket trouvé** pour cette période.`);
+        break;
+      }
+      const totalTickets = ranked.reduce((s, r) => s + r.total, 0);
+      let txt = `**Classement des lieux** (${tickets.length} tickets, ${period === 'all' ? 'toutes périodes' : period})\n\n`;
+      txt += `| Rang | Lieu | Tickets | Urgents | % |\n|---|---|---|---|---|\n`;
+      for (let i = 0; i < ranked.length; i++) {
+        const r = ranked[i];
+        const pct = Math.round((r.total / tickets.length) * 100);
+        txt += `| ${i+1} | ${r.name} | ${r.total} | ${r.urgent} | ${pct}% |\n`;
+      }
+      contextParts.push(txt);
+      break;
+    }
+
+    case 'top_technicians': {
+      if (!isStaff(user)) {
+        contextParts.push(`**Accès refusé :** Les classements ne sont accessibles qu'aux équipes support.`);
+        break;
+      }
+      const period = params?.period || 'all';
+      const startDate = period === 'all' ? null : (
+        period === 'today' ? new Date(new Date().setHours(0,0,0,0)) :
+        period === '7d' ? new Date(Date.now() - 7*86400000) :
+        period === '30d' ? new Date(Date.now() - 30*86400000) :
+        period === '90d' ? new Date(Date.now() - 90*86400000) : null
+      );
+      const where = {};
+      if (startDate) where.createdAt = { gte: startDate };
+      const tickets = await prisma.ticket.findMany({
+        where,
+        select: { id: true, priority: true, status: true, assignedToId: true, assignedTo: { select: { fullName: true } } },
+      });
+      const techMap = new Map();
+      for (const t of tickets) {
+        const name = t.assignedTo?.fullName || 'Non assigné';
+        if (!techMap.has(name)) techMap.set(name, { total: 0, resolved: 0, urgent: 0 });
+        const item = techMap.get(name);
+        item.total++;
+        if (t.status === 'SOLVED' || t.status === 'CLOSED') item.resolved++;
+        if (t.priority === 'P1' || t.priority === 'P2') item.urgent++;
+      }
+      const ranked = [...techMap.entries()]
+        .map(([name, data]) => ({ name, rate: data.total > 0 ? Math.round((data.resolved / data.total) * 100) : 0, ...data }))
+        .sort((a, b) => b.total - a.total)
+        .slice(0, 10);
+      if (ranked.length === 0) {
+        contextParts.push(`**Aucun ticket trouvé** pour cette période.`);
+        break;
+      }
+      let txt = `**Classement des techniciens** (${tickets.length} tickets, ${period === 'all' ? 'toutes périodes' : period})\n\n`;
+      txt += `| Rang | Technicien | Tickets | Résolus | Taux | Urgents |\n|---|---|---|---|---|---|\n`;
+      for (let i = 0; i < ranked.length; i++) {
+        const r = ranked[i];
+        txt += `| ${i+1} | ${r.name} | ${r.total} | ${r.resolved} | ${r.rate}% | ${r.urgent} |\n`;
+      }
+      contextParts.push(txt);
       break;
     }
 
