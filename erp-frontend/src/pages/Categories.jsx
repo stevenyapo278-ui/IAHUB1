@@ -53,7 +53,26 @@ export default function Categories() {
     }
     const sort = (list) => list.sort((a, b) => a.name.localeCompare(b.name, 'fr'));
     for (const list of byParent.values()) sort(list);
-    return sort(byParent.get(null) || []);
+    const roots = [...(byParent.get(null) || [])];
+
+    // Récupérer les orphelins (parentId pointe vers un parent absent ou circulaire)
+    const visited = new Set();
+    const walk = (nodes) => {
+      for (const n of nodes) {
+        if (visited.has(n.id)) continue;
+        visited.add(n.id);
+        const kids = byParent.get(n.id);
+        if (kids?.length) walk(kids);
+      }
+    };
+    walk(roots);
+    const orphans = categories.filter((c) => !visited.has(c.id));
+    if (orphans.length) {
+      sort(orphans);
+      roots.push(...orphans);
+    }
+
+    return roots;
   }, [categories]);
 
   const flatOptions = useMemo(() => flattenCategoryTree(categories), [categories]);
