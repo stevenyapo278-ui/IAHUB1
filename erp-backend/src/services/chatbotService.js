@@ -629,6 +629,17 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
       if (regexParams && regexParams.personName && !params.personName && !params.requesterName && !params.assignedToName) {
         params.personName = regexParams.personName;
       }
+      // Compléter avec l'ID regex si le LLM l'a raté (ex: "montre-moi le ticket #12"
+      // extrait à tort en keyword:"12") — un ID explicite est un signal déterministe fort.
+      if (regexParams && regexParams.ticketId && !params.ticketId) {
+        params.ticketId = regexParams.ticketId;
+        if (params.keyword === String(regexParams.ticketId)) delete params.keyword;
+      }
+    }
+    // Keyword purement numérique → c'est un ID de ticket, pas un mot-clé de recherche
+    if (params?.keyword && /^\d+$/.test(params.keyword) && !params.ticketId) {
+      params.ticketId = parseInt(params.keyword, 10);
+      delete params.keyword;
     }
 
     // Post-traitement : si keyword ressemble à un nom de personne, le convertir en filtre personne (demandeur OU assigné)
@@ -1334,13 +1345,17 @@ async function callAIWithTools(messages, options = {}) {
 
   // Boucle agentic : LLM appelle des tools, on exécute, on renvoie les résultats
   let finalText = '';
+  const allToolResults = []; // résultats d'outils cumulés — remontés à l'appelant pour la validation des chiffres
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    // Premier round : avec tools. Rounds suivants : sans tools (pour forcer une réponse texte)
-    const callTools = round === 0;
+    // Tools disponibles jusqu'à l'avant-dernier round ; le dernier round force une
+    // réponse texte. AUPARAVANT : tools uniquement au round 0 → si le LLM avait
+    // besoin d'une 2e recherche (utilisateur trouvé → puis ses tickets), il n'avait
+    // que l'invention comme issue.
+    const callTools = round < MAX_TOOL_ROUNDS - 1;
     const result = await callAiWithRetry(() => callProviderWithFallback(providers, null, 'chatbot', {
       messages: trimmedMessages,
       system: systemContent,
-      temperature: options.temperature ?? 0.7,
+      temperature: options.temperature ?? 0.2,
       maxTokens: options.maxTokens ?? 4096,
       tools: callTools ? CHATBOT_TOOLS : undefined,
       forcedModelId: options.forcedModelId,
@@ -1376,6 +1391,7 @@ async function callAIWithTools(messages, options = {}) {
       }
 
       const resultText = typeof fnResult === 'string' ? fnResult : JSON.stringify(fnResult, null, 2);
+      allToolResults.push(`## ${fnName}\n${resultText.substring(0, 6000)}`);
       toolResults.push(`## ${fnName}\n${resultText.substring(0, 6000)}`);
     }
 
@@ -1391,7 +1407,11 @@ async function callAIWithTools(messages, options = {}) {
     if (m.tool_calls) delete m.tool_calls;
   }
 
-  return finalText;
+  // ⚠️ CHANGEMENT DE CONTRAT : renvoyer { text, toolData } au lieu d'une string.
+  // toolData = données brutes des outils exécutés — l'appelant les ajoute au corpus
+  // autorisé de findUnsourcedNumbers pour que la validation des chiffres couvre
+  // AUSSI cette voie (avant : elle ne validait que la voie callAI).
+  return { text: finalText, toolData: allToolResults.join('\n\n---\n\n') };
 }
 
 // ── Appel IA ───────────────────────────────────────────────────────────
@@ -1479,8 +1499,10 @@ async function callAI(messages, options = {}) {
   const providerOptions = {
     messages: trimmedMessages,
     system: systemContent,
-    // Température élevée = réponses plus naturelles et variées (garde-fou retiré)
-    temperature: options.temperature ?? 0.8,
+    // 0.3 : tournures naturelles sans broder les chiffres. Le ton de MARIE vient du
+    // SYSTEM_PROMPT, pas de la température — à 0.8 le modèle arrondit les totaux et
+    // complète les tableaux (réponses factuelles = la voie de tous les intents à contexte).
+    temperature: options.temperature ?? 0.3,
     // Défaut provider = 2048 tokens : coupe les analyses longues en plein milieu → effet robot.
     // On double pour laisser MARIE développer ses analyses.
     maxTokens: options.maxTokens ?? 4096,
@@ -3385,14 +3407,15 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   // Pour les autres intents : le contexte est déjà construit par les handlers, on le passe au LLM
   try {
     let raw;
-    let usedToolsPath = false;
+    let toolData = '';
     if (intent === 'general' && contextParts.length === 0) {
-      usedToolsPath = true;
-      raw = await callAIWithTools(
+      const r = await callAIWithTools(
         [{ role: 'user', content: message }],
         { ...voiceModelOptions, conversationHistory, forcedSystem: SYSTEM_PROMPT + buildCapabilityLine(), user }
       );
-      _stepLog('llm-tools', `replyLen=${raw.length}`);
+      raw = r.text;
+      toolData = r.toolData || '';
+      _stepLog('llm-tools', `replyLen=${(raw || '').length} toolDataLen=${toolData.length}`);
     } else {
       raw = await callAI(
         [{ role: 'user', content: message }],
@@ -3402,19 +3425,21 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
           forcedSystem: fullSystemPrompt + buildCapabilityLine(),
         }
       );
-      _stepLog('llm-free', `replyLen=${raw.length}`);
+      _stepLog('llm-free', `replyLen=${(raw || '').length}`);
     }
 
     reply = cleanAiReply(raw);
 
-    // ── Validation des chiffres cités (voie callAI uniquement) ──
-    // Sur la voie callAIWithTools, les chiffres viennent de résultats d'outils absents
-    // de ce contexte : les valider ici produirait des faux positifs.
-    if (!usedToolsPath) {
-      // Corpus autorisé : contexte injecté (faits DB) + message utilisateur + historique
-      // récent (l'utilisateur peut citer lui-même un numéro) + IDs de l'état conversationnel.
+    // ── Validation des chiffres cités — UNIVERSELLE (les deux voies) ──
+    // La voie callAIWithTools fait remonter toolData (données brutes des outils) :
+    // le corpus autorisé la couvre sans faux positifs, la validation s'applique partout.
+    // Corpus autorisé : contexte injecté (faits DB) + données d'outils + message
+    // utilisateur + historique récent + IDs de l'état conversationnel.
+    {
       const allowedText = [
         systemContext,
+        toolData,
+        getDateContextLine(), // la date du jour est injectée au LLM — la citer ne doit pas être un faux positif
         message,
         (conversationHistory || []).slice(-6).map((h) => h?.content || '').join('\n'),
         (previousState?.tickets || []).map((t) => `#${t.id}`).join(' '),
@@ -3425,27 +3450,36 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
       });
       let unsourced = checkNumbers(reply);
       if (unsourced.length > 0) {
-        console.warn('[chatbot] Chiffres non sourcés dans la réponse IA:', unsourced.join(', '), '— relance corrective');
+        console.warn('[chatbot] Chiffres non sourcés dans la réponse IA:', unsourced.join(', '), '— relance corrective (voie: ' + (toolData.length > 0 ? 'tools' : 'callAI') + ')');
+        // Sur la voie outils, la relance doit VOIR les mêmes données que la réponse
+        // initiale : fullSystemPrompt ne contient que contextParts (vide sur cette
+        // voie) — sans toolData injecté, le modèle réinvente ou répond "je n'ai pas
+        // l'info" alors que les données existaient. La boucle détection → correction
+        // → repli doit être fermée sur LES DEUX voies.
+        const usedToolsPath = toolData.length > 0;
+        const retrySystem = usedToolsPath
+          ? SYSTEM_PROMPT + buildCapabilityLine() + `\n\nDONNÉES RÉCUPÉRÉES PAR LES OUTILS (seule source autorisée pour tout chiffre, numéro et statut) :\n${toolData}`
+          : fullSystemPrompt + buildCapabilityLine();
         try {
           const retryRaw = await callAI(
             [{ role: 'user', content: message }],
             {
               ...voiceModelOptions,
               conversationHistory,
-              forcedSystem: fullSystemPrompt + buildCapabilityLine() + `\n\n⚠️ TA RÉPONSE PRÉCÉDENTE citait ces informations ABSENTES des données : ${unsourced.join(', ')}. Refais ta réponse en n'utilisant QUE les chiffres, numéros et statuts présents dans le contexte. Si une donnée manque, dis-le explicitement — ne la déduis pas, ne la calcule pas toi-même.`,
+              forcedSystem: retrySystem + `\n\n⚠️ TA RÉPONSE PRÉCÉDENTE citait ces informations ABSENTES des données : ${unsourced.join(', ')}. Refais ta réponse en n'utilisant QUE les chiffres, numéros et statuts présents dans le contexte. Si une donnée manque, dis-le explicitement — ne la déduis pas, ne la calcule pas toi-même.`,
             }
           );
           reply = cleanAiReply(retryRaw);
           unsourced = checkNumbers(reply);
           if (unsourced.length > 0) {
             console.warn('[chatbot] Chiffres toujours non sourcés après relance:', unsourced.join(', '), '— repli déterministe');
-            const deterministicData = contextParts.filter((p) => p.length > 30).join('\n\n');
-            if (deterministicData) reply = deterministicData;
+            const fallback = renderFallback(contextParts.length > 0 ? contextParts : [toolData]);
+            if (fallback) reply = fallback;
           }
         } catch (retryErr) {
           console.error('[chatbot] Relance corrective échouée:', retryErr.message);
-          const deterministicData = contextParts.filter((p) => p.length > 30).join('\n\n');
-          if (deterministicData) reply = deterministicData;
+          const fallback = renderFallback(contextParts.length > 0 ? contextParts : [toolData]);
+          if (fallback) reply = fallback;
         }
       }
     }
@@ -3453,15 +3487,26 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     // Fallback dégradé mais UTILE : si on a des données déterministes, on les renvoie telles quelles
     // au lieu d'un message d'erreur générique. Sinon message d'attente court.
     console.error('[chatbot] Échec appel LLM:', err.message);
-    const deterministicData = contextParts.filter((p) => p.length > 30).join('\n\n');
-    reply = deterministicData
-      ? deterministicData
+    const fallback = renderFallback(contextParts);
+    reply = fallback
+      ? fallback
       : "Je rencontre un souci temporaire d'accès aux services IA. Réessayez dans quelques instants.";
   }
 
-  // Extraire les citedTicketIds du contexte si disponibles
-  if (matchingTickets.length > 0) {
-    citedTicketIds = matchingTickets.map(t => t.id);
+  // citedTicketIds = ce que l'IA a RÉELLEMENT cité dans sa réponse, validé contre
+  // la base (validateCitedIds filtre les tickets fantômes). Auparavant on renvoyait
+  // tous les matchingTickets — une protection illusoire, jamais ce qui est cité.
+  try {
+    // Formes "#253" ET "le ticket 253" / "ticket n°253" — sinon les citations sans
+    // dièse échappent à la validation.
+    const mentioned = [...new Set((String(reply).match(/(?:#|\bticket\s+n?°?\s*)(\d+)/gi) || []).map((s) => Number(s.replace(/[^\d]/g, ''))))];
+    if (mentioned.length > 0) {
+      const v = await validateCitedIds(mentioned, [], intent);
+      citedTicketIds = v.ticketIds;
+      if (v.issues.length > 0) console.warn('[chatbot] Tickets fantômes cités:', v.issues.join(' | '));
+    }
+  } catch (e) {
+    console.error('[chatbot] validateCitedIds échoué (non bloquant):', e.message);
   }
 
   _stepLog('done', `intent=${intent} replyLen=${(reply || '').length} action=${action?.type || 'null'} citedTickets=${citedTicketIds.length}`);
@@ -3495,6 +3540,15 @@ function findUnsourcedNumbers(reply, { allowedText = '', allowedIds = [] } = {})
   const text = String(reply).replace(/(^|\n)\s*\d{1,2}[.)]\s/g, '$1');
   const used = text.match(/\d+(?:[.,]\d+)?/g) || [];
   return [...new Set(used.filter((n) => !allowed.has(n)))].slice(0, 10);
+}
+
+// Repli déterministe lisible : le contexte brut est formaté pour un LLM — le renvoyer
+// tel quel à l'utilisateur donne l'impression d'un chatbot cassé. On l'encadre d'une
+// phrase honnête qui assume le choix (exact mais non interprété).
+function renderFallback(contextParts) {
+  const data = (contextParts || []).filter((p) => p && p.length > 30).join('\n\n');
+  if (!data) return null;
+  return `Voici les données brutes que j'ai récupérées — je préfère te les donner telles quelles plutôt que de risquer une interprétation approximative :\n\n${data}`;
 }
 
 // ── Helpers pour le structured output ──────────────────────────────────
