@@ -55,18 +55,18 @@ Intents possibles :
 - "create_ticket" : créer/ouvrir un ticket pour soi-même, signaler un problème, demander de l'assistance, décrire un incident ("j'ai un problème", "j'ai besoin d'assistance", "mon imprimante ne marche pas", "l'imprimante du 2ème est en panne", "il y a un souci VPN", "signaler un incident", "ça ne fonctionne plus")
 - "create_ticket_for" : créer un ticket au nom d'un autre utilisateur ("crée un ticket pour Paul", "ouvre un ticket pour M. Diallo", "ticket pour la compta")
 - "confirm_create_ticket" : l'utilisateur confirme vouloir créer un ticket après avoir été demandé ("oui", "oui crée-le", "confirme", "go", "vas-y", "c'est bon", "je confirme", "oui vas-y")
-- "check_ticket" : connaître le statut, la date de création, ou les détails d'un ticket spécifique ("quel est le statut du ticket #10", "quand a été créé le ticket 5", "qui a assigné le ticket #3", "qui a travaillé sur le ticket 12", "quel est le SLA du ticket #8", "y a-t-il des tickets liés au ticket 5")
+- "check_ticket" : connaître le statut, la date de création, ou les détails d'un ticket spécifique ("quel est le statut du ticket #10", "quand a été créé le ticket 5", "qui a assigné le ticket #3")
 - "summary" : résumer un ticket existant ("résume-moi le ticket #123", "résumé du ticket 45")
 - "similar_tickets" : chercher des tickets similaires avant création
 - "change_status" : modifier le statut d'un ticket
 - "assign_ticket" : assigner un ticket à un technicien
 - "search_inventory" : recherche d'équipements/assets
-- "search_users" : recherche d'utilisateurs
+- "search_users" : recherche d'utilisateurs (nom, email, rôle) — NE PAS utiliser pour les compétences
 - "search_locations" : recherche de lieux/où
 - "search_problems" : recherche de problèmes ITIL racines ("problèmes ouverts", "quels problèmes", "liste des incidents majeurs", "problèmes réseau")
-- "search_skills" : recherche de compétences techniciens ("qui est expert en réseau", "qui sait faire du VPN", "compétences de Jean", "quels techniciens savent faire Linux")
-- "ticket_links" : liens entre tickets ("tickets liés au #12", "doublons", "tickets bloqués", "quel ticket bloque le #5")
-- "time_entries" : suivi du temps passé ("temps passé sur le #12", "combien de temps sur ce ticket", "qui a travaillé dessus")
+- "search_skills" : COMPÉTENCES des techniciens — uniquement quand le message contient "compétence", "expert", "maîtrise", "niveau", "qui sait faire", "qui connait", "qualifié". Exemples : "qui est expert en réseau", "qui sait faire du VPN", "compétences de Jean", "quels techniciens savent faire Linux", "liste des compétences"
+- "ticket_links" : LIENS entre tickets — uniquement quand le message contient "lié", "lien", "liens", "bloque", "bloqué", "doublon", "rattaché". Exemples : "liens du ticket #12", "quels tickets sont liés", "y a-t-il un doublon", "quel ticket bloque le #5"
+- "time_entries" : TEMPS PASSÉ sur un ticket — uniquement quand le message contient "temps", "heures", "imputé", "saisie", "chronomètre", "travaillé". Exemples : "temps passé sur le #12", "combien de temps sur ce ticket", "qui a travaillé dessus", "heures imputées"
 - "report" : rapport STATISTIQUE global — PAS une liste de tickets. "combien de tickets", "nombre total", "synthèse", "bilan chiffré". NE PAS utiliser pour "liste les tickets", "quels tickets", "montre les tickets".
 - "escalate" : parler à un technicien/humain, escalade
 - "help" : demande d'aide sur les fonctionnalités
@@ -1010,6 +1010,18 @@ function detectIntentRegex(message, previousState = null) {
 }
 
 async function detectIntent(message, previousState = null, conversationHistory = []) {
+  // 0. Pré-détection par mots-clés pour les intents nouveaux (le LLM les confond souvent)
+  const lower = message.toLowerCase();
+  if (/\b(compétence|expert|maîtrise|niveau|qualifié|qui sait|qui connait)\b/.test(lower) && !/\b(ticket|statut|priorité)\b/.test(lower)) {
+    return { intent: 'search_skills', params: {} };
+  }
+  if (/\b(temps?\s+pass[éeé]|heures?\s+(imputées?|passées?)|travaillé\s+sur|saisie\s+de\s+temps|pointage|chronomètre)/.test(lower) || (/\b(temps?|heures?)\b/.test(lower) && /\b(sur\s+le\s+ticket|#\d+)/.test(lower))) {
+    return { intent: 'time_entries', params: {} };
+  }
+  if (/\b(lien[s]?\s+(du|sur|avec|entre)|lié[s]?\s+(à|au|au|x|avec)|bloque[s]?\s+(le|un|ce)|doublon|rattaché|bloqué\s+par)/.test(lower) || (/\b(lien[s]?)\b/.test(lower) && /#\d+/.test(lower))) {
+    return { intent: 'ticket_links', params: {} };
+  }
+
   // 1. Regex d'abord — instantané, pas d'appel LLM
   const regexResult = detectIntentRegex(message, previousState);
   if (regexResult.intent !== 'general') {
