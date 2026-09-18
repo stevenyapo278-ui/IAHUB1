@@ -1990,6 +1990,12 @@ async function generateReport(period = null, fullList = false) {
   }
 
   const baseWhere = { deletedAt: null, approvalStatus: { notIn: ['PENDING', 'REJECTED'] }, ...(Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {}) };
+  const resolvedWhere = {
+    deletedAt: null,
+    approvalStatus: { notIn: ['PENDING', 'REJECTED'] },
+    status: { in: ['SOLVED', 'CLOSED'] },
+    ...(Object.keys(dateFilter).length > 0 ? { solvedAt: dateFilter } : {}),
+  };
 
   const [tickets, openCount, totalAll, resolvedCount, statusCounts, priorityCounts] = await Promise.all([
     prisma.ticket.findMany({
@@ -2004,13 +2010,7 @@ async function generateReport(period = null, fullList = false) {
     }),
     prisma.ticket.count({ where }),
     prisma.ticket.count({ where: baseWhere }),
-    prisma.ticket.count({
-      where: {
-        deletedAt: null,
-        status: { in: ['SOLVED', 'CLOSED'] },
-        ...(Object.keys(dateFilter).length > 0 ? { solvedAt: dateFilter } : {}),
-      },
-    }),
+    prisma.ticket.count({ where: resolvedWhere }),
     prisma.ticket.groupBy({ by: ['status'], _count: true, where }),
     prisma.ticket.groupBy({ by: ['priority'], _count: true, where }),
   ]);
@@ -2682,7 +2682,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     // Note anti-hallucination DÉTERMINISTE : quand le total DB dépasse les lignes
     // affichées (pagination take:20/100), le LLM "complétait" le tableau avec des
     // numéros inventés (#XXX). On lui donne le compte rendu exact à recopier.
-    if (totalTicketCount > matchingTickets.length) {
+    if (intent !== 'report' && totalTicketCount > matchingTickets.length) {
       ticketContext += `\n⚠️ COMPTES RENDUS VÉRIFIÉS (recopie-les tels quels, n'en déduis RIEN d'autre) :\n• Total réel en base : ${totalTicketCount} tickets.\n• Détail affiché ci-dessus : ${matchingTickets.length} tickets (limité côté serveur).\n• Tickets ABSENTS du détail affiché : ${totalTicketCount - matchingTickets.length}. AUCUN numéro n'est fourni pour eux — ne fabrique JAMAIS de numéros, de titres ni de statuts pour ces tickets. La seule formulation correcte est : "j'ai bien ${totalTicketCount} tickets au total, le détail ci-dessus n'en montre que ${matchingTickets.length}, veux-tu que je charge la suite ?"\n`;
     }
     // Format tableau compact pour beaucoup de résultats
