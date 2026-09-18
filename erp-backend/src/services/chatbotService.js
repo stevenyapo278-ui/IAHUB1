@@ -1120,7 +1120,7 @@ async function callAIWithTools(messages, options = {}) {
 
       let fnResult;
       try {
-        fnResult = await executeTool(fnName, fnArgs, user);
+        fnResult = await executeTool(fnName, fnArgs, options.user);
       } catch (err) {
         fnResult = `Erreur: ${err.message}`;
         console.error(`[chatbot] Tool ${fnName} error:`, err.message);
@@ -2972,7 +2972,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     if (intent === 'general' && contextParts.length === 0) {
       raw = await callAIWithTools(
         [{ role: 'user', content: message }],
-        { ...voiceModelOptions, conversationHistory, forcedSystem: SYSTEM_PROMPT }
+        { ...voiceModelOptions, conversationHistory, forcedSystem: SYSTEM_PROMPT, user }
       );
       _stepLog('llm-tools', `replyLen=${raw.length}`);
     } else {
