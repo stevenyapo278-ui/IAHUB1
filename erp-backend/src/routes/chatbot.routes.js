@@ -319,9 +319,17 @@ router.post('/', authenticate, async (req, res) => {
     // Passer le pendingTicketData existant au handler
     // Filet de sécurité : une erreur non prévue dans le handler (ex: outil analytics en échec)
     // ne doit pas provoquer de 500 — on renvoie une réponse dégradée mais utilisable.
+
+    // Charger l'historique depuis la DB pour le contexte conversationnel
+    const dbHistory = convId ? (await prisma.chatMessage.findMany({
+      where: { conversationId: convId },
+      orderBy: { createdAt: 'asc' },
+      select: { role: true, content: true },
+    })).map(m => ({ role: m.role, content: m.content })) : [];
+
     let result;
     try {
-      result = await handleMessage(message.trim(), history, req.user, conv?.pendingTicketData || null, convId);
+      result = await handleMessage(message.trim(), dbHistory.length > 0 ? dbHistory : history, req.user, conv?.pendingTicketData || null, convId);
     } catch (handlerErr) {
       console.error('[chatbot] ═══ ERREUR HANDLEMESSAGE ═══');
       console.error('[chatbot] Message:', message.trim().substring(0, 200));
