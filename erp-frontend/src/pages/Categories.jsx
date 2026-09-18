@@ -23,7 +23,7 @@ export default function Categories() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [pendingDelete, setPendingDelete] = useState(null);
-  const [pageSize, setPageSize] = useState(25);
+  const [pageSize, setPageSize] = useState(50);
   const [page, setPage] = useState(1);
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -58,9 +58,55 @@ export default function Categories() {
 
   const flatOptions = useMemo(() => flattenCategoryTree(categories), [categories]);
 
-  const filtered = useMemo(() => {
+  const filteredTree = useMemo(() => {
     if (!search.trim()) return null;
-    return categories.filter((c) => c.name?.toLowerCase().includes(search.toLowerCase()));
+    const term = search.toLowerCase();
+    const matched = categories.filter((c) => c.name?.toLowerCase().includes(term));
+    if (matched.length === 0) return [];
+
+    const catMap = new Map(categories.map((c) => [c.id, c]));
+    const matchedIds = new Set(matched.map((c) => c.id));
+    const visibleIds = new Set(matchedIds);
+
+    for (const cat of matched) {
+      let current = cat;
+      while (current.parentId != null) {
+        const parentId = Number(current.parentId);
+        if (visibleIds.has(parentId)) break;
+        visibleIds.add(parentId);
+        current = catMap.get(parentId);
+        if (!current) break;
+      }
+    }
+
+    const childrenMap = new Map();
+    for (const c of categories) {
+      if (c.parentId != null) {
+        const pid = Number(c.parentId);
+        if (!childrenMap.has(pid)) childrenMap.set(pid, []);
+        childrenMap.get(pid).push(c);
+      }
+    }
+    function addDescendants(id) {
+      const kids = childrenMap.get(id);
+      if (!kids) return;
+      for (const kid of kids) {
+        visibleIds.add(kid.id);
+        addDescendants(kid.id);
+      }
+    }
+    for (const id of matchedIds) addDescendants(id);
+
+    const byParent = new Map();
+    for (const c of categories) {
+      if (!visibleIds.has(c.id)) continue;
+      const pid = c.parentId == null ? null : Number(c.parentId);
+      if (!byParent.has(pid)) byParent.set(pid, []);
+      byParent.get(pid).push(c);
+    }
+    const sortFn = (list) => list.sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+    for (const list of byParent.values()) sortFn(list);
+    return sortFn(byParent.get(null) || []);
   }, [categories, search]);
 
   useEffect(() => { setPage(1); }, [search]);
@@ -136,10 +182,10 @@ export default function Categories() {
         if (kids.length) walk(kids, depth + 1, cat.name);
       }
     }
-    const toShow = filtered || tree;
+    const toShow = filteredTree || tree;
     walk(toShow, 0, null);
     return rows;
-  }, [categories, tree, filtered]);
+  }, [categories, tree, filteredTree]);
 
   const totalPages = Math.max(1, Math.ceil(tableRows.length / pageSize));
   const paginatedRows = tableRows.slice((page - 1) * pageSize, page * pageSize);

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Search, X, ChevronDown, Check, Loader2 } from 'lucide-react';
 
-const MAX_RENDERED = 80;
+const MAX_RENDERED = 500;
 
 export default function SearchableSelect({
   options = [],

@@ -1389,7 +1389,10 @@ export default function Tickets() {
 
   useEffect(() => {
     api.get('/locations').then(({ data }) => setLocations(data)).catch(() => {});
-    api.get('/categories').then(({ data }) => setCategories(data)).catch(() => {});
+    api.get('/categories').then(({ data }) => setCategories(Array.isArray(data) ? data : data.categories || [])).catch((err) => {
+      console.error('Erreur chargement catégories:', err);
+      toast.error('Erreur lors du chargement des catégories');
+    });
     api.get('/glpi/users').then(({ data }) => setGlpiUsers(data)).catch(() => {});
     api.get('/ticket-templates').then(({ data }) => setTemplates(data)).catch(() => {});
     api.get('/assets', { params: { pageSize: 200 } })
