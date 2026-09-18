@@ -199,13 +199,16 @@ async function getPerformanceMetrics({ teamId, period }) {
   if (startDate) where.createdAt = { gte: startDate };
   if (teamId) where.teamId = Number(teamId);
 
+  // ⚠️ Le champ Prisma est `solvedAt` — `resolvedAt` n'existe pas sur Ticket et lève
+  // PrismaClientValidationError (crash de la route appelante).
   const tickets = await prisma.ticket.findMany({
     where,
     select: {
       id: true,
       status: true,
       createdAt: true,
-      resolvedAt: true,
+      solvedAt: true,
+      closedAt: true,
       team: { select: { name: true } },
     },
   });
@@ -217,8 +220,9 @@ async function getPerformanceMetrics({ teamId, period }) {
   let resolvedWithTime = 0;
 
   for (const t of resolved) {
-    if (t.resolvedAt && t.createdAt) {
-      const diffMs = new Date(t.resolvedAt) - new Date(t.createdAt);
+    const resolvedDate = t.solvedAt || t.closedAt;
+    if (resolvedDate && t.createdAt) {
+      const diffMs = new Date(resolvedDate) - new Date(t.createdAt);
       const hours = diffMs / (1000 * 60 * 60);
       if (hours > 0 && hours < 1000) {
         totalResolutionHours += hours;

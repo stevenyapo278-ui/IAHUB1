@@ -1733,23 +1733,29 @@ async function detectIntent(message, previousState = null, conversationHistory =
 async function getUserContext(userId) {
   if (!userId) return '';
   try {
+    // ⚠️ Champs alignés sur le schéma Prisma : `team` est une relation simple (Team?), et les
+    // compétences passent par la table de liaison UserSkill (skills → skill.name).
+    // Les anciens champs `teams`/`skills.name` n'existent pas → PrismaClientValidationError
+    // avalée par le catch → le bot ne connaissait JAMAIS le profil de l'utilisateur connecté
+    // (d'où des questions inutiles type "sous quel nom es-tu enregistré ?").
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: {
         fullName: true,
         email: true,
         role: true,
-        teams: { select: { name: true } },
-        skills: { select: { name: true } },
+        team: { select: { name: true } },
+        skills: { select: { level: true, skill: { select: { name: true } } } },
       },
     });
     if (!user) return '';
 
     const parts = [`Nom: ${user.fullName}`, `Email: ${user.email}`, `Rôle: ${user.role}`];
-    if (user.teams?.length) parts.push(`Équipes: ${user.teams.map((t) => t.name).join(', ')}`);
-    if (user.skills?.length) parts.push(`Compétences: ${user.skills.map((s) => s.name).join(', ')}`);
+    if (user.team?.name) parts.push(`Équipe: ${user.team.name}`);
+    if (user.skills?.length) parts.push(`Compétences: ${user.skills.map((s) => s.skill?.name).filter(Boolean).join(', ')}`);
     return parts.join(' | ');
-  } catch {
+  } catch (err) {
+    console.error('[chatbot] getUserContext échoué:', err.message);
     return '';
   }
 }
@@ -2243,9 +2249,12 @@ async function getTechnicianStats(personName) {
 
   if (!user) return null;
 
+  // ⚠️ Le champ Prisma est `solvedAt` (PAS `resolvedAt` qui n'existe pas sur Ticket —
+  // une sélection avec un champ inconnu lève PrismaClientValidationError et faisait
+  // planter tout le handleMessage sur une demande "perf de <Nom>").
   const tickets = await prisma.ticket.findMany({
-    where: { assignedToId: user.id },
-    select: { status: true, priority: true, createdAt: true, resolvedAt: true },
+    where: { assignedToId: user.id, deletedAt: null },
+    select: { status: true, priority: true, createdAt: true, solvedAt: true, closedAt: true },
   });
 
   const total = tickets.length;
@@ -2259,8 +2268,9 @@ async function getTechnicianStats(personName) {
     byPriority[t.priority] = (byPriority[t.priority] || 0) + 1;
     if (t.status === 'SOLVED' || t.status === 'CLOSED') {
       resolvedCount++;
-      if (t.resolvedAt) {
-        totalResolutionTime += (new Date(t.resolvedAt) - new Date(t.createdAt)) / (1000 * 60 * 60);
+      const resolvedDate = t.solvedAt || t.closedAt;
+      if (resolvedDate) {
+        totalResolutionTime += (new Date(resolvedDate) - new Date(t.createdAt)) / (1000 * 60 * 60);
       }
     }
   }
@@ -2323,8 +2333,12 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     params = intentResult.params;
     _stepLog('intent', `intent=${intent} params=${JSON.stringify(params || {})}`);
   } catch (intentErr) {
+    // Une erreur de classification (DB momentanément indisponible, provider down...) ne doit
+    // JAMAIS tuer la demande : on retombe sur le regex local, 100 % hors-ligne.
     _stepLog('intent-error', intentErr.message);
-    throw intentErr;
+    const fallbackResult = detectIntentRegex(message, previousState);
+    intent = fallbackResult.intent;
+    params = fallbackResult.params;
   }
 
   // Contexte utilisateur
@@ -2356,7 +2370,17 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   if (intent === 'search_locations') searches.push(searchLocations(params?.locationName || message, 10));
   else searches.push(Promise.resolve([]));
 
-  const [knowledgeChunks, ticketsResult, assets, users, locations] = await Promise.all(searches);
+  // Promise.allSettled : si une seule recherche échoue (DB momentanément indisponible,
+  // API users down...), les autres continuent et la réponse reste utile au lieu du
+  // message générique "erreur interne".
+  const settled = await Promise.allSettled(searches);
+  const unwrap = (r, fallback) => (r.status === 'fulfilled' ? r.value : fallback);
+  const knowledgeChunks = unwrap(settled[0], []);
+  const ticketsResult = unwrap(settled[1], { tickets: [], totalCount: 0 });
+  const assets = unwrap(settled[2], []);
+  const users = unwrap(settled[3], []);
+  const locations = unwrap(settled[4], []);
+  for (const r of settled) if (r.status === 'rejected') console.error('[chatbot] recherche échouée (dégradé):', r.reason?.message);
   _stepLog('searches-done', `knowledge=${knowledgeChunks.length} tickets=${ticketsResult.tickets?.length || ticketsResult.length || 0} total=${ticketsResult.totalCount ?? '?'} assets=${assets.length} users=${users.length} locations=${locations.length}`);
 
   const matchingTickets = ticketsResult.tickets || ticketsResult; // compat: array ou { tickets, totalCount }
@@ -2462,7 +2486,8 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     for (const u of users) {
       userContextStr += `• **${u.fullName}** — Rôle: ${u.role}`;
       if (u.email) userContextStr += ` | Email: ${u.email}`;
-      if (u.teams?.length) userContextStr += ` | Équipes: ${u.teams.map((t) => t.name).join(', ')}`;
+      // L'API /users renvoie `team` (objet unique), pas `teams` (ancien format inexistant)
+      if (u.team?.name) userContextStr += ` | Équipe: ${u.team.name}`;
       userContextStr += `\n`;
     }
     contextParts.push(userContextStr);
