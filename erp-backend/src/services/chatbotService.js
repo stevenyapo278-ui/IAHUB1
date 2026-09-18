@@ -1,7 +1,10 @@
 const prisma = require('../prismaClient');
 const { getActiveProviders, callProviderWithFallback, callAiWithRetry } = require('./mailAnalyzer');
-const { emitTicketCreated, emitTicketAssigned } = require('../utils/socket');
+const { emitTicketCreated, emitTicketAssigned, emitTicketUpdated } = require('../utils/socket');
 const { sendTicketCreationNotification, sendAssignmentNotificationEmail } = require('./emailSender');
+const { sanitizeTicketHtml } = require('../utils/security');
+const { recordFirstResponse } = require('./slaService');
+const { logEvent } = require('./ticketEvent');
 const analyticsTools = require('./analyticsTools');
 
 const SYSTEM_PROMPT = `Tu es MARIE, l'assistante IA Helpdesk IT de Prosuma. Tu es une collègue expérimentée du support IT : naturelle, chaleureuse, efficace.
@@ -33,7 +36,7 @@ const GREETING_REPLIES = [
 // ── Intents qui produisent leur propre contexte déterministe (pas de message "aucun ticket") ──
 const DETERMINISTIC_INTENTS = new Set([
   'analytics', 'team_report', 'top_locations', 'top_technicians', 'report',
-  'check_ticket', 'summary', 'change_status', 'assign_ticket', 'help',
+  'check_ticket', 'summary', 'change_status', 'assign_ticket', 'add_followup', 'help',
   'search_inventory', 'search_users', 'search_locations',
 ]);
 
@@ -60,6 +63,7 @@ Intents possibles :
 - "similar_tickets" : chercher des tickets similaires avant création
 - "change_status" : modifier le statut d'un ticket
 - "assign_ticket" : assigner un ticket à un technicien
+- "add_followup" : ajouter un commentaire/suivi sur un ticket ("ajoute un suivi sur le #12", "note que le problème est résolu", "laisse un commentaire sur ce ticket", "mets à jour le ticket #5", "j'ai résolu le souci pour le ticket 8")
 - "search_inventory" : recherche d'équipements/assets
 - "search_users" : recherche d'utilisateurs (nom, email, rôle) — NE PAS utiliser pour les compétences
 - "search_locations" : recherche de lieux/où
@@ -939,6 +943,22 @@ const CHATBOT_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'add_ticket_followup',
+      description: 'Ajouter un commentaire/suivi sur un ticket existant. Utile pour laisser une note, un update, ou un retour d\'information sur un ticket.',
+      parameters: {
+        type: 'object',
+        properties: {
+          ticketId: { type: 'integer', description: 'Numéro du ticket' },
+          content: { type: 'string', description: 'Contenu du commentaire (texte libre)' },
+          isPrivate: { type: 'boolean', description: 'Si true, le commentaire est visible uniquement par l\'équipe interne (défaut: false)' },
+        },
+        required: ['ticketId', 'content'],
+      },
+    },
+  },
 ];
 
 // ── Exécution des tools ──────────────────────────────────────────────
@@ -1032,6 +1052,8 @@ async function executeTool(toolName, args, user) {
       return await searchLocations(p.query, 10);
     case 'search_knowledge':
       return await searchKnowledge(p.query, 5);
+    case 'add_ticket_followup':
+      return await addTicketFollowup(p.ticketId, p.content, p.isPrivate, options.user);
     default:
       return `Outil inconnu: ${toolName}`;
   }
@@ -1949,6 +1971,70 @@ async function assignTicket(ticketId, personName) {
       }
     }).catch(() => {});
   return { ticket: updated, assignedTo: tech.fullName, oldAssignedTo: ticket.assignedToId };
+}
+
+async function addTicketFollowup(ticketId, content, isPrivate, user) {
+  const id = parseInt(ticketId, 10);
+  if (isNaN(id)) return { error: 'Numéro de ticket invalide.' };
+  if (!content || !content.trim()) return { error: 'Le contenu du commentaire est requis.' };
+
+  const ticket = await prisma.ticket.findUnique({ where: { id }, select: { id: true, title: true, status: true, priority: true, requesterId: true, assignedToId: true } });
+  if (!ticket) return { error: `Ticket #${id} introuvable.` };
+
+  if (['SOLVED', 'CLOSED'].includes(ticket.status)) {
+    return { error: `Impossible d'ajouter un commentaire sur un ticket ${ticket.status === 'SOLVED' ? 'résolu' : 'fermé'}.` };
+  }
+
+  if (user?.role === 'REQUESTER' && ticket.requesterId !== user.id) {
+    return { error: 'Vous ne pouvez commenter que vos propres tickets.' };
+  }
+
+  if (user?.role === 'TECHNICIAN') {
+    const isAssigned = ticket.assignedToId === user.id;
+    if (!isAssigned) {
+      const isMultiAssigned = await prisma.ticket.findFirst({
+        where: { id, assignees: { some: { id: user.id } } },
+        select: { id: true },
+      });
+      if (!isMultiAssigned) {
+        return { error: 'Vous ne pouvez ajouter un suivi que sur les tickets qui vous sont assignés.' };
+      }
+    }
+  }
+
+  const sanitized = sanitizeTicketHtml(content.trim());
+
+  const followup = await prisma.followup.create({
+    data: {
+      ticketId: id,
+      authorId: user.id,
+      content: sanitized,
+      isPrivate: isPrivate === true,
+    },
+    include: { author: { select: { id: true, fullName: true, avatarUrl: true } } },
+  });
+
+  if (['ADMIN', 'TECHNICIAN', 'HOTLINE', 'SUPERADMIN'].includes(user.role)) {
+    try {
+      await recordFirstResponse(id, user.id);
+    } catch (err) {
+      console.error('[chatbot] Enregistrement première réponse échoué:', err.message);
+    }
+  }
+
+  try {
+    await logEvent(id, 'FOLLOWUP_ADDED', user.email || 'CHATBOT', { followupId: followup.id });
+  } catch (err) {
+    console.error('[chatbot] Log event FOLLOWUP_ADDED échoué:', err.message);
+  }
+
+  try {
+    emitTicketUpdated({ id, title: ticket.title, assignedToId: ticket.assignedToId, requesterId: ticket.requesterId }, { followupAdded: true });
+  } catch (err) {
+    console.error('[chatbot] Socket emit followup échoué:', err.message);
+  }
+
+  return { followup, ticketId: id, ticketTitle: ticket.title };
 }
 
 async function createTicketFromChat(title, description, priority, userId, { teamId = null, assignedToId = null, category = null } = {}) {
