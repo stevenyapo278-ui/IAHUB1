@@ -291,7 +291,7 @@ async function analyzeRootCause({ locationName, filterKeyword, limit = 15 }) {
 async function getTeamDistribution({ period } = {}) {
   const startDate = parsePeriod(period);
 
-  const where = { deletedAt: null, status: { notIn: ['CLOSED', 'SOLVED'] } };
+  const where = { deletedAt: null, status: { notIn: ['CLOSED', 'SOLVED'] }, approvalStatus: { notIn: ['PENDING', 'REJECTED'] } };
   if (startDate) where.createdAt = { gte: startDate };
 
   const tickets = await prisma.ticket.findMany({
@@ -350,7 +350,7 @@ async function getTeamDistribution({ period } = {}) {
  * 6. Détail des tickets ouverts par équipe (liste)
  */
 async function getOpenTicketsByTeam({ teamName, limit = 20 } = {}) {
-  const where = { deletedAt: null, status: { notIn: ['CLOSED', 'SOLVED'] } };
+  const where = { deletedAt: null, status: { notIn: ['CLOSED', 'SOLVED'] }, approvalStatus: { notIn: ['PENDING', 'REJECTED'] } };
 
   if (teamName) {
     where.team = { name: { contains: teamName, mode: 'insensitive' } };

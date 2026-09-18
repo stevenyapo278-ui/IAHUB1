@@ -1795,8 +1795,8 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
         period === '30d' ? new Date(Date.now() - 30*86400000) :
         period === '90d' ? new Date(Date.now() - 90*86400000) : null
       );
-      const where = {};
-      if (startDate) where.createdAt = { gte: startDate };
+      const where = { deletedAt: null, status: { notIn: ['CLOSED', 'SOLVED'] }, approvalStatus: { notIn: ['PENDING', 'REJECTED'] } };
+      if (startDate) where.createdAt = { ...where.createdAt, gte: startDate };
       const tickets = await prisma.ticket.findMany({
         where,
         select: { id: true, priority: true, status: true, locationName: true },
@@ -1838,8 +1838,8 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
         period === '30d' ? new Date(Date.now() - 30*86400000) :
         period === '90d' ? new Date(Date.now() - 90*86400000) : null
       );
-      const where = {};
-      if (startDate) where.createdAt = { gte: startDate };
+      const where = { deletedAt: null, status: { notIn: ['CLOSED', 'SOLVED'] }, approvalStatus: { notIn: ['PENDING', 'REJECTED'] } };
+      if (startDate) where.createdAt = { ...where.createdAt, gte: startDate };
       const tickets = await prisma.ticket.findMany({
         where,
         select: { id: true, priority: true, status: true, assignedToId: true, assignedTo: { select: { fullName: true } } },
