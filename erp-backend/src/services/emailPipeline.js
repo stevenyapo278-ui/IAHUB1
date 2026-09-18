@@ -201,6 +201,10 @@ async function processMessage(message, account) {
   // Flag positionné par les routes unspam : indique que l'email est retraitement d'un SPAM
   // et que les règles de triage spam (couche 2) doivent être byspassées pour cette passe.
   const bypassSpamRules = message.bypassSpamRules === true;
+  // Flag positionné par la route needs-review « Créer le ticket » (Centre de Validation) :
+  // la Hotline a confirmé que ce message mérite un ticket — on bypasse toutes les couches
+  // de filtrage (spam + info + confiance) pour garantir la création du ticket.
+  const forceTicketCreation = message.forceTicketCreation === true;
 
   // ── Garde anti-boucle (1/2) : message émis par la boîte support elle-même ──
   // Cas typique : l'IA répond à un message dont le To contient la boîte de diffusion dont
@@ -581,7 +585,7 @@ async function processMessage(message, account) {
     // L'IA détecte un spam / email d'information / hors périmètre
     // → Plutôt que de rejeter, on oriente vers le centre de validation (NEEDS_REVIEW)
     //   pour que la Hotline puisse confirmer ou créer un ticket manuellement.
-    if (analysis.isSpam || analysis.isInformational === true || analysis.requiresAction === false || analysis.ticketDecision === 'DO_NOT_CREATE') {
+    if (!forceTicketCreation && (analysis.isSpam || analysis.isInformational === true || analysis.requiresAction === false || analysis.ticketDecision === 'DO_NOT_CREATE')) {
       const reason = analysis.decisionReason || (analysis.isSpam ? 'SPAM' : 'INFORMATION');
       console.log(`[emailPipeline] Email classé par l'IA comme non-actionnable (${reason}) — orienté NEEDS_REVIEW pour validation Hotline`);
       const updated = await prisma.incomingEmail.update({
@@ -613,7 +617,8 @@ async function processMessage(message, account) {
     }
 
     // Traitement des e-mails ambigus ou à faible confiance (NEEDS_REVIEW)
-    if (analysis.ticketDecision === 'NEEDS_REVIEW') {
+    // Bypassé si la Hotline a forcé la création du ticket depuis le Centre de Validation.
+    if (!forceTicketCreation && analysis.ticketDecision === 'NEEDS_REVIEW') {
       console.log(`[emailPipeline] Email ambigu ou confiance faible (confiance: ${analysis.confidence}), marqué pour révision Hotline`);
       const updated = await prisma.incomingEmail.update({
         where: { id: incoming.id },

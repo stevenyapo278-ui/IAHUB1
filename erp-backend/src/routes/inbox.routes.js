@@ -398,6 +398,137 @@ router.get('/sent', requirePermission('inbox.sync', ['ADMIN', 'TECHNICIAN', 'HOT
   }
 });
 
+// ── Emails marqués NEEDS_REVIEW : file de révision humaine du Centre de Validation ──
+// Un email arrive ici quand l'IA n'a pas su le trancher (confiance faible, spam ambigu,
+// email d'information, règle de triage suspecte...). La Hotline décide : créer un ticket
+// manuellement ou ignorer. Doit être déclaré AVANT la route '/:id'.
+router.get('/needs-review', requirePermission('inbox.sync', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+  try {
+    const scope = await buildEmailScope(req.user);
+    const emails = await prisma.incomingEmail.findMany({
+      where: { status: 'NEEDS_REVIEW', ...(scope || {}) },
+      orderBy: { receivedAt: 'desc' },
+      take: 100,
+      select: {
+        id: true,
+        graphMessageId: true,
+        conversationId: true,
+        fromEmail: true,
+        fromName: true,
+        subject: true,
+        bodyPreview: true,
+        receivedAt: true,
+        aiSummary: true,
+        aiCategory: true,
+        aiPriority: true,
+        aiConfidence: true,
+        aiIsSpam: true,
+        aiIntent: true,
+        erpTicketId: true,
+        hasAttachments: true,
+        ccRecipients: true,
+        isRead: true,
+        createdAt: true,
+      },
+    });
+    return res.json({ items: emails, total: emails.length });
+  } catch (err) {
+    console.error('[inbox/needs-review] Erreur:', err.message);
+    return res.status(500).json({ error: err.message || 'Erreur lors du chargement des emails à réviser' });
+  }
+});
+
+// ── Créer manuellement un ticket depuis un email NEEDS_REVIEW ────────────────
+// La Hotline confirme que cet email mérite bien un ticket : on retrait le message via
+// le pipeline IA avec un flag forçant la création (bypass des filtres spam/info).
+router.post('/:id/force-ticket', requirePermission('inbox.sync', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+  try {
+    const incoming = await prisma.incomingEmail.findUnique({ where: { id: Number(req.params.id) } });
+    if (!incoming) return res.status(404).json({ error: 'Email introuvable' });
+    if (incoming.status !== 'NEEDS_REVIEW') {
+      return res.status(400).json({ error: `Cet email n'est pas en attente de révision (statut actuel : ${incoming.status})` });
+    }
+
+    const account = await prisma.emailAccount.findUnique({ where: { id: incoming.emailAccountId } });
+    if (!account) return res.status(400).json({ error: 'Compte email associé introuvable' });
+
+    // Reconstruire l'objet message pour le pipeline (même pattern que /:id/unspam)
+    const message = {
+      id: incoming.graphMessageId,
+      from: { emailAddress: { address: incoming.fromEmail, name: incoming.fromName || '' } },
+      subject: incoming.subject,
+      bodyPreview: incoming.bodyPreview,
+      body: { content: incoming.bodyHtml || '' },
+      receivedDateTime: incoming.receivedAt?.toISOString?.() || new Date().toISOString(),
+      conversationId: incoming.conversationId,
+      internetMessageId: incoming.internetMessageId,
+      hasAttachments: incoming.hasAttachments,
+      toRecipients: [],
+      ccRecipients: (incoming.ccRecipients || []).map((e) => ({ emailAddress: { address: e } })),
+      internetMessageHeaders: [],
+      // Flags spéciaux : bypass des règles de triage + décision de ticket forcée
+      bypassSpamRules: true,
+      forceTicketCreation: true,
+    };
+
+    // Réinitialiser le statut et l'analyse IA avant le retraitement
+    await prisma.incomingEmail.update({
+      where: { id: incoming.id },
+      data: {
+        status: 'PROCESSING',
+        aiIsSpam: false,
+        aiSummary: null,
+        aiIntent: null,
+        error: null,
+        lastError: null,
+        retryCount: 0,
+      },
+    });
+
+    const { processMessage: pm } = require('../services/emailPipeline');
+    const result = await pm(message, account);
+
+    return res.json({
+      message: 'Ticket créé avec succès depuis la révision',
+      newStatus: result?.status,
+      ticketId: result?.erpTicketId,
+      id: result?.id,
+    });
+  } catch (err) {
+    console.error('[inbox/force-ticket] Erreur:', err.message);
+    return res.status(500).json({ error: err.message || 'Erreur lors de la création du ticket', errorDetail: err.errorDetail || null });
+  }
+});
+
+// ── Ignorer un email NEEDS_REVIEW (traité sans création de ticket) ──────────
+router.post('/:id/needs-review-resolve', requirePermission('inbox.sync', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+  try {
+    const incoming = await prisma.incomingEmail.findUnique({ where: { id: Number(req.params.id) } });
+    if (!incoming) return res.status(404).json({ error: 'Email introuvable' });
+    if (incoming.status !== 'NEEDS_REVIEW') {
+      return res.status(400).json({ error: `Cet email n'est pas en attente de révision (statut actuel : ${incoming.status})` });
+    }
+
+    const updated = await prisma.incomingEmail.update({
+      where: { id: incoming.id },
+      data: {
+        status: 'DONE',
+        aiSummary: `[Résolu par révision Hotline] ${incoming.aiSummary || 'Email examiné sans création de ticket'}`,
+        aiIsSpam: false,
+        error: null,
+        lastError: null,
+      },
+    });
+    const io = req.app.get('io');
+    if (io) io.emit('email_updated', updated);
+
+    return res.json({ message: 'Email marqué comme traité', id: updated.id, newStatus: updated.status });
+  } catch (err) {
+    console.error('[inbox/needs-review-resolve] Erreur:', err.message);
+    return res.status(500).json({ error: err.message || 'Erreur lors de la résolution' });
+  }
+});
+
 // Détail d'un email reçu
 router.get('/:id', async (req, res) => {
   const scope = await buildEmailScope(req.user);

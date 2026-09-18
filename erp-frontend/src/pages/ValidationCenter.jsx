@@ -61,6 +61,11 @@ function matchesSearch(item, tab, q) {
       item.title, item.problem, item.cause, item.solution, item.category,
       ...(item.tags || []), ...(item.keywords || []),
     ];
+  } else if (tab === 'reviews') {
+    fields = [
+      item.subject, item.bodyPreview, item.aiSummary, item.aiCategory,
+      item.fromName, item.fromEmail, String(item.id || ''),
+    ];
   }
   return fields.some((v) => v && String(v).toLowerCase().includes(q));
 }
@@ -78,6 +83,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   const [pendingKnowledgeDrafts, setPendingKnowledgeDrafts] = useState([]);
   const [pendingClosures, setPendingClosures] = useState([]);
   const [rejectedClosures, setRejectedClosures] = useState([]);
+  // Emails entrants marqués NEEDS_REVIEW par le pipeline (demande de révision Hotline)
+  const [needsReviewEmails, setNeedsReviewEmails] = useState([]);
+  const [processingReviewId, setProcessingReviewId] = useState(null);
   const [closureStats, setClosureStats] = useState(null);
   // Sous-onglet dans Clôtures IA : 'pending' | 'rejected'
   const [closureSubTab, setClosureSubTab] = useState('pending');
@@ -155,8 +163,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
       api.get('/knowledge/drafts').catch(() => ({ data: [] })),
       api.get('/dashboard/closure-stats?days=30').catch(() => null),
       api.get('/tickets/rejected-closures?limit=50').catch(() => ({ data: [] })),
+      api.get('/inbox/needs-review').catch(() => ({ data: { items: [] } })),
     ])
-      .then(([ticketsRes, closuresRes, draftsRes, knowledgeRes, closureStatsRes, rejectedRes]) => {
+      .then(([ticketsRes, closuresRes, draftsRes, knowledgeRes, closureStatsRes, rejectedRes, needsReviewRes]) => {
         const ticketList = Array.isArray(ticketsRes.data)
           ? ticketsRes.data
           : ticketsRes.data?.items || [];
@@ -177,6 +186,12 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
 
         const knowledgeList = Array.isArray(knowledgeRes.data) ? knowledgeRes.data : [];
         setPendingKnowledgeDrafts(knowledgeList);
+
+        // Emails en attente de révision humaine (statut NEEDS_REVIEW)
+        const reviewList = Array.isArray(needsReviewRes?.data?.items)
+          ? needsReviewRes.data.items
+          : (Array.isArray(needsReviewRes?.data) ? needsReviewRes.data : []);
+        setNeedsReviewEmails(reviewList);
 
         // Statistiques + série temporelle de l'évolution des clôtures suggérées
         setClosureStats(closureStatsRes?.data || null);
@@ -206,6 +221,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     reminders: 'automation.manage', // POST /reminders/run + config
     closures: 'tickets.approve', // POST /tickets/:id/validate-close
     knowledge: 'knowledge.manage', // POST /knowledge/drafts/:id/approve|reject
+    reviews: 'inbox.sync', // GET /inbox/needs-review + POST /inbox/:id/force-ticket
   };
   const isTechnician = user?.role === 'TECHNICIAN';
   const tabAllowed = (tab) => {
@@ -214,7 +230,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   };
 
   // Si l'URL pointe un onglet non autorisé (ou inconnu), retomber sur le 1er autorisé.
-  const firstAllowedTab = ['tickets', 'drafts', 'reminders', 'closures', 'knowledge'].find(tabAllowed) || 'tickets';
+  const firstAllowedTab = ['tickets', 'drafts', 'reminders', 'closures', 'knowledge', 'reviews'].find(tabAllowed) || 'tickets';
   const activeTab = tabAllowed(rawTab) ? rawTab : firstAllowedTab;
   const needsTabFix = activeTab !== rawTab;
   useEffect(() => {
@@ -227,6 +243,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     reminders: reminderDrafts,
     closures: pendingClosures,
     knowledge: pendingKnowledgeDrafts,
+    reviews: needsReviewEmails,
   }[activeTab] || [];
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -245,6 +262,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     reminders: 'Rechercher une relance (ticket, destinataire)...',
     closures: 'Rechercher un ticket à clôturer (titre, demandeur)...',
     knowledge: 'Rechercher un article (titre, problème, solution, tags)...',
+    reviews: 'Rechercher un email à réviser (objet, expéditeur, contenu)...',
   }[activeTab] || 'Rechercher...';
 
   // --- ACTIONS TICKET PENDING ---
@@ -264,6 +282,43 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     setRejectTicketId(ticketId);
     setRejectReason('');
     setShowRejectModal(true);
+  }
+
+  // --- ACTIONS EMAILS EN RÉVISION (NEEDS_REVIEW) ---
+  // La Hotline confirme que l'email mérite un ticket : retraitement via le pipeline
+  // avec bypass des filtres (forceTicketCreation) — le ticket est créé puis passe
+  // dans l'onglet « Tickets en attente » pour l'approbation classique.
+  async function handleForceTicketFromReview(emailId) {
+    setProcessingReviewId(emailId);
+    try {
+      const { data } = await api.post(`/inbox/${emailId}/force-ticket`);
+      playApproval();
+      toast.success(data?.ticketId
+        ? `Ticket #${data.ticketId} créé depuis l'email — en attente d'approbation`
+        : 'Email retraité avec succès');
+      loadAllData(true);
+    } catch (err) {
+      playError();
+      toast.error(err.response?.data?.error || 'Erreur lors de la création du ticket');
+    } finally {
+      setProcessingReviewId(null);
+    }
+  }
+
+  // L'email ne nécessite finalement pas de ticket : marqué traité sans création.
+  async function handleResolveReview(emailId) {
+    setProcessingReviewId(emailId);
+    try {
+      await api.post(`/inbox/${emailId}/needs-review-resolve`);
+      playApproval();
+      toast.success('Email marqué comme traité (sans ticket)');
+      loadAllData(true);
+    } catch (err) {
+      playError();
+      toast.error(err.response?.data?.error || 'Erreur lors du traitement de la révision');
+    } finally {
+      setProcessingReviewId(null);
+    }
   }
 
   async function handleConfirmRejectTicket() {
@@ -680,6 +735,26 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             activeTab === 'knowledge' ? 'bg-white/20 text-white' : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
           }`}>
             {pendingKnowledgeDrafts.length}
+          </span>
+        </button>
+        )}
+
+        {tabAllowed('reviews') && (
+        <button
+          onClick={() => handleTabChange('reviews')}
+          className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+            activeTab === 'reviews'
+              ? 'bg-orange-600 text-white shadow-md font-extrabold'
+              : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
+          }`}
+          title="Emails que l'IA n'a pas pu trancher — validation Hotline requise"
+        >
+          <AlertTriangle className="w-4 h-4" />
+          <span className="whitespace-nowrap">Révisions Email</span>
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black whitespace-nowrap ${
+            activeTab === 'reviews' ? 'bg-white/20 text-white' : 'bg-orange-500/20 text-orange-600 dark:text-orange-400'
+          }`}>
+            {needsReviewEmails.length}
           </span>
         </button>
         )}
@@ -1819,6 +1894,147 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                           </button>
                         </div>
                       )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* CONTENU DE L'ONGLET 5 : RÉVISIONS EMAIL (NEEDS_REVIEW) */}
+      {activeTab === 'reviews' && (
+        <div className="space-y-4">
+          {/* Bandeau explicatif */}
+          <div className="p-4 rounded-2xl border border-orange-500/25 bg-orange-500/5 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-orange-500 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <p className="text-xs font-bold text-on-surface">Emails nécessitant une révision humaine</p>
+              <p className="text-[11px] text-on-surface-variant">
+                L'IA n'a pas su trancher sur ces emails (confiance insuffisante, spam ambigu, message d'information,
+                règle de triage suspecte). Validez : créez un ticket ou marquez comme traité sans suite.
+              </p>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-32 bento-card animate-pulse" />
+              ))}
+            </div>
+          ) : filteredList.length === 0 ? (
+            activeList.length === 0 ? (
+              <div className="p-12 text-center bento-card border-dashed space-y-3">
+                <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto" />
+                <h3 className="text-base font-bold text-on-surface">Aucun email en attente de révision</h3>
+                <p className="text-xs text-on-surface-variant max-w-md mx-auto">
+                  Tous les emails entrants ont été traités automatiquement par l'IA.
+                </p>
+              </div>
+            ) : noResultsBlock
+          ) : (
+            <div className="space-y-4">
+              {paginatedList.map((email) => {
+                const reasonLabel = {
+                  NEEDS_REVIEW: 'Confiance IA insuffisante',
+                  SPAM: 'Spam suspecté',
+                  INFORMATION: 'Message d\'information',
+                }[email.aiIntent] || 'Révision requise';
+                const isProcessing = processingReviewId === email.id;
+                return (
+                  <div
+                    key={email.id}
+                    className="bento-card p-6 space-y-4 hover-interactive transition-all"
+                    style={{ borderColor: 'color-mix(in srgb, #f97316 25%, var(--color-border))' }}
+                  >
+                    {/* Header : expéditeur + objet + badges */}
+                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-outline-variant/20 pb-3">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div className="p-2 rounded-xl bg-orange-500/10 text-orange-600 dark:text-orange-400 shrink-0">
+                          <AlertTriangle className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <h3 className="text-sm font-bold text-on-surface" style={{ overflowWrap: 'anywhere' }}>
+                            {email.subject || '(sans objet)'}
+                          </h3>
+                          <p className="text-[11px] text-on-surface-variant truncate">
+                            De : <strong className="text-on-surface">{email.fromName || email.fromEmail}</strong>
+                            {email.fromName && email.fromEmail ? ` <${email.fromEmail}>` : ''}
+                          </p>
+                          <p className="text-[11px] text-on-surface-variant mt-0.5">
+                            Reçu le <strong className="text-on-surface font-semibold">{new Date(email.receivedAt).toLocaleString('fr-FR')}</strong>
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Badges raison + catégorie + confiance */}
+                      <div className="flex items-center gap-2 flex-wrap shrink-0">
+                        <span className="px-2.5 py-0.5 rounded-md bg-orange-500/15 text-orange-600 dark:text-orange-400 text-[10px] font-extrabold border border-orange-500/30 uppercase tracking-wider">
+                          ⚠️ {reasonLabel}
+                        </span>
+                        {email.aiCategory && (
+                          <span className="px-2.5 py-0.5 rounded-md bg-surface-container text-on-surface-variant text-[10px] font-bold border border-outline-variant/30">
+                            {email.aiCategory}
+                          </span>
+                        )}
+                        {email.aiPriority && (
+                          <span className={`px-2 py-0.5 rounded-md border text-[10px] font-bold ${PRIORITY_BADGES[email.aiPriority] || PRIORITY_BADGES.MEDIUM}`}>
+                            {PRIORITY_LABELS[email.aiPriority] || email.aiPriority}
+                          </span>
+                        )}
+                        {typeof email.aiConfidence === 'number' && (
+                          <span className="px-2.5 py-0.5 rounded-md bg-surface-container text-on-surface-variant text-[10px] font-mono border border-outline-variant/30">
+                            {Math.round(email.aiConfidence * 100)}% IA
+                          </span>
+                        )}
+                        {email.hasAttachments && (
+                          <span className="px-2 py-0.5 rounded-md bg-surface-container text-on-surface-variant text-[10px] font-bold border border-outline-variant/30">
+                            📎 PJ
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Aperçu du contenu + résumé IA */}
+                    <div className="p-4 rounded-2xl bg-surface-container-low/40 border border-outline-variant/20 space-y-2">
+                      {email.aiSummary && (
+                        <p className="text-[11px] text-violet-700 dark:text-violet-300 bg-violet-500/8 rounded-lg px-3 py-1.5 border border-violet-500/15 italic">
+                          <Sparkles className="w-3 h-3 inline mr-1 -mt-0.5" />{email.aiSummary}
+                        </p>
+                      )}
+                      {email.bodyPreview && (
+                        <p className="text-xs text-on-surface-variant line-clamp-3" style={{ whiteSpace: 'pre-line', overflowWrap: 'anywhere' }}>
+                          {email.bodyPreview}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Actions de révision */}
+                    <div className="flex items-center justify-between gap-4 pt-2">
+                      <span className="text-[10px] text-on-surface-variant font-mono">#email-{email.id}</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleResolveReview(email.id)}
+                          disabled={isProcessing}
+                          className="px-3.5 py-2 rounded-xl text-xs font-bold border border-outline-variant/40 text-on-surface-variant hover:bg-surface-container transition-all disabled:opacity-50"
+                        >
+                          Traiter sans ticket
+                        </button>
+                        <button
+                          onClick={() => handleForceTicketFromReview(email.id)}
+                          disabled={isProcessing}
+                          className="px-4 py-2 rounded-xl text-xs font-bold bg-orange-600 hover:bg-orange-700 text-white shadow-md shadow-orange-500/20 transition-all flex items-center gap-1.5 disabled:opacity-50"
+                        >
+                          {isProcessing ? (
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Ticket className="w-4 h-4" />
+                          )}
+                          <span>{isProcessing ? 'Traitement...' : 'Créer le ticket'}</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
