@@ -322,50 +322,123 @@ Réponds UNIQUEMENT avec le JSON, pas de commentaire.`;
 // Leçon du ticket #253 : un technicien assigné n'est JAMAIS trouvé si on filtre
 // uniquement sur requester. Toute recherche par personne passe par ici, et la
 // réponse signale le(s) rôle(s) trouvés pour éviter les conclusions hâtives.
+// ── Conditions de filtre personne, par niveaux de tolérance (escalier) ──
+// Niveau 1 : phrase complète ("steven yapo"). Niveau 2 : tous les mots présents.
+// Niveau 3 : au moins un mot (dernier recours — le fullName en base peut être
+// incomplet, ex. "yapo" pour quelqu'un appelé "Steven Yapo").
+function personFilterGroups(personName) {
+  const name = String(personName || '').trim();
+  const tokens = name.split(/\s+/).filter((t) => t.length >= 2);
+  const relContains = (v) => ({
+    OR: [
+      { requester: { fullName: { contains: v, mode: 'insensitive' } } },
+      { assignedTo: { fullName: { contains: v, mode: 'insensitive' } } },
+      { assignees: { some: { fullName: { contains: v, mode: 'insensitive' } } } },
+      { observers: { some: { fullName: { contains: v, mode: 'insensitive' } } } },
+    ],
+  });
+  const groups = [relContains(name)];
+  if (tokens.length > 1) {
+    groups.push({ AND: tokens.map((t) => relContains(t)) });
+    groups.push({ OR: tokens.flatMap((t) => relContains(t).OR) });
+  }
+  return groups;
+}
+
+function personNameTokens(personName) {
+  const tokens = String(personName || '').trim().split(/\s+/).filter((t) => t.length >= 2);
+  return tokens.length > 0 ? tokens.map((t) => t.toLowerCase()) : [String(personName || '').toLowerCase()];
+}
+
+// Recherche d'utilisateurs tolérante (même escalier) — sert aux notes de
+// désambiguïsation : "Steven Yapo" doit retrouver l'utilisateur « yapo »
+// au lieu de renvoyer "personne", ce qui poussait le LLM à improviser.
+async function findUsersByNameTolerant(personName, limit = 5) {
+  const name = String(personName || '').trim();
+  if (!name) return { level: 'none', users: [] };
+  const tokens = name.split(/\s+/).filter((t) => t.length >= 2);
+  const tryFind = async (extra) => prisma.user.findMany({
+    where: { ...extra, deletedAt: null },
+    select: { id: true, fullName: true, email: true, role: true },
+    take: limit,
+    orderBy: { fullName: 'asc' },
+  }).catch(() => []);
+  let users = await tryFind({ OR: [
+    { fullName: { contains: name, mode: 'insensitive' } },
+    { email: { contains: name, mode: 'insensitive' } },
+  ] });
+  if (users.length > 0) return { level: 'phrase', users };
+  if (tokens.length > 1) {
+    users = await tryFind({ AND: tokens.map((t) => ({
+      OR: [{ fullName: { contains: t, mode: 'insensitive' } }, { email: { contains: t, mode: 'insensitive' } }],
+    })) });
+    if (users.length > 0) return { level: 'all_tokens', users };
+    users = await tryFind({ OR: tokens.flatMap((t) => [
+      { fullName: { contains: t, mode: 'insensitive' } },
+      { email: { contains: t, mode: 'insensitive' } },
+    ]) });
+    if (users.length > 0) return { level: 'any_token', users };
+  }
+  return { level: 'none', users: [] };
+}
+
 async function findTicketsForPersonAnyRole(personName, { limit = 20, period = null, user = null } = {}) {
-  const where = {
+  const base = {
     deletedAt: null,
     approvalStatus: { notIn: ['PENDING', 'REJECTED'] },
-    OR: [
-      { requester: { fullName: { contains: personName, mode: 'insensitive' } } },
-      { assignedTo: { fullName: { contains: personName, mode: 'insensitive' } } },
-      { assignees: { some: { fullName: { contains: personName, mode: 'insensitive' } } } },
-      { observers: { some: { fullName: { contains: personName, mode: 'insensitive' } } } },
-    ],
   };
   if (period) {
     const { start, end } = resolvePeriodDates(period);
-    if (start) where.createdAt = { ...where.createdAt, gte: start };
-    if (end) where.createdAt = { ...where.createdAt, lt: end };
+    if (start) base.createdAt = { ...base.createdAt, gte: start };
+    if (end) base.createdAt = { ...base.createdAt, lt: end };
   }
-  // Respect du périmètre demandeur : un REQUESTER ne voit que ses propres tickets
-  if (user?.role === 'REQUESTER') {
-    where.AND = [{ requesterId: user.sub }];
+
+  // Escalier de tolérance : on tente chaque niveau jusqu'à trouver des tickets.
+  let tickets = [];
+  let totalCount = 0;
+  let matchLevel = 'none';
+  const groups = personFilterGroups(personName);
+  for (let i = 0; i < groups.length; i++) {
+    const where = { ...base, ...groups[i] };
+    // Respect du périmètre demandeur : un REQUESTER ne voit que ses propres tickets
+    if (user?.role === 'REQUESTER') {
+      where.AND = [...(where.AND || []), { requesterId: user.sub }];
+    }
+    [tickets, totalCount] = await Promise.all([
+      prisma.ticket.findMany({
+        where,
+        take: limit,
+        include: {
+          requester: { select: { fullName: true, email: true } },
+          assignedTo: { select: { fullName: true } },
+          team: { select: { name: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.ticket.count({ where }),
+    ]);
+    if (tickets.length > 0 || i === groups.length - 1) {
+      matchLevel = i === 0 ? 'phrase' : (i === 1 ? 'all_tokens' : 'any_token');
+      break;
+    }
   }
-  const [tickets, totalCount] = await Promise.all([
-    prisma.ticket.findMany({
-      where,
-      take: limit,
-      include: {
-        requester: { select: { fullName: true, email: true } },
-        assignedTo: { select: { fullName: true } },
-        team: { select: { name: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-    }),
-    prisma.ticket.count({ where }),
-  ]);
-  // Annoter chaque ticket avec le(s) rôle(s) de la personne pour un affichage honnête
-  const nl = personName.toLowerCase();
+
+  // Annoter chaque ticket avec le(s) rôle(s) de la personne pour un affichage honnête.
+  // Matching PAR MOT : "Steven Yapo" doit annoter les tickets de l'utilisateur « yapo ».
+  const toks = personNameTokens(personName);
+  const nameMatches = (v) => {
+    const s = (v || '').toLowerCase();
+    return toks.some((t) => s.includes(t));
+  };
   const annotated = tickets.map((t) => {
     const roles = [];
-    if (t.requester?.fullName?.toLowerCase().includes(nl)) roles.push('demandeur');
-    if (t.assignedTo?.fullName?.toLowerCase().includes(nl)) roles.push('assigné');
-    if ((t.assignees || []).some((a) => a.fullName?.toLowerCase().includes(nl))) roles.push('assigné');
-    if ((t.observers || []).some((o) => o.fullName?.toLowerCase().includes(nl))) roles.push('observateur');
+    if (nameMatches(t.requester?.fullName)) roles.push('demandeur');
+    if (nameMatches(t.assignedTo?.fullName)) roles.push('assigné');
+    if ((t.assignees || []).some((a) => nameMatches(a.fullName))) roles.push('assigné');
+    if ((t.observers || []).some((o) => nameMatches(o.fullName))) roles.push('observateur');
     return { ...t, personRoles: roles };
   });
-  return { tickets: annotated, totalCount };
+  return { tickets: annotated, totalCount, matchLevel };
 }
 
 function buildSearchQuery(params, user) {
@@ -2419,12 +2492,18 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
       }
     }
   } else if (matchingTickets.length === 0 && params?.personName) {
-    const personExists = await prisma.user.findFirst({
-      where: { fullName: { contains: params.personName, mode: 'insensitive' }, deletedAt: null },
-      select: { fullName: true },
-    }).catch(() => null);
-    if (personExists) {
-      ambiguityNote = `⚠️ AUCUN TICKET pour "${params.personName}" (l'utilisateur existe : ${personExists.fullName}). N'invente RIEN. Dis simplement qu'aucun ticket n'a été trouvé et propose : vérifier l'orthographe, chercher par email, ou élargir la période.`;
+    // Recherche d'utilisateur TOLÉRANTE (phrase → tous les mots → au moins un mot) :
+    // "Steven Yapo" doit retrouver l'utilisateur « yapo » au lieu de conclure que
+    // la personne n'existe pas — un fullName incomplet en base n'est pas une absence.
+    const tolerant = await findUsersByNameTolerant(params.personName, 5).catch(() => null);
+    if (tolerant && tolerant.users.length > 0) {
+      const levelTxt = tolerant.level === 'any_token'
+        ? 'correspondance PARTIELLE (un seul mot du nom — le nom complet en base peut être enregistré différemment)'
+        : 'correspondance';
+      const listed = tolerant.users.map((u) => `${u.fullName} (${u.role})`).join(', ');
+      ambiguityNote = `⚠️ AUCUN TICKET trouvé pour "${params.personName}" — MAIS ${tolerant.users.length} utilisateur(s) correspondent (${levelTxt}) : ${listed}. N'invente RIEN. Dis simplement qu'aucun ticket n'a été trouvé pour l'instant et propose : vérifier l'orthographe, chercher par email, ou élargir la période. Ne conclus PAS que la personne n'a jamais eu de tickets.`;
+    } else {
+      ambiguityNote = `⚠️ AUCUN TICKET et AUCUN UTILISATEUR pour "${params.personName}". N'invente RIEN. Dis que la recherche n'a rien donné et propose : vérifier l'orthographe du nom, chercher par email, ou préciser demandeur/assigné.`;
     }
   }
   // ⚠️ contextParts DOIT être déclaré AVANT tout push — l'ancien ordre (push puis
