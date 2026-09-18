@@ -11,7 +11,14 @@ const SYSTEM_PROMPT = `Tu es MARIE, l'assistante IA Helpdesk IT de Prosuma. Tu e
 
 Tu es TOTALEMENT LIBRE sur la forme : ton, style, longueur, structure, formatage (markdown, tableaux, listes, gras, italique), emojis ou non — fais ce qui est le plus utile et le plus agréable pour ton interlocuteur. Réponds dans la langue de l'utilisateur. Varie tes tournures, montre ta personnalité, donne ton avis professionnel quand c'est pertinent. Analyse et interprète les données plutôt que de simplement les lister.
 
-Un contexte (profil utilisateur, tickets, statistiques, base de connaissances) est fourni après ce prompt quand il existe : appuie-toi sur ce qui est pertinent, ignore le reste. Quand tu cites des tickets, des chiffres ou des données, base-toi sur ce contexte — ne fabrique pas de numéros de tickets ou de statistiques qui n'y figurent pas. En dehors de ça, aucune contrainte : sois naturelle.
+Un contexte (profil utilisateur, tickets, statistiques, base de connaissances) est fourni après ce prompt quand il existe : appuie-toi sur ce qui est pertinent, ignore le reste.
+
+RÈGLE DE VÉRACITÉ — JAMAIS D'INVENTION (absolue, prime sur tout le reste) :
+- Les seuls numéros de tickets, chiffres, statuts et noms que tu peux citer sont ceux du contexte fourni. Écrire "#XXX", "[Ticket 6]", "#123 (détail non chargé)" ou tout numéro/statut absent du contexte est INTERDIT — même pour "compléter" un tableau.
+- Si l'en-tête annonce un total (ex. "Tickets pertinents trouvés (7)") mais que le détail n'affiche que 5 lignes, dis-le tel quel : "j'ai bien 7 tickets au total, mais le détail des 2 derniers n'est pas chargé" et propose de relancer l'affichage — n'imagine JAMAIS les lignes manquantes.
+- Si une donnée manque, dis-le simplement et propose de la récupérer. "Je vérifie et je reviens vers toi" vaut mille fois une réponse inventée.
+- Si tu n'as effectué aucune recherche (pas de contexte de tickets), ne fais AUCUNE affirmation chiffrée sur des tickets.
+En dehors de ça, aucune contrainte sur la forme : sois naturelle.
 
 RÈGLE D'OR — DEMANDER PLUTÔT QUE DEVINER :
 Quand une demande est ambiguë ou incomplète, ne choisis JAMAIS une interprétation au hasard. Pose une question de clarification courte et naturelle. Cas typiques :
@@ -1082,6 +1089,15 @@ const CHATBOT_TOOLS = [
 ];
 
 // ── Exécution des tools ──────────────────────────────────────────────
+
+// ── Liste blanche des capacités (dérivée du CODE réel, jamais copiée à la main) ──
+// Le LLM n'a le droit d'annoncer QUE les actions correspondant aux outils définis
+// dans CHATBOT_TOOLS ci-dessus. Toute autre promesse ("je vous envoie un mail",
+// "c'est planifié", "je relance l'équipe") est une hallucination d'action.
+function buildCapabilityLine() {
+  const names = CHATBOT_TOOLS.map((t) => t?.function?.name).filter(Boolean);
+  return `\n\nACTIONS POSSIBLE — LISTE FERMÉE (dérivée des outils réellement disponibles) :\n${names.map((n) => '- ' + n).join('\n')}\nTu ne peux RIEN faire d'autre : pas d'envoi d'email, pas de modification d'inventaire ou de GLPI, pas de rapport planifié, pas de relance automatique. Si on te demande une action hors de cette liste, dis que tu ne peux pas faire ça et propose l'action la plus proche parmi celles de la liste. Ne dis jamais "je m'en occupe", "c'est fait" ou "je vous envoie" pour une action hors liste — ces outils sont ta seule capacité d'action.`;
+}
 
 async function executeTool(toolName, args, user) {
   const p = args || {};
@@ -2411,13 +2427,40 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
       ambiguityNote = `⚠️ AUCUN TICKET pour "${params.personName}" (l'utilisateur existe : ${personExists.fullName}). N'invente RIEN. Dis simplement qu'aucun ticket n'a été trouvé et propose : vérifier l'orthographe, chercher par email, ou élargir la période.`;
     }
   }
+  // ⚠️ contextParts DOIT être déclaré AVANT tout push — l'ancien ordre (push puis
+  // déclaration plus bas) levait un ReferenceError (TDZ) dès qu'une note de
+  // désambiguïsation était produite → "erreur interne sur les données".
+  const contextParts = [];
   if (ambiguityNote) contextParts.push(ambiguityNote);
+
+  // ── Court-circuit déterministe : recherche pure ENTIÈREMENT vide ──
+  // Volontairement limité aux intents de recherche pure : 'general' doit continuer
+  // vers callAIWithTools (le LLM y relance ses propres outils). Si une note de
+  // désambiguïsation existe, on laisse le LLM poser sa question de clarification.
+  const PURE_SEARCH_EMPTY = {
+    search_tickets: { isEmpty: () => matchingTickets.length === 0, reply: "Je n'ai trouvé aucun ticket correspondant dans la base. On peut élargir la période, essayer un autre mot-clé, ou vérifier ensemble l'orthographe d'un nom mentionné — que préférez-vous ?" },
+    search_inventory: { isEmpty: () => assets.length === 0, reply: "Aucun équipement correspondant dans l'inventaire. Précisez la marque, le modèle ou le numéro d'inventaire et je relance la recherche." },
+    search_users: { isEmpty: () => users.length === 0, reply: "Aucun utilisateur trouvé pour cette recherche. Vérifions l'orthographe du nom, ou donnez-moi son email." },
+    search_locations: { isEmpty: () => locations.length === 0, reply: "Aucun lieu trouvé. Précisez le nom du magasin ou du site et je relance la recherche." },
+  };
+  const pureSearch = PURE_SEARCH_EMPTY[intent];
+  if (pureSearch && knowledgeChunks.length === 0 && !ambiguityNote && pureSearch.isEmpty()) {
+    _stepLog('empty-short-circuit', `intent=${intent} → réponse déterministe sans LLM`);
+    return {
+      reply: pureSearch.reply,
+      intent,
+      action: null,
+      widget: null,
+      sources: [],
+      citedTicketIds: [],
+      citedKnowledgeIds: [],
+      pendingTicketData: null,
+    };
+  }
 
   const knowledgeContext = knowledgeChunks.length > 0
     ? knowledgeChunks.map((c) => `[doc:${c.documentId} | ${c.title}] : ${c.content.substring(0, 500)}`).join('\n\n')
     : '';
-
-  const contextParts = [];
 
   if (userContext) {
     contextParts.push(`**Profil de l'utilisateur :** ${userContext}`);
@@ -2429,6 +2472,12 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
 
   if (matchingTickets.length > 0) {
     let ticketContext = `**Tickets pertinents trouvés (${totalTicketCount}) :**\n`;
+    // Note anti-hallucination DÉTERMINISTE : quand le total DB dépasse les lignes
+    // affichées (pagination take:20/100), le LLM "complétait" le tableau avec des
+    // numéros inventés (#XXX). On lui donne le compte rendu exact à recopier.
+    if (totalTicketCount > matchingTickets.length) {
+      ticketContext += `\n⚠️ COMPTES RENDUS VÉRIFIÉS (recopie-les tels quels, n'en déduis RIEN d'autre) :\n• Total réel en base : ${totalTicketCount} tickets.\n• Détail affiché ci-dessus : ${matchingTickets.length} tickets (limité côté serveur).\n• Tickets ABSENTS du détail affiché : ${totalTicketCount - matchingTickets.length}. AUCUN numéro n'est fourni pour eux — ne fabrique JAMAIS de numéros, de titres ni de statuts pour ces tickets. La seule formulation correcte est : "j'ai bien ${totalTicketCount} tickets au total, le détail ci-dessus n'en montre que ${matchingTickets.length}, veux-tu que je charge la suite ?"\n`;
+    }
     // Format tableau compact pour beaucoup de résultats
     if (matchingTickets.length > 5) {
       ticketContext += `| # | Titre | Statut | Priorité | Demandeur | Lieu | SLA |\n|---|-------|--------|----------|-----------|------|-----|\n`;
@@ -2509,6 +2558,11 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
 
   _stepLog('pre-switch', `intent=${intent} contextParts=${contextParts.length}`);
 
+  // Filet de sécurité : les handlers déterministes ci-dessous font des requêtes DB/IA
+  // non protégées. Une erreur dedans (champ Prisma inconnu, provider down...) ne doit
+  // JAMAIS tuer la réponse entière — on garde le contexte déjà construit et on signale
+  // l'indisponibilité au LLM, qui dira honnêtement ce qui manque au lieu de crasher.
+  try {
   switch (intent) {
     case 'analytics': {
       const lower = message.toLowerCase();
@@ -3212,6 +3266,10 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
       break;
     }
   }
+  } catch (switchErr) {
+    console.error('[chatbot] Erreur handler déterministe (réponse dégradée):', switchErr?.message, '\n', switchErr?.stack);
+    contextParts.push(`⚠️ Une partie des données demandées n'a pas pu être récupérée (erreur technique). Présente UNIQUEMENT les données disponibles ci-dessus, signale honnêtement que le reste est momentanément indisponible et propose de réessayer — n'invente RIEN pour compléter.`);
+  }
 
   // Instructions spécifiques par intent pour guider le format de réponse
   // ── Classification intents info vs action ──
@@ -3248,10 +3306,12 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   // Pour les autres intents : le contexte est déjà construit par les handlers, on le passe au LLM
   try {
     let raw;
+    let usedToolsPath = false;
     if (intent === 'general' && contextParts.length === 0) {
+      usedToolsPath = true;
       raw = await callAIWithTools(
         [{ role: 'user', content: message }],
-        { ...voiceModelOptions, conversationHistory, forcedSystem: SYSTEM_PROMPT, user }
+        { ...voiceModelOptions, conversationHistory, forcedSystem: SYSTEM_PROMPT + buildCapabilityLine(), user }
       );
       _stepLog('llm-tools', `replyLen=${raw.length}`);
     } else {
@@ -3260,13 +3320,56 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
         {
           ...voiceModelOptions,
           conversationHistory,
-          forcedSystem: fullSystemPrompt,
+          forcedSystem: fullSystemPrompt + buildCapabilityLine(),
         }
       );
       _stepLog('llm-free', `replyLen=${raw.length}`);
     }
 
     reply = cleanAiReply(raw);
+
+    // ── Validation des chiffres cités (voie callAI uniquement) ──
+    // Sur la voie callAIWithTools, les chiffres viennent de résultats d'outils absents
+    // de ce contexte : les valider ici produirait des faux positifs.
+    if (!usedToolsPath) {
+      // Corpus autorisé : contexte injecté (faits DB) + message utilisateur + historique
+      // récent (l'utilisateur peut citer lui-même un numéro) + IDs de l'état conversationnel.
+      const allowedText = [
+        systemContext,
+        message,
+        (conversationHistory || []).slice(-6).map((h) => h?.content || '').join('\n'),
+        (previousState?.tickets || []).map((t) => `#${t.id}`).join(' '),
+      ].join('\n');
+      const checkNumbers = (text) => findUnsourcedNumbers(text, {
+        allowedText,
+        allowedIds: matchingTickets.map((t) => t.id),
+      });
+      let unsourced = checkNumbers(reply);
+      if (unsourced.length > 0) {
+        console.warn('[chatbot] Chiffres non sourcés dans la réponse IA:', unsourced.join(', '), '— relance corrective');
+        try {
+          const retryRaw = await callAI(
+            [{ role: 'user', content: message }],
+            {
+              ...voiceModelOptions,
+              conversationHistory,
+              forcedSystem: fullSystemPrompt + buildCapabilityLine() + `\n\n⚠️ TA RÉPONSE PRÉCÉDENTE citait ces informations ABSENTES des données : ${unsourced.join(', ')}. Refais ta réponse en n'utilisant QUE les chiffres, numéros et statuts présents dans le contexte. Si une donnée manque, dis-le explicitement — ne la déduis pas, ne la calcule pas toi-même.`,
+            }
+          );
+          reply = cleanAiReply(retryRaw);
+          unsourced = checkNumbers(reply);
+          if (unsourced.length > 0) {
+            console.warn('[chatbot] Chiffres toujours non sourcés après relance:', unsourced.join(', '), '— repli déterministe');
+            const deterministicData = contextParts.filter((p) => p.length > 30).join('\n\n');
+            if (deterministicData) reply = deterministicData;
+          }
+        } catch (retryErr) {
+          console.error('[chatbot] Relance corrective échouée:', retryErr.message);
+          const deterministicData = contextParts.filter((p) => p.length > 30).join('\n\n');
+          if (deterministicData) reply = deterministicData;
+        }
+      }
+    }
   } catch (err) {
     // Fallback dégradé mais UTILE : si on a des données déterministes, on les renvoie telles quelles
     // au lieu d'un message d'erreur générique. Sinon message d'attente court.
@@ -3299,6 +3402,20 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     citedKnowledgeIds,
     pendingTicketData: pendingTicket || null,
   };
+}
+
+// ── Validation des chiffres cités par le LLM (anti-hallucination) ─────
+// Un chiffre de la réponse doit exister dans le corpus autorisé (contexte injecté,
+// message utilisateur, historique récent) ou être un ID de ticket réel. Sinon il
+// est signalé : relance corrective, puis repli déterministe si toujours hors-sol.
+function findUnsourcedNumbers(reply, { allowedText = '', allowedIds = [] } = {}) {
+  if (!reply) return [];
+  const allowed = new Set(String(allowedText).match(/\d+(?:[.,]\d+)?/g) || []);
+  for (const id of allowedIds || []) allowed.add(String(id));
+  // Ignorer les numérotations de listes markdown ("1. ", "2) " en début de ligne)
+  const text = String(reply).replace(/(^|\n)\s*\d{1,2}[.)]\s/g, '$1');
+  const used = text.match(/\d+(?:[.,]\d+)?/g) || [];
+  return [...new Set(used.filter((n) => !allowed.has(n)))].slice(0, 10);
 }
 
 // ── Helpers pour le structured output ──────────────────────────────────
