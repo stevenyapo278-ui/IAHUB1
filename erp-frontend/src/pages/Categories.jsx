@@ -70,9 +70,11 @@ export default function Categories() {
 
     for (const cat of matched) {
       let current = cat;
+      const seen = new Set([cat.id]);
       while (current.parentId != null) {
         const parentId = Number(current.parentId);
-        if (visibleIds.has(parentId)) break;
+        if (visibleIds.has(parentId) || seen.has(parentId)) break;
+        seen.add(parentId);
         visibleIds.add(parentId);
         current = catMap.get(parentId);
         if (!current) break;
@@ -87,15 +89,16 @@ export default function Categories() {
         childrenMap.get(pid).push(c);
       }
     }
-    function addDescendants(id) {
+    function addDescendants(id, ancestors) {
       const kids = childrenMap.get(id);
       if (!kids) return;
       for (const kid of kids) {
+        if (ancestors.has(kid.id)) continue;
         visibleIds.add(kid.id);
-        addDescendants(kid.id);
+        addDescendants(kid.id, new Set([...ancestors, kid.id]));
       }
     }
-    for (const id of matchedIds) addDescendants(id);
+    for (const id of matchedIds) addDescendants(id, new Set([id]));
 
     const byParent = new Map();
     for (const c of categories) {
