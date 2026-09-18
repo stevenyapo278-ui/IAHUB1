@@ -11,7 +11,16 @@ const SYSTEM_PROMPT = `Tu es MARIE, l'assistante IA Helpdesk IT de Prosuma. Tu e
 
 Tu es TOTALEMENT LIBRE sur la forme : ton, style, longueur, structure, formatage (markdown, tableaux, listes, gras, italique), emojis ou non — fais ce qui est le plus utile et le plus agréable pour ton interlocuteur. Réponds dans la langue de l'utilisateur. Varie tes tournures, montre ta personnalité, donne ton avis professionnel quand c'est pertinent. Analyse et interprète les données plutôt que de simplement les lister.
 
-Un contexte (profil utilisateur, tickets, statistiques, base de connaissances) est fourni après ce prompt quand il existe : appuie-toi sur ce qui est pertinent, ignore le reste. Quand tu cites des tickets, des chiffres ou des données, base-toi sur ce contexte — ne fabrique pas de numéros de tickets ou de statistiques qui n'y figurent pas. En dehors de ça, aucune contrainte : sois naturelle.`;
+Un contexte (profil utilisateur, tickets, statistiques, base de connaissances) est fourni après ce prompt quand il existe : appuie-toi sur ce qui est pertinent, ignore le reste. Quand tu cites des tickets, des chiffres ou des données, base-toi sur ce contexte — ne fabrique pas de numéros de tickets ou de statistiques qui n'y figurent pas. En dehors de ça, aucune contrainte : sois naturelle.
+
+RÈGLE D'OR — DEMANDER PLUTÔT QUE DEVINER :
+Quand une demande est ambiguë ou incomplète, ne choisis JAMAIS une interprétation au hasard. Pose une question de clarification courte et naturelle. Cas typiques :
+- Une personne est mentionnée ("tickets de Steven", "ceux de Marie") sans préciser demandeur ou technicien → cherche les DEUX rôles, et si tu ne peux pas, demande : "Tu veux dire en tant que demandeur ou en tant que technicien assigné ?"
+- Plusieurs utilisateurs portent le même nom → demande lequel (ou liste les deux en le signalant explicitement).
+- Le nom ne correspond à personne dans l'annuaire → ne re-formule pas une orthographe au hasard : demande de vérifier le nom ou de donner l'email.
+- "mes tickets", "son ticket", "ce problème" et tout pronom ambigu → vérifie le contexte de conversation ; s'il ne suffit pas, demande.
+- Une stat ou un périmètre est vague ("les pannes récentes") → précise ce que tu as utilisé comme filtre (période, statut) et propose d'ajuster.
+En revanche, si le contexte (conversation précédente, profil utilisateur, résultat de recherche élargie) lève le doute, réponds directement sans reposer la question.`;
 
 // ── Nettoyage minimal des réponses IA ──────────────────────────────────
 
@@ -182,6 +191,14 @@ function extractSearchParamsRegex(query) {
     params.personName = candidate;
     break;
   }
+
+  // Possessifs : "mes tickets", "mes tickets en cours", "mes demandes" → filtre sur
+  // l'utilisateur connecté (résolu plus tard via buildSearchQuery(params, user)).
+  // Détecté AVANT le regex personne pour que "mes tickets" ne soit pas interprété autrement.
+  if (/\b(mes|ma)\s+(tickets?|demandes?|incidents?|requêtes?|interventions?)\b/i.test(lower)
+    || /\b(mes|ma)\s+(tickets?|demandes?|incidents?|requêtes?|interventions?)\s+(ouverts?|en\s+cours?|pass[ée]s?|actifs?)\b/i.test(lower)) {
+    params.isMyTicketsRef = true;
+  }
   const explicitAssignee = query.match(/\b(?:assign[ée]s?\s*[àa]|attribu[ée]s?\s*[àa])\s+([A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s+[A-ZÀ-Ÿ][a-zà-ÿ]+)+)/i);
   if (explicitAssignee) {
     params.assignedToName = explicitAssignee[1];
@@ -214,6 +231,7 @@ const SEARCH_PARAMS_SCHEMA = {
     requesterName: { type: 'string', description: 'Nom du demandeur' },
     assignedToName: { type: 'string', description: 'Nom du technicien assigné' },
     personName: { type: 'string', description: 'Nom de personne sans précision demandeur/assigné (ex: "tickets de Mariam") — cherche comme demandeur OU assigné' },
+    isMyTicketsRef: { type: 'boolean', description: 'Vrai si l\'utilisateur parle de SES tickets avec un possessif ("mes tickets", "mes demandes", "mon ticket") — filtre sur l\'utilisateur connecté, ne pas demander son nom' },
     keyword: { type: 'string', description: 'Mot-clé pour titre/contenu/catégorie (un seul mot significatif, PAS les articles/pronoms)' },
     dateFrom: { type: 'string', description: 'Date début ISO (ex: 2026-09-01)' },
     dateTo: { type: 'string', description: 'Date fin ISO (ex: 2026-09-16)' },
@@ -252,6 +270,8 @@ Règles:
 - Si le message contient un nom de personne connu (ex: "Yapo", "Jean", "Diallo"), PAS keyword.
   - Précision explicite : "demandeur", "assigné à", "attribuées à", "créés par" → choisir requesterName ou assignedToName en conséquence.
   - Sinon (ex: "tickets de Mariam Fofana") → personName: "Mariam Fofana" (recherche demandeur OU assigné, ne pas deviner).
+- POSSESSIFS = l'utilisateur parle de LUI-MÊME : "mes tickets", "mes demandes", "mon ticket", "mes tickets en cours", "mes tickets passés" → isMyTicketsRef: true.
+  NE PAS mettre requesterName/personName dans ce cas : le filtre est appliqué automatiquement sur l'utilisateur connecté.
 - wantFullList: vrai si "liste", "tous", "montre", "donne-moi" est présent
 - DATES IMPORTANTES : les dates doivent être extraites en dateFrom/dateTo au format ISO (YYYY-MM-DD), JAMAIS en keyword.
   AUJOURD'HUI = ${new Date().toISOString().split('T')[0]}.
@@ -289,6 +309,56 @@ Réponds UNIQUEMENT avec le JSON, pas de commentaire.`;
     _plog('error', err.message);
     return null;
   }
+}
+
+// ── Recherche élargie pour une personne : demandeur OU assigné OU observateur ──
+// Leçon du ticket #253 : un technicien assigné n'est JAMAIS trouvé si on filtre
+// uniquement sur requester. Toute recherche par personne passe par ici, et la
+// réponse signale le(s) rôle(s) trouvés pour éviter les conclusions hâtives.
+async function findTicketsForPersonAnyRole(personName, { limit = 20, period = null, user = null } = {}) {
+  const where = {
+    deletedAt: null,
+    approvalStatus: { notIn: ['PENDING', 'REJECTED'] },
+    OR: [
+      { requester: { fullName: { contains: personName, mode: 'insensitive' } } },
+      { assignedTo: { fullName: { contains: personName, mode: 'insensitive' } } },
+      { assignees: { some: { fullName: { contains: personName, mode: 'insensitive' } } } },
+      { observers: { some: { fullName: { contains: personName, mode: 'insensitive' } } } },
+    ],
+  };
+  if (period) {
+    const { start, end } = resolvePeriodDates(period);
+    if (start) where.createdAt = { ...where.createdAt, gte: start };
+    if (end) where.createdAt = { ...where.createdAt, lt: end };
+  }
+  // Respect du périmètre demandeur : un REQUESTER ne voit que ses propres tickets
+  if (user?.role === 'REQUESTER') {
+    where.AND = [{ requesterId: user.sub }];
+  }
+  const [tickets, totalCount] = await Promise.all([
+    prisma.ticket.findMany({
+      where,
+      take: limit,
+      include: {
+        requester: { select: { fullName: true, email: true } },
+        assignedTo: { select: { fullName: true } },
+        team: { select: { name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    }),
+    prisma.ticket.count({ where }),
+  ]);
+  // Annoter chaque ticket avec le(s) rôle(s) de la personne pour un affichage honnête
+  const nl = personName.toLowerCase();
+  const annotated = tickets.map((t) => {
+    const roles = [];
+    if (t.requester?.fullName?.toLowerCase().includes(nl)) roles.push('demandeur');
+    if (t.assignedTo?.fullName?.toLowerCase().includes(nl)) roles.push('assigné');
+    if ((t.assignees || []).some((a) => a.fullName?.toLowerCase().includes(nl))) roles.push('assigné');
+    if ((t.observers || []).some((o) => o.fullName?.toLowerCase().includes(nl))) roles.push('observateur');
+    return { ...t, personRoles: roles };
+  });
+  return { tickets: annotated, totalCount };
 }
 
 function buildSearchQuery(params, user) {
@@ -340,6 +410,28 @@ function buildSearchQuery(params, user) {
   // Assigné à
   if (params.assignedToName) {
     where.assignedTo = { fullName: { contains: params.assignedToName, mode: 'insensitive' } };
+  }
+
+  // Possessif ("mes tickets", "mes demandes") → filtre sur l'UTILISATEUR CONNECTÉ.
+  // Prioritaire sur toute extraction de nom : si l'utilisateur dit "mes tickets", on ne
+  // cherche JAMAIS les tickets de quelqu'un d'autre, même si un nom a été extrait à tort.
+  // Un demandeur voit ses tickets (demandeur OU observateur), un technicien voit aussi
+  // ceux qui lui sont assignés — même sémantique que le filtrage par rôle ci-dessus.
+  if (params.isMyTicketsRef && user?.sub) {
+    const mineFilter = {
+      OR: [
+        { requesterId: user.sub },
+        { observers: { some: { id: user.sub } } },
+        { requesterIds: { has: user.sub } },
+        ...(user.role === 'TECHNICIAN' ? [{ assignedToId: user.sub }] : []),
+      ],
+    };
+    if (where.OR) {
+      where.AND = [...(where.AND || []), mineFilter];
+    } else {
+      where.OR = mineFilter.OR;
+    }
+    return where; // les filtres personName/requesterName/assignedToName sont ignorés
   }
 
   // Personne sans précision (ex: "tickets de Mariam") → demandeur OU assigné.
@@ -479,6 +571,18 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
       return { tickets: [], totalCount: 0 };
     }
 
+    // ── Personne avec rôle AMBIGU ("tickets de Mariam") → recherche élargie ──
+    // On cherche demandeur OU assigné OU observateur en une seule passe (cf. leçon ticket
+    // #253 : un technicien assigné n'est jamais trouvé par un filtre requester seul).
+    if (params.personName && !params.requesterName && !params.assignedToName && !params.isMyTicketsRef) {
+      _slog('broad-person-search', `personName="${params.personName}"`);
+      const broad = await findTicketsForPersonAnyRole(params.personName, {
+        limit: params.wantFullList ? 100 : limit, period, user,
+      });
+      _slog('broad-done', `tickets=${broad.tickets.length} totalCount=${broad.totalCount}`);
+      return { ...broad, personName: params.personName };
+    }
+
     const where = buildSearchQuery(params, user);
     _slog('buildQuery', `where=${JSON.stringify(where, null, 0)}`);
 
@@ -504,6 +608,21 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
       }),
       prisma.ticket.count({ where }),
     ]);
+
+    // ── Repli élargi si un filtre personne explicite ne trouve RIEN ──
+    // "tickets demandés par Yapo" qui renvoie 0 alors que Yapo est assigné = réponse
+    // utile et honnête plutôt qu'un vide sec. On note le repli pour que la réponse
+    // signale que la personne a été trouvée sous un AUTRE rôle.
+    const personFilterName = params.requesterName || params.assignedToName;
+    if (tickets.length === 0 && personFilterName) {
+      _slog('fallback-broad', `requester/assigned filter empty → broad search for "${personFilterName}"`);
+      const broad = await findTicketsForPersonAnyRole(personFilterName, {
+        limit: params.wantFullList ? 100 : limit, period, user,
+      });
+      if (broad.tickets.length > 0) {
+        return { ...broad, fallbackFromRole: params.requesterName ? 'demandeur' : 'assigné', personName: personFilterName };
+      }
+    }
 
     _slog('db-done', `tickets=${tickets.length} totalCount=${totalCount} limit=${effectiveLimit}`);
     return { tickets, totalCount };
@@ -668,7 +787,7 @@ const CHATBOT_TOOLS = [
     type: 'function',
     function: {
       name: 'search_tickets',
-      description: 'Rechercher des tickets par mot-clé, statut, priorité, lieu, date, demandeur ou technicien. Retourne une liste de tickets correspondants.',
+      description: 'Rechercher des tickets par mot-clé, statut, priorité, lieu, date, demandeur ou technicien. IMPORTANT : si l\'utilisateur parle de SES tickets ("mes tickets", "mes demandes"), passe requester avec le nom/email de l\'utilisateur connecté fourni dans le contexte — ne devine jamais un autre nom. Retourne une liste de tickets correspondants.',
       parameters: {
         type: 'object',
         properties: {
@@ -677,7 +796,8 @@ const CHATBOT_TOOLS = [
           priority: { type: 'string', description: 'Filtrer par priorité: P1, P2, P3, P4' },
           locationName: { type: 'string', description: 'Filtrer par nom de lieu/magasin' },
           assignedTo: { type: 'string', description: 'Filtrer par nom du technicien assigné' },
-          requester: { type: 'string', description: 'Filtrer par nom du demandeur' },
+          requester: { type: 'string', description: 'Filtrer par nom ou email du demandeur. Pour "mes tickets", utiliser le nom de l\'utilisateur connecté (voir contexte profil)' },
+          person: { type: 'string', description: 'Personne SANS rôle précisé ("tickets de Jean") → cherche comme demandeur OU assigné OU observateur. Préférer ceci à requester/assignedTo quand l\'utilisateur n\'a pas précisé, ou si requester ne renvoie rien' },
           period: { type: 'string', description: 'Période: today, yesterday, 7d, 30d, 90d, ou une date YYYY-MM-DD' },
           limit: { type: 'integer', description: 'Nombre max de résultats (défaut: 20)' },
         },
@@ -967,6 +1087,24 @@ async function executeTool(toolName, args, user) {
   const p = args || {};
   switch (toolName) {
     case 'search_tickets': {
+      // "tickets de <Personne>" sans rôle précisé → recherche élargie demandeur OU assigné
+      // (cf. leçon ticket #253) plutôt qu'un filtre demandeur seul qui rate les techniciens.
+      if (p.person && !p.requester && !p.assignedTo) {
+        const broad = await findTicketsForPersonAnyRole(p.person, { limit: p.limit || 20, period: p.period, user });
+        return broad.tickets.filter(t => {
+          if (p.status && t.status !== p.status) return false;
+          if (p.priority && t.priority !== p.priority) return false;
+          if (p.locationName && !t.locationName?.toLowerCase().includes(p.locationName.toLowerCase())) return false;
+          return true;
+        }).map(t => ({
+          id: t.id, title: t.title, status: t.status, priority: t.priority,
+          locationName: t.locationName, requester: t.requester?.fullName || null,
+          assignedTo: t.assignedTo?.fullName || null, team: t.team?.name || null,
+          createdAt: t.createdAt, category: t.category,
+          personRoles: t.personRoles,
+        }));
+      }
+
       const q = [p.query, p.locationName, p.assignedTo, p.requester, p.category].filter(Boolean).join(' ');
       const result = await searchTickets(q || ' ', p.limit || 20, user, p.period);
       const tickets = result.tickets || result;
@@ -1053,7 +1191,7 @@ async function executeTool(toolName, args, user) {
     case 'search_knowledge':
       return await searchKnowledge(p.query, 5);
     case 'add_ticket_followup':
-      return await addTicketFollowup(p.ticketId, p.content, p.isPrivate, options.user);
+      return await addTicketFollowup(p.ticketId, p.content, p.isPrivate, user);
     default:
       return `Outil inconnu: ${toolName}`;
   }
@@ -1607,7 +1745,7 @@ async function getUserContext(userId) {
     });
     if (!user) return '';
 
-    const parts = [`Nom: ${user.fullName}`, `Rôle: ${user.role}`];
+    const parts = [`Nom: ${user.fullName}`, `Email: ${user.email}`, `Rôle: ${user.role}`];
     if (user.teams?.length) parts.push(`Équipes: ${user.teams.map((t) => t.name).join(', ')}`);
     if (user.skills?.length) parts.push(`Compétences: ${user.skills.map((s) => s.name).join(', ')}`);
     return parts.join(' | ');
@@ -2224,6 +2362,33 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   const matchingTickets = ticketsResult.tickets || ticketsResult; // compat: array ou { tickets, totalCount }
   const totalTicketCount = ticketsResult.totalCount ?? matchingTickets.length;
 
+  // ── Signaux de désambiguïsation produits par searchTickets ──
+  // 1) Recherche élargie par personne (rôle non précisé) : on liste les rôles rencontrés
+  //    pour que la réponse soit honnête ("demandeur", "assigné"...).
+  // 2) Repli après filtre demandeur/assigné vide : la personne a été trouvée sous un AUTRE rôle.
+  // 3) Aucun résultat mais la personne existe : signaler pour inviter à préciser au lieu d'inventer.
+  let ambiguityNote = '';
+  if (ticketsResult.personName) {
+    if (ticketsResult.fallbackFromRole) {
+      ambiguityNote = `⚠️ FILTRE PAR PERSONNE : aucun ticket trouvé où ${ticketsResult.personName} est ${ticketsResult.fallbackFromRole}, MAIS une recherche élargie a trouvé des tickets. Mentionne explicitement que ${ticketsResult.personName} apparaît sous un AUTRE rôle que ${ticketsResult.fallbackFromRole} (regarde les champs Demandeur / Assigné à des tickets listés) — ne présente pas ces tickets comme s'ils correspondaient au filtre initial.`;
+    } else {
+      const roleSet = new Set();
+      for (const t of matchingTickets) for (const r of t.personRoles || []) roleSet.add(r);
+      if (roleSet.size > 0) {
+        ambiguityNote = `⚠️ RECHERCHE PAR PERSONNE ("${ticketsResult.personName}") : recherche élargie aux rôles suivants → trouvés comme : ${[...roleSet].join(' ET ')}. Indique pour chaque ticket (ou en résumé) sous quel rôle ${ticketsResult.personName} apparaît (Demandeur / Assigné / Observateur). Si l'utilisateur semblait attendre UN rôle précis, signale-le et propose de filtrer.`;
+      }
+    }
+  } else if (matchingTickets.length === 0 && params?.personName) {
+    const personExists = await prisma.user.findFirst({
+      where: { fullName: { contains: params.personName, mode: 'insensitive' }, deletedAt: null },
+      select: { fullName: true },
+    }).catch(() => null);
+    if (personExists) {
+      ambiguityNote = `⚠️ AUCUN TICKET pour "${params.personName}" (l'utilisateur existe : ${personExists.fullName}). N'invente RIEN. Dis simplement qu'aucun ticket n'a été trouvé et propose : vérifier l'orthographe, chercher par email, ou élargir la période.`;
+    }
+  }
+  if (ambiguityNote) contextParts.push(ambiguityNote);
+
   const knowledgeContext = knowledgeChunks.length > 0
     ? knowledgeChunks.map((c) => `[doc:${c.documentId} | ${c.title}] : ${c.content.substring(0, 500)}`).join('\n\n')
     : '';
@@ -2273,7 +2438,10 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     }
     contextParts.push(ticketContext);
   } else if (!DETERMINISTIC_INTENTS.has(intent) && !['general', 'create_ticket', 'create_ticket_for', 'confirm_create_ticket'].includes(intent)) {
-    contextParts.push("**Aucun ticket trouvé dans la base de données** pour cette recherche. Ne pas inventer de tickets — indiquer simplement qu'aucun résultat n'a été trouvé.");
+    const emptyPersonMsg = params?.personName || params?.requesterName || params?.assignedToName
+      ? `**Aucun ticket trouvé** pour cette recherche. Une personne était mentionnée dans la demande : ne conclus PAS que cette personne n'a aucun rôle ou que la demande est impossible — propose de vérifier l'orthographe, de chercher par email, ou de préciser demandeur/assigné.`
+      : "**Aucun ticket trouvé dans la base de données** pour cette recherche. Ne pas inventer de tickets — indiquer simplement qu'aucun résultat n'a été trouvé.";
+    contextParts.push(emptyPersonMsg);
   }
 
   if (assets.length > 0) {
