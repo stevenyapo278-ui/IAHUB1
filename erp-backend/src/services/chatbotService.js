@@ -55,7 +55,7 @@ Intents possibles :
 - "create_ticket" : créer/ouvrir un ticket pour soi-même, signaler un problème, demander de l'assistance, décrire un incident ("j'ai un problème", "j'ai besoin d'assistance", "mon imprimante ne marche pas", "l'imprimante du 2ème est en panne", "il y a un souci VPN", "signaler un incident", "ça ne fonctionne plus")
 - "create_ticket_for" : créer un ticket au nom d'un autre utilisateur ("crée un ticket pour Paul", "ouvre un ticket pour M. Diallo", "ticket pour la compta")
 - "confirm_create_ticket" : l'utilisateur confirme vouloir créer un ticket après avoir été demandé ("oui", "oui crée-le", "confirme", "go", "vas-y", "c'est bon", "je confirme", "oui vas-y")
-- "check_ticket" : connaître le statut, la date de création, ou les détails d'un ticket spécifique ("quel est le statut du ticket #10", "quand a été créé le ticket 5", "qui a assigné le ticket #3")
+- "check_ticket" : connaître le statut, la date de création, ou les détails d'un ticket spécifique ("quel est le statut du ticket #10", "quand a été créé le ticket 5", "qui a assigné le ticket #3", "qui a travaillé sur le ticket 12", "quel est le SLA du ticket #8", "y a-t-il des tickets liés au ticket 5")
 - "summary" : résumer un ticket existant ("résume-moi le ticket #123", "résumé du ticket 45")
 - "similar_tickets" : chercher des tickets similaires avant création
 - "change_status" : modifier le statut d'un ticket
@@ -63,6 +63,10 @@ Intents possibles :
 - "search_inventory" : recherche d'équipements/assets
 - "search_users" : recherche d'utilisateurs
 - "search_locations" : recherche de lieux/où
+- "search_problems" : recherche de problèmes ITIL racines ("problèmes ouverts", "quels problèmes", "liste des incidents majeurs", "problèmes réseau")
+- "search_skills" : recherche de compétences techniciens ("qui est expert en réseau", "qui sait faire du VPN", "compétences de Jean", "quels techniciens savent faire Linux")
+- "ticket_links" : liens entre tickets ("tickets liés au #12", "doublons", "tickets bloqués", "quel ticket bloque le #5")
+- "time_entries" : suivi du temps passé ("temps passé sur le #12", "combien de temps sur ce ticket", "qui a travaillé dessus")
 - "report" : rapport STATISTIQUE global — PAS une liste de tickets. "combien de tickets", "nombre total", "synthèse", "bilan chiffré". NE PAS utiliser pour "liste les tickets", "quels tickets", "montre les tickets".
 - "escalate" : parler à un technicien/humain, escalade
 - "help" : demande d'aide sur les fonctionnalités
@@ -1137,7 +1141,14 @@ async function checkTicketStatus(ticketId) {
 
   const ticket = await prisma.ticket.findUnique({
     where: { id },
-    include: { assignedTo: { select: { fullName: true } }, team: { select: { name: true } } },
+    include: {
+      assignedTo: { select: { fullName: true } },
+      team: { select: { name: true } },
+      requester: { select: { fullName: true, email: true } },
+      linksA: { select: { ticketB: { select: { id: true, title: true, status: true } }, type: true } },
+      linksB: { select: { ticketA: { select: { id: true, title: true, status: true } }, type: true } },
+      timeEntries: { orderBy: { entryDate: 'desc' }, take: 5, select: { minutes: true, description: true, entryDate: true, user: { select: { fullName: true } } } },
+    },
   });
 
   if (!ticket) return `Ticket #${id} introuvable.`;
@@ -1146,9 +1157,77 @@ async function checkTicketStatus(ticketId) {
   r += `• **Titre :** ${ticket.title}\n`;
   r += `• **Statut :** ${STATUS_LABEL[ticket.status] || ticket.status}\n`;
   r += `• **Priorité :** ${PRIORITY_LABEL[ticket.priority] || ticket.priority}\n`;
+  r += `• **Type :** ${ticket.type || 'Incident'}\n`;
+  r += `• **Urgence :** ${ticket.urgency || 'Moyenne'} | **Impact :** ${ticket.impact || 'Moyen'}\n`;
+  r += `• **Demandeur :** ${ticket.requester?.fullName || 'Inconnu'}\n`;
   r += `• **Assigné à :** ${ticket.assignedTo?.fullName || 'Non assigné'}\n`;
   if (ticket.team) r += `• **Équipe :** ${ticket.team.name}\n`;
+  if (ticket.category) r += `• **Catégorie :** ${ticket.category}\n`;
+  if (ticket.locationName) r += `• **Lieu :** ${ticket.locationName}\n`;
   r += `• **Créé le :** ${new Date(ticket.createdAt).toLocaleDateString('fr-FR')}\n`;
+  if (ticket.solvedAt) r += `• **Résolu le :** ${new Date(ticket.solvedAt).toLocaleDateString('fr-FR')}\n`;
+  if (ticket.closedAt) r += `• **Fermé le :** ${new Date(ticket.closedAt).toLocaleDateString('fr-FR')}\n`;
+
+  // SLA
+  if (ticket.slaResponseDueAt || ticket.slaResolutionDueAt) {
+    const now = new Date();
+    r += `\n**SLA :**\n`;
+    if (ticket.slaResponseDueAt) {
+      const respDue = new Date(ticket.slaResponseDueAt);
+      const respBreached = ticket.slaBreachedAt && !ticket.firstResponseAt;
+      r += `• Réponse due : ${respDue.toLocaleDateString('fr-FR')} ${respBreached ? '⚠️ DÉPASSÉ' : (ticket.firstResponseAt ? '✅ Répondu' : (respDue > now ? `dans ${Math.round((respDue - now) / 3600000)}h` : '⏰ En retard'))}\n`;
+    }
+    if (ticket.slaResolutionDueAt) {
+      const resDue = new Date(ticket.slaResolutionDueAt);
+      const isResolved = ticket.status === 'SOLVED' || ticket.status === 'CLOSED';
+      r += `• Résolution due : ${resDue.toLocaleDateString('fr-FR')} ${isResolved ? '✅ Résolu' : (resDue > now ? `dans ${Math.round((resDue - now) / 3600000)}h` : '⏰ En retard')}\n`;
+    }
+  }
+
+  // Échéance
+  if (ticket.dueDate) {
+    r += `• **Échéance :** ${new Date(ticket.dueDate).toLocaleDateString('fr-FR')}\n`;
+  }
+
+  // Approbation
+  if (ticket.approvalStatus && ticket.approvalStatus !== 'NOT_REQUIRED') {
+    r += `• **Approbation :** ${ticket.approvalStatus}\n`;
+  }
+
+  // Escalade
+  if (ticket.escalationLevel > 0) {
+    r += `• **Escalade :** niveau ${ticket.escalationLevel}\n`;
+  }
+
+  // Liens
+  const allLinks = [
+    ...(ticket.linksA || []).map(l => ({ ...l.ticketB, linkType: l.type, direction: 'A→B' })),
+    ...(ticket.linksB || []).map(l => ({ ...l.ticketA, linkType: l.type, direction: 'B→A' })),
+  ];
+  if (allLinks.length > 0) {
+    r += `\n**Tickets liés :**\n`;
+    for (const l of allLinks) {
+      r += `• #${l.id} [${STATUS_LABEL[l.status] || l.status}] ${l.title} (${l.linkType})\n`;
+    }
+  }
+
+  // Temps passé
+  if (ticket.timeEntries?.length > 0) {
+    const totalMin = ticket.timeEntries.reduce((s, e) => s + e.minutes, 0);
+    r += `\n**Temps passé :** ${totalMin}min (${ticket.timeEntries.length} saisies)\n`;
+    for (const e of ticket.timeEntries.slice(0, 3)) {
+      r += `• ${e.user?.fullName || '?'} : ${e.minutes}min — ${e.description || 'sans description'}\n`;
+    }
+  }
+
+  // Escalade manuelle
+  if (ticket.dueDateNotifiedAt) r += `• **Relance envoyée**\n`;
+
+  // CSAT
+  if (ticket.csatScore) {
+    r += `• **Satisfaction :** ${ticket.csatScore}/5${ticket.csatComment ? ` — "${ticket.csatComment}"` : ''}\n`;
+  }
+
   return r;
 }
 
@@ -1163,6 +1242,10 @@ async function getTicketSummary(ticketId) {
       assignedTo: { select: { fullName: true } },
       team: { select: { name: true } },
       followups: { orderBy: { createdAt: 'desc' }, take: 5, select: { content: true, createdAt: true, author: { select: { fullName: true } } } },
+      linksA: { select: { ticketB: { select: { id: true, title: true, status: true } }, type: true } },
+      linksB: { select: { ticketA: { select: { id: true, title: true, status: true } }, type: true } },
+      timeEntries: { orderBy: { entryDate: 'desc' }, select: { minutes: true, description: true, entryDate: true, user: { select: { fullName: true } } } },
+      observers: { select: { fullName: true } },
     },
   });
 
@@ -1171,14 +1254,66 @@ async function getTicketSummary(ticketId) {
   let r = `**Résumé du Ticket #${ticket.id}**\n\n`;
   r += `**Titre :** ${ticket.title}\n`;
   r += `**Statut :** ${STATUS_LABEL[ticket.status] || ticket.status} | **Priorité :** ${PRIORITY_LABEL[ticket.priority] || ticket.priority}\n`;
+  r += `**Type :** ${ticket.type || 'Incident'} | **Urgence :** ${ticket.urgency || 'Moyenne'} | **Impact :** ${ticket.impact || 'Moyen'}\n`;
   r += `**Demandeur :** ${ticket.requester?.fullName || 'Inconnu'} (${ticket.requester?.email || ''})\n`;
   r += `**Assigné à :** ${ticket.assignedTo?.fullName || 'Non assigné'}\n`;
   if (ticket.team) r += `**Équipe :** ${ticket.team.name}\n`;
   if (ticket.category) r += `**Catégorie :** ${ticket.category}\n`;
   if (ticket.locationName) r += `**Lieu :** ${ticket.locationName}\n`;
-  r += `**Créé le :** ${new Date(ticket.createdAt).toLocaleDateString('fr-FR')}\n\n`;
-  r += `**Description :**\n${(ticket.content || 'Aucune description').substring(0, 800)}\n`;
+  if (ticket.source) r += `**Source :** ${ticket.source}\n`;
+  r += `**Créé le :** ${new Date(ticket.createdAt).toLocaleDateString('fr-FR')}\n`;
+  if (ticket.solvedAt) r += `**Résolu le :** ${new Date(ticket.solvedAt).toLocaleDateString('fr-FR')}\n`;
+  if (ticket.closedAt) r += `**Fermé le :** ${new Date(ticket.closedAt).toLocaleDateString('fr-FR')}\n`;
 
+  // SLA
+  if (ticket.slaResponseDueAt || ticket.slaResolutionDueAt) {
+    const now = new Date();
+    r += `\n**SLA :**\n`;
+    if (ticket.slaResponseDueAt) {
+      const respDue = new Date(ticket.slaResponseDueAt);
+      const respBreached = ticket.slaBreachedAt && !ticket.firstResponseAt;
+      r += `• Réponse due : ${respDue.toLocaleDateString('fr-FR')} ${respBreached ? '⚠️ DÉPASSÉ' : (ticket.firstResponseAt ? '✅ Répondu' : (respDue > now ? `dans ${Math.round((respDue - now) / 3600000)}h` : '⏰ En retard'))}\n`;
+    }
+    if (ticket.slaResolutionDueAt) {
+      const resDue = new Date(ticket.slaResolutionDueAt);
+      const isResolved = ticket.status === 'SOLVED' || ticket.status === 'CLOSED';
+      r += `• Résolution due : ${resDue.toLocaleDateString('fr-FR')} ${isResolved ? '✅ Résolu' : (resDue > now ? `dans ${Math.round((resDue - now) / 3600000)}h` : '⏰ En retard')}\n`;
+    }
+  }
+
+  if (ticket.dueDate) r += `**Échéance :** ${new Date(ticket.dueDate).toLocaleDateString('fr-FR')}\n`;
+  if (ticket.approvalStatus && ticket.approvalStatus !== 'NOT_REQUIRED') r += `**Approbation :** ${ticket.approvalStatus}\n`;
+  if (ticket.escalationLevel > 0) r += `**Escalade :** niveau ${ticket.escalationLevel}\n`;
+
+  r += `\n**Description :**\n${(ticket.content || 'Aucune description').substring(0, 800)}\n`;
+
+  // Liens
+  const allLinks = [
+    ...(ticket.linksA || []).map(l => ({ ...l.ticketB, linkType: l.type })),
+    ...(ticket.linksB || []).map(l => ({ ...l.ticketA, linkType: l.type })),
+  ];
+  if (allLinks.length > 0) {
+    r += `\n**Tickets liés :**\n`;
+    for (const l of allLinks) {
+      r += `• #${l.id} [${STATUS_LABEL[l.status] || l.status}] ${l.title} (${l.linkType})\n`;
+    }
+  }
+
+  // Temps passé
+  if (ticket.timeEntries?.length > 0) {
+    const totalMin = ticket.timeEntries.reduce((s, e) => s + e.minutes, 0);
+    r += `\n**Temps passé :** ${totalMin}min total\n`;
+    for (const e of ticket.timeEntries.slice(0, 5)) {
+      r += `• ${e.user?.fullName || '?'} : ${e.minutes}min — ${e.description || 'sans description'}\n`;
+    }
+  }
+
+  // Observateurs
+  if (ticket.observers?.length > 0) {
+    r += `**Observateurs :** ${ticket.observers.map(o => o.fullName).join(', ')}\n`;
+  }
+
+  // Derniers followups
   if (ticket.followups?.length > 0) {
     r += `\n**Derniers commentaires :**\n`;
     for (const c of ticket.followups) {
@@ -1481,9 +1616,16 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     let ticketContext = `**Tickets pertinents trouvés (${totalTicketCount}) :**\n`;
     // Format tableau compact pour beaucoup de résultats
     if (matchingTickets.length > 5) {
-      ticketContext += `| # | Titre | Statut | Priorité | Demandeur | Lieu |\n|---|-------|--------|----------|-----------|------|\n`;
+      ticketContext += `| # | Titre | Statut | Priorité | Demandeur | Lieu | SLA |\n|---|-------|--------|----------|-----------|------|-----|\n`;
       for (const t of matchingTickets) {
-        ticketContext += `| ${t.id} | ${(t.title || '').substring(0, 50)} | ${STATUS_LABEL[t.status] || t.status} | ${PRIORITY_LABEL[t.priority] || t.priority} | ${t.requester?.fullName || '-'} | ${t.locationName || '-'} |\n`;
+        let slaStatus = '-';
+        if (t.slaResolutionDueAt) {
+          const now = new Date();
+          const due = new Date(t.slaResolutionDueAt);
+          const isResolved = t.status === 'SOLVED' || t.status === 'CLOSED';
+          slaStatus = isResolved ? '✅' : (due > now ? `${Math.round((due - now) / 3600000)}h` : '⚠️');
+        }
+        ticketContext += `| ${t.id} | ${(t.title || '').substring(0, 50)} | ${STATUS_LABEL[t.status] || t.status} | ${PRIORITY_LABEL[t.priority] || t.priority} | ${t.requester?.fullName || '-'} | ${t.locationName || '-'} | ${slaStatus} |\n`;
       }
     } else {
       for (const t of matchingTickets) {
@@ -1492,6 +1634,13 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
         if (t.requester) ticketContext += ` | Demandeur : ${t.requester.fullName}`;
         if (t.assignedTo) ticketContext += ` | Assigné à : ${t.assignedTo.fullName}`;
         if (t.locationName) ticketContext += ` | Lieu : ${t.locationName}`;
+        if (t.slaResolutionDueAt) {
+          const now = new Date();
+          const due = new Date(t.slaResolutionDueAt);
+          const isResolved = t.status === 'SOLVED' || t.status === 'CLOSED';
+          ticketContext += ` | SLA: ${isResolved ? '✅ Résolu' : (due > now ? `dans ${Math.round((due - now) / 3600000)}h` : '⚠️ En retard')}`;
+        }
+        if (t.approvalStatus && t.approvalStatus !== 'NOT_REQUIRED') ticketContext += ` | Approbation : ${t.approvalStatus}`;
         if (t.glpiTicketId) ticketContext += ` | GLPI #${t.glpiTicketId}`;
         ticketContext += `\n  - *Description :* ${(t.content || '').substring(0, 200)}...\n\n`;
       }
@@ -1835,6 +1984,181 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
       break;
     }
 
+    case 'search_problems': {
+      const kw = params?.keyword || message;
+      const problems = await prisma.problem.findMany({
+        where: {
+          OR: [
+            { title: { contains: kw, mode: 'insensitive' } },
+            { description: { contains: kw, mode: 'insensitive' } },
+            { category: { contains: kw, mode: 'insensitive' } },
+          ],
+        },
+        include: {
+          assignedTo: { select: { fullName: true } },
+          team: { select: { name: true } },
+          requester: { select: { fullName: true } },
+          tickets: { select: { ticket: { select: { id: true, title: true, status: true } } } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      });
+      if (problems.length === 0) {
+        contextParts.push(`**Aucun problème trouvé** pour "${kw}".`);
+      } else {
+        let txt = `**${problems.length} problème(s) trouvé(s) :**\n\n`;
+        for (const p of problems) {
+          txt += `• **#${p.id}** [${p.status}] ${p.title}\n`;
+          txt += `  Priorité: ${PRIORITY_LABEL[p.priority] || p.priority} | Assigné: ${p.assignedTo?.fullName || 'Non assigné'} | Équipe: ${p.team?.name || '-'}\n`;
+          if (p.tickets?.length > 0) {
+            txt += `  Tickets liés: ${p.tickets.map(t => `#${t.ticket.id}`).join(', ')}\n`;
+          }
+        }
+        contextParts.push(txt);
+      }
+      break;
+    }
+
+    case 'search_skills': {
+      const personName = params?.personName || message;
+      // Si un nom de personne est mentionné, chercher ses compétences
+      if (personName && personName.length > 1) {
+        const users = await prisma.user.findMany({
+          where: {
+            OR: [
+              { fullName: { contains: personName, mode: 'insensitive' } },
+              { email: { contains: personName, mode: 'insensitive' } },
+            ],
+            role: { in: ['TECHNICIAN', 'HOTLINE', 'ADMIN'] },
+          },
+          select: {
+            id: true, fullName: true, role: true,
+            skills: { select: { skill: { select: { name: true, category: true } }, level: true } },
+          },
+          take: 5,
+        });
+        if (users.length === 0) {
+          contextParts.push(`**Aucun technicien trouvé** pour "${personName}".`);
+        } else {
+          let txt = `**Compétences des techniciens :**\n\n`;
+          for (const u of users) {
+            txt += `• **${u.fullName}** (${u.role})\n`;
+            if (u.skills.length === 0) {
+              txt += `  Aucune compétence renseignée\n`;
+            } else {
+              for (const s of u.skills) {
+                txt += `  • ${s.skill.name} (${s.skill.category || 'Général'}) — niveau ${s.level}/5\n`;
+              }
+            }
+          }
+          contextParts.push(txt);
+        }
+      } else {
+        // Lister toutes les compétences disponibles
+        const allSkills = await prisma.skill.findMany({
+          include: { userSkills: { select: { userId: true } } },
+          orderBy: { name: 'asc' },
+        });
+        if (allSkills.length === 0) {
+          contextParts.push(`**Aucune compétence** enregistrée dans le système.`);
+        } else {
+          let txt = `**${allSkills.length} compétence(s) disponible(s) :**\n\n`;
+          for (const s of allSkills) {
+            txt += `• **${s.name}** (${s.category || 'Général'}) — ${s.userSkills.length} technicien(s)\n`;
+          }
+          contextParts.push(txt);
+        }
+      }
+      break;
+    }
+
+    case 'ticket_links': {
+      let tid = params?.ticketId || message.match(/#?(\d+)/)?.[1];
+      if (!tid && conversationHistory.length > 0) {
+        const lastUserMsgs = conversationHistory.filter(m => m.role === 'user');
+        for (const m of lastUserMsgs.reverse()) {
+          const match = m.content.match(/#?(\d+)/);
+          if (match) { tid = match[1]; break; }
+        }
+      }
+      if (tid) {
+        const ticket = await prisma.ticket.findUnique({
+          where: { id: parseInt(tid, 10) },
+          include: {
+            linksA: { select: { ticketB: { select: { id: true, title: true, status: true, priority: true, assignedTo: { select: { fullName: true } } } }, type: true } },
+            linksB: { select: { ticketA: { select: { id: true, title: true, status: true, priority: true, assignedTo: { select: { fullName: true } } } }, type: true } },
+          },
+        });
+        if (!ticket) {
+          contextParts.push(`Ticket #${tid} introuvable.`);
+        } else {
+          const allLinks = [
+            ...(ticket.linksA || []).map(l => ({ id: l.ticketB.id, title: l.ticketB.title, status: l.ticketB.status, priority: l.ticketB.priority, assignee: l.ticketB.assignedTo?.fullName, linkType: l.type, direction: 'ce ticket →' })),
+            ...(ticket.linksB || []).map(l => ({ id: l.ticketA.id, title: l.ticketA.title, status: l.ticketA.status, priority: l.ticketA.priority, assignee: l.ticketA.assignedTo?.fullName, linkType: l.type, direction: '→ ce ticket' })),
+          ];
+          if (allLinks.length === 0) {
+            contextParts.push(`**Ticket #${tid}** n'a aucun lien avec d'autres tickets.`);
+          } else {
+            let txt = `**Liens du ticket #${tid}** (${allLinks.length} lien(s)) :\n\n`;
+            const TYPE_LABEL = { RELATED: 'Lié', DUPLICATE_OF: 'Doublon de', BLOCKS: 'Bloque', BLOCKED_BY: 'Bloqué par' };
+            for (const l of allLinks) {
+              txt += `• ${l.direction} #${l.id} [${STATUS_LABEL[l.status] || l.status}] ${l.title} — ${TYPE_LABEL[l.linkType] || l.linkType}\n`;
+              txt += `  Priorité: ${PRIORITY_LABEL[l.priority] || l.priority} | Assigné: ${l.assignee || 'Non assigné'}\n`;
+            }
+            contextParts.push(txt);
+          }
+        }
+      } else {
+        contextParts.push(`Donnez le numéro d'un ticket pour voir ses liens (ex: "liens du ticket #12").`);
+      }
+      break;
+    }
+
+    case 'time_entries': {
+      let tid = params?.ticketId || message.match(/#?(\d+)/)?.[1];
+      if (!tid && conversationHistory.length > 0) {
+        const lastUserMsgs = conversationHistory.filter(m => m.role === 'user');
+        for (const m of lastUserMsgs.reverse()) {
+          const match = m.content.match(/#?(\d+)/);
+          if (match) { tid = match[1]; break; }
+        }
+      }
+      if (tid) {
+        const entries = await prisma.ticketTimeEntry.findMany({
+          where: { ticketId: parseInt(tid, 10) },
+          orderBy: { entryDate: 'desc' },
+          select: { minutes: true, description: true, entryDate: true, user: { select: { fullName: true } } },
+        });
+        if (entries.length === 0) {
+          contextParts.push(`**Aucune saisie de temps** pour le ticket #${tid}.`);
+        } else {
+          const totalMin = entries.reduce((s, e) => s + e.minutes, 0);
+          let txt = `**Temps passé sur le ticket #${tid} :** ${totalMin}min total (${entries.length} saisie(s))\n\n`;
+          for (const e of entries) {
+            txt += `• **${e.user?.fullName || '?'}** — ${e.minutes}min`;
+            if (e.description) txt += ` — ${e.description}`;
+            txt += ` (${new Date(e.entryDate).toLocaleDateString('fr-FR')})\n`;
+          }
+          // Agrégat par technicien
+          const byUser = new Map();
+          for (const e of entries) {
+            const name = e.user?.fullName || 'Inconnu';
+            byUser.set(name, (byUser.get(name) || 0) + e.minutes);
+          }
+          if (byUser.size > 1) {
+            txt += `\n**Résumé par technicien :**\n`;
+            for (const [name, min] of [...byUser.entries()].sort((a, b) => b[1] - a[1])) {
+              txt += `• ${name} : ${min}min\n`;
+            }
+          }
+          contextParts.push(txt);
+        }
+      } else {
+        contextParts.push(`Donnez le numéro d'un ticket pour voir le temps passé (ex: "temps passé sur le #12").`);
+      }
+      break;
+    }
+
     case 'team_report': {
       const teamDist = await analyticsTools.getTeamDistribution({ period: params?.period || '30d' });
       if (teamDist.teams.length > 0) {
@@ -2051,12 +2375,16 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
 • **Signaler un problème** : "Je veux signaler un problème"
 • **Créer pour un autre** : "Crée un ticket pour Paul — Imprimante cassée — Description..."
 • **Résumé de ticket** : "Résume-moi le ticket #123"
-• **Vérifier statut** : "Quel est le statut du ticket #123"
+• **Vérifier statut** : "Quel est le statut du ticket #123" (inclut SLA, liens, temps passé)
+• **Liens entre tickets** : "Y a-t-il des liens sur le #12", "Quels tickets sont bloqués"
+• **Temps passé** : "Combien de temps sur le ticket #12", "Qui a travaillé dessus"
 • **Changer statut** : "Ferme le ticket #5", "Passe le ticket 12 en résolu"
 • **Assigner un ticket** : "Assigne le ticket #5 à Jean"
 • **Rechercher un équipement** : "Où est l'imprimante HP ?", "Cherche le PC X1"
 • **Rechercher un utilisateur** : "Qui est Jean ?", "Email de Paul"
 • **Rechercher un lieu** : "Où se trouve le magasin Asten ?"
+• **Problèmes ITIL** : "Problèmes ouverts", "Quels incidents majeurs", "Problèmes réseau"
+• **Compétences** : "Qui est expert en réseau ?", "Qui sait faire du VPN ?", "Compétences de Jean"
 • **Doublons** : "Y a-t-il déjà un ticket pour ça ?"
 • **Escalade** : "Parler à un technicien"
 • **Base de connaissances** : Pose une question sur une procédure IT`);
@@ -2125,7 +2453,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   _stepLog('done', `intent=${intent} replyLen=${(reply || '').length} action=${action?.type || 'null'} citedTickets=${citedTicketIds.length}`);
 
   // Sauvegarder le state conversationnel pour le multi-turn (isolé par conversation)
-  if (userId && ['search_tickets', 'report', 'analytics', 'check_ticket', 'team_report', 'search_inventory', 'search_users', 'search_locations'].includes(intent)) {
+  if (userId && ['search_tickets', 'report', 'analytics', 'check_ticket', 'team_report', 'search_inventory', 'search_users', 'search_locations', 'search_problems', 'search_skills', 'ticket_links', 'time_entries'].includes(intent)) {
     setConversationState(stateKey, intent, params, matchingTickets.map(t => ({ id: t.id, title: t.title, status: t.status })));
   }
 
