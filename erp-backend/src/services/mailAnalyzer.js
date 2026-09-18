@@ -189,9 +189,15 @@ async function callOpenAICompat(provider, apiKey, model, prompt, usage, options 
       body.response_format = options.responseFormat;
     }
 
+    // Function calling / tool use
+    if (options.tools) {
+      body.tools = options.tools;
+      if (options.toolChoice) body.tool_choice = options.toolChoice;
+    }
+
     const res = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
-      signal: AbortSignal.timeout(25000),
+      signal: AbortSignal.timeout(60000),
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify(body),
     });
@@ -201,13 +207,15 @@ async function callOpenAICompat(provider, apiKey, model, prompt, usage, options 
       throwHttpError(provider, res.status, bodyText, res);
     }
     const data = await res.json();
-    const text = data.choices?.[0]?.message?.content || '';
+    const choice = data.choices?.[0]?.message;
+    const text = choice?.content || '';
+    const toolCalls = choice?.tool_calls || null;
     const tokenUsage = data.usage ? {
       promptTokens: data.usage.prompt_tokens || 0,
       completionTokens: data.usage.completion_tokens || 0,
       totalTokens: data.usage.total_tokens || 0,
     } : null;
-    return { text, usage: tokenUsage };
+    return { text, toolCalls, usage: tokenUsage };
   });
 }
 
@@ -259,9 +267,20 @@ async function callGemini(provider, apiKey, prompt, modelName, usage, options = 
       }
     }
 
+    // Function calling / tool use (Gemini format)
+    if (options.tools) {
+      payload.tools = options.tools.map(t => ({
+        functionDeclarations: [{
+          name: t.function.name,
+          description: t.function.description,
+          parameters: t.function.parameters ? convertToGeminiSchema(t.function.parameters) : undefined,
+        }],
+      }));
+    }
+
     const res = await fetch(`${base}/models/${model}:generateContent`, {
       method: 'POST',
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(60000),
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify(payload),
     });
@@ -271,13 +290,22 @@ async function callGemini(provider, apiKey, prompt, modelName, usage, options = 
       throwHttpError(provider, res.status, bodyText, res);
     }
     const data = await res.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const parts = data.candidates?.[0]?.content?.parts || [];
+    const text = parts.find(p => p.text)?.text || '';
+    // Extract tool calls from parts
+    const toolCalls = parts
+      .filter(p => p.functionCall)
+      .map((p, i) => ({
+        id: `call_${i}_${Date.now()}`,
+        type: 'function',
+        function: { name: p.functionCall.name, arguments: JSON.stringify(p.functionCall.args || {}) },
+      }));
     const tokenUsage = data.usageMetadata ? {
       promptTokens: data.usageMetadata.promptTokenCount || 0,
       completionTokens: data.usageMetadata.candidatesTokenCount || 0,
       totalTokens: data.usageMetadata.totalTokenCount || 0,
     } : null;
-    return { text, usage: tokenUsage };
+    return { text, toolCalls: toolCalls.length > 0 ? toolCalls : null, usage: tokenUsage };
   });
 }
 
@@ -316,9 +344,18 @@ async function callAnthropic(provider, apiKey, prompt, modelName, usage, options
       }
     }
 
+    // Function calling / tool use (Anthropic format)
+    if (options.tools) {
+      body.tools = options.tools.map(t => ({
+        name: t.function.name,
+        description: t.function.description,
+        input_schema: t.function.parameters || { type: 'object', properties: {} },
+      }));
+    }
+
     const res = await fetch(`${baseUrl}/v1/messages`, {
       method: 'POST',
-      signal: AbortSignal.timeout(25000),
+      signal: AbortSignal.timeout(60000),
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify(body),
     });
@@ -328,13 +365,21 @@ async function callAnthropic(provider, apiKey, prompt, modelName, usage, options
       throwHttpError(provider, res.status, bodyText, res);
     }
     const data = await res.json();
-    const text = data.content?.[0]?.text || '';
+    // Extract text and tool calls from content blocks
+    const textBlocks = (data.content || []).filter(b => b.type === 'text');
+    const toolBlocks = (data.content || []).filter(b => b.type === 'tool_use');
+    const text = textBlocks.map(b => b.text).join('\n');
+    const toolCalls = toolBlocks.length > 0 ? toolBlocks.map(b => ({
+      id: b.id,
+      type: 'function',
+      function: { name: b.name, arguments: JSON.stringify(b.input || {}) },
+    })) : null;
     const tokenUsage = data.usage ? {
       promptTokens: data.usage.input_tokens || 0,
       completionTokens: data.usage.output_tokens || 0,
       totalTokens: (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0),
     } : null;
-    return { text, usage: tokenUsage };
+    return { text, toolCalls, usage: tokenUsage };
   });
 }
 
@@ -369,6 +414,8 @@ async function callProvider(provider, prompt, usage = 'email', forcedModelId = n
           messages: options.messages || undefined,
           system: options.system || undefined,
           responseFormat: options.responseFormat || undefined,
+          tools: options.tools || undefined,
+          toolChoice: options.toolChoice || undefined,
         };
         switch (provider.name) {
           case 'gemini':
@@ -425,7 +472,7 @@ async function callProviderWithFallback(providers, prompt, usage = 'email', opti
     throw new Error('Aucun provider IA configuré (Paramètres → Intelligence Artificielle)');
   }
 
-  const { forcedModelId, messages, system, responseFormat } = options;
+  const { forcedModelId, messages, system, responseFormat, tools, toolChoice } = options;
   const errors = [];
   for (const provider of providers) {
     // Skip les providers en cooldown 429
@@ -434,12 +481,11 @@ async function callProviderWithFallback(providers, prompt, usage = 'email', opti
       continue;
     }
     try {
-      const result = await callProvider(provider, prompt, usage, forcedModelId, { messages, system, responseFormat });
+      const result = await callProvider(provider, prompt, usage, forcedModelId, { messages, system, responseFormat, tools, toolChoice });
       if (errors.length > 0) {
         logger.warn(`[AI] Fallback utilisé : "${provider.label}" a répondu après ${errors.length} échec(s)`);
       }
-      // result est { text, usage } — extraire le texte pour les appelants existants
-      // et stocker l'usage en side-effect pour le tracking
+      // result est { text, toolCalls, usage }
       const text = result.text !== undefined ? result.text : result;
       _lastAiUsage = result.usage || null;
       _lastAiProvider = provider.name;
@@ -450,6 +496,10 @@ async function callProviderWithFallback(providers, prompt, usage = 'email', opti
         trackAiUsage(result.usage, provider.name, usage).catch(() => {});
       }
 
+      // Si tools ont été demandés, retourner le résultat complet (text + toolCalls)
+      if (tools) {
+        return { text, toolCalls: result.toolCalls || null, usage: result.usage };
+      }
       return text;
     } catch (err) {
       logger.warn(`[AI] Provider "${provider.label}" indisponible, tentative suivante : ${err.message}`);

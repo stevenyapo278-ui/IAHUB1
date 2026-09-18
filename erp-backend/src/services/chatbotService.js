@@ -657,6 +657,494 @@ async function searchLocations(query, limit = 10) {
   }
 }
 
+// ── Tool definitions (function calling) ──────────────────────────────
+
+const CHATBOT_TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'search_tickets',
+      description: 'Rechercher des tickets par mot-clé, statut, priorité, lieu, date, demandeur ou technicien. Retourne une liste de tickets correspondants.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Mot-clé de recherche (titre, contenu, lieu, catégorie)' },
+          status: { type: 'string', description: 'Filtrer par statut: NEW, OPEN, PENDING, SOLVED, CLOSED' },
+          priority: { type: 'string', description: 'Filtrer par priorité: P1, P2, P3, P4' },
+          locationName: { type: 'string', description: 'Filtrer par nom de lieu/magasin' },
+          assignedTo: { type: 'string', description: 'Filtrer par nom du technicien assigné' },
+          requester: { type: 'string', description: 'Filtrer par nom du demandeur' },
+          period: { type: 'string', description: 'Période: today, yesterday, 7d, 30d, 90d, ou une date YYYY-MM-DD' },
+          limit: { type: 'integer', description: 'Nombre max de résultats (défaut: 20)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'check_ticket',
+      description: 'Obtenir les détails complets d\'un ticket par son numéro (statut, priorité, assigné, lieu, catégorie, SLA, dates, etc.)',
+      parameters: {
+        type: 'object',
+        properties: {
+          ticketId: { type: 'integer', description: 'Numéro du ticket' },
+        },
+        required: ['ticketId'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_ticket_summary',
+      description: 'Obtenir un résumé IA d\'un ticket (historique, résolution, etc.)',
+      parameters: {
+        type: 'object',
+        properties: {
+          ticketId: { type: 'integer', description: 'Numéro du ticket' },
+        },
+        required: ['ticketId'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_ticket',
+      description: 'Créer un nouveau ticket. Demande toujours confirmation à l\'utilisateur avant de créer.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Titre du ticket' },
+          description: { type: 'string', description: 'Description du problème' },
+          priority: { type: 'string', description: 'Priorité: P1, P2, P3, P4 (défaut: P3)' },
+          category: { type: 'string', description: 'Catégorie du ticket' },
+          locationName: { type: 'string', description: 'Lieu/magasin' },
+        },
+        required: ['title', 'description'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'change_ticket_status',
+      description: 'Modifier le statut d\'un ticket',
+      parameters: {
+        type: 'object',
+        properties: {
+          ticketId: { type: 'integer', description: 'Numéro du ticket' },
+          newStatus: { type: 'string', description: 'Nouveau statut: NEW, OPEN, PENDING, SOLVED, CLOSED' },
+        },
+        required: ['ticketId', 'newStatus'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'assign_ticket',
+      description: 'Assigner un ticket à un technicien',
+      parameters: {
+        type: 'object',
+        properties: {
+          ticketId: { type: 'integer', description: 'Numéro du ticket' },
+          personName: { type: 'string', description: 'Nom du technicien' },
+        },
+        required: ['ticketId', 'personName'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'find_similar_tickets',
+      description: 'Chercher des tickets similaires à un problème donné (utile avant création)',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Titre ou description du problème' },
+          description: { type: 'string', description: 'Description détaillée' },
+        },
+        required: ['title'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_ticket_links',
+      description: 'Obtenir les liens entre tickets (doublons, bloqués, liés)',
+      parameters: {
+        type: 'object',
+        properties: {
+          ticketId: { type: 'integer', description: 'Numéro du ticket' },
+        },
+        required: ['ticketId'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_ticket_time_entries',
+      description: 'Obtenir le temps passé sur un ticket (saisies chronométrées)',
+      parameters: {
+        type: 'object',
+        properties: {
+          ticketId: { type: 'integer', description: 'Numéro du ticket' },
+        },
+        required: ['ticketId'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_top_locations',
+      description: 'Classement des lieux/magasins par nombre de tickets. Utile pour "quel magasin a le plus de problèmes"',
+      parameters: {
+        type: 'object',
+        properties: {
+          period: { type: 'string', description: 'Période: today, 7d, 30d, 90d, all (défaut: 30d)' },
+          sortByUrgent: { type: 'boolean', description: 'Trier par tickets urgents (P1/P2) au lieu du total' },
+          limit: { type: 'integer', description: 'Nombre de résultats (défaut: 5)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_top_technicians',
+      description: 'Classement des techniciens par nombre de tickets. Utile pour "quel tech a le plus de tickets"',
+      parameters: {
+        type: 'object',
+        properties: {
+          period: { type: 'string', description: 'Période: today, 7d, 30d, 90d, all (défaut: 30d)' },
+          limit: { type: 'integer', description: 'Nombre de résultats (défaut: 10)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_team_report',
+      description: 'Répartition des tickets ouverts par équipe. Utile pour les bilans et réunions.',
+      parameters: {
+        type: 'object',
+        properties: {
+          period: { type: 'string', description: 'Période: today, 7d, 30d, 90d (défaut: 30d)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_category_distribution',
+      description: 'Distribution des tickets par catégorie',
+      parameters: {
+        type: 'object',
+        properties: {
+          period: { type: 'string', description: 'Période' },
+          locationId: { type: 'integer', description: 'ID du lieu pour filtrer' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'analyze_root_cause',
+      description: 'Analyser les causes racines d\'un problème sur un lieu ou une catégorie',
+      parameters: {
+        type: 'object',
+        properties: {
+          locationName: { type: 'string', description: 'Nom du lieu à analyser' },
+          filterKeyword: { type: 'string', description: 'Mot-clé pour filtrer' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'generate_report',
+      description: 'Rapport statistique global: nombre total de tickets, ouverts, résolus, par statut/priorité',
+      parameters: {
+        type: 'object',
+        properties: {
+          period: { type: 'string', description: 'Période: today, 7d, 30d, 90d, ou null pour tout' },
+          fullList: { type: 'boolean', description: 'Inclure la liste complète des tickets (défaut: false)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_inventory',
+      description: 'Rechercher des équipements/assets dans l\'inventaire',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Mot-clé de recherche (nom, modèle, numéro de série)' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_users',
+      description: 'Rechercher des utilisateurs par nom ou email',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Nom ou email de l\'utilisateur' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_locations',
+      description: 'Rechercher des lieux/magasins',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Nom du lieu' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_knowledge',
+      description: 'Rechercher dans la base de connaissances IT (solutions, procédures, docs)',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Mot-clé ou question' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+];
+
+// ── Exécution des tools ──────────────────────────────────────────────
+
+async function executeTool(toolName, args, user) {
+  const p = args || {};
+  switch (toolName) {
+    case 'search_tickets': {
+      const q = [p.query, p.locationName, p.assignedTo, p.requester, p.category].filter(Boolean).join(' ');
+      const result = await searchTickets(q || ' ', p.limit || 20, user, p.period);
+      const tickets = result.tickets || result;
+      // Filtrer côté JS si des filtres spécifiques sont demandés
+      return tickets.filter(t => {
+        if (p.status && t.status !== p.status) return false;
+        if (p.priority && t.priority !== p.priority) return false;
+        if (p.locationName && !t.locationName?.toLowerCase().includes(p.locationName.toLowerCase())) return false;
+        if (p.assignedTo && !t.assignedTo?.fullName?.toLowerCase().includes(p.assignedTo.toLowerCase())) return false;
+        if (p.requester && !t.requester?.fullName?.toLowerCase().includes(p.requester.toLowerCase())) return false;
+        return true;
+      }).map(t => ({
+        id: t.id, title: t.title, status: t.status, priority: t.priority,
+        locationName: t.locationName, requester: t.requester?.fullName || null,
+        assignedTo: t.assignedTo?.fullName || null, team: t.team?.name || null,
+        createdAt: t.createdAt, category: t.category,
+      }));
+    }
+    case 'check_ticket':
+      return await checkTicketStatus(p.ticketId);
+    case 'get_ticket_summary':
+      return await getTicketSummary(p.ticketId);
+    case 'create_ticket':
+      return await createTicketFromChat(p.title, p.description, p.priority || 'P3', user?.id, { category: p.category });
+    case 'change_ticket_status':
+      return await changeTicketStatus(p.ticketId, p.newStatus);
+    case 'assign_ticket':
+      return await assignTicket(p.ticketId, p.personName);
+    case 'find_similar_tickets':
+      return await findSimilarTickets(p.title, p.description || p.title, user);
+    case 'get_ticket_links': {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: Number(p.ticketId) },
+        include: {
+          linksA: { select: { ticketB: { select: { id: true, title: true, status: true } }, type: true } },
+          linksB: { select: { ticketA: { select: { id: true, title: true, status: true } }, type: true } },
+        },
+      });
+      if (!ticket) return 'Ticket introuvable';
+      const links = [
+        ...(ticket.linksA || []).map(l => ({ linkedId: l.ticketB.id, title: l.ticketB.title, type: l.type, direction: 'vers' })),
+        ...(ticket.linksB || []).map(l => ({ linkedId: l.ticketA.id, title: l.ticketA.title, type: l.type, direction: 'depuis' })),
+      ];
+      return links.length > 0 ? links : 'Aucun lien';
+    }
+    case 'get_ticket_time_entries': {
+      const entries = await prisma.ticketTimeEntry.findMany({
+        where: { ticketId: Number(p.ticketId) },
+        orderBy: { entryDate: 'desc' },
+        select: { minutes: true, description: true, entryDate: true, user: { select: { fullName: true } } },
+      });
+      if (entries.length === 0) return 'Aucune saisie de temps';
+      const totalMin = entries.reduce((s, e) => s + e.minutes, 0);
+      return { totalMinutes: totalMin, entries: entries.map(e => ({ user: e.user?.fullName, minutes: e.minutes, description: e.description, date: e.entryDate })) };
+    }
+    case 'get_top_locations': {
+      const stats = await analyticsTools.getTopLocationsStats({ period: p.period || '30d', limit: p.limit || 5, sortByUrgent: p.sortByUrgent });
+      return stats;
+    }
+    case 'get_top_technicians': {
+      const where = { deletedAt: null, status: { notIn: ['CLOSED', 'SOLVED'] }, approvalStatus: { notIn: ['PENDING', 'REJECTED'] } };
+      const tickets = await prisma.ticket.findMany({ where, select: { id: true, assignedToId: true, assignedTo: { select: { fullName: true } } } });
+      const techMap = new Map();
+      for (const t of tickets) {
+        const name = t.assignedTo?.fullName || 'Non assigné';
+        techMap.set(name, (techMap.get(name) || 0) + 1);
+      }
+      return [...techMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, p.limit || 10).map(([name, total]) => ({ name, total }));
+    }
+    case 'get_team_report':
+      return await analyticsTools.getTeamDistribution({ period: p.period || '30d' });
+    case 'get_category_distribution':
+      return await analyticsTools.getCategoryDistribution({ period: p.period, locationId: p.locationId });
+    case 'analyze_root_cause':
+      return await analyticsTools.analyzeRootCause({ locationName: p.locationName, filterKeyword: p.filterKeyword });
+    case 'generate_report':
+      return await generateReport(p.period || null, p.fullList || false);
+    case 'search_inventory':
+      return await searchAssets(p.query, 5);
+    case 'search_users':
+      return await searchUsers(p.query, 5);
+    case 'search_locations':
+      return await searchLocations(p.query, 10);
+    case 'search_knowledge':
+      return await searchKnowledge(p.query, 5);
+    default:
+      return `Outil inconnu: ${toolName}`;
+  }
+}
+
+// ── Appel IA avec tool calling (boucle agentic) ─────────────────────
+
+const MAX_TOOL_ROUNDS = 6;
+
+async function callAIWithTools(messages, options = {}) {
+  const providers = await getActiveProviders();
+  if (providers.length === 0) throw new Error('Aucun fournisseur IA configuré.');
+
+  const systemContent = (options.forcedSystem || SYSTEM_PROMPT) + getDateContextLine();
+
+  // Construire les messages API depuis l'historique
+  const recentHistory = (options.conversationHistory || []).slice(-30);
+  const apiMessages = [];
+  for (const msg of recentHistory) {
+    if (!msg || !msg.content || typeof msg.content !== 'string') continue;
+    if (msg.content.includes('Désolé, je rencontre un problème technique')) continue;
+    apiMessages.push({ role: msg.role === 'assistant' ? 'assistant' : 'user', content: msg.content });
+  }
+  apiMessages.push({ role: 'user', content: messages[messages.length - 1].content });
+
+  // Budget token
+  const MAX_HISTORY_TOKENS = 16000;
+  let trimmedMessages = [...apiMessages];
+  let totalTokens = trimmedMessages.reduce((s, m) => s + estimateTokens(m.content), 0);
+  while (trimmedMessages.length > 1 && totalTokens > MAX_HISTORY_TOKENS) {
+    totalTokens -= estimateTokens(trimmedMessages[0].content);
+    trimmedMessages.shift();
+  }
+  // Valider alternance user/assistant
+  if (trimmedMessages.length > 1) {
+    const cleaned = [trimmedMessages[0]];
+    for (let i = 1; i < trimmedMessages.length; i++) {
+      if (trimmedMessages[i].role === cleaned[cleaned.length - 1].role) {
+        cleaned[cleaned.length - 1].content += '\n\n' + trimmedMessages[i].content;
+      } else {
+        cleaned.push(trimmedMessages[i]);
+      }
+    }
+    trimmedMessages = cleaned;
+  }
+  if (trimmedMessages.length > 0 && trimmedMessages[0].role !== 'user') {
+    trimmedMessages.unshift({ role: 'user', content: '(Contexte de conversation précédente)' });
+  }
+
+  console.log(`[chatbot] callAIWithTools — ${trimmedMessages.length} messages, tools: ${CHATBOT_TOOLS.length}`);
+
+  // Boucle agentic : LLM appelle des tools, on exécute, on renvoie les résultats
+  let finalText = '';
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    // Premier round : avec tools. Rounds suivants : sans tools (pour forcer une réponse texte)
+    const callTools = round === 0;
+    const result = await callAiWithRetry(() => callProviderWithFallback(providers, null, 'chatbot', {
+      messages: trimmedMessages,
+      system: systemContent,
+      temperature: options.temperature ?? 0.7,
+      maxTokens: options.maxTokens ?? 4096,
+      tools: callTools ? CHATBOT_TOOLS : undefined,
+      forcedModelId: options.forcedModelId,
+    }), { maxRetries: 2, baseDelay: 1500 });
+
+    // result est { text, toolCalls } quand tools sont fournis, sinon string
+    const text = typeof result === 'string' ? result : (result.text || '');
+    const toolCalls = typeof result === 'string' ? null : (result.toolCalls || null);
+
+    // Si pas de tool calls → réponse finale
+    if (!toolCalls || toolCalls.length === 0) {
+      finalText = text;
+      break;
+    }
+
+    // Ajouter la réponse du LLM avec les tool calls aux messages
+    trimmedMessages.push({ role: 'assistant', content: text || '(tool call)' });
+
+    // Exécuter chaque tool et ajouter les résultats comme texte
+    const toolResults = [];
+    for (const tc of toolCalls) {
+      const fnName = tc.function.name;
+      let fnArgs = {};
+      try { fnArgs = JSON.parse(tc.function.arguments || '{}'); } catch {}
+      console.log(`[chatbot] Tool call: ${fnName}(${JSON.stringify(fnArgs).substring(0, 200)})`);
+
+      let fnResult;
+      try {
+        fnResult = await executeTool(fnName, fnArgs, user);
+      } catch (err) {
+        fnResult = `Erreur: ${err.message}`;
+        console.error(`[chatbot] Tool ${fnName} error:`, err.message);
+      }
+
+      const resultText = typeof fnResult === 'string' ? fnResult : JSON.stringify(fnResult, null, 2);
+      toolResults.push(`## ${fnName}\n${resultText.substring(0, 6000)}`);
+    }
+
+    // Envoyer tous les résultats comme un seul message user
+    trimmedMessages.push({
+      role: 'user',
+      content: `Voici les données récupérées par les outils. Analyse-les et réponds à l'utilisateur de manière naturelle :\n\n${toolResults.join('\n\n---\n\n')}`,
+    });
+  }
+
+  // Nettoyer les tool_calls des messages
+  for (const m of trimmedMessages) {
+    if (m.tool_calls) delete m.tool_calls;
+  }
+
+  return finalText;
+}
+
 // ── Appel IA ───────────────────────────────────────────────────────────
 
 // Estimation rapide du nombre de tokens (~4 caractères par token, rule of thumb)
@@ -2477,18 +2965,29 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   _stepLog('pre-llm', `isAction=${isActionIntent} contextLen=${systemContext.length}`);
 
   // ═══ TOUJOURS passer par le LLM pour une réponse naturelle ═══
+  // Pour 'general' sans contexte déterministe : callAIWithTools (le LLM choisit ses outils)
+  // Pour les autres intents : le contexte est déjà construit par les handlers, on le passe au LLM
   try {
-    const raw = await callAI(
-      [{ role: 'user', content: message }],
-      {
-        ...voiceModelOptions,
-        conversationHistory,
-        forcedSystem: fullSystemPrompt,
-      }
-    );
+    let raw;
+    if (intent === 'general' && contextParts.length === 0) {
+      raw = await callAIWithTools(
+        [{ role: 'user', content: message }],
+        { ...voiceModelOptions, conversationHistory, forcedSystem: SYSTEM_PROMPT }
+      );
+      _stepLog('llm-tools', `replyLen=${raw.length}`);
+    } else {
+      raw = await callAI(
+        [{ role: 'user', content: message }],
+        {
+          ...voiceModelOptions,
+          conversationHistory,
+          forcedSystem: fullSystemPrompt,
+        }
+      );
+      _stepLog('llm-free', `replyLen=${raw.length}`);
+    }
 
     reply = cleanAiReply(raw);
-    _stepLog('llm-free', `replyLen=${reply.length}`);
   } catch (err) {
     // Fallback dégradé mais UTILE : si on a des données déterministes, on les renvoie telles quelles
     // au lieu d'un message d'erreur générique. Sinon message d'attente court.
