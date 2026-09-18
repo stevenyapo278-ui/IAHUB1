@@ -576,6 +576,42 @@ async function searchTicketsWithContext(message, limit, user, period, previousSt
     }
   }
 
+  // Suivi de top_locations : filtrer par le lieu précédent
+  if (previousState?.intent === 'top_locations' && previousState?.params?.topLocations?.length) {
+    const topLocation = previousState.params.topLocations[0]; // 1er du classement
+    _slog('top_location-context', `topLocation=${topLocation}`);
+    try {
+      const where = {
+        deletedAt: null,
+        approvalStatus: { notIn: ['PENDING', 'REJECTED'] },
+        locationName: { contains: topLocation, mode: 'insensitive' },
+      };
+      if (period) {
+        const { start, end } = resolvePeriodDates(period);
+        if (start) where.createdAt = { ...where.createdAt, gte: start };
+        if (end) where.createdAt = { ...where.createdAt, lt: end };
+      }
+      const [tickets, totalCount] = await Promise.all([
+        prisma.ticket.findMany({
+          where,
+          take: limit,
+          include: {
+            requester: { select: { fullName: true, email: true } },
+            assignedTo: { select: { fullName: true } },
+            team: { select: { name: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+        prisma.ticket.count({ where }),
+      ]);
+      _slog('db-done', `tickets=${tickets.length} totalCount=${totalCount}`);
+      return { tickets, totalCount };
+    } catch (err) {
+      console.error('[chatbot] Erreur searchTicketsWithContext top_locations:', err.message);
+      return searchTickets(message, limit, user, period);
+    }
+  }
+
   // Fallback : recherche normale
   return searchTickets(message, limit, user, period);
 }
@@ -932,7 +968,8 @@ function isReferenceMessage(message) {
   // au message précédent. Ex: "il y a combien de ticket ouverts à date ?" doit être traité
   // comme une question fraîche, pas hériter de la dernière recherche (filtre VPN, etc.).
   if (/\b(combien|nombre|total|liste|montre[rz]?|classement|stats?|statistiques?)\b/.test(lower)) return false;
-  if (/\bil y a\b/.test(lower)) return false;
+  // "il y a" seul bloque — MAIS "il y a ... pour ce magasin/site" est un suivi de contexte
+  if (/\bil y a\b/.test(lower) && !/\b(pour ce|dans ce|ce magasin|ce site|ce lieu)\b/.test(lower)) return false;
   return /^(et|et aussi|et pour|maintenant|ok et|d'accord et|sinon| sinon|pareil|m[aè]me chose|ceux[- ]?(ci|là)?|celui[- ]?(ci|là)?|les m[aè]mes?|aussi|ensuite|et toi|et nous|pour nous|pour moi|pour l['']?équipe|il|elle|ce ticket|son|sa|ses)\b/.test(lower)
     || /^.{0,15}\b(et|aussi|pareil|ensuite)\b.{0,25}$/.test(lower)
     || /\b(aussi|pareil|comme (ça|avant)|de m[aè]me|ensuite|et|puis)\b/.test(lower) && message.length < 40;
@@ -958,6 +995,9 @@ function detectIntentRegex(message, previousState = null) {
     }
     // Cas : "et pour Jean" → on garde le même intent mais on change un param
     if (previousState.intent === 'search_tickets') {
+      return { intent: 'search_tickets', params: { period, inheritFrom: previousState } };
+    }
+    if (previousState.intent === 'top_locations') {
       return { intent: 'search_tickets', params: { period, inheritFrom: previousState } };
     }
     if (previousState.intent === 'report') {
@@ -1818,6 +1858,8 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
         contextParts.push(`**Aucun ticket trouvé** pour cette période.`);
         break;
       }
+      // Sauvegarder les top locations dans params pour multi-turn
+      params.topLocations = ranked.map(r => r.name);
       const totalTickets = ranked.reduce((s, r) => s + r.total, 0);
       let txt = `**Classement des lieux** (${tickets.length} tickets, ${period === 'all' ? 'toutes périodes' : period})\n\n`;
       txt += `| Rang | Lieu | Tickets | Urgents | % |\n|---|---|---|---|---|\n`;
@@ -2465,7 +2507,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   _stepLog('done', `intent=${intent} replyLen=${(reply || '').length} action=${action?.type || 'null'} citedTickets=${citedTicketIds.length}`);
 
   // Sauvegarder le state conversationnel pour le multi-turn (isolé par conversation)
-  if (userId && ['search_tickets', 'report', 'analytics', 'check_ticket', 'team_report', 'search_inventory', 'search_users', 'search_locations', 'search_problems', 'search_skills', 'ticket_links', 'time_entries'].includes(intent)) {
+  if (userId && ['search_tickets', 'report', 'analytics', 'check_ticket', 'team_report', 'top_locations', 'top_technicians', 'search_inventory', 'search_users', 'search_locations', 'search_problems', 'search_skills', 'ticket_links', 'time_entries'].includes(intent)) {
     setConversationState(stateKey, intent, params, matchingTickets.map(t => ({ id: t.id, title: t.title, status: t.status })));
   }
 
