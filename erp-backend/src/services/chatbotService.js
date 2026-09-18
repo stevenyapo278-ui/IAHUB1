@@ -53,8 +53,56 @@ const GREETING_REPLIES = [
 const DETERMINISTIC_INTENTS = new Set([
   'analytics', 'team_report', 'top_locations', 'top_technicians', 'report',
   'check_ticket', 'summary', 'change_status', 'assign_ticket', 'add_followup', 'help',
-  'search_inventory', 'search_users', 'search_locations',
+  'search_inventory', 'search_users', 'search_locations', 'search_teams',
 ]);
+
+function normalizeAccents(str) {
+  if (!str) return '';
+  return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+async function resolveCanonicalTeamName(teamQuery, userId = null) {
+  if (!teamQuery) return null;
+  const lower = teamQuery.toLowerCase().trim();
+
+  // 1. Possessif ("mon équipe", "ma team", "nos équipes") → récupérer l'équipe de l'utilisateur connecté
+  if (/\b(mon|ma|mes|notre|nos)\s+(équipe|equipe|team)\b/i.test(lower) || lower === 'mon equipe' || lower === 'mon équipe') {
+    if (userId) {
+      try {
+        const u = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { team: { select: { name: true } } },
+        });
+        if (u?.team?.name) return u.team.name;
+      } catch {}
+    }
+  }
+
+  // 2. Recherche parmi les équipes DB avec tolérance aux accents
+  try {
+    const teams = await prisma.team.findMany({ select: { id: true, name: true } });
+    const cleanedQuery = normalizeAccents(lower.replace(/^(?:l['’]|l|d['’]|de\s+l['’]|de\s+la\s+|l['’]équipe\s+|l['’]equipe\s+|équipe\s+|equipe\s+)/i, '').trim());
+    if (!cleanedQuery) return teamQuery;
+
+    for (const t of teams) {
+      const cleanName = normalizeAccents(t.name.toLowerCase());
+      if (cleanName.includes(cleanedQuery) || cleanedQuery.includes(cleanName)) {
+        return t.name;
+      }
+    }
+    for (const t of teams) {
+      const cleanName = normalizeAccents(t.name.toLowerCase());
+      const words = cleanedQuery.split(/\s+/).filter((w) => w.length > 2);
+      if (words.some((w) => cleanName.includes(w))) {
+        return t.name;
+      }
+    }
+  } catch (err) {
+    console.error('[chatbot] resolveCanonicalTeamName error:', err.message);
+  }
+
+  return teamQuery;
+}
 
 // ── Petites phrases (salutations, remerciements) : pas besoin de recherches ni de LLM de classification ──
 function isGreetingMessage(message) {
@@ -82,6 +130,7 @@ Intents possibles :
 - "add_followup" : ajouter un commentaire/suivi sur un ticket ("ajoute un suivi sur le #12", "note que le problème est résolu", "laisse un commentaire sur ce ticket", "mets à jour le ticket #5", "j'ai résolu le souci pour le ticket 8")
 - "search_inventory" : recherche d'équipements/assets
 - "search_users" : recherche d'utilisateurs (nom, email, rôle) — NE PAS utiliser pour les compétences
+- "search_teams" : LISTE ou RECHERCHE des équipes du système ("regarde la liste des équipes", "quelles sont les équipes", "liste des équipes", "membres de l'équipe X", "nos équipes")
 - "search_locations" : recherche de lieux/où
 - "search_problems" : recherche de problèmes ITIL racines ("problèmes ouverts", "quels problèmes", "liste des incidents majeurs", "problèmes réseau")
 - "search_skills" : COMPÉTENCES des techniciens — uniquement quand le message contient "compétence", "expert", "maîtrise", "niveau", "qui sait faire", "qui connait", "qualifié". Exemples : "qui est expert en réseau", "qui sait faire du VPN", "compétences de Jean", "quels techniciens savent faire Linux", "liste des compétences"
@@ -157,7 +206,11 @@ function extractSearchParamsRegex(query) {
 
   // Équipe
   const teamMatch = lower.match(/\b(?:equipe|équipe|team)\s+([a-zà-ÿ0-9\- ]+)/i);
-  if (teamMatch) params.teamName = teamMatch[1].trim();
+  if (teamMatch) {
+    params.teamName = teamMatch[1].replace(/[\?!\.\,]+$/, '').trim();
+  } else if (/\b(?:mon|ma|notre|nos)\s+(?:équipe|equipe|team)\b/i.test(lower)) {
+    params.teamName = 'mon équipe';
+  }
 
   // Dates explicites : "le 01/09/2026", "du 06/09 au 15/09", format français JJ/MM/AAAA.
   // Lookarounds pour exclure les faux positifs (IP 192.168.1.1, versions 10.5.2, heures 14:30).
@@ -472,9 +525,19 @@ function buildSearchQuery(params, user) {
     where.priority = params.priorities.length === 1 ? params.priorities[0] : { in: params.priorities };
   }
 
-  // Équipe
+  // Équipe : filtre à la fois ticket.team.name ET assignedTo.team.name
   if (params.teamName) {
-    where.team = { name: { contains: params.teamName, mode: 'insensitive' } };
+    const teamFilter = {
+      OR: [
+        { team: { name: { contains: params.teamName, mode: 'insensitive' } } },
+        { assignedTo: { team: { name: { contains: params.teamName, mode: 'insensitive' } } } },
+      ],
+    };
+    if (where.OR) {
+      where.AND = [...(where.AND || []), teamFilter];
+    } else {
+      where.OR = teamFilter.OR;
+    }
   }
 
   // Lieu
@@ -867,6 +930,37 @@ async function searchLocations(query, limit = 10) {
     const data = await response.json();
     return Array.isArray(data) ? data.slice(0, limit) : [];
   } catch {
+    return [];
+  }
+}
+
+// ── Recherche d'équipes ────────────────────────────────────────────────
+
+async function searchTeams(query = '', limit = 10) {
+  try {
+    const teams = await prisma.team.findMany({
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        groupEmail: true,
+        members: { select: { id: true, fullName: true, role: true } },
+        _count: { select: { tickets: true } },
+      },
+      orderBy: { name: 'asc' },
+    });
+    if (!query || !query.trim() || /liste|tous|équipes?|equipes?/i.test(query.trim())) {
+      return teams.slice(0, limit);
+    }
+    const cleanQ = normalizeAccents(query.trim().toLowerCase());
+    const filtered = teams.filter((t) => {
+      const nameClean = normalizeAccents(t.name.toLowerCase());
+      const descClean = normalizeAccents((t.description || '').toLowerCase());
+      return nameClean.includes(cleanQ) || cleanQ.includes(nameClean);
+    });
+    return filtered.slice(0, limit);
+  } catch (err) {
+    console.error('[chatbot] Erreur searchTeams:', err.message);
     return [];
   }
 }
@@ -1288,6 +1382,8 @@ async function executeTool(toolName, args, user) {
       return await searchUsers(p.query, 5);
     case 'search_locations':
       return await searchLocations(p.query, 10);
+    case 'search_teams':
+      return await searchTeams(p.query, 10);
     case 'search_knowledge':
       return await searchKnowledge(p.query, 5);
     case 'add_ticket_followup':
@@ -1772,6 +1868,11 @@ function detectIntentRegex(message, previousState = null) {
   if (lower.match(/\b(assigne|affecte|donne.*[àa]|attribue|passe.*[àa])\b/) && !lower.match(/\b(mot de passe|mot passe|password)\b/)) return { intent: 'assign_ticket', params: { period } };
   // search_inventory : uniquement si pas de signalement de problème (problème/panne/ne marche → create_ticket) et pas de demande de stats
   if (lower.match(/\b(inventaire|[ée]quipement|asset|pc portable|imprimante|mat[ée]riel)\b/) && !lower.match(/\b(probl[èe]me|panne|ne marche|fonctionne plus|erreur|assistance|signaler|incident|souci|statistiques?|stats?|analyse)\b/)) return { intent: 'search_inventory', params: { period } };
+  // search_teams : demandes d'affichage/liste des équipes sans mention explicite de "tickets"
+  if (/(?:liste|quelles?|quels?|montre|affiche|donne[- ]?moi|regarde|voir|qu'est-ce que|quelles sont)\b.*?(?:équipes?|equipes?)/i.test(lower)
+    && !/\btickets?\b/i.test(lower)) {
+    return { intent: 'search_teams', params: { period } };
+  }
   // search_users : exclusions pour comparatifs/superlatifs qui vont en analytics
   if (lower.match(/\b(utilisateur|user|email de|t[ée]l[ée]phone de|nom de)\b/) && !lower.match(/\b(plus|moins|top|meilleur|pire|charg[ée]|résout|charge)\b/)) return { intent: 'search_users', params: { period } };
   if (lower.match(/\b(qui est|qui suis)[-\s]?(je)?\b/) && !lower.match(/\b(technicien|technicienne|le plus|la plus|meilleur|pire|charg[ée]|résout)\b/)) return { intent: 'search_users', params: { period } };
@@ -2481,6 +2582,9 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   if (intent === 'search_locations') searches.push(searchLocations(params?.locationName || message, 10));
   else searches.push(Promise.resolve([]));
 
+  if (intent === 'search_teams') searches.push(searchTeams(params?.teamName || message, 10));
+  else searches.push(Promise.resolve([]));
+
   // Promise.allSettled : si une seule recherche échoue (DB momentanément indisponible,
   // API users down...), les autres continuent et la réponse reste utile au lieu du
   // message générique "erreur interne".
@@ -2491,8 +2595,9 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   const assets = unwrap(settled[2], []);
   const users = unwrap(settled[3], []);
   const locations = unwrap(settled[4], []);
+  const teams = unwrap(settled[5], []);
   for (const r of settled) if (r.status === 'rejected') console.error('[chatbot] recherche échouée (dégradé):', r.reason?.message);
-  _stepLog('searches-done', `knowledge=${knowledgeChunks.length} tickets=${ticketsResult.tickets?.length || ticketsResult.length || 0} total=${ticketsResult.totalCount ?? '?'} assets=${assets.length} users=${users.length} locations=${locations.length}`);
+  _stepLog('searches-done', `knowledge=${knowledgeChunks.length} tickets=${ticketsResult.tickets?.length || ticketsResult.length || 0} total=${ticketsResult.totalCount ?? '?'} assets=${assets.length} users=${users.length} locations=${locations.length} teams=${teams.length}`);
 
   const matchingTickets = ticketsResult.tickets || ticketsResult; // compat: array ou { tickets, totalCount }
   const totalTicketCount = ticketsResult.totalCount ?? matchingTickets.length;
@@ -2543,6 +2648,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     search_inventory: { isEmpty: () => assets.length === 0, reply: "Aucun équipement correspondant dans l'inventaire. Précisez la marque, le modèle ou le numéro d'inventaire et je relance la recherche." },
     search_users: { isEmpty: () => users.length === 0, reply: "Aucun utilisateur trouvé pour cette recherche. Vérifions l'orthographe du nom, ou donnez-moi son email." },
     search_locations: { isEmpty: () => locations.length === 0, reply: "Aucun lieu trouvé. Précisez le nom du magasin ou du site et je relance la recherche." },
+    search_teams: { isEmpty: () => teams.length === 0, reply: "Aucune équipe trouvée dans le système." },
   };
   const pureSearch = PURE_SEARCH_EMPTY[intent];
   if (pureSearch && knowledgeChunks.length === 0 && !ambiguityNote && pureSearch.isEmpty()) {
@@ -2651,6 +2757,20 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
       locContext += `\n`;
     }
     contextParts.push(locContext);
+  }
+
+  if (teams.length > 0) {
+    let teamContextStr = "**Équipes trouvées dans le système :**\n";
+    for (const tm of teams) {
+      teamContextStr += `• **${tm.name}** (${tm.members?.length || 0} membres, ${tm._count?.tickets || 0} tickets en base)`;
+      if (tm.description) teamContextStr += ` — ${tm.description}`;
+      if (tm.groupEmail) teamContextStr += ` | Email groupe: ${tm.groupEmail}`;
+      if (tm.members?.length > 0) {
+        teamContextStr += `\n  - Membres: ${tm.members.map((m) => `${m.fullName} (${m.role})`).join(', ')}`;
+      }
+      teamContextStr += `\n`;
+    }
+    contextParts.push(teamContextStr);
   }
 
   let action = null;
@@ -2956,6 +3076,13 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     case 'search_locations': {
       if (locations.length === 0) {
         contextParts.push(`**Aucun lieu trouvé** pour "${params?.locationName || message}". Essayez avec un autre terme.`);
+      }
+      break;
+    }
+
+    case 'search_teams': {
+      if (teams.length === 0) {
+        contextParts.push(`**Aucune équipe trouvée** pour "${params?.teamName || message}".`);
       }
       break;
     }
@@ -3512,7 +3639,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   _stepLog('done', `intent=${intent} replyLen=${(reply || '').length} action=${action?.type || 'null'} citedTickets=${citedTicketIds.length}`);
 
   // Sauvegarder le state conversationnel pour le multi-turn (isolé par conversation)
-  if (userId && ['search_tickets', 'report', 'analytics', 'check_ticket', 'team_report', 'top_locations', 'top_technicians', 'search_inventory', 'search_users', 'search_locations', 'search_problems', 'search_skills', 'ticket_links', 'time_entries'].includes(intent)) {
+  if (userId && ['search_tickets', 'report', 'analytics', 'check_ticket', 'team_report', 'top_locations', 'top_technicians', 'search_inventory', 'search_users', 'search_locations', 'search_teams', 'search_problems', 'search_skills', 'ticket_links', 'time_entries'].includes(intent)) {
     setConversationState(stateKey, intent, params, matchingTickets.map(t => ({ id: t.id, title: t.title, status: t.status })));
   }
 
@@ -3630,4 +3757,10 @@ async function validateCitedIds(ticketIds, knowledgeIds, intent) {
 }
 
 
-module.exports = { handleMessage };
+module.exports = {
+  handleMessage,
+  searchTeams,
+  detectIntentRegex,
+  extractSearchParamsRegex,
+  resolveCanonicalTeamName,
+};
