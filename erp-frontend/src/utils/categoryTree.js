@@ -4,7 +4,6 @@
 // Utile pour les <select> hiérarchiques et les filtres.
 export function flattenCategoryTree(categories = []) {
   const byParent = new Map();
-  const roots = [];
   for (const c of categories) {
     const pid = c.parentId == null ? null : Number(c.parentId);
     if (!byParent.has(pid)) byParent.set(pid, []);
@@ -24,6 +23,15 @@ export function flattenCategoryTree(categories = []) {
       if (kids && kids.length) walk(kids, depth + 1, label);
     }
   }
-  walk(roots.length ? roots : byParent.get(null) || [], 0, '');
+  walk(byParent.get(null) || [], 0, '');
+
+  // Récupérer les orphelins (parentId pointe vers un parent inexistant ou circulaire)
+  for (const c of categories) {
+    if (!visited.has(c.id)) {
+      visited.add(c.id);
+      result.push({ id: c.id, name: c.name, depth: 0, label: c.name, glpiCategoryId: c.glpiCategoryId, isCustom: c.isCustom, parentId: c.parentId });
+    }
+  }
+
   return result;
 }
