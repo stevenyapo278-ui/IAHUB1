@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   ShieldCheck, Ticket, MailCheck, Clock, CheckCircle2,
-  XCircle, AlertTriangle, RefreshCw, ChevronRight, User,
+  XCircle, AlertTriangle, RefreshCw, ChevronRight, ChevronUp, ChevronDown, User,
   Sparkles, ExternalLink, Send, ArrowRight, Shield, Check, X,
   Bell, BookOpen, Edit3, Tags, HelpCircle, TrendingUp, Search, Eye,
 } from 'lucide-react';
@@ -139,6 +139,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [pageSize, setPageSize] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
+  const [expandedCards, setExpandedCards] = useState(new Set());
 
   function loadAllData(silent = false) {
     if (!silent) setLoading(true);
@@ -788,50 +789,78 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                       )}
                     </div>
 
-                    {/* Titre + résumé */}
+                    {/* Titre */}
                     <h3 className="text-base font-bold text-on-surface" style={{ overflowWrap: 'anywhere' }}>{t.title}</h3>
-                    {t.aiSummary && (
-                      <p className="text-[11px] text-violet-700 dark:text-violet-300 bg-violet-500/8 rounded-lg px-3 py-1.5 border border-violet-500/15 italic line-clamp-2">
-                        <Bot className="w-3 h-3 inline mr-1 -mt-0.5" />{t.aiSummary}
-                      </p>
-                    )}
-                    <p className="text-xs text-on-surface-variant line-clamp-3" style={{ whiteSpace: 'pre-line', overflowWrap: 'anywhere' }}>{t.content}</p>
 
-                    {/* Attributs GLPI : type, priorité, urgence, impact, lieu, source */}
-                    <div className="flex items-center gap-1.5 flex-wrap text-[10px] font-bold">
-                      <span className={`px-2 py-0.5 rounded-md border ${prioClass}`}>
-                        {PRIORITY_LABELS[t.priority] || t.priority}
-                      </span>
-                      <span className="px-2 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface-variant">
-                        {t.type === 'REQUEST' ? 'Demande' : 'Incident'} · U: {LEVEL_LABELS[t.urgency] || t.urgency} · I: {LEVEL_LABELS[t.impact] || t.impact}
-                      </span>
-                      {t.locationName && (
-                        <span className="px-2 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface-variant flex items-center gap-1">
-                          <MapPin className="w-3 h-3" /> {t.locationName}
+                    {/* Mode réduit : badges essentiels + demandeur + date */}
+                    {!expandedCards.has(t.id) && (
+                      <div className="flex items-center gap-1.5 flex-wrap text-[10px] font-bold">
+                        <span className={`px-2 py-0.5 rounded-md border ${prioClass}`}>
+                          {PRIORITY_LABELS[t.priority] || t.priority}
                         </span>
-                      )}
-                      {t.impactedSites?.length > 0 && (
-                        <span className="px-2 py-0.5 rounded-md bg-orange-500/10 border border-orange-500/25 text-orange-600 dark:text-orange-400 flex items-center gap-1" title={t.impactedSites.join(', ')}>
-                          <Layers className="w-3 h-3" /> {t.impactedSites.length} site(s)
+                        <span className="px-2 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface-variant">
+                          {t.type === 'REQUEST' ? 'Demande' : 'Incident'}
                         </span>
-                      )}
-                      {(t.source || t.sourceEmail) && (
-                        <span className="px-2 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface-variant truncate max-w-[260px]" title={t.sourceEmail || t.source}>
-                          {t.source || 'Email'}{t.sourceEmail ? ` · ${t.sourceEmail}` : ''}
-                        </span>
-                      )}
-                      {t.origin && ORIGIN_CONFIG[t.origin] && (() => {
-                        const OriginIcon = ORIGIN_CONFIG[t.origin].Icon;
-                        return (
-                          <span className={`px-2 py-0.5 rounded-md border flex items-center gap-1 ${ORIGIN_CONFIG[t.origin].bg}`}>
-                            <OriginIcon className="w-3 h-3" />
-                            {ORIGIN_CONFIG[t.origin].label}
+                        {t.locationName && (
+                          <span className="px-2 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface-variant flex items-center gap-1">
+                            <MapPin className="w-3 h-3" /> {t.locationName}
                           </span>
-                        );
-                      })()}
-                    </div>
+                        )}
+                        {(t.source || t.sourceEmail) && (
+                          <span className="px-2 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface-variant truncate max-w-[200px]">
+                            {t.source || 'Email'}
+                          </span>
+                        )}
+                      </div>
+                    )}
 
-                    {/* Demandeur avec photo + date */}
+                    {/* Mode déplié : contenu complet */}
+                    {expandedCards.has(t.id) && (
+                      <>
+                        {t.aiSummary && (
+                          <p className="text-[11px] text-violet-700 dark:text-violet-300 bg-violet-500/8 rounded-lg px-3 py-1.5 border border-violet-500/15 italic line-clamp-2">
+                            <Bot className="w-3 h-3 inline mr-1 -mt-0.5" />{t.aiSummary}
+                          </p>
+                        )}
+                        <p className="text-xs text-on-surface-variant line-clamp-3" style={{ whiteSpace: 'pre-line', overflowWrap: 'anywhere' }}>{t.content}</p>
+
+                        {/* Attributs GLPI */}
+                        <div className="flex items-center gap-1.5 flex-wrap text-[10px] font-bold">
+                          <span className={`px-2 py-0.5 rounded-md border ${prioClass}`}>
+                            {PRIORITY_LABELS[t.priority] || t.priority}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface-variant">
+                            {t.type === 'REQUEST' ? 'Demande' : 'Incident'} · U: {LEVEL_LABELS[t.urgency] || t.urgency} · I: {LEVEL_LABELS[t.impact] || t.impact}
+                          </span>
+                          {t.locationName && (
+                            <span className="px-2 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface-variant flex items-center gap-1">
+                              <MapPin className="w-3 h-3" /> {t.locationName}
+                            </span>
+                          )}
+                          {t.impactedSites?.length > 0 && (
+                            <span className="px-2 py-0.5 rounded-md bg-orange-500/10 border border-orange-500/25 text-orange-600 dark:text-orange-400 flex items-center gap-1" title={t.impactedSites.join(', ')}>
+                              <Layers className="w-3 h-3" /> {t.impactedSites.length} site(s)
+                            </span>
+                          )}
+                          {(t.source || t.sourceEmail) && (
+                            <span className="px-2 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface-variant truncate max-w-[260px]" title={t.sourceEmail || t.source}>
+                              {t.source || 'Email'}{t.sourceEmail ? ` · ${t.sourceEmail}` : ''}
+                            </span>
+                          )}
+                          {t.origin && ORIGIN_CONFIG[t.origin] && (() => {
+                            const OriginIcon = ORIGIN_CONFIG[t.origin].Icon;
+                            return (
+                              <span className={`px-2 py-0.5 rounded-md border flex items-center gap-1 ${ORIGIN_CONFIG[t.origin].bg}`}>
+                                <OriginIcon className="w-3 h-3" />
+                                {ORIGIN_CONFIG[t.origin].label}
+                              </span>
+                            );
+                          })()}
+                        </div>
+                      </>
+                    )}
+
+                    {/* Demandeur avec photo + date (toujours visible) */}
                     <div className="flex items-center gap-4 text-[11px] text-on-surface-variant pt-0.5 flex-wrap">
                       <span className="flex items-center gap-1.5 min-w-0">
                         <UserAvatar user={t.requester} name={t.sourceName} size="xs" />
@@ -848,6 +877,19 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
 
                   {/* Actions directes Hotline */}
                   <div className="flex items-center gap-2 shrink-0 border-t lg:border-t-0 pt-4 lg:pt-0 border-outline-variant/20">
+                    <button
+                      onClick={() => {
+                        const next = new Set(expandedCards);
+                        if (next.has(t.id)) next.delete(t.id);
+                        else next.add(t.id);
+                        setExpandedCards(next);
+                      }}
+                      className="px-2.5 py-2 rounded-xl text-xs font-semibold border border-outline-variant/40 hover:bg-surface-container text-on-surface transition-all flex items-center gap-1"
+                      title={expandedCards.has(t.id) ? 'Réduire' : 'Développer'}
+                    >
+                      {expandedCards.has(t.id) ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                    </button>
+
                     <button
                       onClick={() => setDetailTicket(t)}
                       className="px-3.5 py-2 rounded-xl text-xs font-semibold border border-outline-variant/40 hover:bg-surface-container text-on-surface transition-all flex items-center gap-1"
