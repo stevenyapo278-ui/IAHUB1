@@ -241,15 +241,27 @@ function extractSearchParamsRegex(query) {
   const idMatch = query.match(/#(\d+)/);
   if (idMatch) params.ticketId = parseInt(idMatch[1], 10);
 
-  // Personne : "de/par/demandeur/assigné à <Nom>" (ex: "tickets de Mariam Fofana").
-  // On capture au moins prénom+nom pour éviter les faux positifs ("liste des tickets ouverts").
-  const personRe = /\b(?:de|par|du|demandeur\s*:?)\s+([A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s+[A-ZÀ-Ÿ][a-zà-ÿ]+)+)\b/g;
-  let pm;
-  while ((pm = personRe.exec(query)) !== null) {
-    const candidate = pm[1];
-    if (/\b(janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre|semaine|mois|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\b/i.test(candidate)) continue;
-    params.personName = candidate;
-    break;
+  // Personne : "de/par/du/pour/concernant/demandeur/assigné à <Nom>" (ex: "tickets de Mariam Fofana", "pour Steven Yapo").
+  const personRe = /\b(?:de|par|du|pour|concernant|sur|demandeur\s*:?)\s+([A-ZÀ-Ÿa-zà-ÿ]+(?:\s+[A-ZÀ-Ÿa-zà-ÿ]+)+)\b/i;
+  const pm = query.match(personRe);
+  if (pm) {
+    const candidate = pm[1].replace(/\s+(?:a[- ]t[- ]il|a[- ]t[- ]elle|a|des|les|en|sur|pour|ce|cet|cette|du|de|tickets?|incidents?).*$/i, '').trim();
+    if (!/\b(janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre|semaine|mois|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|equipe|équipe|ticket|tickets)\b/i.test(candidate) && candidate.length > 2) {
+      params.personName = candidate;
+    }
+  }
+
+  // Si pas encore de personName, chercher un Prénom + Nom au début de la phrase (ex: "Steven Yapo a-t-il des tickets ?")
+  if (!params.personName && !params.isMyTicketsRef) {
+    const nameAtStartMatch = query.match(/^([A-ZÀ-Ÿa-zà-ÿ]{2,}\s+[A-ZÀ-Ÿa-zà-ÿ]{2,})\b/i);
+    if (nameAtStartMatch) {
+      const cand = nameAtStartMatch[1].trim();
+      const lowerCand = cand.toLowerCase();
+      const forbidden = ['liste des', 'montre les', 'tous les', 'quand il', 'quel est', 'est ce', 'y a', 'il y', 'le ticket', 'un ticket', 'quels sont'];
+      if (!forbidden.some((f) => lowerCand.startsWith(f)) && !/\b(janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre|equipe|équipe|ticket|tickets)\b/i.test(cand)) {
+        params.personName = cand;
+      }
+    }
   }
 
   // Possessifs : "mes tickets", "mes tickets en cours", "mes demandes" → filtre sur
@@ -464,6 +476,8 @@ async function findTicketsForPersonAnyRole(personName, { limit = 20, period = nu
         include: {
           requester: { select: { fullName: true, email: true } },
           assignedTo: { select: { fullName: true } },
+          assignees: { select: { fullName: true } },
+          observers: { select: { fullName: true } },
           team: { select: { name: true } },
         },
         orderBy: { createdAt: 'desc' },
@@ -1889,6 +1903,10 @@ function detectIntentRegex(message, previousState = null) {
   if (lower.match(/\b(classement|classe|ranking|palmar[èe]s|top)\b/) && lower.match(/\b(magasin|lieu|site|centre)\b/)) return { intent: 'top_locations', params: { period } };
   // Date explicite + "tickets" → recherche par date (ex: "il y a eu des tickets le 01/09/2026")
   if (/\b\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}\b/.test(lower) && /\btickets?\b/.test(lower)) {
+    return { intent: 'search_tickets', params: { period } };
+  }
+  // Questions d'existence de tickets pour une personne ("steven yapo a t il des tickets ?", "y a t il des tickets pour X")
+  if (/\btickets?\b/i.test(lower) && /\b(a[- ]t[- ]il|a[- ]t[- ]elle|a des|y a[- ]t[- ]il|pour|concernant|sur|de|des)\b/i.test(lower) && !/\b(cr[ée]er?|ouvrir?|nouveau)\b/i.test(lower)) {
     return { intent: 'search_tickets', params: { period } };
   }
   // search_tickets AVANT team_report et analytics : "montre les stats du magasin X" = recherche, pas rapport LLM
@@ -3760,6 +3778,8 @@ async function validateCitedIds(ticketIds, knowledgeIds, intent) {
 module.exports = {
   handleMessage,
   searchTeams,
+  searchTickets,
+  findTicketsForPersonAnyRole,
   detectIntentRegex,
   extractSearchParamsRegex,
   resolveCanonicalTeamName,
