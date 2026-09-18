@@ -264,13 +264,6 @@ router.post('/', authenticate, async (req, res) => {
     if (!message || !message.trim()) {
       return res.status(400).json({ error: 'Le message ne peut pas être vide.' });
     }
-    if (message.length > 8000) {
-      return res.status(400).json({
-        error: 'Le message est trop long (max 8000 caractères).',
-        length: message.length,
-        max: 8000,
-      });
-    }
 
     // Détection d'injection : conservée en LOG uniquement (audit), plus aucun blocage.
     // L'utilisateur garde la liberté totale dans ses messages — MARIE gère naturellement les tentatives.

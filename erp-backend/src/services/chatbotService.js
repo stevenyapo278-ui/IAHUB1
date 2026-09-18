@@ -135,9 +135,50 @@ function extractSearchParamsRegex(query) {
   const teamMatch = lower.match(/\b(?:equipe|équipe|team)\s+([a-zà-ÿ0-9\- ]+)/i);
   if (teamMatch) params.teamName = teamMatch[1].trim();
 
+  // Dates explicites : "le 01/09/2026", "du 06/09 au 15/09", format français JJ/MM/AAAA.
+  // Lookarounds pour exclure les faux positifs (IP 192.168.1.1, versions 10.5.2, heures 14:30).
+  const dateRe = /(?<![\d.:-])(\d{1,2})[\/.-](\d{1,2})(?:[\/.-](\d{2,4}))?(?![\d.:-])/g;
+  const foundDates = [];
+  let dm;
+  while ((dm = dateRe.exec(lower)) !== null) {
+    const day = parseInt(dm[1], 10);
+    const month = parseInt(dm[2], 10);
+    let year = dm[3] ? parseInt(dm[3], 10) : null;
+    if (year !== null && year < 100) year += 2000;
+    if (year === null) year = new Date().getFullYear(); // "le 01/09" → année courante
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      foundDates.push({ year, month, day });
+    }
+  }
+  const toIso = (d) => `${d.year}-${String(d.month).padStart(2, '0')}-${String(d.day).padStart(2, '0')}`;
+  if (foundDates.length === 1) {
+    params.dateFrom = toIso(foundDates[0]);
+    params.dateTo = toIso(foundDates[0]);
+  } else if (foundDates.length >= 2) {
+    const sorted = [...foundDates].sort((a, b) => (a.year - b.year) || (a.month - b.month) || (a.day - b.day));
+    params.dateFrom = toIso(sorted[0]);
+    params.dateTo = toIso(sorted[sorted.length - 1]);
+  }
+
   // ID
   const idMatch = query.match(/#(\d+)/);
   if (idMatch) params.ticketId = parseInt(idMatch[1], 10);
+
+  // Personne : "de/par/demandeur/assigné à <Nom>" (ex: "tickets de Mariam Fofana").
+  // On capture au moins prénom+nom pour éviter les faux positifs ("liste des tickets ouverts").
+  const personRe = /\b(?:de|par|du|demandeur\s*:?)\s+([A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s+[A-ZÀ-Ÿ][a-zà-ÿ]+)+)\b/g;
+  let pm;
+  while ((pm = personRe.exec(query)) !== null) {
+    const candidate = pm[1];
+    if (/\b(janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre|semaine|mois|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\b/i.test(candidate)) continue;
+    params.personName = candidate;
+    break;
+  }
+  const explicitAssignee = query.match(/\b(?:assign[ée]s?\s*[àa]|attribu[ée]s?\s*[àa])\s+([A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s+[A-ZÀ-Ÿ][a-zà-ÿ]+)+)/i);
+  if (explicitAssignee) {
+    params.assignedToName = explicitAssignee[1];
+    delete params.personName;
+  }
 
   // Liste complète
   if (/\b(tous?|liste|montre|affiche|donne[- ]?moi)\b/.test(lower)) params.wantFullList = true;
@@ -164,6 +205,7 @@ const SEARCH_PARAMS_SCHEMA = {
     locationName: { type: 'string', description: 'Lieu (ex: "Casino", "Super U")' },
     requesterName: { type: 'string', description: 'Nom du demandeur' },
     assignedToName: { type: 'string', description: 'Nom du technicien assigné' },
+    personName: { type: 'string', description: 'Nom de personne sans précision demandeur/assigné (ex: "tickets de Mariam") — cherche comme demandeur OU assigné' },
     keyword: { type: 'string', description: 'Mot-clé pour titre/contenu/catégorie (un seul mot significatif, PAS les articles/pronoms)' },
     dateFrom: { type: 'string', description: 'Date début ISO (ex: 2026-09-01)' },
     dateTo: { type: 'string', description: 'Date fin ISO (ex: 2026-09-16)' },
@@ -199,7 +241,9 @@ Règles:
 - "équipe Abidjan" → teamName: "Abidjan"
 - "Casino" → locationName: "Casino"
 - Extrais UN seul mot-clé significatif si présent (ex: "VPN" dans "tickets VPN"). PAS de mots vides (la, les, des, un, une, qui, pour, etc.)
-- Si le message contient un nom de personne connu (ex: "Yapo", "Jean", "Diallo"), utilise assignedToName ou requesterName, PAS keyword. Ex: "tickets de Yapo" → assignedToName: "Yapo"
+- Si le message contient un nom de personne connu (ex: "Yapo", "Jean", "Diallo"), PAS keyword.
+  - Précision explicite : "demandeur", "assigné à", "attribuées à", "créés par" → choisir requesterName ou assignedToName en conséquence.
+  - Sinon (ex: "tickets de Mariam Fofana") → personName: "Mariam Fofana" (recherche demandeur OU assigné, ne pas deviner).
 - wantFullList: vrai si "liste", "tous", "montre", "donne-moi" est présent
 - DATES IMPORTANTES : les dates doivent être extraites en dateFrom/dateTo au format ISO (YYYY-MM-DD), JAMAIS en keyword.
   AUJOURD'HUI = ${new Date().toISOString().split('T')[0]}.
@@ -288,6 +332,22 @@ function buildSearchQuery(params, user) {
   // Assigné à
   if (params.assignedToName) {
     where.assignedTo = { fullName: { contains: params.assignedToName, mode: 'insensitive' } };
+  }
+
+  // Personne sans précision (ex: "tickets de Mariam") → demandeur OU assigné.
+  // Un filtre assigné seul renvoie vide quand la personne est seulement demandeur (cas fréquent).
+  if (params.personName && !params.requesterName && !params.assignedToName) {
+    const personFilter = {
+      OR: [
+        { requester: { fullName: { contains: params.personName, mode: 'insensitive' } } },
+        { assignedTo: { fullName: { contains: params.personName, mode: 'insensitive' } } },
+      ],
+    };
+    if (where.OR) {
+      where.AND = [...(where.AND || []), personFilter];
+    } else {
+      where.OR = personFilter.OR;
+    }
   }
 
   // ID
@@ -380,18 +440,27 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
         }
       }
       if (regexParams && regexParams.wantFullList) params.wantFullList = true;
+      // Compléter avec les dates regex si le LLM n'en a pas extrait (ex: réponse partielle)
+      if (regexParams && regexParams.dateFrom && !params.dateFrom) {
+        params.dateFrom = regexParams.dateFrom;
+        params.dateTo = regexParams.dateTo;
+      }
+      // Compléter avec la personne regex si le LLM ne l'a pas détectée (ex: "tickets de Mariam Fofana")
+      if (regexParams && regexParams.personName && !params.personName && !params.requesterName && !params.assignedToName) {
+        params.personName = regexParams.personName;
+      }
     }
 
-    // Post-traitement : si keyword ressemble à un nom de personne, le convertir en assignedToName/requesterName
-    if (params?.keyword && !params.assignedToName && !params.requesterName) {
+    // Post-traitement : si keyword ressemble à un nom de personne, le convertir en filtre personne (demandeur OU assigné)
+    if (params?.keyword && !params.assignedToName && !params.requesterName && !params.personName) {
       try {
         const userMatch = await prisma.user.findFirst({
           where: { fullName: { contains: params.keyword, mode: 'insensitive' }, deletedAt: null },
           select: { id: true },
         });
         if (userMatch) {
-          _slog('keyword-to-user', `keyword="${params.keyword}" → assignedToName`);
-          params.assignedToName = params.keyword;
+          _slog('keyword-to-user', `keyword="${params.keyword}" → personName`);
+          params.personName = params.keyword;
           delete params.keyword;
         }
       } catch {}
@@ -463,12 +532,15 @@ async function searchTicketsWithContext(message, limit, user, period, previousSt
     const personName = validPersonName;
     _slog('person-detected', `personName=${personName}`);
 
-    // Chercher les tickets assignés à cette personne
+    // Chercher les tickets de cette personne (demandeur OU assigné)
     try {
       const where = {
         deletedAt: null,
         approvalStatus: { notIn: ['PENDING', 'REJECTED'] },
-        assignedTo: { fullName: { contains: personName, mode: 'insensitive' } },
+        OR: [
+          { requester: { fullName: { contains: personName, mode: 'insensitive' } } },
+          { assignedTo: { fullName: { contains: personName, mode: 'insensitive' } } },
+        ],
       };
 
       if (period) {
@@ -552,13 +624,20 @@ function estimateTokens(text) {
   return Math.ceil((text || '').length / 4);
 }
 
+// Le LLM ne connaît pas la date réelle : on l'injecte à chaque appel pour éviter
+// qu'il prenne une date passée pour une date future (ex: "tickets du 01/09/2026").
+function getDateContextLine() {
+  const today = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  return `\n\n[Date du jour : ${today}] Utilise-la pour situer les dates mentionnées : une date antérieure est dans le passé, pas le futur.`;
+}
+
 async function callAI(messages, options = {}) {
   const providers = await getActiveProviders();
   if (providers.length === 0) throw new Error('Aucun fournisseur IA configuré.');
 
   // ── Multi-turn : séparer system / user / assistant ──
   const intentHint = options.intentHint || '';
-  const systemContent = options.forcedSystem || (SYSTEM_PROMPT + intentHint);
+  const systemContent = (options.forcedSystem || (SYSTEM_PROMPT + intentHint)) + getDateContextLine();
 
   // Construire l'historique en messages API (user/assistant alternés)
   const apiMessages = [];
@@ -904,6 +983,10 @@ function detectIntentRegex(message, previousState = null) {
   if (lower.match(/\b(quel|quelle|quels|quelles|le|la|les)\b.{0,30}\b(magasin|lieu|site|centre)\b.{0,30}\b(plus|moins|plus grand|plus petit|top|meilleur|pire)\b/)) return { intent: 'top_locations', params: { period } };
   if (lower.match(/\b(magasin|lieu|site)\b.{0,20}\b(fait|fait le plus|a le plus|génère|genere|cause|provoque)\b/)) return { intent: 'top_locations', params: { period } };
   if (lower.match(/\b(classement|classe|ranking|palmar[èe]s|top)\b/) && lower.match(/\b(magasin|lieu|site|centre)\b/)) return { intent: 'top_locations', params: { period } };
+  // Date explicite + "tickets" → recherche par date (ex: "il y a eu des tickets le 01/09/2026")
+  if (/\b\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}\b/.test(lower) && /\btickets?\b/.test(lower)) {
+    return { intent: 'search_tickets', params: { period } };
+  }
   // search_tickets AVANT team_report et analytics : "montre les stats du magasin X" = recherche, pas rapport LLM
   if (lower.match(/\b(quels?|liste|listes|montre|affiche|donne[- ]?moi|cherche|recherche|tous?|toute?)\b/) && lower.match(/\b tickets?\b/)) return { intent: 'search_tickets', params: { period } };
   if (lower.match(/\b(quels?|liste|listes|montre|affiche|donne[- ]?moi|cherche|recherche|tous?|toute?)\b/) && lower.match(/\b(magasin|lieu|site|stats?|statistiques?|incident|probl[èe]me|panne|cat[ée]gorie|technicien|[ée]quipe|historique|d[ée]tail|resume|sommaire)\b/)) return { intent: 'search_tickets', params: { period } };
@@ -1120,11 +1203,6 @@ async function findSimilarTickets(title, description, user = null) {
       { content: { contains: w, mode: 'insensitive' } },
     ]),
   };
-
-  // Filtrer par requester pour les non-staff (REQUESTER ne voit que ses tickets)
-  if (user && !isStaff(user)) {
-    where.requesterId = user.sub;
-  }
 
   return await prisma.ticket.findMany({
     where,
@@ -1651,22 +1729,6 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
         }
       }
       if (tid) {
-        // Vérifier l'accès au ticket pour REQUESTER/TECHNICIAN
-        if (user && (user.role === 'REQUESTER' || user.role === 'TECHNICIAN')) {
-          const ticket = await prisma.ticket.findUnique({
-            where: { id: parseInt(tid, 10) },
-            select: { requesterId: true, assignedToId: true },
-          });
-          if (ticket) {
-            const hasAccess = user.role === 'TECHNICIAN'
-              ? (ticket.assignedToId === user.sub || ticket.requesterId === user.sub)
-              : ticket.requesterId === user.sub;
-            if (!hasAccess) {
-              contextParts.push(`**Accès refusé :** Vous n'avez pas accès au ticket #${tid}.`);
-              break;
-            }
-          }
-        }
         const info = await checkTicketStatus(tid);
         contextParts.push(`**Résultat de la consultation :**\n${info}`);
       } else {
@@ -1693,22 +1755,6 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
         }
       }
       if (tid) {
-        // Vérifier l'accès au ticket pour REQUESTER/TECHNICIAN
-        if (user && (user.role === 'REQUESTER' || user.role === 'TECHNICIAN')) {
-          const ticket = await prisma.ticket.findUnique({
-            where: { id: parseInt(tid, 10) },
-            select: { requesterId: true, assignedToId: true },
-          });
-          if (ticket) {
-            const hasAccess = user.role === 'TECHNICIAN'
-              ? (ticket.assignedToId === user.sub || ticket.requesterId === user.sub)
-              : ticket.requesterId === user.sub;
-            if (!hasAccess) {
-              contextParts.push(`**Accès refusé :** Vous n'avez pas accès au ticket #${tid}.`);
-              break;
-            }
-          }
-        }
         const summary = await getTicketSummary(tid);
         contextParts.push(`**Résumé :**\n${summary}`);
       } else {
@@ -1738,22 +1784,6 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
       const tid = params?.ticketId || message.match(/#?(\d+)/)?.[1];
       const statusWord = message.match(/\b(nouveau|ouvert|attente|résolu|resolu|fermé|ferme|new|open|pending|solved|closed)\b/i)?.[1];
       if (tid && statusWord) {
-        // Vérifier l'accès au ticket
-        if (user && (user.role === 'REQUESTER' || user.role === 'TECHNICIAN')) {
-          const ticket = await prisma.ticket.findUnique({
-            where: { id: parseInt(tid, 10) },
-            select: { requesterId: true, assignedToId: true },
-          });
-          if (ticket) {
-            const hasAccess = user.role === 'TECHNICIAN'
-              ? (ticket.assignedToId === user.sub || ticket.requesterId === user.sub)
-              : ticket.requesterId === user.sub;
-            if (!hasAccess) {
-              contextParts.push(`**Accès refusé :** Vous n'avez pas accès au ticket #${tid}.`);
-              break;
-            }
-          }
-        }
         const result = await changeTicketStatus(tid, statusWord);
         if (result.error) {
           contextParts.push(`**Erreur :** ${result.error}`);
@@ -1771,22 +1801,6 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
       const tid = params?.ticketId || message.match(/#?(\d+)/)?.[1];
       const person = params?.personName || message.match(/(?:à|a)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)/)?.[1];
       if (tid && person) {
-        // Vérifier l'accès au ticket
-        if (user && (user.role === 'REQUESTER' || user.role === 'TECHNICIAN')) {
-          const ticket = await prisma.ticket.findUnique({
-            where: { id: parseInt(tid, 10) },
-            select: { requesterId: true, assignedToId: true },
-          });
-          if (ticket) {
-            const hasAccess = user.role === 'TECHNICIAN'
-              ? (ticket.assignedToId === user.sub || ticket.requesterId === user.sub)
-              : ticket.requesterId === user.sub;
-            if (!hasAccess) {
-              contextParts.push(`**Accès refusé :** Vous n'avez pas accès au ticket #${tid}.`);
-              break;
-            }
-          }
-        }
         const result = await assignTicket(tid, person);
         if (result.error) {
           contextParts.push(`**Erreur :** ${result.error}`);
