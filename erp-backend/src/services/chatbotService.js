@@ -138,15 +138,11 @@ function isGreetingMessage(message) {
 
 // ── Recherche RAG (Base de connaissances) ─────────────────────────────
 
+const { searchKnowledge: searchKnowledgeUnified } = require('./knowledgeSearch');
+
 async function searchKnowledge(query, limit = 5) {
   try {
-    const response = await fetch('http://localhost:4000/api/knowledge/search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, limit, useHybrid: true }),
-    });
-    if (!response.ok) return [];
-    return await response.json();
+    return await searchKnowledgeUnified(query, { topK: limit, useHybrid: true, applyReranking: true });
   } catch {
     return [];
   }
@@ -1412,14 +1408,14 @@ async function callAIWithTools(messages, options = {}) {
   }
   apiMessages.push({ role: 'user', content: messages[messages.length - 1].content });
 
-  // Budget token
-  const MAX_HISTORY_TOKENS = 16000;
-  let trimmedMessages = [...apiMessages];
-  let totalTokens = trimmedMessages.reduce((s, m) => s + estimateTokens(m.content), 0);
-  while (trimmedMessages.length > 1 && totalTokens > MAX_HISTORY_TOKENS) {
-    totalTokens -= estimateTokens(trimmedMessages[0].content);
-    trimmedMessages.shift();
-  }
+  // Préparer les messages avec résumé si la conversation est longue
+  const { trimmedMessages, newSummary } = await prepareMessagesWithSummary(
+    apiMessages,
+    options.existingSummary || null,
+    options.summaryModelId || null
+  );
+  if (newSummary) options._newSummary = newSummary;
+
   // Valider alternance user/assistant
   if (trimmedMessages.length > 1) {
     const cleaned = [trimmedMessages[0]];
@@ -1540,6 +1536,101 @@ function getDateContextLine() {
   return `\n\n[Date du jour : ${today}] Utilise-la pour situer les dates mentionnées : une date antérieure est dans le passé, pas le futur.`;
 }
 
+// Seuil de tokens déclenchant un résumé (avant la troncature à 16k)
+const SUMMARIZE_THRESHOLD_TOKENS = 12000;
+
+/**
+ * Résume les anciens messages d'une conversation pour libérer de l'espace dans le budget token.
+ * Utilise un modèle léger (summaryAiModelId ou fallback) pour minimiser le coût.
+ *
+ * @param {Array} messages - Messages de la conversation (role + content)
+ * @param {number|null} forcedModelId - ID du modèle à utiliser (optionnel)
+ * @returns {string|null} Le résumé, ou null si échec
+ */
+async function summarizeConversationHistory(messages, forcedModelId = null) {
+  const providers = await getActiveProviders();
+  if (providers.length === 0) return null;
+
+  // Prendre les 10 premiers messages à résumer (les plus anciens)
+  const toSummarize = messages.slice(0, 10);
+  if (toSummarize.length < 2) return null;
+
+  const historyText = toSummarize
+    .map((m) => `[${m.role === 'assistant' ? 'MARIE' : 'Utilisateur'}] ${(m.content || '').substring(0, 500)}`)
+    .join('\n');
+
+  const prompt = `Résume cette conversation ITSM en 3-4 points clés. Pour chaque point, indique le problème mentionné et le statut si connu.
+
+CONVERSATION :
+${historyText}
+
+Réponds UNIQUEMENT avec le résumé en texte brut (pas de JSON, pas de markdown), 3-4 phrases max.`;
+
+  try {
+    const raw = await callProviderWithFallback(providers, prompt, 'chatbot', {
+      forcedModelId,
+      temperature: 0.1,
+      maxTokens: 300,
+    });
+    return (raw || '').trim().substring(0, 1000) || null;
+  } catch (err) {
+    console.error(`[chatbot] Échec résumé conversation:`, err.message);
+    return null;
+  }
+}
+
+/**
+ * Prépare l'historique pour l'appel IA en appliquant la troncature + résumé si nécessaire.
+ * Si la conversation est longue (> 12k tokens), résume les anciens messages et les remplace
+ * par un bloc "[Résumé de la conversation précédente]".
+ *
+ * @param {Array} apiMessages - Messages API (role + content)
+ * @param {string|null} existingSummary - Résumé existant en DB (Conversation.summary)
+ * @param {number|null} summaryModelId - ID du modèle léger pour le résumé
+ * @returns {{ trimmedMessages: Array, newSummary: string|null }}
+ */
+async function prepareMessagesWithSummary(apiMessages, existingSummary = null, summaryModelId = null) {
+  const MAX_HISTORY_TOKENS = 16000;
+  let trimmedMessages = [...apiMessages];
+  let totalTokens = trimmedMessages.reduce((s, m) => s + estimateTokens(m.content), 0);
+
+  // Si on dépasse le seuil ET qu'on n'a pas déjà un résumé, en créer un
+  if (totalTokens > SUMMARIZE_THRESHOLD_TOKENS && !existingSummary) {
+    const messagesToSummarize = trimmedMessages.slice(0, -4); // Garder les 4 derniers intacts
+    if (messagesToSummarize.length >= 2) {
+      const summary = await summarizeConversationHistory(messagesToSummarize, summaryModelId);
+      if (summary) {
+        // Remplacer les anciens messages par le résumé
+        const recentMessages = trimmedMessages.slice(-4);
+        trimmedMessages = [
+          { role: 'user', content: `[Résumé de la conversation précédente]\n${summary}` },
+          ...recentMessages,
+        ];
+        totalTokens = trimmedMessages.reduce((s, m) => s + estimateTokens(m.content), 0);
+        return { trimmedMessages, newSummary: summary };
+      }
+    }
+  }
+
+  // Si on a déjà un résumé, l'injecter au début
+  if (existingSummary && trimmedMessages.length > 2) {
+    const recentMessages = trimmedMessages.slice(-6); // Garder les 6 derniers
+    trimmedMessages = [
+      { role: 'user', content: `[Résumé de la conversation précédente]\n${existingSummary}` },
+      ...recentMessages,
+    ];
+    totalTokens = trimmedMessages.reduce((s, m) => s + estimateTokens(m.content), 0);
+  }
+
+  // Troncature classique si toujours trop long
+  while (trimmedMessages.length > 1 && totalTokens > MAX_HISTORY_TOKENS) {
+    totalTokens -= estimateTokens(trimmedMessages[0].content);
+    trimmedMessages.shift();
+  }
+
+  return { trimmedMessages, newSummary: null };
+}
+
 async function callAI(messages, options = {}) {
   const providers = await getActiveProviders();
   if (providers.length === 0) throw new Error('Aucun fournisseur IA configuré.');
@@ -1565,21 +1656,13 @@ async function callAI(messages, options = {}) {
   const lastMsg = messages[messages.length - 1];
   apiMessages.push({ role: 'user', content: lastMsg.content });
 
-  // Budget token dynamique : garder l'historique dans ~16000 tokens
-  const MAX_HISTORY_TOKENS = 16000;
-  let trimmedMessages = [...apiMessages];
-
-  // Calculer le total des tokens de l'historique (sans le message actuel)
-  let totalHistoryTokens = 0;
-  for (let i = 0; i < trimmedMessages.length - 1; i++) {
-    totalHistoryTokens += estimateTokens(trimmedMessages[i].content);
-  }
-
-  // Tronquer depuis les messages les plus anciens tant qu'on dépasse le budget
-  while (trimmedMessages.length > 1 && totalHistoryTokens > MAX_HISTORY_TOKENS) {
-    const removed = trimmedMessages.shift();
-    totalHistoryTokens -= estimateTokens(removed.content);
-  }
+  // Préparer les messages avec résumé si la conversation est longue
+  const { trimmedMessages, newSummary } = await prepareMessagesWithSummary(
+    apiMessages,
+    options.existingSummary || null,
+    options.summaryModelId || null
+  );
+  if (newSummary) options._newSummary = newSummary;
 
   // Valider l'alternance user/assistant (Anthropic l'exige strictement)
   // Le premier message doit être 'user', et pas deux user/assistant consécutifs
@@ -2645,7 +2728,7 @@ ${rescueContext}`;
 
 // ── Message handler ────────────────────────────────────────────────────
 
-async function handleMessage(message, conversationHistory = [], user = null, pendingTicketData = null, conversationId = null) {
+async function handleMessage(message, conversationHistory = [], user = null, pendingTicketData = null, conversationId = null, options = {}) {
   let history = Array.isArray(conversationHistory) ? conversationHistory : [];
   let currentUser = user;
   let currentPending = pendingTicketData;
@@ -2797,6 +2880,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
 
   let reply;
   let toolData = '';
+  let _newSummary = null;
   let citedTicketIds = [];
   let citedKnowledgeIds = [];
 
@@ -2808,7 +2892,15 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   try {
     const r = await callAIWithTools(
       [{ role: 'user', content: message }],
-      { ...voiceModelOptions, conversationHistory, forcedSystem, user, _stateKey: stateKey }
+      {
+        ...voiceModelOptions,
+        conversationHistory,
+        forcedSystem,
+        user,
+        _stateKey: stateKey,
+        existingSummary: options.existingSummary || null,
+        summaryModelId: options.summaryModelId || null,
+      }
     );
 
     // Si une confirmation est en attente, renvoyer directement le message
@@ -2827,6 +2919,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
 
     reply = cleanAiReply(r.text);
     toolData = r.toolData || '';
+    _newSummary = r._newSummary || null;
     _stepLog('llm-tools', `replyLen=${(reply || '').length} toolDataLen=${toolData.length}`);
 
     // ── Validation des chiffres cités — anti-hallucination complète ──
@@ -2987,6 +3080,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     citedTicketIds,
     citedKnowledgeIds,
     pendingTicketData: null,
+    _newSummary,
   };
 }
 

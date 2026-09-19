@@ -4,9 +4,9 @@
 // de données trop obsolètes. Les écritures (POST/PATCH/DELETE) ne sont jamais mises en cache.
 //
 // Géré depuis Paramètres > Avancé (statistiques + purge manuelle) via cache.routes.js.
-const MAX_ENTRIES = 500; // garde-fou mémoire : au-delà, on évince les entrées les plus anciennes
+const DEFAULT_MAX_ENTRIES = 500; // garde-fou mémoire par défaut
 
-const store = new Map(); // key -> { value, expiresAt, hits, createdAt }
+const store = new Map(); // key -> { value, expiresAt, hits, createdAt, maxEntries }
 
 function createKey(req) {
   return `${req.method} ${req.originalUrl}`;
@@ -23,11 +23,12 @@ function get(key) {
   return entry.value;
 }
 
-function set(key, value, ttlSeconds) {
-  if (store.size >= MAX_ENTRIES) {
+function set(key, value, ttlSeconds, options = {}) {
+  const max = options.maxEntries || DEFAULT_MAX_ENTRIES;
+  if (store.size >= max) {
     // Éviction des entrées expirées puis, sinon, des plus anciennes
     for (const [k, e] of store) if (e.expiresAt <= Date.now()) store.delete(k);
-    if (store.size >= MAX_ENTRIES) {
+    if (store.size >= max) {
       const oldestKey = [...store.entries()].sort((a, b) => a[1].createdAt - b[1].createdAt)[0]?.[0];
       if (oldestKey) store.delete(oldestKey);
     }

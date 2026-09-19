@@ -1,5 +1,6 @@
 const prisma = require('../prismaClient');
 const { getActiveProviders, callProviderWithFallback } = require('./mailAnalyzer');
+const { generateEmbedding, toVectorLiteral } = require('../utils/embeddings');
 
 const WINDOW_HOURS = 4;
 const MAJOR_INCIDENT_THRESHOLD = 3; // nb de sites pour promouvoir en incident majeur
@@ -111,6 +112,59 @@ function fallbackJaccard({ subject, body }, tickets) {
   return null;
 }
 
-async function saveTicketEmbedding() {} // no-op, conservé pour compatibilité
+/**
+ * Sauvegarde l'embedding d'un ticket pour la détection future d'incidents similaires.
+ * Fire-and-forget : ne doit JAMAIS bloquer le pipeline email.
+ *
+ * @param {number} ticketId
+ * @param {string} title
+ * @param {string} content
+ */
+async function saveTicketEmbedding(ticketId, title, content) {
+  const text = `${title || ''} ${content || ''}`.substring(0, 1000);
+  if (!text.trim()) return;
+
+  try {
+    const embedding = await generateEmbedding(text);
+    const vectorLiteral = toVectorLiteral(embedding);
+
+    // Mettre à jour l'embedding dans Ticket (raw SQL avec paramètre lié)
+    await prisma.$executeRaw`
+      UPDATE "Ticket"
+      SET "contentEmbedding" = ${vectorLiteral}::vector
+      WHERE id = ${ticketId}
+    `;
+
+    // Upsert TicketSimilarityIndex (Prisma classique pour les champs non-vector)
+    await prisma.ticketSimilarityIndex.upsert({
+      where: { ticketId },
+      create: {
+        ticketId,
+        summary: (title || '').substring(0, 500),
+        bodyShort: (content || '').substring(0, 200),
+        content: (content || '').substring(0, 2000),
+        status: 'OPEN',
+        requesterEmail: '',
+      },
+      update: {
+        summary: (title || '').substring(0, 500),
+        bodyShort: (content || '').substring(0, 200),
+        content: (content || '').substring(0, 2000),
+      },
+    });
+
+    // Mettre à jour l'embedding dans TicketSimilarityIndex (raw SQL)
+    await prisma.$executeRaw`
+      UPDATE "TicketSimilarityIndex"
+      SET embedding = ${vectorLiteral}::vector
+      WHERE "ticketId" = ${ticketId}
+    `;
+
+    console.log(`[similarIncident] Embedding sauvegardé pour ticket ${ticketId}`);
+  } catch (err) {
+    // Ne jamais bloquer le pipeline — c'est fire-and-forget
+    console.error(`[similarIncident] Échec sauvegarde embedding ticket ${ticketId}:`, err.message);
+  }
+}
 
 module.exports = { findSimilarOpenTicket, attachSiteToTicket, saveTicketEmbedding };

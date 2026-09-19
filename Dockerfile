@@ -49,6 +49,7 @@ RUN npx prisma generate
 
 # Backend source
 COPY erp-backend/src ./src
+COPY erp-backend/scripts ./scripts
 COPY erp-backend/docker-entrypoint.sh ./
 RUN chmod +x docker-entrypoint.sh
 

@@ -379,6 +379,8 @@ Réponds UNIQUEMENT avec un objet JSON strict, sans markdown, au format :
     label: "Génération d'un article de base de connaissances depuis un ticket résolu",
     template: `Tu es un expert ITSM. À partir de ce ticket résolu, génère un article de base de connaissances en JSON.
 
+RÈGLE ABSOLUE : Utilise UNIQUEMENT les informations présentes dans le ticket ci-dessous. N'invente JAMAIS de détails, de causes ou de solutions qui ne sont pas explicitement mentionnés dans le ticket. Si une information manque, écris "Non spécifié" plutôt que d'inventer.
+
 Ticket :
 - Titre : {{title}}
 - Catégorie : {{category}}
@@ -391,9 +393,9 @@ Ticket :
 Retourne UNIQUEMENT ce JSON :
 {
   "title": "titre de l'article",
-  "problem": "description du problème",
-  "cause": "cause identifiée",
-  "solution": "solution appliquée étape par étape",
+  "problem": "description du problème telle que décrite dans le ticket",
+  "cause": "cause identifiée dans le ticket (ou 'Non spécifié' si pas clair)",
+  "solution": "solution appliquée telle que décrite dans le ticket",
   "keywords": ["mot1", "mot2", "mot3"]
 }`,
   },

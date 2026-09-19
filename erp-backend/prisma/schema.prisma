@@ -742,6 +742,11 @@ model SystemSettings {
   intentAiModelId Int?     @unique
   intentAiModel   AiModel? @relation("IntentAiModel", fields: [intentAiModelId], references: [id], onDelete: SetNull)
 
+  // ── Résumé conversation chatbot (Paramètres > IA) ──────────────────────────
+  // ID du modèle léger dédié au résumé des conversations longues (optionnel). Si null, utilise le modèle par défaut.
+  summaryAiModelId Int?     @unique
+  summaryAiModel   AiModel? @relation("SummaryAiModel", fields: [summaryAiModelId], references: [id], onDelete: SetNull)
+
   // ── Apparence de la page de connexion (configurable par SUPERADMIN) ─────────
   // loginThemeMode: "daily_rotation" = rotation déterministe (jour de l'année) sur les variantes activées,
   //                 "fixed"          = variante unique toujours affichée,
@@ -809,6 +814,9 @@ model AiModel {
 
   // Lien inverse : modèle utilisé pour la classification d'intent
   intentSetting SystemSettings? @relation("IntentAiModel")
+
+  // Lien inverse : modèle utilisé pour le résumé des conversations
+  summarySetting SystemSettings? @relation("SummaryAiModel")
 
   @@unique([providerId, name])
 }
@@ -1409,6 +1417,7 @@ model Conversation {
   archived          Boolean  @default(false)
   pendingTicketData Json? // données du ticket en attente de confirmation
   state             Json? // état conversationnel multi-turn (intent, params, lastToolData, lastMessage, timestamp)
+  summary           String? @db.Text // résumé des anciens messages quand la conversation est longue (tronquée)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

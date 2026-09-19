@@ -1,10 +1,17 @@
 const prisma = require('../prismaClient');
+const crypto = require('crypto');
+const cacheStore = require('../services/cacheStore');
 
 // Colonne pgvector figée à 768 dimensions (cf. prisma/schema.prisma — choisi pour matcher
 // Gemini text-embedding-004 qui produit nativement 768 dimensions) — chaque candidat
 // d'embeddings essayé ci-dessous doit produire un vecteur de cette taille, sinon il est écarté
 // et le candidat suivant est tenté (load balancing par compatibilité, pas seulement par priorité).
 const EMBEDDING_DIMENSIONS = 768;
+
+// Cache des embeddings : même texte = même vecteur, pas d'appel API redondant
+const EMBEDDING_CACHE_PREFIX = 'embeddings:';
+const EMBEDDING_CACHE_TTL = 3600; // 1 heure
+const EMBEDDING_CACHE_MAX = 2000; // ≈ 2000 × 768 × 8 bytes ≈ 12 MB
 
 // Anthropic n'a pas d'API d'embeddings — toujours ignoré pour cet usage, même actif/avec clé.
 const PROVIDERS_WITHOUT_EMBEDDINGS = new Set(['anthropic']);
@@ -106,11 +113,22 @@ async function essaiEmbedding(config, text) {
   return vector;
 }
 
+// Génère une clé de cache à partir du texte (hash SHA-256, normalisé)
+function cacheKey(text) {
+  const normalized = (text || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  return `${EMBEDDING_CACHE_PREFIX}${crypto.createHash('sha256').update(normalized).digest('hex')}`;
+}
+
 // Génère l'embedding (vecteur de 768 dimensions) d'un texte en essayant TOUS les fournisseurs/
 // modèles actifs disponibles dans l'ordre, et en gardant le premier qui produit un vecteur
 // compatible — load balancing par compatibilité : un fournisseur incompatible (mauvaise taille,
 // clé invalide, quota dépassé) ne bloque pas la génération si un autre fournisseur actif convient.
 async function generateEmbedding(text) {
+  // Vérifier le cache d'abord
+  const key = cacheKey(text);
+  const cached = cacheStore.get(key);
+  if (cached) return cached;
+
   const candidates = await listEmbeddingCandidates();
   if (candidates.length === 0) {
     throw new Error('Aucun fournisseur IA actif ne supporte la génération d\'embeddings (configurez une clé pour Gemini, OpenAI, NVIDIA ou Mistral)');
@@ -119,7 +137,10 @@ async function generateEmbedding(text) {
   const failures = [];
   for (const config of candidates) {
     try {
-      return await essaiEmbedding(config, text);
+      const vector = await essaiEmbedding(config, text);
+      // Mettre en cache le résultat
+      cacheStore.set(key, vector, EMBEDDING_CACHE_TTL, { maxEntries: EMBEDDING_CACHE_MAX });
+      return vector;
     } catch (err) {
       failures.push(`${config.providerName}/${config.model} : ${err.message}`);
     }

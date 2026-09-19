@@ -129,6 +129,7 @@ router.patch(
     body('aiTokenAlertRecipients.*').optional().isEmail(),
     body('voiceAiModelId').optional({ nullable: true }).isInt(),
     body('intentAiModelId').optional({ nullable: true }).isInt(),
+    body('summaryAiModelId').optional({ nullable: true }).isInt(),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -175,6 +176,7 @@ router.patch(
     if (req.body.aiTokenAlertRecipients !== undefined) data.aiTokenAlertRecipients = req.body.aiTokenAlertRecipients;
     if (req.body.voiceAiModelId !== undefined) data.voiceAiModelId = req.body.voiceAiModelId || null;
     if (req.body.intentAiModelId !== undefined) data.intentAiModelId = req.body.intentAiModelId || null;
+    if (req.body.summaryAiModelId !== undefined) data.summaryAiModelId = req.body.summaryAiModelId || null;
 
     const updated = await prisma.systemSettings.update({ where: { id: 1 }, data });
     cacheStore.clear();

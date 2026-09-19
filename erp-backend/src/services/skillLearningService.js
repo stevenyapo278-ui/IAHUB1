@@ -1,6 +1,7 @@
 const prisma = require('../prismaClient');
 const { getActiveProviders, callProviderWithFallback } = require('./mailAnalyzer');
 const { getPrompt } = require('./promptTemplates');
+const { autoLearnFromResolution } = require('./knowledgeAutoLearner');
 
 // ═══════════════════════════════════════════════════════════════════════════
 // AUTO-APPRENTISSAGE POST-RÉSOLUTION
@@ -91,6 +92,11 @@ async function learnFromResolution(ticketId) {
     } catch (err) {
       console.error(`[skillLearning] Analyse IA échouée (ticket ${ticketId}):`, err.message);
     }
+
+    // 5. Générer un brouillon knowledge base (fire-and-forget, ne pas bloquer)
+    autoLearnFromResolution(ticketId).catch((err) => {
+      console.error(`[skillLearning] Knowledge auto-learn échoué (ticket ${ticketId}):`, err.message);
+    });
 
     console.log(`[skillLearning] Ticket ${ticketId} traité : catégorie="${ticket.category}", fine="${result.fineSkill?.name || 'aucune'}", tech=${ticket.assignedToId}, niveau=${level}`);
     return result;

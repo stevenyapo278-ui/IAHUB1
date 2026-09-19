@@ -6,7 +6,7 @@ const { requirePermission } = require('../middleware/permissions');
 const { extractText } = require('../utils/documentExtract');
 const { chunkText } = require('../utils/chunking');
 const { generateEmbedding, toVectorLiteral } = require('../utils/embeddings');
-const { rerank, listRerankCandidates } = require('../utils/reranking');
+const { searchKnowledge } = require('../services/knowledgeSearch');
 const { auditLog } = require('../services/auditLogService');
 const { validateUpload } = require('../utils/security');
 
@@ -213,77 +213,14 @@ router.post('/search', async (req, res) => {
   if (!query) return res.status(400).json({ error: 'query est requis' });
 
   try {
-    const embedding = await generateEmbedding(query);
-    const userLimit = Number(limit) || 5;
-
-    // Si un Reranker est actif, on récupère plus de candidats pour l'étape de tri secondaire
-    const rerankCandidates = await listRerankCandidates();
-    const hasActiveReranker = rerankCandidates.length > 0;
-    const dbLimit = hasActiveReranker ? Math.max(30, userLimit * 3) : Math.min(userLimit, 20);
-
-    // Build where clause for metadata filters
-    const metadataFilters = [];
-    const filterParams = [];
-    let paramIndex = 3;
-
-    if (category) {
-      metadataFilters.push(`d.category = $${paramIndex}`);
-      filterParams.push(category);
-      paramIndex++;
-    }
-
-    if (tags && tags.length > 0) {
-      metadataFilters.push(`d.tags && $${paramIndex}`);
-      filterParams.push(tags);
-      paramIndex++;
-    }
-
-    const whereClause = metadataFilters.length > 0 
-      ? `WHERE d.status = 'READY' AND ${metadataFilters.join(' AND ')}`
-      : `WHERE d.status = 'READY'`;
-
-    // Hybrid search: combine vector similarity with full-text search (if enabled)
-    let results;
-    if (useHybrid) {
-      results = await prisma.$queryRawUnsafe(
-        `SELECT c.id, c."documentId", c."chunkIndex", c.content, d.title, d."sourceType", d.category, d.tags,
-                1 - (c.embedding <=> $1::vector) AS similarity,
-                ts_rank(to_tsvector('french', c.content), plainto_tsquery('french', $2)) AS text_rank,
-                (0.7 * (1 - (c.embedding <=> $1::vector)) + 0.3 * ts_rank(to_tsvector('french', c.content), plainto_tsquery('french', $2))) AS combined_score
-         FROM "KnowledgeChunk" c
-         JOIN "KnowledgeDocument" d ON d.id = c."documentId"
-         ${whereClause}
-         ORDER BY combined_score DESC
-         LIMIT $3`,
-        toVectorLiteral(embedding),
-        query,
-        dbLimit,
-        ...filterParams
-      );
-    } else {
-      results = await prisma.$queryRawUnsafe(
-        `SELECT c.id, c."documentId", c."chunkIndex", c.content, d.title, d."sourceType", d.category, d.tags,
-                1 - (c.embedding <=> $1::vector) AS similarity,
-                0 AS text_rank,
-                (1 - (c.embedding <=> $1::vector)) AS combined_score
-         FROM "KnowledgeChunk" c
-         JOIN "KnowledgeDocument" d ON d.id = c."documentId"
-         ${whereClause}
-         ORDER BY combined_score DESC
-         LIMIT $2`,
-        toVectorLiteral(embedding),
-        dbLimit,
-        ...filterParams
-      );
-    }
-
-    let finalResults = results;
-    if (hasActiveReranker) {
-      const reranked = await rerank(query, results);
-      finalResults = reranked.slice(0, userLimit);
-    }
-
-    return res.json(finalResults);
+    const results = await searchKnowledge(query, {
+      topK: Number(limit) || 5,
+      useHybrid,
+      category,
+      tags,
+      applyReranking: true,
+    });
+    return res.json(results);
   } catch (err) {
     return res.status(502).json({ error: err.message || 'Erreur lors de la recherche' });
   }

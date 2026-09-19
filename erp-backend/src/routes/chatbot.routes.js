@@ -328,9 +328,16 @@ router.post('/', authenticate, async (req, res) => {
       select: { role: true, content: true },
     })).map(m => ({ role: m.role, content: m.content })) : [];
 
+    // Charger le résumé existant de la conversation (si longue)
+    const existingSummary = conv?.summary || null;
+
+    // Charger le modèle de résumé configuré (Paramètres > IA)
+    const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+    const summaryModelId = settings?.summaryAiModelId || null;
+
     let result;
     try {
-      result = await handleMessage(message.trim(), dbHistory.length > 0 ? dbHistory : history, req.user, conv?.pendingTicketData || null, convId);
+      result = await handleMessage(message.trim(), dbHistory.length > 0 ? dbHistory : history, req.user, conv?.pendingTicketData || null, convId, { existingSummary, summaryModelId });
     } catch (handlerErr) {
       console.error('[chatbot] ═══ ERREUR HANDLEMESSAGE ═══');
       console.error('[chatbot] Message:', message.trim().substring(0, 200));
@@ -370,10 +377,14 @@ router.post('/', authenticate, async (req, res) => {
       },
     });
 
-    // Sauvegarder ou effacer les données du ticket en attente
+    // Sauvegarder ou effacer les données du ticket en attente + résumé si généré
+    const updateData = { pendingTicketData: result.pendingTicketData || null };
+    if (result._newSummary) {
+      updateData.summary = result._newSummary;
+    }
     await prisma.conversation.update({
       where: { id: convId },
-      data: { pendingTicketData: result.pendingTicketData || null },
+      data: updateData,
     });
 
     // Audit log
