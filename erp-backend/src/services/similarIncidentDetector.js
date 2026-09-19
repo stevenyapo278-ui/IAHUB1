@@ -135,23 +135,21 @@ async function saveTicketEmbedding(ticketId, title, content) {
       WHERE id = ${ticketId}
     `;
 
-    // Upsert TicketSimilarityIndex (Prisma classique pour les champs non-vector)
-    await prisma.ticketSimilarityIndex.upsert({
-      where: { ticketId },
-      create: {
-        ticketId,
-        summary: (title || '').substring(0, 500),
-        bodyShort: (content || '').substring(0, 200),
-        content: (content || '').substring(0, 2000),
-        status: 'OPEN',
-        requesterEmail: '',
-      },
-      update: {
-        summary: (title || '').substring(0, 500),
-        bodyShort: (content || '').substring(0, 200),
-        content: (content || '').substring(0, 2000),
-      },
-    });
+    // Upsert TicketSimilarityIndex (find-first + create/update car ticketId n'est pas @unique)
+    const summary = (title || '').substring(0, 500);
+    const bodyShort = (content || '').substring(0, 200);
+    const fullContent = (content || '').substring(0, 2000);
+    const existing = await prisma.ticketSimilarityIndex.findFirst({ where: { ticketId } });
+    if (existing) {
+      await prisma.ticketSimilarityIndex.update({
+        where: { id: existing.id },
+        data: { summary, bodyShort, content: fullContent },
+      });
+    } else {
+      await prisma.ticketSimilarityIndex.create({
+        data: { ticketId, summary, bodyShort, content: fullContent, status: 'OPEN', requesterEmail: '' },
+      });
+    }
 
     // Mettre à jour l'embedding dans TicketSimilarityIndex (raw SQL)
     await prisma.$executeRaw`
