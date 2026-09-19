@@ -268,14 +268,15 @@ async function callGemini(provider, apiKey, prompt, modelName, usage, options = 
     }
 
     // Function calling / tool use (Gemini format)
+    // Gemini attend UN SEUL entry tools avec toutes les functionDeclarations groupées
     if (options.tools) {
-      payload.tools = options.tools.map(t => ({
-        functionDeclarations: [{
+      payload.tools = [{
+        functionDeclarations: options.tools.map(t => ({
           name: t.function.name,
           description: t.function.description,
           parameters: t.function.parameters ? convertToGeminiSchema(t.function.parameters) : undefined,
-        }],
-      }));
+        })),
+      }];
     }
 
     const res = await fetch(`${base}/models/${model}:generateContent`, {
