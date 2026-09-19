@@ -270,10 +270,11 @@ router.post('/', authenticate, async (req, res) => {
     const flagged = detectPromptInjection(message);
 
     // Créer ou récupérer la conversation
-    let convId = conversationId;
+    let convId = conversationId ? parseInt(conversationId, 10) || null : null;
+    let conv = null;
     if (!convId) {
       // Créer une nouvelle conversation automatiquement
-      const conv = await prisma.conversation.create({
+      conv = await prisma.conversation.create({
         data: {
           userId: req.user.sub,
           title: generateConversationTitle(message),
@@ -282,7 +283,7 @@ router.post('/', authenticate, async (req, res) => {
       convId = conv.id;
     } else {
       // Vérifier que la conversation appartient à l'utilisateur
-      const conv = await prisma.conversation.findUnique({ where: { id: convId } });
+      conv = await prisma.conversation.findUnique({ where: { id: convId } });
       if (!conv || conv.userId !== req.user.sub) {
         return res.status(404).json({ error: 'Conversation introuvable.' });
       }
@@ -300,7 +301,7 @@ router.post('/', authenticate, async (req, res) => {
     });
 
     // Mettre à jour updatedAt de la conversation
-    const conv = await prisma.conversation.findUnique({ where: { id: convId } });
+    conv = await prisma.conversation.findUnique({ where: { id: convId } });
     await prisma.conversation.update({
       where: { id: convId },
       data: { updatedAt: new Date() },

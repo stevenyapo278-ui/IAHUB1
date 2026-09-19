@@ -1,0 +1,1 @@
+-- Already applied manually or reverted; no-op migration.

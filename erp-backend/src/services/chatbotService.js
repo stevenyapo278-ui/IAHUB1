@@ -9,9 +9,25 @@ const analyticsTools = require('./analyticsTools');
 
 const SYSTEM_PROMPT = `Tu es MARIE, l'assistante IA Helpdesk IT de Prosuma. Tu es une collègue expérimentée du support IT : naturelle, chaleureuse, efficace.
 
+CONNAISSANCE DE LA BASE DE DONNÉES IT PROSUMA :
+Tu as une connaissance complète de la structure et du contenu de la base PostgreSQL du helpdesk :
+- **Équipes Système** : Sécurité, Réseau, Téléphonie, Système, Matériel, Applicatif, Logiciel, DÉVELOPPEMENT.
+- **Catégories de tickets** : Sécurité, Réseau, Téléphonie, Système, Matériel, Applicatif, Logiciel, Serveur, Test.
+- **Statuts des tickets** : NEW (Nouveau), OPEN (Ouvert), PENDING (En attente), WAITING_FOR_USER (En attente utilisateur), SOLVED (Résolu), CLOSED (Fermé), PLANNED (Planifié).
+- **Priorités** : P1 (Critique), P2 (Haute), P3 (Moyenne), P4 (Basse).
+- **Entités clés** : Tickets (id, titre, contenu, statut, priorité, demandeur, assigné, équipe, lieu, SLA, approbations, suivis/commentaires, temps passés, liens inter-tickets), Utilisateurs (fullName, email, role, team), Équipements/Inventaire (assets, serial, type, lieu), Base de connaissances (articles, procédures).
+
 Tu es TOTALEMENT LIBRE sur la forme : ton, style, longueur, structure, formatage (markdown, tableaux, listes, gras, italique), emojis ou non — fais ce qui est le plus utile et le plus agréable pour ton interlocuteur. Réponds dans la langue de l'utilisateur. Varie tes tournures, montre ta personnalité, donne ton avis professionnel quand c'est pertinent. Analyse et interprète les données plutôt que de simplement les lister.
 
 Un contexte (profil utilisateur, tickets, statistiques, base de connaissances) est fourni après ce prompt quand il existe : appuie-toi sur ce qui est pertinent, ignore le reste.
+
+RÈGLE DE RESTITUTION ET FORMATAGE PROPRE (Absolue) :
+- Restitue TOUJOURS les données sous un format lisible, élégant et naturel (tableaux Markdown épurés, listes synthétiques).
+- Ne montre JAMAIS de détails techniques internes, de noms de champs de base de données (ex: "aiProcessed", "secondaryRequesterId", "outlookConversationId", "null", "undefined", "vector") ni de jargon de code.
+- Si une personne apparaît dans une recherche de tickets, indique systématiquement et clairement son rôle (Demandeur / Assigné / Observateur). Si elle apparaît sous plusieurs rôles, regroupe les tickets par rôle.
+
+RÈGLE DES OUTILS ET TRANSPARENCE :
+- Ne dis JAMAIS "Je peux lancer l'outil X, voulez-vous que je le fasse ?" ou "Je n'ai pas la main pour exécuter cet outil". Si un outil existe, il est utilisé automatiquement et tu présentes directement les résultats. Si la donnée est là, réponds directement avec les chiffres réels.
 
 RÈGLE DE VÉRACITÉ — JAMAIS D'INVENTION (absolue, prime sur tout le reste) :
 - Les seuls numéros de tickets, chiffres, statuts et noms que tu peux citer sont ceux du contexte fourni. Écrire "#XXX", "[Ticket 6]", "#123 (détail non chargé)" ou tout numéro/statut absent du contexte est INTERDIT — même pour "compléter" un tableau.
@@ -27,16 +43,30 @@ Quand une demande est ambiguë ou incomplète, ne choisis JAMAIS une interpréta
 - Le nom ne correspond à personne dans l'annuaire → ne re-formule pas une orthographe au hasard : demande de vérifier le nom ou de donner l'email.
 - "mes tickets", "son ticket", "ce problème" et tout pronom ambigu → vérifie le contexte de conversation ; s'il ne suffit pas, demande.
 - Une stat ou un périmètre est vague ("les pannes récentes") → précise ce que tu as utilisé comme filtre (période, statut) et propose d'ajuster.
-En revanche, si le contexte (conversation précédente, profil utilisateur, résultat de recherche élargie) lève le doute, réponds directement sans reposer la question.`;
+En dehors de ça, si le contexte (conversation précédente, profil utilisateur, résultat de recherche élargie) lève le doute, réponds directement sans reposer la question.
+
+NE JAMAIS ÉNONCER UNE LIMITE :
+- Ne formule jamais de phrase en "je ne peux pas", "je n'ai pas accès à", "cette fonctionnalité n'existe pas".
+- Quand une demande sort de ce que tu peux faire, redirige directement vers l'action utile ou l'endroit approprié, sans jamais énoncer la limite elle-même.
+- Ne dis jamais "c'est fait", "je l'ai créé", "je l'ai assigné" pour une action que tu n'as pas réellement exécutée via un outil.`;
 
 // ── Nettoyage minimal des réponses IA ──────────────────────────────────
 
 function cleanAiReply(text) {
   if (!text) return '';
-  return text
+  let cleaned = text
     .replace(/\n{4,}/g, '\n\n\n')
     .replace(/\n+$/, '')
     .trim();
+  // Supprimer les fuites de Chain of Thought / audit preamble
+  // (le LLM audit peut parfois sortir son analyse interne avant la réponse)
+  cleaned = cleaned
+    .replace(/^\s*(?:["']?(?:tickets?|réponse|résumé|analyse|note|internal|context|implicit)[^:]*:\s*)/i, '')
+    .replace(/\b(?:CHAIN OF THOUGHT|chain of thought|réflexion interne|analyse interne|note interne|internal thought|reasoning)\b[^]*?(?=\n[#*\-]|$)/gi, '')
+    .replace(/\b(?:Le système|la réponse|première réponse|le chatbot|MARIE)[^.]*?(?:répond|présente|soulève|contient|mentionne)[^.]*\./gi, '')
+    .replace(/\b(?:Voici (?:le |un )?(?:résumé|aperçu|analyse|résultat)[^.]*)\./gi, '')
+    .trim();
+  return cleaned;
 }
 
 // ── Réponses directes pour les salutations ──
@@ -49,12 +79,6 @@ const GREETING_REPLIES = [
   'Bonjour ! Besoin d\'aide sur un ticket, des stats, autre chose ?',
 ];
 
-// ── Intents qui produisent leur propre contexte déterministe (pas de message "aucun ticket") ──
-const DETERMINISTIC_INTENTS = new Set([
-  'analytics', 'team_report', 'top_locations', 'top_technicians', 'report',
-  'check_ticket', 'summary', 'change_status', 'assign_ticket', 'add_followup', 'help',
-  'search_inventory', 'search_users', 'search_locations', 'search_teams',
-]);
 
 function normalizeAccents(str) {
   if (!str) return '';
@@ -112,55 +136,6 @@ function isGreetingMessage(message) {
     || /^(salut|bonjour|bonsoir|hello|hey|coucou)[\s,!.,]*(marie|ia|bot)[\s!.,?]*$/i.test(lower);
 }
 
-const INTENT_PROMPT = `Tu es un classificateur d'intentions. Analyse le message utilisateur et réponds UNIQUEMENT avec un JSON valide (pas de texte avant ou après).
-
-Intents possibles :
-- "analytics" : statistiques, comparaisons, classements, causes racines ("quel magasin a le plus de tickets", "pourquoi ce magasin a des pannes", "perf de Jean")
-- "team_report" : répartition des tickets par équipe, reunion hebdomadaire, presenting ("répartition par équipe", "tickets par technicien", "bilan équipe", "réunion hebdo", "ouverts par équipe")
-- "general" : question générale, salutation, conversation, OU questions de suivi sur un ticket déjà mentionné ("quand il a été créé", "quel est son statut", "qui l'a assigné", "donne plus de détails", "et pour Jean?")
-- "search_tickets" : RECHERCHE ou LISTE de tickets existants. Toute demande qui commence par "liste", "quels", "montre", "tous les", "donne-moi les tickets" → search_tickets. Exemples : "pannes vpn", "tickets imprimantes", "liste tous les tickets ouverts", "quels sont les tickets VPN", "montre les tickets en attente", "tous les tickets Critique", "je veux la liste de tous les tickets", "donne-moi les tickets P1"
-- "create_ticket" : créer/ouvrir un ticket pour soi-même, signaler un problème, demander de l'assistance, décrire un incident ("j'ai un problème", "j'ai besoin d'assistance", "mon imprimante ne marche pas", "l'imprimante du 2ème est en panne", "il y a un souci VPN", "signaler un incident", "ça ne fonctionne plus")
-- "create_ticket_for" : créer un ticket au nom d'un autre utilisateur ("crée un ticket pour Paul", "ouvre un ticket pour M. Diallo", "ticket pour la compta")
-- "confirm_create_ticket" : l'utilisateur confirme vouloir créer un ticket après avoir été demandé ("oui", "oui crée-le", "confirme", "go", "vas-y", "c'est bon", "je confirme", "oui vas-y")
-- "check_ticket" : connaître le statut, la date de création, ou les détails d'un ticket spécifique ("quel est le statut du ticket #10", "quand a été créé le ticket 5", "qui a assigné le ticket #3")
-- "summary" : résumer un ticket existant ("résume-moi le ticket #123", "résumé du ticket 45")
-- "similar_tickets" : chercher des tickets similaires avant création
-- "change_status" : modifier le statut d'un ticket
-- "assign_ticket" : assigner un ticket à un technicien
-- "add_followup" : ajouter un commentaire/suivi sur un ticket ("ajoute un suivi sur le #12", "note que le problème est résolu", "laisse un commentaire sur ce ticket", "mets à jour le ticket #5", "j'ai résolu le souci pour le ticket 8")
-- "search_inventory" : recherche d'équipements/assets
-- "search_users" : recherche d'utilisateurs (nom, email, rôle) — NE PAS utiliser pour les compétences
-- "search_teams" : LISTE ou RECHERCHE des équipes du système ("regarde la liste des équipes", "quelles sont les équipes", "liste des équipes", "membres de l'équipe X", "nos équipes")
-- "search_locations" : recherche de lieux/où
-- "search_problems" : recherche de problèmes ITIL racines ("problèmes ouverts", "quels problèmes", "liste des incidents majeurs", "problèmes réseau")
-- "search_skills" : COMPÉTENCES des techniciens — uniquement quand le message contient "compétence", "expert", "maîtrise", "niveau", "qui sait faire", "qui connait", "qualifié". Exemples : "qui est expert en réseau", "qui sait faire du VPN", "compétences de Jean", "quels techniciens savent faire Linux", "liste des compétences"
-- "ticket_links" : LIENS entre tickets — uniquement quand le message contient "lié", "lien", "liens", "bloque", "bloqué", "doublon", "rattaché". Exemples : "liens du ticket #12", "quels tickets sont liés", "y a-t-il un doublon", "quel ticket bloque le #5"
-- "time_entries" : TEMPS PASSÉ sur un ticket — uniquement quand le message contient "temps", "heures", "imputé", "saisie", "chronomètre", "travaillé". Exemples : "temps passé sur le #12", "combien de temps sur ce ticket", "qui a travaillé dessus", "heures imputées"
-- "report" : rapport STATISTIQUE global — PAS une liste de tickets. "combien de tickets", "nombre total", "synthèse", "bilan chiffré". NE PAS utiliser pour "liste les tickets", "quels tickets", "montre les tickets".
-- "escalate" : parler à un technicien/humain, escalade
-- "help" : demande d'aide sur les fonctionnalités
-
-RÈGLES CRITIQUES POUR LES SUIVIS DE CONVERSATION :
-- Si le message contient des pronoms référant à un ticket précédent ("il", "elle", "ce ticket", "celui-ci", "son statut", "sa priorité", "quand il a été créé") → "check_ticket" ou "general" selon le contexte.
-- "quand il a été créé" = question sur la DATE de création d'un ticket existant → "check_ticket" (PAS create_ticket).
-- "quel est son statut" = question sur le statut d'un ticket déjà mentionné → "check_ticket" (PAS create_ticket).
-- "créé" seul ne signifie PAS "créer un ticket". Regarde le contexte : "quand il a été créé" = passé, question → check_ticket.
-- "et pour Jean?" ou "et ceux de Paul?" = follow-up sur une recherche précédente → herite de l'intent précédent via le contexte conversationnel.
-
-RÈGLE IMPORTANTE : "liste les tickets", "quels tickets", "tous les tickets", "montre les tickets" → search_tickets (PAS report). Report = compter/résumer, search_tickets = lister/détail.
-
-Réponds avec : {"intent": "nom_intent", "params": {}}
-
-Extraction de paramètres :
-- Si mot-clé spécifique mentionné → "keyword": "..."
-- Si question "pourquoi" → "isWhy": true
-- Si numéro de ticket (#123) → "ticketId": 123
-- Si titre + description fournis → "title": "...", "description": "..."
-- Si un nom de personne mentionné → "personName": "..."
-- Si un nom de lieu mentionné → "locationName": "..."
-- Si un nom d'équipe mentionné → "teamName": "..."
-- Si création pour un autre → "forUser": "..." (nom de la personne)`;
-
 // ── Recherche RAG (Base de connaissances) ─────────────────────────────
 
 async function searchKnowledge(query, limit = 5) {
@@ -205,9 +180,12 @@ function extractSearchParamsRegex(query) {
   }
 
   // Équipe
-  const teamMatch = lower.match(/\b(?:equipe|équipe|team)\s+([a-zà-ÿ0-9\- ]+)/i);
+  const teamMatch = query.match(/\b(?:equipe|équipe|team|groupe)\s+([A-ZÀ-Ÿa-zà-ÿ0-9_-]+(?:\s+[A-ZÀ-Ÿa-zà-ÿ0-9_-]+)?)/i);
   if (teamMatch) {
-    params.teamName = teamMatch[1].replace(/[\?!\.\,]+$/, '').trim();
+    const cand = teamMatch[1].replace(/\s+(?:a[- ]t[- ]il|a[- ]t[- ]elle|a|des|les|en|sur|pour|ce|cet|cette|du|de|tickets?|tikets?|tiquets?).*$/i, '').replace(/[\?!\.\,]+$/, '').trim();
+    if (cand && !/^(du|de|la|le|les|des|un|une)$/i.test(cand)) {
+      params.teamName = cand;
+    }
   } else if (/\b(?:mon|ma|notre|nos)\s+(?:équipe|equipe|team)\b/i.test(lower)) {
     params.teamName = 'mon équipe';
   }
@@ -241,12 +219,12 @@ function extractSearchParamsRegex(query) {
   const idMatch = query.match(/#(\d+)/);
   if (idMatch) params.ticketId = parseInt(idMatch[1], 10);
 
-  // Personne : "de/par/du/pour/concernant/demandeur/assigné à <Nom>" (ex: "tickets de Mariam Fofana", "pour Steven Yapo").
-  const personRe = /\b(?:de|par|du|pour|concernant|sur|demandeur\s*:?)\s+([A-ZÀ-Ÿa-zà-ÿ]+(?:\s+[A-ZÀ-Ÿa-zà-ÿ]+)+)\b/i;
-  const pm = query.match(personRe);
-  if (pm) {
-    const candidate = pm[1].replace(/\s+(?:a[- ]t[- ]il|a[- ]t[- ]elle|a|des|les|en|sur|pour|ce|cet|cette|du|de|tickets?|incidents?).*$/i, '').trim();
-    if (!/\b(janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre|semaine|mois|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|equipe|équipe|ticket|tickets)\b/i.test(candidate) && candidate.length > 2) {
+  // Personne : "de/par/du/pour/concernant/demandeur/technicien/évalue <Nom>" (ex: "tickets de Mariam Fofana", "évalue le technicien Jean Kouassi").
+  const techPersonMatch = query.match(/\b(?:de|par|du|pour|concernant|sur|demandeur|technicien|technicienne|[ée]value|[ée]valuer|performance\s+de|bilan\s+de)\s+([A-ZÀ-Ÿa-zà-ÿ]+(?:\s+[A-ZÀ-Ÿa-zà-ÿ]+)+)\b/i);
+  const NON_PERSON_TERMS = /\b(janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre|semaine|mois|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|equipe|équipe|ticket|tickets|tiket|tikets|tiquet|tiquets|tcket|tckets|port|usb|imprimante|serveur|réseau|reseau|logiciel|mot de passe|wifi|vpn|switch|ordinateur|pc|application|messagerie|compte|accès|acces|connexion|antivirus|licence|dossier|fichier|base|site|bâtiment|batiment|agence|étage|etage|ouverture|securite|sécurité|sécurite|securité|téléphonie|telephonie|applicatif|matériel|materiel|développement|developpement|système|systeme|combien|total|nombre|statut|statuts|état|états|avancement|bilan|rapport|résumé|resume|liste|synthèse|synthese|historique)\b/i;
+  if (techPersonMatch) {
+    const candidate = techPersonMatch[1].replace(/\s+(?:a[- ]t[- ]il|a[- ]t[- ]elle|a|des|les|en|sur|pour|ce|cet|cette|du|de|tickets?|incidents?).*$/i, '').trim();
+    if (!NON_PERSON_TERMS.test(candidate) && candidate.length > 2) {
       params.personName = candidate;
     }
   }
@@ -257,8 +235,12 @@ function extractSearchParamsRegex(query) {
     if (nameAtStartMatch) {
       const cand = nameAtStartMatch[1].trim();
       const lowerCand = cand.toLowerCase();
-      const forbidden = ['liste des', 'montre les', 'tous les', 'quand il', 'quel est', 'est ce', 'y a', 'il y', 'le ticket', 'un ticket', 'quels sont'];
-      if (!forbidden.some((f) => lowerCand.startsWith(f)) && !/\b(janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre|equipe|équipe|ticket|tickets)\b/i.test(cand)) {
+      const forbidden = [
+        'liste des', 'montre les', 'tous les', 'quand il', 'quel est', 'est ce', 'y a', 'il y', 'le ticket',
+        'un ticket', 'quels sont', 'je veux', 'je souhaite', 'je voudrais', 'peux tu', 'dis moi', 'evalue le',
+        'évalue le', 'évaluer le', 'performance de', 'bilan de', 'les demandes', 'ouverture de',
+      ];
+      if (!forbidden.some((f) => lowerCand.startsWith(f)) && !NON_PERSON_TERMS.test(cand)) {
         params.personName = cand;
       }
     }
@@ -508,6 +490,39 @@ async function findTicketsForPersonAnyRole(personName, { limit = 20, period = nu
   return { tickets: annotated, totalCount, matchLevel };
 }
 
+function getKeywordVariants(kw) {
+  if (!kw || typeof kw !== 'string') return [];
+  const trimmed = kw.trim();
+  if (!trimmed) return [];
+
+  const set = new Set([trimmed, trimmed.toLowerCase(), trimmed.toUpperCase()]);
+
+  // Dé-accentuation
+  const unaccented = trimmed.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  set.add(unaccented);
+  set.add(unaccented.toLowerCase());
+  set.add(unaccented.toUpperCase());
+
+  // Dictionnaire de correspondances d'accents IT français
+  const knownMap = {
+    "securite": ["Sécurité", "sécurité", "SECURITE", "Sécurite"],
+    "reseau": ["Réseau", "réseau", "RESEAU", "Réseaux", "réseaux"],
+    "telephonie": ["Téléphonie", "téléphonie", "TELEPHONIE"],
+    "systeme": ["Système", "système", "SYSTEME", "Systèmes"],
+    "materiel": ["Matériel", "matériel", "MATERIEL", "Matériels"],
+    "developpement": ["DÉVELOPPEMENT", "Développement", "développement", "DEVELOPPEMENT"],
+    "applicatif": ["Applicatif", "applicatif", "Applicatifs"],
+    "logiciel": ["Logiciel", "logiciel", "Logiciels"],
+  };
+
+  const norm = unaccented.toLowerCase();
+  if (knownMap[norm]) {
+    for (const v of knownMap[norm]) set.add(v);
+  }
+
+  return [...set];
+}
+
 function buildSearchQuery(params, user) {
   const where = { deletedAt: null, approvalStatus: { notIn: ['PENDING', 'REJECTED'] } };
 
@@ -539,13 +554,14 @@ function buildSearchQuery(params, user) {
     where.priority = params.priorities.length === 1 ? params.priorities[0] : { in: params.priorities };
   }
 
-  // Équipe : filtre à la fois ticket.team.name ET assignedTo.team.name
+  // Équipe : filtre à la fois ticket.team.name ET assignedTo.team.name avec variantes d'accents
   if (params.teamName) {
+    const variants = getKeywordVariants(params.teamName);
     const teamFilter = {
-      OR: [
-        { team: { name: { contains: params.teamName, mode: 'insensitive' } } },
-        { assignedTo: { team: { name: { contains: params.teamName, mode: 'insensitive' } } } },
-      ],
+      OR: variants.flatMap(v => [
+        { team: { name: { contains: v, mode: 'insensitive' } } },
+        { assignedTo: { team: { name: { contains: v, mode: 'insensitive' } } } },
+      ]),
     };
     if (where.OR) {
       where.AND = [...(where.AND || []), teamFilter];
@@ -570,10 +586,6 @@ function buildSearchQuery(params, user) {
   }
 
   // Possessif ("mes tickets", "mes demandes") → filtre sur l'UTILISATEUR CONNECTÉ.
-  // Prioritaire sur toute extraction de nom : si l'utilisateur dit "mes tickets", on ne
-  // cherche JAMAIS les tickets de quelqu'un d'autre, même si un nom a été extrait à tort.
-  // Un demandeur voit ses tickets (demandeur OU observateur), un technicien voit aussi
-  // ceux qui lui sont assignés — même sémantique que le filtrage par rôle ci-dessus.
   if (params.isMyTicketsRef && user?.sub) {
     const mineFilter = {
       OR: [
@@ -592,7 +604,6 @@ function buildSearchQuery(params, user) {
   }
 
   // Personne sans précision (ex: "tickets de Mariam") → demandeur OU assigné.
-  // Un filtre assigné seul renvoie vide quand la personne est seulement demandeur (cas fréquent).
   if (params.personName && !params.requesterName && !params.assignedToName) {
     const personFilter = {
       OR: [
@@ -612,14 +623,17 @@ function buildSearchQuery(params, user) {
     where.OR = [...(where.OR || []), { id: params.ticketId }];
   }
 
-  // Mot-clé (titre, contenu, catégorie)
+  // Mot-clé (titre, contenu, catégorie, équipe) avec variantes d'accents
   if (params.keyword && params.keyword.length > 1) {
     const kw = params.keyword;
-    const keywordFilter = [
-      { title: { contains: kw, mode: 'insensitive' } },
-      { content: { contains: kw, mode: 'insensitive' } },
-      { category: { contains: kw, mode: 'insensitive' } },
-    ];
+    const variants = getKeywordVariants(kw);
+    const keywordFilter = variants.flatMap(v => [
+      { title: { contains: v, mode: 'insensitive' } },
+      { content: { contains: v, mode: 'insensitive' } },
+      { category: { contains: v, mode: 'insensitive' } },
+      { team: { name: { contains: v, mode: 'insensitive' } } },
+      { assignedTo: { team: { name: { contains: v, mode: 'insensitive' } } } },
+    ]);
 
     if (user && (user.role === 'REQUESTER' || user.role === 'TECHNICIAN')) {
       const roleFilter = { OR: where.OR || [] };
@@ -800,113 +814,6 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
   }
 }
 
-async function searchTicketsWithContext(message, limit, user, period, previousState) {
-  const _slog = (step, detail) => console.log(`[chatbot] searchTicketsWithContext step=${step} ${detail || ''}`);
-  _slog('start', `msg="${message.substring(0, 60)}" prevIntent=${previousState?.intent} prevTickets=${previousState?.tickets?.length || 0}`);
-
-  // Détecter si le message change juste un paramètre (ex: "et pour Jean")
-  const lower = message.toLowerCase();
-  const personMatch = lower.match(/\b(?:pour|de|à|a)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/i);
-
-  // Anti-faux-positif : "de ticket ouverts", "à date", "pour aujourd'hui"... ne sont PAS des
-  // personnes. On valide que ce "nom" correspond à un utilisateur réel avant de filtrer dessus.
-  let validPersonName = null;
-  if (personMatch && previousState?.intent === 'search_tickets') {
-    const candidate = personMatch[1];
-    try {
-      const exists = await prisma.user.findFirst({
-        where: { fullName: { contains: candidate, mode: 'insensitive' }, deletedAt: null },
-        select: { id: true },
-      });
-      if (exists) validPersonName = candidate;
-    } catch {}
-  }
-
-  if (validPersonName && previousState?.intent === 'search_tickets') {
-    // Extraire le nom de la personne
-    const personName = validPersonName;
-    _slog('person-detected', `personName=${personName}`);
-
-    // Chercher les tickets de cette personne (demandeur OU assigné)
-    try {
-      const where = {
-        deletedAt: null,
-        approvalStatus: { notIn: ['PENDING', 'REJECTED'] },
-        OR: [
-          { requester: { fullName: { contains: personName, mode: 'insensitive' } } },
-          { assignedTo: { fullName: { contains: personName, mode: 'insensitive' } } },
-        ],
-      };
-
-      if (period) {
-        const { start, end } = resolvePeriodDates(period);
-        if (start) where.createdAt = { ...where.createdAt, gte: start };
-        if (end) where.createdAt = { ...where.createdAt, lt: end };
-      }
-
-      const [tickets, totalCount] = await Promise.all([
-        prisma.ticket.findMany({
-          where,
-          take: limit,
-          include: {
-            requester: { select: { fullName: true, email: true } },
-            assignedTo: { select: { fullName: true } },
-            team: { select: { name: true } },
-          },
-          orderBy: { createdAt: 'desc' },
-        }),
-        prisma.ticket.count({ where }),
-      ]);
-
-      _slog('db-done', `tickets=${tickets.length} totalCount=${totalCount}`);
-      return { tickets, totalCount };
-    } catch (err) {
-      console.error('[chatbot] Erreur searchTicketsWithContext:', err.message);
-      // Fallback utile : recherche normale au lieu de résultats vides
-      return searchTickets(message, limit, user, period);
-    }
-  }
-
-  // Suivi de top_locations : filtrer par le lieu précédent
-  if (previousState?.intent === 'top_locations' && previousState?.params?.topLocations?.length) {
-    const topLocation = previousState.params.topLocations[0]; // 1er du classement
-    _slog('top_location-context', `topLocation=${topLocation}`);
-    try {
-      const where = {
-        deletedAt: null,
-        approvalStatus: { notIn: ['PENDING', 'REJECTED'] },
-        locationName: { contains: topLocation, mode: 'insensitive' },
-      };
-      if (period) {
-        const { start, end } = resolvePeriodDates(period);
-        if (start) where.createdAt = { ...where.createdAt, gte: start };
-        if (end) where.createdAt = { ...where.createdAt, lt: end };
-      }
-      const [tickets, totalCount] = await Promise.all([
-        prisma.ticket.findMany({
-          where,
-          take: limit,
-          include: {
-            requester: { select: { fullName: true, email: true } },
-            assignedTo: { select: { fullName: true } },
-            team: { select: { name: true } },
-          },
-          orderBy: { createdAt: 'desc' },
-        }),
-        prisma.ticket.count({ where }),
-      ]);
-      _slog('db-done', `tickets=${tickets.length} totalCount=${totalCount}`);
-      return { tickets, totalCount };
-    } catch (err) {
-      console.error('[chatbot] Erreur searchTicketsWithContext top_locations:', err.message);
-      return searchTickets(message, limit, user, period);
-    }
-  }
-
-  // Fallback : recherche normale
-  return searchTickets(message, limit, user, period);
-}
-
 // ── Recherche d'inventaire (assets) ───────────────────────────────────
 
 async function searchAssets(query, limit = 5) {
@@ -981,7 +888,7 @@ async function searchTeams(query = '', limit = 10) {
 
 // ── Tool definitions (function calling) ──────────────────────────────
 
-const CHATBOT_TOOLS = [
+const ALL_CHATBOT_TOOLS = [
   {
     type: 'function',
     function: {
@@ -1141,7 +1048,7 @@ const CHATBOT_TOOLS = [
     type: 'function',
     function: {
       name: 'get_top_technicians',
-      description: 'Classement des techniciens par nombre de tickets. Utile pour "quel tech a le plus de tickets"',
+      description: 'Classement des techniciens par nombre de tickets résolus ET total. Utile pour « qui a le plus résolu », « meilleur taux de résolution », « classement des techs ».',
       parameters: {
         type: 'object',
         properties: {
@@ -1280,6 +1187,12 @@ const CHATBOT_TOOLS = [
   },
 ];
 
+// ── Filtre : seuls les outils de lecture sont exposés au LLM ──
+// Les actions d'écriture (create, change_status, assign) ne doivent JAMAIS
+// être déclenchées par un choix du modèle — elles sont réservées au code interne.
+const WRITE_ACTION_TOOLS = new Set(['create_ticket', 'change_ticket_status', 'assign_ticket']);
+const CHATBOT_TOOLS = ALL_CHATBOT_TOOLS.filter(t => !WRITE_ACTION_TOOLS.has(t.function.name));
+
 // ── Exécution des tools ──────────────────────────────────────────────
 
 // ── Liste blanche des capacités (dérivée du CODE réel, jamais copiée à la main) ──
@@ -1288,10 +1201,15 @@ const CHATBOT_TOOLS = [
 // "c'est planifié", "je relance l'équipe") est une hallucination d'action.
 function buildCapabilityLine() {
   const names = CHATBOT_TOOLS.map((t) => t?.function?.name).filter(Boolean);
-  return `\n\nACTIONS POSSIBLE — LISTE FERMÉE (dérivée des outils réellement disponibles) :\n${names.map((n) => '- ' + n).join('\n')}\nTu ne peux RIEN faire d'autre : pas d'envoi d'email, pas de modification d'inventaire ou de GLPI, pas de rapport planifié, pas de relance automatique. Si on te demande une action hors de cette liste, dis que tu ne peux pas faire ça et propose l'action la plus proche parmi celles de la liste. Ne dis jamais "je m'en occupe", "c'est fait" ou "je vous envoie" pour une action hors liste — ces outils sont ta seule capacité d'action.`;
+  return `\n\nCE QUE TU PEUX FAIRE (liste fermée) :\n${names.map((n) => '- ' + n).join('\n')}\n\nPour un suivi sur un ticket existant, tu peux l'ajouter directement (add_ticket_followup) après confirmation de l'utilisateur.\nRègle : quand l'utilisateur te demande d'ajouter un suivi, appelle add_ticket_followup directement avec ticketId et content. Ne demande PAS la visibilité (public/privé) — c'est public par défaut. Ne pose PAS de questions supplémentaires avant la confirmation.\nSi on te demande de créer, clôturer ou réassigner un ticket : ne dis jamais que tu ne peux pas — oriente directement et naturellement vers l'ERP, ou propose d'ajouter un suivi qui résume la demande. Ne mentionne jamais tes limites, tes outils, ou ce que tu ne fais pas.`;
 }
 
-async function executeTool(toolName, args, user) {
+async function executeTool(toolName, args, user, { confirmed = false } = {}) {
+  // ── Garde-fou défensif : les actions d'écriture ne sont plus exécutables par le LLM ──
+  if (WRITE_ACTION_TOOLS.has(toolName)) {
+    return { redirect: true, message: 'Consulte directement l\'ERP pour cette action, ou ajoute un suivi sur le ticket concerné.' };
+  }
+
   const p = args || {};
   switch (toolName) {
     case 'search_tickets': {
@@ -1313,6 +1231,45 @@ async function executeTool(toolName, args, user) {
         }));
       }
 
+      // ── Chemin direct : quand le LLM fournit des params structurés (locationName,
+      // status, priority, etc.), on construit la requête Prisma directement sans repasser
+      // par callSearchParamsAI qui risque de réinterpréter le query (ex: "Siège Abidjan"
+      // → teamName:"Abidjan" au lieu de locationName:"Siège Abidjan"). ──
+      const hasStructuredParams = p.locationName || p.status || p.priority || p.assignedTo || p.requester || p.person || p.category || p.period;
+      if (hasStructuredParams && !p.query) {
+        const searchParams = {};
+        if (p.locationName) searchParams.locationName = p.locationName;
+        if (p.status) searchParams.statuses = [p.status];
+        if (p.priority) searchParams.priorities = [p.priority];
+        if (p.assignedTo) searchParams.assignedToName = p.assignedTo;
+        if (p.requester) searchParams.requesterName = p.requester;
+        if (p.person) searchParams.personName = p.person;
+        if (p.category) searchParams.keyword = p.category;
+        if (p.period) searchParams.period = p.period;
+
+        const where = buildSearchQuery(searchParams, user);
+        const tickets = await prisma.ticket.findMany({
+          where,
+          take: p.limit || 20,
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true, title: true, status: true, priority: true, locationName: true, category: true,
+            content: true, createdAt: true, slaResolutionDueAt: true, approvalStatus: true,
+            requester: { select: { fullName: true, email: true } },
+            assignedTo: { select: { fullName: true } },
+            team: { select: { name: true } },
+          },
+        });
+        console.log(`[chatbot] search_tickets direct: ${tickets.length} résultats pour ${JSON.stringify(searchParams)}`);
+        return tickets.map(t => ({
+          id: t.id, title: t.title, status: t.status, priority: t.priority,
+          locationName: t.locationName, requester: t.requester?.fullName || null,
+          assignedTo: t.assignedTo?.fullName || null, team: t.team?.name || null,
+          createdAt: t.createdAt, category: t.category,
+        }));
+      }
+
+      // ── Chemin classique : query texte → AI re-parsing ──
       const q = [p.query, p.locationName, p.assignedTo, p.requester, p.category].filter(Boolean).join(' ');
       const result = await searchTickets(q || ' ', p.limit || 20, user, p.period);
       const tickets = result.tickets || result;
@@ -1335,12 +1292,6 @@ async function executeTool(toolName, args, user) {
       return await checkTicketStatus(p.ticketId);
     case 'get_ticket_summary':
       return await getTicketSummary(p.ticketId);
-    case 'create_ticket':
-      return await createTicketFromChat(p.title, p.description, p.priority || 'P3', user?.id, { category: p.category });
-    case 'change_ticket_status':
-      return await changeTicketStatus(p.ticketId, p.newStatus);
-    case 'assign_ticket':
-      return await assignTicket(p.ticketId, p.personName);
     case 'find_similar_tickets':
       return await findSimilarTickets(p.title, p.description || p.title, user);
     case 'get_ticket_links': {
@@ -1373,14 +1324,39 @@ async function executeTool(toolName, args, user) {
       return stats;
     }
     case 'get_top_technicians': {
-      const where = { deletedAt: null, status: { notIn: ['CLOSED', 'SOLVED'] }, approvalStatus: { notIn: ['PENDING', 'REJECTED'] } };
-      const tickets = await prisma.ticket.findMany({ where, select: { id: true, assignedToId: true, assignedTo: { select: { fullName: true } } } });
-      const techMap = new Map();
-      for (const t of tickets) {
-        const name = t.assignedTo?.fullName || 'Non assigné';
-        techMap.set(name, (techMap.get(name) || 0) + 1);
+      // Inclure TOUS les tickets (ouverts ET résolus) pour un vrai classement
+      // L'ancien filtre `status NOT IN (CLOSED, SOLVED)` excluait les résolutions
+      // et rendait le comptage "résolus" toujours à 0.
+      const period = p.period || '30d';
+      const techWhere = { deletedAt: null, approvalStatus: { notIn: ['PENDING', 'REJECTED'] } };
+      const startDate = getStartDateFromPeriod(period);
+      if (startDate) {
+        techWhere.createdAt = { gte: startDate };
       }
-      return [...techMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, p.limit || 10).map(([name, total]) => ({ name, total }));
+      const allTickets = await prisma.ticket.findMany({
+        where: techWhere,
+        select: { id: true, status: true, priority: true, assignedTo: { select: { fullName: true } } },
+      });
+      const techMap = new Map();
+      for (const t of allTickets) {
+        const name = t.assignedTo?.fullName || 'Non assigné';
+        if (!techMap.has(name)) techMap.set(name, { total: 0, resolved: 0, urgent: 0 });
+        const entry = techMap.get(name);
+        entry.total++;
+        if (t.status === 'SOLVED' || t.status === 'CLOSED') entry.resolved++;
+        if (t.priority === 'P1' || t.priority === 'P2') entry.urgent++;
+      }
+      return [...techMap.entries()]
+        .sort((a, b) => b[1].resolved - a[1].resolved) // classement par résolutions
+        .slice(0, p.limit || 10)
+        .map(([name, data], i) => ({
+          rank: i + 1,
+          name,
+          total: data.total,
+          resolved: data.resolved,
+          resolutionRate: data.total > 0 ? Math.round((data.resolved / data.total) * 100) : 0,
+          urgent: data.urgent,
+        }));
     }
     case 'get_team_report':
       return await analyticsTools.getTeamDistribution({ period: p.period || '30d' });
@@ -1401,6 +1377,15 @@ async function executeTool(toolName, args, user) {
     case 'search_knowledge':
       return await searchKnowledge(p.query, 5);
     case 'add_ticket_followup':
+      if (!confirmed) {
+        const visLabel = p.isPrivate ? 'Privé (interne IT)' : 'Public';
+        return {
+          needsConfirmation: true,
+          tool: toolName,
+          args: p,
+          message: `Je m'apprête à ajouter ce suivi au ticket #${p.ticketId} :\n> "${p.content}"\n\nVisibilité : ${visLabel}\n\nConfirme ?`,
+        };
+      }
       return await addTicketFollowup(p.ticketId, p.content, p.isPrivate, user);
     default:
       return `Outil inconnu: ${toolName}`;
@@ -1486,6 +1471,7 @@ async function callAIWithTools(messages, options = {}) {
 
     // Exécuter chaque tool et ajouter les résultats comme texte
     const toolResults = [];
+    let pendingConfirmation = null;
     for (const tc of toolCalls) {
       const fnName = tc.function.name;
       let fnArgs = {};
@@ -1500,9 +1486,28 @@ async function callAIWithTools(messages, options = {}) {
         console.error(`[chatbot] Tool ${fnName} error:`, err.message);
       }
 
+      // Si l'outil nécessite une confirmation → arrêter la boucle immédiatement
+      if (fnResult && fnResult.needsConfirmation) {
+        pendingConfirmation = fnResult;
+        break;
+      }
+
       const resultText = typeof fnResult === 'string' ? fnResult : JSON.stringify(fnResult, null, 2);
       allToolResults.push(`## ${fnName}\n${resultText.substring(0, 6000)}`);
       toolResults.push(`## ${fnName}\n${resultText.substring(0, 6000)}`);
+    }
+
+    // Si une confirmation est en attente → renvoyer le message de confirmation
+    // et persister l'action en attente dans le state conversationnel
+    if (pendingConfirmation) {
+      // Sauvegarder l'action en attente pour le prochain message
+      if (options._stateKey) {
+        await setConversationState(options._stateKey, 'pendingConfirmation', {
+          tool: pendingConfirmation.tool,
+          args: pendingConfirmation.args,
+        }, []);
+      }
+      return { text: pendingConfirmation.message, toolData: allToolResults.join('\n\n---\n\n'), pendingConfirmation };
     }
 
     // Envoyer tous les résultats comme un seul message user
@@ -1518,10 +1523,7 @@ async function callAIWithTools(messages, options = {}) {
   }
 
   // ⚠️ CHANGEMENT DE CONTRAT : renvoyer { text, toolData } au lieu d'une string.
-  // toolData = données brutes des outils exécutés — l'appelant les ajoute au corpus
-  // autorisé de findUnsourcedNumbers pour que la validation des chiffres couvre
-  // AUSSI cette voie (avant : elle ne validait que la voie callAI).
-  return { text: finalText, toolData: allToolResults.join('\n\n---\n\n') };
+  return { text: finalText, toolData: allToolResults.join('\n\n---\n\n'), pendingConfirmation: null };
 }
 
 // ── Appel IA ───────────────────────────────────────────────────────────
@@ -1632,73 +1634,7 @@ async function callAI(messages, options = {}) {
 
 // ── Appel Intent AI (structured output) ─────────────────────────────────
 
-const INTENT_SCHEMA = {
-  type: 'object',
-  properties: {
-    intent: {
-      type: 'string',
-      description: "Nom de l'intent détecté",
-      enum: [
-        'analytics', 'team_report', 'general', 'search_tickets', 'create_ticket',
-        'create_ticket_for', 'confirm_create_ticket', 'check_ticket', 'summary',
-        'similar_tickets', 'change_status', 'assign_ticket', 'search_inventory',
-        'search_users', 'search_locations', 'report', 'escalate', 'help',
-      ],
-    },
-    params: {
-      type: 'object',
-      description: 'Paramètres extraits du message',
-      properties: {
-        keyword: { type: 'string' },
-        ticketId: { type: 'integer' },
-        title: { type: 'string' },
-        description: { type: 'string' },
-        personName: { type: 'string' },
-        locationName: { type: 'string' },
-        teamName: { type: 'string' },
-        forUser: { type: 'string' },
-        period: { type: 'string' },
-        isWhy: { type: 'boolean' },
-      },
-    },
-  },
-  required: ['intent'],
-};
-
-async function callIntentAI(message, conversationHistory = []) {
-  const providers = await getActiveProviders();
-  if (providers.length === 0) return null;
-
-  // Modèle léger dédié à la classification (optionnel)
-  let intentModelOptions = {};
-  try {
-    const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
-    if (settings?.intentAiModelId) {
-      intentModelOptions = { forcedModelId: settings.intentAiModelId };
-    }
-  } catch {}
-
-  // Construire le contexte conversationnel pour résoudre les pronoms
-  let historyContext = '';
-  if (conversationHistory.length > 0) {
-    const recent = conversationHistory.slice(-6);
-    historyContext = '\n\nCONVERSATION PRÉCÉDENTE (pour résoudre les pronoms et références) :\n'
-      + recent.map(m => `${m.role === 'user' ? 'Utilisateur' : 'MARIE'}: ${m.content.substring(0, 200)}`).join('\n');
-  }
-
-  try {
-    const raw = await callAI(
-      [{ role: 'user', content: `${INTENT_PROMPT}${historyContext}\n\nUser: "${message}"` }],
-      { responseFormat: { type: 'json_schema', schema: INTENT_SCHEMA }, temperature: 0.1, ...intentModelOptions }
-    );
-    const parsed = parseStructuredResponse(raw);
-    if (parsed?.intent) return parsed;
-    console.warn('[chatbot] callIntentAI: structured output invalide, fallback regex');
-  } catch (err) {
-    console.warn('[chatbot] callIntentAI échoué, fallback regex:', err.message);
-  }
-  return null;
-}
+;
 
 // ── Extraction de période depuis le message utilisateur ────────────────
 
@@ -1736,8 +1672,22 @@ function parsePeriodFromText(text) {
   if (/\b(7j|7 jours?|une semaine)\b/.test(lower)) return '7d';
   if (/\b(30j|30 jours?|un mois)\b/.test(lower)) return '30d';
   if (/\b(90j|90 jours?|3 mois)\b/.test(lower)) return '90d';
+  const daysMatch = lower.match(/\b(\d+)\s*jours?\b/);
+  if (daysMatch) return `${daysMatch[1]}d`;
 
-  return null; // pas de période détectée
+  return null;
+}
+
+function getStartDateFromPeriod(period) {
+  if (!period || period === 'all') return null;
+  if (period === 'today' || period === '1d') return new Date(new Date().setHours(0, 0, 0, 0));
+  if (period === 'yesterday') return new Date(Date.now() - 2 * 86400000);
+  if (period === '7d' || period === 'this_week' || period === 'last_week') return new Date(Date.now() - 7 * 86400000);
+  if (period === '30d' || period === 'this_month' || period === 'last_month') return new Date(Date.now() - 30 * 86400000);
+  if (period === '90d') return new Date(Date.now() - 90 * 86400000);
+  const match = String(period).match(/^(\d+)d$/);
+  if (match) return new Date(Date.now() - parseInt(match[1], 10) * 86400000);
+  return new Date(Date.now() - 30 * 86400000);
 }
 
 /**
@@ -1811,43 +1761,61 @@ function resolvePeriodDates(periodKey) {
 }
 
 // ── Conversation state (multi-turn) ───────────────────────────────────
+// Persisté en PostgreSQL via le champ Conversation.state (JSONB)
+// Clé : "conv:{id}" ou "user:{id}" (fallback mémoire si pas de conversation)
 
-const conversationStates = new Map(); // userId → { intent, params, tickets, timestamp }
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
-function getConversationState(userId) {
-  if (!userId) return null;
-  const state = conversationStates.get(userId);
+// Fallback mémoire pour les cas sans conversationId (avant création)
+const _memStateFallback = new Map();
+
+function _extractConvId(key) {
+  if (!key) return null;
+  const m = key.match(/^conv:(\d+)$/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+async function getConversationState(key) {
+  if (!key) return null;
+
+  const convId = _extractConvId(key);
+  if (convId) {
+    try {
+      const conv = await prisma.conversation.findUnique({ where: { id: convId }, select: { state: true } });
+      if (!conv?.state) return null;
+      const state = conv.state;
+      if (Date.now() - (state.timestamp || 0) > STATE_TTL_MS) return null;
+      return state;
+    } catch (err) {
+      console.warn('[chatbot] getConversationState DB error:', err.message);
+      return null;
+    }
+  }
+
+  // Fallback mémoire (pas de conversationId)
+  const state = _memStateFallback.get(key);
   if (!state) return null;
   if (Date.now() - state.timestamp > STATE_TTL_MS) {
-    conversationStates.delete(userId);
+    _memStateFallback.delete(key);
     return null;
   }
   return state;
 }
 
-function setConversationState(userId, intent, params, tickets = []) {
-  if (!userId) return;
-  conversationStates.set(userId, { intent, params, tickets, timestamp: Date.now() });
-}
+async function setConversationState(key, intent, params, tickets = []) {
+  if (!key) return;
+  const state = { intent, params, tickets, timestamp: Date.now() };
 
-function isReferenceMessage(message) {
-  const lower = message.toLowerCase().trim();
-  // Les questions autonomes (comptage, listing, stats) ne sont JAMAIS de simples références
-  // au message précédent. Ex: "il y a combien de ticket ouverts à date ?" doit être traité
-  // comme une question fraîche, pas hériter de la dernière recherche (filtre VPN, etc.).
-  if (/\b(combien|nombre|total|liste|montre[rz]?|classement|stats?|statistiques?)\b/.test(lower)) return false;
-  // "il y a" seul bloque — MAIS "il y a ... pour ce magasin/site" est un suivi de contexte
-  if (/\bil y a\b/.test(lower) && !/\b(pour ce|dans ce|ce magasin|ce site|ce lieu)\b/.test(lower)) return false;
-  return /^(et|et aussi|et pour|maintenant|ok et|d'accord et|sinon| sinon|pareil|m[aè]me chose|ceux[- ]?(ci|là)?|celui[- ]?(ci|là)?|les m[aè]mes?|aussi|ensuite|et toi|et nous|pour nous|pour moi|pour l['']?équipe|il|elle|ce ticket|son|sa|ses)\b/.test(lower)
-    || /^.{0,15}\b(et|aussi|pareil|ensuite)\b.{0,25}$/.test(lower)
-    || /\b(aussi|pareil|comme (ça|avant)|de m[aè]me|ensuite|et|puis)\b/.test(lower) && message.length < 40;
-}
-
-function isTeamSearchMessage(message) {
-  const lower = message.toLowerCase();
-  return /(?:^|\s|')(quipe|equipe|team|groupe)(?:\s|$|')/i.test(lower.replace(/é/g, 'e').replace(/è/g, 'e'))
-    && !/(?:^|\s)(rapport|bilan|combien|nombre|total|stats|statistiques)(?:\s|$)/i.test(lower);
+  const convId = _extractConvId(key);
+  if (convId) {
+    try {
+      await prisma.conversation.update({ where: { id: convId }, data: { state } });
+    } catch (err) {
+      console.warn('[chatbot] setConversationState DB error:', err.message);
+    }
+  } else {
+    _memStateFallback.set(key, state);
+  }
 }
 
 // ── Intent detection (IA + regex fallback) ─────────────────────────────
@@ -1856,106 +1824,82 @@ function detectIntentRegex(message, previousState = null) {
   const lower = message.toLowerCase();
   const period = parsePeriodFromText(message);
 
-  // Si c'est une référence ("et ceux de Jean ?", "aussi pour moi") et on a un state précédent
-  if (previousState && isReferenceMessage(message)) {
-    // Si le message mentionne une équipe → search_tickets (pas report)
-    if (isTeamSearchMessage(message)) {
-      return { intent: 'search_tickets', params: { period, inheritFrom: previousState } };
-    }
-    // Cas : "et pour Jean" → on garde le même intent mais on change un param
-    if (previousState.intent === 'search_tickets') {
-      return { intent: 'search_tickets', params: { period, inheritFrom: previousState } };
-    }
-    if (previousState.intent === 'top_locations') {
-      return { intent: 'search_tickets', params: { period, inheritFrom: previousState } };
-    }
-    if (previousState.intent === 'report') {
-      return { intent: 'report', params: { period, inheritFrom: previousState } };
-    }
-  }
+  // 1. Superlatifs / comparatifs / classements techniciens → top_technicians (AVANT change_status et assign_ticket)
+  if (lower.match(/\b(quel|quelle|qui|le|la)\b.{0,30}\b(technicien|technicienne)\b.{0,30}\b(plus|moins|top|meilleur|pire|charg[ée]|r[ée]sout|r[ée]solu|performant)\b/)) return { intent: 'top_technicians', params: { period } };
+  if (lower.match(/\b(technicien|technicienne)\b.{0,30}\b(a r[ée]solu|a le plus|résout|r[ée]solution)\b/)) return { intent: 'top_technicians', params: { period } };
+  if (lower.match(/\b(plus|moins|top|meilleur|pire)\b.{0,20}\b(technicien|technicienne)\b/)) return { intent: 'top_technicians', params: { period } };
+  if (lower.match(/\b(classement|performance|r[ée]so.u.*plus)\b.{0,20}\b(technicien|technicienne)\b/)) return { intent: 'top_technicians', params: { period } };
 
-  if (lower.match(/\b(r[ée]sume|r[ée]sum[ée])\b/)) return { intent: 'summary', params: { period } };
-  if (lower.match(/\b(similaire|doublon|m[êe]me (probl[èe]me|incident|sujet)|y a-t-il|d[ée]j[à])\b/)) return { intent: 'similar_tickets', params: { period } };
-  // change_status : "passe" seul = changement de statut, mais "mot passe" = recherche de tickets
-  if (lower.match(/\b(ferme|clôtur|cloture|r[ée]solu|resolu|change.*statut|met.*statut)\b/) && !lower.match(/\b(mot de passe|mot passe|password)\b/)) return { intent: 'change_status', params: { period } };
-  if (lower.match(/\b(passe)\b/) && !lower.match(/\b(mot de passe|mot passe|password|tickets?)\b/)) return { intent: 'change_status', params: { period } };
-  if (lower.match(/\b(assigne|affecte|donne.*[àa]|attribue|passe.*[àa])\b/) && !lower.match(/\b(mot de passe|mot passe|password)\b/)) return { intent: 'assign_ticket', params: { period } };
-  // search_inventory : uniquement si pas de signalement de problème (problème/panne/ne marche → create_ticket) et pas de demande de stats
-  if (lower.match(/\b(inventaire|[ée]quipement|asset|pc portable|imprimante|mat[ée]riel)\b/) && !lower.match(/\b(probl[èe]me|panne|ne marche|fonctionne plus|erreur|assistance|signaler|incident|souci|statistiques?|stats?|analyse)\b/)) return { intent: 'search_inventory', params: { period } };
-  // search_teams : demandes d'affichage/liste des équipes sans mention explicite de "tickets"
-  if (/(?:liste|quelles?|quels?|montre|affiche|donne[- ]?moi|regarde|voir|qu'est-ce que|quelles sont)\b.*?(?:équipes?|equipes?)/i.test(lower)
-    && !/\btickets?\b/i.test(lower)) {
-    return { intent: 'search_teams', params: { period } };
-  }
-  // search_users : exclusions pour comparatifs/superlatifs qui vont en analytics
-  if (lower.match(/\b(utilisateur|user|email de|t[ée]l[ée]phone de|nom de)\b/) && !lower.match(/\b(plus|moins|top|meilleur|pire|charg[ée]|résout|charge)\b/)) return { intent: 'search_users', params: { period } };
-  if (lower.match(/\b(qui est|qui suis)[-\s]?(je)?\b/) && !lower.match(/\b(technicien|technicienne|le plus|la plus|meilleur|pire|charg[ée]|résout)\b/)) return { intent: 'search_users', params: { period } };
-  // search_locations : exclusions pour comparatifs/superlatifs qui vont en analytics
-  if (lower.match(/\b(lieu|site|o[uù] se trouve|adresse|localisation|magasin\s+(de\s+)?[a-z])\b/) && !lower.match(/\b(plus|moins|top|meilleur|pire|le plus|la plus|comparer|classement)\b/)) return { intent: 'search_locations', params: { period } };
-  // Superlatifs / comparatifs sur techniciens/équipes → top_technicians (déterministe) — AVANT search_tickets
-  if (lower.match(/\b(quel|quelle|qui|le|la)\b.{0,30}\b(technicien|technicienne)\b.{0,30}\b(plus|moins|top|meilleur|pire|charg[ée]|résout|performant)\b/)) return { intent: 'top_technicians', params: { period } };
-  if (lower.match(/\b(quel|quelle|qui|le|la)\b.{0,30}(équipe|equipe).{0,30}\b(plus|moins|top|meilleur|pire|charg[ée]|résout|performant)\b/)) return { intent: 'top_technicians', params: { period } };
-  if (lower.match(/\b(plus|moins|top|meilleur|pire)\b.{0,20}\b(technicien|technicienne|équipe|equipe)\b/)) return { intent: 'top_technicians', params: { period } };
-  // Superlatifs / comparatifs sur magasins/lieux → top_locations (déterministe) — AVANT search_tickets
-  // sinon "quel magasin a le plus de problèmes" est capté par le catch-all search_tickets
+  // 2. Superlatifs / comparatifs sur lieux/magasins → top_locations
   if (lower.match(/\b(quel|quelle|quels|quelles|le|la|les)\b.{0,30}\b(magasin|lieu|site|centre)\b.{0,30}\b(plus|moins|plus grand|plus petit|top|meilleur|pire)\b/)) return { intent: 'top_locations', params: { period } };
   if (lower.match(/\b(magasin|lieu|site)\b.{0,20}\b(fait|fait le plus|a le plus|génère|genere|cause|provoque)\b/)) return { intent: 'top_locations', params: { period } };
   if (lower.match(/\b(classement|classe|ranking|palmar[èe]s|top)\b/) && lower.match(/\b(magasin|lieu|site|centre)\b/)) return { intent: 'top_locations', params: { period } };
-  // Date explicite + "tickets" → recherche par date (ex: "il y a eu des tickets le 01/09/2026")
-  if (/\b\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}\b/.test(lower) && /\btickets?\b/.test(lower)) {
+
+  // 3. Répartition / bilans d'équipe → team_report (AVANT assign_ticket)
+  if (lower.match(/\b(r[ée]partition|bilan.*quipe|r[ée]union.*hebdo|ouverts par equipe|ouverts par équipe)\b/)) return { intent: 'team_report', params: { period } };
+
+  // 4. Recherche inventaire / matériel
+  if (lower.match(/\b(inventaire|asset[s]?|mat[ée]riel en stock|pc en stock)\b/)) return { intent: 'search_inventory', params: { period } };
+  if (lower.match(/\b([ée]quipement|asset|pc portable|imprimante|ordinateur)\b/) && lower.match(/\b(inventaire|stock)\b/)) return { intent: 'search_inventory', params: { period } };
+
+  if (lower.match(/\b(r[ée]sume|r[ée]sum[ée])\b/)) {
+    if (/\b(demandes?|tickets?|liste|requêtes?|interventions?|ses\s+tickets?|ses\s+demandes?)\b/.test(lower) && !/#\d+/.test(lower)) {
+      return { intent: 'search_tickets', params: { period } };
+    }
+    return { intent: 'summary', params: { period } };
+  }
+  if (lower.match(/\b(similaire|doublon|m[êe]me (probl[èe]me|incident|sujet)|y a-t-il|d[ée]j[à])\b/)) return { intent: 'similar_tickets', params: { period } };
+
+  // Actions précises sur tickets (AVANT les règles plus larges)
+  if (lower.match(/\b(ferme|clôtur|cloture|change.*statut|met.*statut)\b/) && !lower.match(/\b(mot de passe|mot passe|password)\b/)) return { intent: 'change_status', params: { period } };
+  if (lower.match(/\b(passe)\b/) && lower.match(/#\d+/) && !lower.match(/\b(mot de passe|mot passe|password)\b/)) return { intent: 'change_status', params: { period } };
+  if (lower.match(/\b(assigne|affecte|attribue)\b/) && !lower.match(/\b(mot de passe|mot passe|password)\b/)) return { intent: 'assign_ticket', params: { period } };
+
+  // search_teams : demandes d'affichage/liste des équipes sans mention explicite de "tickets" ou "demandes"
+  if (/(?:liste|quelles?|quels?|montre|affiche|donne[- ]?moi|regarde|voir|qu'est-ce que|quelles sont)\b.*?(?:équipes?|equipes?)/i.test(lower)
+    && !/(?:tickets?|tikets?|tiquets?|tckets?|demandes?|requêtes?)/i.test(lower)) {
+    return { intent: 'search_teams', params: { period } };
+  }
+
+  // search_users
+  if (lower.match(/\b(utilisateur|user|email de|t[ée]l[ée]phone de|nom de)\b/) && !lower.match(/\b(plus|moins|top|meilleur|pire|charg[ée]|résout|charge)\b/)) return { intent: 'search_users', params: { period } };
+  if (lower.match(/\b(qui est|qui suis)[-\s]?(je)?\b/) && !lower.match(/\b(technicien|technicienne|le plus|la plus|meilleur|pire|charg[ée]|résout)\b/)) return { intent: 'search_users', params: { period } };
+
+  // search_locations
+  if (lower.match(/\b(lieu|site|o[uù] se trouve|adresse|localisation|magasin\s+(de\s+)?[a-z])\b/) && !lower.match(/\b(plus|moins|top|meilleur|pire|le plus|la plus|comparer|classement)\b/)) return { intent: 'search_locations', params: { period } };
+
+  // Consultation / question sur un ticket spécifique par son numéro (#16, ticket 16, ticket #16...)
+  if (/(?:#\d+|ticket\s*#?\s*\d+)/i.test(lower) && !/\b(ferme|clôtur|cloture|assigne|affecte|attribue|temps|liens?|doublon)\b/i.test(lower)) {
+    const tidMatch = lower.match(/(?:#|ticket\s*#?\s*)(\d+)/i);
+    const ticketId = tidMatch ? parseInt(tidMatch[1], 10) : null;
+    return { intent: 'check_ticket', params: { period, ticketId } };
+  }
+
+  // Typo-tolerant ticket word matching: ticket, tickets, tiket, tikets, tiquet, tiquets, tcket, tckets, demande, demandes
+  const TICKET_WORD = /(?:tickets?|tikets?|tiquets?|tckets?|demandes?|requêtes?)/i;
+
+  // Date explicite + "tickets"
+  if (/\b\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}\b/.test(lower) && TICKET_WORD.test(lower)) {
     return { intent: 'search_tickets', params: { period } };
   }
-  // Questions d'existence de tickets pour une personne ("steven yapo a t il des tickets ?", "y a t il des tickets pour X")
-  if (/\btickets?\b/i.test(lower) && /\b(a[- ]t[- ]il|a[- ]t[- ]elle|a des|y a[- ]t[- ]il|pour|concernant|sur|de|des)\b/i.test(lower) && !/\b(cr[ée]er?|ouvrir?|nouveau)\b/i.test(lower)) {
+  // Questions d'existence de tickets pour une personne, équipe ou domaine
+  if (TICKET_WORD.test(lower) && /\b(a[- ]t[- ]il|a[- ]t[- ]elle|a des|y a[- ]t[- ]il|pour|concernant|sur|de|des|du|la)\b/i.test(lower) && !/\b(cr[ée]er?|ouvrir?|nouveau)\b/i.test(lower)) {
     return { intent: 'search_tickets', params: { period } };
   }
-  // search_tickets AVANT team_report et analytics : "montre les stats du magasin X" = recherche, pas rapport LLM
-  if (lower.match(/\b(quels?|liste|listes|montre|affiche|donne[- ]?moi|cherche|recherche|tous?|toute?)\b/) && lower.match(/\b tickets?\b/)) return { intent: 'search_tickets', params: { period } };
-  if (lower.match(/\b(quels?|liste|listes|montre|affiche|donne[- ]?moi|cherche|recherche|tous?|toute?)\b/) && lower.match(/\b(magasin|lieu|site|stats?|statistiques?|incident|probl[èe]me|panne|cat[ée]gorie|technicien|[ée]quipe|historique|d[ée]tail|resume|sommaire)\b/)) return { intent: 'search_tickets', params: { period } };
-  if (lower.match(/\b(r[ée]partition|bilan.*quipe|r[ée]union|hebdo|ouverts par)\b/) && !lower.match(/\b tickets?\b/)) return { intent: 'team_report', params: { period } };
+
+  if (lower.match(/\b(quels?|liste|listes|montre|affiche|donne[- ]?moi|cherche|recherche|tous?|toute?)\b/) && TICKET_WORD.test(lower)) return { intent: 'search_tickets', params: { period } };
+  if (lower.match(/\b(quels?|liste|listes|montre|affiche|donne[- ]?moi|cherche|recherche|tous?|toute?)\b/) && lower.match(/\b(magasin|lieu|site|stats?|statistiques?|incident|probl[èe]me|panne|cat[ée]gorie|technicien|[ée]quipe|historique|d[ée]tail|resume|sommaire|securit[ée]?|r[ée]seau|t[ée]l[ée]phonie|systeme|mat[ée]riel|logiciel)\b/)) return { intent: 'search_tickets', params: { period } };
   if (lower.match(/\b(magasin|lieu|top|comparer|plus de probl[èe]mes?|statistiques?|stats?|analyse|pourquoi|cause)\b/)) return { intent: 'analytics', params: { period } };
   if (lower.match(/^\s*(oui|yes|go|confirme|c'est bon|vas-y|ok|d'accord|je confirme|oui crée|oui vas)\b/i)) return { intent: 'confirm_create_ticket', params: { period } };
   if (/\b(cr[ée]er?|ouvrir?|nouveau ticket|nouvelle demande|signaler|probl[èe]me|incident)\b/.test(lower) && /\b(pour|au nom de|pour le compte)\b/.test(lower)) return { intent: 'create_ticket_for', params: { period } };
-  // check_ticket AVANT create_ticket : "quand il a été créé", "quel est son statut", "son état"
   if (lower.match(/\b(quand|date|qu'est-ce que|c'est quoi|donne|dis-moi)\b/) && lower.match(/\b(cr[ée][eé]|statut|état|avancement|d[ée]tail|priorit[ée]|assign[ée])\b/)) return { intent: 'check_ticket', params: { period } };
   if (lower.match(/\b(il|elle|ce ticket|celui-ci|celui-là|le ticket)\b/) && lower.match(/\b(statut|état|avancement|cr[ée][eé]|priorit[ée]|assign[ée]|d[ée]tail|lieu|cat[ée]gorie)\b/)) return { intent: 'check_ticket', params: { period } };
   if (lower.match(/\b(statut|état|avancement|suiv[ie]|ticket\s*#?\s*\d+|#\d+|num[ée]ro)\b/)) return { intent: 'check_ticket', params: { period } };
   if (lower.match(/\b(cr[ée]er?|ouvrir?|nouveau ticket|nouvelle demande|signaler|probl[èe]me|incident|panne|souci|ne marche|fonctionne plus|erreur|assistance)\b/)) return { intent: 'create_ticket', params: { period } };
   if (lower.match(/\b(rapport|synth[èe]se|combien|nombre|total)\b/)) return { intent: 'report', params: { period } };
-  if (lower.match(/\b(escalade|technicien|humain|agent|support|parler|[aà] quelqu'un|transfer)\b/)) return { intent: 'escalate', params: { period } };
+  if (lower.match(/\b(escalade|escalader|parler [àa]|contacter|passer [àa]|transfert|agent humain|technicien humain)\b/)) return { intent: 'escalate', params: { period } };
   if (lower.match(/\b(aide|commandes?|fonctionnalit[ée]s?|que sais|que peux|help|menu)\b/)) return { intent: 'help', params: { period } };
   return { intent: 'general', params: { period } };
-}
-
-async function detectIntent(message, previousState = null, conversationHistory = []) {
-  // 0. Pré-détection par mots-clés pour les intents nouveaux (le LLM les confond souvent)
-  const lower = message.toLowerCase();
-  if (/\b(compétence|expert|maîtrise|niveau|qualifié|qui sait|qui connait)\b/.test(lower) && !/\b(ticket|statut|priorité)\b/.test(lower)) {
-    return { intent: 'search_skills', params: {} };
-  }
-  if (/\b(temps?\s+pass[éeé]|heures?\s+(imputées?|passées?)|travaillé\s+sur|saisie\s+de\s+temps|pointage|chronomètre)/.test(lower) || (/\b(temps?|heures?)\b/.test(lower) && /\b(sur\s+le\s+ticket|#\d+)/.test(lower))) {
-    return { intent: 'time_entries', params: {} };
-  }
-  if (/\b(lien[s]?\s+(du|sur|avec|entre)|lié[s]?\s+(à|au|au|x|avec)|bloque[s]?\s+(le|un|ce)|doublon|rattaché|bloqué\s+par)/.test(lower) || (/\b(lien[s]?)\b/.test(lower) && /#\d+/.test(lower))) {
-    return { intent: 'ticket_links', params: {} };
-  }
-
-  // 1. Regex d'abord — instantané, pas d'appel LLM
-  const regexResult = detectIntentRegex(message, previousState);
-  if (regexResult.intent !== 'general') {
-    return regexResult;
-  }
-
-  // 2. LLM en fallback uniquement pour les cas ambigus (regex → "general")
-  const aiResult = await callIntentAI(message, conversationHistory);
-  if (aiResult?.intent) {
-    const textPeriod = parsePeriodFromText(message);
-    if (textPeriod && !aiResult.params) aiResult.params = {};
-    if (textPeriod && !aiResult.params.period) aiResult.params.period = textPeriod;
-    return aiResult;
-  }
-
-  return regexResult;
 }
 
 // ── Contexte utilisateur ──────────────────────────────────────────────
@@ -1992,11 +1936,21 @@ async function getUserContext(userId) {
 
 // ── Actions métier ─────────────────────────────────────────────────────
 
-const STATUS_LABEL = { NEW: 'Nouveau', OPEN: 'Ouvert', PENDING: 'En attente', WAITING_FOR_USER: 'En attente utilisateur', SOLVED: 'Résolu', CLOSED: 'Fermé' };
+const STATUS_LABEL = { NEW: 'Nouveau', OPEN: 'Ouvert', PENDING: 'En attente', WAITING_FOR_USER: 'En attente utilisateur', SOLVED: 'Résolu', CLOSED: 'Fermé', PLANNED: 'Planifié' };
 const PRIORITY_LABEL = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' };
 
-async function generateReport(period = null, fullList = false) {
-  const where = { deletedAt: null, approvalStatus: { notIn: ['PENDING', 'REJECTED'] }, status: { notIn: ['CLOSED', 'SOLVED'] } };
+async function generateReport(period = null, fullList = false, teamName = null) {
+  let teamFilter = {};
+  let teamTitleLabel = '';
+  if (teamName) {
+    const team = await prisma.team.findFirst({
+      where: { name: { contains: teamName, mode: 'insensitive' } }
+    });
+    if (team) {
+      teamFilter = { teamId: team.id };
+      teamTitleLabel = ` — Équipe ${team.name}`;
+    }
+  }
 
   // Filtrage temporel optionnel
   let dateFilter = {};
@@ -2004,15 +1958,29 @@ async function generateReport(period = null, fullList = false) {
     const { start, end } = resolvePeriodDates(period);
     if (start) dateFilter.gte = start;
     if (end) dateFilter.lt = end;
-    if (Object.keys(dateFilter).length > 0) where.createdAt = dateFilter;
   }
 
-  const baseWhere = { deletedAt: null, approvalStatus: { notIn: ['PENDING', 'REJECTED'] }, ...(Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {}) };
+  const where = {
+    deletedAt: null,
+    approvalStatus: { notIn: ['PENDING', 'REJECTED'] },
+    status: { notIn: ['CLOSED', 'SOLVED'] },
+    ...(Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {}),
+    ...teamFilter,
+  };
+
+  const baseWhere = {
+    deletedAt: null,
+    approvalStatus: { notIn: ['PENDING', 'REJECTED'] },
+    ...(Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {}),
+    ...teamFilter,
+  };
+
   const resolvedWhere = {
     deletedAt: null,
     approvalStatus: { notIn: ['PENDING', 'REJECTED'] },
     status: { in: ['SOLVED', 'CLOSED'] },
     ...(Object.keys(dateFilter).length > 0 ? { solvedAt: dateFilter } : {}),
+    ...teamFilter,
   };
 
   const [tickets, openCount, totalAll, resolvedCount, statusCounts, priorityCounts] = await Promise.all([
@@ -2033,7 +2001,7 @@ async function generateReport(period = null, fullList = false) {
     prisma.ticket.groupBy({ by: ['priority'], _count: true, where }),
   ]);
 
-  if (openCount === 0 && resolvedCount === 0) return 'Aucun ticket pour cette période.';
+  if (openCount === 0 && resolvedCount === 0) return `Aucun ticket pour cette période${teamTitleLabel}.`;
 
   const byStatus = {};
   for (const s of statusCounts) byStatus[s.status] = s._count;
@@ -2041,7 +2009,7 @@ async function generateReport(period = null, fullList = false) {
   for (const p of priorityCounts) byPriority[p.priority] = p._count;
 
   const periodLabel = period ? ` (${period})` : '';
-  let report = `**Rapport${periodLabel}**\n\n`;
+  let report = `**Rapport${teamTitleLabel}${periodLabel}**\n\n`;
   report += `• Total tickets : **${totalAll}**\n`;
   report += `• Ouverts : **${openCount}**\n`;
   report += `• Résolus/Fermés : **${resolvedCount}**\n\n`;
@@ -2083,7 +2051,8 @@ async function checkTicketStatus(ticketId) {
       requester: { select: { fullName: true, email: true } },
       linksA: { select: { ticketB: { select: { id: true, title: true, status: true } }, type: true } },
       linksB: { select: { ticketA: { select: { id: true, title: true, status: true } }, type: true } },
-      timeEntries: { orderBy: { entryDate: 'desc' }, take: 5, select: { minutes: true, description: true, entryDate: true, user: { select: { fullName: true } } } },
+      timeEntries: { orderBy: { entryDate: 'desc' }, take: 10, select: { minutes: true, description: true, entryDate: true, user: { select: { fullName: true } } } },
+      followups: { orderBy: { createdAt: 'desc' }, take: 10, select: { content: true, isPrivate: true, createdAt: true, author: { select: { fullName: true } } } },
     },
   });
 
@@ -2103,6 +2072,19 @@ async function checkTicketStatus(ticketId) {
   r += `• **Créé le :** ${new Date(ticket.createdAt).toLocaleDateString('fr-FR')}\n`;
   if (ticket.solvedAt) r += `• **Résolu le :** ${new Date(ticket.solvedAt).toLocaleDateString('fr-FR')}\n`;
   if (ticket.closedAt) r += `• **Fermé le :** ${new Date(ticket.closedAt).toLocaleDateString('fr-FR')}\n`;
+
+  if (ticket.content) {
+    r += `\n**Description complète :**\n${ticket.content}\n`;
+  }
+
+  // Suivis / commentaires récents
+  if (ticket.followups?.length > 0) {
+    r += `\n**Derniers suivis / commentaires (${ticket.followups.length}) :**\n`;
+    for (const f of ticket.followups) {
+      const cleanText = (f.content || '').replace(/<[^>]*>/g, '').trim();
+      r += `• [${new Date(f.createdAt).toLocaleDateString('fr-FR')}] **${f.author?.fullName || 'Système'}**${f.isPrivate ? ' (privé)' : ''} : ${cleanText}\n`;
+    }
+  }
 
   // SLA
   if (ticket.slaResponseDueAt || ticket.slaResolutionDueAt) {
@@ -2151,7 +2133,7 @@ async function checkTicketStatus(ticketId) {
   if (ticket.timeEntries?.length > 0) {
     const totalMin = ticket.timeEntries.reduce((s, e) => s + e.minutes, 0);
     r += `\n**Temps passé :** ${totalMin}min (${ticket.timeEntries.length} saisies)\n`;
-    for (const e of ticket.timeEntries.slice(0, 3)) {
+    for (const e of ticket.timeEntries) {
       r += `• ${e.user?.fullName || '?'} : ${e.minutes}min — ${e.description || 'sans description'}\n`;
     }
   }
@@ -2364,10 +2346,10 @@ async function addTicketFollowup(ticketId, content, isPrivate, user) {
   }
 
   if (user?.role === 'TECHNICIAN') {
-    const isAssigned = ticket.assignedToId === user.id;
+    const isAssigned = ticket.assignedToId === (user.sub || user.id);
     if (!isAssigned) {
       const isMultiAssigned = await prisma.ticket.findFirst({
-        where: { id, assignees: { some: { id: user.id } } },
+        where: { id, assignees: { some: { id: user.sub || user.id } } },
         select: { id: true },
       });
       if (!isMultiAssigned) {
@@ -2381,7 +2363,7 @@ async function addTicketFollowup(ticketId, content, isPrivate, user) {
   const followup = await prisma.followup.create({
     data: {
       ticketId: id,
-      authorId: user.id,
+      authorId: user.sub || user.id,
       content: sanitized,
       isPrivate: isPrivate === true,
     },
@@ -2390,7 +2372,7 @@ async function addTicketFollowup(ticketId, content, isPrivate, user) {
 
   if (['ADMIN', 'TECHNICIAN', 'HOTLINE', 'SUPERADMIN'].includes(user.role)) {
     try {
-      await recordFirstResponse(id, user.id);
+      await recordFirstResponse(id, user.sub || user.id);
     } catch (err) {
       console.error('[chatbot] Enregistrement première réponse échoué:', err.message);
     }
@@ -2525,17 +2507,165 @@ function isStaff(user) {
   return user && STAFF_ROLES.includes(user.role);
 }
 
+// ── Passe 2 : Audit & Ajustement (Auto-correction par le second LLM) ─────
+// Évalue la réponse proposée par la 1ère passe face à la question exacte de l'utilisateur,
+// au contexte de conversation et aux outils disponibles.
+// Si la 1ère réponse est satisfaisante, elle est conservée/affichée.
+// Si elle contient des hallucinations, imprécisions, ou a renvoyé à tort "aucun résultat", elle est ajustée.
+async function auditAndAdjustResponse(message, draftReply, options = {}) {
+  const {
+    conversationHistory = [],
+    fullSystemPrompt = '',
+    toolData = '',
+    voiceModelOptions = {},
+  } = options;
+
+  if (!draftReply || isGreetingMessage(message)) {
+    return draftReply;
+  }
+
+  // ── Auto-secours Passe 2 : si la 1ère passe a renvoyé "aucun ticket" ou "pas de données" ──
+  const isNoDataReply = /\b(aucun ticket|n'ai trouvé aucun|aucun [ée]quipement|pas de données|aucune donnée|pas d'éléments|pas cette donnée)\b/i.test(draftReply);
+  let rescueContext = '';
+
+  if (isNoDataReply) {
+    let rescued = [];
+
+    // 1. Recherche par ID de ticket explicite (#16, ticket 16, etc.)
+    const ticketIdMatches = [...message.matchAll(/(?:#|ticket\s*#?\s*)(\d+)/gi)]
+      .map(m => parseInt(m[1], 10))
+      .filter(id => !isNaN(id));
+
+    if (ticketIdMatches.length > 0) {
+      try {
+        rescued = await prisma.ticket.findMany({
+          where: { id: { in: ticketIdMatches }, deletedAt: null },
+          take: 10,
+          select: {
+            id: true, title: true, status: true, priority: true, locationName: true, category: true,
+            createdAt: true, solvedAt: true, closedAt: true,
+            requester: { select: { fullName: true } }, assignedTo: { select: { fullName: true } },
+          },
+        });
+      } catch (errId) {
+        console.warn('[chatbot] Erreur Passe 2 Secours par ID:', errId.message);
+      }
+    }
+
+    // 2. Recherche par mots-clés significatifs de la question
+    if (rescued.length === 0) {
+      const words = message.toLowerCase()
+        .replace(/[^\wà-ÿ\s]/g, ' ')
+        .split(/\s+/)
+        .filter(w => w.length > 2 && !/^(les|des|du|de|la|le|un|une|sur|pour|dans|par|avec|cette|ce|ces|quel|quels|quelle|quelles|qui|est|mon|ma|mes|vos|votre|nos|notre|mois|semaine|jour|demandes?|tickets?|recherche|montre|affiche|liste)$/i.test(w));
+
+      if (words.length > 0) {
+        try {
+          const ORConditions = [];
+          for (const w of words) {
+            const num = parseInt(w, 10);
+            if (!isNaN(num) && num > 0) ORConditions.push({ id: num });
+            ORConditions.push(
+              { title: { contains: w, mode: 'insensitive' } },
+              { content: { contains: w, mode: 'insensitive' } },
+              { category: { contains: w, mode: 'insensitive' } },
+              { requester: { fullName: { contains: w, mode: 'insensitive' } } },
+              { assignedTo: { fullName: { contains: w, mode: 'insensitive' } } }
+            );
+          }
+
+          rescued = await prisma.ticket.findMany({
+            where: { deletedAt: null, OR: ORConditions },
+            take: 15,
+            select: {
+              id: true, title: true, status: true, priority: true, locationName: true, category: true,
+              createdAt: true, solvedAt: true, closedAt: true,
+              requester: { select: { fullName: true } }, assignedTo: { select: { fullName: true } },
+            },
+          });
+        } catch (errRescue) {
+          console.warn('[chatbot] Erreur Passe 2 Secours (non bloquant):', errRescue.message);
+        }
+      }
+    }
+
+    if (rescued.length > 0) {
+      console.log(`[chatbot] Passe 2 Secours : ${rescued.length} ticket(s) retrouvé(s) en base pour la question "${message}"`);
+      rescueContext = `\n\n⚠️ SECOURS PASSE 2 — ${rescued.length} TICKET(S) RÉEL(S) RETROUVÉ(S) EN BASE :\n` +
+        rescued.map(t => `- Ticket #${t.id} "${t.title}" | Statut: ${t.status} | Priorité: ${t.priority} | Demandeur: ${t.requester?.fullName || 'inconnu'} | Assigné: ${t.assignedTo?.fullName || 'non assigné'} | Lieu: ${t.locationName || 'N/A'} | Créé le: ${new Date(t.createdAt).toLocaleDateString('fr-FR')}`).join('\n') +
+        `\n\nSi la 1ère réponse disait "aucun ticket trouvé", UTILISE OBLIGATOIREMENT ces tickets ci-dessus pour répondre de manière exacte et complète à l'utilisateur !`;
+    }
+  }
+
+  const AUDIT_SYSTEM_PROMPT = `Tu es l'Auditeur et Ajusteur Qualité du Chatbot MARIE (Helpdesk IT Prosuma).
+Ta mission est d'évaluer et de valider (ou ajuster) la PREMIÈRE RÉPONSE proposée par le système face à la QUESTION EXACTE de l'utilisateur.
+
+CRITÈRES D'EVALUATION ET D'AJUSTEMENT :
+1. PERTINENCE : La réponse répond-elle directement, clairement et naturellement à la question posée ?
+2. VÉRACITÉ : La réponse respecte-t-elle strictement les données fournies (pas de numéros de tickets inventés, pas de statistiques imaginées) ?
+3. AUTO-SECOURS / DONNÉES MANQUANTES : Si la première réponse disait "aucun ticket trouvé" mais que des tickets ont été retrouvés par le secours Passe 2, réécris la réponse en utilisant ces tickets !
+4. RESTITUTION ET STYLE : La réponse est-elle rédigée dans un français naturel et professionnel, sans jargon technique de base de données (ex: "null", "undefined", "aiProcessed", "secondaryRequesterId", "vector") ?
+5. TRANSPARENCE ET RÔLES : Si une personne est citée, son rôle (Demandeur/Assigné/Observateur) est-il clair ? Y a-t-il des promesses d'outils fictifs non exécutés (ex: "Voulez-vous que je lance l'outil X ?") ?
+
+RÈGLE DÉCISIONNELLE :
+- Si la première réponse est BONNE et RÉPOND EXACTEMENT à la question : restitue-la telle quelle (ou avec un simple polissage de mise en forme si nécessaire).
+- Si la première réponse N'EST PAS BONNE (hallucination, manqué de données retrouvées par secours, jargon DB, mauvaise détection de la question, promesse d'outil non exécuté) : AJUSTE et RÉÉCRIS la version finale corrigée.
+
+IMPORTANT : Restitue UNIQUEMENT la réponse finale, sansAnalyse interne, sansCHAIN OF THOUGHT, sans-meta-commentaire. La réponse doit être directement utilisable par l'utilisateur.
+
+${toolData ? `\n\nDONNÉES COMPLÉMENTAIRES DES OUTILS :\n${toolData}` : ''}
+${rescueContext}`;
+
+  try {
+    const auditPrompt = [
+      ...conversationHistory,
+      { role: 'user', content: message },
+      {
+        role: 'user',
+        content: `[PREMIÈRE RÉPONSE PROPOSÉE À AUDITER ET AJUSTER] :\n${draftReply}\n\nInspecte cette réponse par rapport à ma question ci-dessus. Si elle est satisfaisante et exacte, restitue-la. Si elle nécessite un ajustement ou une correction, réécris directement la version finale ajustée.`,
+      },
+    ];
+
+    const auditRaw = await callAI(auditPrompt, {
+      ...voiceModelOptions,
+      forcedSystem: AUDIT_SYSTEM_PROMPT,
+    });
+
+    const cleanedAudit = cleanAiReply(auditRaw);
+    if (cleanedAudit && cleanedAudit.length > 15) {
+      console.log('[chatbot] Passe 2 (Audit / Ajustement) exécutée avec succès.');
+      return cleanedAudit;
+    }
+  } catch (auditErr) {
+    console.warn('[chatbot] Passe 2 (Audit) non bloquante, conservation réponse Passe 1:', auditErr.message);
+  }
+
+  return draftReply;
+}
+
 // ── Message handler ────────────────────────────────────────────────────
 
 async function handleMessage(message, conversationHistory = [], user = null, pendingTicketData = null, conversationId = null) {
-  const userId = user?.sub || null;
+  let history = Array.isArray(conversationHistory) ? conversationHistory : [];
+  let currentUser = user;
+  let currentPending = pendingTicketData;
+  let currentConvId = conversationId;
+
+  if (conversationHistory && !Array.isArray(conversationHistory) && typeof conversationHistory === 'object') {
+    const opts = conversationHistory;
+    history = Array.isArray(opts.conversationHistory) ? opts.conversationHistory : (Array.isArray(opts.history) ? opts.history : []);
+    currentUser = opts.user || user;
+    currentPending = opts.pendingTicketData || pendingTicketData;
+    currentConvId = opts.conversationId || conversationId;
+  }
+
+  const userId = currentUser?.sub || currentUser?.id || null;
   // Clé d'état conversationnel : PAR CONVERSATION (pas par user) sinon les conversations
   // d'un même utilisateur se polluent entre elles (filtres hérités d'une autre conversation).
-  const stateKey = conversationId ? `conv:${conversationId}` : `user:${userId}`;
+  const stateKey = currentConvId ? `conv:${currentConvId}` : (userId ? `user:${userId}` : null);
   const _stepLog = (step, detail) => console.log(`[chatbot] handleMessage step=${step} ${detail || ''}`);
 
-  _stepLog('start', `msg="${message.substring(0, 80)}" userId=${userId} historyLen=${conversationHistory.length}`);
-  let intent, params;
+  _stepLog('start', `msg="${message.substring(0, 80)}" userId=${userId} historyLen=${history.length}`);
 
   // ── Petit talk (salutations, remerciements) : réponse directe, zéro recherche, zéro classification ──
   // Évite 2-3 appels LLM + requêtes DB inutiles pour un simple "bonjour"
@@ -2554,24 +2684,78 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   }
 
   // Récupérer le state conversationnel précédent (isolé par conversation)
-  const previousState = getConversationState(stateKey);
+  const previousState = await getConversationState(stateKey);
   _stepLog('context', `prevIntent=${previousState?.intent || 'none'} prevTickets=${previousState?.tickets?.length || 0}`);
 
-  try {
-    const intentResult = await detectIntent(message, previousState, conversationHistory);
-    intent = intentResult.intent;
-    params = intentResult.params;
-    _stepLog('intent', `intent=${intent} params=${JSON.stringify(params || {})}`);
-  } catch (intentErr) {
-    // Une erreur de classification (DB momentanément indisponible, provider down...) ne doit
-    // JAMAIS tuer la demande : on retombe sur le regex local, 100 % hors-ligne.
-    _stepLog('intent-error', intentErr.message);
-    const fallbackResult = detectIntentRegex(message, previousState);
-    intent = fallbackResult.intent;
-    params = fallbackResult.params;
+  // ── Détection de confirmation d'action en attente (ex: add_ticket_followup) ──
+  if (previousState?.intent === 'pendingConfirmation' && previousState?.params) {
+    const isConfirmation = /^\s*(oui|yes|go|confirme|c'est bon|vas-y|ok|d'accord|je confirme|oui vas|oui je|vas|c'est parti|allons-y|make it so)\b/i.test(message.trim());
+    const isDenial = /^\s*(non|no|annul|pas maintenant|stop|abort|cancel)\b/i.test(message.trim());
+
+    if (isConfirmation) {
+      const { tool, args } = previousState.params;
+      // Whitelist explicite : seuls les outils autorisés peuvent être exécutés via confirmation
+      if (tool !== 'add_ticket_followup') {
+        await setConversationState(stateKey, 'general', {}, []);
+        return {
+          reply: "D'accord.",
+          intent: 'general',
+          action: null,
+          widget: null,
+          sources: [],
+          citedTicketIds: [],
+          citedKnowledgeIds: [],
+          pendingTicketData: null,
+        };
+      }
+      _stepLog('confirm-action', `tool=${tool} args=${JSON.stringify(args || {}).substring(0, 200)}`);
+      try {
+        const result = await executeTool(tool, args, currentUser, { confirmed: true });
+        const resultText = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+        // Nettoyer le state de confirmation
+        await setConversationState(stateKey, 'general', {}, []);
+        return {
+          reply: cleanAiReply(resultText),
+          intent: 'add_followup',
+          action: null,
+          widget: null,
+          sources: [],
+          citedTicketIds: [],
+          citedKnowledgeIds: [],
+          pendingTicketData: null,
+        };
+      } catch (confirmErr) {
+        console.error('[chatbot] Erreur exécution confirmation:', confirmErr.message);
+        await setConversationState(stateKey, 'general', {}, []);
+        return {
+          reply: "Une erreur est survenue lors de l'exécution. Réessayez ou décrivez votre demande.",
+          intent: 'general',
+          action: null,
+          widget: null,
+          sources: [],
+          citedTicketIds: [],
+          citedKnowledgeIds: [],
+          pendingTicketData: null,
+        };
+      }
+    }
+
+    if (isDenial) {
+      await setConversationState(stateKey, 'general', {}, []);
+      return {
+        reply: "D'accord, action annulée. N'hésite pas si tu as besoin d'autre chose.",
+        intent: 'general',
+        action: null,
+        widget: null,
+        sources: [],
+        citedTicketIds: [],
+        citedKnowledgeIds: [],
+        pendingTicketData: null,
+      };
+    }
   }
 
-  // Contexte utilisateur
+  // ── Contexte utilisateur ──
   let userContext;
   try {
     userContext = await getUserContext(userId);
@@ -2580,954 +2764,6 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     _stepLog('userContext-error', ucErr.message);
     userContext = '';
   }
-
-  // Recherche simultanée : RAG + Tickets + (selon intent) inventaire/users/locations
-  _stepLog('searches', `intent=${intent}`);
-
-  const searches = [
-    searchKnowledge(message, 8),
-    params?.inheritFrom
-      ? searchTicketsWithContext(message, 20, user, params.period, params.inheritFrom)
-      : searchTickets(message, 20, user, params?.period),
-  ];
-
-  if (intent === 'search_inventory') searches.push(searchAssets(params?.keyword || message, 5));
-  else searches.push(Promise.resolve([]));
-
-  if (intent === 'search_users') searches.push(searchUsers(params?.personName || message, 5));
-  else searches.push(Promise.resolve([]));
-
-  if (intent === 'search_locations') searches.push(searchLocations(params?.locationName || message, 10));
-  else searches.push(Promise.resolve([]));
-
-  if (intent === 'search_teams') searches.push(searchTeams(params?.teamName || message, 10));
-  else searches.push(Promise.resolve([]));
-
-  // Promise.allSettled : si une seule recherche échoue (DB momentanément indisponible,
-  // API users down...), les autres continuent et la réponse reste utile au lieu du
-  // message générique "erreur interne".
-  const settled = await Promise.allSettled(searches);
-  const unwrap = (r, fallback) => (r.status === 'fulfilled' ? r.value : fallback);
-  const knowledgeChunks = unwrap(settled[0], []);
-  const ticketsResult = unwrap(settled[1], { tickets: [], totalCount: 0 });
-  const assets = unwrap(settled[2], []);
-  const users = unwrap(settled[3], []);
-  const locations = unwrap(settled[4], []);
-  const teams = unwrap(settled[5], []);
-  for (const r of settled) if (r.status === 'rejected') console.error('[chatbot] recherche échouée (dégradé):', r.reason?.message);
-  _stepLog('searches-done', `knowledge=${knowledgeChunks.length} tickets=${ticketsResult.tickets?.length || ticketsResult.length || 0} total=${ticketsResult.totalCount ?? '?'} assets=${assets.length} users=${users.length} locations=${locations.length} teams=${teams.length}`);
-
-  const matchingTickets = ticketsResult.tickets || ticketsResult; // compat: array ou { tickets, totalCount }
-  const totalTicketCount = ticketsResult.totalCount ?? matchingTickets.length;
-
-  // ── Signaux de désambiguïsation produits par searchTickets ──
-  // 1) Recherche élargie par personne (rôle non précisé) : on liste les rôles rencontrés
-  //    pour que la réponse soit honnête ("demandeur", "assigné"...).
-  // 2) Repli après filtre demandeur/assigné vide : la personne a été trouvée sous un AUTRE rôle.
-  // 3) Aucun résultat mais la personne existe : signaler pour inviter à préciser au lieu d'inventer.
-  let ambiguityNote = '';
-  if (ticketsResult.personName) {
-    if (ticketsResult.fallbackFromRole) {
-      ambiguityNote = `⚠️ FILTRE PAR PERSONNE : aucun ticket trouvé où ${ticketsResult.personName} est ${ticketsResult.fallbackFromRole}, MAIS une recherche élargie a trouvé des tickets. Mentionne explicitement que ${ticketsResult.personName} apparaît sous un AUTRE rôle que ${ticketsResult.fallbackFromRole} (regarde les champs Demandeur / Assigné à des tickets listés) — ne présente pas ces tickets comme s'ils correspondaient au filtre initial.`;
-    } else {
-      const roleSet = new Set();
-      for (const t of matchingTickets) for (const r of t.personRoles || []) roleSet.add(r);
-      if (roleSet.size > 0) {
-        ambiguityNote = `⚠️ RECHERCHE PAR PERSONNE ("${ticketsResult.personName}") : recherche élargie aux rôles suivants → trouvés comme : ${[...roleSet].join(' ET ')}. Indique pour chaque ticket (ou en résumé) sous quel rôle ${ticketsResult.personName} apparaît (Demandeur / Assigné / Observateur). Si l'utilisateur semblait attendre UN rôle précis, signale-le et propose de filtrer.`;
-      }
-    }
-  } else if (matchingTickets.length === 0 && params?.personName) {
-    // Recherche d'utilisateur TOLÉRANTE (phrase → tous les mots → au moins un mot) :
-    // "Steven Yapo" doit retrouver l'utilisateur « yapo » au lieu de conclure que
-    // la personne n'existe pas — un fullName incomplet en base n'est pas une absence.
-    const tolerant = await findUsersByNameTolerant(params.personName, 5).catch(() => null);
-    if (tolerant && tolerant.users.length > 0) {
-      const levelTxt = tolerant.level === 'any_token'
-        ? 'correspondance PARTIELLE (un seul mot du nom — le nom complet en base peut être enregistré différemment)'
-        : 'correspondance';
-      const listed = tolerant.users.map((u) => `${u.fullName} (${u.role})`).join(', ');
-      ambiguityNote = `⚠️ AUCUN TICKET trouvé pour "${params.personName}" — MAIS ${tolerant.users.length} utilisateur(s) correspondent (${levelTxt}) : ${listed}. N'invente RIEN. Dis simplement qu'aucun ticket n'a été trouvé pour l'instant et propose : vérifier l'orthographe, chercher par email, ou élargir la période. Ne conclus PAS que la personne n'a jamais eu de tickets.`;
-    } else {
-      ambiguityNote = `⚠️ AUCUN TICKET et AUCUN UTILISATEUR pour "${params.personName}". N'invente RIEN. Dis que la recherche n'a rien donné et propose : vérifier l'orthographe du nom, chercher par email, ou préciser demandeur/assigné.`;
-    }
-  }
-  // ⚠️ contextParts DOIT être déclaré AVANT tout push — l'ancien ordre (push puis
-  // déclaration plus bas) levait un ReferenceError (TDZ) dès qu'une note de
-  // désambiguïsation était produite → "erreur interne sur les données".
-  const contextParts = [];
-  if (ambiguityNote) contextParts.push(ambiguityNote);
-
-  // ── Court-circuit déterministe : recherche pure ENTIÈREMENT vide ──
-  // Volontairement limité aux intents de recherche pure : 'general' doit continuer
-  // vers callAIWithTools (le LLM y relance ses propres outils). Si une note de
-  // désambiguïsation existe, on laisse le LLM poser sa question de clarification.
-  const PURE_SEARCH_EMPTY = {
-    search_tickets: { isEmpty: () => matchingTickets.length === 0, reply: "Je n'ai trouvé aucun ticket correspondant dans la base. On peut élargir la période, essayer un autre mot-clé, ou vérifier ensemble l'orthographe d'un nom mentionné — que préférez-vous ?" },
-    search_inventory: { isEmpty: () => assets.length === 0, reply: "Aucun équipement correspondant dans l'inventaire. Précisez la marque, le modèle ou le numéro d'inventaire et je relance la recherche." },
-    search_users: { isEmpty: () => users.length === 0, reply: "Aucun utilisateur trouvé pour cette recherche. Vérifions l'orthographe du nom, ou donnez-moi son email." },
-    search_locations: { isEmpty: () => locations.length === 0, reply: "Aucun lieu trouvé. Précisez le nom du magasin ou du site et je relance la recherche." },
-    search_teams: { isEmpty: () => teams.length === 0, reply: "Aucune équipe trouvée dans le système." },
-  };
-  const pureSearch = PURE_SEARCH_EMPTY[intent];
-  if (pureSearch && knowledgeChunks.length === 0 && !ambiguityNote && pureSearch.isEmpty()) {
-    _stepLog('empty-short-circuit', `intent=${intent} → réponse déterministe sans LLM`);
-    return {
-      reply: pureSearch.reply,
-      intent,
-      action: null,
-      widget: null,
-      sources: [],
-      citedTicketIds: [],
-      citedKnowledgeIds: [],
-      pendingTicketData: null,
-    };
-  }
-
-  const knowledgeContext = knowledgeChunks.length > 0
-    ? knowledgeChunks.map((c) => `[doc:${c.documentId} | ${c.title}] : ${c.content.substring(0, 500)}`).join('\n\n')
-    : '';
-
-  if (userContext) {
-    contextParts.push(`**Profil de l'utilisateur :** ${userContext}`);
-  }
-
-  if (knowledgeContext) {
-    contextParts.push(`**Informations de la base de connaissances :**\n${knowledgeContext}`);
-  }
-
-  if (matchingTickets.length > 0) {
-    let ticketContext = `**Tickets pertinents trouvés (${totalTicketCount}) :**\n`;
-    // Note anti-hallucination DÉTERMINISTE : quand le total DB dépasse les lignes
-    // affichées (pagination take:20/100), le LLM "complétait" le tableau avec des
-    // numéros inventés (#XXX). On lui donne le compte rendu exact à recopier.
-    if (intent !== 'report' && totalTicketCount > matchingTickets.length) {
-      ticketContext += `\n⚠️ COMPTES RENDUS VÉRIFIÉS (recopie-les tels quels, n'en déduis RIEN d'autre) :\n• Total réel en base : ${totalTicketCount} tickets.\n• Détail affiché ci-dessus : ${matchingTickets.length} tickets (limité côté serveur).\n• Tickets ABSENTS du détail affiché : ${totalTicketCount - matchingTickets.length}. AUCUN numéro n'est fourni pour eux — ne fabrique JAMAIS de numéros, de titres ni de statuts pour ces tickets. La seule formulation correcte est : "j'ai bien ${totalTicketCount} tickets au total, le détail ci-dessus n'en montre que ${matchingTickets.length}, veux-tu que je charge la suite ?"\n`;
-    }
-    // Format tableau compact pour beaucoup de résultats
-    if (matchingTickets.length > 5) {
-      ticketContext += `| # | Titre | Statut | Priorité | Demandeur | Lieu | SLA |\n|---|-------|--------|----------|-----------|------|-----|\n`;
-      for (const t of matchingTickets) {
-        let slaStatus = '-';
-        if (t.slaResolutionDueAt) {
-          const now = new Date();
-          const due = new Date(t.slaResolutionDueAt);
-          const isResolved = t.status === 'SOLVED' || t.status === 'CLOSED';
-          slaStatus = isResolved ? '✅' : (due > now ? `${Math.round((due - now) / 3600000)}h` : '⚠️');
-        }
-        ticketContext += `| ${t.id} | ${(t.title || '').substring(0, 50)} | ${STATUS_LABEL[t.status] || t.status} | ${PRIORITY_LABEL[t.priority] || t.priority} | ${t.requester?.fullName || '-'} | ${t.locationName || '-'} | ${slaStatus} |\n`;
-      }
-    } else {
-      for (const t of matchingTickets) {
-        ticketContext += `• **Ticket #${t.id}** : "${t.title}"\n  - Statut : ${STATUS_LABEL[t.status] || t.status} | Priorité : ${PRIORITY_LABEL[t.priority] || t.priority}`;
-        if (t.category) ticketContext += ` | Catégorie : ${t.category}`;
-        if (t.requester) ticketContext += ` | Demandeur : ${t.requester.fullName}`;
-        if (t.assignedTo) ticketContext += ` | Assigné à : ${t.assignedTo.fullName}`;
-        if (t.locationName) ticketContext += ` | Lieu : ${t.locationName}`;
-        if (t.slaResolutionDueAt) {
-          const now = new Date();
-          const due = new Date(t.slaResolutionDueAt);
-          const isResolved = t.status === 'SOLVED' || t.status === 'CLOSED';
-          ticketContext += ` | SLA: ${isResolved ? '✅ Résolu' : (due > now ? `dans ${Math.round((due - now) / 3600000)}h` : '⚠️ En retard')}`;
-        }
-        if (t.approvalStatus && t.approvalStatus !== 'NOT_REQUIRED') ticketContext += ` | Approbation : ${t.approvalStatus}`;
-        if (t.glpiTicketId) ticketContext += ` | GLPI #${t.glpiTicketId}`;
-        ticketContext += `\n  - *Description :* ${(t.content || '').substring(0, 200)}...\n\n`;
-      }
-    }
-    contextParts.push(ticketContext);
-  } else if (!DETERMINISTIC_INTENTS.has(intent) && !['general', 'create_ticket', 'create_ticket_for', 'confirm_create_ticket'].includes(intent)) {
-    const emptyPersonMsg = params?.personName || params?.requesterName || params?.assignedToName
-      ? `**Aucun ticket trouvé** pour cette recherche. Une personne était mentionnée dans la demande : ne conclus PAS que cette personne n'a aucun rôle ou que la demande est impossible — propose de vérifier l'orthographe, de chercher par email, ou de préciser demandeur/assigné.`
-      : "**Aucun ticket trouvé dans la base de données** pour cette recherche. Ne pas inventer de tickets — indiquer simplement qu'aucun résultat n'a été trouvé.";
-    contextParts.push(emptyPersonMsg);
-  }
-
-  if (assets.length > 0) {
-    let assetContext = "**Équipements trouvés dans l'inventaire :**\n";
-    for (const a of assets) {
-      assetContext += `• **${a.name}** (${a.assetType}) — N° série: ${a.serialNumber || 'N/A'} | Inventaire: ${a.inventoryNumber || 'N/A'}`;
-      if (a.manufacturer) assetContext += ` | Marque: ${a.manufacturer}`;
-      if (a.model) assetContext += ` | Modèle: ${a.model}`;
-      if (a.location) assetContext += ` | Lieu: ${a.location.name}`;
-      if (a.owner) assetContext += ` | Propriétaire: ${a.owner.fullName}`;
-      assetContext += `\n`;
-    }
-    contextParts.push(assetContext);
-  }
-
-  if (users.length > 0) {
-    let userContextStr = "**Utilisateurs trouvés :**\n";
-    for (const u of users) {
-      userContextStr += `• **${u.fullName}** — Rôle: ${u.role}`;
-      if (u.email) userContextStr += ` | Email: ${u.email}`;
-      // L'API /users renvoie `team` (objet unique), pas `teams` (ancien format inexistant)
-      if (u.team?.name) userContextStr += ` | Équipe: ${u.team.name}`;
-      userContextStr += `\n`;
-    }
-    contextParts.push(userContextStr);
-  }
-
-  if (locations.length > 0) {
-    let locContext = "**Lieux trouvés :**\n";
-    for (const l of locations) {
-      locContext += `• **${l.name}** — ${l.completename || ''}`;
-      if (l.address) locContext += ` | Adresse: ${l.address}`;
-      locContext += `\n`;
-    }
-    contextParts.push(locContext);
-  }
-
-  if (teams.length > 0) {
-    let teamContextStr = "**Équipes trouvées dans le système :**\n";
-    for (const tm of teams) {
-      teamContextStr += `• **${tm.name}** (${tm.members?.length || 0} membres, ${tm._count?.tickets || 0} tickets en base)`;
-      if (tm.description) teamContextStr += ` — ${tm.description}`;
-      if (tm.groupEmail) teamContextStr += ` | Email groupe: ${tm.groupEmail}`;
-      if (tm.members?.length > 0) {
-        teamContextStr += `\n  - Membres: ${tm.members.map((m) => `${m.fullName} (${m.role})`).join(', ')}`;
-      }
-      teamContextStr += `\n`;
-    }
-    contextParts.push(teamContextStr);
-  }
-
-  let action = null;
-  let widget = null;
-  let pendingTicket = null;
-
-  _stepLog('pre-switch', `intent=${intent} contextParts=${contextParts.length}`);
-
-  // Filet de sécurité : les handlers déterministes ci-dessous font des requêtes DB/IA
-  // non protégées. Une erreur dedans (champ Prisma inconnu, provider down...) ne doit
-  // JAMAIS tuer la réponse entière — on garde le contexte déjà construit et on signale
-  // l'indisponibilité au LLM, qui dira honnêtement ce qui manque au lieu de crasher.
-  try {
-  switch (intent) {
-    case 'analytics': {
-      const lower = message.toLowerCase();
-      const kwMatch = message.match(/\b(asten|caisse|vpn|réseau|reseau|imprimante|telephonie|logiciel)\b/i);
-      const kw = params?.keyword || (kwMatch ? kwMatch[1] : null);
-
-      // Si un nom de personne est mentionné → stats technicien (staff only)
-      if (params?.personName || (lower.match(/\b(perf|performance|stats|statistiques)\b/) && lower.match(/\b([A-Z][a-z]+)\b/))) {
-        const techName = params?.personName || lower.match(/\b([A-Z][a-z]+)\b/)?.[1];
-        if (techName) {
-          const stats = await getTechnicianStats(techName);
-          if (stats) {
-            let statsText = `**Performance de ${stats.name} :**\n`;
-            statsText += `• Total tickets assignés : ${stats.total}\n`;
-            statsText += `• Résolus : ${stats.resolvedCount} (${stats.resolutionRate}%)\n`;
-            statsText += `• Temps moyen de résolution : ${stats.avgResolutionHours}h\n`;
-            statsText += `**Par statut :**\n`;
-            for (const [s, c] of Object.entries(stats.byStatus)) statsText += `  • ${STATUS_LABEL[s] || s} : ${c}\n`;
-            statsText += `**Par priorité :**\n`;
-            for (const [p, c] of Object.entries(stats.byPriority)) statsText += `  • ${PRIORITY_LABEL[p] || p} : ${c}\n`;
-            contextParts.push(statsText);
-            break;
-          }
-        }
-      }
-
-      if (lower.includes('pourquoi') || params?.isWhy) {
-        const rootCause = await analyticsTools.analyzeRootCause({ locationName: kw, filterKeyword: kw });
-        contextParts.push(`**Données d'analyse de cause racine pour ${kw || 'l\'ensemble des tickets'} (${rootCause.sampleCount} incidents analysés) :**\n` +
-          rootCause.ticketsSample.map(t => `• Ticket #${t.id} [${t.category || 'Général'}]: ${t.subject}`).join('\n')
-        );
-      } else {
-        // "le plus critique" → classement par nombre de tickets critiques (P1)
-        const wantsUrgent = /critique|urgent|grave|s[ée]v[èe]re|p1/i.test(message) || /critical|urgent/i.test(params?.keyword || '');
-        const period = params?.period || 'all';
-
-        // Stats par lieu
-        const stats = await analyticsTools.getTopLocationsStats({ filterKeyword: kw, period, limit: 5, sortByUrgent: wantsUrgent });
-
-        // Stats par catégorie (si un mot-clé est fourni)
-        let categoryStats = null;
-        if (kw) {
-          categoryStats = await analyticsTools.getCategoryDistribution({ filterKeyword: kw, period, limit: 6 });
-        }
-
-        if (stats.rankings.length > 0) {
-          widget = {
-            type: 'chart',
-            chartType: 'bar',
-            title: `📊 Top Magasins / Lieux ${kw ? `(Filtre: ${kw})` : ''}`,
-            data: stats.chartData,
-            columns: ['name', 'Tickets', 'Urgents'],
-            rankings: stats.rankings,
-          };
-
-          let statsText = `**Analyse statistique${kw ? ` pour "${kw}"` : ''} :**\n\n`;
-
-          // Afficher les stats par catégorie si disponibles
-          if (categoryStats && categoryStats.categories.length > 0) {
-            statsText += `**Par catégorie :**\n`;
-            for (const cat of categoryStats.categories) {
-              statsText += `• ${cat.name} : ${cat.count} tickets\n`;
-            }
-            statsText += `\n`;
-          }
-
-          // Stats par lieu
-          statsText += `**Par lieu :**\n`;
-          for (const r of stats.rankings) {
-            statsText += `• **#${r.rank} ${r.locationName}** — ${r.totalTickets} tickets (${r.percentage}%, ${r.urgentTickets} urgents)\n`;
-          }
-          contextParts.push(statsText);
-        } else if (categoryStats && categoryStats.categories.length > 0) {
-          // Pas de stats par lieu, mais on a des stats par catégorie
-          let statsText = `**Analyse statistique${kw ? ` pour "${kw}"` : ''} :**\n\n`;
-          statsText += `**Par catégorie :**\n`;
-          for (const cat of categoryStats.categories) {
-            statsText += `• ${cat.name} : ${cat.count} tickets\n`;
-          }
-          contextParts.push(statsText);
-        }
-      }
-      break;
-    }
-
-    case 'top_locations': {
-      const period = params?.period || 'all';
-      const startDate = period === 'all' ? null : (
-        period === 'today' ? new Date(new Date().setHours(0,0,0,0)) :
-        period === '7d' ? new Date(Date.now() - 7*86400000) :
-        period === '30d' ? new Date(Date.now() - 30*86400000) :
-        period === '90d' ? new Date(Date.now() - 90*86400000) : null
-      );
-      const where = { deletedAt: null, status: { notIn: ['CLOSED', 'SOLVED'] }, approvalStatus: { notIn: ['PENDING', 'REJECTED'] } };
-      if (startDate) where.createdAt = { ...where.createdAt, gte: startDate };
-      const tickets = await prisma.ticket.findMany({
-        where,
-        select: { id: true, priority: true, status: true, locationName: true },
-      });
-      const locationMap = new Map();
-      for (const t of tickets) {
-        const loc = t.locationName || 'Non spécifié';
-        if (!locationMap.has(loc)) locationMap.set(loc, { total: 0, urgent: 0, byStatus: {} });
-        const item = locationMap.get(loc);
-        item.total++;
-        if (t.priority === 'P1' || t.priority === 'P2') item.urgent++;
-        item.byStatus[t.status] = (item.byStatus[t.status] || 0) + 1;
-      }
-      const ranked = [...locationMap.entries()]
-        .map(([name, data]) => ({ name, ...data }))
-        .sort((a, b) => b.total - a.total)
-        .slice(0, 10);
-      if (ranked.length === 0) {
-        contextParts.push(`**Aucun ticket trouvé** pour cette période.`);
-        break;
-      }
-      // Sauvegarder les top locations dans params pour multi-turn
-      params.topLocations = ranked.map(r => r.name);
-      const totalTickets = ranked.reduce((s, r) => s + r.total, 0);
-      let txt = `**Classement des lieux** (${tickets.length} tickets, ${period === 'all' ? 'toutes périodes' : period})\n\n`;
-      txt += `| Rang | Lieu | Tickets | Urgents | % |\n|---|---|---|---|---|\n`;
-      for (let i = 0; i < ranked.length; i++) {
-        const r = ranked[i];
-        const pct = Math.round((r.total / tickets.length) * 100);
-        txt += `| ${i+1} | ${r.name} | ${r.total} | ${r.urgent} | ${pct}% |\n`;
-      }
-      contextParts.push(txt);
-      break;
-    }
-
-    case 'top_technicians': {
-      const period = params?.period || 'all';
-      const startDate = period === 'all' ? null : (
-        period === 'today' ? new Date(new Date().setHours(0,0,0,0)) :
-        period === '7d' ? new Date(Date.now() - 7*86400000) :
-        period === '30d' ? new Date(Date.now() - 30*86400000) :
-        period === '90d' ? new Date(Date.now() - 90*86400000) : null
-      );
-      const where = { deletedAt: null, status: { notIn: ['CLOSED', 'SOLVED'] }, approvalStatus: { notIn: ['PENDING', 'REJECTED'] } };
-      if (startDate) where.createdAt = { ...where.createdAt, gte: startDate };
-      const tickets = await prisma.ticket.findMany({
-        where,
-        select: { id: true, priority: true, status: true, assignedToId: true, assignedTo: { select: { fullName: true } } },
-      });
-      const techMap = new Map();
-      for (const t of tickets) {
-        const name = t.assignedTo?.fullName || 'Non assigné';
-        if (!techMap.has(name)) techMap.set(name, { total: 0, resolved: 0, urgent: 0 });
-        const item = techMap.get(name);
-        item.total++;
-        if (t.status === 'SOLVED' || t.status === 'CLOSED') item.resolved++;
-        if (t.priority === 'P1' || t.priority === 'P2') item.urgent++;
-      }
-      const ranked = [...techMap.entries()]
-        .map(([name, data]) => ({ name, rate: data.total > 0 ? Math.round((data.resolved / data.total) * 100) : 0, ...data }))
-        .sort((a, b) => b.total - a.total)
-        .slice(0, 10);
-      if (ranked.length === 0) {
-        contextParts.push(`**Aucun ticket trouvé** pour cette période.`);
-        break;
-      }
-      let txt = `**Classement des techniciens** (${tickets.length} tickets, ${period === 'all' ? 'toutes périodes' : period})\n\n`;
-      txt += `| Rang | Technicien | Tickets | Résolus | Taux | Urgents |\n|---|---|---|---|---|---|\n`;
-      for (let i = 0; i < ranked.length; i++) {
-        const r = ranked[i];
-        txt += `| ${i+1} | ${r.name} | ${r.total} | ${r.resolved} | ${r.rate}% | ${r.urgent} |\n`;
-      }
-      contextParts.push(txt);
-      break;
-    }
-
-    case 'check_ticket': {
-      let tid = params?.ticketId || message.match(/#?(\d+)/)?.[1];
-      // Si pas de numéro dans le message, chercher dans l'historique conversationnel
-      if (!tid && conversationHistory.length > 0) {
-        const lastUserMsgs = conversationHistory.filter(m => m.role === 'user');
-        for (const m of lastUserMsgs.reverse()) {
-          const match = m.content.match(/#?(\d+)/);
-          if (match) { tid = match[1]; break; }
-        }
-        // Aussi chercher dans la réponse précédente du bot (ex: "Ticket 63", "#63")
-        if (!tid) {
-          const lastBotMsgs = conversationHistory.filter(m => m.role === 'assistant');
-          for (const m of lastBotMsgs.reverse()) {
-            const match = m.content.match(/(?:ticket|#)\s*(\d+)/i);
-            if (match) { tid = match[1]; break; }
-          }
-        }
-      }
-      if (tid) {
-        const info = await checkTicketStatus(tid);
-        contextParts.push(`**Résultat de la consultation :**\n${info}`);
-      } else {
-        contextParts.push(`L'utilisateur veut consulter un ticket mais n'a pas donné de numéro. Demandez-le.`);
-      }
-      break;
-    }
-
-    case 'summary': {
-      let tid = params?.ticketId || message.match(/#?(\d+)/)?.[1];
-      // Si pas de numéro dans le message, chercher dans l'historique conversationnel
-      if (!tid && conversationHistory.length > 0) {
-        const lastUserMsgs = conversationHistory.filter(m => m.role === 'user');
-        for (const m of lastUserMsgs.reverse()) {
-          const match = m.content.match(/#?(\d+)/);
-          if (match) { tid = match[1]; break; }
-        }
-        if (!tid) {
-          const lastBotMsgs = conversationHistory.filter(m => m.role === 'assistant');
-          for (const m of lastBotMsgs.reverse()) {
-            const match = m.content.match(/(?:ticket|#)\s*(\d+)/i);
-            if (match) { tid = match[1]; break; }
-          }
-        }
-      }
-      if (tid) {
-        const summary = await getTicketSummary(tid);
-        contextParts.push(`**Résumé :**\n${summary}`);
-      } else {
-        contextParts.push(`L'utilisateur veut un résumé de ticket mais n'a pas donné de numéro. Demandez-le.`);
-      }
-      break;
-    }
-
-    case 'similar_tickets': {
-      const title = params?.title || '';
-      const description = params?.description || message;
-      const similar = await findSimilarTickets(title, description, user);
-      if (similar.length > 0) {
-        let simContext = `**Tickets similaires potentiels (${similar.length} trouvés) :**\n`;
-        for (const t of similar) {
-          simContext += `• **#${t.id}** ${t.title} — ${STATUS_LABEL[t.status] || t.status} — ${t.requester?.fullName || 'Inconnu'}\n`;
-        }
-        simContext += `\n*Voulez-vous créer un nouveau ticket ou mettre à jour un existant ?*`;
-        contextParts.push(simContext);
-      } else {
-        contextParts.push(`**Aucun ticket similaire trouvé.** Vous pouvez créer un nouveau ticket si nécessaire.`);
-      }
-      break;
-    }
-
-    case 'change_status': {
-      const tid = params?.ticketId || message.match(/#?(\d+)/)?.[1];
-      const statusWord = message.match(/\b(nouveau|ouvert|attente|résolu|resolu|fermé|ferme|new|open|pending|solved|closed)\b/i)?.[1];
-      if (tid && statusWord) {
-        const result = await changeTicketStatus(tid, statusWord);
-        if (result.error) {
-          contextParts.push(`**Erreur :** ${result.error}`);
-        } else {
-          action = { type: 'status_changed', ticketId: result.ticket.id };
-          contextParts.push(`**Statut modifié :** Ticket #${result.ticket.id} passe de "${result.oldStatus}" à "${result.newStatus}".`);
-        }
-      } else {
-        contextParts.push(`Pour changer le statut, donnez le numéro du ticket et le nouveau statut. Ex: "ferme le ticket #5" ou "passe le ticket 12 en résolu".`);
-      }
-      break;
-    }
-
-    case 'assign_ticket': {
-      const tid = params?.ticketId || message.match(/#?(\d+)/)?.[1];
-      const person = params?.personName || message.match(/(?:à|a)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)/)?.[1];
-      if (tid && person) {
-        const result = await assignTicket(tid, person);
-        if (result.error) {
-          contextParts.push(`**Erreur :** ${result.error}`);
-        } else {
-          action = { type: 'ticket_assigned', ticketId: result.ticket.id };
-          contextParts.push(`**Ticket assigné :** Ticket #${result.ticket.id} assigné à **${result.assignedTo}**.`);
-        }
-      } else {
-        contextParts.push(`Pour assigner un ticket, donnez le numéro et le nom du technicien. Ex: "assigne le ticket #5 à Jean".`);
-      }
-      break;
-    }
-
-    case 'search_inventory': {
-      if (assets.length === 0) {
-        contextParts.push(`**Aucun équipement trouvé** pour "${params?.keyword || message}". Essayez avec un autre terme.`);
-      }
-      break;
-    }
-
-    case 'search_users': {
-      if (users.length === 0) {
-        contextParts.push(`**Aucun utilisateur trouvé** pour "${params?.personName || message}". Essayez avec un autre terme.`);
-      }
-      break;
-    }
-
-    case 'search_locations': {
-      if (locations.length === 0) {
-        contextParts.push(`**Aucun lieu trouvé** pour "${params?.locationName || message}". Essayez avec un autre terme.`);
-      }
-      break;
-    }
-
-    case 'search_teams': {
-      if (teams.length === 0) {
-        contextParts.push(`**Aucune équipe trouvée** pour "${params?.teamName || message}".`);
-      }
-      break;
-    }
-
-    case 'search_problems': {
-      const kw = params?.keyword || message;
-      const problems = await prisma.problem.findMany({
-        where: {
-          OR: [
-            { title: { contains: kw, mode: 'insensitive' } },
-            { description: { contains: kw, mode: 'insensitive' } },
-            { category: { contains: kw, mode: 'insensitive' } },
-          ],
-        },
-        include: {
-          assignedTo: { select: { fullName: true } },
-          team: { select: { name: true } },
-          requester: { select: { fullName: true } },
-          tickets: { select: { ticket: { select: { id: true, title: true, status: true } } } },
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 10,
-      });
-      if (problems.length === 0) {
-        contextParts.push(`**Aucun problème trouvé** pour "${kw}".`);
-      } else {
-        let txt = `**${problems.length} problème(s) trouvé(s) :**\n\n`;
-        for (const p of problems) {
-          txt += `• **#${p.id}** [${p.status}] ${p.title}\n`;
-          txt += `  Priorité: ${PRIORITY_LABEL[p.priority] || p.priority} | Assigné: ${p.assignedTo?.fullName || 'Non assigné'} | Équipe: ${p.team?.name || '-'}\n`;
-          if (p.tickets?.length > 0) {
-            txt += `  Tickets liés: ${p.tickets.map(t => `#${t.ticket.id}`).join(', ')}\n`;
-          }
-        }
-        contextParts.push(txt);
-      }
-      break;
-    }
-
-    case 'search_skills': {
-      const personName = params?.personName || message;
-      // Si un nom de personne est mentionné, chercher ses compétences
-      if (personName && personName.length > 1) {
-        const users = await prisma.user.findMany({
-          where: {
-            OR: [
-              { fullName: { contains: personName, mode: 'insensitive' } },
-              { email: { contains: personName, mode: 'insensitive' } },
-            ],
-            role: { in: ['TECHNICIAN', 'HOTLINE', 'ADMIN'] },
-          },
-          select: {
-            id: true, fullName: true, role: true,
-            skills: { select: { skill: { select: { name: true, category: true } }, level: true } },
-          },
-          take: 5,
-        });
-        if (users.length === 0) {
-          contextParts.push(`**Aucun technicien trouvé** pour "${personName}".`);
-        } else {
-          let txt = `**Compétences des techniciens :**\n\n`;
-          for (const u of users) {
-            txt += `• **${u.fullName}** (${u.role})\n`;
-            if (u.skills.length === 0) {
-              txt += `  Aucune compétence renseignée\n`;
-            } else {
-              for (const s of u.skills) {
-                txt += `  • ${s.skill.name} (${s.skill.category || 'Général'}) — niveau ${s.level}/5\n`;
-              }
-            }
-          }
-          contextParts.push(txt);
-        }
-      } else {
-        // Lister toutes les compétences disponibles
-        const allSkills = await prisma.skill.findMany({
-          include: { userSkills: { select: { userId: true } } },
-          orderBy: { name: 'asc' },
-        });
-        if (allSkills.length === 0) {
-          contextParts.push(`**Aucune compétence** enregistrée dans le système.`);
-        } else {
-          let txt = `**${allSkills.length} compétence(s) disponible(s) :**\n\n`;
-          for (const s of allSkills) {
-            txt += `• **${s.name}** (${s.category || 'Général'}) — ${s.userSkills.length} technicien(s)\n`;
-          }
-          contextParts.push(txt);
-        }
-      }
-      break;
-    }
-
-    case 'ticket_links': {
-      let tid = params?.ticketId || message.match(/#?(\d+)/)?.[1];
-      if (!tid && conversationHistory.length > 0) {
-        const lastUserMsgs = conversationHistory.filter(m => m.role === 'user');
-        for (const m of lastUserMsgs.reverse()) {
-          const match = m.content.match(/#?(\d+)/);
-          if (match) { tid = match[1]; break; }
-        }
-      }
-      if (tid) {
-        const ticket = await prisma.ticket.findUnique({
-          where: { id: parseInt(tid, 10) },
-          include: {
-            linksA: { select: { ticketB: { select: { id: true, title: true, status: true, priority: true, assignedTo: { select: { fullName: true } } } }, type: true } },
-            linksB: { select: { ticketA: { select: { id: true, title: true, status: true, priority: true, assignedTo: { select: { fullName: true } } } }, type: true } },
-          },
-        });
-        if (!ticket) {
-          contextParts.push(`Ticket #${tid} introuvable.`);
-        } else {
-          const allLinks = [
-            ...(ticket.linksA || []).map(l => ({ id: l.ticketB.id, title: l.ticketB.title, status: l.ticketB.status, priority: l.ticketB.priority, assignee: l.ticketB.assignedTo?.fullName, linkType: l.type, direction: 'ce ticket →' })),
-            ...(ticket.linksB || []).map(l => ({ id: l.ticketA.id, title: l.ticketA.title, status: l.ticketA.status, priority: l.ticketA.priority, assignee: l.ticketA.assignedTo?.fullName, linkType: l.type, direction: '→ ce ticket' })),
-          ];
-          if (allLinks.length === 0) {
-            contextParts.push(`**Ticket #${tid}** n'a aucun lien avec d'autres tickets.`);
-          } else {
-            let txt = `**Liens du ticket #${tid}** (${allLinks.length} lien(s)) :\n\n`;
-            const TYPE_LABEL = { RELATED: 'Lié', DUPLICATE_OF: 'Doublon de', BLOCKS: 'Bloque', BLOCKED_BY: 'Bloqué par' };
-            for (const l of allLinks) {
-              txt += `• ${l.direction} #${l.id} [${STATUS_LABEL[l.status] || l.status}] ${l.title} — ${TYPE_LABEL[l.linkType] || l.linkType}\n`;
-              txt += `  Priorité: ${PRIORITY_LABEL[l.priority] || l.priority} | Assigné: ${l.assignee || 'Non assigné'}\n`;
-            }
-            contextParts.push(txt);
-          }
-        }
-      } else {
-        contextParts.push(`Donnez le numéro d'un ticket pour voir ses liens (ex: "liens du ticket #12").`);
-      }
-      break;
-    }
-
-    case 'time_entries': {
-      let tid = params?.ticketId || message.match(/#?(\d+)/)?.[1];
-      if (!tid && conversationHistory.length > 0) {
-        const lastUserMsgs = conversationHistory.filter(m => m.role === 'user');
-        for (const m of lastUserMsgs.reverse()) {
-          const match = m.content.match(/#?(\d+)/);
-          if (match) { tid = match[1]; break; }
-        }
-      }
-      if (tid) {
-        const entries = await prisma.ticketTimeEntry.findMany({
-          where: { ticketId: parseInt(tid, 10) },
-          orderBy: { entryDate: 'desc' },
-          select: { minutes: true, description: true, entryDate: true, user: { select: { fullName: true } } },
-        });
-        if (entries.length === 0) {
-          contextParts.push(`**Aucune saisie de temps** pour le ticket #${tid}.`);
-        } else {
-          const totalMin = entries.reduce((s, e) => s + e.minutes, 0);
-          let txt = `**Temps passé sur le ticket #${tid} :** ${totalMin}min total (${entries.length} saisie(s))\n\n`;
-          for (const e of entries) {
-            txt += `• **${e.user?.fullName || '?'}** — ${e.minutes}min`;
-            if (e.description) txt += ` — ${e.description}`;
-            txt += ` (${new Date(e.entryDate).toLocaleDateString('fr-FR')})\n`;
-          }
-          // Agrégat par technicien
-          const byUser = new Map();
-          for (const e of entries) {
-            const name = e.user?.fullName || 'Inconnu';
-            byUser.set(name, (byUser.get(name) || 0) + e.minutes);
-          }
-          if (byUser.size > 1) {
-            txt += `\n**Résumé par technicien :**\n`;
-            for (const [name, min] of [...byUser.entries()].sort((a, b) => b[1] - a[1])) {
-              txt += `• ${name} : ${min}min\n`;
-            }
-          }
-          contextParts.push(txt);
-        }
-      } else {
-        contextParts.push(`Donnez le numéro d'un ticket pour voir le temps passé (ex: "temps passé sur le #12").`);
-      }
-      break;
-    }
-
-    case 'team_report': {
-      const teamDist = await analyticsTools.getTeamDistribution({ period: params?.period || '30d' });
-      if (teamDist.teams.length > 0) {
-        widget = {
-          type: 'chart',
-          chartType: 'bar',
-          title: '📊 Répartition des tickets ouverts par équipe',
-          data: teamDist.chartData,
-          columns: ['name', 'Total', 'Urgents'],
-          rankings: teamDist.teams.map((t, i) => ({
-            rank: i + 1,
-            locationName: t.teamName,
-            totalTickets: t.total,
-            urgentTickets: t.urgent,
-          })),
-        };
-
-        let reportText = `**Répartition des tickets ouverts** (${teamDist.totalOpen} total, ${teamDist.unassignedCount} non assignés)\n\n`;
-        for (const t of teamDist.teams) {
-          reportText += `• **${t.teamName}** — ${t.total} tickets (${t.urgent} urgents)\n`;
-          reportText += `  Nouveaux: ${t.byStatus.NEW} | Ouverts: ${t.byStatus.OPEN} | Attente: ${t.byStatus.PENDING}\n`;
-        }
-        contextParts.push(reportText);
-      } else {
-        contextParts.push(`**Aucun ticket ouvert** à ce jour.`);
-      }
-      break;
-    }
-
-    case 'create_ticket_for': {
-      if (params?.title && params?.description && params?.forUser) {
-        // Chercher l'utilisateur cible
-        const targetUsers = await prisma.user.findMany({
-          where: {
-            OR: [
-              { fullName: { contains: params.forUser, mode: 'insensitive' } },
-              { email: { contains: params.forUser, mode: 'insensitive' } },
-            ],
-          },
-          select: { id: true, fullName: true, role: true },
-          take: 5,
-        });
-        if (targetUsers.length === 0) {
-          contextParts.push(`**Utilisateur introuvable** pour "${params.forUser}". Vérifiez le nom.`);
-        } else {
-          const target = targetUsers[0];
-          try {
-            const ticket = await createTicketFromChat(params.title, params.description, params?.priorityHint, target.id);
-            action = { type: 'ticket_created', ticketId: ticket.id };
-            contextParts.push(`**Ticket créé pour ${target.fullName} :** #${ticket.id} — ${ticket.title}\nPriorité: ${PRIORITY_LABEL[ticket.priority] || ticket.priority}\nDemandeur: ${target.fullName}\nLien: /tickets/${ticket.id}`);
-          } catch (err) {
-            contextParts.push(`Erreur lors de la création du ticket : ${err.message}`);
-          }
-        }
-      } else {
-        contextParts.push(`Pour créer un ticket pour un autre utilisateur, donnez : le nom de la personne, le titre et la description. Ex: "Crée un ticket pour Paul — Imprimante cassée — L'imprimante du 2ème étage ne fonctionne plus"`);
-      }
-      break;
-    }
-
-    case 'report': {
-      const wantsFull = /\b(tous?|toute?|liste|liste[s]?|montre|affiche|donne[- ]?moi)\b/i.test(message);
-      const report = await generateReport(params?.period || null, wantsFull);
-      contextParts.push(`**Rapport :**\n${report}`);
-      break;
-    }
-
-    case 'create_ticket': {
-      // TOUJOURS demander confirmation avant création
-      const ticketTitle = params?.title || message.substring(0, 100);
-      const ticketDesc = params?.description || message;
-      const ticketPriority = params?.priorityHint || 'P3';
-
-      // Vérifier les doublons
-      const similar = await findSimilarTickets(ticketTitle, ticketDesc, user);
-
-      // Suggérer équipe et technicien basé sur le contenu
-      let suggestedTeam = null;
-      let suggestedTechnician = null;
-      let suggestedCategory = null;
-      let suggestedCategoryId = null;
-      try {
-        // Charger les catégories depuis la base et détecter la plus appropriée
-        const allCategories = await prisma.ticketCategory.findMany({ select: { id: true, name: true, parentId: true } });
-        const textToSearch = (ticketTitle + ' ' + ticketDesc).toLowerCase();
-        
-        // Mots-clés de fallback si aucune catégorie ne matche par nom
-        const categoryKeywords = {
-          'Réseau': /\b(vpn|réseau|reseau|dns|wifi|switch|pare-feu|firewall|ip|internet|connection)\b/i,
-          'Matériel': /\b(imprimante|écran|clavier|souris|pc|ordinateur|disque dur|ssd|scanner)\b/i,
-          'Sécurité': /\b(phishing|virus|antivirus|mot de passe|ssl|certificat|sécurite| sécurité)\b/i,
-          'Système': /\b(windows|linux|serveur|ad|active directory|sauvegarde|profil|installation)\b/i,
-          'Logiciel': /\b(office|outlook|sage|logiciel|license|mise à jour|update)\b/i,
-          'Téléphonie': /\b(téléphone|phone|voip|standard|appel|extension)\b/i,
-          'Applicatif': /\b(erp|application|api|module|import|export|rapport|dashboard)\b/i,
-        };
-
-        // 1. Essayer de matcher par nom de catégorie (insensible à la casse)
-        for (const cat of allCategories) {
-          const catNameLower = cat.name.toLowerCase();
-          if (textToSearch.includes(catNameLower)) {
-            suggestedCategory = cat.name;
-            suggestedCategoryId = cat.id;
-            break;
-          }
-        }
-
-        // 2. Si pas de match par nom, utiliser les mots-clés de fallback
-        if (!suggestedCategory) {
-          for (const [catName, regex] of Object.entries(categoryKeywords)) {
-            if (regex.test(textToSearch)) {
-              // Chercher la catégorie correspondante en base
-              const matchCat = allCategories.find((c) => c.name.toLowerCase() === catName.toLowerCase());
-              if (matchCat) {
-                suggestedCategory = matchCat.name;
-                suggestedCategoryId = matchCat.id;
-              } else {
-                suggestedCategory = catName;
-              }
-              break;
-            }
-          }
-        }
-
-        // 3. Chercher le meilleur technicien pour cette catégorie
-        const { team, technician } = await require('./ticketAutoAssign').findBestTechnician(suggestedCategory, suggestedCategory);
-        suggestedTeam = team;
-        suggestedTechnician = technician;
-      } catch (err) {
-        console.warn('[chatbot] Suggestion équipe/technicien échouée:', err.message);
-      }
-
-      let confirmMsg = `**Création de ticket**\n\n`;
-      confirmMsg += `**Sujet :** ${ticketTitle}\n`;
-      confirmMsg += `**Description :** ${ticketDesc.substring(0, 300)}${ticketDesc.length > 300 ? '...' : ''}\n`;
-      confirmMsg += `**Priorité :** ${PRIORITY_LABEL[ticketPriority] || ticketPriority}\n`;
-      if (suggestedCategory) confirmMsg += `**Catégorie :** ${suggestedCategory}\n`;
-      if (suggestedTeam) confirmMsg += `**Équipe suggérée :** ${suggestedTeam.name}\n`;
-      if (suggestedTechnician) confirmMsg += `**Technicien suggéré :** ${suggestedTechnician.fullName}\n`;
-      confirmMsg += `**Demandeur :** ${user?.fullName || 'Vous'}\n`;
-      confirmMsg += `**Source :** Chatbot\n\n`;
-
-      if (similar.length > 0) {
-        confirmMsg += `⚠️ **Attention, des tickets similaires existent déjà :**\n`;
-        for (const t of similar.slice(0, 3)) {
-          confirmMsg += `• **#${t.id}** ${t.title} — ${STATUS_LABEL[t.status] || t.status}\n`;
-        }
-        confirmMsg += `\n`;
-      }
-
-      confirmMsg += `**Voulez-vous que je crée ce ticket ?** Répondez "oui" pour confirmer.`;
-
-      // Stocker les données en attente (avec équipe et technicien suggérés)
-      pendingTicket = {
-        title: ticketTitle,
-        description: ticketDesc,
-        priority: ticketPriority,
-        teamId: suggestedTeam?.id || null,
-        teamName: suggestedTeam?.name || null,
-        assignedToId: suggestedTechnician?.id || null,
-        assignedToName: suggestedTechnician?.fullName || null,
-        category: suggestedCategory || null,
-        categoryId: suggestedCategoryId || null,
-      };
-      contextParts.push(confirmMsg);
-      break;
-    }
-
-    case 'confirm_create_ticket': {
-      // L'utilisateur confirme → créer le ticket avec les données en attente
-      const dataToCreate = pendingTicketData || pendingTicket;
-      if (dataToCreate) {
-        try {
-          const ticket = await createTicketFromChat(dataToCreate.title, dataToCreate.description, dataToCreate.priority, userId, {
-            teamId: dataToCreate.teamId || null,
-            assignedToId: dataToCreate.assignedToId || null,
-            category: dataToCreate.category || null,
-          });
-          action = { type: 'ticket_created', ticketId: ticket.id };
-          let successMsg = `✅ **Ticket créé avec succès :**\n\n**#${ticket.id}** — ${ticket.title}\n`;
-          successMsg += `**Priorité :** ${PRIORITY_LABEL[ticket.priority] || ticket.priority}\n`;
-          if (dataToCreate.teamName) successMsg += `**Équipe :** ${dataToCreate.teamName}\n`;
-          if (dataToCreate.assignedToName) successMsg += `**Technicien :** ${dataToCreate.assignedToName}\n`;
-          successMsg += `**Demandeur :** ${user?.fullName || 'Vous'}\n`;
-          successMsg += `**Source :** Chatbot\n\nLe ticket passe par le centre de validation avant d'être traité.`;
-          contextParts.push(successMsg);
-          pendingTicket = null;
-        } catch (err) {
-          contextParts.push(`Erreur lors de la création du ticket : ${err.message}`);
-        }
-      } else {
-        contextParts.push(`Aucun ticket en attente de création. Décrivez d'abord votre problème.`);
-      }
-      break;
-    }
-
-    case 'escalate': {
-      try {
-        const ticket = await escalateToTechnician(message, userId);
-        action = { type: 'escalation', ticketId: ticket.id };
-        contextParts.push(`**Escalade effectuée :** Un ticket P2 (#${ticket.id}) a été créé et les techniciens ont été notifiés en temps réel.`);
-      } catch (err) {
-        contextParts.push(`Erreur lors de l'escalade : ${err.message}`);
-      }
-      break;
-    }
-
-    case 'help': {
-      contextParts.push(`**Fonctionnalités disponibles :**\n
-• **Réunion hebdomadaire** : "Répartition par équipe", "Bilan des tickets ouverts par équipe"
-• **Recherche de tickets** : "Quels sont les tickets VPN ?", "Tickets imprimantes"
-• **Statistiques** : "Quel magasin a le plus de problèmes ?", "Stats du magasin Asten"
-• **Performance technicien** : "Perf de Jean", "Stats de Paul"
-• **Signaler un problème** : "Je veux signaler un problème"
-• **Créer pour un autre** : "Crée un ticket pour Paul — Imprimante cassée — Description..."
-• **Résumé de ticket** : "Résume-moi le ticket #123"
-• **Vérifier statut** : "Quel est le statut du ticket #123" (inclut SLA, liens, temps passé)
-• **Liens entre tickets** : "Y a-t-il des liens sur le #12", "Quels tickets sont bloqués"
-• **Temps passé** : "Combien de temps sur le ticket #12", "Qui a travaillé dessus"
-• **Changer statut** : "Ferme le ticket #5", "Passe le ticket 12 en résolu"
-• **Assigner un ticket** : "Assigne le ticket #5 à Jean"
-• **Rechercher un équipement** : "Où est l'imprimante HP ?", "Cherche le PC X1"
-• **Rechercher un utilisateur** : "Qui est Jean ?", "Email de Paul"
-• **Rechercher un lieu** : "Où se trouve le magasin Asten ?"
-• **Problèmes ITIL** : "Problèmes ouverts", "Quels incidents majeurs", "Problèmes réseau"
-• **Compétences** : "Qui est expert en réseau ?", "Qui sait faire du VPN ?", "Compétences de Jean"
-• **Doublons** : "Y a-t-il déjà un ticket pour ça ?"
-• **Escalade** : "Parler à un technicien"
-• **Base de connaissances** : Pose une question sur une procédure IT`);
-      break;
-    }
-  }
-  } catch (switchErr) {
-    console.error('[chatbot] Erreur handler déterministe (réponse dégradée):', switchErr?.message, '\n', switchErr?.stack);
-    contextParts.push(`⚠️ Une partie des données demandées n'a pas pu être récupérée (erreur technique). Présente UNIQUEMENT les données disponibles ci-dessus, signale honnêtement que le reste est momentanément indisponible et propose de réessayer — n'invente RIEN pour compléter.`);
-  }
-
-  // Instructions spécifiques par intent pour guider le format de réponse
-  // ── Classification intents info vs action ──
-  const ACTION_INTENTS = new Set([
-    'create_ticket', 'create_ticket_for', 'confirm_create_ticket',
-    'change_status', 'assign_ticket', 'escalate',
-  ]);
-
-  const isActionIntent = ACTION_INTENTS.has(intent);
-
-  // ── Construire le contexte système ──
-  const systemContext = contextParts.length > 0 ? `\n\n${contextParts.join('\n\n')}` : '';
 
   // ── Récupérer le modèle vocal configuré (optionnel) ──
   let voiceModelOptions = {};
@@ -3538,115 +2774,191 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     }
   } catch {}
 
-  // ── Le contexte RAG va dans le system prompt, le message user reste propre ──
-  const fullSystemPrompt = SYSTEM_PROMPT + systemContext;
+  // ── Construire le prompt système avec contexte utilisateur ──
+  const userContextLine = userContext ? `\n\n**Profil de l\'utilisateur :** ${userContext}` : '';
+  let forcedSystem = SYSTEM_PROMPT + buildCapabilityLine() + userContextLine;
+
+  // ── Injecter le contexte de la recherche précédente pour les follow-ups ──
+  // Si le message semble être un suivi ("ce site", "cette semaine", "et pour Jean",
+  // "combien", "leurs tickets"...), on injecte le toolData et le message précédent
+  // pour que le LLM ait le contexte de la recherche en cours.
+  if (previousState?.lastToolData || previousState?.lastMessage) {
+    const isFollowUp = /\b(ce |cette |cet |leur |leurs |ceux |ces |et |aussi |total|nombre|combien|statut|état|lesquels|lesquelles|ensuite|autre|détail|précis|encore)\b/i.test(message)
+      || /^[\s!.,?]*$/.test(message.replace(/\b(oui|non|ok|merci|super|bon|du|de|le|la|les|des|un|une|et|ou|pour|sur|avec|dans|par)\b/gi, '').trim());
+    if (isFollowUp && (previousState.lastToolData || previousState.lastMessage)) {
+      let contextInjection = '\n\nCONTEXTE DE LA RECHERCHE PRÉCÉDENTE :\n';
+      if (previousState.lastMessage) contextInjection += `Question précédente : "${previousState.lastMessage}"\n`;
+      if (previousState.lastToolData) contextInjection += `Résultats obtenus :\n${previousState.lastToolData.substring(0, 4000)}\n`;
+      contextInjection += `\nL'utilisateur fait un suivi sur cette recherche. Utilise ce contexte pour comprendre les références ("ce site", "cette semaine", "leurs tickets", etc.).`;
+      forcedSystem += contextInjection;
+      _stepLog('context-injection', `injected ${previousState.lastToolData?.length || 0} chars of previous toolData`);
+    }
+  }
 
   let reply;
+  let toolData = '';
   let citedTicketIds = [];
   let citedKnowledgeIds = [];
 
-  _stepLog('pre-llm', `isAction=${isActionIntent} contextLen=${systemContext.length}`);
+  _stepLog('pre-llm', 'agentic-flow');
 
-  // ═══ TOUJOURS passer par le LLM pour une réponse naturelle ═══
-  // Pour 'general' sans contexte déterministe : callAIWithTools (le LLM choisit ses outils)
-  // Pour les autres intents : le contexte est déjà construit par les handlers, on le passe au LLM
+  // ═══ FLUX AGENTIC UNIFIÉ : un seul appel callAIWithTools ═══
+  // Le LLM analyse la demande, choisit librement les outils dans CHATBOT_TOOLS,
+  // et génère la réponse. Plus de classification d\'intent préalable.
   try {
-    let raw;
-    let toolData = '';
-    if (intent === 'general' && contextParts.length === 0) {
-      const r = await callAIWithTools(
-        [{ role: 'user', content: message }],
-        { ...voiceModelOptions, conversationHistory, forcedSystem: SYSTEM_PROMPT + buildCapabilityLine(), user }
-      );
-      raw = r.text;
-      toolData = r.toolData || '';
-      _stepLog('llm-tools', `replyLen=${(raw || '').length} toolDataLen=${toolData.length}`);
-    } else {
-      raw = await callAI(
-        [{ role: 'user', content: message }],
-        {
-          ...voiceModelOptions,
-          conversationHistory,
-          forcedSystem: fullSystemPrompt + buildCapabilityLine(),
-        }
-      );
-      _stepLog('llm-free', `replyLen=${(raw || '').length}`);
+    const r = await callAIWithTools(
+      [{ role: 'user', content: message }],
+      { ...voiceModelOptions, conversationHistory, forcedSystem, user, _stateKey: stateKey }
+    );
+
+    // Si une confirmation est en attente, renvoyer directement le message
+    if (r.pendingConfirmation) {
+      return {
+        reply: cleanAiReply(r.text),
+        intent: 'add_followup',
+        action: null,
+        widget: null,
+        sources: [],
+        citedTicketIds: [],
+        citedKnowledgeIds: [],
+        pendingTicketData: null,
+      };
     }
 
-    reply = cleanAiReply(raw);
+    reply = cleanAiReply(r.text);
+    toolData = r.toolData || '';
+    _stepLog('llm-tools', `replyLen=${(reply || '').length} toolDataLen=${toolData.length}`);
 
-    // ── Validation des chiffres cités — UNIVERSELLE (les deux voies) ──
-    // La voie callAIWithTools fait remonter toolData (données brutes des outils) :
-    // le corpus autorisé la couvre sans faux positifs, la validation s'applique partout.
-    // Corpus autorisé : contexte injecté (faits DB) + données d'outils + message
-    // utilisateur + historique récent + IDs de l'état conversationnel.
+    // ── Validation des chiffres cités — anti-hallucination complète ──
+    // Couvre à la fois les IDs de tickets fantômes (#253) ET les chiffres
+    // hallucinés (totaux, pourcentages, durées non sourcés dans toolData).
     {
-      const allowedText = [
-        systemContext,
-        toolData,
-        getDateContextLine(), // la date du jour est injectée au LLM — la citer ne doit pas être un faux positif
-        message,
-        (conversationHistory || []).slice(-6).map((h) => h?.content || '').join('\n'),
-        (previousState?.tickets || []).map((t) => `#${t.id}`).join(' '),
-      ].join('\n');
-      const checkNumbers = (text) => findUnsourcedNumbers(text, {
-        allowedText,
-        allowedIds: matchingTickets.map((t) => t.id),
-      });
-      let unsourced = checkNumbers(reply);
-      if (unsourced.length > 0) {
-        console.warn('[chatbot] Chiffres non sourcés dans la réponse IA:', unsourced.join(', '), '— relance corrective (voie: ' + (toolData.length > 0 ? 'tools' : 'callAI') + ')');
-        // Sur la voie outils, la relance doit VOIR les mêmes données que la réponse
-        // initiale : fullSystemPrompt ne contient que contextParts (vide sur cette
-        // voie) — sans toolData injecté, le modèle réinvente ou répond "je n'ai pas
-        // l'info" alors que les données existaient. La boucle détection → correction
-        // → repli doit être fermée sur LES DEUX voies.
-        const usedToolsPath = toolData.length > 0;
-        const retrySystem = usedToolsPath
-          ? SYSTEM_PROMPT + buildCapabilityLine() + `\n\nDONNÉES RÉCUPÉRÉES PAR LES OUTILS (seule source autorisée pour tout chiffre, numéro et statut) :\n${toolData}`
-          : fullSystemPrompt + buildCapabilityLine();
+      // Inclure le contexte précédent (toolData injecté via forcedSystem) pour les follow-ups
+      const prevToolData = previousState?.lastToolData || '';
+      const allowedText = [toolData, prevToolData, message].filter(Boolean).join('\n');
+
+      // 1. IDs de tickets fantômes
+      const mentionedIds = [...new Set(
+        (String(reply).match(/(?:#|\bticket\s+n?°?\s*)(\d+)/gi) || [])
+          .map(s => parseInt(s.replace(/[^\d]/g, '')))
+          .filter(n => !isNaN(n) && n > 0 && n < 1000000)
+      )];
+      const allowedFromTools = new Set();
+      // Extraire les IDs avec préfixe #/ticket (ex: #66, ticket n°66)
+      (String(allowedText).match(/(?:#|\bticket\s+n?°?\s*)(\d+)/gi) || [])
+        .forEach(s => allowedFromTools.add(String(parseInt(s.replace(/[^\d]/g, '')))));
+      // Extraire les IDs depuis le JSON toolData (ex: "id": 66, "id":90)
+      (String(toolData).match(/"id"\s*:\s*(\d+)/gi) || [])
+        .forEach(s => { const m = s.match(/(\d+)/); if (m) allowedFromTools.add(m[1]); });
+      const phantomIds = mentionedIds.filter(id => !allowedFromTools.has(String(id)));
+
+      // 2. Chiffres libres non sourcés (totaux, pourcentages, durées)
+      const unsourcedNumbers = findUnsourcedNumbers(reply, { allowedText });
+
+      const hasPhantomIds = phantomIds.length > 0;
+      const hasUnsourcedNumbers = unsourcedNumbers.length > 0;
+
+      if (hasPhantomIds || hasUnsourcedNumbers) {
+        const issues = [];
+        if (hasPhantomIds) issues.push(`IDs fantômes: ${phantomIds.join(', ')}`);
+        if (hasUnsourcedNumbers) issues.push(`Chiffres non sourcés: ${unsourcedNumbers.join(', ')}`);
+        console.warn('[chatbot] Chiffres suspects dans la réponse:', issues.join(' | '), '— relance corrective');
+
+        const retrySystem = SYSTEM_PROMPT + buildCapabilityLine() + userContextLine +
+          (toolData ? `\n\nDONNÉES RÉCUPÉRÉES PAR LES OUTILS :\n${toolData}` : '');
+        let retryInstruction = '\n\n⚠️ RÈGLE ABSOLUE — VÉRACITÉ DES CHIFFRES :\n';
+        retryInstruction += 'Les numéros suivants n\'existent pas dans les données fournies et ne doivent PAS apparaître dans ta réponse :\n';
+        if (hasPhantomIds) retryInstruction += `- IDs de tickets: ${phantomIds.join(', ')}\n`;
+        if (hasUnsourcedNumbers) retryInstruction += `- Chiffres non sourcés: ${unsourcedNumbers.join(', ')}\n`;
+        retryInstruction += 'Si tu n\'as pas la donnée exacte, dis-le simplement. Ne JAMAIS compléter un tableau, un classement ou une statistique avec des chiffres inventés.';
+
         try {
           const retryRaw = await callAI(
             [{ role: 'user', content: message }],
             {
               ...voiceModelOptions,
               conversationHistory,
-              forcedSystem: retrySystem + `\n\n⚠️ TA RÉPONSE PRÉCÉDENTE citait ces informations ABSENTES des données : ${unsourced.join(', ')}. Refais ta réponse en n'utilisant QUE les chiffres, numéros et statuts présents dans le contexte. Si une donnée manque, dis-le explicitement — ne la déduis pas, ne la calcule pas toi-même.`,
+              forcedSystem: retrySystem + retryInstruction,
             }
           );
           reply = cleanAiReply(retryRaw);
-          unsourced = checkNumbers(reply);
-          if (unsourced.length > 0) {
-            console.warn('[chatbot] Chiffres toujours non sourcés après relance:', unsourced.join(', '), '— repli déterministe');
-            const fallback = renderFallback(contextParts.length > 0 ? contextParts : [toolData]);
-            if (fallback) reply = fallback;
+
+          // Re-vérification post-retry : si le modèle réintroduit des chiffres hallucinés,
+          // on bascule sur un repli déterministe honnête plutôt que de risquer une 2e erreur.
+          const retryIds = [...new Set(
+            (String(reply).match(/(?:#|\bticket\s+n?°?\s*)(\d+)/gi) || [])
+              .map(s => parseInt(s.replace(/[^\d]/g, '')))
+              .filter(n => !isNaN(n) && n > 0 && n < 1000000)
+          )];
+          const retryAllowed = new Set();
+          (String(allowedText).match(/(?:#|\bticket\s+n?°?\s*)(\d+)/gi) || [])
+            .forEach(s => retryAllowed.add(String(parseInt(s.replace(/[^\d]/g, '')))));
+          const retryPhantom = retryIds.filter(id => !retryAllowed.has(String(id)));
+          const retryUnsourced = findUnsourcedNumbers(reply, { allowedText });
+
+          if (retryPhantom.length > 0 || retryUnsourced.length > 0) {
+            console.warn('[chatbot] Relance corrective n\'a pas corrigé les chiffres suspects, repli déterministe');
+            reply = "Je n'ai pas cette donnée exacte de façon fiable — je préfère te le dire plutôt que de risquer une approximation. Réessaie ou précise ta recherche.";
           }
         } catch (retryErr) {
           console.error('[chatbot] Relance corrective échouée:', retryErr.message);
-          const fallback = renderFallback(contextParts.length > 0 ? contextParts : [toolData]);
-          if (fallback) reply = fallback;
         }
       }
     }
   } catch (err) {
-    // Fallback dégradé mais UTILE : si on a des données déterministes, on les renvoie telles quelles
-    // au lieu d'un message d'erreur générique. Sinon message d'attente court.
+    // Fallback dégradé : recherche par ID de ticket explicite si le message contient #\d+
     console.error('[chatbot] Échec appel LLM:', err.message);
-    const fallback = renderFallback(contextParts);
-    reply = fallback
-      ? fallback
-      : "Je rencontre un souci temporaire d'accès aux services IA. Réessayez dans quelques instants.";
+    const ticketIdMatch = message.match(/#(\d+)/);
+    if (ticketIdMatch) {
+      try {
+        const ticket = await prisma.ticket.findUnique({
+          where: { id: parseInt(ticketIdMatch[1], 10), deletedAt: null },
+          select: {
+            id: true, title: true, status: true, priority: true, locationName: true, category: true,
+            createdAt: true,
+            requester: { select: { fullName: true } },
+            assignedTo: { select: { fullName: true } },
+            team: { select: { name: true } },
+          },
+        });
+        if (ticket) {
+          reply = `**Ticket #${ticket.id}** : "${ticket.title}"\nStatut : ${ticket.status} | Priorité : ${ticket.priority}\nDemandeur : ${ticket.requester?.fullName || 'inconnu'} | Assigné : ${ticket.assignedTo?.fullName || 'non assigné'}\nÉquipe : ${ticket.team?.name || '-'} | Lieu : ${ticket.locationName || 'N/A'}\nCréé le : ${new Date(ticket.createdAt).toLocaleDateString('fr-FR')}`;
+        } else {
+          reply = "Je rencontre un souci temporaire d\'accès aux services IA. Réessayez dans quelques instants.";
+        }
+      } catch (dbErr) {
+        console.error('[chatbot] Fallback DB échoué:', dbErr.message);
+        reply = "Je rencontre un souci temporaire d\'accès aux services IA. Réessayez dans quelques instants.";
+      }
+    } else {
+      reply = "Je rencontre un souci temporaire d\'accès aux services IA. Réessayez dans quelques instants.";
+    }
+  }
+
+  // ═══ PASSE 2 : Audit & Ajustement (Auto-correction par le second LLM) ═══
+  // Le 2nd LLM reçoit la question utilisateur, la 1ère réponse générée, le contexte de conversation
+  // et les mêmes outils. Si la 1ère réponse est bonne, il l'affiche. Sinon, il l'ajuste.
+  if (reply && !isGreetingMessage(message)) {
+    try {
+      _stepLog('pass2-audit', `draftLen=${reply.length}`);
+      reply = await auditAndAdjustResponse(message, reply, {
+        conversationHistory,
+        fullSystemPrompt: forcedSystem,
+        toolData: typeof toolData !== 'undefined' ? toolData : '',
+        voiceModelOptions,
+      });
+    } catch (auditErr) {
+      console.warn('[chatbot] Passe 2 Audit non bloquante:', auditErr.message);
+    }
   }
 
   // citedTicketIds = ce que l'IA a RÉELLEMENT cité dans sa réponse, validé contre
   // la base (validateCitedIds filtre les tickets fantômes). Auparavant on renvoyait
   // tous les matchingTickets — une protection illusoire, jamais ce qui est cité.
   try {
-    // Formes "#253" ET "le ticket 253" / "ticket n°253" — sinon les citations sans
-    // dièse échappent à la validation.
     const mentioned = [...new Set((String(reply).match(/(?:#|\bticket\s+n?°?\s*)(\d+)/gi) || []).map((s) => Number(s.replace(/[^\d]/g, ''))))];
     if (mentioned.length > 0) {
-      const v = await validateCitedIds(mentioned, [], intent);
+      const v = await validateCitedIds(mentioned, [], 'agentic');
       citedTicketIds = v.ticketIds;
       if (v.issues.length > 0) console.warn('[chatbot] Tickets fantômes cités:', v.issues.join(' | '));
     }
@@ -3654,46 +2966,84 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     console.error('[chatbot] validateCitedIds échoué (non bloquant):', e.message);
   }
 
-  _stepLog('done', `intent=${intent} replyLen=${(reply || '').length} action=${action?.type || 'null'} citedTickets=${citedTicketIds.length}`);
+  _stepLog('done', `replyLen=${(reply || '').length} citedTickets=${citedTicketIds.length}`);
 
-  // Sauvegarder le state conversationnel pour le multi-turn (isolé par conversation)
-  if (userId && ['search_tickets', 'report', 'analytics', 'check_ticket', 'team_report', 'top_locations', 'top_technicians', 'search_inventory', 'search_users', 'search_locations', 'search_teams', 'search_problems', 'search_skills', 'ticket_links', 'time_entries'].includes(intent)) {
-    setConversationState(stateKey, intent, params, matchingTickets.map(t => ({ id: t.id, title: t.title, status: t.status })));
+  // ── Persister le contexte de recherche pour les follow-ups multi-tour ──
+  // Sauvegarde le toolData et le message pour que le prochain tour puisse
+  // injecter le contexte ("ce site", "cette semaine", etc.)
+  if (stateKey && toolData) {
+    await setConversationState(stateKey, 'agentic', {
+      lastToolData: toolData.substring(0, 6000),
+      lastMessage: message,
+    }, []);
   }
 
   return {
     reply,
-    intent,
-    action,
-    widget,
-    sources: knowledgeChunks.map((c) => ({ title: c.title, id: c.documentId })),
+    intent: 'general',
+    action: null,
+    widget: null,
+    sources: [],
     citedTicketIds,
     citedKnowledgeIds,
-    pendingTicketData: pendingTicket || null,
+    pendingTicketData: null,
   };
 }
 
-// ── Validation des chiffres cités par le LLM (anti-hallucination) ─────
-// Un chiffre de la réponse doit exister dans le corpus autorisé (contexte injecté,
-// message utilisateur, historique récent) ou être un ID de ticket réel. Sinon il
-// est signalé : relance corrective, puis repli déterministe si toujours hors-sol.
+// ── Validation des chiffres cités par le LLM ─────────────────────────
+// Extrait TOUS les chiffres explicitement cités dans la réponse (pas seulement les
+// IDs de tickets — aussi les totaux, pourcentages, durées) et les compare au corpus
+// autorisé (toolData + message utilisateur). Un chiffre absent du corpus est
+// probablement halluciné et déclenche une relance corrective.
 function findUnsourcedNumbers(reply, { allowedText = '', allowedIds = [] } = {}) {
   if (!reply) return [];
-  const allowed = new Set(String(allowedText).match(/\d+(?:[.,]\d+)?/g) || []);
-  for (const id of allowedIds || []) allowed.add(String(id));
-  // Ignorer les numérotations de listes markdown ("1. ", "2) " en début de ligne)
-  const text = String(reply).replace(/(^|\n)\s*\d{1,2}[.)]\s/g, '$1');
-  const used = text.match(/\d+(?:[.,]\d+)?/g) || [];
-  return [...new Set(used.filter((n) => !allowed.has(n)))].slice(0, 10);
+
+  // 1. Extraire les IDs de tickets cités (#X, "ticket X")
+  const ticketIds = [...new Set(
+    (String(reply).match(/(?:#|\bticket\s+n?°?\s*)(\d+)/gi) || [])
+      .map(s => parseInt(s.replace(/[^\d]/g, '')))
+      .filter(n => !isNaN(n) && n > 0 && n < 1000000)
+  )];
+
+  // 2. Extraire les chiffres libres (totaux, pourcentages, durées) — pattern large
+  //    "12 tickets", "42%", "3h", "150 demandes", etc.
+  const freeNumbers = [...new Set(
+    (String(reply).match(/\b\d[\d\s.,]*(?:\s*%|\s*h(?:eures?)?|\s*min(?:utes?)?|\s*tickets?|\s*demandes?|\s*résolus?|\s*ouverts?|\s*urgents?|\s*liés?)\b/gi) || [])
+      .map(s => parseInt(s.replace(/[^\d]/g, '')))
+      .filter(n => !isNaN(n) && n > 0 && n < 1000000)
+  )];
+
+  const allMentioned = [...new Set([...ticketIds, ...freeNumbers])];
+  if (allMentioned.length === 0) return [];
+
+  // 3. Construire le corpus autorisé : allowedIds + IDs dans allowedText + tous les chiffres du toolData et du message
+  const allowed = new Set((allowedIds || []).map(String));
+
+  // IDs de tickets dans le corpus autorisé
+  (String(allowedText).match(/(?:#|\bticket\s+n?°?\s*)(\d+)/gi) || [])
+    .forEach(s => allowed.add(String(parseInt(s.replace(/[^\d]/g, '')))));
+
+  // Chiffres libres dans le corpus autorisé (toolData + message)
+  const corpusText = (allowedText || '');
+  const corpusNumbers = (corpusText.match(/\b\d[\d\s.,]*(?:\s*%|\s*h(?:eures?)?|\s*min(?:utes?)?|\s*tickets?|\s*demandes?|\s*résolus?|\s*ouverts?|\s*urgents?|\s*liés?)\b/gi) || [])
+    .map(s => parseInt(s.replace(/[^\d]/g, '')))
+    .filter(n => !isNaN(n));
+  for (const n of corpusNumbers) allowed.add(String(n));
+
+  // Aussi autoriser les chiffres qui apparaissent tels quels dans le corpus brut
+  const allCorpusDigits = (corpusText.match(/\b\d+\b/g) || []).map(s => String(parseInt(s, 10)));
+  for (const d of allCorpusDigits) allowed.add(d);
+
+  return allMentioned.filter(id => !allowed.has(String(id))).slice(0, 10);
 }
 
-// Repli déterministe lisible : le contexte brut est formaté pour un LLM — le renvoyer
-// tel quel à l'utilisateur donne l'impression d'un chatbot cassé. On l'encadre d'une
-// phrase honnête qui assume le choix (exact mais non interprété).
+// Repli déterministe : afficher proprement les données réelles sans wrapper trompeur.
 function renderFallback(contextParts) {
-  const data = (contextParts || []).filter((p) => p && p.length > 30).join('\n\n');
+  const data = (contextParts || [])
+    .filter((p) => p && p.length > 30)
+    .join('\n\n');
   if (!data) return null;
-  return `Voici les données brutes que j'ai récupérées — je préfère te les donner telles quelles plutôt que de risquer une interprétation approximative :\n\n${data}`;
+  return data;
 }
 
 // ── Helpers pour le structured output ──────────────────────────────────
