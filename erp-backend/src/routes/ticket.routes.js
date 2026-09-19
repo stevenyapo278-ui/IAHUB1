@@ -1469,6 +1469,15 @@ router.patch('/:id', allowTechnicianStatusOnly, requireTicketAssignOrTechnicianS
       );
     }
 
+    // Mettre à jour l'index de similarité (fire-and-forget)
+    const { updateSimilarityIndexStatus, refreshTicketEmbedding } = require('../services/similarIncidentDetector');
+    if (data.status !== undefined) {
+      updateSimilarityIndexStatus(id, data.status);
+    }
+    if (data.title !== undefined || data.content !== undefined) {
+      refreshTicketEmbedding(id);
+    }
+
     return res.json(ticket);
   } catch (err) {
     if (err.code === 'P2025') return res.status(404).json({ error: 'Ticket introuvable' });
@@ -2020,6 +2029,10 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
       console.error('[ticket.routes] Enregistrement première réponse échoué:', err.message);
     }
   }
+
+  // Régénérer l'embedding avec le nouveau suivi (fire-and-forget)
+  const { refreshTicketEmbedding } = require('../services/similarIncidentDetector');
+  refreshTicketEmbedding(ticketId);
 
   return res.status(201).json({ followup, imageAttachments });
 });

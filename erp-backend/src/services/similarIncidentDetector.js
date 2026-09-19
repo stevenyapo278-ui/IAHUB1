@@ -269,4 +269,76 @@ async function findSimilarByText(text, limit = 5, minScore = 0.4) {
   }
 }
 
-module.exports = { findSimilarOpenTicket, attachSiteToTicket, saveTicketEmbedding, findSimilarTicketsByVector, findSimilarByText };
+/**
+ * Met à jour le statut dans TicketSimilarityIndex quand le ticket change de statut.
+ * Fire-and-forget.
+ */
+async function updateSimilarityIndexStatus(ticketId, newStatus) {
+  try {
+    await prisma.ticketSimilarityIndex.updateMany({
+      where: { ticketId },
+      data: { status: newStatus, updatedAt: new Date() },
+    });
+  } catch (err) {
+    console.error(`[similarIncident] Échec maj statut similarity ticket ${ticketId}:`, err.message);
+  }
+}
+
+/**
+ * Régénère l'embedding d'un ticket quand son contenu change (titre, contenu, suivi).
+ * Met à jour à la fois Ticket.contentEmbedding et TicketSimilarityIndex.
+ * Fire-and-forget.
+ */
+async function refreshTicketEmbedding(ticketId) {
+  try {
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { id: true, title: true, content: true },
+    });
+    if (!ticket) return;
+
+    const allFollowups = await prisma.followup.findMany({
+      where: { ticketId, isPrivate: false },
+      select: { content: true },
+      orderBy: { createdAt: 'asc' },
+      take: 20,
+    });
+
+    const followupText = allFollowups.map(f => (f.content || '').replace(/<[^>]*>/g, '').trim()).filter(Boolean).join(' ');
+    const fullText = `${ticket.title || ''} ${ticket.content || ''} ${followupText}`.substring(0, 1000);
+    if (!fullText.trim()) return;
+
+    const embedding = await generateEmbedding(fullText);
+    const vectorLiteral = toVectorLiteral(embedding);
+
+    await prisma.$executeRaw`
+      UPDATE "Ticket"
+      SET "contentEmbedding" = ${vectorLiteral}::vector
+      WHERE id = ${ticketId}
+    `;
+
+    const existing = await prisma.ticketSimilarityIndex.findFirst({ where: { ticketId } });
+    if (existing) {
+      await prisma.ticketSimilarityIndex.update({
+        where: { id: existing.id },
+        data: {
+          summary: (ticket.title || '').substring(0, 500),
+          bodyShort: (ticket.content || '').substring(0, 200),
+          content: fullText.substring(0, 2000),
+        },
+      });
+    }
+
+    await prisma.$executeRaw`
+      UPDATE "TicketSimilarityIndex"
+      SET embedding = ${vectorLiteral}::vector
+      WHERE "ticketId" = ${ticketId}
+    `;
+
+    console.log(`[similarIncident] Embedding régénéré pour ticket ${ticketId}`);
+  } catch (err) {
+    console.error(`[similarIncident] Échec régénération embedding ticket ${ticketId}:`, err.message);
+  }
+}
+
+module.exports = { findSimilarOpenTicket, attachSiteToTicket, saveTicketEmbedding, findSimilarTicketsByVector, findSimilarByText, updateSimilarityIndexStatus, refreshTicketEmbedding };
