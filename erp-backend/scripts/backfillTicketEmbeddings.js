@@ -98,12 +98,12 @@ async function main() {
       try {
         // Vérifier si le ticket a déjà un embedding (sinon le générer)
         const ticketRow = await prisma.$queryRaw`
-          SELECT "contentEmbedding" FROM "Ticket" WHERE id = ${ticket.id}
+          SELECT "contentEmbedding"::text AS embedding_text FROM "Ticket" WHERE id = ${ticket.id}
         `;
         let vectorLiteral;
-        if (ticketRow[0]?.contentEmbedding) {
-          // L'embedding existe déjà — le convertir en literal pour TicketSimilarityIndex
-          vectorLiteral = String(ticketRow[0].contentEmbedding);
+        if (ticketRow[0]?.embedding_text) {
+          // L'embedding existe déjà — le réutiliser
+          vectorLiteral = ticketRow[0].embedding_text;
         } else {
           const embedding = await generateEmbedding(text);
           vectorLiteral = toVectorLiteral(embedding);
