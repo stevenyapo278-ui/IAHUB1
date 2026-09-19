@@ -1168,6 +1168,12 @@ router.post(
           console.error('[ticket.routes] Notification création échouée:', err.message)
         );
       }
+
+      // Générer et sauvegarder l'embedding du ticket pour la similarité (fire-and-forget)
+      const { saveTicketEmbedding } = require('../services/similarIncidentDetector');
+      saveTicketEmbedding(finalTicket.id).catch((err) =>
+        console.error('[ticket.routes] Sauvegarde embedding échouée:', err.message)
+      );
     }
 
     return res.status(201).json(finalTicket);
