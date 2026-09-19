@@ -185,8 +185,8 @@ async function findSimilarTicketsByVector(ticketId, limit = 5, minScore = 0.5) {
   const results = await prisma.$queryRawUnsafe(
     `SELECT t.id, t.title, t.status, t.priority, t.category, t."locationName", t."createdAt",
             1 - (t."contentEmbedding" <=> $1::vector) AS similarity,
-            u.fullName AS "assignedToName",
-            r.fullName AS "requesterName"
+            u."fullName" AS "assignedToName",
+            r."fullName" AS "requesterName"
      FROM "Ticket" t
      LEFT JOIN "User" u ON u.id = t."assignedToId"
      LEFT JOIN "User" r ON r.id = t."requesterId"
@@ -236,8 +236,8 @@ async function findSimilarByText(text, limit = 5, minScore = 0.4) {
     const results = await prisma.$queryRawUnsafe(
       `SELECT t.id, t.title, t.status, t.priority, t.category, t."locationName", t."createdAt",
               1 - (t."contentEmbedding" <=> $1::vector) AS similarity,
-              u.fullName AS "assignedToName",
-              r.fullName AS "requesterName"
+              u."fullName" AS "assignedToName",
+              r."fullName" AS "requesterName"
        FROM "Ticket" t
        LEFT JOIN "User" u ON u.id = t."assignedToId"
        LEFT JOIN "User" r ON r.id = t."requesterId"
