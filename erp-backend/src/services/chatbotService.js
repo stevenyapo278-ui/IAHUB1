@@ -2999,9 +2999,10 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
       }
     }
   } catch (err) {
-    // Fallback dégradé : recherche par ID de ticket explicite si le message contient #\d+
+    // Fallback dégradé : recherche par ID de ticket explicite
+    // Matche : #10, ticket 10, ticket #10, ticket n°10, ticket numero 10, demande 10...
     console.error('[chatbot] Échec appel LLM:', err.message);
-    const ticketIdMatch = message.match(/#(\d+)/);
+    const ticketIdMatch = message.match(/(?:#|ticket\s*#?\s*|demande\s*n[°o]?\s*|requ[êe]te?\s*n[°o]?\s*)(\d+)/i);
     if (ticketIdMatch) {
       try {
         const ticket = await prisma.ticket.findUnique({
@@ -3017,14 +3018,14 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
         if (ticket) {
           reply = `**Ticket #${ticket.id}** : "${ticket.title}"\nStatut : ${ticket.status} | Priorité : ${ticket.priority}\nDemandeur : ${ticket.requester?.fullName || 'inconnu'} | Assigné : ${ticket.assignedTo?.fullName || 'non assigné'}\nÉquipe : ${ticket.team?.name || '-'} | Lieu : ${ticket.locationName || 'N/A'}\nCréé le : ${new Date(ticket.createdAt).toLocaleDateString('fr-FR')}`;
         } else {
-          reply = "Je rencontre un souci temporaire d\'accès aux services IA. Réessayez dans quelques instants.";
+          reply = `Ticket #${parseInt(ticketIdMatch[1], 10)} introuvable.`;
         }
       } catch (dbErr) {
         console.error('[chatbot] Fallback DB échoué:', dbErr.message);
-        reply = "Je rencontre un souci temporaire d\'accès aux services IA. Réessayez dans quelques instants.";
+        reply = "Je rencontre un souci temporaire d'accès aux services IA. Réessayez dans quelques instants.";
       }
     } else {
-      reply = "Je rencontre un souci temporaire d\'accès aux services IA. Réessayez dans quelques instants.";
+      reply = "Je rencontre un souci temporaire d'accès aux services IA. Réessayez dans quelques instants.";
     }
   }
 
