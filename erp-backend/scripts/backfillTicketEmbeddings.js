@@ -44,11 +44,12 @@ async function main() {
   console.log('[backfill] Début du backfill des embeddings tickets');
   console.log(`[backfill] Configuration : batch=${BATCH_SIZE}, delay=${DELAY_MS}ms, dryRun=${DRY_RUN}`);
 
-  // Compter les tickets sans embedding
+  // Compter les tickets sans embedding OU sans entrée TicketSimilarityIndex
   const totalWithoutEmbedding = await prisma.$queryRaw`
     SELECT COUNT(*)::int AS count
-    FROM "Ticket"
-    WHERE "contentEmbedding" IS NULL
+    FROM "Ticket" t
+    LEFT JOIN "TicketSimilarityIndex" tsi ON tsi."ticketId" = t.id
+    WHERE t."contentEmbedding" IS NULL OR tsi.id IS NULL
   `;
 
   const total = totalWithoutEmbedding[0]?.count || 0;
@@ -66,12 +67,13 @@ async function main() {
 
   // Traiter par batch
   while (processed < total) {
-    // Récupérer un batch de tickets sans embedding
+    // Récupérer un batch de tickets sans embedding ou sans similarity index
     const tickets = await prisma.$queryRaw`
-      SELECT id, title, content
-      FROM "Ticket"
-      WHERE "contentEmbedding" IS NULL
-      ORDER BY id ASC
+      SELECT t.id, t.title, t.content
+      FROM "Ticket" t
+      LEFT JOIN "TicketSimilarityIndex" tsi ON tsi."ticketId" = t.id
+      WHERE t."contentEmbedding" IS NULL OR tsi.id IS NULL
+      ORDER BY t.id ASC
       LIMIT ${BATCH_SIZE}
     `;
 
@@ -94,33 +96,49 @@ async function main() {
       }
 
       try {
-        const embedding = await generateEmbedding(text);
-        const vectorLiteral = toVectorLiteral(embedding);
+        // Vérifier si le ticket a déjà un embedding (sinon le générer)
+        const ticketRow = await prisma.$queryRaw`
+          SELECT "contentEmbedding" FROM "Ticket" WHERE id = ${ticket.id}
+        `;
+        let vectorLiteral;
+        if (ticketRow[0]?.contentEmbedding) {
+          // L'embedding existe déjà — le convertir en literal pour TicketSimilarityIndex
+          vectorLiteral = String(ticketRow[0].contentEmbedding);
+        } else {
+          const embedding = await generateEmbedding(text);
+          vectorLiteral = toVectorLiteral(embedding);
+        }
 
-        // Mettre à jour l'embedding dans Ticket
+        // Mettre à jour l'embedding dans Ticket (seulement si NULL)
         await prisma.$executeRaw`
           UPDATE "Ticket"
           SET "contentEmbedding" = ${vectorLiteral}::vector
-          WHERE id = ${ticket.id}
+          WHERE id = ${ticket.id} AND "contentEmbedding" IS NULL
         `;
 
-        // Upsert TicketSimilarityIndex
-        await prisma.ticketSimilarityIndex.upsert({
-          where: { ticketId: ticket.id },
-          create: {
-            ticketId: ticket.id,
-            summary: (ticket.title || '').substring(0, 500),
-            bodyShort: (ticket.content || '').substring(0, 200),
-            content: (ticket.content || '').substring(0, 2000),
-            status: 'OPEN',
-            requesterEmail: '',
-          },
-          update: {
-            summary: (ticket.title || '').substring(0, 500),
-            bodyShort: (ticket.content || '').substring(0, 200),
-            content: (ticket.content || '').substring(0, 2000),
-          },
-        });
+        // Upsert TicketSimilarityIndex (find-first + create/update car ticketId n'est pas @unique)
+        const existing = await prisma.ticketSimilarityIndex.findFirst({ where: { ticketId: ticket.id } });
+        if (existing) {
+          await prisma.ticketSimilarityIndex.update({
+            where: { id: existing.id },
+            data: {
+              summary: (ticket.title || '').substring(0, 500),
+              bodyShort: (ticket.content || '').substring(0, 200),
+              content: (ticket.content || '').substring(0, 2000),
+            },
+          });
+        } else {
+          await prisma.ticketSimilarityIndex.create({
+            data: {
+              ticketId: ticket.id,
+              summary: (ticket.title || '').substring(0, 500),
+              bodyShort: (ticket.content || '').substring(0, 200),
+              content: (ticket.content || '').substring(0, 2000),
+              status: 'OPEN',
+              requesterEmail: '',
+            },
+          });
+        }
 
         // Mettre à jour l'embedding dans TicketSimilarityIndex
         await prisma.$executeRaw`
