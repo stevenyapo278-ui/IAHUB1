@@ -18,6 +18,28 @@ const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); // 20 Mo max
 const KNOWLEDGE_DIR = path.join(process.cwd(), 'uploads', 'knowledge');
 if (!fs.existsSync(KNOWLEDGE_DIR)) fs.mkdirSync(KNOWLEDGE_DIR, { recursive: true });
 
+// Télécharger le fichier source d'un document — AVANT authenticate pour accepter ?token= (iframe)
+router.get('/documents/:id/file', async (req, res) => {
+  try {
+    const header = req.headers.authorization || '';
+    const queryToken = req.query.token;
+    const token = header.startsWith('Bearer ') ? header.slice(7) : queryToken || null;
+    if (!token) return res.status(401).json({ error: 'Token manquant' });
+    try { require('jsonwebtoken').verify(token, process.env.JWT_SECRET); } catch { return res.status(401).json({ error: 'Token invalide' }); }
+
+    const doc = await prisma.knowledgeDocument.findUnique({ where: { id: Number(req.params.id) }, select: { filePath: true, filename: true, sourceType: true } });
+    if (!doc || !doc.filePath) return res.status(404).json({ error: 'Fichier non disponible' });
+    const fullPath = path.join(process.cwd(), doc.filePath);
+    if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'Fichier non trouvé sur disque' });
+    const mimeTypes = { pdf: 'application/pdf', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', md: 'text/markdown', txt: 'text/plain' };
+    res.setHeader('Content-Type', mimeTypes[doc.sourceType] || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${doc.filename || 'document'}"`);
+    fs.createReadStream(fullPath).pipe(res);
+  } catch (err) {
+    return res.status(500).json({ error: 'Erreur lors de la lecture du fichier' });
+  }
+});
+
 router.use(authenticate);
 
 // Liste des documents de la base de connaissances (avec filtres)
@@ -33,22 +55,6 @@ router.get('/documents', async (req, res) => {
     orderBy: { createdAt: 'desc' },
   });
   return res.json(documents);
-});
-
-// Télécharger le fichier source d'un document
-router.get('/documents/:id/file', async (req, res) => {
-  try {
-    const doc = await prisma.knowledgeDocument.findUnique({ where: { id: Number(req.params.id) }, select: { filePath: true, filename: true, sourceType: true } });
-    if (!doc || !doc.filePath) return res.status(404).json({ error: 'Fichier non disponible' });
-    const fullPath = path.join(process.cwd(), doc.filePath);
-    if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'Fichier non trouvé sur disque' });
-    const mimeTypes = { pdf: 'application/pdf', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', md: 'text/markdown', txt: 'text/plain' };
-    res.setHeader('Content-Type', mimeTypes[doc.sourceType] || 'application/octet-stream');
-    res.setHeader('Content-Disposition', `inline; filename="${doc.filename || 'document'}"`);
-    fs.createReadStream(fullPath).pipe(res);
-  } catch (err) {
-    return res.status(500).json({ error: 'Erreur lors de la lecture du fichier' });
-  }
 });
 
 // Récupérer les fragments (chunks) d'un document

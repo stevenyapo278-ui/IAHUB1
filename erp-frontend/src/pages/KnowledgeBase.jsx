@@ -809,7 +809,7 @@ export default function KnowledgeBase() {
                   <div className="w-1/2 border-r border-outline-variant/30 bg-surface-container flex items-center justify-center overflow-hidden">
                     {detailDoc.sourceType === 'pdf' ? (
                       <iframe
-                        src={`/api/knowledge/documents/${detailDoc.id}/file`}
+                        src={`/api/knowledge/documents/${detailDoc.id}/file?token=${localStorage.getItem('token') || ''}`}
                         className="w-full h-full border-0"
                         title={detailDoc.title}
                       />
