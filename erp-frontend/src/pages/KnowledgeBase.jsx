@@ -67,6 +67,9 @@ export default function KnowledgeBase() {
   const [searchLimit, setSearchLimit] = useState(() => Number(localStorage.getItem('kb_search_limit')) || 5);
   const [useHybrid, setUseHybrid] = useState(() => { const s = localStorage.getItem('kb_use_hybrid'); return s !== null ? s === 'true' : true; });
   const [showFilters, setShowFilters] = useState(false);
+  const [detailDoc, setDetailDoc] = useState(null);
+  const [detailChunks, setDetailChunks] = useState([]);
+  const [loadingDetail, setLoadingDetail] = useState(false);
 
   useEffect(() => { localStorage.setItem('kb_search_category', searchCategory); }, [searchCategory]);
   useEffect(() => { localStorage.setItem('kb_search_tags', JSON.stringify(searchTags)); }, [searchTags]);
@@ -183,6 +186,20 @@ export default function KnowledgeBase() {
       setResults(data);
     } catch (err) { setError(err.response?.data?.error || 'Erreur recherche'); }
     finally { setSearching(false); }
+  }
+
+  async function handleOpenDetail(doc) {
+    setDetailDoc(doc);
+    setDetailChunks([]);
+    setLoadingDetail(true);
+    try {
+      const { data } = await api.get(`/knowledge/documents/${doc.id}/chunks`);
+      setDetailChunks(data.chunks || []);
+    } catch {
+      setDetailChunks([]);
+    } finally {
+      setLoadingDetail(false);
+    }
   }
 
   async function handlePreviewStructured(doc) {
@@ -470,6 +487,7 @@ export default function KnowledgeBase() {
                         onDelete={() => setConfirmDeleteId(doc.id)}
                         onReplace={() => askReplace(doc)}
                         onPreview={handlePreviewStructured}
+                        onOpen={handleOpenDetail}
                         replacingId={replacingId}
                       />
                     ))}
@@ -495,6 +513,7 @@ export default function KnowledgeBase() {
                       canManage={canManage}
                       onDelete={() => setConfirmDeleteId(doc.id)}
                       onReplace={() => askReplace(doc)}
+                      onOpen={handleOpenDetail}
                       replacingId={replacingId}
                     />
                   ))}
@@ -753,6 +772,101 @@ export default function KnowledgeBase() {
         document.body
       )}
 
+      {/* ── Document Detail Modal (PDF + Chunks) ──────────────────────── */}
+      {createPortal(
+        <AnimatePresence>
+          {detailDoc && (
+            <div className="fixed inset-0 z-[9999] flex">
+              <motion.div
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                onClick={() => { setDetailDoc(null); setDetailChunks([]); }}
+                className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer"
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                transition={{ type: 'spring', duration: 0.35, bounce: 0.12 }}
+                className="relative m-2 sm:m-4 flex-1 bg-surface-container-lowest border border-outline-variant/60 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+              >
+                {/* Header */}
+                <div className="flex items-center gap-3 px-5 py-3 border-b border-outline-variant/30 shrink-0">
+                  <div className="p-1.5 rounded-lg bg-blue-500/10"><FileText className="w-4 h-4 text-blue-600" /></div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-sm font-bold text-on-surface truncate">{detailDoc.title}</h3>
+                    <p className="text-[10px] text-on-surface-variant">{detailDoc.filename} · {detailChunks.length} fragment{detailChunks.length !== 1 ? 's' : ''}</p>
+                  </div>
+                  <motion.button
+                    onClick={() => { setDetailDoc(null); setDetailChunks([]); }}
+                    whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }}
+                    className="p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"
+                  ><X className="w-4 h-4" /></motion.button>
+                </div>
+
+                {/* Split content */}
+                <div className="flex-1 flex overflow-hidden min-h-0">
+                  {/* Left: PDF viewer */}
+                  <div className="w-1/2 border-r border-outline-variant/30 bg-surface-container flex items-center justify-center overflow-hidden">
+                    {detailDoc.sourceType === 'pdf' ? (
+                      <iframe
+                        src={`/api/knowledge/documents/${detailDoc.id}/file`}
+                        className="w-full h-full border-0"
+                        title={detailDoc.title}
+                      />
+                    ) : detailDoc.filePath ? (
+                      <div className="p-6 text-center text-on-surface-variant">
+                        <FileText className="w-12 h-12 mx-auto mb-3 text-outline/30" />
+                        <p className="text-sm font-medium">Aperçu non disponible</p>
+                        <p className="text-[10px] mt-1">Fichier : {detailDoc.filename}</p>
+                      </div>
+                    ) : (
+                      <div className="p-6 text-center text-on-surface-variant">
+                        <FileText className="w-12 h-12 mx-auto mb-3 text-outline/30" />
+                        <p className="text-sm font-medium">Fichier source non disponible</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right: Chunks */}
+                  <div className="w-1/2 overflow-y-auto">
+                    <div className="p-4 space-y-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Layers className="w-4 h-4 text-primary" />
+                        <span className="text-xs font-bold text-on-surface">Fragments vectorisés</span>
+                      </div>
+                      {loadingDetail ? (
+                        <div className="flex items-center justify-center py-12 gap-2 text-on-surface-variant">
+                          <RefreshCw className="w-5 h-5 animate-spin text-primary" />
+                          <span className="text-sm">Chargement...</span>
+                        </div>
+                      ) : detailChunks.length === 0 ? (
+                        <div className="text-center py-12 text-on-surface-variant">
+                          <Layers className="w-10 h-10 text-outline/30 mx-auto mb-3" />
+                          <p className="text-sm italic">Aucun fragment.</p>
+                        </div>
+                      ) : (
+                        detailChunks.map((chunk, i) => (
+                          <div key={chunk.id} className="rounded-xl border border-outline-variant/30 bg-surface-container-low/50 p-3">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-[10px] font-black text-primary/70">#{chunk.chunkIndex + 1}</span>
+                              <span className="text-[9px] text-on-surface-variant/60 font-mono">
+                                {new Date(chunk.createdAt).toLocaleDateString('fr-FR')}
+                              </span>
+                            </div>
+                            <p className="text-xs leading-relaxed text-on-surface whitespace-pre-wrap">{chunk.content}</p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
+
       <ConfirmDialog
         open={!!confirmDeleteId}
         title="Supprimer le document"
@@ -767,14 +881,15 @@ export default function KnowledgeBase() {
   );
 }
 
-function DocumentCard({ doc, canManage, onDelete, onReplace, replacingId, onPreview }) {
+function DocumentCard({ doc, canManage, onDelete, onReplace, replacingId, onPreview, onOpen }) {
   const catCfg = CATEGORY_CONFIG[doc.category] || CATEGORY_CONFIG.Système;
 
   return (
     <motion.div
       layout
       initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-      className="rounded-2xl border border-outline-variant/30 overflow-hidden bg-surface-container-lowest p-4 shadow-sm flex flex-col justify-between group hover:border-emerald-500/40 transition-all"
+      onClick={() => onOpen?.(doc)}
+      className="rounded-2xl border border-outline-variant/30 overflow-hidden bg-surface-container-lowest p-4 shadow-sm flex flex-col justify-between group hover:border-primary/40 hover:shadow-md transition-all cursor-pointer"
     >
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-2">
@@ -801,7 +916,7 @@ function DocumentCard({ doc, canManage, onDelete, onReplace, replacingId, onPrev
           {new Date(doc.createdAt).toLocaleDateString('fr-FR')}
         </span>
         {canManage && (
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
             {doc.sourceType === 'pdf' && (
               <button onClick={() => onPreview?.(doc)} className="p-1 rounded-lg text-on-surface-variant hover:text-blue-600 hover:bg-blue-500/10 transition-all" title="Voir le contenu structuré">
                 <Eye className="w-3.5 h-3.5" />

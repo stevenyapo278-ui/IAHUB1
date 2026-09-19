@@ -1,5 +1,7 @@
 const express = require('express');
 const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
@@ -12,6 +14,9 @@ const { validateUpload } = require('../utils/security');
 
 const router = express.Router();
 const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); // 20 Mo max
+
+const KNOWLEDGE_DIR = path.join(process.cwd(), 'uploads', 'knowledge');
+if (!fs.existsSync(KNOWLEDGE_DIR)) fs.mkdirSync(KNOWLEDGE_DIR, { recursive: true });
 
 router.use(authenticate);
 
@@ -28,6 +33,38 @@ router.get('/documents', async (req, res) => {
     orderBy: { createdAt: 'desc' },
   });
   return res.json(documents);
+});
+
+// Télécharger le fichier source d'un document
+router.get('/documents/:id/file', async (req, res) => {
+  try {
+    const doc = await prisma.knowledgeDocument.findUnique({ where: { id: Number(req.params.id) }, select: { filePath: true, filename: true, sourceType: true } });
+    if (!doc || !doc.filePath) return res.status(404).json({ error: 'Fichier non disponible' });
+    const fullPath = path.join(process.cwd(), doc.filePath);
+    if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'Fichier non trouvé sur disque' });
+    const mimeTypes = { pdf: 'application/pdf', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', md: 'text/markdown', txt: 'text/plain' };
+    res.setHeader('Content-Type', mimeTypes[doc.sourceType] || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${doc.filename || 'document'}"`);
+    fs.createReadStream(fullPath).pipe(res);
+  } catch (err) {
+    return res.status(500).json({ error: 'Erreur lors de la lecture du fichier' });
+  }
+});
+
+// Récupérer les fragments (chunks) d'un document
+router.get('/documents/:id/chunks', async (req, res) => {
+  try {
+    const doc = await prisma.knowledgeDocument.findUnique({ where: { id: Number(req.params.id) }, select: { id: true, title: true, filename: true, sourceType: true, category: true, tags: true, filePath: true } });
+    if (!doc) return res.status(404).json({ error: 'Document introuvable' });
+    const chunks = await prisma.knowledgeChunk.findMany({
+      where: { documentId: Number(req.params.id) },
+      select: { id: true, chunkIndex: true, content: true, createdAt: true },
+      orderBy: { chunkIndex: 'asc' },
+    });
+    return res.json({ document: doc, chunks });
+  } catch (err) {
+    return res.status(500).json({ error: 'Erreur lors de la récupération des fragments' });
+  }
 });
 
 // Upload d'un document (PDF, DOCX, Markdown) : extraction, découpage et indexation pgvector
@@ -62,6 +99,17 @@ router.post('/documents', requirePermission('knowledge.manage', ['ADMIN', 'TECHN
       author,
     },
   });
+
+  // Sauvegarder le fichier source sur disque pour consultation ultérieure
+  if (['pdf', 'docx', 'md', 'markdown', 'txt'].includes(ext)) {
+    const safeFilename = `${document.id}-${ext}`;
+    const filePath = path.join(KNOWLEDGE_DIR, safeFilename);
+    fs.writeFileSync(filePath, req.file.buffer);
+    await prisma.knowledgeDocument.update({
+      where: { id: document.id },
+      data: { filePath: `uploads/knowledge/${safeFilename}` },
+    });
+  }
 
   try {
     const text = await extractText(req.file.buffer, req.file.mimetype, req.file.originalname);
@@ -142,6 +190,19 @@ router.put('/documents/:id/replace', requirePermission('knowledge.manage', ['ADM
     },
   });
 
+  // Sauvegarder le nouveau fichier source
+  if (document.filePath) {
+    const oldPath = path.join(process.cwd(), document.filePath);
+    if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+  }
+  const safeFilename = `${document.id}-${ext}`;
+  const filePath = path.join(KNOWLEDGE_DIR, safeFilename);
+  fs.writeFileSync(filePath, req.file.buffer);
+  await prisma.knowledgeDocument.update({
+    where: { id: document.id },
+    data: { filePath: `uploads/knowledge/${safeFilename}` },
+  });
+
   try {
     const text = await extractText(req.file.buffer, req.file.mimetype, req.file.originalname);
     const chunks = chunkText(text);
@@ -198,7 +259,11 @@ router.put('/documents/:id/replace', requirePermission('knowledge.manage', ['ADM
 // Supprime un document et ses chunks (cascade)
 router.delete('/documents/:id', requirePermission('knowledge.manage', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
   try {
-    const doc = await prisma.knowledgeDocument.findUnique({ where: { id: Number(req.params.id) }, select: { id: true, title: true } });
+    const doc = await prisma.knowledgeDocument.findUnique({ where: { id: Number(req.params.id) }, select: { id: true, title: true, filePath: true } });
+    if (doc?.filePath) {
+      const fullPath = path.join(process.cwd(), doc.filePath);
+      if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+    }
     await prisma.knowledgeDocument.delete({ where: { id: Number(req.params.id) } });
     auditLog('KNOWLEDGE_DOCUMENT_DELETED', { actor: req.user, targetType: 'KnowledgeDocument', targetId: doc.id, targetLabel: doc.title }).catch(() => {});
     return res.status(204).send();
