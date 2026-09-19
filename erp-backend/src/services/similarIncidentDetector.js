@@ -175,36 +175,32 @@ async function saveTicketEmbedding(ticketId, title, content) {
  * @returns {Promise<Array>} Tickets similaires avec score
  */
 async function findSimilarTicketsByVector(ticketId, limit = 5, minScore = 0.5) {
-  const ticket = await prisma.$queryRaw`
-    SELECT "contentEmbedding"::text AS embedding_text
-    FROM "Ticket"
-    WHERE id = ${ticketId} AND "contentEmbedding" IS NOT NULL
-  `;
+  const ticket = await prisma.$queryRawUnsafe(
+    `SELECT "contentEmbedding"::text AS embedding_text FROM "Ticket" WHERE id = $1 AND "contentEmbedding" IS NOT NULL`,
+    ticketId
+  );
 
   if (!ticket[0]?.embedding_text) return [];
 
-  const results = await prisma.$queryRaw`
-    SELECT
-      t.id,
-      t.title,
-      t.status,
-      t.priority,
-      t.category,
-      t."locationName",
-      t."createdAt",
-      1 - (t."contentEmbedding" <=> ${ticket[0].embedding_text}::vector) AS similarity,
-      u.fullName AS "assignedToName",
-      r.fullName AS "requesterName"
-    FROM "Ticket" t
-    LEFT JOIN "User" u ON u.id = t."assignedToId"
-    LEFT JOIN "User" r ON r.id = t."requesterId"
-    WHERE t.id != ${ticketId}
-      AND t."contentEmbedding" IS NOT NULL
-      AND t."deletedAt" IS NULL
-      AND 1 - (t."contentEmbedding" <=> ${ticket[0].embedding_text}::vector) >= ${minScore}
-    ORDER BY t."contentEmbedding" <=> ${ticket[0].embedding_text}::vector
-    LIMIT ${limit}
-  `;
+  const results = await prisma.$queryRawUnsafe(
+    `SELECT t.id, t.title, t.status, t.priority, t.category, t."locationName", t."createdAt",
+            1 - (t."contentEmbedding" <=> $1::vector) AS similarity,
+            u.fullName AS "assignedToName",
+            r.fullName AS "requesterName"
+     FROM "Ticket" t
+     LEFT JOIN "User" u ON u.id = t."assignedToId"
+     LEFT JOIN "User" r ON r.id = t."requesterId"
+     WHERE t.id != $2
+       AND t."contentEmbedding" IS NOT NULL
+       AND t."deletedAt" IS NULL
+       AND 1 - (t."contentEmbedding" <=> $1::vector) >= $3
+     ORDER BY t."contentEmbedding" <=> $1::vector
+     LIMIT $4`,
+    ticket[0].embedding_text,
+    ticketId,
+    minScore,
+    limit
+  );
 
   return results.map(r => ({
     id: r.id,
@@ -237,27 +233,23 @@ async function findSimilarByText(text, limit = 5, minScore = 0.4) {
     const embedding = await generateEmbedding(inputText);
     const vectorLiteral = toVectorLiteral(embedding);
 
-    const results = await prisma.$queryRaw`
-      SELECT
-        t.id,
-        t.title,
-        t.status,
-        t.priority,
-        t.category,
-        t."locationName",
-        t."createdAt",
-        1 - (t."contentEmbedding" <=> ${vectorLiteral}::vector) AS similarity,
-        u.fullName AS "assignedToName",
-        r.fullName AS "requesterName"
-      FROM "Ticket" t
-      LEFT JOIN "User" u ON u.id = t."assignedToId"
-      LEFT JOIN "User" r ON r.id = t."requesterId"
-      WHERE t."contentEmbedding" IS NOT NULL
-        AND t."deletedAt" IS NULL
-        AND 1 - (t."contentEmbedding" <=> ${vectorLiteral}::vector) >= ${minScore}
-      ORDER BY t."contentEmbedding" <=> ${vectorLiteral}::vector
-      LIMIT ${limit}
-    `;
+    const results = await prisma.$queryRawUnsafe(
+      `SELECT t.id, t.title, t.status, t.priority, t.category, t."locationName", t."createdAt",
+              1 - (t."contentEmbedding" <=> $1::vector) AS similarity,
+              u.fullName AS "assignedToName",
+              r.fullName AS "requesterName"
+       FROM "Ticket" t
+       LEFT JOIN "User" u ON u.id = t."assignedToId"
+       LEFT JOIN "User" r ON r.id = t."requesterId"
+       WHERE t."contentEmbedding" IS NOT NULL
+         AND t."deletedAt" IS NULL
+         AND 1 - (t."contentEmbedding" <=> $1::vector) >= $2
+       ORDER BY t."contentEmbedding" <=> $1::vector
+       LIMIT $3`,
+      vectorLiteral,
+      minScore,
+      limit
+    );
 
     return results.map(r => ({
       id: r.id,
