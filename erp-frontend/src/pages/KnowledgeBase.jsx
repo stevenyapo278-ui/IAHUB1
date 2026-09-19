@@ -70,6 +70,7 @@ export default function KnowledgeBase() {
   const [detailDoc, setDetailDoc] = useState(null);
   const [detailChunks, setDetailChunks] = useState([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [detailPdfUrl, setDetailPdfUrl] = useState(null);
 
   useEffect(() => { localStorage.setItem('kb_search_category', searchCategory); }, [searchCategory]);
   useEffect(() => { localStorage.setItem('kb_search_tags', JSON.stringify(searchTags)); }, [searchTags]);
@@ -191,10 +192,18 @@ export default function KnowledgeBase() {
   async function handleOpenDetail(doc) {
     setDetailDoc(doc);
     setDetailChunks([]);
+    setDetailPdfUrl(null);
     setLoadingDetail(true);
     try {
       const { data } = await api.get(`/knowledge/documents/${doc.id}/chunks`);
       setDetailChunks(data.chunks || []);
+      if (doc.sourceType === 'pdf') {
+        try {
+          const res = await api.get(`/knowledge/documents/${doc.id}/file`, { responseType: 'blob' });
+          const url = URL.createObjectURL(res.data);
+          setDetailPdfUrl(url);
+        } catch { setDetailPdfUrl(null); }
+      }
     } catch {
       setDetailChunks([]);
     } finally {
@@ -779,7 +788,7 @@ export default function KnowledgeBase() {
             <div className="fixed inset-0 z-[9999] flex">
               <motion.div
                 initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                onClick={() => { setDetailDoc(null); setDetailChunks([]); }}
+                    onClick={() => { if (detailPdfUrl) URL.revokeObjectURL(detailPdfUrl); setDetailDoc(null); setDetailChunks([]); setDetailPdfUrl(null); }}
                 className="fixed inset-0 bg-black/70 backdrop-blur-md cursor-pointer"
               />
               <motion.div
@@ -797,7 +806,7 @@ export default function KnowledgeBase() {
                     <p className="text-[10px] text-on-surface-variant">{detailDoc.filename} · {detailChunks.length} fragment{detailChunks.length !== 1 ? 's' : ''}</p>
                   </div>
                   <motion.button
-                    onClick={() => { setDetailDoc(null); setDetailChunks([]); }}
+                onClick={() => { if (detailPdfUrl) URL.revokeObjectURL(detailPdfUrl); setDetailDoc(null); setDetailChunks([]); setDetailPdfUrl(null); }}
                     whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }}
                     className="p-1.5 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all"
                   ><X className="w-4 h-4" /></motion.button>
@@ -808,11 +817,18 @@ export default function KnowledgeBase() {
                   {/* Left: PDF viewer */}
                   <div className="w-1/2 border-r border-outline-variant/30 bg-surface-container flex items-center justify-center overflow-hidden">
                     {detailDoc.sourceType === 'pdf' ? (
-                      <iframe
-                        src={`/api/knowledge/documents/${detailDoc.id}/file?token=${localStorage.getItem('token') || ''}`}
-                        className="w-full h-full border-0"
-                        title={detailDoc.title}
-                      />
+                      detailPdfUrl ? (
+                        <iframe
+                          src={detailPdfUrl}
+                          className="w-full h-full border-0"
+                          title={detailDoc.title}
+                        />
+                      ) : (
+                        <div className="flex items-center justify-center py-12 gap-2 text-on-surface-variant">
+                          <RefreshCw className="w-5 h-5 animate-spin text-blue-600" />
+                          <span className="text-sm">Chargement du PDF...</span>
+                        </div>
+                      )
                     ) : detailDoc.filePath ? (
                       <div className="p-6 text-center text-on-surface-variant">
                         <FileText className="w-12 h-12 mx-auto mb-3 text-outline/30" />
