@@ -870,6 +870,20 @@ router.get('/:id/attachments/:attachmentId/file', async (req, res) => {
   }
 });
 
+// GET /api/tickets/:id/similar — tickets similaires par vectorielle (cosine distance)
+router.get('/:id/similar', async (req, res) => {
+  const id = Number(req.params.id);
+  const limit = Math.min(Number(req.query.limit) || 5, 20);
+  const minScore = Math.max(0, Math.min(1, Number(req.query.minScore) || 0.5));
+
+  const ticket = await prisma.ticket.findUnique({ where: { id }, select: { id: true } });
+  if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
+
+  const { findSimilarTicketsByVector } = require('../services/similarIncidentDetector');
+  const similar = await findSimilarTicketsByVector(id, limit, minScore);
+  res.json({ ticketId: id, similar });
+});
+
 // Create ticket
 router.post(
   '/',

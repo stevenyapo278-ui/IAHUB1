@@ -165,4 +165,116 @@ async function saveTicketEmbedding(ticketId, title, content) {
   }
 }
 
-module.exports = { findSimilarOpenTicket, attachSiteToTicket, saveTicketEmbedding };
+/**
+ * Recherche de tickets similaires par similarité vectorielle (cosine distance).
+ * Utilise l'embedding du ticket source pour trouver les tickets les plus proches.
+ *
+ * @param {number} ticketId - ID du ticket source
+ * @param {number} limit - Nombre max de résultats (défaut: 5)
+ * @param {number} minScore - Score minimum de similarité 0-1 (défaut: 0.5)
+ * @returns {Promise<Array>} Tickets similaires avec score
+ */
+async function findSimilarTicketsByVector(ticketId, limit = 5, minScore = 0.5) {
+  const ticket = await prisma.$queryRaw`
+    SELECT "contentEmbedding"::text AS embedding_text
+    FROM "Ticket"
+    WHERE id = ${ticketId} AND "contentEmbedding" IS NOT NULL
+  `;
+
+  if (!ticket[0]?.embedding_text) return [];
+
+  const results = await prisma.$queryRaw`
+    SELECT
+      t.id,
+      t.title,
+      t.status,
+      t.priority,
+      t.category,
+      t."locationName",
+      t."createdAt",
+      1 - (t."contentEmbedding" <=> ${ticket[0].embedding_text}::vector) AS similarity,
+      u.fullName AS "assignedToName",
+      r.fullName AS "requesterName"
+    FROM "Ticket" t
+    LEFT JOIN "User" u ON u.id = t."assignedToId"
+    LEFT JOIN "User" r ON r.id = t."requesterId"
+    WHERE t.id != ${ticketId}
+      AND t."contentEmbedding" IS NOT NULL
+      AND t."deletedAt" IS NULL
+      AND 1 - (t."contentEmbedding" <=> ${ticket[0].embedding_text}::vector) >= ${minScore}
+    ORDER BY t."contentEmbedding" <=> ${ticket[0].embedding_text}::vector
+    LIMIT ${limit}
+  `;
+
+  return results.map(r => ({
+    id: r.id,
+    title: r.title,
+    status: r.status,
+    priority: r.priority,
+    category: r.category,
+    locationName: r.locationName,
+    createdAt: r.createdAt,
+    similarity: Math.round(Number(r.similarity) * 100),
+    assignedToName: r.assignedToName,
+    requesterName: r.requesterName,
+  }));
+}
+
+/**
+ * Recherche de tickets similaires par texte (génère un embedding à la volée).
+ * Utile quand on a une description mais pas de ticketId.
+ *
+ * @param {string} text - Texte à comparer
+ * @param {number} limit - Nombre max de résultats
+ * @param {number} minScore - Score minimum 0-1
+ * @returns {Promise<Array>} Tickets similaires avec score
+ */
+async function findSimilarByText(text, limit = 5, minScore = 0.4) {
+  const inputText = (text || '').substring(0, 1000).trim();
+  if (!inputText) return [];
+
+  try {
+    const embedding = await generateEmbedding(inputText);
+    const vectorLiteral = toVectorLiteral(embedding);
+
+    const results = await prisma.$queryRaw`
+      SELECT
+        t.id,
+        t.title,
+        t.status,
+        t.priority,
+        t.category,
+        t."locationName",
+        t."createdAt",
+        1 - (t."contentEmbedding" <=> ${vectorLiteral}::vector) AS similarity,
+        u.fullName AS "assignedToName",
+        r.fullName AS "requesterName"
+      FROM "Ticket" t
+      LEFT JOIN "User" u ON u.id = t."assignedToId"
+      LEFT JOIN "User" r ON r.id = t."requesterId"
+      WHERE t."contentEmbedding" IS NOT NULL
+        AND t."deletedAt" IS NULL
+        AND 1 - (t."contentEmbedding" <=> ${vectorLiteral}::vector) >= ${minScore}
+      ORDER BY t."contentEmbedding" <=> ${vectorLiteral}::vector
+      LIMIT ${limit}
+    `;
+
+    return results.map(r => ({
+      id: r.id,
+      title: r.title,
+      status: r.status,
+      priority: r.priority,
+      category: r.category,
+      locationName: r.locationName,
+      createdAt: r.createdAt,
+      similarity: Math.round(Number(r.similarity) * 100),
+      assignedToName: r.assignedToName,
+      requesterName: r.requesterName,
+    }));
+  } catch (err) {
+    console.error(`[similarIncident] Erreur recherche vectorielle:`, err.message);
+    return [];
+  }
+}
+
+module.exports = { findSimilarOpenTicket, attachSiteToTicket, saveTicketEmbedding, findSimilarTicketsByVector, findSimilarByText };

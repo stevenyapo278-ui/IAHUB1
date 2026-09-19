@@ -986,14 +986,14 @@ const ALL_CHATBOT_TOOLS = [
     type: 'function',
     function: {
       name: 'find_similar_tickets',
-      description: 'Chercher des tickets similaires à un problème donné (utile avant création)',
+      description: 'Chercher des tickets similaires à un problème donné, ou à un ticket existant par son numéro. Utilise la similarité vectorielle (sémantique) pour trouver les tickets les plus proches.',
       parameters: {
         type: 'object',
         properties: {
-          title: { type: 'string', description: 'Titre ou description du problème' },
-          description: { type: 'string', description: 'Description détaillée' },
+          ticketId: { type: 'integer', description: 'Numéro du ticket source pour chercher des similaires (optionnel)' },
+          title: { type: 'string', description: 'Titre ou description du problème (optionnel si ticketId fourni)' },
+          description: { type: 'string', description: 'Description détaillée (optionnel)' },
         },
-        required: ['title'],
       },
     },
   },
@@ -1289,7 +1289,7 @@ async function executeTool(toolName, args, user, { confirmed = false } = {}) {
     case 'get_ticket_summary':
       return await getTicketSummary(p.ticketId);
     case 'find_similar_tickets':
-      return await findSimilarTickets(p.title, p.description || p.title, user);
+      return await findSimilarTickets(p.title, p.description || p.title, user, p.ticketId || null);
     case 'get_ticket_links': {
       const ticket = await prisma.ticket.findUnique({
         where: { id: Number(p.ticketId) },
@@ -2324,10 +2324,23 @@ async function getTicketSummary(ticketId) {
   return r;
 }
 
-async function findSimilarTickets(title, description, user = null) {
-  const query = `${title || ''} ${description || ''}`.trim();
-  if (!query) return [];
+async function findSimilarTickets(title, description, user = null, ticketId = null) {
+  // Si un ticketId est fourni, utiliser la recherche vectorielle par embedding
+  if (ticketId) {
+    const { findSimilarTicketsByVector } = require('../services/similarIncidentDetector');
+    const vectorResults = await findSimilarTicketsByVector(ticketId, 5, 0.5);
+    if (vectorResults.length > 0) return vectorResults;
+  }
 
+  // Recherche vectorielle par texte si pas de ticketId
+  const query = `${title || ''} ${description || ''}`.trim();
+  if (query) {
+    const { findSimilarByText } = require('../services/similarIncidentDetector');
+    const vectorResults = await findSimilarByText(query, 5, 0.4);
+    if (vectorResults.length > 0) return vectorResults;
+  }
+
+  // Fallback : recherche par mots-clés (si pas d'embedding disponible)
   const words = query.split(/\s+/).filter((w) => w.length > 2);
   if (words.length === 0) return [];
 
