@@ -1,40 +1,56 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { convert } = require('@opendataloader/pdf');
 const mammoth = require('mammoth');
+
+let odlConvert = null;
+try {
+  odlConvert = require('@opendataloader/pdf').convert;
+} catch (_) {}
+
+const pdfParse = require('pdf-parse');
+
+async function extractPdf(buffer, filename) {
+  if (odlConvert) {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pdf-'));
+    const tmpPdf = path.join(tmpDir, filename || 'upload.pdf');
+    fs.writeFileSync(tmpPdf, buffer);
+
+    try {
+      await odlConvert([tmpPdf], {
+        outputDir: tmpDir,
+        format: 'markdown',
+        quiet: true,
+      });
+
+      const base = path.basename(tmpPdf, '.pdf');
+      const mdFile = path.join(tmpDir, base + '.md');
+      if (fs.existsSync(mdFile)) {
+        return fs.readFileSync(mdFile, 'utf-8');
+      }
+
+      const jsonFile = path.join(tmpDir, base + '.json');
+      if (fs.existsSync(jsonFile)) {
+        const json = JSON.parse(fs.readFileSync(jsonFile, 'utf-8'));
+        return json.content || json.text || JSON.stringify(json);
+      }
+    } catch (err) {
+      console.warn('[documentExtract] opendataloader failed, falling back to pdf-parse:', err.message);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }
+
+  const data = await pdfParse(buffer);
+  return data.text;
+}
 
 // Extrait le texte brut d'un fichier uploadé selon son type MIME/extension.
 async function extractText(buffer, mimeType, filename) {
   const ext = (filename.split('.').pop() || '').toLowerCase();
 
   if (mimeType === 'application/pdf' || ext === 'pdf') {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pdf-'));
-    const tmpPdf = path.join(tmpDir, filename || 'upload.pdf');
-    fs.writeFileSync(tmpPdf, buffer);
-
-    try {
-      await convert([tmpPdf], {
-        outputDir: tmpDir,
-        format: 'markdown',
-        quiet: true,
-      });
-
-      const mdFile = path.join(tmpDir, path.basename(tmpPdf, '.pdf') + '.md');
-      if (fs.existsSync(mdFile)) {
-        return fs.readFileSync(mdFile, 'utf-8');
-      }
-
-      const jsonFile = path.join(tmpDir, path.basename(tmpPdf, '.pdf') + '.json');
-      if (fs.existsSync(jsonFile)) {
-        const json = JSON.parse(fs.readFileSync(jsonFile, 'utf-8'));
-        return json.content || json.text || JSON.stringify(json);
-      }
-
-      throw new Error('Aucune sortie générée par @opendataloader/pdf');
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
+    return extractPdf(buffer, filename);
   }
 
   if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || ext === 'docx') {
