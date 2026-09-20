@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import MarkdownContent from '../components/MarkdownContent';
+import TypewriterText from '../components/TypewriterText';
 import MarieLoader from '../components/MarieLoader';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip } from 'recharts';
 import {
@@ -11,20 +12,21 @@ import {
   Mic, MicOff,
 } from 'lucide-react';
 import VoiceVisualizer from '../components/VoiceVisualizer';
+import VoiceModeModal from '../components/VoiceModeModal';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
 import { useVoiceRecognition } from '../hooks/useVoiceRecognition';
 
 const QUICK_ACTIONS = [
   { label: 'Répartition équipe', icon: Users, message: 'Répartition des tickets ouverts par équipe', color: 'text-emerald-500', roles: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'] },
-  { label: 'Top Magasins', icon: TrendingUp, message: 'Quel est le magasin qui a eu le plus de problèmes ?', color: 'text-amber-500', roles: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'] },
-  { label: 'Incidents Asten', icon: AlertTriangle, message: 'Montre-moi les statistiques et incidents du magasin Asten', color: 'text-orange-500', roles: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'] },
-  { label: 'Temps de résolution', icon: Timer, message: 'Quel est le temps moyen de résolution des tickets ?', color: 'text-cyan-500', roles: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'] },
-  { label: 'Rapport ouverts', icon: BarChart3, message: 'Montre les tickets ouverts', color: 'text-blue-500', roles: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'] },
-  { label: 'Aide & Commandes', icon: HelpCircle, message: 'Que peux-tu faire ?', color: 'text-on-surface-variant', roles: null },
+  { label: 'Top Magasins', icon: TrendingUp, message: 'Quel magasin a le plus de problèmes ce mois-ci ?', color: 'text-amber-500', roles: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'] },
+  { label: 'Anal. causes racines', icon: BarChart3, message: 'Analyse les causes racines des pannes Réseau', color: 'text-orange-500', roles: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'] },
+  { label: 'Top Techniciens', icon: Timer, message: 'Quel est le technicien le plus performant ?', color: 'text-cyan-500', roles: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'] },
+  { label: 'Tickets similaires', icon: AlertTriangle, message: 'Y a-t-il des incidents similaires à un problème VPN ?', color: 'text-blue-500', roles: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'] },
+  { label: 'Aide', icon: HelpCircle, message: 'Que peux-tu faire ?', color: 'text-on-surface-variant', roles: null },
   // Demandeur
   { label: 'Mes tickets', icon: MessageSquare, message: 'Liste de mes tickets', color: 'text-blue-500', roles: ['REQUESTER'] },
-  { label: 'Signaler un problème', icon: PlusCircle, message: 'Je veux signaler un problème', color: 'text-emerald-500', roles: ['REQUESTER'] },
+  { label: 'Signaler un bug', icon: PlusCircle, message: 'Je veux signaler un problème', color: 'text-emerald-500', roles: ['REQUESTER'] },
 ];
 
 // ── Widget Recharts ─────────────────────────────────────────────────────
@@ -269,6 +271,7 @@ export default function ChatPage() {
   const [showArchived, setShowArchived] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [revealedIds, setRevealedIds] = useState(() => new Set());
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -280,6 +283,9 @@ export default function ChatPage() {
       setTimeout(() => sendMessage(text), 100);
     }
   });
+
+  // Voice mode (full-screen assistant)
+  const [voiceModeOpen, setVoiceModeOpen] = useState(false);
 
   // Déterminer si la conversation active est archivée
   const activeConv = conversations.find(c => c.id === conversationId);
@@ -324,9 +330,12 @@ export default function ChatPage() {
     setConversationId(convId);
     try {
       const { data } = await api.get(`/chat/history?conversationId=${convId}`);
-      setMessages(data.map((m) => ({ id: m.id, role: m.role, content: m.content, sources: m.sources, rating: m.rating })));
+      const msgs = data.map((m) => ({ id: m.id, role: m.role, content: m.content, sources: m.sources, rating: m.rating }));
+      setMessages(msgs);
+      setRevealedIds(new Set(msgs.map((m) => m.id).filter(Boolean)));
     } catch {
       setMessages([]);
+      setRevealedIds(new Set());
     }
   }
 
@@ -334,6 +343,7 @@ export default function ChatPage() {
   async function handleNewConversation() {
     setConversationId(null);
     setMessages([]);
+    setRevealedIds(new Set());
     setInput('');
     setReplyTo(null);
     removeAttachment();
@@ -351,7 +361,7 @@ export default function ChatPage() {
   async function handleArchive(convId) {
     try {
       await api.post(`/chat/conversations/${convId}/archive`);
-      if (convId === conversationId) { setConversationId(null); setMessages([]); }
+      if (convId === conversationId) { setConversationId(null); setMessages([]); setRevealedIds(new Set()); }
       fetchConversations();
     } catch {}
   }
@@ -359,7 +369,7 @@ export default function ChatPage() {
   async function handleDelete(convId) {
     try {
       await api.delete(`/chat/conversations/${convId}`);
-      if (convId === conversationId) { setConversationId(null); setMessages([]); }
+      if (convId === conversationId) { setConversationId(null); setMessages([]); setRevealedIds(new Set()); }
       fetchConversations();
     } catch {}
   }
@@ -433,6 +443,7 @@ export default function ChatPage() {
       setMessages((prev) => [...prev, { role: 'assistant', content: "Désolé, une erreur est survenue. Réessayez." }]);
     } finally {
       setLoading(false);
+      setTimeout(() => inputRef.current?.focus(), 50);
     }
   }
 
@@ -443,6 +454,32 @@ export default function ChatPage() {
   function handleReply(content) {
     setReplyTo(content.substring(0, 150) + (content.length > 150 ? '...' : ''));
     inputRef.current?.focus();
+  }
+
+  // Handler pour le mode vocal : envoie un message et retourne la réponse texte
+  async function handleVoiceMessage(text) {
+    try {
+      const history = [...messages, { role: 'user', content: text }].slice(-30).map((m) => ({ role: m.role, content: m.content }));
+      const res = await api.post('/chat', { message: text, history, conversationId });
+      const data = res.data;
+
+      // Mettre à jour les messages localement
+      setMessages((prev) => [
+        ...prev,
+        { role: 'user', content: text },
+        { role: 'assistant', content: data.reply, sources: data.sources, action: data.action, widget: data.widget },
+      ]);
+
+      if (data.conversationId) {
+        setConversationId(data.conversationId);
+        fetchConversations();
+      }
+
+      return data.reply;
+    } catch (err) {
+      console.error('[voice] handleVoiceMessage error:', err);
+      return 'Désolé, une erreur est survenue.';
+    }
   }
 
   // Filtrer les conversations
@@ -587,7 +624,7 @@ export default function ChatPage() {
           {showWelcome ? (
             <WelcomeScreen onAction={sendMessage} userRole={user?.role} />
           ) : (
-            <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
+            <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
               {/* Bannière conversation archivée */}
               {isArchived && (
                 <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-xs">
@@ -596,13 +633,13 @@ export default function ChatPage() {
                 </div>
               )}
               {messages.map((msg, i) => (
-                <div key={msg.id || i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} group ${isArchived ? 'opacity-75' : ''}`}>
-                  <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-[13.5px] leading-relaxed ${
+                <div key={msg.id || i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} group ${isArchived ? 'opacity-75' : ''} animate-fade-in`}>
+                  <div className={`max-w-[92%] rounded-2xl px-4 py-3 text-[13.5px] leading-relaxed ${
                     msg.role === 'user'
                       ? 'bg-primary text-white rounded-br-md'
                       : 'bg-surface-container border border-outline-variant/40 text-on-surface rounded-bl-md'
                   }`}>
-                    {msg.role === 'assistant' ? <MarkdownContent content={msg.content} /> : <p>{msg.content}</p>}
+                    {msg.role === 'assistant' ? <TypewriterText content={msg.content} isNew={!msg.id || !revealedIds.has(msg.id)} /> : <p>{msg.content}</p>}
                     {msg.widget && <WidgetRenderer widget={msg.widget} />}
                     {msg.sources && msg.sources.length > 0 && (
                       <div className="mt-2 pt-2 border-t border-outline-variant/30">
@@ -694,14 +731,24 @@ export default function ChatPage() {
                 <Send className="w-4 h-4" />
               </button>
               {voiceSupported && (
-                <button
-                  onClick={isListening ? stopListening : startListening}
-                  className={`p-2 rounded-xl transition-colors cursor-pointer shrink-0 mb-0.5 ${isListening ? 'bg-red-500 text-white animate-pulse' : 'hover:bg-surface-container-high text-on-surface-variant'}`}
-                  title={isListening ? 'Arrêter l\'écoute' : 'Parler'}
-                  disabled={isArchived}
-                >
-                  {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                </button>
+                <>
+                  <button
+                    onClick={() => setVoiceModeOpen(true)}
+                    className="p-2 rounded-xl hover:bg-surface-container-high text-on-surface-variant transition-colors cursor-pointer shrink-0 mb-0.5"
+                    title="Mode vocal (assistant complet)"
+                    disabled={isArchived}
+                  >
+                    <Bot className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={isListening ? stopListening : startListening}
+                    className={`p-2 rounded-xl transition-colors cursor-pointer shrink-0 mb-0.5 ${isListening ? 'bg-red-500 text-white animate-pulse' : 'hover:bg-surface-container-high text-on-surface-variant'}`}
+                    title={isListening ? 'Arrêter l\'écoute' : 'Parler'}
+                    disabled={isArchived}
+                  >
+                    {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                  </button>
+                </>
               )}
             </div>
             {isListening && (
@@ -720,6 +767,12 @@ export default function ChatPage() {
           </div>
         </div>
       </div>
+
+      {/* Mode vocal plein écran */}
+      <VoiceModeModal
+        isOpen={voiceModeOpen}
+        onClose={() => setVoiceModeOpen(false)}
+      />
     </div>
   );
 }

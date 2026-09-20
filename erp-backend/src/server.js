@@ -4,6 +4,7 @@ const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const { initSocket } = require('./utils/socket');
+const { setupVoiceLive } = require('./routes/voiceLive.routes');
 const { syncAllProviders } = require('./utils/modelSync');
 const { runEmailPipeline } = require('./services/emailPipeline');
 const { getSystemSettings } = require('./services/systemSettings');
@@ -66,6 +67,7 @@ if (tlsCertPath && tlsKeyPath && fs.existsSync(tlsCertPath) && fs.existsSync(tls
   server = http.createServer(app);
 }
 initSocket(server);
+setupVoiceLive();
 
 server.listen(PORT, () => {
   logger.info(`Backend ERP démarré (${protocol}) sur le port ${PORT}`);

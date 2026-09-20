@@ -44,6 +44,7 @@ services:
       FRONTEND_URL: http://localhost:5173
       BACKEND_URL: http://localhost:4000
       PORT: 4000
+      VOICE_LIVE_PORT: 4001
       AUTH_EMAIL_DOMAIN: ${AUTH_EMAIL_DOMAIN:-}
       LDAP_ENABLED: ${LDAP_ENABLED:-false}
       LDAP_URL: ${LDAP_URL:-ldap://10.0.70.1}
@@ -58,6 +59,7 @@ services:
       LDAP_USER_FILTER: ${LDAP_USER_FILTER:-(&(objectClass=user)(objectCategory=person))}
     ports:
       - "4000:4000"
+      - "4001:4001"
     networks:
       - ia-hub-network
     volumes:

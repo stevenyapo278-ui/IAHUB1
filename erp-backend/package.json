@@ -14,6 +14,7 @@
     "seed": "node prisma/seed.js"
   },
   "dependencies": {
+    "@google/genai": "^2.23.0",
     "@opendataloader/pdf": "^2.5.10",
     "@prisma/client": "^5.20.0",
     "bcryptjs": "^2.4.3",
@@ -36,7 +37,8 @@
     "pdfkit": "^0.19.1",
     "prisma": "^5.22.0",
     "socket.io": "^4.8.3",
-    "winston": "^3.19.0"
+    "winston": "^3.19.0",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "jest": "^30.4.2",

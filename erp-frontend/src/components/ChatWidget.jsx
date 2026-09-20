@@ -3,8 +3,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import MarkdownContent from './MarkdownContent';
 import MarieLoader from './MarieLoader';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip } from 'recharts';
-import { Download, BarChart2, Send, Paperclip, MessageSquare, Users, TrendingUp, AlertTriangle, Timer, BarChart3, HelpCircle, PlusCircle, X, Mic, MicOff } from 'lucide-react';
+import { Download, BarChart2, Send, Paperclip, MessageSquare, Users, TrendingUp, AlertTriangle, Timer, BarChart3, HelpCircle, PlusCircle, X, Mic, MicOff, Bot } from 'lucide-react';
 import VoiceVisualizer from './VoiceVisualizer';
+import VoiceModeModal from './VoiceModeModal';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
@@ -14,13 +15,13 @@ const STORAGE_KEY = 'chatwidget_position';
 
 const QUICK_ACTIONS = [
   { label: 'Répartition équipe', icon: Users, message: 'Répartition des tickets ouverts par équipe', color: 'text-emerald-500', roles: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'] },
-  { label: 'Top Magasins', icon: TrendingUp, message: 'Quel est le magasin qui a eu le plus de problèmes ?', color: 'text-amber-500', roles: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'] },
-  { label: 'Incidents Asten', icon: AlertTriangle, message: 'Montre-moi les statistiques et incidents du magasin Asten', color: 'text-orange-500', roles: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'] },
-  { label: 'Temps de résolution', icon: Timer, message: 'Quel est le temps moyen de résolution des tickets ?', color: 'text-cyan-500', roles: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'] },
-  { label: 'Rapport ouverts', icon: BarChart3, message: 'Montre les tickets ouverts', color: 'text-blue-500', roles: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'] },
-  { label: 'Aide & Commandes', icon: HelpCircle, message: 'Que peux-tu faire ?', color: 'text-on-surface-variant', roles: null },
+  { label: 'Top Magasins', icon: TrendingUp, message: 'Quel magasin a le plus de problèmes ce mois-ci ?', color: 'text-amber-500', roles: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'] },
+  { label: 'Anal. causes racines', icon: BarChart3, message: 'Analyse les causes racines des pannes Réseau', color: 'text-orange-500', roles: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'] },
+  { label: 'Top Techniciens', icon: Timer, message: 'Quel est le technicien le plus performant ?', color: 'text-cyan-500', roles: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'] },
+  { label: 'Tickets similaires', icon: AlertTriangle, message: 'Y a-t-il des incidents similaires à un problème VPN ?', color: 'text-blue-500', roles: ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'] },
+  { label: 'Aide', icon: HelpCircle, message: 'Que peux-tu faire ?', color: 'text-on-surface-variant', roles: null },
   { label: 'Mes tickets', icon: MessageSquare, message: 'Liste de mes tickets', color: 'text-blue-500', roles: ['REQUESTER'] },
-  { label: 'Signaler un problème', icon: PlusCircle, message: 'Je veux signaler un problème', color: 'text-emerald-500', roles: ['REQUESTER'] },
+  { label: 'Signaler un bug', icon: PlusCircle, message: 'Je veux signaler un problème', color: 'text-emerald-500', roles: ['REQUESTER'] },
 ];
 
 function WidgetRenderer({ widget }) {
@@ -155,6 +156,9 @@ export default function ChatWidget() {
       setTimeout(() => sendMessage(text), 100);
     }
   });
+
+  // Voice mode (full-screen assistant)
+  const [voiceModeOpen, setVoiceModeOpen] = useState(false);
 
   // Conversation management
   const [conversationId, setConversationId] = useState(null);
@@ -344,6 +348,30 @@ export default function ChatWidget() {
   function handleReply(content) {
     setReplyTo(content.substring(0, 150) + (content.length > 150 ? '...' : ''));
     inputRef.current?.focus();
+  }
+
+  // Handler pour le mode vocal
+  async function handleVoiceMessage(text) {
+    try {
+      const history = [...messages, { role: 'user', content: text }].slice(-30).map((m) => ({ role: m.role, content: m.content }));
+      const { data } = await api.post('/chat', { message: text, history, conversationId: conversationId || undefined });
+
+      setMessages((prev) => [
+        ...prev,
+        { role: 'user', content: text },
+        { role: 'assistant', content: data.reply, sources: data.sources, action: data.action, widget: data.widget },
+      ]);
+
+      if (data.conversationId && !conversationId) {
+        setConversationId(data.conversationId);
+        loadConversations();
+      }
+
+      return data.reply;
+    } catch (err) {
+      console.error('[voice] handleVoiceMessage error:', err);
+      return 'Désolé, une erreur est survenue.';
+    }
   }
 
   // Masquer si sur /chat
@@ -536,13 +564,22 @@ export default function ChatWidget() {
                   <span className="material-symbols-outlined text-[16px]">send</span>
                 </button>
                 {voiceSupported && (
-                  <button
-                    onClick={isListening ? stopListening : startListening}
-                    className={`p-1.5 rounded-lg transition-colors cursor-pointer ${isListening ? 'bg-red-500 text-white animate-pulse' : 'hover:bg-surface-container-high text-on-surface-variant'}`}
-                    title={isListening ? 'Arrêter l\'écoute' : 'Parler'}
-                  >
-                    {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                  </button>
+                  <>
+                    <button
+                      onClick={() => setVoiceModeOpen(true)}
+                      className="p-1.5 rounded-lg hover:bg-surface-container-high text-on-surface-variant transition-colors cursor-pointer"
+                      title="Mode vocal (assistant complet)"
+                    >
+                      <Bot className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={isListening ? stopListening : startListening}
+                      className={`p-1.5 rounded-lg transition-colors cursor-pointer ${isListening ? 'bg-red-500 text-white animate-pulse' : 'hover:bg-surface-container-high text-on-surface-variant'}`}
+                      title={isListening ? 'Arrêter l\'écoute' : 'Parler'}
+                    >
+                      {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                    </button>
+                  </>
                 )}
               </div>
               {isListening && (
@@ -559,6 +596,12 @@ export default function ChatWidget() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Mode vocal plein écran */}
+      <VoiceModeModal
+        isOpen={voiceModeOpen}
+        onClose={() => setVoiceModeOpen(false)}
+      />
     </>
   );
 }

@@ -1,87 +1,91 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useEffect, useCallback } from 'react';
 
-export default function VoiceVisualizer({ isActive, className = '' }) {
+const BAR_COUNT = 32;
+const MIN_BAR_HEIGHT = 2;
+
+export default function VoiceVisualizer({ analyserNode, isActive, color = '#3b82f6', className = '' }) {
   const canvasRef = useRef(null);
   const animFrameRef = useRef(null);
-  const analyserRef = useRef(null);
-  const streamRef = useRef(null);
-  const [bars, setBars] = useState(new Array(20).fill(0));
+  const barsRef = useRef(new Array(BAR_COUNT).fill(MIN_BAR_HEIGHT));
+
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    const { width, height } = canvas;
+    ctx.clearRect(0, 0, width, height);
+
+    let dataArray;
+    if (analyserNode) {
+      const bufferLength = analyserNode.frequencyBinCount;
+      dataArray = new Uint8Array(bufferLength);
+      analyserNode.getByteFrequencyData(dataArray);
+    }
+
+    const barWidth = (width / BAR_COUNT) * 0.7;
+    const gap = (width / BAR_COUNT) * 0.3;
+    const maxHeight = height * 0.9;
+
+    for (let i = 0; i < BAR_COUNT; i++) {
+      let targetHeight;
+      if (dataArray) {
+        const index = Math.floor((i / BAR_COUNT) * dataArray.length * 0.6);
+        const value = dataArray[index] || 0;
+        targetHeight = Math.max(MIN_BAR_HEIGHT, (value / 255) * maxHeight);
+      } else if (isActive) {
+        targetHeight = MIN_BAR_HEIGHT + Math.random() * maxHeight * 0.15;
+      } else {
+        targetHeight = MIN_BAR_HEIGHT;
+      }
+
+      barsRef.current[i] += (targetHeight - barsRef.current[i]) * 0.18;
+
+      const x = i * (barWidth + gap) + gap / 2;
+      const barH = barsRef.current[i];
+      const y = (height - barH) / 2;
+
+      const gradient = ctx.createLinearGradient(x, y, x, y + barH);
+      gradient.addColorStop(0, color);
+      gradient.addColorStop(0.5, color + 'cc');
+      gradient.addColorStop(1, color + '44');
+
+      ctx.beginPath();
+      ctx.roundRect(x, y, barWidth, barH, barWidth / 2);
+      ctx.fillStyle = gradient;
+      ctx.fill();
+    }
+
+    animFrameRef.current = requestAnimationFrame(draw);
+  }, [analyserNode, isActive, color]);
 
   useEffect(() => {
-    if (!isActive) {
-      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(t => t.stop());
-        streamRef.current = null;
-      }
-      setBars(new Array(20).fill(0));
-      return;
-    }
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-    let cancelled = false;
+    const resizeObserver = new ResizeObserver(() => {
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      const ctx = canvas.getContext('2d');
+      ctx.scale(dpr, dpr);
+    });
+    resizeObserver.observe(canvas);
 
-    async function startVisualization() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
-
-        streamRef.current = stream;
-        const audioCtx = new AudioContext();
-        const source = audioCtx.createMediaStreamSource(stream);
-        const analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 64;
-        analyser.smoothingTimeConstant = 0.8;
-        source.connect(analyser);
-        analyserRef.current = analyser;
-
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
-
-        function animate() {
-          if (cancelled) return;
-          analyser.getByteFrequencyData(dataArray);
-
-          // Take 20 bars from the frequency data
-          const step = Math.floor(dataArray.length / 20);
-          const newBars = [];
-          for (let i = 0; i < 20; i++) {
-            const val = dataArray[i * step] || 0;
-            newBars.push(val / 255); // Normalize 0-1
-          }
-          setBars(newBars);
-
-          animFrameRef.current = requestAnimationFrame(animate);
-        }
-
-        animate();
-      } catch (err) {
-        console.warn('VoiceVisualizer: microphone access denied', err);
-      }
-    }
-
-    startVisualization();
+    animFrameRef.current = requestAnimationFrame(draw);
 
     return () => {
-      cancelled = true;
+      resizeObserver.disconnect();
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(t => t.stop());
-        streamRef.current = null;
-      }
     };
-  }, [isActive]);
+  }, [draw]);
 
   return (
-    <div className={`flex items-center justify-center gap-[3px] h-8 ${className}`}>
-      {bars.map((height, i) => (
-        <div
-          key={i}
-          className="w-[3px] rounded-full bg-primary transition-all duration-75"
-          style={{
-            height: `${Math.max(4, height * 32)}px`,
-            opacity: 0.4 + height * 0.6,
-          }}
-        />
-      ))}
-    </div>
+    <canvas
+      ref={canvasRef}
+      className={className}
+      style={{ width: '100%', height: '100%', display: 'block' }}
+    />
   );
 }
