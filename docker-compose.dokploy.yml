@@ -43,6 +43,8 @@ services:
     environment:
       NODE_ENV: production
       PORT: 4000
+      TLS_CERT_PATH: /app/ssl/cert.pem
+      TLS_KEY_PATH: /app/ssl/key.pem
       # Derrière Traefik/Dokploy : req.ip = vraie IP client (indispensable pour les
       # limiteurs de connexion par réseau)
       TRUST_PROXY: ${TRUST_PROXY:-1}
@@ -76,6 +78,7 @@ services:
       FRONTEND_DIST_PATH: /app/erp-frontend/dist
     volumes:
       - app_uploads:/app/erp-backend/uploads
+      - ./ssl:/app/ssl:ro
     ports:
       - "${PORT:-4000}:4000"
     networks:
