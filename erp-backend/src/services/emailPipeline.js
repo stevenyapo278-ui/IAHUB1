@@ -13,7 +13,7 @@ const { notifyNewPendingTicket } = require('./approvalReminderScheduler');
 const { processIncomingAttachments } = require('./emailAttachmentProcessor');
 const { stripSignature } = require('./signatureStripper');
 const { logEvent } = require('./ticketEvent');
-const { getSystemSettings } = require('./systemSettings');
+const { getSystemSettings, resolveFrontendUrl } = require('./systemSettings');
 const { emitTicketCreated, emitTicketAssigned, persistNotification, userHasPermission } = require('../utils/socket');
 const { tryHandleReminderReply } = require('./draftReplyApproval');
 const { getBreaker } = require('../utils/circuitBreaker');
@@ -127,7 +127,7 @@ async function notifyAdminsEmailFailed({ incomingId, subject, fromEmail, error, 
 ${retryInfoLine}
 <p>Détail de l'erreur :</p>
 ${detailBlock}
-<p>Vous pouvez relancer le traitement manuellement depuis l'<a href="${settings?.frontendUrl || 'http://localhost:3000'}/inbox">Inbox</a>.</p>
+<p>Vous pouvez relancer le traitement manuellement depuis l'<a href="${resolveFrontendUrl(settings)}/inbox">Inbox</a>.</p>
 `.trim();
       const subjectLine = `${isDeadLetter ? '❌' : '⚠️'} Email non traité — ${subject || '(sans objet)'}`;
       for (const notifyEmail of recipientList) {

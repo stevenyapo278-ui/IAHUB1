@@ -12,14 +12,29 @@ async function getSystemSettings() {
 }
 
 // Construit une URL absolue à partir d'un "host" saisi par l'admin (Paramètres > Automatisation) :
-// juste une IP ou un nom de domaine ("192.168.1.10", "support.prosuma.ci"), avec ou sans port
-// ("192.168.1.10:8080"). Le protocole est toujours http:// (un nom de domaine avec HTTPS suppose
-// un reverse proxy/certificat configuré côté serveur, hors du périmètre de ce réglage applicatif)
-// et le port par défaut n'est ajouté que si l'admin n'en a pas précisé un lui-même.
+// une IP ou un nom de domaine ("192.168.1.10", "support.prosuma.ci"), avec ou sans port
+// ("192.168.1.10:8080"). Si l'admin tape explicitement "https://...", le protocole est préservé ;
+// sinon on déduit https:// pour les ports 443/8443 et http:// pour le reste.
 function buildUrlFromHost(host, defaultPort) {
-  const trimmed = host.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
-  const hasPort = /:\d+$/.test(trimmed);
-  return `http://${trimmed}${hasPort ? '' : `:${defaultPort}`}`;
+  const trimmed = host.trim().replace(/\/+$/, '');
+  const explicitProtocol = trimmed.match(/^(https?):\/\//i);
+  const withoutProtocol = trimmed.replace(/^https?:\/\//i, '');
+  const portMatch = withoutProtocol.match(/:(\d+)$/);
+  const hasPort = !!portMatch;
+  const port = hasPort ? parseInt(portMatch[1], 10) : null;
+  let protocol = 'http://';
+  let resolvedPort = port || defaultPort;
+  if (explicitProtocol) {
+    protocol = explicitProtocol[1].toLowerCase() + '://';
+    if (!hasPort) {
+      resolvedPort = protocol === 'https://' ? 443 : defaultPort;
+    }
+  } else if (port === 443 || port === 8443) {
+    protocol = 'https://';
+  }
+  const hostOnly = withoutProtocol.replace(/:\d+$/, '');
+  const portSuffix = hasPort ? `:${port}` : `:${resolvedPort}`;
+  return `${protocol}${hostOnly}${portSuffix}`;
 }
 
 // Résout l'URL absolue du backend : priorité au réglage UI (Paramètres > Automatisation), sinon
