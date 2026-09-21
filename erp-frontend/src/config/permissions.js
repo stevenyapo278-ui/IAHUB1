@@ -6,6 +6,7 @@ export const PERMISSION_DEFINITIONS = [
   { key: 'tickets.delete', label: 'Supprimer un ticket' },
   { key: 'tickets.bulkDelete', label: 'Supprimer des tickets en masse' },
   { key: 'tickets.assign', label: 'Assigner un ticket' },
+  { key: 'tickets.escalate', label: 'Escalader un ticket (transférer à une autre équipe)' },
   { key: 'tickets.approve', label: 'Approuver / rejeter un ticket' },
   { key: 'tickets.timesheet', label: 'Saisir le temps passé sur les tickets (timesheet)' },
   { key: 'tickets.manage', label: 'Gérer les champs personnalisés des tickets' },

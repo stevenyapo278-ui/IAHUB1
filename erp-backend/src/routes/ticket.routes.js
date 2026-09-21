@@ -1963,8 +1963,11 @@ router.patch('/:id/reassign', forbidTechnicianTicketEdits, requirePermission('ti
 // Body optionnel : { reason, targetTeamId, assignedToId }
 // - targetTeamId  : réaffecte le ticket à une autre équipe (le technicien actuel est remplacé)
 // - assignedToId  : technicien choisi dans l'équipe cible (optionnel — sinon ticket d'équipe non assigné)
-// Droit requis : tickets.assign — réservé aux ADMIN/SUPERADMIN/HOTLINE via les groupes de droits.
-router.post('/:id/escalate', forbidTechnicianTicketEdits, requirePermission('tickets.assign', ['ADMIN', 'HOTLINE']), async (req, res) => {
+// Droit requis : tickets.escalate — permission dédiée, délégable à une personne précise via les
+// groupes de droits (par défaut : Administrateurs + Équipe Hotline). Le garde-fou par RÔLE
+// (forbidTechnicianTicketEdits) est conservé : un technicien ne peut jamais escalader, même avec
+// la permission dans son groupe.
+router.post('/:id/escalate', forbidTechnicianTicketEdits, requirePermission('tickets.escalate'), async (req, res) => {
   const id = Number(req.params.id);
   const { reason, targetTeamId, assignedToId } = req.body || {};
   try {
@@ -2105,15 +2108,17 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
     if (['SOLVED', 'CLOSED'].includes(ticket.status)) {
       return res.status(403).json({ error: 'Un technicien ne peut pas ajouter de suivi sur un ticket résolu ou fermé.' });
     }
-    // Un technicien ne peut commenter QUE les tickets qui lui sont assignés (direct ou multi-assignees)
-    // Les tickets d'équipe non assignés sont visibles en lecture seule — pas de commentaire autorisé
+    // Un technicien peut commenter les tickets qui lui sont assignés (direct ou multi-assignees)
+    // ET les tickets de son équipe (collaboration intra-équipe : les membres d'une même équipe
+    // se relaient sur les tickets les uns des autres, y compris non assignés).
     const isAssigned = ticket.assignedToId === req.user.sub;
     const isMultiAssigned = !isAssigned && await prisma.ticket.findFirst({
       where: { id: ticketId, assignees: { some: { id: req.user.sub } } },
       select: { id: true },
     });
-    if (!isAssigned && !isMultiAssigned) {
-      return res.status(403).json({ error: 'Vous ne pouvez ajouter un suivi que sur les tickets qui vous sont assignés.' });
+    const isTeamTicket = !isAssigned && !isMultiAssigned && ticket.teamId != null && ticket.teamId === req.user.teamId;
+    if (!isAssigned && !isMultiAssigned && !isTeamTicket) {
+      return res.status(403).json({ error: 'Vous ne pouvez ajouter un suivi que sur les tickets qui vous sont assignés ou qui appartiennent à votre équipe.' });
     }
   }
 

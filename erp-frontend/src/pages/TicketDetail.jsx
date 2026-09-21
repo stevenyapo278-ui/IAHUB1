@@ -316,16 +316,17 @@ export default function TicketDetail() {
     ticket.teamId === user?.teamId;
   const canAssign = (canEditTicketsRole || isTeamTicket) && (hasPermission(user, 'tickets.assign') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN');
   const canApprove = canEditTicketsRole && (hasPermission(user, 'tickets.approve') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN');
-  // Escalade = transfert d'équipe : droit tickets.assign restreint aux acteurs support désignés
-  // (l'ADMIN peut l'avoir retiré de son groupe de droits — la hotline l'a par défaut côté serveur).
+  // Escalade = transfert d'équipe : droit tickets.escalate (permission dédiée, délégable à une
+  // personne précise via les groupes de droits — Administrateurs et Équipe Hotline l'ont par
+  // défaut). Le plafond par rôle est conservé : un TECHNICIAN ne peut jamais escalader, même
+  // avec la permission (miroir du garde-fou serveur forbidTechnicianTicketEdits).
   // Uniquement sur un ticket ACTIF : sur un ticket résolu/fermé/rejeté il n'y a plus de travail
   // à pousser vers une équipe — le bouton serait une source de misclicks et de notifications
   // parasites (le backend rejette aussi, défense en profondeur). WAITING_FOR_USER reste
   // escaladable : c'est un état actif (demandeur silencieux, relance nécessaire).
   const ESCALATABLE_STATUSES = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER'];
   const canEscalate = canEditTicketsRole
-    && ['ADMIN', 'SUPERADMIN', 'HOTLINE'].includes(user?.role)
-    && hasPermission(user, 'tickets.assign')
+    && hasPermission(user, 'tickets.escalate')
     && ESCALATABLE_STATUSES.includes(ticket?.status);
   const canDeleteRole = ['SUPERADMIN', 'ADMIN', 'HOTLINE'].includes(user?.role);
   const canDelete = canEditTicketsRole && (canDeleteRole || hasPermission(user, 'tickets.delete'));
@@ -2354,7 +2355,7 @@ export default function TicketDetail() {
                 <select
                   className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                   value={ticket.status}
-                  disabled={(!canAssign && !isAssignedTechnician) || savingField === 'status' || (user?.role === 'TECHNICIAN' && ['SOLVED', 'CLOSED'].includes(ticket.status))}
+                  disabled={(!canAssign && !isAssignedTechnician && !isTeamTicket) || savingField === 'status' || (user?.role === 'TECHNICIAN' && ['SOLVED', 'CLOSED'].includes(ticket.status))}
                   onChange={(e) => updateField('status', e.target.value)}
                 >
                   {MANUAL_STATUS_OPTIONS.map((s) => (
