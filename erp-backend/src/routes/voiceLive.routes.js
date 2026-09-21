@@ -1,4 +1,6 @@
 const http = require('http');
+const https = require('https');
+const fs = require('fs');
 const { WebSocketServer } = require('ws');
 const { GoogleGenAI } = require('@google/genai');
 const prisma = require('../prismaClient');
@@ -548,7 +550,20 @@ function getPeriodDate(period) {
 }
 
 function setupVoiceLive() {
-  const server = http.createServer();
+  const tlsCertPath = process.env.TLS_CERT_PATH;
+  const tlsKeyPath = process.env.TLS_KEY_PATH;
+  let server;
+  if (tlsCertPath && tlsKeyPath && fs.existsSync(tlsCertPath) && fs.existsSync(tlsKeyPath)) {
+    try {
+      server = https.createServer({ cert: fs.readFileSync(tlsCertPath), key: fs.readFileSync(tlsKeyPath) });
+      logger.info('[voice-live] HTTPS activé');
+    } catch (err) {
+      logger.error(`[voice-live] Impossible de charger TLS, fallback HTTP : ${err.message}`);
+      server = http.createServer();
+    }
+  } else {
+    server = http.createServer();
+  }
   const wss = new WebSocketServer({ server, pingInterval: 30000, pingTimeout: 10000 });
 
   wss.on('connection', async (ws, req) => {

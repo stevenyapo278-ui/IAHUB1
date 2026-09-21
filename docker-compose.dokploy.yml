@@ -81,6 +81,7 @@ services:
       - ./ssl:/app/ssl:ro
     ports:
       - "${PORT:-4000}:4000"
+      - "4001:4001"
     networks:
       - ia-hub-network
 
