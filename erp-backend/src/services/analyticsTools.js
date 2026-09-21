@@ -395,4 +395,5 @@ module.exports = {
   analyzeRootCause,
   getTeamDistribution,
   getOpenTicketsByTeam,
+  parsePeriod,
 };

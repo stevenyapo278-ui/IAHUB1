@@ -87,8 +87,13 @@ const TOOLS = [
       },
       {
         name: 'get_ticket_count',
-        description: 'Nombre de tickets par statut.',
-        parameters: { type: 'object', properties: {} },
+        description: 'Nombre de tickets par statut (NEW, OPEN, PLANNED, PENDING, WAITING_FOR_USER, SOLVED, CLOSED) + totaux groupés (ouverts, enAttente, resolus, fermes). Renseigne TOUJOURS period quand l utilisateur mentionne une période (aujourd hui, cette semaine, ce mois, 7d, 30d…).',
+        parameters: {
+          type: 'object',
+          properties: {
+            period: { type: 'string', description: 'Période: today, yesterday, this_week, this_month, 7d, 30d, 90d, all (défaut all)' },
+          },
+        },
       },
       {
         name: 'get_ticket_time_entries',
@@ -377,11 +382,21 @@ async function executeTool(name, args) {
         // Même périmètre que l'UI : corbeille (deletedAt) et suggestions en attente/rejetées
         // (approvalStatus) exclus — sinon les chiffres vocaux dépassaient ceux affichés.
         const base = { deletedAt: null, approvalStatus: { notIn: ['PENDING', 'REJECTED'] } };
+        // La période demandée (« cette semaine », « ce mois »…) est RÉELLEMENT appliquée :
+        // avant, le tool renvoyait toujours les totaux depuis toujours.
+        const startDate = args.period && args.period !== 'all' ? getPeriodDate(args.period) : null;
+        const where = startDate ? { ...base, createdAt: { gte: startDate } } : base;
         const statuses = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER', 'SOLVED', 'CLOSED'];
-        const counts = await Promise.all(statuses.map((s) => prisma.ticket.count({ where: { ...base, status: s } })));
+        const counts = await Promise.all(statuses.map((s) => prisma.ticket.count({ where: { ...where, status: s } })));
         const result = {};
         statuses.forEach((s, i) => { result[s] = counts[i]; });
         result.total = counts.reduce((a, b) => a + b, 0);
+        // Regroupements que l'utilisateur demande naturellement à l'oral, alignés sur l'UI
+        result.ouverts = (result.NEW || 0) + (result.OPEN || 0) + (result.PLANNED || 0);
+        result.enAttente = (result.PENDING || 0) + (result.WAITING_FOR_USER || 0);
+        result.resolus = result.SOLVED || 0;
+        result.fermes = result.CLOSED || 0;
+        if (startDate) result.periode = { depuis: startDate.toISOString() };
         return result;
       }
 
@@ -608,15 +623,11 @@ async function executeTool(name, args) {
 }
 
 function getPeriodDate(period) {
-  const now = new Date();
-  switch (period) {
-    case 'today': return new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    case 'yesterday': { const d = new Date(now); d.setDate(d.getDate() - 1); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
-    case '7d': { const d = new Date(now); d.setDate(d.getDate() - 7); return d; }
-    case '30d': { const d = new Date(now); d.setDate(d.getDate() - 30); return d; }
-    case '90d': { const d = new Date(now); d.setDate(d.getDate() - 90); return d; }
-    default: return null;
-  }
+  // Délégue à parsePeriod (analyticsTools) qui couvre aussi this_week/this_month/last_week/…
+  // — l'ancien switch local ignorait ces périodes (retour null => filtre perdu => chiffres
+  // « depuis toujours » au lieu de « cette semaine »/« ce mois »).
+  const { parsePeriod } = require('../services/analyticsTools');
+  return parsePeriod(period);
 }
 
 function setupVoiceLive() {
