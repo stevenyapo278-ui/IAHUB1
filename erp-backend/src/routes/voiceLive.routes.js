@@ -655,10 +655,31 @@ function setupVoiceLive() {
             'Utilise les outils quand on te pose des questions sur les tickets, utilisateurs, équipements, magasins, équipes, ou la base de connaissances.',
             'Quand tu crées ou modifies un ticket, confirme le numéro et le résultat.',
             'Pour les rapports et statistiques, synthétise les données de façon claire.',
+            // ── Exactitude des chiffres ──
+            'RÈGLE ABSOLUE : pour toute question chiffrée (combien, total, nombre, statistiques, classement), tu DOIS appeler un outil et répondre UNIQUEMENT avec les chiffres qu il renvoie.',
+            'Ne devine JAMAIS un chiffre de mémoire et n arrondis pas : si l outil ne renvoie pas l information, dis que tu ne peux pas la vérifier.',
+            'Lis les données renvoyées avec attention : le champ « total » est la source de vérité, pas un des sous-totaux.',
+            // ── Rythme de la conversation ──
+            'Laisse toujours l utilisateur TERMINER sa question : écoute jusqu au bout, puis réponds.',
+            'Avant d annoncer un chiffre ou un résultat, dis brièvement « je vérifie » : cela masque le délai de l appel d outil.',
           ].join(' '),
           speechConfig: {
             voiceConfig: {
               prebuiltVoiceConfig: { voiceName: LIVE_VOICE },
+            },
+          },
+          // ── Détection de fin de parole plus patiente ──
+          // Par défaut (END_SENSITIVITY_HIGH), le modèle coupe dès ~300 ms de silence :
+          // une hésitation ou une respiration mid-phrase déclenche la réponse trop tôt, souvent
+          // avec une question incomplète => chiffres hors sujet. END_SENSITIVITY_LOW + 900 ms
+          // de silence requis laissent le temps de finir sa phrase (et sa pause de réflexion).
+          realtimeInputConfig: {
+            automaticActivityDetection: {
+              disabled: false,
+              startOfSpeechSensitivity: 'START_SENSITIVITY_HIGH',
+              endOfSpeechSensitivity: 'END_SENSITIVITY_LOW',
+              prefixPaddingMs: 100,
+              silenceDurationMs: 900,
             },
           },
           inputAudioTranscription: {},
