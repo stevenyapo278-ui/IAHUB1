@@ -86,6 +86,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   // Emails entrants marqués NEEDS_REVIEW par le pipeline (demande de révision Hotline)
   const [needsReviewEmails, setNeedsReviewEmails] = useState([]);
   const [processingReviewId, setProcessingReviewId] = useState(null);
+  const [bulkResolving, setBulkResolving] = useState(false);
   const [closureStats, setClosureStats] = useState(null);
   // Sous-onglet dans Clôtures IA : 'pending' | 'rejected'
   const [closureSubTab, setClosureSubTab] = useState('pending');
@@ -323,6 +324,25 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
       toast.error(err.response?.data?.error || 'Erreur lors du traitement de la révision');
     } finally {
       setProcessingReviewId(null);
+    }
+  }
+
+  // Traiter en masse plusieurs emails NEEDS_REVIEW sans création de ticket
+  async function handleBulkResolveReviews() {
+    if (selectedDraftIds.size === 0) return;
+    if (!window.confirm(`Marquer ${selectedDraftIds.size} email(s) comme traité(s) sans ticket ?`)) return;
+    setBulkResolving(true);
+    try {
+      const { data } = await api.post('/inbox/bulk-needs-review-resolve', { ids: Array.from(selectedDraftIds) });
+      playApproval();
+      toast.success(`${data?.count || selectedDraftIds.size} email(s) marqué(s) comme traité(s)`);
+      setSelectedDraftIds(new Set());
+      loadAllData(true);
+    } catch (err) {
+      playError();
+      toast.error(err.response?.data?.error || 'Erreur lors du traitement en masse');
+    } finally {
+      setBulkResolving(false);
     }
   }
 
@@ -2008,6 +2028,40 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             ) : noResultsBlock
           ) : (
             <div className="space-y-4">
+              {/* Barre de sélection + actions bulk */}
+              {paginatedList.length > 0 && (
+                <div className="flex items-center justify-between px-4 py-2.5 rounded-xl bg-surface-container-low border border-outline-variant/20">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedDraftIds.size === paginatedList.length && paginatedList.length > 0}
+                      onChange={handleToggleAllDrafts}
+                      className="w-4 h-4 rounded border-outline-variant text-primary focus:ring-primary/30 cursor-pointer"
+                    />
+                    <span className="text-xs text-on-surface-variant font-medium">
+                      {selectedDraftIds.size > 0
+                        ? `${selectedDraftIds.size} sélectionné(s) sur ${filteredList.length}`
+                        : `Tout sélectionner (${paginatedList.length} sur cette page)`
+                      }
+                    </span>
+                  </div>
+                  {selectedDraftIds.size > 0 && (
+                    <button
+                      onClick={handleBulkResolveReviews}
+                      disabled={bulkResolving}
+                      className="px-3.5 py-1.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold shadow-md shadow-orange-500/20 transition-all flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                    >
+                      {bulkResolving ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                      )}
+                      {bulkResolving ? 'Traitement...' : `Traiter sans ticket (${selectedDraftIds.size})`}
+                    </button>
+                  )}
+                </div>
+              )}
+
               {paginatedList.map((email) => {
                 const reasonLabel = {
                   NEEDS_REVIEW: 'Confiance IA insuffisante',
@@ -2018,12 +2072,18 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                 return (
                   <div
                     key={email.id}
-                    className="bento-card p-6 space-y-4 hover-interactive transition-all"
+                    className={`bento-card p-6 space-y-4 hover-interactive transition-all ${selectedDraftIds.has(email.id) ? 'ring-2 ring-primary/40 bg-primary/5' : ''}`}
                     style={{ borderColor: 'color-mix(in srgb, #f97316 25%, var(--color-border))' }}
                   >
                     {/* Header : expéditeur + objet + badges */}
                     <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-outline-variant/20 pb-3">
                       <div className="flex items-start gap-3 min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={selectedDraftIds.has(email.id)}
+                          onChange={() => handleToggleDraftSelection(email.id)}
+                          className="w-4 h-4 mt-2 rounded border-outline-variant text-primary focus:ring-primary/30 cursor-pointer shrink-0"
+                        />
                         <div className="p-2 rounded-xl bg-orange-500/10 text-orange-600 dark:text-orange-400 shrink-0">
                           <AlertTriangle className="w-4 h-4" />
                         </div>

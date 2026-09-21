@@ -529,6 +529,48 @@ router.post('/:id/needs-review-resolve', requirePermission('inbox.sync', ['ADMIN
   }
 });
 
+// ── Traiter plusieurs emails NEEDS_REVIEW en masse (sans création de ticket) ──
+router.post('/bulk-needs-review-resolve', requirePermission('inbox.sync', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ error: 'ids est requis et doit être un tableau non vide' });
+  }
+  if (ids.length > 100) {
+    return res.status(400).json({ error: 'Maximum 100 emails par opération' });
+  }
+
+  try {
+    const result = await prisma.incomingEmail.updateMany({
+      where: { id: { in: ids.map(Number) }, status: 'NEEDS_REVIEW' },
+      data: {
+        status: 'DONE',
+        aiIsSpam: false,
+        error: null,
+        lastError: null,
+      },
+    });
+
+    // Mettre à jour le résumé pour les emails traités
+    const emails = await prisma.incomingEmail.findMany({ where: { id: { in: ids.map(Number) }, status: 'DONE' }, select: { id: true, aiSummary: true } });
+    for (const email of emails) {
+      if (!email.aiSummary?.startsWith('[Résolu par révision')) {
+        await prisma.incomingEmail.update({
+          where: { id: email.id },
+          data: { aiSummary: `[Résolu par révision Hotline] ${email.aiSummary || 'Email examiné sans création de ticket'}` },
+        });
+      }
+    }
+
+    const io = req.app.get('io');
+    if (io) io.emit('bulk_email_resolved', { count: result.count });
+
+    return res.json({ message: `${result.count} email(s) marqué(s) comme traité(s)`, count: result.count });
+  } catch (err) {
+    console.error('[inbox/bulk-needs-review-resolve] Erreur:', err.message);
+    return res.status(500).json({ error: err.message || 'Erreur lors de la résolution en masse' });
+  }
+});
+
 // Détail d'un email reçu
 router.get('/:id', async (req, res) => {
   const scope = await buildEmailScope(req.user);
