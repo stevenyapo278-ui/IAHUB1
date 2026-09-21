@@ -1018,6 +1018,11 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                           <User className="w-3 h-3" /> {t.assignedTo.fullName}
                         </span>
                       )}
+                      {t.observers?.length > 0 && (
+                        <span className="px-2 py-0.5 rounded-md bg-violet-500/10 border border-violet-500/20 text-violet-600 dark:text-violet-400 text-[10px] font-bold flex items-center gap-1" title={t.observers.map(o => o.fullName).join(', ')}>
+                          <Eye className="w-3 h-3" /> {t.observers.length} observateur{t.observers.length > 1 ? 's' : ''}
+                        </span>
+                      )}
                     </div>
 
                     {/* Titre */}
@@ -2776,6 +2781,20 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                     <div className="flex items-center gap-2 min-w-0">
                       <UserAvatar user={detailTicket.assignedTo} size="xs" />
                       <p className="text-xs text-on-surface font-semibold truncate">{detailTicket.assignedTo.fullName}</p>
+                    </div>
+                  </div>
+                )}
+
+                {detailTicket.observers?.length > 0 && (
+                  <div className="p-3 rounded-xl bg-violet-500/5 border border-violet-500/20 space-y-1">
+                    <span className="text-[10px] font-bold text-violet-600 dark:text-violet-400 uppercase tracking-wider flex items-center gap-1"><Eye className="w-3 h-3" /> Observateurs</span>
+                    <div className="flex flex-wrap gap-2">
+                      {detailTicket.observers.map(o => (
+                        <div key={o.id} className="flex items-center gap-1.5">
+                          <UserAvatar user={o} size="xs" />
+                          <p className="text-xs text-on-surface truncate">{o.fullName}</p>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}

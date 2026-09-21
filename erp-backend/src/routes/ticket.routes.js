@@ -703,6 +703,7 @@ router.get('/pending-approval', async (req, res) => {
         createdBy: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
         assignedTo: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
         team: { select: { id: true, name: true } },
+        observers: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
       },
     }),
     prisma.ticket.count({ where }),
