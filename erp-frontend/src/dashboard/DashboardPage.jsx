@@ -16,6 +16,7 @@ import {
   usePendingApprovals,
   usePendingAiDrafts,
   useNeedsReview,
+  useReplySuggestions,
   useTicketHeatmap,
   useWorkloadByTeam,
 } from './useDashboard';
@@ -119,6 +120,7 @@ export default function DashboardPage() {
   const { pendingApprovals } = usePendingApprovals();
   const { pendingAiDrafts } = usePendingAiDrafts();
   const { needsReview } = useNeedsReview();
+  const { replySuggestions } = useReplySuggestions();
   const { heatmap } = useTicketHeatmap(20);
   const { workloadByTeam } = useWorkloadByTeam();
 
@@ -548,6 +550,7 @@ export default function DashboardPage() {
                 pendingApprovals,
                 pendingAiDrafts,
                 needsReview,
+                replySuggestions,
                 heatmap,
                 workloadByTeam,
                 period: activePeriod,

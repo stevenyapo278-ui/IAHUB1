@@ -433,6 +433,16 @@ model Ticket {
   // les boucles de re-suggestion après rejet de la Hotline ; remis à 0 à la validation.
   closeSuggestionCount      Int       @default(0)
 
+  // Réponse sur ticket fermé/résolu — le demandeur a répondu à un email concernant un ticket
+  // SOLVED ou CLOSED. Au lieu de rouvrir automatiquement, on crée une suggestion avec 2 options :
+  // rouvrir le ticket existant OU créer une nouvelle demande.
+  replyOnClosedSuggested    Boolean   @default(false)
+  replyOnClosedSuggestedAt  DateTime?
+  replyOnClosedSender       String?   // email du demandeur
+  replyOnClosedSubject      String?   // sujet de l'email de réponse
+  replyOnClosedBody         String?   // contenu texte de la réponse (pour création de nouveau ticket)
+  replyOnClosedBodyHtml     String?   // contenu HTML de la réponse
+
   // Champs alignés sur le formulaire de ticket classique
   type       TicketType    @default(INCIDENT)
   source     String? // "Helpdesk", "Email", "Téléphone", etc.

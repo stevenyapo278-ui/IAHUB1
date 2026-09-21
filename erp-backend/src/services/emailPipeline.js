@@ -415,7 +415,19 @@ async function processMessage(message, account) {
       await applyIntentActions(match.ticketId, intentResult, fromEmail, {
         fromEmail, fromName, emailAccountId: account.id,
         originalBody: bodyPreview, originalSubject: subject,
+        originalBodyHtml: bodyHtml,
       });
+
+      // Si une suggestion "réponse sur ticket fermé" a été créée, notifier les clients en temps réel
+      const updatedTicket = await prisma.ticket.findUnique({ where: { id: match.ticketId }, select: { replyOnClosedSuggested: true, status: true } });
+      if (updatedTicket?.replyOnClosedSuggested && io) {
+        io.emit('ticket_reply_suggestion', {
+          ticketId: match.ticketId,
+          status: updatedTicket.status,
+          sender: fromEmail,
+          subject,
+        });
+      }
 
       // Conversation IA multi-tours : tente de répondre directement à l'utilisateur sur les emails
       // de suivi (au-delà du simple changement de statut ci-dessus), avec validation humaine
@@ -478,8 +490,15 @@ async function processMessage(message, account) {
       }
 
       if (match.method === 'REOPEN') {
-        await logEvent(match.ticketId, 'REOPENED', fromEmail, { conversationId });
-        await prisma.ticket.update({ where: { id: match.ticketId }, data: { status: 'OPEN', closedAt: null } });
+        // Si le ticket est SOLVED/CLOSED, l'intent analyzer a déjà créé une suggestion
+        // replyOnClosed. On ne force pas la réouverture — la suggestion gère le flow.
+        const ticketStillClosed = ['SOLVED', 'CLOSED'].includes(
+          (await prisma.ticket.findUnique({ where: { id: match.ticketId }, select: { status: true } }))?.status
+        );
+        if (!ticketStillClosed) {
+          await logEvent(match.ticketId, 'REOPENED', fromEmail, { conversationId });
+          await prisma.ticket.update({ where: { id: match.ticketId }, data: { status: 'OPEN', closedAt: null } });
+        }
       }
 
       const updated = await prisma.incomingEmail.update({

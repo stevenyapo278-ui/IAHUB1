@@ -142,7 +142,8 @@ export default function MainLayout() {
         api.get('/dashboard/pending-ai-drafts').catch(() => null),
         api.get('/knowledge/drafts').catch(() => null),
         api.get('/inbox/counts').catch(() => null),
-      ]).then(([ticketsRes, pendingTicketsRes, draftsRes, knowledgeRes, inboxRes]) => {
+        api.get('/dashboard/reply-suggestions-count').catch(() => null),
+      ]).then(([ticketsRes, pendingTicketsRes, draftsRes, knowledgeRes, inboxRes, replyRes]) => {
         const activeTicketsTotal = ticketsRes?.data?.total || 0;
 
         const pendingTicketsCount = typeof pendingTicketsRes?.data?.total === 'number'
@@ -155,8 +156,9 @@ export default function MainLayout() {
 
         const pendingDraftsCount = Array.isArray(draftsRes?.data) ? draftsRes.data.length : 0;
         const pendingKnowledgeCount = Array.isArray(knowledgeRes?.data) ? knowledgeRes.data.length : 0;
+        const replySuggestionsCount = replyRes?.data?.count || 0;
 
-        const validationTotal = pendingTicketsCount + pendingDraftsCount + pendingKnowledgeCount;
+        const validationTotal = pendingTicketsCount + pendingDraftsCount + pendingKnowledgeCount + replySuggestionsCount;
         const unreadInboxCount = inboxRes?.data?.unread || 0;
 
         setBadgeCounts({
@@ -175,6 +177,7 @@ export default function MainLayout() {
     if (socket) {
       socket.on('ticket_created', fetchSidebarBadges);
       socket.on('ticket_updated', fetchSidebarBadges);
+      socket.on('ticket_reply_suggestion', fetchSidebarBadges);
       socket.on('email_received', fetchSidebarBadges);
       socket.on('email_updated', fetchSidebarBadges);
     }

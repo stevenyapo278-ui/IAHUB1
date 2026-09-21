@@ -108,6 +108,14 @@ router.get('/pending-approvals', async (req, res) => {
   return res.json(tickets);
 });
 
+// Nombre de suggestions "réponse sur ticket fermé" en attente
+router.get('/reply-suggestions-count', async (req, res) => {
+  const count = await prisma.ticket.count({
+    where: { replyOnClosedSuggested: true },
+  });
+  return res.json({ count });
+});
+
 // Activité récente / derniers tickets
 router.get('/recent-activity', async (req, res) => {
   const tickets = await prisma.ticket.findMany({

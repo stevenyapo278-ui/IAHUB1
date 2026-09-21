@@ -62,6 +62,11 @@ export function useNeedsReview() {
   return { needsReview: data || [], isLoading, error };
 }
 
+export function useReplySuggestions() {
+  const { data, error, isLoading } = useSWR('/tickets/reply-suggestions?limit=50', fetcher);
+  return { replySuggestions: data || [], isLoading, error };
+}
+
 export function useTicketHeatmap(weeks = 20) {
   const { data, error, isLoading } = useSWR(`/dashboard/ticket-heatmap?weeks=${weeks}`, fetcher);
   return { heatmap: data, isLoading, error };

@@ -31,7 +31,7 @@ function Skeleton() {
 
 function resolveWidget(widget, allData) {
   const { widgetType } = widget;
-  const { stats, trend, activity, techPerformance, slaAnalytics, integrations, pendingApprovals, pendingAiDrafts, needsReview, heatmap, workloadByTeam } = allData;
+  const { stats, trend, activity, techPerformance, slaAnalytics, integrations, pendingApprovals, pendingAiDrafts, needsReview, replySuggestions, heatmap, workloadByTeam } = allData;
 
   switch (widgetType) {
     case 'kpi_open_tickets':
@@ -97,7 +97,7 @@ function resolveWidget(widget, allData) {
       return <TeamBreakdownWidget stats={stats} config={widget.config} />;
 
     case 'ai_pipeline':
-      return <AiPipelineWidget pendingAiDrafts={pendingAiDrafts} needsReview={needsReview} pendingApprovals={pendingApprovals} stats={stats} config={widget.config} />;
+      return <AiPipelineWidget pendingAiDrafts={pendingAiDrafts} needsReview={needsReview} pendingApprovals={pendingApprovals} replySuggestions={replySuggestions} stats={stats} config={widget.config} />;
 
     case 'quick_access':
       return <QuickAccessWidget config={widget.config} />;

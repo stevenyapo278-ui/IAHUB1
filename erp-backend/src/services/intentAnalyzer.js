@@ -117,7 +117,7 @@ function daysSince(date) {
 async function applyIntentActions(ticketId, { intent, confidence, newIssueSummary, isAutoReply }, actor = 'AI', context = {}) {
   const { logEvent } = require('./ticketEvent');
   const { createTicketFromEmail } = require('./ticketCreator');
-  const { fromEmail, fromName, emailAccountId, originalBody, originalSubject } = context;
+  const { fromEmail, fromName, emailAccountId, originalBody, originalSubject, originalBodyHtml } = context;
 
   // Réponse automatique détectée (auto-reply, disclaimer, accusé système) : on ne change rien au statut,
   // on trace juste l'événement pour audit. Évite qu'un "résolu" présent dans une signature ferme un ticket.
@@ -136,47 +136,73 @@ async function applyIntentActions(ticketId, { intent, confidence, newIssueSummar
   const canReopenAutomatically = confidence >= CONFIDENCE_THRESHOLD_FOR_REOPEN;
 
   if (intent === 'RESOLVED') {
-    // Toute détection de résolution est soumise à validation humaine : plus aucune
-    // clôture automatique. Le ticket est marqué "clôture suggérée" et apparaît dans
-    // le Centre de Validation jusqu'à la décision de la Hotline.
-    // Garde-fous : confiance < 0.7 -> aucune suggestion (juste WAITING_FOR_USER), et
-    // maximum 2 suggestions par ticket (anti-boucle après rejets répétés).
-    const canSuggestClose = confidence >= CONFIDENCE_THRESHOLD_FOR_CLOSE
-      && (ticket?.closeSuggestionCount || 0) < MAX_CLOSE_SUGGESTIONS;
-    if (canSuggestClose) {
-      updates.closeSuggested = true;
-      updates.closeSuggestedAt = new Date();
-      updates.closeSuggestionConfidence = confidence;
-      updates.closeSuggestionCount = (ticket?.closeSuggestionCount || 0) + 1;
-      updates.status = 'WAITING_FOR_USER';
-      updates.lastUserReplyAt = new Date();
-      await logEvent(ticketId, 'CLOSURE_SUGGESTED', actor, { intent, confidence });
+    const wasClosed = ['SOLVED', 'CLOSED'].includes(ticket?.status);
+    if (wasClosed) {
+      // Ticket déjà fermé : inutile de suggérer une clôture. On notifie juste que le demandeur a confirmé la résolution.
+      await logEvent(ticketId, 'RESOLUTION_CONFIRMED_ON_CLOSED', actor, { intent, confidence, originalStatus: ticket.status });
     } else {
-      // Confiance insuffisante OU plafond de suggestions atteint : le ticket reste en attente
-      // humaine, sans encombrer le Centre de Validation.
-      updates.status = 'WAITING_FOR_USER';
+      // Toute détection de résolution est soumise à validation humaine : plus aucune
+      // clôture automatique. Le ticket est marqué "clôture suggérée" et apparaît dans
+      // le Centre de Validation jusqu'à la décision de la Hotline.
+      const canSuggestClose = confidence >= CONFIDENCE_THRESHOLD_FOR_CLOSE
+        && (ticket?.closeSuggestionCount || 0) < MAX_CLOSE_SUGGESTIONS;
+      if (canSuggestClose) {
+        updates.closeSuggested = true;
+        updates.closeSuggestedAt = new Date();
+        updates.closeSuggestionConfidence = confidence;
+        updates.closeSuggestionCount = (ticket?.closeSuggestionCount || 0) + 1;
+        updates.status = 'WAITING_FOR_USER';
+        updates.lastUserReplyAt = new Date();
+        await logEvent(ticketId, 'CLOSURE_SUGGESTED', actor, { intent, confidence });
+      } else {
+        updates.status = 'WAITING_FOR_USER';
+        updates.lastUserReplyAt = new Date();
+        if (!lifetimeExceeded) {
+          updates.reminderCount = 0;
+          updates.reminderSentAt = null;
+        }
+        const reason = (ticket?.closeSuggestionCount || 0) >= MAX_CLOSE_SUGGESTIONS ? 'limit_reached' : 'low_confidence';
+        await logEvent(ticketId, 'CLOSURE_NOT_SUGGESTED', actor, { intent, confidence, reason });
+      }
+    }
+  } else if (intent === 'STILL_PRESENT' || intent === 'NEW_INFO') {
+    // Si le ticket est déjà SOLVED ou CLOSED, on ne le rouvre pas automatiquement.
+    // On crée une suggestion "réponse sur ticket fermé" pour que la Hotline décide.
+    const wasClosed = ['SOLVED', 'CLOSED'].includes(ticket?.status);
+    if (wasClosed) {
+      updates.replyOnClosedSuggested = true;
+      updates.replyOnClosedSuggestedAt = new Date();
+      updates.replyOnClosedSender = fromEmail;
+      updates.replyOnClosedSubject = originalSubject || '';
+      updates.replyOnClosedBody = (originalBody || '').substring(0, 5000);
+      updates.replyOnClosedBodyHtml = originalBodyHtml || null;
+      await logEvent(ticketId, 'REPLY_ON_CLOSED_SUGGESTED', actor, { intent, confidence, originalStatus: ticket.status });
+      // On ne touche PAS au statut : le ticket reste SOLVED/CLOSED.
+    } else {
+      updates.status = 'OPEN';
       updates.lastUserReplyAt = new Date();
+      if (!ticket?.firstOpenedAt) updates.firstOpenedAt = new Date();
+      // Au-delà de la durée de vie max, on ne remet plus le compteur de relances à zéro :
+      // le ticket continue d'avancer vers la pré-clôture/clôture au lieu de boucler indéfiniment.
       if (!lifetimeExceeded) {
         updates.reminderCount = 0;
         updates.reminderSentAt = null;
+      } else {
+        await logEvent(ticketId, 'AI_LIFETIME_EXCEEDED', actor, { intent, daysSinceOpened: Math.round(daysSince(ticket?.firstOpenedAt)) });
       }
-      const reason = (ticket?.closeSuggestionCount || 0) >= MAX_CLOSE_SUGGESTIONS ? 'limit_reached' : 'low_confidence';
-      await logEvent(ticketId, 'CLOSURE_NOT_SUGGESTED', actor, { intent, confidence, reason });
-    }
-  } else if (intent === 'STILL_PRESENT' || intent === 'NEW_INFO') {
-    updates.status = 'OPEN';
-    updates.lastUserReplyAt = new Date();
-    if (!ticket?.firstOpenedAt) updates.firstOpenedAt = new Date();
-    // Au-delà de la durée de vie max, on ne remet plus le compteur de relances à zéro :
-    // le ticket continue d'avancer vers la pré-clôture/clôture au lieu de boucler indéfiniment.
-    if (!lifetimeExceeded) {
-      updates.reminderCount = 0;
-      updates.reminderSentAt = null;
-    } else {
-      await logEvent(ticketId, 'AI_LIFETIME_EXCEEDED', actor, { intent, daysSinceOpened: Math.round(daysSince(ticket?.firstOpenedAt)) });
     }
   } else if (intent === 'REOPEN') {
-    if (canReopenAutomatically) {
+    const wasClosed = ['SOLVED', 'CLOSED'].includes(ticket?.status);
+    if (wasClosed) {
+      // Ticket fermé/résolu : on ne rouvre pas, on suggère une décision humaine.
+      updates.replyOnClosedSuggested = true;
+      updates.replyOnClosedSuggestedAt = new Date();
+      updates.replyOnClosedSender = fromEmail;
+      updates.replyOnClosedSubject = originalSubject || '';
+      updates.replyOnClosedBody = (originalBody || '').substring(0, 5000);
+      updates.replyOnClosedBodyHtml = originalBodyHtml || null;
+      await logEvent(ticketId, 'REPLY_ON_CLOSED_SUGGESTED', actor, { intent, confidence, originalStatus: ticket.status });
+    } else if (canReopenAutomatically) {
       updates.status = 'OPEN';
       updates.closedAt = null;
       updates.lastUserReplyAt = new Date();
@@ -189,42 +215,50 @@ async function applyIntentActions(ticketId, { intent, confidence, newIssueSummar
       await logEvent(ticketId, 'AI_LOW_CONFIDENCE_REOPEN_SKIPPED', actor, { intent, confidence });
     }
   } else if (intent === 'NEW_ISSUE_IN_THREAD') {
-    // Le problème initial est (probablement) résolu : la clôture est suggérée à la Hotline
-    // (validation humaine obligatoire, mêmes garde-fous que RESOLVED), et on ouvre un ticket
-    // séparé pour le nouveau sujet évoqué dans le même mail, plutôt que de tout mélanger.
-    const canSuggestClose = confidence >= CONFIDENCE_THRESHOLD_FOR_CLOSE
-      && (ticket?.closeSuggestionCount || 0) < MAX_CLOSE_SUGGESTIONS;
-    updates.status = 'WAITING_FOR_USER';
-    updates.lastUserReplyAt = new Date();
-    if (canSuggestClose) {
-      updates.closeSuggested = true;
-      updates.closeSuggestedAt = new Date();
-      updates.closeSuggestionConfidence = confidence;
-      updates.closeSuggestionCount = (ticket?.closeSuggestionCount || 0) + 1;
-      await logEvent(ticketId, 'CLOSURE_SUGGESTED', actor, { intent, confidence, newIssueSummary });
+    const wasClosed = ['SOLVED', 'CLOSED'].includes(ticket?.status);
+    if (wasClosed) {
+      // Ticket fermé/résolu avec un nouveau sujet dans la réponse : suggestion reply-on-closed.
+      updates.replyOnClosedSuggested = true;
+      updates.replyOnClosedSuggestedAt = new Date();
+      updates.replyOnClosedSender = fromEmail;
+      updates.replyOnClosedSubject = originalSubject || '';
+      updates.replyOnClosedBody = (originalBody || '').substring(0, 5000);
+      updates.replyOnClosedBodyHtml = originalBodyHtml || null;
+      await logEvent(ticketId, 'REPLY_ON_CLOSED_SUGGESTED', actor, { intent, confidence, originalStatus: ticket.status, newIssueSummary });
     } else {
-      const reason = (ticket?.closeSuggestionCount || 0) >= MAX_CLOSE_SUGGESTIONS ? 'limit_reached' : 'low_confidence';
-      await logEvent(ticketId, 'CLOSURE_NOT_SUGGESTED', actor, { intent, confidence, newIssueSummary, reason });
-    }
-
-    const splitCount = ticket?.splitCount || 0;
-    if (newIssueSummary && fromEmail && splitCount < MAX_SPLITS_PER_TICKET) {
-      const { erpTicketId } = await createTicketFromEmail({
-        subject: originalSubject || `Nouveau sujet détecté dans le suivi du ticket #${ticketId}`,
-        body: originalBody || newIssueSummary,
-        from: fromEmail,
-        fromName,
-        analysis: { suggestedTitle: newIssueSummary, summary: newIssueSummary, priority: 'P3' },
-        emailAccountId,
-      });
-      updates.splitCount = splitCount + 1;
-      await logEvent(ticketId, 'SPLIT_NEW_ISSUE', actor, { newTicketId: erpTicketId, newIssueSummary });
-      await logEvent(erpTicketId, 'CREATED_FROM_SPLIT', actor, { originTicketId: ticketId });
-    } else if (newIssueSummary && splitCount >= MAX_SPLITS_PER_TICKET) {
-      // Trop de scissions déjà faites depuis ce ticket : probablement une mauvaise classification répétée.
-      // On n'ouvre plus de nouveau ticket automatiquement, on signale pour revue humaine.
+      // Ticket actif : la clôture est suggérée à la Hotline, et on ouvre un ticket séparé pour le nouveau sujet.
+      const canSuggestClose = confidence >= CONFIDENCE_THRESHOLD_FOR_CLOSE
+        && (ticket?.closeSuggestionCount || 0) < MAX_CLOSE_SUGGESTIONS;
       updates.status = 'WAITING_FOR_USER';
-      await logEvent(ticketId, 'AI_SPLIT_LIMIT_REACHED', actor, { splitCount, newIssueSummary });
+      updates.lastUserReplyAt = new Date();
+      if (canSuggestClose) {
+        updates.closeSuggested = true;
+        updates.closeSuggestedAt = new Date();
+        updates.closeSuggestionConfidence = confidence;
+        updates.closeSuggestionCount = (ticket?.closeSuggestionCount || 0) + 1;
+        await logEvent(ticketId, 'CLOSURE_SUGGESTED', actor, { intent, confidence, newIssueSummary });
+      } else {
+        const reason = (ticket?.closeSuggestionCount || 0) >= MAX_CLOSE_SUGGESTIONS ? 'limit_reached' : 'low_confidence';
+        await logEvent(ticketId, 'CLOSURE_NOT_SUGGESTED', actor, { intent, confidence, newIssueSummary, reason });
+      }
+
+      const splitCount = ticket?.splitCount || 0;
+      if (newIssueSummary && fromEmail && splitCount < MAX_SPLITS_PER_TICKET) {
+        const { erpTicketId } = await createTicketFromEmail({
+          subject: originalSubject || `Nouveau sujet détecté dans le suivi du ticket #${ticketId}`,
+          body: originalBody || newIssueSummary,
+          from: fromEmail,
+          fromName,
+          analysis: { suggestedTitle: newIssueSummary, summary: newIssueSummary, priority: 'P3' },
+          emailAccountId,
+        });
+        updates.splitCount = splitCount + 1;
+        await logEvent(ticketId, 'SPLIT_NEW_ISSUE', actor, { newTicketId: erpTicketId, newIssueSummary });
+        await logEvent(erpTicketId, 'CREATED_FROM_SPLIT', actor, { originTicketId: ticketId });
+      } else if (newIssueSummary && splitCount >= MAX_SPLITS_PER_TICKET) {
+        updates.status = 'WAITING_FOR_USER';
+        await logEvent(ticketId, 'AI_SPLIT_LIMIT_REACHED', actor, { splitCount, newIssueSummary });
+      }
     }
   } else if (intent === 'QUESTION' || intent === 'UNKNOWN') {
     updates.status = 'WAITING_FOR_USER';

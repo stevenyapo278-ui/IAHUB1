@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 
-export default function AiPipelineWidget({ pendingAiDrafts, needsReview, pendingApprovals, stats, config }) {
+export default function AiPipelineWidget({ pendingAiDrafts, needsReview, pendingApprovals, replySuggestions, stats, config }) {
   const total = stats?.total || 0;
   const aiTotal = (pendingAiDrafts?.length || 0) + (needsReview?.length || 0);
   const aiPct = total > 0 ? Math.min(100, Math.round((aiTotal / total) * 100)) : 0;
@@ -9,11 +9,12 @@ export default function AiPipelineWidget({ pendingAiDrafts, needsReview, pending
     { label: 'Brouillons', value: pendingAiDrafts?.length || 0, tone: 'primary' },
     { label: 'À valider', value: needsReview?.length || 0, tone: 'warning' },
     { label: 'En attente', value: pendingApprovals?.length || 0, tone: 'info' },
+    { label: 'Réponses fermés', value: replySuggestions?.length || 0, tone: 'violet' },
   ];
 
   return (
     <div className="space-y-4 h-full w-full">
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {metrics.map((m) => (
           <div key={m.label} className="text-center">
             <p className="text-2xl font-bold text-on-surface">{m.value}</p>

@@ -178,7 +178,7 @@ function buildTicketWhereClause(user, queryParams = {}) {
   const {
     status, priority, teamId, assignedToId, mine, title, search, query,
     category, locationId, aiProcessed, due, closeSuggested, approvalStatus,
-    dateFrom, dateTo, source, origin,
+    dateFrom, dateTo, source, origin, replyOnClosedSuggested,
   } = queryParams;
 
   const andConditions = [
@@ -272,6 +272,9 @@ function buildTicketWhereClause(user, queryParams = {}) {
 
   if (closeSuggested === 'true') andConditions.push({ closeSuggested: true });
   if (closeSuggested === 'false') andConditions.push({ closeSuggested: false });
+
+  if (replyOnClosedSuggested === 'true') andConditions.push({ replyOnClosedSuggested: true });
+  if (replyOnClosedSuggested === 'false') andConditions.push({ replyOnClosedSuggested: false });
 
   if (dateFrom || dateTo) {
     const dateCond = {};
@@ -786,6 +789,160 @@ router.get('/rejected-closures', requirePermission('tickets.approve', ['ADMIN', 
     return res.json(rejected);
   } catch (err) {
     return res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Réponses sur tickets fermés / résolus ---
+// Liste les tickets où un demandeur a répondu à un email alors que le ticket était SOLVED ou CLOSED.
+// La Hotline décide : rouvrir le ticket OU créer une nouvelle demande.
+router.get('/reply-suggestions', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+
+    const tickets = await prisma.ticket.findMany({
+      where: { replyOnClosedSuggested: true },
+      orderBy: { replyOnClosedSuggestedAt: 'desc' },
+      take: limit,
+      select: {
+        id: true, title: true, content: true, status: true, priority: true,
+        category: true, replyOnClosedSuggestedAt: true,
+        replyOnClosedSender: true, replyOnClosedSubject: true,
+        sourceEmail: true, sourceName: true, createdAt: true,
+        requester: { select: { id: true, fullName: true, email: true } },
+        assignedTo: { select: { id: true, fullName: true } },
+      },
+    });
+
+    return res.json(tickets);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Rouvrir un ticket fermé suite à une réponse du demandeur
+router.post('/:id/accept-reply-suggestion/reopen', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+  const id = Number(req.params.id);
+  try {
+    const ticket = await prisma.ticket.findUnique({ where: { id } });
+    if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
+    if (!ticket.replyOnClosedSuggested) return res.status(400).json({ error: 'Aucune suggestion de réponse sur ticket fermé en cours' });
+
+    const updated = await prisma.ticket.update({
+      where: { id },
+      data: {
+        status: 'OPEN',
+        closedAt: null,
+        replyOnClosedSuggested: false,
+        replyOnClosedSuggestedAt: null,
+        replyOnClosedSender: null,
+        replyOnClosedSubject: null,
+        replyOnClosedBody: null,
+        replyOnClosedBodyHtml: null,
+      },
+    });
+
+    await logEvent(id, 'REPLY_ON_CLOSED_REOPENED', req.user.sub, {
+      originalStatus: ticket.status,
+      sender: ticket.replyOnClosedSender,
+    });
+
+    if (io) io.emit('ticket_updated', { id, status: 'OPEN' });
+
+    return res.json({ ticket: updated, message: 'Ticket rouvert avec succès' });
+  } catch (err) {
+    console.error('[ticket.routes] Erreur réouverture reply-on-closed:', err);
+    return res.status(500).json({ error: 'Erreur interne' });
+  }
+});
+
+// Créer une nouvelle demande suite à une réponse sur un ticket fermé
+router.post('/:id/accept-reply-suggestion/new-ticket', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+  const id = Number(req.params.id);
+  try {
+    const ticket = await prisma.ticket.findUnique({
+      where: { id },
+      include: { requester: { select: { id: true, fullName: true, email: true } } },
+    });
+    if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
+    if (!ticket.replyOnClosedSuggested) return res.status(400).json({ error: 'Aucune suggestion de réponse sur ticket fermé en cours' });
+
+    // Créer un nouveau ticket à partir du contenu de la réponse
+    const newTicket = await prisma.ticket.create({
+      data: {
+        title: ticket.replyOnClosedSubject || `Re: ${ticket.title}`,
+        content: ticket.replyOnClosedBody || '',
+        status: 'OPEN',
+        priority: ticket.priority,
+        category: ticket.category,
+        type: ticket.type,
+        source: 'Email',
+        origin: 'EMAIL',
+        requesterId: ticket.requesterId,
+        sourceEmail: ticket.replyOnClosedSender || ticket.sourceEmail,
+        sourceName: ticket.replyOnClosedSender || ticket.sourceName,
+      },
+      include: {
+        requester: { select: { id: true, fullName: true, email: true } },
+      },
+    });
+
+    // Marquer le ticket original comme traité (suggestion consommée)
+    await prisma.ticket.update({
+      where: { id },
+      data: {
+        replyOnClosedSuggested: false,
+        replyOnClosedSuggestedAt: null,
+        replyOnClosedSender: null,
+        replyOnClosedSubject: null,
+        replyOnClosedBody: null,
+        replyOnClosedBodyHtml: null,
+      },
+    });
+
+    await logEvent(id, 'REPLY_ON_CLOSED_NEW_TICKET', req.user.sub, {
+      originalStatus: ticket.status,
+      newTicketId: newTicket.id,
+      sender: ticket.replyOnClosedSender,
+    });
+
+    if (io) io.emit('ticket_created', { id: newTicket.id, title: newTicket.title });
+
+    return res.json({ ticket: newTicket, message: 'Nouvelle demande créée avec succès' });
+  } catch (err) {
+    console.error('[ticket.routes] Erreur création nouveau ticket reply-on-closed:', err);
+    return res.status(500).json({ error: 'Erreur interne' });
+  }
+});
+
+// Rejeter une suggestion de réponse sur ticket fermé (ignorer)
+router.post('/:id/dismiss-reply-suggestion', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+  const id = Number(req.params.id);
+  try {
+    const ticket = await prisma.ticket.findUnique({ where: { id } });
+    if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
+    if (!ticket.replyOnClosedSuggested) return res.status(400).json({ error: 'Aucune suggestion en cours' });
+
+    await prisma.ticket.update({
+      where: { id },
+      data: {
+        replyOnClosedSuggested: false,
+        replyOnClosedSuggestedAt: null,
+        replyOnClosedSender: null,
+        replyOnClosedSubject: null,
+        replyOnClosedBody: null,
+        replyOnClosedBodyHtml: null,
+      },
+    });
+
+    await logEvent(id, 'REPLY_ON_CLOSED_DISMISSED', req.user.sub, {
+      originalStatus: ticket.status,
+      sender: ticket.replyOnClosedSender,
+    });
+
+    return res.json({ message: 'Suggestion ignorée' });
+  } catch (err) {
+    console.error('[ticket.routes] Erreur dismiss reply-on-closed:', err);
+    return res.status(500).json({ error: 'Erreur interne' });
   }
 });
 

@@ -202,6 +202,44 @@ export function SocketProvider({ children }) {
       }
     });
 
+    // ── Réponse sur ticket fermé ─────────────────────────────────────
+    newSocket.on('ticket_reply_suggestion', (data) => {
+      playTicketAssigned();
+      sendBrowserNotification(
+        'Réponse sur ticket fermé',
+        {
+          body: `${data.sender} a répondu au ticket #${data.ticketId} (${data.status})`,
+          tag: `reply-suggestion-${data.ticketId}`,
+          onClick: () => navigateRef.current('/email-drafts?tab=replyClosed'),
+        }
+      );
+      toast(
+        <div className="flex items-start gap-3 w-full min-w-0 pr-2 group cursor-pointer">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-violet-500/10 text-violet-500 border border-violet-500/20">
+            <RefreshCw className="w-4 h-4 text-violet-500" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-xs font-bold text-on-surface">Réponse sur ticket fermé</span>
+              <span className="px-1.5 py-0.2 rounded-md text-[10px] font-mono font-extrabold bg-violet-500/15 text-violet-500 shrink-0">
+                #{data.ticketId}
+              </span>
+            </div>
+            <p className="text-xs text-on-surface-variant font-medium truncate mt-0.5 max-w-[240px]">
+              {data.sender} a répondu — ticket {data.status}
+            </p>
+          </div>
+          <div className="shrink-0 text-on-surface-variant/40 group-hover:text-violet-500 transition-colors self-center">
+            <ExternalLink className="w-3.5 h-3.5" />
+          </div>
+        </div>,
+        {
+          duration: 8000,
+          onClick: () => navigateRef.current('/email-drafts?tab=replyClosed'),
+        }
+      );
+    });
+
     setSocket(newSocket);
 
     return () => {
