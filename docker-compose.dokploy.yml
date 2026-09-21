@@ -78,7 +78,6 @@ services:
       FRONTEND_DIST_PATH: /app/erp-frontend/dist
     volumes:
       - app_uploads:/app/erp-backend/uploads
-      - ./ssl:/app/ssl:ro
     ports:
       - "${PORT:-4000}:4000"
       - "4001:4001"

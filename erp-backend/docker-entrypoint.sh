@@ -106,4 +106,19 @@ echo "Seed initial..."
 node prisma/seed.js 2>/dev/null || true
 
 echo "Démarrage du serveur..."
+
+# Générer un certificat auto-signé si TLS_CERT_PATH n'existe pas encore
+if [ -n "$TLS_CERT_PATH" ] && [ ! -f "$TLS_CERT_PATH" ]; then
+  echo "Génération du certificat auto-signé..."
+  mkdir -p "$(dirname "$TLS_CERT_PATH")"
+  # Récupérer l'IP du container pour le SAN
+  CONTAINER_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")
+  openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+    -keyout "$TLS_KEY_PATH" \
+    -out "$TLS_CERT_PATH" \
+    -subj "/C=CI/ST=Abidjan/O=Prosuma/CN=${CONTAINER_IP}" \
+    -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:${CONTAINER_IP}" \
+    2>/dev/null && echo "Certificat auto-signé généré pour IP ${CONTAINER_IP}" || echo "⚠️  Échec génération certificat"
+fi
+
 exec node src/server.js

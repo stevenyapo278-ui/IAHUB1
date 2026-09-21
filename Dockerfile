@@ -61,13 +61,17 @@ COPY --from=build-frontend /app/erp-frontend/dist /app/erp-frontend/dist
 RUN mkdir -p /app/erp-backend/uploads/avatar \
     && chown -R node:node /app
 
+# SSL directory for self-signed certificate (generated at startup)
+RUN mkdir -p /app/ssl && chown -R node:node /app/ssl
+
 USER node
 
 WORKDIR /app/erp-backend
 
 EXPOSE 4000
+EXPOSE 4001
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:4000/health || exit 1
+    CMD curl -f -k https://localhost:4000/health || curl -f http://localhost:4000/health || exit 1
 
 ENTRYPOINT ["./docker-entrypoint.sh"]
