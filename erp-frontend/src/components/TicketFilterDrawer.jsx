@@ -1,6 +1,7 @@
 import { SlidersHorizontal, User, Sparkles, Flag, Plus, Bookmark, Trash2, Calendar, CheckCircle2, Radio, Flame, UserX } from 'lucide-react';
 import FormDrawer from './FormDrawer';
 import SearchableSelect from './SearchableSelect';
+import DateRangePicker from './ui/date-range-picker';
 
 const QUICK_FILTERS = [
   { key: 'status', val: '', label: 'Tous les statuts', Icon: CheckCircle2 },
@@ -198,32 +199,17 @@ export default function TicketFilterDrawer({
           <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-on-surface-variant mb-3">
             Période
           </p>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[11px] font-semibold text-on-surface-variant mb-1">Du</label>
-              <div className="relative">
-                <Calendar className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50" />
-                <input
-                  type="datetime-local"
-                  value={filters.dateFrom || ''}
-                  onChange={(e) => onUpdate('dateFrom', e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 text-xs bg-surface border border-outline-variant/60 rounded-xl text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="block text-[11px] font-semibold text-on-surface-variant mb-1">Au</label>
-              <div className="relative">
-                <Calendar className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50" />
-                <input
-                  type="datetime-local"
-                  value={filters.dateTo || ''}
-                  onChange={(e) => onUpdate('dateTo', e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 text-xs bg-surface border border-outline-variant/60 rounded-xl text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-                />
-              </div>
-            </div>
-          </div>
+          <DateRangePicker
+            value={{
+              from: filters.dateFrom ? new Date(filters.dateFrom) : null,
+              to: filters.dateTo ? new Date(filters.dateTo) : null,
+            }}
+            onChange={({ from, to }) => {
+              onUpdate('dateFrom', from ? from.toISOString().slice(0, 16) : '');
+              onUpdate('dateTo', to ? to.toISOString().slice(0, 16) : '');
+            }}
+            presets={false}
+          />
         </div>
 
         <div className="h-px bg-outline-variant/20" />

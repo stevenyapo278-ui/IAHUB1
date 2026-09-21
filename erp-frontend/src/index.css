@@ -2227,6 +2227,38 @@ html[data-compact-mode] .sidebar-nav {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════ */
+/* TYPEWRITER — animation de texte progressif                                    */
+/* ═══════════════════════════════════════════════════════════════════════════════ */
+
+.typewriter-wrapper {
+  display: inline;
+}
+
+.typewriter-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background-color: currentColor;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  animation: cursor-blink 0.7s step-end infinite;
+}
+
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out forwards;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════ */
 /* MARIE LOADER — animation de lettres dessinées                                */
 /* ═══════════════════════════════════════════════════════════════════════════════ */
 

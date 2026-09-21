@@ -148,6 +148,8 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   const [pageSize, setPageSize] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
   const [expandedCards, setExpandedCards] = useState(new Set());
+  const [selectedDraftIds, setSelectedDraftIds] = useState(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   function loadAllData(silent = false) {
     if (!silent) setLoading(true);
@@ -159,7 +161,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     Promise.all([
       api.get('/tickets/pending-approval?limit=200').catch(() => ({ data: { items: [] } })),
       api.get(`/tickets?closeSuggested=true${mineFilter}&limit=100`).catch(() => ({ data: { tickets: [] } })),
-      api.get('/dashboard/pending-ai-drafts').catch(() => ({ data: [] })),
+      api.get('/dashboard/pending-ai-drafts?limit=500').catch(() => ({ data: { items: [] } })),
       api.get('/knowledge/drafts').catch(() => ({ data: [] })),
       api.get('/dashboard/closure-stats?days=30').catch(() => null),
       api.get('/tickets/rejected-closures?limit=50').catch(() => ({ data: [] })),
@@ -180,7 +182,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
         const rejectedList = Array.isArray(rejectedRes.data) ? rejectedRes.data : [];
         setRejectedClosures(rejectedList);
 
-        const draftList = Array.isArray(draftsRes.data) ? draftsRes.data : [];
+        const draftList = Array.isArray(draftsRes.data)
+          ? draftsRes.data
+          : (draftsRes.data?.items || []);
         setPendingDrafts(draftList.filter((d) => d.draftKind !== 'REMINDER'));
         setReminderDrafts(draftList.filter((d) => d.draftKind === 'REMINDER'));
 
@@ -211,6 +215,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   function handleTabChange(tab) {
     setSearchParams({ tab });
     setCurrentPage(1);
+    setSelectedDraftIds(new Set());
   }
 
   // ── Onglets filtrés par droits (cohérent avec les gates backend) ─────────────
@@ -511,6 +516,39 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
       loadAllData(true);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erreur lors du rejet');
+    }
+  }
+
+  async function handleBulkDeleteDrafts() {
+    if (selectedDraftIds.size === 0) return;
+    if (!window.confirm(`Supprimer ${selectedDraftIds.size} brouillon(s) ? Cette action est irréversible.`)) return;
+    setBulkDeleting(true);
+    try {
+      await api.post('/ai-email-drafts/bulk-delete', { ids: Array.from(selectedDraftIds) });
+      toast.success(`${selectedDraftIds.size} brouillon(s) supprimé(s)`);
+      setSelectedDraftIds(new Set());
+      loadAllData(true);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de la suppression');
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
+  function handleToggleDraftSelection(draftId) {
+    setSelectedDraftIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(draftId)) next.delete(draftId);
+      else next.add(draftId);
+      return next;
+    });
+  }
+
+  function handleToggleAllDrafts() {
+    if (selectedDraftIds.size === paginatedList.length) {
+      setSelectedDraftIds(new Set());
+    } else {
+      setSelectedDraftIds(new Set(paginatedList.map((d) => d.id)));
     }
   }
 
@@ -834,8 +872,8 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                   }`}
                 >
                   <div className="space-y-2.5 flex-1 min-w-0">
-                    {/* Ligne 1 : badges d'état */}
-                    <div className="flex items-center gap-2 flex-wrap">
+                    {/* Ligne 1 : tous les badges d'état + essentiels */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="px-2.5 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-400 text-[10px] font-extrabold border border-amber-500/30 uppercase tracking-wider">
                         🛡️ En attente Hotline
                       </span>
@@ -857,9 +895,25 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                           <Bot className="w-3 h-3" /> IA
                         </span>
                       )}
+                      <span className={`px-2 py-0.5 rounded-md border text-[10px] font-bold ${prioClass}`}>
+                        {PRIORITY_LABELS[t.priority] || t.priority}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface-variant text-[10px] font-bold">
+                        {t.type === 'REQUEST' ? 'Demande' : 'Incident'}
+                      </span>
                       {t.category && (
-                        <span className="px-2.5 py-0.5 rounded-md bg-surface-container text-on-surface-variant text-[10px] font-bold border border-outline-variant/30">
+                        <span className="px-2 py-0.5 rounded-md bg-surface-container text-on-surface-variant text-[10px] font-bold border border-outline-variant/30">
                           {t.category}
+                        </span>
+                      )}
+                      {t.locationName && (
+                        <span className="px-2 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface-variant text-[10px] font-bold flex items-center gap-1">
+                          <MapPin className="w-3 h-3" /> {t.locationName}
+                        </span>
+                      )}
+                      {(t.source || t.sourceEmail) && (
+                        <span className="px-2 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface-variant text-[10px] font-bold truncate max-w-[200px]">
+                          {t.source || 'Email'}
                         </span>
                       )}
                     </div>
@@ -867,25 +921,19 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                     {/* Titre */}
                     <h3 className="text-base font-bold text-on-surface" style={{ overflowWrap: 'anywhere' }}>{t.title}</h3>
 
-                    {/* Mode réduit : badges essentiels + demandeur + date */}
+                    {/* Mode réduit : demandeur + date uniquement */}
                     {!expandedCards.has(t.id) && (
-                      <div className="flex items-center gap-1.5 flex-wrap text-[10px] font-bold">
-                        <span className={`px-2 py-0.5 rounded-md border ${prioClass}`}>
-                          {PRIORITY_LABELS[t.priority] || t.priority}
-                        </span>
-                        <span className="px-2 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface-variant">
-                          {t.type === 'REQUEST' ? 'Demande' : 'Incident'}
-                        </span>
-                        {t.locationName && (
-                          <span className="px-2 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface-variant flex items-center gap-1">
-                            <MapPin className="w-3 h-3" /> {t.locationName}
+                      <div className="flex items-center gap-4 text-[11px] text-on-surface-variant flex-wrap">
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          <UserAvatar user={t.requester} name={t.sourceName} size="xs" />
+                          <span className="truncate max-w-[220px]">
+                            {t.requester?.fullName || t.sourceName || t.sourceEmail || 'Demandeur anonyme'}
                           </span>
-                        )}
-                        {(t.source || t.sourceEmail) && (
-                          <span className="px-2 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface-variant truncate max-w-[200px]">
-                            {t.source || 'Email'}
-                          </span>
-                        )}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5 text-primary" />
+                          {new Date(t.createdAt).toLocaleString('fr-FR')}
+                        </span>
                       </div>
                     )}
 
@@ -934,20 +982,6 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                         </div>
                       </>
                     )}
-
-                    {/* Demandeur avec photo + date (toujours visible) */}
-                    <div className="flex items-center gap-4 text-[11px] text-on-surface-variant pt-0.5 flex-wrap">
-                      <span className="flex items-center gap-1.5 min-w-0">
-                        <UserAvatar user={t.requester} name={t.sourceName} size="xs" />
-                        <span className="truncate max-w-[220px]">
-                          {t.requester?.fullName || t.sourceName || t.sourceEmail || 'Demandeur anonyme'}
-                        </span>
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-3.5 h-3.5 text-primary" />
-                        {new Date(t.createdAt).toLocaleString('fr-FR')}
-                      </span>
-                    </div>
                   </div>
 
                   {/* Actions directes Hotline */}
@@ -1017,6 +1051,36 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             ) : noResultsBlock
           ) : (
             <div className="space-y-6">
+              {/* Bulk actions bar */}
+              {paginatedList.length > 0 && (
+                <div className="flex items-center justify-between px-4 py-2.5 rounded-xl bg-surface-container-low border border-outline-variant/20">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedDraftIds.size === paginatedList.length && paginatedList.length > 0}
+                      onChange={handleToggleAllDrafts}
+                      className="w-4 h-4 rounded border-outline-variant text-primary accent-primary cursor-pointer"
+                    />
+                    <span className="text-xs text-on-surface-variant font-medium">
+                      {selectedDraftIds.size > 0
+                        ? `${selectedDraftIds.size} sélectionné(s) sur ${filteredList.length}`
+                        : `Tout sélectionner (${paginatedList.length} sur cette page)`
+                      }
+                    </span>
+                  </div>
+                  {selectedDraftIds.size > 0 && (
+                    <button
+                      onClick={handleBulkDeleteDrafts}
+                      disabled={bulkDeleting}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-600 hover:bg-red-700 text-white disabled:opacity-50 transition-colors flex items-center gap-1.5"
+                    >
+                      <XCircle className="w-3.5 h-3.5" />
+                      {bulkDeleting ? 'Suppression...' : `Supprimer (${selectedDraftIds.size})`}
+                    </button>
+                  )}
+                </div>
+              )}
+
               {paginatedList.map((draft) => {
                 const ticketObj = draft.ticket;
                 const glpiId = ticketObj?.glpiTicketId;
@@ -1025,11 +1089,19 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                 return (
                   <div
                     key={draft.id}
-                    className="bento-card p-6 space-y-4 hover-interactive transition-all"
+                    className={`bento-card p-6 space-y-4 hover-interactive transition-all ${
+                      selectedDraftIds.has(draft.id) ? 'ring-2 ring-primary/40 bg-primary/5' : ''
+                    }`}
                   >
                     {/* Header draft avec BADGE ÉTAT GLPI */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-outline-variant/20 pb-3">
                       <div className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedDraftIds.has(draft.id)}
+                          onChange={() => handleToggleDraftSelection(draft.id)}
+                          className="w-4 h-4 rounded border-outline-variant text-primary accent-primary cursor-pointer"
+                        />
                         <div className="p-2 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400">
                           <Sparkles className="w-4 h-4" />
                         </div>

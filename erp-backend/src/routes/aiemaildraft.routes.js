@@ -173,6 +173,24 @@ router.post('/:id/reject', requirePermission('emaildrafts.manage', ['ADMIN', 'TE
   return res.json(updated);
 });
 
+// Suppression en masse de brouillons
+router.post('/bulk-delete', requirePermission('emaildrafts.manage', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ error: 'Liste d\'IDs requise' });
+  }
+  if (ids.length > 100) {
+    return res.status(400).json({ error: 'Maximum 100 suppressions à la fois' });
+  }
+
+  const numIds = ids.map(Number).filter((n) => !isNaN(n));
+  const result = await prisma.aiEmailDraft.deleteMany({
+    where: { id: { in: numIds } },
+  });
+
+  return res.json({ deleted: result.count });
+});
+
 // Restaure un brouillon rejeté en PENDING, pour pouvoir l'éditer et l'approuver à nouveau
 // (ex: rejeté par erreur, ou contexte ayant changé depuis le rejet).
 router.post('/:id/restore', requirePermission('emaildrafts.manage', ['ADMIN', 'TECHNICIAN']), async (req, res) => {

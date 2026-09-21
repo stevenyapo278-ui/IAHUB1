@@ -12,6 +12,7 @@ import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import DataGrid from '../components/DataGrid';
 import SearchableSelect from '../components/SearchableSelect';
+import DateRangePicker from '../components/ui/date-range-picker';
 
 const PERIODS = ['7 Jours', '1 Mois', '3 Mois', '6 Mois'];
 const PERIOD_DAYS = { '7 Jours': 7, '1 Mois': 30, '3 Mois': 90, '6 Mois': 180 };
@@ -199,24 +200,17 @@ export default function TechnicianStats() {
           <div className="w-px h-6 bg-outline-variant/30 shrink-0" />
 
           {/* Dates custom */}
-          <div className="flex items-center gap-1.5">
-            <CalendarDays className="w-3.5 h-3.5 text-on-surface-variant shrink-0" />
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => handleDateChange('from', e.target.value)}
-              className={dateInputCls}
-              placeholder="Du"
-            />
-            <span className="text-[10px] text-on-surface-variant font-medium">à</span>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => handleDateChange('to', e.target.value)}
-              className={dateInputCls}
-              placeholder="Au"
-            />
-          </div>
+          <DateRangePicker
+            value={{
+              from: dateFrom ? new Date(dateFrom) : null,
+              to: dateTo ? new Date(dateTo) : null,
+            }}
+            onChange={({ from, to }) => {
+              handleDateChange('from', from ? from.toISOString().slice(0, 10) : '');
+              handleDateChange('to', to ? to.toISOString().slice(0, 10) : '');
+            }}
+            presets={false}
+          />
 
           {/* Séparateur */}
           <div className="w-px h-6 bg-outline-variant/30 shrink-0" />

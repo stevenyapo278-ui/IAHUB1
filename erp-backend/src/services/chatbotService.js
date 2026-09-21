@@ -1181,6 +1181,20 @@ const ALL_CHATBOT_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'search_teams',
+      description: 'Rechercher des équipes par nom et lister leurs membres. Utile pour demander la liste des membres d\'une équipe.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Nom de l\'équipe (ex: sécurité, réseau, téléphonie)' },
+        },
+        required: ['query'],
+      },
+    },
+  },
 ];
 
 // ── Filtre : seuls les outils de lecture sont exposés au LLM ──
@@ -1409,7 +1423,7 @@ async function callAIWithTools(messages, options = {}) {
   apiMessages.push({ role: 'user', content: messages[messages.length - 1].content });
 
   // Préparer les messages avec résumé si la conversation est longue
-  const { trimmedMessages, newSummary } = await prepareMessagesWithSummary(
+  let { trimmedMessages, newSummary } = await prepareMessagesWithSummary(
     apiMessages,
     options.existingSummary || null,
     options.summaryModelId || null
@@ -1657,7 +1671,7 @@ async function callAI(messages, options = {}) {
   apiMessages.push({ role: 'user', content: lastMsg.content });
 
   // Préparer les messages avec résumé si la conversation est longue
-  const { trimmedMessages, newSummary } = await prepareMessagesWithSummary(
+  let { trimmedMessages, newSummary } = await prepareMessagesWithSummary(
     apiMessages,
     options.existingSummary || null,
     options.summaryModelId || null
@@ -2861,14 +2875,10 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     userContext = '';
   }
 
-  // ── Récupérer le modèle vocal configuré (optionnel) ──
+  // ── Récupérer le modèle vocal configuré (optionnel, utilisé UNIQUEMENT en mode vocal) ──
   let voiceModelOptions = {};
-  try {
-    const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
-    if (settings?.voiceAiModelId) {
-      voiceModelOptions = { forcedModelId: settings.voiceAiModelId };
-    }
-  } catch {}
+  // Ne PAS appliquer voiceAiModelId au chatbot textuel — il est réservé au mode vocal
+  // (voiceAiModelId pointe souvent vers un modèle TTS qui ne supporte pas le tool calling)
 
   // ── Construire le prompt système avec contexte utilisateur ──
   const userContextLine = userContext ? `\n\n**Profil de l\'utilisateur :** ${userContext}` : '';

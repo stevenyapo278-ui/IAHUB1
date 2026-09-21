@@ -37,6 +37,13 @@ async function runDraftReminderScheduler() {
     select: { email: true, fullName: true },
   });
 
+  const excludeEmails = new Set(
+    (settings.draftReminderExcludeEmails || []).map((e) => e.toLowerCase().trim())
+  );
+  const filteredRecipients = recipients.filter(
+    (r) => r.email && !excludeEmails.has(r.email.toLowerCase().trim())
+  );
+
   const results = [];
   for (const draft of drafts) {
     const since = minutesSince(draft.lastReminderAt || draft.createdAt);
@@ -44,7 +51,7 @@ async function runDraftReminderScheduler() {
 
     const minutesWaiting = minutesSince(draft.createdAt);
     let sentCount = 0;
-    for (const recipient of recipients) {
+    for (const recipient of filteredRecipients) {
       try {
         const { id: approvalTokenId, token: approvalToken } = await createApprovalToken(draft.id);
         const sentMessage = await sendDraftPendingReminderEmail({

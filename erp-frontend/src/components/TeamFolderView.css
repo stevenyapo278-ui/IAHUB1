@@ -1,0 +1,242 @@
+/* TEAM FOLDER — effet 3D inspired by Uiverse.io */
+
+.team-folder {
+  position: relative;
+  width: 192px;
+  height: 140px;
+  cursor: pointer;
+  transform-origin: bottom;
+  perspective: 1500px;
+  z-index: 10;
+}
+
+/* Back panel */
+.team-folder .folder-back {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform-origin: top;
+  border-radius: 0 16px 16px 16px;
+  transition: all 0.3s ease;
+}
+.team-folder .folder-back::after {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  width: 56px;
+  height: 14px;
+  border-radius: 12px 12px 0 0;
+  background: inherit;
+}
+.team-folder .folder-back::before {
+  content: '';
+  position: absolute;
+  top: -12px;
+  left: 52px;
+  border-style: solid;
+  clip-path: polygon(0 35%, 0% 100%, 50% 100%);
+  background: inherit;
+  width: 14px;
+  height: 14px;
+}
+.team-folder:hover .folder-back {
+  box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+}
+
+/* Stacked pages */
+.team-folder .folder-page {
+  position: absolute;
+  inset: 4px;
+  border-radius: 12px;
+  transition: all 0.3s ease;
+  transform-origin: bottom;
+  transform: rotateX(0deg);
+  user-select: none;
+}
+.team-folder:hover .folder-page-4 {
+  background: #a1a1aa;
+  transform: rotateX(-20deg);
+}
+.team-folder:hover .folder-page-3 {
+  background: #d4d4d8;
+  transform: rotateX(-30deg);
+}
+.team-folder:hover .folder-page-2 {
+  background: #e4e4e7;
+  transform: rotateX(-38deg);
+}
+
+/* Front cover */
+.team-folder .folder-front {
+  position: absolute;
+  bottom: 0;
+  width: 100%;
+  height: 108px;
+  border-radius: 16px 0 16px 16px;
+  transition: all 0.3s ease;
+  transform-origin: bottom;
+  display: flex;
+  align-items: flex-end;
+  padding: 0 14px 12px 14px;
+}
+.team-folder .folder-front::after {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  width: 110px;
+  height: 14px;
+  border-radius: 12px 12px 0 0;
+  background: inherit;
+  filter: brightness(1.05);
+}
+.team-folder .folder-front::before {
+  content: '';
+  position: absolute;
+  top: -9px;
+  right: 107px;
+  clip-path: polygon(100% 14%, 50% 100%, 100% 100%);
+  background: inherit;
+  filter: brightness(1.05);
+  width: 12px;
+  height: 12px;
+}
+.team-folder:hover .folder-front {
+  transform: rotateX(-46deg) translateY(1px);
+  box-shadow: inset 0 20px 40px rgba(255,255,255,0.25), inset 0 -20px 40px rgba(0,0,0,0.15);
+}
+
+/* Color: amber */
+.folder-amber .folder-back { background: #d97706; }
+.folder-amber .folder-front { background: linear-gradient(to top, #f59e0b, #fbbf24); }
+.folder-amber .folder-front::after { background: #fbbf24; }
+.folder-amber .folder-front::before { background: #fbbf24; }
+
+/* Color: blue */
+.folder-blue .folder-back { background: #2563eb; }
+.folder-blue .folder-front { background: linear-gradient(to top, #3b82f6, #60a5fa); }
+.folder-blue .folder-front::after { background: #60a5fa; }
+.folder-blue .folder-front::before { background: #60a5fa; }
+
+/* Color: emerald */
+.folder-emerald .folder-back { background: #059669; }
+.folder-emerald .folder-front { background: linear-gradient(to top, #10b981, #34d399); }
+.folder-emerald .folder-front::after { background: #34d399; }
+.folder-emerald .folder-front::before { background: #34d399; }
+
+/* Color: violet */
+.folder-violet .folder-back { background: #7c3aed; }
+.folder-violet .folder-front { background: linear-gradient(to top, #8b5cf6, #a78bfa); }
+.folder-violet .folder-front::after { background: #a78bfa; }
+.folder-violet .folder-front::before { background: #a78bfa; }
+
+/* Color: rose */
+.folder-rose .folder-back { background: #e11d48; }
+.folder-rose .folder-front { background: linear-gradient(to top, #f43f5e, #fb7185); }
+.folder-rose .folder-front::after { background: #fb7185; }
+.folder-rose .folder-front::before { background: #fb7185; }
+
+/* Color: cyan */
+.folder-cyan .folder-back { background: #0891b2; }
+.folder-cyan .folder-front { background: linear-gradient(to top, #06b6d4, #22d3ee); }
+.folder-cyan .folder-front::after { background: #22d3ee; }
+.folder-cyan .folder-front::before { background: #22d3ee; }
+
+/* Color: orange */
+.folder-orange .folder-back { background: #ea580c; }
+.folder-orange .folder-front { background: linear-gradient(to top, #f97316, #fb923c); }
+.folder-orange .folder-front::after { background: #fb923c; }
+.folder-orange .folder-front::before { background: #fb923c; }
+
+/* Color: indigo */
+.folder-indigo .folder-back { background: #4f46e5; }
+.folder-indigo .folder-front { background: linear-gradient(to top, #6366f1, #818cf8); }
+.folder-indigo .folder-front::after { background: #818cf8; }
+.folder-indigo .folder-front::before { background: #818cf8; }
+
+/* ═══════════════════════════════════════════════════════════════════════════════ */
+/* GENIE EFFECT — liquid deformation animation                                    */
+/* ═══════════════════════════════════════════════════════════════════════════════ */
+
+@keyframes genie-in {
+  0% {
+    clip-path: polygon(30% 0%, 70% 0%, 70% 100%, 30% 100%);
+    transform: scale(0.2) translateY(80px);
+    opacity: 0;
+    filter: blur(2px);
+  }
+  30% {
+    clip-path: polygon(15% 0%, 85% 0%, 75% 100%, 25% 100%);
+    transform: scale(0.6) translateY(30px) skewY(3deg);
+    opacity: 0.7;
+    filter: blur(0.5px);
+  }
+  60% {
+    clip-path: polygon(3% 0%, 97% 0%, 95% 100%, 5% 100%);
+    transform: scale(0.9) translateY(8px) skewY(-1deg);
+    opacity: 0.95;
+    filter: blur(0px);
+  }
+  80% {
+    clip-path: polygon(0% 0%, 100% 0%, 99% 100%, 1% 100%);
+    transform: scale(1.02) translateY(-2px);
+    opacity: 1;
+  }
+  100% {
+    clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%);
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes genie-out {
+  0% {
+    clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%);
+    transform: scale(1) translateY(0) skewY(0deg);
+    opacity: 1;
+    border-radius: 16px;
+  }
+  15% {
+    clip-path: polygon(2% 0%, 98% 0%, 97% 85%, 3% 85%);
+    transform: scale(0.95) translateY(15px) skewY(1deg);
+    opacity: 0.95;
+    border-radius: 18px;
+  }
+  35% {
+    clip-path: polygon(8% 0%, 92% 0%, 82% 70%, 18% 70%);
+    transform: scale(0.75) translateY(50px) skewY(4deg);
+    opacity: 0.8;
+    border-radius: 22px;
+  }
+  55% {
+    clip-path: polygon(18% 0%, 82% 0%, 62% 55%, 38% 55%);
+    transform: scale(0.45) translateY(120px) skewY(8deg);
+    opacity: 0.55;
+    border-radius: 28px;
+    filter: blur(1px);
+  }
+  75% {
+    clip-path: polygon(30% 0%, 70% 0%, 48% 35%, 52% 35%);
+    transform: scale(0.2) translateY(220px) skewY(14deg);
+    opacity: 0.25;
+    border-radius: 50%;
+    filter: blur(3px);
+  }
+  100% {
+    clip-path: polygon(45% 0%, 55% 0%, 50% 10%, 50% 10%);
+    transform: scale(0.05) translateY(350px) skewY(22deg);
+    opacity: 0;
+    border-radius: 50%;
+    filter: blur(6px);
+  }
+}
+
+.modal-genie-in {
+  animation: genie-in 0.5s cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+
+.modal-genie-out {
+  animation: genie-out 0.55s cubic-bezier(0.45, 0, 0.55, 1) forwards;
+}

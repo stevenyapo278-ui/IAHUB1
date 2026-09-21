@@ -222,7 +222,7 @@ async function callOpenAICompat(provider, apiKey, model, prompt, usage, options 
 async function callGemini(provider, apiKey, prompt, modelName, usage, options = {}) {
   return getBreakerForProvider(provider.name, usage).call(async () => {
     const base = provider.baseUrl || 'https://generativelanguage.googleapis.com/v1beta';
-    const model = modelName || 'gemini-1.5-flash';
+    const model = modelName || 'gemini-3.5-flash';
 
     // Construire les contents : multi-turn si fourni, sinon legacy
     // IMPORTANT: Gemini utilise 'model' au lieu de 'assistant' pour le rôle assistant
@@ -718,7 +718,7 @@ async function analyzeSingleImage(provider, apiKey, modelName, imageBase64, mime
   switch (provider.name) {
     case 'gemini': {
       const base = provider.baseUrl || 'https://generativelanguage.googleapis.com/v1beta';
-      const model = modelName || 'gemini-1.5-flash';
+      const model = modelName || 'gemini-3.5-flash';
       const res = await fetch(`${base}/models/${model}:generateContent`, {
         method: 'POST',
         signal: AbortSignal.timeout(25000),

@@ -3,6 +3,7 @@ import {
   CheckCircle2, Radio, User, UserX, Flag, Sparkles, Flame, SlidersHorizontal,
   X, Search, Users,
 } from 'lucide-react';
+import DateRangePicker from './ui/date-range-picker';
 
 // ── TicketFilterBar ──────────────────────────────────────────────────────────
 // Barre de filtres rapide toujours visible au-dessus du tableau.
@@ -139,6 +140,22 @@ export default function TicketFilterBar({
             </button>
           );
         })}
+
+        {/* Separator */}
+        <div className="w-px h-4 bg-outline-variant/30 mx-1 shrink-0" />
+
+        {/* Date range picker */}
+        <DateRangePicker
+          value={{
+            from: filters.dateFrom ? new Date(filters.dateFrom) : null,
+            to: filters.dateTo ? new Date(filters.dateTo) : null,
+          }}
+          onChange={({ from, to }) => {
+            onUpdate('dateFrom', from ? from.toISOString().slice(0, 10) : '');
+            onUpdate('dateTo', to ? to.toISOString().slice(0, 10) : '');
+          }}
+          presets={false}
+        />
 
         {/* Separator */}
         <div className="w-px h-4 bg-outline-variant/30 mx-1 shrink-0" />

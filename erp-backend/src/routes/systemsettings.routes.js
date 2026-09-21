@@ -89,6 +89,8 @@ router.patch(
   [
     body('draftReminderEnabled').optional().isBoolean(),
     body('draftReminderDelayMinutes').optional().isInt({ min: 1, max: 1440 }),
+    body('draftReminderExcludeEmails').optional().isArray(),
+    body('draftReminderExcludeEmails.*').optional().isEmail(),
     body('enableFewShotTriage').optional().isBoolean(),
     body('acknowledgementMessage').optional({ nullable: true }).isString().isLength({ max: 2000 }),
     body('emailSignature').optional({ nullable: true }).isString().isLength({ max: 2000 }),
@@ -140,6 +142,7 @@ router.patch(
     const data = {};
     if (req.body.draftReminderEnabled !== undefined) data.draftReminderEnabled = req.body.draftReminderEnabled;
     if (req.body.draftReminderDelayMinutes !== undefined) data.draftReminderDelayMinutes = req.body.draftReminderDelayMinutes;
+    if (req.body.draftReminderExcludeEmails !== undefined) data.draftReminderExcludeEmails = req.body.draftReminderExcludeEmails;
     if (req.body.enableFewShotTriage !== undefined) data.enableFewShotTriage = req.body.enableFewShotTriage;
     if (req.body.acknowledgementMessage !== undefined) data.acknowledgementMessage = req.body.acknowledgementMessage || null;
     if (req.body.emailSignature !== undefined) data.emailSignature = req.body.emailSignature || null;

@@ -250,8 +250,8 @@ async function makeAIRequest(providerName, baseUrl, apiKey, model, prompt, maxTo
     const fallbackModels = [
       model,                                           // Modèle configuré (d'abord)
       'gemini-flash-lite-latest',                       // Fallback 1 : flash léger
-      'gemini-1.5-flash',                               // Fallback 2 : 1.5 flash
-      'gemini-2.0-flash',                               // Fallback 3 : 2.0 flash (nouveau)
+      'gemini-3.5-flash',                               // Fallback 2 : 3.5 flash (actuel)
+      'gemini-3.6-flash',                               // Fallback 3 : 3.6 flash
     ].filter(Boolean);
 
     let lastErr = null;

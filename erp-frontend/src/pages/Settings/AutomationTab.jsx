@@ -435,6 +435,53 @@ export default function AutomationTab() {
               unit="minutes"
             />
 
+            {/* Exclusion email des relances */}
+            <motion.div variants={itemVariants} className="space-y-2">
+              <label className="text-sm font-medium text-on-surface">Exclure des relances</label>
+              <p className="text-xs text-on-surface-variant">
+                Adresses email qui ne recevront jamais de relance pour les brouillons en attente.
+              </p>
+              <div className="flex flex-wrap gap-1.5 p-2 rounded-xl bg-surface-container-low border border-outline-variant/30 min-h-[40px]">
+                {(settings.draftReminderExcludeEmails || []).map((email) => (
+                  <span
+                    key={email}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-xs font-medium"
+                  >
+                    {email}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const updated = (settings.draftReminderExcludeEmails || []).filter((e) => e !== email);
+                        updateSetting('draftReminderExcludeEmails', updated);
+                      }}
+                      className="hover:text-red-900 dark:hover:text-red-100"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <input
+                type="email"
+                placeholder="Ajouter un email et appuyer Entrée..."
+                disabled={saving || !settings.draftReminderEnabled}
+                className="w-full px-3 py-2 rounded-xl bg-surface-container text-on-surface text-sm border border-outline-variant/30 focus:border-primary focus:ring-1 focus:ring-primary/30 outline-none transition-all placeholder:text-on-surface-variant/50 disabled:opacity-50"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const val = e.target.value.trim().toLowerCase();
+                    if (val && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
+                      const current = settings.draftReminderExcludeEmails || [];
+                      if (!current.includes(val)) {
+                        updateSetting('draftReminderExcludeEmails', [...current, val]);
+                      }
+                      e.target.value = '';
+                    }
+                  }
+                }}
+              />
+            </motion.div>
+
             <motion.div
               variants={itemVariants}
               className="bento-card p-md bg-surface-container-low/30 border border-dashed border-outline-variant/30 text-center"

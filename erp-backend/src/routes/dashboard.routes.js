@@ -141,15 +141,26 @@ router.get('/needs-human-review', async (req, res) => {
 
 // Brouillons en attente de validation (réponses IA + relances automatiques)
 router.get('/pending-ai-drafts', async (req, res) => {
-  const drafts = await prisma.aiEmailDraft.findMany({
-    where: { status: 'PENDING' },
-    include: {
-      ticket: { select: { id: true, title: true, approvalStatus: true, sourceEmail: true, sourceName: true } },
-    },
-    orderBy: { createdAt: 'asc' },
-    take: 100,
-  });
-  return res.json(drafts);
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 50), 200);
+  const skip = (page - 1) * limit;
+  const status = req.query.status || 'PENDING';
+
+  const where = { status };
+  const [drafts, total] = await Promise.all([
+    prisma.aiEmailDraft.findMany({
+      where,
+      include: {
+        ticket: { select: { id: true, title: true, approvalStatus: true, sourceEmail: true, sourceName: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+      skip,
+      take: limit,
+    }),
+    prisma.aiEmailDraft.count({ where }),
+  ]);
+
+  return res.json({ items: drafts, total, page, limit, totalPages: Math.ceil(total / limit) });
 });
 
 // Statut des intégrations (GLPI, n8n, IA)

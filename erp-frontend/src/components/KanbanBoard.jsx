@@ -3,71 +3,61 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ScrollText, GripVertical, User } from 'lucide-react';
 import SlaBadge from './SlaBadge';
-import { STATUS_CONFIG } from '../constants/tickets';
 
-const KANBAN_STATUSES = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER', 'SOLVED', 'CLOSED'];
+const COLUMNS = [
+  { key: 'OPEN', label: 'Ouverts', statuses: ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER'], color: { dot: 'bg-blue-500', head: 'text-blue-600 dark:text-blue-400', count: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/25' } },
+  { key: 'SOLVED', label: 'Résolu', statuses: ['SOLVED'], color: { dot: 'bg-emerald-500', head: 'text-emerald-600 dark:text-emerald-400', count: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25' } },
+  { key: 'CLOSED', label: 'Fermé', statuses: ['CLOSED'], color: { dot: 'bg-slate-400', head: 'text-slate-500 dark:text-slate-400', count: 'bg-slate-400/10 text-slate-500 dark:text-slate-400 border border-slate-400/25' } },
+];
+
+const STATUS_TO_COL = Object.fromEntries(COLUMNS.flatMap((col) => col.statuses.map((s) => [s, col.key])));
 
 export default function KanbanBoard({ tickets, canAssign, onStatusChange }) {
   const navigate = useNavigate();
   const [dragOverCol, setDragOverCol] = useState(null);
   const [draggingId, setDraggingId] = useState(null);
 
-  const byStatus = useMemo(() => {
-    const map = Object.fromEntries(KANBAN_STATUSES.map((s) => [s, []]));
+  const byColumn = useMemo(() => {
+    const map = Object.fromEntries(COLUMNS.map((c) => [c.key, []]));
     tickets.forEach((t) => {
-      const col = KANBAN_STATUSES.includes(t.status) ? t.status : 'OPEN';
+      const col = STATUS_TO_COL[t.status] || 'OPEN';
       map[col].push(t);
     });
     return map;
   }, [tickets]);
 
-  function handleDrop(status) {
+  function handleDrop(colKey) {
     setDragOverCol(null);
     if (draggingId === null) return;
     const ticket = tickets.find((t) => t.id === draggingId);
-    if (ticket && ticket.status !== status) onStatusChange(ticket, status);
+    if (!ticket) { setDraggingId(null); return; }
+    const col = COLUMNS.find((c) => c.key === colKey);
+    const targetStatus = col.statuses.includes(ticket.status) ? ticket.status : col.statuses[0];
+    if (ticket.status !== targetStatus) onStatusChange(ticket, targetStatus);
     setDraggingId(null);
   }
 
-  const COLORS = {
-    NEW: { dot: 'bg-amber-500', head: 'text-amber-600 dark:text-amber-400', count: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/25' },
-    OPEN: { dot: 'bg-blue-500', head: 'text-blue-600 dark:text-blue-400', count: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/25' },
-    PLANNED: { dot: 'bg-purple-500', head: 'text-purple-600 dark:text-purple-400', count: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/25' },
-    PENDING: { dot: 'bg-yellow-500', head: 'text-yellow-600 dark:text-yellow-400', count: 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border border-yellow-500/25' },
-    WAITING_FOR_USER: { dot: 'bg-sky-500', head: 'text-sky-600 dark:text-sky-400', count: 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/25' },
-    SOLVED: { dot: 'bg-emerald-500', head: 'text-emerald-600 dark:text-emerald-400', count: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25' },
-    CLOSED: { dot: 'bg-slate-400', head: 'text-slate-500 dark:text-slate-400', count: 'bg-slate-400/10 text-slate-500 dark:text-slate-400 border border-slate-400/25' },
-  };
-
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3 min-w-0">
-      {KANBAN_STATUSES.map((status) => {
-        const color = COLORS[status];
-        const colTickets = byStatus[status];
-        const isOver = dragOverCol === status;
+    <div className="grid grid-cols-3 gap-4 min-w-0">
+      {COLUMNS.map((col) => {
+        const colTickets = byColumn[col.key];
+        const isOver = dragOverCol === col.key;
         return (
           <div
-            key={status}
-            onDragOver={(e) => {
-              if (!canAssign) return;
-              e.preventDefault();
-              setDragOverCol(status);
-            }}
-            onDragLeave={() => setDragOverCol((c) => (c === status ? null : c))}
-            onDrop={(e) => {
-              e.preventDefault();
-              handleDrop(status);
-            }}
+            key={col.key}
+            onDragOver={(e) => { if (!canAssign) return; e.preventDefault(); setDragOverCol(col.key); }}
+            onDragLeave={() => setDragOverCol((c) => (c === col.key ? null : c))}
+            onDrop={(e) => { e.preventDefault(); handleDrop(col.key); }}
             className={`min-w-0 rounded-2xl border flex flex-col max-h-[70vh] transition-colors ${
               isOver ? 'border-primary/60 bg-primary/5' : 'border-outline-variant/30 bg-surface-container-low/30'
             }`}
           >
             <div className="flex items-center gap-2 px-3 py-2.5 border-b border-outline-variant/20 shrink-0">
-              <span className={`w-2 h-2 rounded-full shrink-0 ${color.dot}`} />
-              <span className={`text-[10px] font-black uppercase tracking-widest ${color.head} truncate`}>
-                {STATUS_CONFIG[status]?.label || status}
+              <span className={`w-2 h-2 rounded-full shrink-0 ${col.color.dot}`} />
+              <span className={`text-[10px] font-black uppercase tracking-widest ${col.color.head} truncate`}>
+                {col.label}
               </span>
-              <span className={`ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${color.count}`}>
+              <span className={`ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${col.color.count}`}>
                 {colTickets.length}
               </span>
             </div>

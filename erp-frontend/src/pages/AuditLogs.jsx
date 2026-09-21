@@ -6,6 +6,7 @@ import api from '../api/client';
 import { useFilterParam, useFilterParams } from '../hooks/useFilterParam';
 import PageShell from '../components/PageShell';
 import Pagination from '../components/Pagination';
+import DateRangePicker from '../components/ui/date-range-picker';
 import {
   Activity, Search, Filter, Calendar, RefreshCw, ChevronDown,
   Shield, UserPlus, UserMinus, Settings, Trash2, Edit3,
@@ -340,22 +341,18 @@ export default function AuditLogs({ embedded = false } = {}) {
                 </label>
 
                 <label className="field-label">
-                  <span>Du</span>
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => { setStartDate(e.target.value); setQuickRange(''); }}
-                    className="input-katalyst"
-                  />
-                </label>
-
-                <label className="field-label">
-                  <span>Au</span>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className="input-katalyst"
+                  <span>Période</span>
+                  <DateRangePicker
+                    value={{
+                      from: startDate ? new Date(startDate) : null,
+                      to: endDate ? new Date(endDate) : null,
+                    }}
+                    onChange={({ from, to }) => {
+                      setStartDate(from ? from.toISOString().slice(0, 10) : '');
+                      setEndDate(to ? to.toISOString().slice(0, 10) : '');
+                      setQuickRange('');
+                    }}
+                    presets={false}
                   />
                 </label>
               </div>

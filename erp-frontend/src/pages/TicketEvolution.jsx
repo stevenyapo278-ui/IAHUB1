@@ -14,6 +14,7 @@ import {
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { STATUS_CONFIG, PRIORITY_CONFIG, SOURCE_LABELS } from '../constants/tickets';
+import DateRangePicker from '../components/ui/date-range-picker';
 
 const inputCls = 'px-3 py-1.5 rounded-xl border border-outline-variant/60 bg-surface text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all';
 const selectCls = `${inputCls} appearance-none cursor-pointer`;
@@ -237,15 +238,15 @@ export default function TicketEvolution() {
 
           <div className="w-px h-6 bg-outline-variant/30" />
 
-          {/* Date inputs */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-bold text-on-surface/40 uppercase">Du</span>
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
-              className="bg-surface border border-outline-variant/60 rounded-lg px-2 py-1 text-[11px] text-on-surface focus:outline-none focus:ring-1 focus:ring-primary/20 w-[120px]" />
-            <span className="text-[10px] font-bold text-on-surface/40 uppercase">Au</span>
-            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
-              className="bg-surface border border-outline-variant/60 rounded-lg px-2 py-1 text-[11px] text-on-surface focus:outline-none focus:ring-1 focus:ring-primary/20 w-[120px]" />
-          </div>
+          {/* Date range picker */}
+          <DateRangePicker
+            value={{ from: startDate ? new Date(startDate) : null, to: endDate ? new Date(endDate) : null }}
+            onChange={({ from, to }) => {
+              if (from) setStartDate(from.toISOString().slice(0, 10));
+              if (to) setEndDate(to.toISOString().slice(0, 10));
+            }}
+            presets={false}
+          />
 
           <div className="w-px h-6 bg-outline-variant/30" />
 

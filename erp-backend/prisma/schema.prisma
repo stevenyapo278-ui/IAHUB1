@@ -634,8 +634,9 @@ model SystemSettings {
   aiModelsSyncIntervalHours Int     @default(24) // liste des modèles disponibles par fournisseur IA
 
   // Relance des brouillons AiEmailDraft non validés (Paramètres > Automatisation).
-  draftReminderEnabled      Boolean @default(true)
-  draftReminderDelayMinutes Int     @default(30) // délai après lequel une relance est envoyée si le brouillon est toujours PENDING
+  draftReminderEnabled          Boolean  @default(true)
+  draftReminderDelayMinutes     Int      @default(30) // délai après lequel une relance est envoyée si le brouillon est toujours PENDING
+  draftReminderExcludeEmails    String[] @default([]) // adresses email exclues des relances (ex: superadmin)
 
   // Moteur SLA (outil de ticketing) — seuils par priorité en heures :
   //   { P1: { response: 1, resolution: 4 }, P2: { response: 2, resolution: 8 },

@@ -41,6 +41,7 @@ import {
   Settings2,
   Eye,
   SlidersHorizontal,
+  FolderOpen,
 } from 'lucide-react';
 import api from '../api/client';
 import ExportModal from '../components/ExportModal';
@@ -57,6 +58,7 @@ import { flattenCategoryTree } from '../utils/categoryTree';
 import EmptyState from '../components/EmptyState';
 
 import KanbanBoard from '../components/KanbanBoard';
+import TeamFolderView from '../components/TeamFolderView';
 import SearchableSelect from '../components/SearchableSelect';
 import TicketFilterDrawer from '../components/TicketFilterDrawer';
 import SearchableMultiSelect from '../components/SearchableMultiSelect';
@@ -1070,8 +1072,7 @@ export default function Tickets() {
   const showSelectionColumn = canBulkDelete || canAssign;
 
   function updateFilter(key, value) {
-    const next = { ...filters, [key]: value };
-    setFilters(next);
+    setFilters((prev) => ({ ...prev, [key]: value }));
     setPage(1);
   }
 
@@ -1178,7 +1179,9 @@ export default function Tickets() {
       setRefreshing(true);
     }
     const isKanbanView = viewMode === 'kanban';
-    const params = { page: isKanbanView ? 1 : page, limit: isKanbanView ? 500 : pageSize, sortBy, sortOrder };
+    const isFoldersView = viewMode === 'folders';
+    const loadAll = isKanbanView || isFoldersView;
+    const params = { page: loadAll ? 1 : page, limit: loadAll ? 500 : pageSize, sortBy, sortOrder };
     if (filters.status) params.status = filters.status;
     if (filters.priority) params.priority = filters.priority;
     if (filters.source) params.source = filters.source;
@@ -1218,7 +1221,9 @@ export default function Tickets() {
 
   const refreshTicketsSilently = useCallback(function refreshTicketsSilently() {
     const isKanbanView = viewMode === 'kanban';
-    const params = { page: isKanbanView ? 1 : page, limit: isKanbanView ? 500 : pageSize, sortBy, sortOrder };
+    const isFoldersView = viewMode === 'folders';
+    const loadAll = isKanbanView || isFoldersView;
+    const params = { page: loadAll ? 1 : page, limit: loadAll ? 500 : pageSize, sortBy, sortOrder };
     if (filters.status) params.status = filters.status;
     if (filters.priority) params.priority = filters.priority;
     if (filters.source) params.source = filters.source;
@@ -1778,11 +1783,12 @@ export default function Tickets() {
           </button>
 
           <div className="flex items-center p-0.5 rounded-lg border border-border/30 bg-surface-muted gap-0.5">
-            {[
-              { mode: 'table', Icon: Table, label: 'Tableau' },
-              { mode: 'grid', Icon: LayoutGrid, label: 'Grille' },
-              { mode: 'kanban', Icon: KanbanSquare, label: 'Kanban' },
-            ].map(({ mode, Icon, label }) => (
+          {[
+            { mode: 'table', Icon: Table, label: 'Tableau' },
+            { mode: 'grid', Icon: LayoutGrid, label: 'Grille' },
+            { mode: 'kanban', Icon: KanbanSquare, label: 'Kanban' },
+            { mode: 'folders', Icon: FolderOpen, label: 'Équipes' },
+          ].map(({ mode, Icon, label }) => (
               <button key={mode} onClick={() => changeViewMode(mode)} title={label}
                 className={`p-1.5 rounded-md transition-all ${viewMode === mode ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
                 <Icon className="w-3.5 h-3.5" />
@@ -1946,6 +1952,10 @@ export default function Tickets() {
               onStatusChange={(ticket, newStatus) => handleQuickStatusChange(ticket.id, newStatus)}
             />
           </div>
+        ) : viewMode === 'folders' ? (
+          <div className="flex-1 min-h-0 overflow-auto">
+            <TeamFolderView tickets={tickets} teams={teams} />
+          </div>
         ) : viewMode === 'grid' ? (
           /* ── GRID VIEW ── */
           <div className="p-4 sm:p-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -2073,7 +2083,7 @@ export default function Tickets() {
       )}
 
       {/* ── PAGINATION ───────────────────────────────────────────────────────── */}
-      {viewMode !== 'kanban' && (
+      {!['kanban', 'folders'].includes(viewMode) && (
       <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-4 sm:px-6 py-3 border-t border-border/20 bg-surface shrink-0">
         <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
           <span className="font-medium tabular-nums">

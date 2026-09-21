@@ -12,6 +12,7 @@ import { staggerContainer, staggerItem } from '../utils/animations';
 import { useSocket } from '../context/SocketContext';
 import { useFilterParam, useFilterParams } from '../hooks/useFilterParam';
 import { sanitizeHtml } from '../utils/sanitize';
+import DateRangePicker from '../components/ui/date-range-picker';
 import {
   Inbox as InboxIcon, MailOpen, RefreshCw, Clock, CheckCircle2, XCircle, Ban,
   Paperclip, Search, X, FlaskConical, Bot, ArrowUpRight, Reply, ChevronDown,
@@ -1284,24 +1285,18 @@ export default function Inbox() {
                     )}
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    <label className="flex flex-col gap-1">
-                      <span className="text-[9px] font-bold text-on-surface-variant/70 uppercase">Date début</span>
-                      <input
-                        type="date"
-                        value={dateFrom}
-                        onChange={(e) => setDateFrom(e.target.value)}
-                        max={dateTo || undefined}
-                        className="w-full px-2 py-1.5 rounded-lg border border-outline-variant/40 bg-surface-container text-[11px] text-on-surface focus:outline-none focus:ring-1 focus:ring-violet-500/40 cursor-pointer"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      <span className="text-[9px] font-bold text-on-surface-variant/70 uppercase">Date fin</span>
-                      <input
-                        type="date"
-                        value={dateTo}
-                        onChange={(e) => setDateTo(e.target.value)}
-                        min={dateFrom || undefined}
-                        className="w-full px-2 py-1.5 rounded-lg border border-outline-variant/40 bg-surface-container text-[11px] text-on-surface focus:outline-none focus:ring-1 focus:ring-violet-500/40 cursor-pointer"
+                    <label className="flex flex-col gap-1 col-span-2">
+                      <span className="text-[9px] font-bold text-on-surface-variant/70 uppercase">Période</span>
+                      <DateRangePicker
+                        value={{
+                          from: dateFrom ? new Date(dateFrom) : null,
+                          to: dateTo ? new Date(dateTo) : null,
+                        }}
+                        onChange={({ from, to }) => {
+                          setDateFrom(from ? from.toISOString().slice(0, 10) : '');
+                          setDateTo(to ? to.toISOString().slice(0, 10) : '');
+                        }}
+                        presets={false}
                       />
                     </label>
                     <label className="flex flex-col gap-1">
