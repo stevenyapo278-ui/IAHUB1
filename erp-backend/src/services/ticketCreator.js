@@ -24,6 +24,22 @@ async function createTicketFromEmail({ subject, body, from, fromName, analysis, 
       console.error('[ticketCreator] Résolution équipe IA échouée:', err.message);
     }
   }
+  // Fallback : résoudre par catégorie si l'équipe n'a pas été trouvée
+  if (!resolvedTeamId && analysis.category) {
+    try {
+      const catTeam = await tx.team.findFirst({
+        where: { name: { equals: analysis.category, mode: 'insensitive' } },
+        select: { id: true },
+      });
+      resolvedTeamId = catTeam?.id || null;
+    } catch (err) {
+      console.error('[ticketCreator] Résolution équipe par catégorie échouée:', err.message);
+    }
+  }
+
+  if (!resolvedTeamId) {
+    console.warn(`[ticketCreator] Aucune équipe résolue pour ticket (team="${analysis.team}", category="${analysis.category}")`);
+  }
 
   const erpTicket = await tx.ticket.create({
     data: {

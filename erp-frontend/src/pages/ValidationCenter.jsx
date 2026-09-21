@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   ShieldCheck, Ticket, MailCheck, Clock, CheckCircle2,
-  XCircle, AlertTriangle, RefreshCw, ChevronRight, ChevronUp, ChevronDown, User,
+  XCircle, AlertTriangle, RefreshCw, ChevronRight, ChevronUp, ChevronDown, User, Users,
   Sparkles, ExternalLink, Send, ArrowRight, Shield, Check, X,
   Bell, BookOpen, Edit3, Tags, HelpCircle, TrendingUp, Search, Eye,
 } from 'lucide-react';
@@ -1006,6 +1006,16 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                       {(t.source || t.sourceEmail) && (
                         <span className="px-2 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-on-surface-variant text-[10px] font-bold truncate max-w-[200px]">
                           {t.source || 'Email'}
+                        </span>
+                      )}
+                      {t.team && (
+                        <span className="px-2 py-0.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 text-[10px] font-bold flex items-center gap-1">
+                          <Users className="w-3 h-3" /> {t.team.name}
+                        </span>
+                      )}
+                      {t.assignedTo && (
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold flex items-center gap-1">
+                          <User className="w-3 h-3" /> {t.assignedTo.fullName}
                         </span>
                       )}
                     </div>
@@ -2750,6 +2760,23 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                   <div className="p-3 rounded-xl bg-surface-container-low/40 border border-outline-variant/20 space-y-1">
                     <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Créé le</span>
                     <p className="text-xs text-on-surface">{new Date(detailTicket.createdAt).toLocaleString('fr-FR')}</p>
+                  </div>
+                )}
+
+                {detailTicket.team && (
+                  <div className="p-3 rounded-xl bg-blue-500/5 border border-blue-500/20 space-y-1">
+                    <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider flex items-center gap-1"><Users className="w-3 h-3" /> Équipe</span>
+                    <p className="text-xs text-on-surface font-semibold">{detailTicket.team.name}</p>
+                  </div>
+                )}
+
+                {detailTicket.assignedTo && (
+                  <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20 space-y-1">
+                    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-1"><User className="w-3 h-3" /> Technicien assigné</span>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <UserAvatar user={detailTicket.assignedTo} size="xs" />
+                      <p className="text-xs text-on-surface font-semibold truncate">{detailTicket.assignedTo.fullName}</p>
+                    </div>
                   </div>
                 )}
 
