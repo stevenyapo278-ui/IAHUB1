@@ -139,7 +139,11 @@ export function useVoiceLive() {
       analyserRef.current = analyser;
 
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      const ws = new WebSocket(`${proto}://${location.hostname}:4001`);
+      // JWT passé en query string : le backend authentifie la session vocale (filtrage par rôle
+      // dans le pipeline chatbot, "mes tickets" = ceux de l'utilisateur connecté, comme au chat).
+      const token = localStorage.getItem('token');
+      const authQuery = token ? `?token=${encodeURIComponent(token)}` : '';
+      const ws = new WebSocket(`${proto}://${location.hostname}:4001${authQuery}`);
       wsRef.current = ws;
 
       ws.binaryType = 'arraybuffer';

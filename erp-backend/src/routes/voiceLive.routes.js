@@ -7,7 +7,8 @@ const prisma = require('../prismaClient');
 const { logger } = require('../utils/logger');
 const analyticsTools = require('../services/analyticsTools');
 const { searchKnowledge } = require('../services/knowledgeSearch');
-const { searchTeams, searchTickets, buildSearchQuery } = require('../services/chatbotService');
+const { searchTeams, searchTickets, buildSearchQuery, handleMessage } = require('../services/chatbotService');
+const jwt = require('jsonwebtoken');
 
 const LIVE_MODEL = 'gemini-2.5-flash-native-audio-preview-12-2025';
 const LIVE_VOICE = 'Aoede';
@@ -50,6 +51,29 @@ function formatTicket(t) {
 const TOOLS = [
   {
     functionDeclarations: [
+      {
+        name: 'ask_assistant',
+        description: `OUTIL PRINCIPAL pour TOUTE question nécessitant des données réelles du helpdesk :
+- nombre de tickets, statistiques, classements, rapports
+- "mes tickets", "tickets ouverts cette semaine", "tickets de [personne]"
+- recherche de tickets par statut / priorité / lieu / équipe / période
+- performance, causes racines, distribution par catégorie ou équipe
+- toute question du type "combien", "quel est le total", "classement", "rapport"
+
+Passe la question de l'utilisateur TELLE QUELLE (transcription complète).
+Ne l'utilise PAS pour créer/modifier un ticket (utilise create_ticket / update_ticket_status).
+Ne réponds JAMAIS de mémoire : appelle toujours cet outil pour les chiffres.`,
+        parameters: {
+          type: 'object',
+          properties: {
+            question: {
+              type: 'string',
+              description: "La question exacte de l'utilisateur (transcription complète)",
+            },
+          },
+          required: ['question'],
+        },
+      },
       {
         name: 'search_tickets',
         description: 'Recherche de tickets par mot-clé, statut, priorité, lieu, technicien, demandeur, période. Très flexible.',
@@ -262,9 +286,36 @@ const TOOLS = [
   },
 ];
 
-async function executeTool(name, args) {
+async function executeTool(name, args, { user = null, sessionHistory = null } = {}) {
   try {
     switch (name) {
+      case 'ask_assistant': {
+        const question = (args.question || '').trim();
+        if (!question) return { error: 'Question vide' };
+        try {
+          // Route la question vers le MÊME cerveau que le chat texte (detection d'intention,
+          // extraction des paramètres, buildSearchQuery…) : les chiffres annoncés à l'oral sont
+          // garantis identiques à ceux du chat. history maintenu par session pour les follow-ups
+          // ("et pour la semaine dernière ?").
+          const history = Array.isArray(sessionHistory) ? sessionHistory.slice(-10) : [];
+          const result = await handleMessage(question, history, user, null, null, {});
+          if (Array.isArray(sessionHistory)) {
+            sessionHistory.push({ role: 'user', content: question });
+            sessionHistory.push({ role: 'assistant', content: result.reply || '' });
+          }
+          return {
+            success: true,
+            answer: result.reply || "Je n'ai pas pu obtenir de réponse.",
+            citedTicketIds: result.citedTicketIds || [],
+          };
+        } catch (err) {
+          logger.error(`[voice-live] ask_assistant error: ${err.message}`);
+          return {
+            success: false,
+            answer: 'Je rencontre un souci temporaire pour récupérer ces informations. Réessaie dans un instant.',
+          };
+        }
+      }
       case 'search_tickets': {
         // Même moteur que le chatbot texte : les filtres structurés (status, priority,
         // locationName, assignedTo, requester, period) annoncés dans le schéma du tool sont
@@ -651,6 +702,36 @@ function setupVoiceLive() {
     logger.info('[voice-live] Client connected');
     let session = null;
 
+    // ── Authentification (JWT envoyé par le front via ?token=) ──
+    // Même logique que utils/socket.js : le JWT n'est qu'une preuve de connexion, le rôle et
+    // l'état du compte sont RELUS en base — un changement de rôle prend effet à la prochaine
+    // session vocale. Sans token valide : currentUser = null (pipeline chatbot non filtré,
+    // comportement identique à l'ancien fonctionnement).
+    let currentUser = null;
+    let sessionHistory = [];
+    try {
+      const url = new URL(req.url, 'http://localhost');
+      const token = url.searchParams.get('token')
+        || (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+      if (token) {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const dbUser = await prisma.user.findUnique({
+          where: { id: Number(decoded.sub) },
+          select: { id: true, email: true, role: true, teamId: true, isActive: true },
+        });
+        if (dbUser?.isActive) {
+          currentUser = { sub: dbUser.id, email: dbUser.email, role: dbUser.role, teamId: dbUser.teamId };
+          logger.info(`[voice-live] Auth OK : user #${currentUser.sub} (${currentUser.role})`);
+        } else {
+          logger.warn('[voice-live] Auth : compte inactif ou introuvable');
+        }
+      } else {
+        logger.warn('[voice-live] Aucun token fourni — session non authentifiée');
+      }
+    } catch (authErr) {
+      logger.warn(`[voice-live] Auth failed: ${authErr.message}`);
+    }
+
     try {
       const apiKey = await getGeminiApiKey();
       const genai = new GoogleGenAI({ apiKey });
@@ -660,20 +741,22 @@ function setupVoiceLive() {
         config: {
           responseModalities: ['AUDIO'],
           systemInstruction: [
-            'Tu es MARIE, un assistant vocal amical et professionnel pour un système ITSM/ERP.',
-            'Tu parles en français, de manière concise et utile.',
-            'Tu as accès à TOUS les outils du système: tickets, utilisateurs, équipes, lieux, inventaire, base de connaissances, rapports et statistiques.',
-            'Utilise les outils quand on te pose des questions sur les tickets, utilisateurs, équipements, magasins, équipes, ou la base de connaissances.',
-            'Quand tu crées ou modifies un ticket, confirme le numéro et le résultat.',
-            'Pour les rapports et statistiques, synthétise les données de façon claire.',
-            // ── Exactitude des chiffres ──
-            'RÈGLE ABSOLUE : pour toute question chiffrée (combien, total, nombre, statistiques, classement), tu DOIS appeler un outil et répondre UNIQUEMENT avec les chiffres qu il renvoie.',
-            'Ne devine JAMAIS un chiffre de mémoire et n arrondis pas : si l outil ne renvoie pas l information, dis que tu ne peux pas la vérifier.',
-            'Lis les données renvoyées avec attention : le champ « total » est la source de vérité, pas un des sous-totaux.',
-            // ── Rythme de la conversation ──
-            'Laisse toujours l utilisateur TERMINER sa question : écoute jusqu au bout, puis réponds.',
-            'Avant d annoncer un chiffre ou un résultat, dis brièvement « je vérifie » : cela masque le délai de l appel d outil.',
-          ].join(' '),
+            'Tu es MARIE, assistante vocale amicale et professionnelle du helpdesk IT Prosuma.',
+            'Tu parles en français, de manière claire, concise et naturelle.',
+            '',
+            'RÈGLE ABSOLUE — DONNÉES ET CHIFFRES :',
+            "- Pour TOUTE question qui implique des chiffres, des tickets, des statistiques, des classements, des périodes (aujourd'hui, cette semaine, ce mois), des tickets d'une personne, d'un lieu, d'une équipe, ou un rapport → tu DOIS appeler l'outil ask_assistant avec la question EXACTE de l'utilisateur.",
+            '- Ne devine JAMAIS un chiffre. Ne réponds jamais de mémoire.',
+            '- Lis attentivement le champ answer renvoyé par ask_assistant et restitue-le fidèlement à l oral, sans recalculer ni arrondir.',
+            '',
+            'ACTIONS (création / modification) :',
+            '- Utilise create_ticket ou update_ticket_status uniquement pour les actions de création ou de changement de statut.',
+            '',
+            'COMPORTEMENT :',
+            '- Laisse toujours l utilisateur terminer sa question (écoute jusqu au bout).',
+            '- Avant d annoncer un résultat, tu peux dire brièvement « je vérifie » pour masquer le délai de l outil.',
+            '- Sois concise à l oral : pas de longs tableaux, synthétise.',
+          ].join('\n'),
           speechConfig: {
             voiceConfig: {
               prebuiltVoiceConfig: { voiceName: LIVE_VOICE },
@@ -740,7 +823,7 @@ function setupVoiceLive() {
                       const fcArgs = JSON.parse(JSON.stringify(fc.args || {}));
                       const fcId = String(fc.id || '');
                       logger.info(`[voice-live] Tool: ${fcName}`);
-                      const result = await executeTool(fcName, fcArgs);
+                      const result = await executeTool(fcName, fcArgs, { user: currentUser, sessionHistory });
                       await session.sendToolResponse({
                         functionResponses: [{ id: fcId, name: fcName, response: result }],
                       });
