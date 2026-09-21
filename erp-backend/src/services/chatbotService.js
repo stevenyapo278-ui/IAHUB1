@@ -3251,4 +3251,5 @@ module.exports = {
   detectIntentRegex,
   extractSearchParamsRegex,
   resolveCanonicalTeamName,
+  buildSearchQuery,
 };

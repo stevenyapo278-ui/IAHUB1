@@ -7,6 +7,11 @@ function parsePeriod(period) {
   if (!period) return null;
   const now = new Date();
 
+  // Aujourd'hui minuit (alias 'today' utilisé par le chatbot et l'assistant vocal)
+  if (period === 'today') {
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  }
+
   // Périodes nommées
   if (period === '1d' || period === 'yesterday') {
     const d = period === 'yesterday' ? new Date(now.getTime() - 86400000) : new Date(now.getFullYear(), now.getMonth(), now.getDate());

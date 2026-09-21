@@ -7,7 +7,7 @@ const prisma = require('../prismaClient');
 const { logger } = require('../utils/logger');
 const analyticsTools = require('../services/analyticsTools');
 const { searchKnowledge } = require('../services/knowledgeSearch');
-const { searchTeams, searchTickets } = require('../services/chatbotService');
+const { searchTeams, searchTickets, buildSearchQuery } = require('../services/chatbotService');
 
 const LIVE_MODEL = 'gemini-2.5-flash-native-audio-preview-12-2025';
 const LIVE_VOICE = 'Aoede';
@@ -261,7 +261,46 @@ async function executeTool(name, args) {
   try {
     switch (name) {
       case 'search_tickets': {
-        const result = await searchTickets(args.query || null, args.limit || 10, null, args.period || null);
+        // Même moteur que le chatbot texte : les filtres structurés (status, priority,
+        // locationName, assignedTo, requester, period) annoncés dans le schéma du tool sont
+        // réellement appliqués via buildSearchQuery. Avant, seuls query/period étaient pris
+        // en compte — les réponses chiffrées ne correspondaient pas à la question posée.
+        const hasStructuredFilters = !!(args.status || args.priority || args.locationName || args.assignedTo || args.requester);
+        if (hasStructuredFilters) {
+          const where = buildSearchQuery({
+            statuses: args.status ? [args.status] : undefined,
+            priorities: args.priority ? [args.priority] : undefined,
+            locationName: args.locationName || undefined,
+            assignedToName: args.assignedTo || undefined,
+            requesterName: args.requester || undefined,
+            keyword: args.query || undefined,
+            dateFrom: args.period && args.period !== 'all' ? getPeriodDate(args.period)?.toISOString?.() : undefined,
+          }, null);
+          const tickets = await prisma.ticket.findMany({
+            where,
+            take: Math.min(Number(args.limit) || 10, 50),
+            orderBy: { createdAt: 'desc' },
+            select: {
+              id: true, title: true, status: true, priority: true, locationName: true,
+              createdAt: true,
+              requester: { select: { fullName: true, email: true } },
+              assignedTo: { select: { fullName: true, email: true } },
+              team: { select: { name: true } },
+            },
+          });
+          return {
+            total: tickets.length,
+            tickets: tickets.map((t) => ({
+              id: t.id, titre: t.title, statut: t.status, priorite: t.priority,
+              lieu: t.locationName || '',
+              demandeur: t.requester?.fullName || t.requester?.email || '',
+              technicien: t.assignedTo?.fullName || t.assignedTo?.email || '',
+              creeLe: t.createdAt?.toISOString?.() || '',
+            })),
+          };
+        }
+        // Sans filtre structuré : chemin classique (query texte → AI re-parsing), avec période
+        const result = await searchTickets(args.query || null, Math.min(Number(args.limit) || 10, 50), null, args.period || null);
         const ticketList = Array.isArray(result) ? result : (result?.tickets || []);
         if (!ticketList.length) return { total: 0, tickets: [], message: 'Aucun ticket trouvé' };
         const results = ticketList.map((t) => ({
@@ -335,8 +374,11 @@ async function executeTool(name, args) {
       }
 
       case 'get_ticket_count': {
+        // Même périmètre que l'UI : corbeille (deletedAt) et suggestions en attente/rejetées
+        // (approvalStatus) exclus — sinon les chiffres vocaux dépassaient ceux affichés.
+        const base = { deletedAt: null, approvalStatus: { notIn: ['PENDING', 'REJECTED'] } };
         const statuses = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER', 'SOLVED', 'CLOSED'];
-        const counts = await Promise.all(statuses.map((s) => prisma.ticket.count({ where: { status: s } })));
+        const counts = await Promise.all(statuses.map((s) => prisma.ticket.count({ where: { ...base, status: s } })));
         const result = {};
         statuses.forEach((s, i) => { result[s] = counts[i]; });
         result.total = counts.reduce((a, b) => a + b, 0);
@@ -363,18 +405,20 @@ async function executeTool(name, args) {
       }
 
       case 'get_ticket_links': {
+        // Le select porte sur la TABLE DE LIAISON : les champs titre/statut vivent sur
+        // ticketA/ticketB (relation), et la colonne s'appelle `type` (pas `linkType`).
         const ticket = await prisma.ticket.findUnique({
           where: { id: Number(args.ticketId) },
           select: {
-            linksA: { select: { id: true, title: true, status: true, linkType: true } },
-            linksB: { select: { id: true, title: true, status: true, linkType: true } },
+            linksA: { select: { id: true, type: true, ticketB: { select: { id: true, title: true, status: true } } } },
+            linksB: { select: { id: true, type: true, ticketA: { select: { id: true, title: true, status: true } } } },
           },
         });
         if (!ticket) return { error: `Ticket #${args.ticketId} non trouvé` };
         return {
           ticketId: args.ticketId,
-          liensSortants: (ticket.linksA || []).map((l) => ({ id: l.id, titre: l.title, statut: l.status, type: l.linkType })),
-          liensEntrants: (ticket.linksB || []).map((l) => ({ id: l.id, titre: l.title, statut: l.status, type: l.linkType })),
+          liensSortants: (ticket.linksA || []).map((l) => ({ id: l.ticketB.id, titre: l.ticketB.title, statut: l.ticketB.status, type: l.type })),
+          liensEntrants: (ticket.linksB || []).map((l) => ({ id: l.ticketA.id, titre: l.ticketA.title, statut: l.ticketA.status, type: l.type })),
           total: (ticket.linksA?.length || 0) + (ticket.linksB?.length || 0),
         };
       }
@@ -415,13 +459,24 @@ async function executeTool(name, args) {
       }
 
       case 'get_top_locations': {
-        const result = await analyticsTools.getTopLocationsStats(args.period || '30d', args.limit || 5);
+        // analyticsTools attend un OBJET ({ period, limit, sortByUrgent }) — les anciens appels
+        // positionnels perdaient period/limit => chiffres sur tout l'historique, sans filtre.
+        const result = await analyticsTools.getTopLocationsStats({
+          period: args.period || '30d',
+          limit: Number(args.limit) || 5,
+        });
         return result;
       }
 
       case 'get_top_technicians': {
+        // Même périmètre que l'UI (corbeille + suggestions exclues) et période réellement appliquée
+        const where = { deletedAt: null, approvalStatus: { notIn: ['PENDING', 'REJECTED'] } };
+        if (args.period && args.period !== 'all') {
+          const d = getPeriodDate(args.period);
+          if (d) where.createdAt = { gte: d };
+        }
         const tickets = await prisma.ticket.findMany({
-          where: args.period && args.period !== 'all' ? { createdAt: { gte: getPeriodDate(args.period) } } : {},
+          where,
           select: { status: true, priority: true, assignedTo: { select: { fullName: true } } },
         });
         const techMap = {};
@@ -435,28 +490,35 @@ async function executeTool(name, args) {
         const ranked = Object.values(techMap)
           .map((t) => ({ ...t, tauxResolution: t.total > 0 ? Math.round((t.resolus / t.total) * 100) : 0 }))
           .sort((a, b) => b.resolus - a.resolus)
-          .slice(0, args.limit || 10);
+          .slice(0, Number(args.limit) || 10);
         return { techniciens: ranked, periode: args.period || 'all' };
       }
 
       case 'get_team_report': {
-        const result = await analyticsTools.getTeamDistribution(args.period || '30d');
+        const result = await analyticsTools.getTeamDistribution({ period: args.period || '30d' });
         return result;
       }
 
       case 'get_category_distribution': {
-        const result = await analyticsTools.getCategoryDistribution(args.period || '30d');
+        const result = await analyticsTools.getCategoryDistribution({ period: args.period || '30d' });
         return result;
       }
 
       case 'analyze_root_cause': {
-        const result = await analyticsTools.analyzeRootCause(args.locationName, args.filterKeyword);
+        const result = await analyticsTools.analyzeRootCause({
+          locationName: args.locationName || undefined,
+          filterKeyword: args.filterKeyword || undefined,
+        });
         return result;
       }
 
       case 'generate_report': {
-        const where = {};
-        if (args.period && args.period !== 'all') where.createdAt = { gte: getPeriodDate(args.period) };
+        // Même périmètre que l'UI : corbeille et suggestions en attente/rejetées exclus
+        const where = { deletedAt: null, approvalStatus: { notIn: ['PENDING', 'REJECTED'] } };
+        if (args.period && args.period !== 'all') {
+          const d = getPeriodDate(args.period);
+          if (d) where.createdAt = { gte: d };
+        }
         const [total, open, solved, closed] = await Promise.all([
           prisma.ticket.count({ where }),
           prisma.ticket.count({ where: { ...where, status: 'OPEN' } }),
