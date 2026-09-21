@@ -261,9 +261,10 @@ async function executeTool(name, args) {
   try {
     switch (name) {
       case 'search_tickets': {
-        const tickets = await searchTickets(args.query || null, args.limit || 10, null, args.period || null);
-        if (!tickets || tickets.length === 0) return { total: 0, tickets: [], message: 'Aucun ticket trouvé' };
-        const results = tickets.map((t) => ({
+        const result = await searchTickets(args.query || null, args.limit || 10, null, args.period || null);
+        const ticketList = Array.isArray(result) ? result : (result?.tickets || []);
+        if (!ticketList.length) return { total: 0, tickets: [], message: 'Aucun ticket trouvé' };
+        const results = ticketList.map((t) => ({
           id: t.id, titre: t.title, statut: t.status, priorite: t.priority,
           lieu: t.locationName || '',
           demandeur: t.requester?.fullName || t.requester?.email || '',
@@ -274,14 +275,21 @@ async function executeTool(name, args) {
       }
 
       case 'check_ticket': {
+        const ticketId = Number(args.ticketId);
+        if (!ticketId || isNaN(ticketId)) return { error: 'Numéro de ticket invalide' };
         const ticket = await prisma.ticket.findUnique({
-          where: { id: Number(args.ticketId) },
+          where: { id: ticketId },
           select: {
-            ...TICKET_SELECT,
+            id: true, title: true, content: true, status: true, priority: true,
+            category: true, locationName: true,
+            createdAt: true, updatedAt: true, solvedAt: true, closedAt: true,
+            requester: { select: { fullName: true, email: true } },
+            assignedTo: { select: { fullName: true, email: true } },
+            team: { select: { name: true } },
             followups: {
               orderBy: { createdAt: 'desc' },
               take: 5,
-              select: { id: true, content: true, isPrivate: true, createdAt: true, user: { select: { fullName: true } } },
+              select: { id: true, content: true, isPrivate: true, createdAt: true, author: { select: { fullName: true } } },
             },
             timeEntries: {
               orderBy: { createdAt: 'desc' },
@@ -295,7 +303,7 @@ async function executeTool(name, args) {
         return {
           ticket: formatTicket(ticket),
           suivi: (ticket.followups || []).map((f) => ({
-            auteur: f.user?.fullName || '',
+            auteur: f.author?.fullName || '',
             contenu: (f.content || '').substring(0, 200),
             prive: f.isPrivate,
             date: f.createdAt?.toISOString?.() || '',
