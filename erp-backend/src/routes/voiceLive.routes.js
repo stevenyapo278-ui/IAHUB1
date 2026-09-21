@@ -387,9 +387,10 @@ async function executeTool(name, args, { user = null, sessionHistory = null } = 
               select: { id: true, content: true, isPrivate: true, createdAt: true, author: { select: { fullName: true } } },
             },
             timeEntries: {
-              orderBy: { createdAt: 'desc' },
+              // NB : TicketTimeEntry n'a PAS de createdAt — le champ date est entryDate (cf. schema.prisma)
+              orderBy: { entryDate: 'desc' },
               take: 10,
-              select: { id: true, minutes: true, description: true, createdAt: true, user: { select: { fullName: true } } },
+              select: { id: true, minutes: true, description: true, entryDate: true, user: { select: { fullName: true } } },
             },
           },
         });
@@ -417,7 +418,8 @@ async function executeTool(name, args, { user = null, sessionHistory = null } = 
             solvedAt: true, requester: { select: { fullName: true } },
             assignedTo: { select: { fullName: true } },
             team: { select: { name: true } },
-            followups: { select: { content: true, createdAt: true, user: { select: { fullName: true } } } },
+            // NB : la relation Followup s'appelle author (pas user) — cf. schema.prisma
+            followups: { select: { content: true, createdAt: true, author: { select: { fullName: true } } } },
           },
         });
         if (!ticket) return { error: `Ticket #${args.ticketId} non trouvé` };
@@ -452,10 +454,11 @@ async function executeTool(name, args, { user = null, sessionHistory = null } = 
       }
 
       case 'get_ticket_time_entries': {
+        // TicketTimeEntry n'a pas de createdAt — tri/select sur entryDate (cf. schema.prisma)
         const entries = await prisma.ticketTimeEntry.findMany({
           where: { ticketId: Number(args.ticketId) },
-          orderBy: { createdAt: 'desc' },
-          select: { id: true, minutes: true, description: true, createdAt: true, user: { select: { fullName: true } } },
+          orderBy: { entryDate: 'desc' },
+          select: { id: true, minutes: true, description: true, entryDate: true, user: { select: { fullName: true } } },
         });
         const total = entries.reduce((sum, e) => sum + (e.minutes || 0), 0);
         return {
@@ -465,7 +468,7 @@ async function executeTool(name, args, { user = null, sessionHistory = null } = 
             auteur: e.user?.fullName || '',
             minutes: e.minutes,
             description: e.description || '',
-            date: e.createdAt?.toISOString?.() || '',
+            date: e.entryDate?.toISOString?.() || '',
           })),
         };
       }
