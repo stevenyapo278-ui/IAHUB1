@@ -228,6 +228,8 @@ export function useVoiceLive() {
         // Configurer le worklet selon le toggle
         try { workletNode.port.postMessage({ type: 'config', noiseGate: { enabled: noiseSuppressionRef.current } }); } catch {}
         workletNode.port.onmessage = (e) => {
+          // Si muté, ne rien envoyer
+          if (mutedRef.current) return;
           // Filtrage anti-bruit : si activé, n'envoie que les frames avec parole détectée
           const isNoiseOnly = noiseSuppressionRef.current && e.data.isSpeech === false && !e.data.gateOpen;
           // On laisse passer quand même ~10% des frames silencieuses pour le VAD Gemini (silence contextuel)
@@ -287,9 +289,15 @@ export function useVoiceLive() {
         setState('error');
       };
 
+      // Keep-alive : ping toutes les 25s pour éviter NAT timeout
+      const pingInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) { try { ws.send(JSON.stringify({ type: 'ping' })); } catch {} }
+      }, 25000);
+      ws.addEventListener('close', () => clearInterval(pingInterval));
+
       source.connect(workletNode);
       workletNode.connect(analyser);
-      analyser.connect(audioCtx.destination);
+      // Ne pas connecter analyser -> destination (évite larsen/écho)
     })().catch((err) => {
       setError(err.message || 'Erreur lors du démarrage');
       setState('error');
