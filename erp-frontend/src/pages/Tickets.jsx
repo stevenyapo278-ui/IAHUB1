@@ -40,6 +40,7 @@ import {
   GripVertical,
   Settings2,
   Eye,
+  Copy,
   SlidersHorizontal,
   FolderOpen,
 } from 'lucide-react';
@@ -1024,6 +1025,9 @@ export default function Tickets() {
 
   const [deleting, setDeleting] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
+  const [duplicateSearch, setDuplicateSearch] = useState('');
+  const [duplicateResults, setDuplicateResults] = useState([]);
   const [page, setPage] = useState(() => {
     const p = searchParams.get('page');
     return p ? parseInt(p, 10) : 1;
@@ -1453,6 +1457,48 @@ export default function Tickets() {
       if (img) URL.revokeObjectURL(img.dataUrl);
       return prev.filter((p) => p.id !== id);
     });
+  }
+
+  async function searchTicketsForDuplicate(query) {
+    setDuplicateSearch(query);
+    if (query.length < 1) { setDuplicateResults([]); return; }
+    try {
+      const { data } = await api.get(`/tickets?search=${encodeURIComponent(query)}&limit=8&status=NOT_CLOSED`);
+      setDuplicateResults(data.items || []);
+    } catch { setDuplicateResults([]); }
+  }
+
+  async function handleDuplicateFromTicket(ticketId) {
+    setDuplicating(true);
+    try {
+      const { data: src } = await api.get(`/tickets/${ticketId}`);
+      setForm({
+        ...EMPTY_FORM,
+        title: src.title || '',
+        content: src.content || '',
+        type: src.type || 'INCIDENT',
+        category: src.category || '',
+        source: src.source || 'Direct',
+        priority: src.priority || 'P3',
+        urgency: src.urgency || 'MEDIUM',
+        impact: src.impact || 'MEDIUM',
+        locationId: src.locationId ? String(src.locationId) : '',
+        teamId: src.teamId ? String(src.teamId) : '',
+        assignedToId: src.assignedToId ? String(src.assignedToId) : '',
+        assigneeIds: (src.assignees || []).map((a) => a.id),
+        requesterIds: (src.requesterIds || []),
+        observerIds: (src.observers || []).map((o) => o.id),
+        assetIds: (src.assets || []).map((a) => a.id),
+        dueDate: src.dueDate ? src.dueDate.slice(0, 10) : '',
+      });
+      setDuplicateResults([]);
+      setDuplicateSearch('');
+      toast.info(`Ticket #${src.id} dupliqué — modifiez les champs nécessaires`);
+    } catch (err) {
+      toast.error('Impossible de charger le ticket source');
+    } finally {
+      setDuplicating(false);
+    }
   }
 
   async function handleCreate(e) {
@@ -2175,6 +2221,41 @@ export default function Tickets() {
                       />
                     </FormField>
                   )}
+
+                  {/* Dupliquer à partir d'un ticket existant */}
+                  <div className="rounded-xl border border-dashed border-outline-variant/50 bg-surface-container-low/30 p-3 space-y-2">
+                    <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+                      <Copy className="w-3.5 h-3.5 text-primary" />
+                      Dupliquer à partir d'un ticket
+                    </div>
+                    <div className="relative">
+                      <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
+                      <input
+                        type="text"
+                        value={duplicateSearch}
+                        onChange={(e) => searchTicketsForDuplicate(e.target.value)}
+                        placeholder="N° ou titre du ticket à dupliquer..."
+                        className="w-full pl-9 pr-3 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface text-xs focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none"
+                      />
+                    </div>
+                    {duplicateResults.length > 0 && (
+                      <div className="max-h-40 overflow-y-auto space-y-1">
+                        {duplicateResults.map((t) => (
+                          <button
+                            key={t.id}
+                            type="button"
+                            onClick={() => handleDuplicateFromTicket(t.id)}
+                            disabled={duplicating}
+                            className="w-full text-left p-2 rounded-lg hover:bg-surface-container-low transition-colors flex items-center gap-2"
+                          >
+                            <span className="text-[10px] font-bold text-primary">#{t.id}</span>
+                            <span className="text-xs text-on-surface truncate flex-1">{t.title}</span>
+                            <span className="text-[9px] text-on-surface-variant shrink-0">{t.status}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
 
                   <FormField label="Titre *">
                     <input type="text" required value={form.title}
