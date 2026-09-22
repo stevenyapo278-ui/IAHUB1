@@ -5,7 +5,7 @@ const fs = require('fs');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
-const { notifyMajorIncidentResolved, sendTicketStatusNotification, sendResolvedNotificationEmail, sendTicketCreationNotification, sendAcknowledgement, sendAssignmentNotificationEmail } = require('../services/emailSender');
+const { notifyMajorIncidentResolved, sendTicketStatusNotification, sendResolvedNotificationEmail, sendTicketCreationNotification, sendAcknowledgement, sendAssignmentNotificationEmail, sendEmail } = require('../services/emailSender');
 const { approveTicket } = require('../services/ticketApproval');
 const { autoAssignTechnician } = require('../services/ticketAutoAssign');
 const { logEvent } = require('../services/ticketEvent');
@@ -2576,6 +2576,105 @@ router.post('/bulk-restore', forbidTechnicianTicketEdits, requireDeleteTicketPer
   }
   await auditLog('TICKETS_RESTORED', { actor: req.user, targetType: 'Ticket', metadata: { count: result.count, ids } });
   return res.json({ restored: result.count });
+});
+
+// ── Transférer la conversation email ────────────────────────────────────────
+// POST /api/tickets/:id/forward-email — body: { to: "email@example.com" }
+// Sécurité : seul le demandeur assigné OU le technicien assigné peut transférer.
+router.post('/:id/forward-email', [
+  body('to').trim().isEmail().withMessage('Adresse email invalide'),
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+  const ticketId = Number(req.params.id);
+  const ticket = await prisma.ticket.findUnique({
+    where: { id: ticketId },
+    select: {
+      id: true, title: true, sourceEmail: true, sourceName: true, sourceSubject: true,
+      requesterIds: true, assignedToId: true,
+      messages: {
+        orderBy: { timestamp: 'asc' },
+        select: {
+          direction: true, sender: true, recipients: true, subject: true,
+          bodyHtml: true, body: true, timestamp: true, ccRecipients: true,
+        },
+      },
+    },
+  });
+
+  if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
+
+  // Vérification de sécurité : demandeur OU technicien assigné
+  const currentUserEmail = (req.user.email || '').toLowerCase();
+  const isRequester = (ticket.requesterIds || []).some(
+    (rid) => rid === req.user.id
+  );
+  const isAssignedTechnician = ticket.assignedToId === req.user.id;
+  const isAdmin = ['SUPERADMIN', 'ADMIN'].includes(req.user.role);
+
+  if (!isRequester && !isAssignedTechnician && !isAdmin) {
+    return res.status(403).json({ error: 'Vous devez être demandeur ou technicien assigné pour transférer cette conversation.' });
+  }
+
+  if (!ticket.messages || ticket.messages.length === 0) {
+    return res.status(400).json({ error: 'Aucun email dans la conversation de ce ticket.' });
+  }
+
+  const { to } = req.body;
+
+  // Construire le HTML de la conversation
+  const conversationHtml = ticket.messages.map((msg, idx) => {
+    const dir = msg.direction === 'INBOUND' ? '📥 Reçu' : '📤 Envoyé';
+    const date = new Date(msg.timestamp).toLocaleString('fr-FR');
+    const from = msg.sender || 'Inconnu';
+    const toList = (msg.recipients || []).join(', ');
+    const ccList = (msg.ccRecipients || []).length > 0 ? `<br><strong>CC :</strong> ${msg.ccRecipients.join(', ')}` : '';
+    const body = msg.bodyHtml || `<pre style="white-space:pre-wrap;font-family:inherit">${msg.body || ''}</pre>`;
+    return `
+      <div style="margin-bottom:24px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+        <div style="background:#f9fafb;padding:12px 16px;border-bottom:1px solid #e5e7eb;font-size:13px">
+          <div><strong>${dir}</strong> — ${date}</div>
+          <div><strong>De :</strong> ${from}</div>
+          <div><strong>À :</strong> ${toList}</div>
+          ${ccList}
+          ${msg.subject ? `<div><strong>Sujet :</strong> ${msg.subject}</div>` : ''}
+        </div>
+        <div style="padding:16px;font-size:13px;line-height:1.5">${body}</div>
+      </div>`;
+  }).join('');
+
+  const subject = `Transfert — Ticket #${ticket.id} : ${ticket.title}`;
+  const bodyHtml = `
+    <div style="font-family:Arial,sans-serif;max-width:800px;margin:0 auto">
+      <div style="background:#2563eb;color:white;padding:16px 20px;border-radius:8px 8px 0 0">
+        <h2 style="margin:0;font-size:16px">📋 Conversation transférée — Ticket #${ticket.id}</h2>
+        <p style="margin:4px 0 0;font-size:13px;opacity:0.9">${ticket.title}</p>
+      </div>
+      <div style="border:1px solid #e5e7eb;border-top:none;padding:20px;border-radius:0 0 8px 8px">
+        <p style="font-size:13px;color:#6b7280;margin:0 0 16px">
+          Transmis par <strong>${req.user.fullName || req.user.email}</strong> le ${new Date().toLocaleString('fr-FR')}.
+        </p>
+        ${conversationHtml}
+      </div>
+    </div>`;
+
+  try {
+    await sendEmail({
+      ticketId: ticket.id,
+      to,
+      subject,
+      bodyHtml,
+      saveAsMessage: false,
+    });
+    await logEvent(ticket.id, 'EMAIL_SENT', req.user.email || 'SYSTEM', {
+      forwardTo: to,
+    }).catch(() => {});
+    return res.json({ success: true, message: `Conversation transférée à ${to}` });
+  } catch (err) {
+    console.error('[forward-email] Erreur envoi:', err.message);
+    return res.status(500).json({ error: 'Erreur lors de l\'envoi : ' + err.message });
+  }
 });
 
 module.exports = router;

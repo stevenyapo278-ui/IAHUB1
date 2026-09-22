@@ -96,7 +96,7 @@ function AttachmentThumbnail({ ticketId, attachment }) {
 
 // Tuile d'information compacte (icône + libellé + valeur) — utilisée pour les
 // cartes d'information du ticket (demandeur, équipe, catégorie, lieu, etc.)
-function InfoTile({ icon: Icon, label, value, tone = 'primary', title }) {
+function InfoTile({ icon: Icon, label, value, tone = 'primary', title, copyable }) {
   const toneColor = {
     primary: 'text-primary',
     emerald: 'text-emerald-500',
@@ -105,18 +105,40 @@ function InfoTile({ icon: Icon, label, value, tone = 'primary', title }) {
     slate: 'text-on-surface-variant',
   }[tone] || 'text-primary';
 
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      toast.success('Copié !');
+      setTimeout(() => setCopied(false), 1500);
+    } catch { toast.error('Erreur de copie'); }
+  };
+
   return (
     <div className="flex flex-col gap-1 rounded-xl border border-outline-variant/30 bg-surface-container-low/50 px-3 py-2.5 min-w-0 transition-colors hover:bg-surface-container-low">
       <span className="flex items-center gap-1.5 text-[9px] font-extrabold uppercase tracking-wider text-on-surface-variant">
         <Icon className={`w-3 h-3 ${toneColor} shrink-0`} />
         {label}
       </span>
-      <span
-        className="text-xs font-bold text-on-surface truncate"
-        title={title || value}
-      >
-        {value || '—'}
-      </span>
+      <div className="flex items-center gap-1 min-w-0">
+        <span
+          className="text-xs font-bold text-on-surface truncate flex-1 min-w-0"
+          title={title || value}
+        >
+          {value || '—'}
+        </span>
+        {copyable && value && (
+          <button
+            onClick={handleCopy}
+            className="shrink-0 p-1 rounded-md hover:bg-surface-container-high transition-colors text-on-surface-variant hover:text-primary"
+            title="Copier le nom"
+          >
+            {copied ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -198,6 +220,9 @@ export default function TicketDetail() {
   const [allUsers, setAllUsers] = useState([]);
   const [syncFailures, setSyncFailures] = useState([]);
   const [savingField, setSavingField] = useState(null);
+  const [forwardModalOpen, setForwardModalOpen] = useState(false);
+  const [forwardEmail, setForwardEmail] = useState('');
+  const [forwarding, setForwarding] = useState(false);
 
   const [adjacent, setAdjacent] = useState({ first: null, prev: null, next: null, last: null });
   const slideDirectionRef = useRef('next'); // 'next' = vers la droite→gauche, 'prev' = gauche→droite
@@ -1104,6 +1129,21 @@ export default function TicketDetail() {
     }
   }
 
+  async function handleForwardEmail() {
+    if (!forwardEmail.trim()) return;
+    setForwarding(true);
+    try {
+      await api.post(`/tickets/${id}/forward-email`, { to: forwardEmail.trim() });
+      toast.success('Conversation transférée avec succès');
+      setForwardModalOpen(false);
+      setForwardEmail('');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors du transfert');
+    } finally {
+      setForwarding(false);
+    }
+  }
+
   function handleApprove() {
     setShowApproveModal(true);
   }
@@ -1544,7 +1584,7 @@ export default function TicketDetail() {
 
               {/* Grille d'informations rapides */}
               <div className={`grid gap-2.5 ${(ticket.status === 'SOLVED' || ticket.status === 'CLOSED') ? 'grid-cols-2 lg:grid-cols-5' : 'grid-cols-2 lg:grid-cols-4'}`}>
-                <InfoTile icon={User} label="Demandeur" value={ticket.requester?.fullName || ticket.sourceName || ticket.sourceEmail || '—'} />
+                <InfoTile icon={User} label="Demandeur" value={ticket.requester?.fullName || ticket.sourceName || ticket.sourceEmail || '—'} copyable />
                 <InfoTile icon={Layers} label="Équipe" value={ticket.team?.name || 'Non assignée'} />
                 <InfoTile icon={MapPin} label="Lieu" value={ticket.locationName || '—'} tone="violet" />
                 <InfoTile icon={Clock} label="Créé le" value={new Date(ticket.createdAt).toLocaleDateString('fr-FR')} tone="amber" />
@@ -2213,6 +2253,15 @@ export default function TicketDetail() {
                   </div>
                 )}
               </dl>
+              {ticket.messages?.length > 0 && (
+                <button
+                  onClick={() => setForwardModalOpen(true)}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-xs font-semibold"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  Transférer la conversation
+                </button>
+              )}
             </div>
           )}
 
@@ -3839,6 +3888,72 @@ export default function TicketDetail() {
           </button>
         </div>
       )}
+
+      {/* Modal : Transférer la conversation email */}
+      <AnimatePresence>
+        {forwardModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-md rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-2xl p-5 space-y-4"
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
+                  <Send className="w-4 h-4 text-primary" />
+                  Transférer la conversation
+                </h3>
+                <button
+                  onClick={() => { setForwardModalOpen(false); setForwardEmail(''); }}
+                  className="p-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <p className="text-[11px] text-on-surface-variant leading-relaxed">
+                L'intégralité de la conversation email ( tickets #{id} ) sera envoyée sous forme de résumé formaté à l'adresse indiquée.
+              </p>
+
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant mb-1 block">Adresse email du destinataire</label>
+                <input
+                  type="email"
+                  value={forwardEmail}
+                  onChange={(e) => setForwardEmail(e.target.value)}
+                  placeholder="destinataire@example.com"
+                  className="w-full px-3 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface text-xs focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none"
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleForwardEmail(); }}
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-outline-variant/30">
+                <button
+                  onClick={() => { setForwardModalOpen(false); setForwardEmail(''); }}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-on-surface-variant hover:bg-surface-container transition-colors"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={handleForwardEmail}
+                  disabled={!forwardEmail.trim() || forwarding}
+                  className="px-4 py-2 rounded-xl bg-primary text-white text-xs font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  {forwarding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  {forwarding ? 'Envoi...' : 'Transférer'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -3907,6 +4022,7 @@ function eventLabel(type) {
     GLPI_SYNC_FAILED: 'Échec synchronisation GLPI',
     FOLLOWUP_MADE_PRIVATE: 'Commentaire rendu privé',
     FOLLOWUP_MADE_PUBLIC: 'Commentaire rendu public',
+    REPLY_ON_CLOSED_SUGGESTED: 'Réponse suggérée (ticket fermé)',
   };
   return labels[type] || type;
 }
