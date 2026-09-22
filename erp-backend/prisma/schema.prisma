@@ -180,6 +180,7 @@ model User {
   problemsObserved             Problem[]               @relation("ProblemObservers")
   problemFollowups             ProblemFollowup[]
   dashboards                   Dashboard[]
+  formSubmissions              FormSubmission[]
 
   @@index([teamId])
 }
@@ -466,6 +467,7 @@ model Ticket {
   linksB           TicketLink[]            @relation("TicketLinksB")
   assets           AssetTicket[]
   problems         ProblemTicket[]
+  formSubmission   FormSubmission?
 
   @@index([requesterId])
   @@index([secondaryRequesterId])
@@ -1660,4 +1662,39 @@ model AiUsageLog {
   @@index([provider])
   @@index([createdAt])
   @@index([usage])
+}
+
+// ── Formulaires de demande (importés depuis GLPI FormCreator) ───────────────
+// Un formulaire = 1 définition JSON (sections + questions + options)
+// Les soumissions créent un Ticket avec le contenu structuré des réponses.
+model FormDefinition {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?  @db.Text
+  icon        String?
+  iconColor   String?
+  bgColor     String?
+  category    String?
+  glpiUuid    String?  @unique
+  isActive    Boolean  @default(true)
+  sections    Json     // [{ name, order, uuid, questions: [{ name, fieldtype, required, values, row, col, width, uuid }] }]
+  submissions FormSubmission[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model FormSubmission {
+  id             Int      @id @default(autoincrement())
+  formId         Int
+  form           FormDefinition @relation(fields: [formId], references: [id], onDelete: Cascade)
+  ticketId       Int?     @unique
+  ticket         Ticket?  @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  submittedById  Int?
+  submittedBy    User?    @relation(fields: [submittedById], references: [id], onDelete: SetNull)
+  answers        Json     // { "NOM DU DEMANDEUR": "Aimee Toho", "SERVICE OU MAGASIN": "DSI – Support", ... }
+  createdAt      DateTime @default(now())
+
+  @@index([formId])
+  @@index([ticketId])
+  @@index([submittedById])
 }

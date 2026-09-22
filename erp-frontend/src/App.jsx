@@ -43,6 +43,7 @@ const Problems = lazy(() => import('./pages/Problems'));
 const ProblemDetail = lazy(() => import('./pages/ProblemDetail'));
 const ChatPage = lazy(() => import('./pages/ChatPage'));
 const ChatMonitor = lazy(() => import('./pages/ChatMonitor'));
+const FormRequest = lazy(() => import('./pages/FormRequest'));
 
 // Écran de chargement plein écran, centré — affiché pendant le chargement d'un chunk
 // (navigation) et le premier montage React. Même visuel que le boot loader d'index.html.
@@ -238,6 +239,7 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
+            <Route path="form-request" element={<FormRequest />} />
           </Route>
         </Routes>
         </MinTimeLoader>

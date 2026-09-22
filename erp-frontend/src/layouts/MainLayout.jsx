@@ -69,6 +69,7 @@ const platformItems = [
   { to: '/email-drafts', label: 'Centre de Validation', icon: MailCheck, color: 'text-amber-400', permission: 'emaildrafts.manage', fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
   { to: '/inbox', label: 'Boîte mail', icon: Inbox, color: 'text-sky-400', permission: 'inbox.sync', fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },
   { to: '/knowledge-base', label: 'Base de connaissances', icon: BookOpen, color: 'text-purple-400', permission: null },
+  { to: '/form-request', label: 'Demande reporting', icon: FileText, color: 'text-indigo-400', permission: null },
   { to: '/ticket-evolution', label: 'Évolution tickets', icon: TrendingUp, color: 'text-cyan-400', permission: 'aiweeklyreports.manage', fallbackRoles: ['ADMIN', 'TECHNICIAN', 'HOTLINE'] },
 ];
 
