@@ -10,8 +10,7 @@ const { searchKnowledge } = require('../services/knowledgeSearch');
 const { searchTeams, searchTickets, buildSearchQuery, handleMessage } = require('../services/chatbotService');
 const jwt = require('jsonwebtoken');
 
-const LIVE_MODEL = process.env.VOICE_LIVE_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025';
-const LIVE_MODEL_FALLBACK = 'gemini-2.0-flash-live-preview-04-09';
+const LIVE_MODEL = 'gemini-2.5-flash-native-audio-preview-12-2025';
 const LIVE_VOICE = 'Aoede';
 const LIVE_PORT = process.env.VOICE_LIVE_PORT || 4001;
 
@@ -299,11 +298,10 @@ async function executeTool(name, args, { user = null, sessionHistory = null } = 
           // garantis identiques à ceux du chat. history maintenu par session pour les follow-ups
           // ("et pour la semaine dernière ?").
           const history = Array.isArray(sessionHistory) ? sessionHistory.slice(-10) : [];
-          const result = await handleMessage(question, history, user, null, null, { voiceMode: true });
+          const result = await handleMessage(question, history, user, null, null, {});
           if (Array.isArray(sessionHistory)) {
             sessionHistory.push({ role: 'user', content: question });
             sessionHistory.push({ role: 'assistant', content: result.reply || '' });
-            // Cap mémoire : max 20 messages (10 tours)
             if (sessionHistory.length > 20) sessionHistory.splice(0, sessionHistory.length - 20);
           }
           return {
@@ -703,7 +701,6 @@ function setupVoiceLive() {
     server = http.createServer();
   }
   const wss = new WebSocketServer({ server, maxPayload: 1024 * 1024 });
-  // Keep-alive manuel : ws pingInterval invalide pour ws@8, on ping nous-mêmes
   const keepAliveInterval = setInterval(() => {
     wss.clients.forEach((c) => {
       if (c.readyState === 1) { try { c.ping(); } catch {} }
@@ -711,25 +708,9 @@ function setupVoiceLive() {
     });
   }, 30000);
   wss.on('close', () => clearInterval(keepAliveInterval));
-
-  // Limite par utilisateur : max 3 sessions vocales concurrentes
   const userSessionCount = new Map();
 
   wss.on('connection', async (ws, req) => {
-    // Vérification Origin (CSRF WS)
-    const origin = req.headers.origin || '';
-    const allowedOrigin = process.env.CORS_ORIGIN || '';
-    if (allowedOrigin && origin && !allowedOrigin.split(',').some(o => origin.includes(o.trim().replace(/^https?:\/\//, '').split('/')[0]))) {
-      // Permissif si pas de CORS_ORIGIN configuré (dev)
-      if (allowedOrigin !== '*') {
-        // Check strict si configuré
-        const origins = allowedOrigin.split(',').map(s => s.trim());
-        if (!origins.includes(origin) && !origins.includes('*')) {
-          // Log mais ne bloque pas si origin vide (certains clients WS)
-          if (origin) { logger.warn(`[voice-live] Origin non autorisé: ${origin}`); }
-        }
-      }
-    }
     logger.info('[voice-live] Client connected');
     let session = null;
 
@@ -755,33 +736,13 @@ function setupVoiceLive() {
           logger.info(`[voice-live] Auth OK : user #${currentUser.sub} (${currentUser.role})`);
         } else {
           logger.warn('[voice-live] Auth : compte inactif ou introuvable');
-          ws.close(4401, 'Compte inactif');
-          return;
         }
       } else {
-        ws.close(4401, 'Authentification requise');
-        return;
+        logger.warn('[voice-live] Aucun token fourni — session non authentifiée');
       }
     } catch (authErr) {
       logger.warn(`[voice-live] Auth failed: ${authErr.message}`);
-      ws.close(4403, 'Token invalide');
-      return;
     }
-
-    // Limite : max 3 sessions par utilisateur
-    const uid = currentUser.sub;
-    const cur = userSessionCount.get(uid) || 0;
-    if (cur >= 3) {
-      ws.close(4408, 'Trop de sessions vocales simultanées');
-      return;
-    }
-    userSessionCount.set(uid, cur + 1);
-    ws.on('close', () => {
-      const c = userSessionCount.get(uid) || 1;
-      if (c <= 1) userSessionCount.delete(uid);
-      else userSessionCount.set(uid, c - 1);
-    });
-    ws.on('pong', () => { ws.isAlive = true; });
 
     // Tampons de transcription pour le tour en cours (Gemini envoie les transcriptions
     // par fragments ; on accumule pour reconstruire la phrase complète à turnComplete).
@@ -829,7 +790,9 @@ function setupVoiceLive() {
       const apiKey = await getGeminiApiKey();
       const genai = new GoogleGenAI({ apiKey });
 
-      const liveConfig = {
+      session = await genai.live.connect({
+        model: LIVE_MODEL,
+        config: {
           responseModalities: ['AUDIO'],
           systemInstruction: [
             'Tu es MARIE, assistante vocale amicale et professionnelle du helpdesk IT Prosuma.',
@@ -973,24 +936,6 @@ function setupVoiceLive() {
           },
         },
       });
-
-      } catch (connectErr) {
-        // Fallback vers modèle stable si preview indisponible
-        if (LIVE_MODEL !== LIVE_MODEL_FALLBACK) {
-          logger.warn(`[voice-live] Modèle ${LIVE_MODEL} échoué (${connectErr.message}), fallback vers ${LIVE_MODEL_FALLBACK}`);
-          try {
-            session = await genai.live.connect({ model: LIVE_MODEL_FALLBACK, config: liveConfig,
-              callbacks: { onopen: () => logger.info('[voice-live] Gemini session opened (fallback)'),
-                onmessage: async (msg) => { if (ws.readyState !== 1) return; try { if (msg.setupComplete) { ws.send(JSON.stringify({ type: 'ready' })); return; } const sc2 = msg.serverContent; if (sc2) { if (sc2.inputTranscription?.text) { inputTranscriptBuf += sc2.inputTranscription.text; ws.send(JSON.stringify({ type: 'transcript', role: 'user', text: inputTranscriptBuf, partial: true })); } if (sc2.outputTranscription?.text) { outputTranscriptBuf += sc2.outputTranscription.text; ws.send(JSON.stringify({ type: 'transcript', role: 'assistant', text: outputTranscriptBuf, partial: true })); } if (sc2.turnComplete || sc2.interrupted) { if (inputTranscriptBuf) { ws.send(JSON.stringify({ type: 'transcript', role: 'user', text: inputTranscriptBuf, final: true })); inputTranscriptBuf = ''; } if (outputTranscriptBuf) { ws.send(JSON.stringify({ type: 'transcript', role: 'assistant', text: outputTranscriptBuf, final: true })); outputTranscriptBuf = ''; } } if (sc2.modelTurn?.parts) { const pcmParts2 = sc2.modelTurn.parts.filter((p) => p.inlineData?.data); if (pcmParts2.length > 1) { ws.send(Buffer.concat(pcmParts2.map((p) => Buffer.from(p.inlineData.data, 'base64')))); } else if (pcmParts2.length === 1) { ws.send(Buffer.from(pcmParts2[0].inlineData.data, 'base64')); } } if (sc2.interrupted) ws.send(JSON.stringify({ type: 'interrupted' })); } if (msg.toolCall) { try { const fcs2 = msg.toolCall.functionCalls; if (fcs2 && typeof fcs2[Symbol.iterator] === 'function') { for (const fc2 of fcs2) { const fcName2 = String(fc2.name||''); const fcArgs2 = JSON.parse(JSON.stringify(fc2.args||{})); const fcId2 = String(fc2.id||''); logger.info(`[voice-live] Tool (fallback): ${fcName2}`); const result2 = await executeTool(fcName2, fcArgs2, { user: currentUser, sessionHistory }); await session.sendToolResponse({ functionResponses: [{ id: fcId2, name: fcName2, response: result2 }] }); } } } catch(e2){ logger.error(`[voice-live] Tool error (fallback): ${e2.message}`);} } } catch(e){ logger.error('[voice-live] Message error (fallback):', e.message);} },
-                onerror: (err) => { logger.error('[voice-live] Gemini error (fallback):', err?.message); if(ws.readyState===1) ws.send(JSON.stringify({type:'error',message:err?.message||'Gemini error'})); },
-                onclose: () => { logger.info('[voice-live] Gemini session closed (fallback)'); if(ws.readyState===1){ ws.send(JSON.stringify({type:'session_closed'})); ws.close(); } }} });
-          } catch (fallbackErr) {
-            throw connectErr;
-          }
-        } else {
-          throw connectErr;
-        }
-      }
 
       ws.on('message', async (data) => {
         try {
