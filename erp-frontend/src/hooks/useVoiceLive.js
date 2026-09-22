@@ -113,7 +113,9 @@ export function useVoiceLive() {
     source.connect(audioCtx.destination);
 
     const now = audioCtx.currentTime;
-    const startAt = Math.max(nextStartRef.current, now);
+    // Jitter buffer : petit délai pour lisser les arrivées réseau et éviter les clics
+    const jitterDelay = 0.04;
+    const startAt = Math.max(nextStartRef.current, now + jitterDelay);
     source.start(startAt);
     nextStartRef.current = startAt + audioBuffer.duration;
 
@@ -240,7 +242,9 @@ export function useVoiceLive() {
             }
           }
           const effectiveRms = e.data.rms ?? e.data.rawRms ?? 0;
-          if (effectiveRms >= 0.02 && speakingRef.current) {
+          // Barge-in : seuil relevé à 0.06 et vérification gate/speech pour éviter les faux positifs (respiration, bruit)
+          const isRealSpeech = e.data.isSpeech !== false && e.data.gateOpen !== false;
+          if (effectiveRms >= 0.06 && speakingRef.current && isRealSpeech) {
             stopPlayback();
           }
         };

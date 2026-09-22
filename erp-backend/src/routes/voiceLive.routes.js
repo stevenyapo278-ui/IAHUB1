@@ -737,6 +737,41 @@ function setupVoiceLive() {
 
     // Tampons de transcription pour le tour en cours (Gemini envoie les transcriptions
     // par fragments ; on accumule pour reconstruire la phrase complète à turnComplete).
+    // ── Snapshot pré-chargé (contexte temps-réel injecté dans le prompt) ──
+    let snapshotBlock = '';
+    try {
+      const snapCache = global._voiceSnapshotCache || (global._voiceSnapshotCache = { data: {}, at: {} });
+      const now = Date.now();
+      const SNAP_TTL = 30_000;
+      const userKey = currentUser ? `u:${currentUser.sub}` : 'anon';
+      const cached = snapCache.data[userKey];
+      const cachedAt = snapCache.at[userKey] || 0;
+      let snap;
+      if (cached && now - cachedAt < SNAP_TTL) {
+        snap = cached;
+      } else {
+        const [total, open, newCount, myCount] = await Promise.all([
+          prisma.ticket.count({ where: { deletedAt: null } }).catch(() => null),
+          prisma.ticket.count({ where: { deletedAt: null, status: { in: ['NEW', 'OPEN', 'PENDING', 'PLANNED'] } } }).catch(() => null),
+          prisma.ticket.count({ where: { deletedAt: null, status: 'NEW' } }).catch(() => null),
+          currentUser ? prisma.ticket.count({ where: { deletedAt: null, requesterIds: { has: currentUser.sub } } }).catch(() => null) : null,
+        ]);
+        snap = { total, open, newCount, myCount, at: new Date().toISOString().slice(0, 16).replace('T', ' ') };
+        snapCache.data[userKey] = snap;
+        snapCache.at[userKey] = now;
+        if (Object.keys(snapCache.data).length > 50) {
+          const oldest = Object.entries(snapCache.at).sort((a, b) => a[1] - b[1])[0];
+          if (oldest) { delete snapCache.data[oldest[0]]; delete snapCache.at[oldest[0]]; }
+        }
+      }
+      const parts = [];
+      if (snap.total != null) parts.push(`Tickets totaux: ${snap.total}, ouverts: ${snap.open}, nouveaux: ${snap.newCount}`);
+      if (snap.myCount != null) parts.push(`Tes tickets (demandeur): ${snap.myCount}`);
+      if (parts.length) snapshotBlock = `\n\n--- SNAPSHOT TEMPS RÉEL (${snap.at}) ---\n${parts.join(' | ')}\nUtilise ces chiffres directement si la question porte dessus — pas besoin d'appeler un outil. Pour tout détail (liste, ticket précis, stats par lieu/équipe) appelle l'outil adapté.\n`;
+    } catch (snapErr) {
+      logger.warn('[voice-live] Snapshot échoué:', snapErr.message);
+    }
+
     let inputTranscriptBuf = '';
     let outputTranscriptBuf = '';
 
@@ -762,8 +797,14 @@ function setupVoiceLive() {
             '',
             'COMPORTEMENT :',
             '- Laisse toujours l utilisateur terminer sa question (écoute jusqu au bout).',
-            '- Avant d annoncer un résultat, tu peux dire brièvement « je vérifie » pour masquer le délai de l outil.',
+            "- Ne dis JAMAIS \"je vérifie\" ou \"un instant\" avant d'avoir le résultat — la technique gère l'attente, pas toi.",
             '- Sois concise à l oral : pas de longs tableaux, synthétise.',
+            '- Varie tes transitions : "voici ce que je trouve", "d après les données", "pour te répondre précisément"... — jamais deux fois la même formule.',
+            '',
+            'FLUIDITÉ VOCALE :',
+            '- Parle en phrases complètes et fluides, sans couper entre deux propositions.',
+            '- Ne t interromps jamais toi-même en milieu de phrase.',
+            snapshotBlock,
           ].join('\n'),
           speechConfig: {
             voiceConfig: {
@@ -830,10 +871,13 @@ function setupVoiceLive() {
                   }
                 }
                 if (sc.modelTurn?.parts) {
-                  for (const part of sc.modelTurn.parts) {
-                    if (part.inlineData?.data) {
-                      ws.send(Buffer.from(part.inlineData.data, 'base64'));
-                    }
+                  // Coalescence : regrouper les petits chunks PCM en un seul envoi pour réduire jitter et hachure
+                  const pcmParts = sc.modelTurn.parts.filter((p) => p.inlineData?.data);
+                  if (pcmParts.length > 1) {
+                    const combined = Buffer.concat(pcmParts.map((p) => Buffer.from(p.inlineData.data, 'base64')));
+                    ws.send(combined);
+                  } else if (pcmParts.length === 1) {
+                    ws.send(Buffer.from(pcmParts[0].inlineData.data, 'base64'));
                   }
                 }
                 if (sc.interrupted) {
