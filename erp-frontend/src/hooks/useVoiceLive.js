@@ -8,6 +8,9 @@ export function useVoiceLive() {
   const [error, setError] = useState(null);
   const [isSupported, setIsSupported] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [noiseSuppressionEnabled, setNoiseSuppressionEnabled] = useState(() => {
+    try { return localStorage.getItem('voiceNoiseSuppression') !== 'false'; } catch { return true; }
+  });
 
   const wsRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -19,6 +22,7 @@ export function useVoiceLive() {
   const speakingRef = useRef(false);
   const readyRef = useRef(false);
   const mutedRef = useRef(false);
+  const noiseSuppressionRef = useRef(noiseSuppressionEnabled);
 
   useEffect(() => {
     setIsSupported(
@@ -32,6 +36,15 @@ export function useVoiceLive() {
   useEffect(() => {
     mutedRef.current = isMuted;
   }, [isMuted]);
+
+  useEffect(() => {
+    noiseSuppressionRef.current = noiseSuppressionEnabled;
+    // Informer le worklet du toggle
+    if (workletRef.current) {
+      try { workletRef.current.port.postMessage({ type: 'config', noiseGate: { enabled: noiseSuppressionEnabled } }); } catch {}
+    }
+    try { localStorage.setItem('voiceNoiseSuppression', String(noiseSuppressionEnabled)); } catch {}
+  }, [noiseSuppressionEnabled]);
 
   // ── Gestion des messages (transcriptions fragmentées de Gemini) ──
   // Gemini envoie les transcriptions par fragments : le backend relaie la phrase
@@ -150,6 +163,10 @@ export function useVoiceLive() {
     setIsMuted((prev) => !prev);
   }, []);
 
+  const toggleNoiseSuppression = useCallback(() => {
+    setNoiseSuppressionEnabled((prev) => !prev);
+  }, []);
+
   const startListening = useCallback(() => {
     cleanupSession();
     setError(null);
@@ -171,9 +188,16 @@ export function useVoiceLive() {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
+          sampleRate: 16000,
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
+          // Contraintes avancées Chrome (WebRTC APM v2)
+          googEchoCancellation: true,
+          googNoiseSuppression: true,
+          googNoiseSuppression2: true,
+          googAutoGainControl: true,
+          googHighpassFilter: true,
         },
       });
       streamRef.current = stream;
@@ -199,11 +223,24 @@ export function useVoiceLive() {
 
       ws.onopen = () => {
         setState('connecting');
+        // Configurer le worklet selon le toggle
+        try { workletNode.port.postMessage({ type: 'config', noiseGate: { enabled: noiseSuppressionRef.current } }); } catch {}
         workletNode.port.onmessage = (e) => {
-          if (readyRef.current && ws.readyState === WebSocket.OPEN && e.data.pcm) {
-            ws.send(e.data.pcm);
+          // Filtrage anti-bruit : si activé, n'envoie que les frames avec parole détectée
+          const isNoiseOnly = noiseSuppressionRef.current && e.data.isSpeech === false && !e.data.gateOpen;
+          // On laisse passer quand même ~10% des frames silencieuses pour le VAD Gemini (silence contextuel)
+          const shouldDrop = isNoiseOnly && Math.random() > 0.1;
+          if (readyRef.current && ws.readyState === WebSocket.OPEN && e.data.pcm && !shouldDrop) {
+            // Si gate fermé et filtre actif, remplacer le PCM par du silence plutôt que de dropper
+            if (isNoiseOnly) {
+              const silent = new Int16Array(e.data.pcm.byteLength / 2);
+              ws.send(silent.buffer);
+            } else {
+              ws.send(e.data.pcm);
+            }
           }
-          if (e.data.rms >= 0.02 && speakingRef.current) {
+          const effectiveRms = e.data.rms ?? e.data.rawRms ?? 0;
+          if (effectiveRms >= 0.02 && speakingRef.current) {
             stopPlayback();
           }
         };
@@ -270,9 +307,11 @@ export function useVoiceLive() {
     error,
     isSupported,
     isMuted,
+    noiseSuppressionEnabled,
     analyserNode: analyserRef.current,
     startListening,
     stopAll,
     toggleMute,
+    toggleNoiseSuppression,
   };
 }

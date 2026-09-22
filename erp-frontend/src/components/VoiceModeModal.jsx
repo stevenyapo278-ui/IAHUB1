@@ -1,6 +1,6 @@
 import { useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Mic, MicOff, Volume2, VolumeX, Loader2 } from 'lucide-react';
+import { X, Mic, MicOff, Volume2, VolumeX, Loader2, Ear, EarOff } from 'lucide-react';
 import { useVoiceLive } from '../hooks/useVoiceLive';
 import VoiceVisualizer from './VoiceVisualizer';
 
@@ -24,10 +24,12 @@ export default function VoiceModeModal({ isOpen, onClose }) {
     error,
     isSupported,
     isMuted,
+    noiseSuppressionEnabled,
     analyserNode,
     startListening,
     stopAll,
     toggleMute,
+    toggleNoiseSuppression,
   } = useVoiceLive();
 
   const isActive = ['listening', 'speaking', 'thinking'].includes(state);
@@ -242,6 +244,19 @@ export default function VoiceModeModal({ isOpen, onClose }) {
 
         {/* Controls row */}
         <div className="flex items-center gap-4 mb-6">
+          <motion.button
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
+            onClick={toggleNoiseSuppression}
+            className={`p-3 rounded-full transition-colors ${noiseSuppressionEnabled ? 'bg-emerald-500/30 hover:bg-emerald-500/40' : 'bg-white/10 hover:bg-white/20'}`}
+            title={noiseSuppressionEnabled ? 'Filtre anti-bruit activé' : 'Filtre anti-bruit désactivé'}
+          >
+            {noiseSuppressionEnabled ? (
+              <Ear className="w-5 h-5 text-emerald-400" />
+            ) : (
+              <EarOff className="w-5 h-5 text-white/40" />
+            )}
+          </motion.button>
           <motion.button
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.9 }}
