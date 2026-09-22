@@ -212,6 +212,38 @@ async function main() {
   }
 
   console.log('Seed terminé.');
+
+  // ── Import formulaire GLPI FormCreator (idempotent) ────────────────────────
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const formJsonPath = path.join(__dirname, 'formcreator.json');
+    if (fs.existsSync(formJsonPath)) {
+      const raw = fs.readFileSync(formJsonPath, 'utf8');
+      const data = JSON.parse(raw);
+      for (const form of data.forms || []) {
+        const sections = (form._sections || []).map((sec) => ({
+          name: sec.name, order: sec.order, uuid: sec.uuid, showRule: sec.show_rule,
+          questions: (sec._questions || []).map((q) => ({
+            name: q.name, fieldtype: q.fieldtype, required: !!q.required, showEmpty: !!q.show_empty,
+            defaultValues: q.default_values, values: q.values, description: q.description || '',
+            row: q.row, col: q.col, width: q.width, uuid: q.uuid, showRule: q.show_rule,
+          })),
+        }));
+        const existing = await prisma.formDefinition.findUnique({ where: { glpiUuid: form.uuid } });
+        if (!existing) {
+          await prisma.formDefinition.create({
+            data: {
+              name: form.name.trim(), description: form.description || null, icon: form.icon || null,
+              iconColor: form.icon_color || null, bgColor: form.background_color || null,
+              category: form._plugin_formcreator_category || null, glpiUuid: form.uuid, sections,
+            },
+          });
+          console.log(`Formulaire importé: ${form.name.trim()}`);
+        }
+      }
+    }
+  } catch (e) { console.warn('Import formcreator ignoré:', e.message); }
 }
 
 main()
