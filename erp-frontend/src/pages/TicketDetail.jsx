@@ -220,8 +220,6 @@ export default function TicketDetail() {
   const [allUsers, setAllUsers] = useState([]);
   const [syncFailures, setSyncFailures] = useState([]);
   const [savingField, setSavingField] = useState(null);
-  const [forwardModalOpen, setForwardModalOpen] = useState(false);
-  const [forwardEmail, setForwardEmail] = useState('');
   const [forwarding, setForwarding] = useState(false);
 
   const [adjacent, setAdjacent] = useState({ first: null, prev: null, next: null, last: null });
@@ -1132,13 +1130,10 @@ export default function TicketDetail() {
   }
 
   async function handleForwardEmail() {
-    if (!forwardEmail.trim()) return;
     setForwarding(true);
     try {
-      await api.post(`/tickets/${id}/forward-email`, { to: forwardEmail.trim() });
-      toast.success('Conversation transférée avec succès');
-      setForwardModalOpen(false);
-      setForwardEmail('');
+      await api.post(`/tickets/${id}/forward-email`);
+      toast.success('Conversation envoyée sur votre adresse email');
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erreur lors du transfert');
     } finally {
@@ -1249,7 +1244,7 @@ export default function TicketDetail() {
   const SIcon = sConfig.Icon;
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 flex flex-col gap-6 max-w-7xl mx-auto overflow-x-hidden">
+    <div className="p-4 sm:p-6 lg:p-8 flex flex-col gap-6 w-full max-w-none min-w-0 overflow-visible">
       {/* Top Header Bar (Fixe) */}
       <div className="flex items-center gap-3 pb-4 border-b border-outline-variant/30 shrink-0">
         <button
@@ -1368,7 +1363,7 @@ export default function TicketDetail() {
       </div>
 
       {/* Zone de contenu Ticket — carrousel directionnel (sortie + entrée) via AnimatePresence keyed par ticket.id */}
-      <div className="relative overflow-x-clip" style={{ minHeight: 400 }}>
+      <div className="relative overflow-visible min-w-0" style={{ minHeight: 400 }}>
         <AnimatePresence mode="popLayout" initial={false} custom={slideDirectionRef.current}>
           {ticket && (
             <motion.div
@@ -1555,9 +1550,9 @@ export default function TicketDetail() {
       )}
 
       {/* Command Center Layout (Katalyst style) */}
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-5">
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-5 min-w-0">
         {/* ── LEFT COLUMN: Properties & Metadata ────────────────────────── */}
-        <div className="flex flex-col gap-5 order-2 xl:order-1">
+        <div className="flex flex-col gap-5 min-w-0 order-2 xl:order-1">
           {/* Main Ticket Card */}
           <div className="bento-card overflow-hidden">
             {/* Barre d'accent selon le statut */}
@@ -2231,7 +2226,7 @@ export default function TicketDetail() {
         </div>
 
         {/* ── RIGHT COLUMN: Actions, AI, Approvals ──────────────────────── */}
-        <div className="flex flex-col gap-5 order-3 xl:sticky xl:top-6 xl:self-start">
+        <div className="flex flex-col gap-5 min-w-0 xl:w-[340px] xl:shrink-0 order-3 xl:sticky xl:top-6 xl:self-start">
           {/* Source Email Details */}
           {ticket.sourceEmail && (
             <div className="bento-card p-5 space-y-3">
@@ -2257,11 +2252,12 @@ export default function TicketDetail() {
               </dl>
               {ticket.messages?.length > 0 && canForward && (
                 <button
-                  onClick={() => setForwardModalOpen(true)}
-                  className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-xs font-semibold"
+                  onClick={handleForwardEmail}
+                  disabled={forwarding}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-xs font-semibold disabled:opacity-50"
                 >
-                  <Send className="w-3.5 h-3.5" />
-                  Transférer la conversation
+                  {forwarding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  {forwarding ? 'Envoi en cours...' : 'Transférer la conversation'}
                 </button>
               )}
             </div>
@@ -3891,71 +3887,7 @@ export default function TicketDetail() {
         </div>
       )}
 
-      {/* Modal : Transférer la conversation email */}
-      <AnimatePresence>
-        {forwardModalOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-md rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-2xl p-5 space-y-4"
-            >
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
-                  <Send className="w-4 h-4 text-primary" />
-                  Transférer la conversation
-                </h3>
-                <button
-                  onClick={() => { setForwardModalOpen(false); setForwardEmail(''); }}
-                  className="p-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container transition-colors cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
 
-              <p className="text-[11px] text-on-surface-variant leading-relaxed">
-                L'intégralité de la conversation email ( tickets #{id} ) sera envoyée sous forme de résumé formaté à l'adresse indiquée.
-              </p>
-
-              <div>
-                <label className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant mb-1 block">Adresse email du destinataire</label>
-                <input
-                  type="email"
-                  value={forwardEmail}
-                  onChange={(e) => setForwardEmail(e.target.value)}
-                  placeholder="destinataire@example.com"
-                  className="w-full px-3 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface text-xs focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none"
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleForwardEmail(); }}
-                  autoFocus
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2 border-t border-outline-variant/30">
-                <button
-                  onClick={() => { setForwardModalOpen(false); setForwardEmail(''); }}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-on-surface-variant hover:bg-surface-container transition-colors"
-                >
-                  Annuler
-                </button>
-                <button
-                  onClick={handleForwardEmail}
-                  disabled={!forwardEmail.trim() || forwarding}
-                  className="px-4 py-2 rounded-xl bg-primary text-white text-xs font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-2"
-                >
-                  {forwarding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                  {forwarding ? 'Envoi...' : 'Transférer'}
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }

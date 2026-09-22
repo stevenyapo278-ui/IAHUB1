@@ -2581,12 +2581,7 @@ router.post('/bulk-restore', forbidTechnicianTicketEdits, requireDeleteTicketPer
 // ── Transférer la conversation email ────────────────────────────────────────
 // POST /api/tickets/:id/forward-email — body: { to: "email@example.com" }
 // Sécurité : seul le demandeur assigné OU le technicien assigné peut transférer.
-router.post('/:id/forward-email', [
-  body('to').trim().isEmail().withMessage('Adresse email invalide'),
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-
+router.post('/:id/forward-email', async (req, res) => {
   const ticketId = Number(req.params.id);
   const ticket = await prisma.ticket.findUnique({
     where: { id: ticketId },
@@ -2621,7 +2616,8 @@ router.post('/:id/forward-email', [
     return res.status(400).json({ error: 'Aucun email dans la conversation de ce ticket.' });
   }
 
-  const { to } = req.body;
+  const to = req.user.email;
+  if (!to) return res.status(400).json({ error: 'Aucune adresse email associée à votre compte.' });
 
   // Construire le HTML de la conversation
   const conversationHtml = ticket.messages.map((msg, idx) => {
