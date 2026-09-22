@@ -89,6 +89,7 @@ export default function AdvancedTab() {
       const { data } = await api.patch('/advanced-settings', {
         backendUrl: backendUrlDraft.trim() || null,
         frontendUrl: frontendUrlDraft.trim() || null,
+        enforceHttps: settings.enforceHttps,
       });
       setSettings(data);
       setBackendUrlDraft(data.backendUrl || '');
@@ -264,8 +265,8 @@ export default function AdvancedTab() {
           <div className="bento-card-header px-0 py-0 pb-md border-b border-outline-variant/40">
             <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold mb-1">Adresses absolues du serveur</h3>
             <p className="font-body-sm text-body-sm text-on-surface-variant">
-              Adresses utilisées pour générer les liens absolus envoyés dans les e-mails (validation de brouillon, mots de passe, etc.). 
-              Indiquez l'IP ou le nom de domaine sans <code className="bg-surface-container-high px-1 rounded font-mono text-[11px]">http://</code> ni port.
+              Adresses utilisées pour générer les liens absolus envoyés dans les e-mails (validation de brouillon, mots de passe, etc.).
+              Indiquez l'IP ou le nom de domaine. Le protocole https:// peut être forcé via le toggle ci-dessous.
             </p>
           </div>
 
@@ -292,6 +293,18 @@ export default function AdvancedTab() {
                 className={inputClass}
               />
             </label>
+          </div>
+
+          <div className="flex items-center justify-between gap-md p-md rounded-xl bg-surface-container-low/40 border border-outline-variant/20">
+            <div>
+              <p className="text-sm font-semibold text-on-surface">Forcer HTTPS dans les liens email</p>
+              <p className="text-xs text-on-surface-variant">Quand activé, tous les liens générés dans les emails utiliseront https:// même si l'adresse saisie ne le précise pas.</p>
+            </div>
+            <Toggle
+              checked={settings.enforceHttps ?? true}
+              onChange={(v) => updateSetting('enforceHttps', v)}
+              disabled={saving}
+            />
           </div>
 
           <motion.div variants={itemVariants} className="flex justify-end pt-sm border-t border-outline-variant/40">

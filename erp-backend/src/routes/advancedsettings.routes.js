@@ -100,7 +100,7 @@ router.post('/pause', async (req, res) => {
 // PUT / PATCH / — sauvegarde des réglages (existants)
 // ═══════════════════════════════════════════════════════════════════════════
 const PUT_FIELDS = [
-  'backendUrl', 'frontendUrl',
+  'backendUrl', 'frontendUrl', 'enforceHttps',
   'autoSendAiEmails', 'autonomousMode', 'enableFewShotTriage',
   'closeChildrenWithParent', 'autoApproveManualTickets', 'enableAutoCreateSkills',
   'glpiTicketsSyncIntervalSeconds', 'emailSyncIntervalSeconds', 'aiModelsSyncIntervalHours',

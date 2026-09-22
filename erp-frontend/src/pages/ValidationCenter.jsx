@@ -723,7 +723,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   );
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] p-6 sm:p-8 max-w-7xl mx-auto animate-fadeIn">
+    <div className="flex flex-col h-[calc(100vh-4rem)] p-6 sm:p-8 w-full animate-fadeIn">
       {/* ── EN-TÊTE + ONGLETS + RECHERCHE (fixes, non scrollables) ── */}
       <div className="shrink-0 space-y-6">
       {/* En-tête de la page */}

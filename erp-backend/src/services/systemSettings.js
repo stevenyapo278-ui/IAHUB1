@@ -13,15 +13,22 @@ async function getSystemSettings() {
 
 // Construit une URL absolue à partir d'un "host" saisi par l'admin (Paramètres > Automatisation) :
 // une IP ou un nom de domaine ("192.168.1.10", "support.prosuma.ci"), avec ou sans port
-// ("192.168.1.10:8080"). Si l'admin tape explicitement "https://...", le protocole est préservé ;
+// ("192.168.1.10:8080"). Si enforceHttps est true, force https:// quelle que soit l'entrée.
+// Sinon, si l'admin tape explicitement "https://...", le protocole est préservé ;
 // sinon on déduit https:// pour les ports 443/8443 et http:// pour le reste.
-function buildUrlFromHost(host, defaultPort) {
+function buildUrlFromHost(host, defaultPort, enforceHttps) {
   const trimmed = host.trim().replace(/\/+$/, '');
   const explicitProtocol = trimmed.match(/^(https?):\/\//i);
   const withoutProtocol = trimmed.replace(/^https?:\/\//i, '');
   const portMatch = withoutProtocol.match(/:(\d+)$/);
   const hasPort = !!portMatch;
   const port = hasPort ? parseInt(portMatch[1], 10) : null;
+
+  if (enforceHttps) {
+    const hostOnly = withoutProtocol.replace(/:\d+$/, '');
+    return `https://${hostOnly}${hasPort ? `:${port}` : ''}`;
+  }
+
   let protocol = 'http://';
   let resolvedPort = port || defaultPort;
   if (explicitProtocol) {
@@ -42,13 +49,13 @@ function buildUrlFromHost(host, defaultPort) {
 // pour que tous les endroits qui génèrent des liens/ressources absolus (logo de signature, etc.)
 // se basent sur la même source de vérité, modifiable sans rebuild quand le serveur change d'adresse.
 function resolveBackendUrl(settings) {
-  if (settings?.backendUrl) return buildUrlFromHost(settings.backendUrl, 4000);
+  if (settings?.backendUrl) return buildUrlFromHost(settings.backendUrl, 4000, settings?.enforceHttps);
   return process.env.BACKEND_URL || 'http://localhost:4000';
 }
 
 // Même logique pour l'URL absolue du frontend (liens d'approbation, de réinitialisation de mot de passe...).
 function resolveFrontendUrl(settings) {
-  if (settings?.frontendUrl) return buildUrlFromHost(settings.frontendUrl, 3000);
+  if (settings?.frontendUrl) return buildUrlFromHost(settings.frontendUrl, 3000, settings?.enforceHttps);
   return process.env.FRONTEND_URL || 'http://localhost:3000';
 }
 

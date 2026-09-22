@@ -638,6 +638,7 @@ model SystemSettings {
   // d'environnement, puis sur localhost en dernier recours.
   backendUrl                String? @db.Text
   frontendUrl               String? @db.Text
+  enforceHttps              Boolean @default(true) // force https:// dans tous les liens email générés, même si l'admin n'a pas tapé le protocole
   // Fréquences de synchronisation automatique (Paramètres > Automatisation > Fréquences de synchronisation).
   // Toutes désactivables individuellement en mettant 0.
   emailSyncIntervalSeconds  Int     @default(15) // relevé des boîtes mail entrantes
