@@ -1410,6 +1410,9 @@ async function callAIWithTools(messages, options = {}) {
   const providers = await getActiveProviders();
   if (providers.length === 0) throw new Error('Aucun fournisseur IA configuré.');
 
+  // Mode vocal : 3 tours max (questions orales = simples, évite 2-3 tours LLM inutiles)
+  const maxRounds = options.voiceMode ? 3 : MAX_TOOL_ROUNDS;
+
   const systemContent = (options.forcedSystem || SYSTEM_PROMPT) + getDateContextLine();
 
   // Construire les messages API depuis l'historique
@@ -1451,12 +1454,12 @@ async function callAIWithTools(messages, options = {}) {
   // Boucle agentic : LLM appelle des tools, on exécute, on renvoie les résultats
   let finalText = '';
   const allToolResults = []; // résultats d'outils cumulés — remontés à l'appelant pour la validation des chiffres
-  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+  for (let round = 0; round < maxRounds; round++) {
     // Tools disponibles jusqu'à l'avant-dernier round ; le dernier round force une
     // réponse texte. AUPARAVANT : tools uniquement au round 0 → si le LLM avait
     // besoin d'une 2e recherche (utilisateur trouvé → puis ses tickets), il n'avait
     // que l'invention comme issue.
-    const callTools = round < MAX_TOOL_ROUNDS - 1;
+    const callTools = round < maxRounds - 1;
     const result = await callAiWithRetry(() => callProviderWithFallback(providers, null, 'chatbot', {
       messages: trimmedMessages,
       system: systemContent,
@@ -2923,6 +2926,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
         _stateKey: stateKey,
         existingSummary: options.existingSummary || null,
         summaryModelId: options.summaryModelId || null,
+        voiceMode: !!options.voiceMode,
       }
     );
 
@@ -3052,10 +3056,8 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     }
   }
 
-  // ═══ PASSE 2 : Audit & Ajustement (Auto-correction par le second LLM) ═══
-  // Le 2nd LLM reçoit la question utilisateur, la 1ère réponse générée, le contexte de conversation
-  // et les mêmes outils. Si la 1ère réponse est bonne, il l'affiche. Sinon, il l'ajuste.
-  if (reply && !isGreetingMessage(message)) {
+  // ═══ PASSE 2 : Audit & Ajustement — désactivé en vocal (économise 1 LLM call, chiffres déjà garantis par snapshot) ═══
+  if (reply && !isGreetingMessage(message) && !options.voiceMode) {
     try {
       _stepLog('pass2-audit', `draftLen=${reply.length}`);
       reply = await auditAndAdjustResponse(message, reply, {

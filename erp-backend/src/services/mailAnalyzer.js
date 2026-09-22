@@ -102,8 +102,15 @@ function throwHttpError(provider, status, bodyText, res) {
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Récupère TOUS les providers actifs avec au moins une clé active.
+// Cache 30s en mémoire pour éviter 3 requêtes DB par question vocale.
 // ═══════════════════════════════════════════════════════════════════════════
+let _providerCache = null;
+let _providerCacheAt = 0;
+const PROVIDER_CACHE_TTL = 30_000;
+
 async function getActiveProviders() {
+  const now = Date.now();
+  if (_providerCache && now - _providerCacheAt < PROVIDER_CACHE_TTL) return _providerCache;
   const providers = await prisma.aiProvider.findMany({
     where: { isActive: true, isDeleted: false },
     include: {
@@ -112,7 +119,9 @@ async function getActiveProviders() {
     },
     orderBy: { label: 'asc' },
   });
-  return providers.filter((p) => p.keys.length > 0);
+  _providerCache = providers.filter((p) => p.keys.length > 0);
+  _providerCacheAt = now;
+  return _providerCache;
 }
 
 async function getActiveProvider() {

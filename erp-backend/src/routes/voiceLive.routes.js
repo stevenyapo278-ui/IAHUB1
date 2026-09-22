@@ -298,7 +298,7 @@ async function executeTool(name, args, { user = null, sessionHistory = null } = 
           // garantis identiques à ceux du chat. history maintenu par session pour les follow-ups
           // ("et pour la semaine dernière ?").
           const history = Array.isArray(sessionHistory) ? sessionHistory.slice(-10) : [];
-          const result = await handleMessage(question, history, user, null, null, {});
+          const result = await handleMessage(question, history, user, null, null, { voiceMode: true });
           if (Array.isArray(sessionHistory)) {
             sessionHistory.push({ role: 'user', content: question });
             sessionHistory.push({ role: 'assistant', content: result.reply || '' });
@@ -750,13 +750,14 @@ function setupVoiceLive() {
       if (cached && now - cachedAt < SNAP_TTL) {
         snap = cached;
       } else {
-        const [total, open, newCount, myCount] = await Promise.all([
+        const [total, open, newCount, myCount, topLocs] = await Promise.all([
           prisma.ticket.count({ where: { deletedAt: null } }).catch(() => null),
           prisma.ticket.count({ where: { deletedAt: null, status: { in: ['NEW', 'OPEN', 'PENDING', 'PLANNED'] } } }).catch(() => null),
           prisma.ticket.count({ where: { deletedAt: null, status: 'NEW' } }).catch(() => null),
           currentUser ? prisma.ticket.count({ where: { deletedAt: null, requesterIds: { has: currentUser.sub } } }).catch(() => null) : null,
+          prisma.ticket.groupBy({ by: ['locationName'], where: { deletedAt: null, locationName: { not: null }, status: { in: ['NEW', 'OPEN', 'PENDING', 'PLANNED'] } }, _count: { id: true }, orderBy: { _count: { id: 'desc' } }, take: 3 }).catch(() => []),
         ]);
-        snap = { total, open, newCount, myCount, at: new Date().toISOString().slice(0, 16).replace('T', ' ') };
+        snap = { total, open, newCount, myCount, topLocs, at: new Date().toISOString().slice(0, 16).replace('T', ' ') };
         snapCache.data[userKey] = snap;
         snapCache.at[userKey] = now;
         if (Object.keys(snapCache.data).length > 50) {
@@ -767,6 +768,7 @@ function setupVoiceLive() {
       const parts = [];
       if (snap.total != null) parts.push(`Tickets totaux: ${snap.total}, ouverts: ${snap.open}, nouveaux: ${snap.newCount}`);
       if (snap.myCount != null) parts.push(`Tes tickets (demandeur): ${snap.myCount}`);
+      if (snap.topLocs?.length) parts.push(`Top lieux: ${snap.topLocs.map((l) => `${l.locationName} (${l._count.id})`).join(', ')}`);
       if (parts.length) snapshotBlock = `\n\n--- SNAPSHOT TEMPS RÉEL (${snap.at}) ---\n${parts.join(' | ')}\nUtilise ces chiffres directement si la question porte dessus — pas besoin d'appeler un outil. Pour tout détail (liste, ticket précis, stats par lieu/équipe) appelle l'outil adapté.\n`;
     } catch (snapErr) {
       logger.warn('[voice-live] Snapshot échoué:', snapErr.message);
