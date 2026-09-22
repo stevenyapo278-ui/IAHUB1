@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TYPE "TicketEventType" ADD VALUE 'REPLY_ON_CLOSED_SUGGESTED';
