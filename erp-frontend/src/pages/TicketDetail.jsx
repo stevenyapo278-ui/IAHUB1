@@ -357,6 +357,8 @@ export default function TicketDetail() {
   const canDelete = canEditTicketsRole && (canDeleteRole || hasPermission(user, 'tickets.delete'));
   const canManageProblems = canEditTicketsRole && (hasPermission(user, 'problems.manage') || user?.role === 'SUPERADMIN');
   const canEdit = (canEditTicketsRole || isTeamTicket) && (hasPermission(user, 'tickets.edit') || user?.role === 'ADMIN' || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN' || isTeamTicket);
+  const isRequesterOfTicket = ticket?.requesterIds?.includes(user?.id);
+  const canForward = isAssignedTechnician || isRequesterOfTicket || ['SUPERADMIN', 'ADMIN'].includes(user?.role);
 
   const followupContainerRef = useRef(null);
   const followupBlobUrlsRef = useRef([]);
@@ -2253,7 +2255,7 @@ export default function TicketDetail() {
                   </div>
                 )}
               </dl>
-              {ticket.messages?.length > 0 && (
+              {ticket.messages?.length > 0 && canForward && (
                 <button
                   onClick={() => setForwardModalOpen(true)}
                   className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-xs font-semibold"
