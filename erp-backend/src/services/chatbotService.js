@@ -631,13 +631,10 @@ function buildSearchQuery(params, user) {
       { assignedTo: { team: { name: { contains: v, mode: 'insensitive' } } } },
     ]);
 
-    if (user && (user.role === 'REQUESTER' || user.role === 'TECHNICIAN')) {
-      const roleFilter = { OR: where.OR || [] };
-      where.AND = [roleFilter, { OR: keywordFilter }];
-      delete where.OR;
-    } else {
-      where.OR = [...(where.OR || []), ...keywordFilter];
-    }
+    // Pour le chatbot : la recherche par mot-clé est globale (tous les tickets),
+    // pas restreinte aux seuls tickets du demandeur/technicien. Un utilisateur qui
+    // cherche "sauvegarde" doit trouver #73 même si ce n'est pas son ticket.
+    where.OR = keywordFilter;
   }
 
   // Dates
