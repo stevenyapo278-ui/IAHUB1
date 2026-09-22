@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Mic, MicOff, Volume2, VolumeX, Loader2 } from 'lucide-react';
 import { useVoiceLive } from '../hooks/useVoiceLive';
@@ -14,15 +14,13 @@ const STATE_CONFIG = {
 };
 
 export default function VoiceModeModal({ isOpen, onClose }) {
-  const [messages, setMessages] = useState([]);
   const messagesEndRef = useRef(null);
-  const lastTranscriptRef = useRef('');
-  const lastReplyRef = useRef('');
 
   const {
     state,
     transcript,
     reply,
+    messages,
     error,
     isSupported,
     isMuted,
@@ -37,7 +35,6 @@ export default function VoiceModeModal({ isOpen, onClose }) {
 
   const handleClose = useCallback(() => {
     stopAll();
-    setMessages([]);
     onClose();
   }, [stopAll, onClose]);
 
@@ -45,35 +42,6 @@ export default function VoiceModeModal({ isOpen, onClose }) {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
-
-  // Track transcript → add user message
-  useEffect(() => {
-    if (transcript && transcript !== lastTranscriptRef.current) {
-      lastTranscriptRef.current = transcript;
-      setMessages((prev) => [...prev, { id: Date.now(), role: 'user', text: transcript }]);
-    }
-  }, [transcript]);
-
-  // Track reply → update last assistant message or add new one
-  useEffect(() => {
-    if (reply && reply !== lastReplyRef.current) {
-      lastReplyRef.current = reply;
-      setMessages((prev) => {
-        const last = prev[prev.length - 1];
-        if (last && last.role === 'assistant') {
-          return [...prev.slice(0, -1), { ...last, text: reply }];
-        }
-        return [...prev, { id: Date.now(), role: 'assistant', text: reply }];
-      });
-    }
-  }, [reply]);
-
-  // Reset lastReplyRef when new user transcript arrives
-  useEffect(() => {
-    if (transcript && transcript !== lastTranscriptRef.current) {
-      lastReplyRef.current = '';
-    }
-  }, [transcript]);
 
   // ESC to close
   useEffect(() => {
@@ -87,7 +55,6 @@ export default function VoiceModeModal({ isOpen, onClose }) {
   useEffect(() => {
     if (!isOpen) {
       stopAll();
-      setMessages([]);
     }
   }, [isOpen, stopAll]);
 
@@ -257,9 +224,10 @@ export default function VoiceModeModal({ isOpen, onClose }) {
                     msg.role === 'user'
                       ? 'bg-blue-500/20 text-blue-100 rounded-br-md'
                       : 'bg-white/5 text-white/70 rounded-bl-md'
-                  }`}
+                  } ${msg.live ? 'opacity-80' : ''}`}
                 >
                   {msg.text}
+                  {msg.live && <span className="inline-block w-1.5 h-3.5 ml-1 align-middle bg-current animate-pulse" />}
                 </div>
                 {msg.role === 'user' && (
                   <div className="w-7 h-7 rounded-full bg-blue-500/30 flex items-center justify-center text-[10px] text-white/70 font-medium shrink-0">

@@ -735,6 +735,11 @@ function setupVoiceLive() {
       logger.warn(`[voice-live] Auth failed: ${authErr.message}`);
     }
 
+    // Tampons de transcription pour le tour en cours (Gemini envoie les transcriptions
+    // par fragments ; on accumule pour reconstruire la phrase complète à turnComplete).
+    let inputTranscriptBuf = '';
+    let outputTranscriptBuf = '';
+
     try {
       const apiKey = await getGeminiApiKey();
       const genai = new GoogleGenAI({ apiKey });
@@ -799,11 +804,30 @@ function setupVoiceLive() {
 
               const sc = msg.serverContent;
               if (sc) {
+                // Les transcriptions Gemini arrivent par FRAGMENTS (un mot à la fois).
+                // On accumule par tour et on relaie : fragment brut (partial) + tour comité
+                // (final) pour que le front affiche une bulle qui grossit au lieu d'une
+                // bulle par mot.
                 if (sc.inputTranscription?.text) {
-                  ws.send(JSON.stringify({ type: 'transcript', role: 'user', text: sc.inputTranscription.text }));
+                  inputTranscriptBuf += sc.inputTranscription.text;
+                  // partial = phrase accumulée depuis le début du tour (le front l'affiche
+                  // dans UNE bulle qui grossit, au lieu d'une bulle par fragment)
+                  ws.send(JSON.stringify({ type: 'transcript', role: 'user', text: inputTranscriptBuf, partial: true }));
                 }
                 if (sc.outputTranscription?.text) {
-                  ws.send(JSON.stringify({ type: 'transcript', role: 'assistant', text: sc.outputTranscription.text }));
+                  outputTranscriptBuf += sc.outputTranscription.text;
+                  ws.send(JSON.stringify({ type: 'transcript', role: 'assistant', text: outputTranscriptBuf, partial: true }));
+                }
+                if (sc.turnComplete || sc.interrupted) {
+                  // Fin de tour (ou interruption) : on commit les phrases complètes
+                  if (inputTranscriptBuf) {
+                    ws.send(JSON.stringify({ type: 'transcript', role: 'user', text: inputTranscriptBuf, final: true }));
+                    inputTranscriptBuf = '';
+                  }
+                  if (outputTranscriptBuf) {
+                    ws.send(JSON.stringify({ type: 'transcript', role: 'assistant', text: outputTranscriptBuf, final: true }));
+                    outputTranscriptBuf = '';
+                  }
                 }
                 if (sc.modelTurn?.parts) {
                   for (const part of sc.modelTurn.parts) {

@@ -4,6 +4,7 @@ export function useVoiceLive() {
   const [state, setState] = useState('idle');
   const [transcript, setTranscript] = useState('');
   const [reply, setReply] = useState('');
+  const [messages, setMessages] = useState([]);
   const [error, setError] = useState(null);
   const [isSupported, setIsSupported] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -17,7 +18,6 @@ export function useVoiceLive() {
   const activeSourcesRef = useRef([]);
   const speakingRef = useRef(false);
   const readyRef = useRef(false);
-  const replyTextRef = useRef('');
   const mutedRef = useRef(false);
 
   useEffect(() => {
@@ -32,6 +32,55 @@ export function useVoiceLive() {
   useEffect(() => {
     mutedRef.current = isMuted;
   }, [isMuted]);
+
+  // ── Gestion des messages (transcriptions fragmentées de Gemini) ──
+  // Gemini envoie les transcriptions par fragments : le backend relaie la phrase
+  // ACCUMULÉE du tour en cours (partial) puis la phrase complète (final). Côté front,
+  // chaque rôle a UNE bulle "live" qui grossit, committée en message définitif au
+  // final — au lieu d'une bulle par mot.
+
+  const upsertLive = useCallback((role, text) => {
+    setMessages((prev) => {
+      const idx = prev.findIndex((m) => m.role === role && m.live);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = { ...copy[idx], text };
+        return copy;
+      }
+      return [...prev, { id: `${role}-live`, role, text, live: true }];
+    });
+  }, []);
+
+  const commitLive = useCallback((role, text) => {
+    setMessages((prev) => {
+      const idx = prev.findIndex((m) => m.role === role && m.live);
+      const entry = { id: `${Date.now()}-${role}`, role, text };
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = entry;
+        return copy;
+      }
+      return [...prev, entry];
+    });
+  }, []);
+
+  const handleTranscript = useCallback((msg) => {
+    if (msg.partial) {
+      upsertLive(msg.role, msg.text);
+    } else if (msg.final) {
+      commitLive(msg.role, msg.text);
+    } else {
+      // Compatibilité ancien format (fragment brut sans partial/final)
+      upsertLive(msg.role, msg.text);
+    }
+    if (msg.role === 'user') {
+      setTranscript(msg.text);
+      if (!msg.final) setState('thinking');
+    } else {
+      setReply(msg.text);
+      if (!speakingRef.current) setState('speaking');
+    }
+  }, [upsertLive, commitLive]);
 
   const playVoiceChunk = useCallback((buffer) => {
     const audioCtx = audioCtxRef.current;
@@ -106,7 +155,7 @@ export function useVoiceLive() {
     setError(null);
     setTranscript('');
     setReply('');
-    replyTextRef.current = '';
+    setMessages([]);
     readyRef.current = false;
 
     const audioCtx = new AudioContext();
@@ -177,14 +226,7 @@ export function useVoiceLive() {
           readyRef.current = true;
           setState('listening');
         } else if (msg.type === 'transcript') {
-          if (msg.role === 'user') {
-            setTranscript(msg.text);
-            setState('thinking');
-          } else if (msg.role === 'assistant') {
-            replyTextRef.current += msg.text;
-            setReply(replyTextRef.current);
-            if (!speakingRef.current) setState('speaking');
-          }
+          handleTranscript(msg);
         } else if (msg.type === 'interrupted') {
           stopPlayback();
         } else if (msg.type === 'error') {
@@ -211,7 +253,7 @@ export function useVoiceLive() {
       setError(err.message || 'Erreur lors du démarrage');
       setState('error');
     });
-  }, [playVoiceChunk, stopPlayback, cleanupSession]);
+  }, [playVoiceChunk, stopPlayback, cleanupSession, handleTranscript]);
 
   const stopAll = useCallback(() => {
     cleanupSession();
@@ -224,6 +266,7 @@ export function useVoiceLive() {
     state,
     transcript,
     reply,
+    messages,
     error,
     isSupported,
     isMuted,
