@@ -111,14 +111,44 @@ echo "Démarrage du serveur..."
 if [ -n "$TLS_CERT_PATH" ] && [ ! -f "$TLS_CERT_PATH" ]; then
   echo "Génération du certificat auto-signé..."
   mkdir -p "$(dirname "$TLS_CERT_PATH")"
-  # Récupérer l'IP du container pour le SAN
+  # IPs à inclure dans le SAN : localhost + container + hôte LAN (pour micro sur https://10.x)
   CONTAINER_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")
+  # IP de l'hôte vue depuis le container (host.docker.internal → 10.0.70.126 en LAN)
+  HOST_IP=""
+  if getent hosts host.docker.internal >/dev/null 2>&1; then
+    HOST_IP=$(getent hosts host.docker.internal 2>/dev/null | awk '{print $1}' | head -1)
+  fi
+  # Variable d'env optionnelle pour forcer des SAN supplémentaires (ex: TLS_SAN_IPS="10.0.70.126,10.0.70.127")
+  EXTRA_IPS="${TLS_SAN_IPS:-}"
+  if [ -n "$FRONTEND_URL" ]; then
+    FRONTEND_HOST=$(echo "$FRONTEND_URL" | sed -E 's|https?://||' | cut -d: -f1 | cut -d/ -f1)
+    case "$FRONTEND_HOST" in
+      *.*.*.*) # ressemble à une IP
+        if [ "$FRONTEND_HOST" != "$CONTAINER_IP" ] && [ "$FRONTEND_HOST" != "$HOST_IP" ] && [ "$FRONTEND_HOST" != "127.0.0.1" ] && [ "$FRONTEND_HOST" != "localhost" ]; then
+          EXTRA_IPS="${EXTRA_IPS:+$EXTRA_IPS,}$FRONTEND_HOST"
+        fi
+        ;;
+    esac
+  fi
+  SAN="DNS:localhost,IP:127.0.0.1,IP:${CONTAINER_IP}"
+  if [ -n "$HOST_IP" ] && [ "$HOST_IP" != "$CONTAINER_IP" ] && [ "$HOST_IP" != "127.0.0.1" ]; then
+    SAN="${SAN},IP:${HOST_IP}"
+  fi
+  if [ -n "$EXTRA_IPS" ]; then
+    for ip in $(echo "$EXTRA_IPS" | tr ',' ' '); do
+      ip=$(echo "$ip" | xargs)
+      if [ -n "$ip" ] && ! echo "$SAN" | grep -q "IP:${ip}"; then
+        SAN="${SAN},IP:${ip}"
+      fi
+    done
+  fi
+  echo "SAN: $SAN"
   openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
     -keyout "$TLS_KEY_PATH" \
     -out "$TLS_CERT_PATH" \
     -subj "/C=CI/ST=Abidjan/O=Prosuma/CN=${CONTAINER_IP}" \
-    -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:${CONTAINER_IP}" \
-    2>/dev/null && echo "Certificat auto-signé généré pour IP ${CONTAINER_IP}" || echo "⚠️  Échec génération certificat"
+    -addext "subjectAltName=${SAN}" \
+    2>/dev/null && echo "Certificat auto-signé généré (SAN: $SAN)" || echo "⚠️  Échec génération certificat"
 fi
 
 exec node src/server.js
