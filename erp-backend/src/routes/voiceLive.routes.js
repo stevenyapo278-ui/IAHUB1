@@ -829,18 +829,16 @@ function setupVoiceLive() {
               prebuiltVoiceConfig: { voiceName: LIVE_VOICE },
             },
           },
-          // ── Détection de fin de parole plus patiente ──
-          // Par défaut (END_SENSITIVITY_HIGH), le modèle coupe dès ~300 ms de silence :
-          // une hésitation ou une respiration mid-phrase déclenche la réponse trop tôt, souvent
-          // avec une question incomplète => chiffres hors sujet. END_SENSITIVITY_LOW + 900 ms
-          // de silence requis laissent le temps de finir sa phrase (et sa pause de réflexion).
+          // ── Détection de fin de parole — compromis rapidité / précision ──
+          // 900ms était trop patient (transcription lente). 500ms + HIGH est plus
+          // réactif tout en gardant prefix 100ms pour ne pas couper les attaques.
           realtimeInputConfig: {
             automaticActivityDetection: {
               disabled: false,
               startOfSpeechSensitivity: 'START_SENSITIVITY_HIGH',
-              endOfSpeechSensitivity: 'END_SENSITIVITY_LOW',
+              endOfSpeechSensitivity: 'END_SENSITIVITY_HIGH',
               prefixPaddingMs: 100,
-              silenceDurationMs: 900,
+              silenceDurationMs: 500,
             },
           },
           inputAudioTranscription: {},

@@ -9,9 +9,9 @@ class PCMProcessor extends AudioWorkletProcessor {
     this.noiseGateEnabled = true;
     this.noiseFloor = 0.008;      // RMS plancher bruit de fond (adaptatif)
     this.gateThreshold = 0.015;    // Seuil d'ouverture (parole détectée)
-    this.attackMs = 10;           // ms d'attaque
-    this.releaseMs = 250;         // ms de relâchement
-    this.holdMs = 120;            // maintien ouvert après parole
+    this.attackMs = 5;            // ms d'attaque (plus réactif)
+    this.releaseMs = 150;         // ms de relâchement (était 250)
+    this.holdMs = 80;             // maintien ouvert après parole (était 120)
     this._gateOpen = false;
     this._holdRemain = 0;
     this._envelopeMs = 0;
