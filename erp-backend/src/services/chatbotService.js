@@ -1404,11 +1404,19 @@ async function executeTool(toolName, args, user, { confirmed = false } = {}) {
 const MAX_TOOL_ROUNDS = 6;
 
 async function callAIWithTools(messages, options = {}) {
-  const providers = await getActiveProviders();
+  let providers = await getActiveProviders();
   if (providers.length === 0) throw new Error('Aucun fournisseur IA configuré.');
 
-  // Mode vocal : 3 tours max (questions orales = simples, évite 2-3 tours LLM inutiles)
+  // Mode vocal : modèle rapide (latence) + 3 tours max
   const maxRounds = options.voiceMode ? 3 : MAX_TOOL_ROUNDS;
+  let forcedModelId = options.forcedModelId || null;
+  if (options.voiceMode && !forcedModelId) {
+    // Cherche le modèle le plus rapide (flash-lite) pour le vocal
+    for (const p of providers) {
+      const fast = p.models.find((m) => m.name.includes('flash-lite') || m.name.includes('flash-latest'));
+      if (fast) { forcedModelId = fast.id; break; }
+    }
+  }
 
   const systemContent = (options.forcedSystem || SYSTEM_PROMPT) + getDateContextLine();
 
@@ -1463,7 +1471,7 @@ async function callAIWithTools(messages, options = {}) {
       temperature: options.temperature ?? 0.2,
       maxTokens: options.maxTokens ?? 4096,
       tools: callTools ? CHATBOT_TOOLS : undefined,
-      forcedModelId: options.forcedModelId,
+      forcedModelId: forcedModelId || options.forcedModelId,
     }), { maxRetries: 2, baseDelay: 1500 });
 
     // result est { text, toolCalls } quand tools sont fournis, sinon string
