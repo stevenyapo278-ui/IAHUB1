@@ -2338,7 +2338,8 @@ export default function TicketDetail() {
            )}
 
           {/* Liaison fil email — tickets manuels : lier un conversationId Outlook */}
-          <div className="bento-card p-5 space-y-3">
+          {!['REQUESTER', 'TECHNICIAN'].includes(user?.role) && (
+            <div className="bento-card p-5 space-y-3">
             <h3 className="bento-card-header -mx-5 -mt-5 mb-0" style={{ borderTopLeftRadius: 'inherit', borderTopRightRadius: 'inherit' }}>
               <div className="flex items-center gap-2">
                 <Link2 className="w-4 h-4" style={{ color: 'var(--color-info)' }} />
@@ -2371,6 +2372,7 @@ export default function TicketDetail() {
               </p>
             )}
           </div>
+          )}
 
           {/* AI Suggestions */}
           {ticket.aiSuggestions?.length > 0 && (

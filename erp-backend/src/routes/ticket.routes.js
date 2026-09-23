@@ -1371,6 +1371,11 @@ router.patch('/:id', allowTechnicianStatusOnly, requireTicketAssignOrTechnicianS
     }
   }
 
+  // Liaison fil conversation : réservé aux rôles privilégiés
+  if (req.body.outlookConversationId !== undefined && ['REQUESTER', 'TECHNICIAN'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Accès refusé : seuls ADMIN/HOTLINE/SUPERADMIN peuvent lier un fil de conversation' });
+  }
+
   // ── Validation de la transition de statut ──────────────────────────────
   if (status !== undefined) {
     const current = await prisma.ticket.findUnique({ where: { id }, select: { status: true } });
