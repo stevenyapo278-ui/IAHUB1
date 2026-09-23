@@ -1609,19 +1609,37 @@ async function prepareMessagesWithSummary(apiMessages, existingSummary = null, s
   let totalTokens = trimmedMessages.reduce((s, m) => s + estimateTokens(m.content), 0);
 
   // Si on dépasse le seuil ET qu'on n'a pas déjà un résumé, en créer un
-  if (totalTokens > SUMMARIZE_THRESHOLD_TOKENS && !existingSummary) {
-    const messagesToSummarize = trimmedMessages.slice(0, -4); // Garder les 4 derniers intacts
-    if (messagesToSummarize.length >= 2) {
-      const summary = await summarizeConversationHistory(messagesToSummarize, summaryModelId);
-      if (summary) {
-        // Remplacer les anciens messages par le résumé
-        const recentMessages = trimmedMessages.slice(-4);
-        trimmedMessages = [
-          { role: 'user', content: `[Résumé de la conversation précédente]\n${summary}` },
-          ...recentMessages,
-        ];
-        totalTokens = trimmedMessages.reduce((s, m) => s + estimateTokens(m.content), 0);
-        return { trimmedMessages, newSummary: summary };
+  if (totalTokens > SUMMARIZE_THRESHOLD_TOKENS) {
+    // Avec ou sans résumé existant : on résume les plus anciens au-delà des 4 derniers
+    if (!existingSummary) {
+      const messagesToSummarize = trimmedMessages.slice(0, -4);
+      if (messagesToSummarize.length >= 2) {
+        const summary = await summarizeConversationHistory(messagesToSummarize, summaryModelId);
+        if (summary) {
+          const recentMessages = trimmedMessages.slice(-4);
+          trimmedMessages = [
+            { role: 'user', content: `[Résumé de la conversation précédente]\n${summary}` },
+            ...recentMessages,
+          ];
+          totalTokens = trimmedMessages.reduce((s, m) => s + estimateTokens(m.content), 0);
+          return { trimmedMessages, newSummary: summary };
+        }
+      }
+    } else {
+      // Résumé hiérarchique : append, pas overwrite
+      const messagesToSummarize = trimmedMessages.slice(0, -6);
+      if (messagesToSummarize.length >= 2) {
+        const summary = await summarizeConversationHistory(messagesToSummarize, summaryModelId);
+        if (summary) {
+          const combined = (existingSummary + '\n' + summary).slice(0, 3000);
+          const recentMessages = trimmedMessages.slice(-6);
+          trimmedMessages = [
+            { role: 'user', content: `[Résumé de la conversation précédente]\n${combined}` },
+            ...recentMessages,
+          ];
+          totalTokens = trimmedMessages.reduce((s, m) => s + estimateTokens(m.content), 0);
+          return { trimmedMessages, newSummary: combined };
+        }
       }
     }
   }
@@ -2885,19 +2903,26 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   let forcedSystem = SYSTEM_PROMPT + buildCapabilityLine() + userContextLine;
 
   // ── Injecter le contexte de la recherche précédente pour les follow-ups ──
-  // Si le message semble être un suivi ("ce site", "cette semaine", "et pour Jean",
-  // "combien", "leurs tickets"...), on injecte le toolData et le message précédent
-  // pour que le LLM ait le contexte de la recherche en cours.
-  if (previousState?.lastToolData || previousState?.lastMessage) {
-    const isFollowUp = /\b(ce |cette |cet |leur |leurs |ceux |ces |et |aussi |total|nombre|combien|statut|état|lesquels|lesquelles|ensuite|autre|détail|précis|encore)\b/i.test(message)
+  if (previousState?.lastToolData || previousState?.lastMessage || previousState?.lastTicketIds?.length) {
+    // Détection pronominale élargie : "son/sa/ce problème/ce ticket" + tous les déictiques
+    const hasPronoun = /\b(son|sa|ses|ce|cette|cet|ces|leur|leurs|celui|celle|ceux|celles|il|elle|ils|elles|le|la|les|lui|leur)\b/i.test(message);
+    const hasDeictic = /\b(ce |cette |cet |leur |leurs |ceux |ces |et |aussi |total|nombre|combien|statut|état|lesquels|lesquelles|ensuite|autre|détail|précis|encore|son|sa|ses)\b/i.test(message)
       || /^[\s!.,?]*$/.test(message.replace(/\b(oui|non|ok|merci|super|bon|du|de|le|la|les|des|un|une|et|ou|pour|sur|avec|dans|par)\b/gi, '').trim());
-    if (isFollowUp && (previousState.lastToolData || previousState.lastMessage)) {
+    // Toujours injecter si entités structurées existent (même sans match regex) — "son ticket ?" isolé doit marcher
+    const shouldInject = hasPronoun || hasDeictic || previousState?.lastTicketIds?.length;
+    if (shouldInject) {
       let contextInjection = '\n\nCONTEXTE DE LA RECHERCHE PRÉCÉDENTE :\n';
       if (previousState.lastMessage) contextInjection += `Question précédente : "${previousState.lastMessage}"\n`;
+      if (previousState.lastTicketIds?.length) contextInjection += `Tickets mentionnés : ${previousState.lastTicketIds.map((id) => `#${id}`).join(', ')}\n`;
+      if (previousState.lastPerson) contextInjection += `Personne mentionnée : ${previousState.lastPerson}\n`;
+      if (previousState.lastLocation) contextInjection += `Lieu mentionné : ${previousState.lastLocation}\n`;
       if (previousState.lastToolData) contextInjection += `Résultats obtenus :\n${previousState.lastToolData.substring(0, 4000)}\n`;
-      contextInjection += `\nL'utilisateur fait un suivi sur cette recherche. Utilise ce contexte pour comprendre les références ("ce site", "cette semaine", "leurs tickets", etc.).`;
+      // Ajouter aussi l'historique textuel récent (3 derniers échanges) pour les références croisées
+      const recentHistory = history.slice(-6).map((m) => `${m.role === 'assistant' ? 'MARIE' : 'Utilisateur'}: ${(m.content || '').slice(0, 300)}`).join('\n');
+      if (recentHistory) contextInjection += `Historique récent :\n${recentHistory}\n`;
+      contextInjection += `\nL'utilisateur fait un suivi sur cette recherche. Utilise ce contexte pour comprendre les références ("son ticket", "ce problème", "ce site", etc.).`;
       forcedSystem += contextInjection;
-      _stepLog('context-injection', `injected ${previousState.lastToolData?.length || 0} chars of previous toolData`);
+      _stepLog('context-injection', `injected ${previousState.lastToolData?.length || 0} chars + ${previousState.lastTicketIds?.length || 0} ticketIds`);
     }
   }
 
@@ -3085,12 +3110,18 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   _stepLog('done', `replyLen=${(reply || '').length} citedTickets=${citedTicketIds.length}`);
 
   // ── Persister le contexte de recherche pour les follow-ups multi-tour ──
-  // Sauvegarde le toolData et le message pour que le prochain tour puisse
-  // injecter le contexte ("ce site", "cette semaine", etc.)
   if (stateKey && toolData) {
+    // Extraire entités structurées pour résolution pronominale ("son ticket", "ce problème")
+    const ticketIds = [...new Set((String(toolData).match(/(?:#|\bticket\s*n?°?\s*)(\d+)/gi) || []).map((s) => Number(s.replace(/[^\d]/g, ''))).filter((n) => n > 0))].slice(0, 5);
+    // Personne / lieu mentionnés dans toolData (heuristique simple)
+    const personMatch = String(toolData).match(/(?:demandeur|assigné|technicien)\s*:\s*([A-ZÀ-ÿ][a-zà-ÿ]+(?:\s[A-ZÀ-ÿ][a-zà-ÿ]+)+)/);
+    const locationMatch = String(toolData).match(/(?:lieu|magasin|site)\s*:\s*([A-ZÀ-ÿ][\w\s>-]+)/i);
     await setConversationState(stateKey, 'agentic', {
       lastToolData: toolData.substring(0, 6000),
       lastMessage: message,
+      lastTicketIds: ticketIds.length ? ticketIds : (citedTicketIds || []).slice(0, 5),
+      lastPerson: personMatch ? personMatch[1].trim() : null,
+      lastLocation: locationMatch ? locationMatch[1].trim() : null,
     }, []);
   }
 
