@@ -493,11 +493,11 @@ export default function MainLayout() {
 
           {showUserMenu && (
             <div className="sidebar-dropdown" style={{ bottom: '100%', left: 0, top: 'auto', marginBottom: 8 }}>
-              {user?.roles && user.roles.length > 1 && (
+              {(user?.roles?.includes('SUPERADMIN') ? ['SUPERADMIN','ADMIN','HOTLINE','TECHNICIAN','REQUESTER'] : user?.roles)?.length > 1 && (
                 <div className="px-3 py-2 border-b border-outline-variant/20">
                   <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Changer de rôle</p>
                   <div className="flex flex-wrap gap-1">
-                    {user.roles.map((r) => (
+                    {(user?.roles?.includes('SUPERADMIN') ? ['SUPERADMIN','ADMIN','HOTLINE','TECHNICIAN','REQUESTER'] : user.roles).map((r) => (
                       <button
                         key={r}
                         onClick={async (e) => {

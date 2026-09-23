@@ -431,7 +431,8 @@ router.post('/switch-role', authenticate, async (req, res) => {
   if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
 
   const ownedRoles = user.roles && user.roles.length ? user.roles : [user.role];
-  if (!ownedRoles.includes(role)) return res.status(403).json({ error: 'Vous ne possédez pas ce rôle' });
+  const isSuperAdmin = ownedRoles.includes('SUPERADMIN') || user.role === 'SUPERADMIN';
+  if (!isSuperAdmin && !ownedRoles.includes(role)) return res.status(403).json({ error: 'Vous ne possédez pas ce rôle' });
 
   const token = jwt.sign(
     { sub: user.id, email: user.email, role, roles: ownedRoles, teamId: user.teamId },
