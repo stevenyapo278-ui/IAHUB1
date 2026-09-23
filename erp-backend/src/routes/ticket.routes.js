@@ -2588,6 +2588,7 @@ router.post('/:id/forward-email', async (req, res) => {
     select: {
       id: true, title: true, sourceEmail: true, sourceName: true, sourceSubject: true,
       requesterIds: true, assignedToId: true,
+      assignees: { select: { id: true } },
       messages: {
         orderBy: { timestamp: 'asc' },
         select: {
@@ -2601,11 +2602,9 @@ router.post('/:id/forward-email', async (req, res) => {
   if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
 
   // Vérification de sécurité : demandeur OU technicien assigné
-  const currentUserEmail = (req.user.email || '').toLowerCase();
-  const isRequester = (ticket.requesterIds || []).some(
-    (rid) => rid === req.user.id
-  );
-  const isAssignedTechnician = ticket.assignedToId === req.user.id;
+  const uid = req.user.sub;
+  const isRequester = (ticket.requesterIds || []).some((rid) => rid === uid);
+  const isAssignedTechnician = ticket.assignedToId === uid || (ticket.assignees || []).some((a) => a.id === uid);
   const isAdmin = ['SUPERADMIN', 'ADMIN'].includes(req.user.role);
 
   if (!isRequester && !isAssignedTechnician && !isAdmin) {
