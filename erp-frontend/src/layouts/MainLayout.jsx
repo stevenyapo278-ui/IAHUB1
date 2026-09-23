@@ -504,17 +504,14 @@ export default function MainLayout() {
                           e.stopPropagation();
                           if (r === user.role) { setShowUserMenu(false); return; }
                           try {
-                            const token = localStorage.getItem('token');
-                            const res = await fetch('/api/auth/switch-role', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ role: r }) });
-                            const data = await res.json();
-                            if (data.token) {
-                              localStorage.setItem('token', data.token);
-                              localStorage.setItem('user', JSON.stringify(data.user));
-                              window.location.reload();
-                            } else if (data.error) {
-                              alert(data.error);
-                            }
-                          } catch (err) { console.error(err); }
+                            const { data } = await api.post('/auth/switch-role', { role: r });
+                            localStorage.setItem('token', data.token);
+                            localStorage.setItem('user', JSON.stringify(data.user));
+                            setShowUserMenu(false);
+                            window.location.reload();
+                          } catch (err) {
+                            console.error('switch-role', err.response?.data?.error || err.message);
+                          }
                         }}
                         className={`px-2 py-1 rounded-md text-[10px] font-bold border transition-colors ${r === user.role ? 'bg-primary text-white border-primary' : 'bg-surface-container text-on-surface-variant border-outline-variant/30 hover:border-primary/40'}`}
                       >
