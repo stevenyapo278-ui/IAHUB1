@@ -475,6 +475,12 @@ model Ticket {
   @@index([teamId])
   @@index([approvedById])
   @@index([status, createdAt])
+  @@index([deletedAt])
+  @@index([approvalStatus])
+  @@index([deletedAt, approvalStatus, status])
+  @@index([category])
+  @@index([createdAt])
+  @@index([deletedAt, status, locationName])
 }
 
 // Suggestion d'action interne générée par l'agent IA pour le technicien (ex: réassigner, changer priorité, ticket similaire)
