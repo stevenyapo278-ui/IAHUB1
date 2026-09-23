@@ -1363,7 +1363,7 @@ router.post(
 router.patch('/:id', allowTechnicianStatusOnly, requireTicketAssignOrTechnicianStatusOnly, async (req, res) => {
   const id = Number(req.params.id);
   // Whitelist : seuls ces champs acceptent la mise à jour (protection mass assignment)
-  const allowed = ['title', 'content', 'status', 'priority', 'category', 'teamId', 'assignedToId', 'assigneeIds', 'requesterId', 'secondaryRequesterId', 'requesterIds', 'sourceName', 'sourceEmail', 'type', 'urgency', 'impact', 'source', 'externalId', 'dueDate', 'assetIds', 'observerIds', 'approvalStatus', 'isMajorIncident', 'impactedSites', 'closeSuggested', 'locationId'];
+  const allowed = ['title', 'content', 'status', 'priority', 'category', 'teamId', 'assignedToId', 'assigneeIds', 'requesterId', 'secondaryRequesterId', 'requesterIds', 'sourceName', 'sourceEmail', 'type', 'urgency', 'impact', 'source', 'externalId', 'dueDate', 'assetIds', 'observerIds', 'approvalStatus', 'isMajorIncident', 'impactedSites', 'closeSuggested', 'locationId', 'outlookConversationId'];
   const { title, content, status, priority, category, teamId, assignedToId, assigneeIds, requesterId, secondaryRequesterId, requesterIds, sourceName, sourceEmail, type, urgency, impact, source, externalId, dueDate, assetIds, locationId } = req.body;
 
   // Rejecter les champs non autorisés
@@ -1457,6 +1457,9 @@ router.patch('/:id', allowTechnicianStatusOnly, requireTicketAssignOrTechnicianS
   if (dueDate !== undefined) {
     data.dueDate = dueDate ? new Date(dueDate) : null;
     data.dueDateNotifiedAt = null;
+  }
+  if (req.body.outlookConversationId !== undefined) {
+    data.outlookConversationId = req.body.outlookConversationId ? String(req.body.outlookConversationId).trim() || null : null;
   }
   if (type !== undefined) data.type = type;
   if (urgency !== undefined) data.urgency = urgency;

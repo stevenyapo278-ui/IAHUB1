@@ -221,6 +221,8 @@ export default function TicketDetail() {
   const [syncFailures, setSyncFailures] = useState([]);
   const [savingField, setSavingField] = useState(null);
   const [forwarding, setForwarding] = useState(false);
+  const [conversationIdDraft, setConversationIdDraft] = useState('');
+  const [savingConversationId, setSavingConversationId] = useState(false);
   const attachmentInputRef = useRef(null);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
 
@@ -247,6 +249,9 @@ export default function TicketDetail() {
     if (ticket.sourceName || ticket.sourceEmail) return { fullName: ticket.sourceName, email: ticket.sourceEmail };
     return null;
   }, [ticket, allUsers]);
+  useEffect(() => {
+    if (ticket) setConversationIdDraft(ticket.outlookConversationId || '');
+  }, [ticket?.outlookConversationId]);
   const [corrections, setCorrections] = useState([]);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
@@ -1181,6 +1186,19 @@ export default function TicketDetail() {
       toast.error(err.response?.data?.error || 'Erreur lors du transfert');
     } finally {
       setForwarding(false);
+    }
+  }
+
+  async function handleSaveConversationId() {
+    setSavingConversationId(true);
+    try {
+      const { data } = await api.patch(`/tickets/${id}`, { outlookConversationId: conversationIdDraft.trim() || null });
+      setTicket(data);
+      toast.success(conversationIdDraft.trim() ? 'Fil lié au ticket (suivis mails automatiques)' : 'Liaison retirée');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de la liaison');
+    } finally {
+      setSavingConversationId(false);
     }
   }
 
@@ -2317,7 +2335,42 @@ export default function TicketDetail() {
                 </button>
               )}
             </div>
-          )}
+           )}
+
+          {/* Liaison fil email — tickets manuels : lier un conversationId Outlook */}
+          <div className="bento-card p-5 space-y-3">
+            <h3 className="bento-card-header -mx-5 -mt-5 mb-0" style={{ borderTopLeftRadius: 'inherit', borderTopRightRadius: 'inherit' }}>
+              <div className="flex items-center gap-2">
+                <Link2 className="w-4 h-4" style={{ color: 'var(--color-info)' }} />
+                <span className="text-xs font-semibold" style={{ color: 'var(--color-foreground)' }}>Fil de conversation</span>
+              </div>
+            </h3>
+            <p className="text-xs text-on-surface-variant leading-relaxed">
+              {ticket.outlookConversationId ? 'Fil lié — les prochains mails de ce fil seront rattachés à ce ticket.' : 'Aucun fil lié. Collez un ID de conversation Outlook (depuis le mail) pour rattacher les suivis.'}
+            </p>
+            <div className="flex gap-2">
+              <input
+                value={conversationIdDraft}
+                onChange={(e) => setConversationIdDraft(e.target.value)}
+                placeholder="AAQkAD..."
+                className="flex-1 px-3 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface text-xs focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none"
+                disabled={savingConversationId}
+              />
+              <button
+                onClick={handleSaveConversationId}
+                disabled={savingConversationId || conversationIdDraft.trim() === (ticket.outlookConversationId || '')}
+                className="px-4 py-2 rounded-xl bg-primary text-white text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors flex items-center gap-1.5 shrink-0"
+              >
+                {savingConversationId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                {ticket.outlookConversationId ? 'Mettre à jour' : 'Lier'}
+              </button>
+            </div>
+            {ticket.outlookConversationId && (
+              <p className="text-[11px] text-emerald-600 dark:text-emerald-400 truncate" title={ticket.outlookConversationId}>
+                Lié : {ticket.outlookConversationId}
+              </p>
+            )}
+          </div>
 
           {/* AI Suggestions */}
           {ticket.aiSuggestions?.length > 0 && (
