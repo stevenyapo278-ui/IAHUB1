@@ -139,10 +139,12 @@ router.post(
         );
 
         let permissions = null;
-        if (user.role !== 'SUPERADMIN') {
-          const groupCount = await prisma.permissionGroup.count({ where: { members: { some: { id: user.id } } } });
-          if (groupCount > 0) {
-            permissions = Array.from(await getUserPermissions(user.id));
+        if (activeRole !== 'SUPERADMIN') {
+          const groupNameMap = { ADMIN: 'Administrateurs', TECHNICIAN: 'Techniciens', HOTLINE: 'Équipe Hotline', REQUESTER: 'Demandeurs' };
+          const targetGroupName = groupNameMap[activeRole];
+          if (targetGroupName) {
+            const group = await prisma.permissionGroup.findUnique({ where: { name: targetGroupName }, include: { members: { where: { id: user.id }, select: { id: true } } } });
+            if (group && group.members.length > 0) permissions = group.permissions;
           }
         }
 
@@ -223,10 +225,12 @@ router.post(
         );
 
         let permissions = null;
-        if (account.role !== 'SUPERADMIN') {
-          const groupCount = await prisma.permissionGroup.count({ where: { members: { some: { id: account.id } } } });
-          if (groupCount > 0) {
-            permissions = Array.from(await getUserPermissions(account.id));
+        if (activeRole2 !== 'SUPERADMIN') {
+          const groupNameMap = { ADMIN: 'Administrateurs', TECHNICIAN: 'Techniciens', HOTLINE: 'Équipe Hotline', REQUESTER: 'Demandeurs' };
+          const targetGroupName = groupNameMap[activeRole2];
+          if (targetGroupName) {
+            const group = await prisma.permissionGroup.findUnique({ where: { name: targetGroupName }, include: { members: { where: { id: account.id }, select: { id: true } } } });
+            if (group && group.members.length > 0) permissions = group.permissions;
           }
         }
 
@@ -236,7 +240,7 @@ router.post(
             id: account.id,
             email: account.email,
             fullName: account.fullName,
-            role: account.role,
+            role: activeRole2,
             roles: roles2,
             teamId: account.teamId,
             permissions,
@@ -359,20 +363,22 @@ router.get('/me', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Utilisateur introuvable' });
     }
 
+    const roles = user.roles && user.roles.length ? user.roles : [user.role];
+    const activeRole = req.user.role; // garde le rôle actif du token, pas le rôle principal
     let permissions = null;
-    if (user.role !== 'SUPERADMIN') {
+    if (activeRole !== 'SUPERADMIN') {
       try {
-        const groupCount = await prisma.permissionGroup.count({ where: { members: { some: { id: user.id } } } });
-        if (groupCount > 0) {
-          permissions = Array.from(await getUserPermissions(user.id));
+        const groupNameMap = { ADMIN: 'Administrateurs', TECHNICIAN: 'Techniciens', HOTLINE: 'Équipe Hotline', REQUESTER: 'Demandeurs' };
+        const targetGroupName = groupNameMap[activeRole];
+        if (targetGroupName) {
+          const group = await prisma.permissionGroup.findUnique({ where: { name: targetGroupName }, include: { members: { where: { id: user.id }, select: { id: true } } } });
+          if (group && group.members.length > 0) permissions = group.permissions;
         }
       } catch (permErr) {
         console.error('[auth.me] Erreur permissions:', permErr.message);
       }
     }
 
-    const roles = user.roles && user.roles.length ? user.roles : [user.role];
-    const activeRole = req.user.role; // garde le rôle actif du token, pas le rôle principal
     const freshToken = jwt.sign(
       { sub: user.id, email: user.email, role: activeRole, roles, teamId: user.teamId },
       process.env.JWT_SECRET,
@@ -443,8 +449,21 @@ router.post('/switch-role', authenticate, async (req, res) => {
   let permissions = null;
   if (role !== 'SUPERADMIN') {
     try {
-      const groupCount = await prisma.permissionGroup.count({ where: { members: { some: { id: user.id } } } });
-      if (groupCount > 0) permissions = Array.from(await getUserPermissions(user.id));
+      // Permissions = celles du groupe correspondant au rôle ACTIF, pas toutes les groupes du user
+      const groupNameMap = { ADMIN: 'Administrateurs', TECHNICIAN: 'Techniciens', HOTLINE: 'Équipe Hotline', REQUESTER: 'Demandeurs' };
+      const targetGroupName = groupNameMap[role];
+      if (targetGroupName) {
+        const group = await prisma.permissionGroup.findUnique({ where: { name: targetGroupName }, include: { members: { where: { id: user.id }, select: { id: true } } } });
+        if (group && group.members.length > 0) {
+          permissions = group.permissions;
+        } else {
+          // Pas de groupe pour ce rôle -> null pour que le front retombe sur les règles par rôle
+          permissions = null;
+        }
+      } else {
+        const groupCount = await prisma.permissionGroup.count({ where: { members: { some: { id: user.id } } } });
+        if (groupCount > 0) permissions = Array.from(await getUserPermissions(user.id));
+      }
     } catch {}
   }
 
