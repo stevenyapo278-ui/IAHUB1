@@ -815,6 +815,13 @@ function setupVoiceLive() {
             'FLUIDITÉ VOCALE :',
             '- Parle en phrases complètes et fluides, sans couper entre deux propositions.',
             '- Ne t interromps jamais toi-même en milieu de phrase.',
+            '',
+            'SCHÉMA TICKET (colonnes et valeurs exactes — ne jamais inventer) :',
+            '- status: NEW | OPEN | PENDING | WAITING_FOR_USER | SOLVED | CLOSED | PLANNED',
+            '- priority: P1 (Critique) | P2 (Haute) | P3 (Moyenne) | P4 (Basse)',
+            '- category: Réseau | Système | Logiciel | Matériel | Téléphonie | Applicatif | Sécurité | Demande reporting',
+            '- team: Réseau | Système | Sécurité | Applicatif | Logiciel | Matériel | Téléphonie | DÉVELOPPEMENT',
+            '- Exemple: "tickets P1" → priority P1, "tickets ouverts" → status NEW/OPEN/PENDING/PLANNED',
             snapshotBlock,
           ].join('\n'),
           speechConfig: {
@@ -899,22 +906,27 @@ function setupVoiceLive() {
               }
 
               if (msg.toolCall) {
-                try {
-                  const fcs = msg.toolCall.functionCalls;
-                  if (fcs && typeof fcs[Symbol.iterator] === 'function') {
-                    for (const fc of fcs) {
-                      const fcName = String(fc.name || '');
-                      const fcArgs = JSON.parse(JSON.stringify(fc.args || {}));
-                      const fcId = String(fc.id || '');
-                      logger.info(`[voice-live] Tool: ${fcName}`);
+                const fcs = msg.toolCall.functionCalls;
+                if (fcs && typeof fcs[Symbol.iterator] === 'function') {
+                  for (const fc of fcs) {
+                    const fcName = String(fc.name || '');
+                    const fcArgs = JSON.parse(JSON.stringify(fc.args || {}));
+                    const fcId = String(fc.id || '');
+                    logger.info(`[voice-live] Tool: ${fcName}`);
+                    try {
                       const result = await executeTool(fcName, fcArgs, { user: currentUser, sessionHistory });
                       await session.sendToolResponse({
                         functionResponses: [{ id: fcId, name: fcName, response: result }],
                       });
+                    } catch (toolErr) {
+                      logger.error(`[voice-live] Tool ${fcName} error: ${toolErr.message}`);
+                      try {
+                        await session.sendToolResponse({
+                          functionResponses: [{ id: fcId, name: fcName, response: { error: toolErr.message, success: false } }],
+                        });
+                      } catch {}
                     }
                   }
-                } catch (toolErr) {
-                  logger.error(`[voice-live] Tool error: ${toolErr.message}`);
                 }
               }
             } catch (err) {
