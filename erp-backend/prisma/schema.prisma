@@ -75,6 +75,7 @@ enum TicketEventType {
   DUE_DATE_UPDATED
   DELETED
   RESTORED
+  RESOLUTION_CONFIRMED_ON_CLOSED
 }
 
 enum TicketPriority {
