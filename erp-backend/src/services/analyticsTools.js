@@ -63,69 +63,70 @@ function parsePeriod(period) {
  */
 async function getTopLocationsStats({ filterKeyword, period, limit = 5, sortByUrgent = false }) {
   const startDate = parsePeriod(period);
-  
-  const where = {};
-  if (startDate) {
-    where.createdAt = { gte: startDate };
-  }
+  const where = { deletedAt: null, approvalStatus: { notIn: ['PENDING', 'REJECTED'] } };
+  if (startDate) where.createdAt = { gte: startDate };
 
-  // Si un mot clé est fourni (ex: "asten", "caisse", "imprimante")
   if (filterKeyword && filterKeyword.trim()) {
     const kw = filterKeyword.trim();
     where.OR = [
       { title: { contains: kw, mode: 'insensitive' } },
       { content: { contains: kw, mode: 'insensitive' } },
-      // Ticket n'a pas de relation `location` — seulement locationId/locationName (nom résolu)
       { locationName: { contains: kw, mode: 'insensitive' } },
     ];
   }
 
-  // Récupère les tickets (locationName = nom complet résolu du lieu, cf. schema.prisma)
-  const tickets = await prisma.ticket.findMany({
+  // groupBy DB — évite de charger tous les tickets en mémoire
+  const groups = await prisma.ticket.groupBy({
+    by: ['locationName'],
     where,
-    select: {
-      id: true,
-      priority: true,
-      status: true,
-      createdAt: true,
-      locationId: true,
-      locationName: true,
-    },
+    _count: { id: true },
+    orderBy: { _count: { id: 'desc' } },
+    take: (Number(limit) || 5) * 3,
   });
 
-  // Groupement par Lieu
-  const locationMap = new Map();
+  const locNames = groups.map((g) => g.locationName).filter(Boolean);
+  const [urgentGroups, resolvedGroups] = await Promise.all([
+    locNames.length
+      ? prisma.ticket.groupBy({ by: ['locationName'], where: { ...where, locationName: { in: locNames }, priority: { in: ['P1', 'P2'] } }, _count: { id: true } })
+      : [],
+    locNames.length
+      ? prisma.ticket.groupBy({ by: ['locationName'], where: { ...where, locationName: { in: locNames }, status: { in: ['SOLVED', 'CLOSED'] } }, _count: { id: true } })
+      : [],
+  ]);
+  const urgentMap = new Map(urgentGroups.map((g) => [g.locationName, g._count.id]));
+  const resolvedMap = new Map(resolvedGroups.map((g) => [g.locationName, g._count.id]));
 
-  for (const t of tickets) {
-    const locName = t.locationName || 'Non spécifié / Magasin Inconnu';
-    const locId = t.locationId || 'unknown';
-
-    if (!locationMap.has(locName)) {
-      locationMap.set(locName, {
-        locationId: locId,
-        locationName: locName,
-        total: 0,
-        urgentCount: 0,
-        resolvedCount: 0,
-      });
-    }
-
-    const item = locationMap.get(locName);
-    item.total += 1;
-    if (t.priority === 'P1' || t.priority === 'P2') item.urgentCount += 1; // P1+P2 = urgent
-    if (t.status === 'SOLVED' || t.status === 'CLOSED') item.resolvedCount += 1; // pas de statut RESOLVED dans TicketStatus
+  // Tickets sans lieu (null)
+  const nullGroup = groups.find((g) => g.locationName === null);
+  let nullCounts = { urgent: 0, resolved: 0 };
+  let grandTotal = await prisma.ticket.count({ where });
+  if (nullGroup) {
+    const [nu, nr] = await Promise.all([
+      prisma.ticket.count({ where: { ...where, locationName: null, priority: { in: ['P1', 'P2'] } } }),
+      prisma.ticket.count({ where: { ...where, locationName: null, status: { in: ['SOLVED', 'CLOSED'] } } }),
+    ]);
+    nullCounts = { urgent: nu, resolved: nr };
   }
 
+  const mapped = groups.map((g) => {
+    const name = g.locationName || 'Non spécifié / Magasin Inconnu';
+    return {
+      locationId: 'unknown',
+      locationName: name,
+      total: g._count.id,
+      urgentCount: g.locationName === null ? nullCounts.urgent : (urgentMap.get(g.locationName) || 0),
+      resolvedCount: g.locationName === null ? nullCounts.resolved : (resolvedMap.get(g.locationName) || 0),
+    };
+  });
+
   // Tri : par tickets critiques (P1) décroissants si demandé, sinon par total décroissant
-  const sorted = Array.from(locationMap.values())
+  const sorted = [...mapped]
     .sort((a, b) =>
       sortByUrgent
         ? (b.urgentCount - a.urgentCount) || (b.total - a.total)
         : b.total - a.total
     )
     .slice(0, Number(limit) || 5);
-
-  const grandTotal = tickets.length;
 
   return {
     totalTicketsAnalyzed: grandTotal,
@@ -154,7 +155,7 @@ async function getTopLocationsStats({ filterKeyword, period, limit = 5, sortByUr
  */
 async function getCategoryDistribution({ locationId, period, filterKeyword, limit = 6 }) {
   const startDate = parsePeriod(period);
-  const where = {};
+  const where = { deletedAt: null, approvalStatus: { notIn: ['PENDING', 'REJECTED'] } };
   if (startDate) where.createdAt = { gte: startDate };
   if (locationId) where.locationId = Number(locationId);
 
@@ -166,27 +167,19 @@ async function getCategoryDistribution({ locationId, period, filterKeyword, limi
     ];
   }
 
-  const tickets = await prisma.ticket.findMany({
+  const groups = await prisma.ticket.groupBy({
+    by: ['category'],
     where,
-    select: {
-      category: true,
-      priority: true,
-    },
+    _count: { id: true },
+    orderBy: { _count: { id: 'desc' } },
+    take: Number(limit) || 6,
   });
 
-  const catMap = new Map();
-  for (const t of tickets) {
-    const cat = t.category || 'Non catégorisé';
-    catMap.set(cat, (catMap.get(cat) || 0) + 1);
-  }
-
-  const sorted = Array.from(catMap.entries())
-    .map(([name, count]) => ({ name, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, Number(limit) || 6);
+  const sorted = groups.map((g) => ({ name: g.category || 'Non catégorisé', count: g._count.id }));
+  const grandTotal = await prisma.ticket.count({ where });
 
   return {
-    totalTickets: tickets.length,
+    totalTickets: grandTotal,
     categories: sorted,
     chartData: sorted.map((item) => ({
       name: item.name,
@@ -299,50 +292,51 @@ async function analyzeRootCause({ locationName, filterKeyword, limit = 15 }) {
  */
 async function getTeamDistribution({ period } = {}) {
   const startDate = parsePeriod(period);
-
   const where = { deletedAt: null, status: { notIn: ['CLOSED', 'SOLVED'] }, approvalStatus: { notIn: ['PENDING', 'REJECTED'] } };
   if (startDate) where.createdAt = { gte: startDate };
 
-  const tickets = await prisma.ticket.findMany({
+  const groups = await prisma.ticket.groupBy({
+    by: ['teamId'],
     where,
-    select: {
-      id: true,
-      priority: true,
-      status: true,
-      teamId: true,
-      team: { select: { name: true } },
-    },
+    _count: { id: true },
   });
 
-  const teamMap = new Map();
+  // Résoudre les noms d'équipes
+  const teamIds = groups.map((g) => g.teamId).filter(Boolean);
+  const teams = teamIds.length ? await prisma.team.findMany({ where: { id: { in: teamIds } }, select: { id: true, name: true } }) : [];
+  const teamNameById = new Map(teams.map((t) => [t.id, t.name]));
+
+  // Urgents et répartition par statut en parallèle
+  const [urgentGroups, statusGroups] = await Promise.all([
+    prisma.ticket.groupBy({ by: ['teamId'], where: { ...where, priority: 'P1' }, _count: { id: true } }),
+    prisma.ticket.groupBy({ by: ['teamId', 'status'], where, _count: { id: true } }),
+  ]);
+  const urgentMap = new Map(urgentGroups.map((g) => [g.teamId, g._count.id]));
+  const statusMap = new Map(statusGroups.map((g) => [`${g.teamId ?? 'null'}:${g.status}`, g._count.id]));
+
   let unassignedCount = 0;
-
-  for (const t of tickets) {
-    const teamName = t.team?.name || 'Non assigné';
-
-    if (!t.teamId) {
-      unassignedCount++;
-    }
-
-    if (!teamMap.has(teamName)) {
-      teamMap.set(teamName, {
-        teamName,
-        total: 0,
-        urgent: 0,
-        byStatus: { NEW: 0, OPEN: 0, PENDING: 0, SOLVED: 0 },
-      });
-    }
-
-    const item = teamMap.get(teamName);
-    item.total += 1;
-    if (t.priority === 'P1') item.urgent += 1;
-    if (item.byStatus[t.status] !== undefined) item.byStatus[t.status] += 1;
+  const teamMap = new Map();
+  for (const g of groups) {
+    const teamName = g.teamId ? (teamNameById.get(g.teamId) || 'Non assigné') : 'Non assigné';
+    if (!g.teamId) unassignedCount = g._count.id;
+    teamMap.set(teamName, {
+      teamName,
+      total: g._count.id,
+      urgent: urgentMap.get(g.teamId) || 0,
+      byStatus: {
+        NEW: statusMap.get(`${g.teamId ?? 'null'}:NEW`) || 0,
+        OPEN: statusMap.get(`${g.teamId ?? 'null'}:OPEN`) || 0,
+        PENDING: statusMap.get(`${g.teamId ?? 'null'}:PENDING`) || 0,
+        SOLVED: statusMap.get(`${g.teamId ?? 'null'}:SOLVED`) || 0,
+      },
+    });
   }
 
   const sorted = Array.from(teamMap.values()).sort((a, b) => b.total - a.total);
+  const totalOpen = groups.reduce((s, g) => s + g._count.id, 0);
 
   return {
-    totalOpen: tickets.length,
+    totalOpen,
     unassignedCount,
     teams: sorted,
     chartData: sorted.map((t) => ({

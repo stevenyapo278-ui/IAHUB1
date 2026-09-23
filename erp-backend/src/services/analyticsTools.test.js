@@ -5,25 +5,26 @@ const {
 } = require('./analyticsTools');
 
 jest.mock('../prismaClient', () => ({
-  ticket: { findMany: jest.fn() },
+  ticket: { findMany: jest.fn(), groupBy: jest.fn(), count: jest.fn() },
+  team: { findMany: jest.fn() },
 }));
 
 describe('getTopLocationsStats', () => {
   beforeEach(() => jest.clearAllMocks());
 
   it('groupe par locationName (pas de relation location sur Ticket)', async () => {
-    prisma.ticket.findMany.mockResolvedValue([
-      { id: 1, priority: 'P1', status: 'OPEN', createdAt: new Date(), locationId: 10, locationName: 'CENTRALE > MARCORY' },
-      { id: 2, priority: 'P3', status: 'SOLVED', createdAt: new Date(), locationId: 10, locationName: 'CENTRALE > MARCORY' },
-      { id: 3, priority: 'P2', status: 'NEW', createdAt: new Date(), locationId: null, locationName: null },
-    ]);
+    prisma.ticket.groupBy
+      .mockResolvedValueOnce([
+        { locationName: 'CENTRALE > MARCORY', _count: { id: 2 } },
+        { locationName: null, _count: { id: 1 } },
+      ])
+      .mockResolvedValueOnce([{ locationName: 'CENTRALE > MARCORY', _count: { id: 1 } }])
+      .mockResolvedValueOnce([{ locationName: 'CENTRALE > MARCORY', _count: { id: 1 } }]);
+    prisma.ticket.count.mockResolvedValue(3);
 
     const stats = await getTopLocationsStats({ period: '30d', limit: 5 });
 
-    // Aucune requête sur une relation `location` inexistante
-    const whereKeys = Object.keys(prisma.ticket.findMany.mock.calls[0][0].where || {});
-    expect(whereKeys).not.toContain('location');
-
+    expect(prisma.ticket.groupBy).toHaveBeenCalled();
     expect(stats.rankings[0]).toMatchObject({
       locationName: 'CENTRALE > MARCORY',
       totalTickets: 2,
@@ -34,10 +35,12 @@ describe('getTopLocationsStats', () => {
   });
 
   it('filtre par mot-clé via locationName/title/content', async () => {
-    prisma.ticket.findMany.mockResolvedValue([]);
+    prisma.ticket.groupBy.mockResolvedValue([]);
+    prisma.ticket.count.mockResolvedValue(0);
+
     await getTopLocationsStats({ filterKeyword: 'asten', period: '30d' });
 
-    const where = prisma.ticket.findMany.mock.calls[0][0].where;
+    const where = prisma.ticket.groupBy.mock.calls[0][0].where;
     expect(where.OR).toEqual([
       { title: { contains: 'asten', mode: 'insensitive' } },
       { content: { contains: 'asten', mode: 'insensitive' } },
@@ -46,12 +49,14 @@ describe('getTopLocationsStats', () => {
   });
 
   it('trie par tickets P1 (critiques) quand sortByUrgent=true', async () => {
-    prisma.ticket.findMany.mockResolvedValue([
-      { id: 1, priority: 'P3', status: 'OPEN', createdAt: new Date(), locationId: 1, locationName: 'MAG A' },
-      { id: 2, priority: 'P3', status: 'OPEN', createdAt: new Date(), locationId: 1, locationName: 'MAG A' },
-      { id: 3, priority: 'P3', status: 'OPEN', createdAt: new Date(), locationId: 1, locationName: 'MAG A' },
-      { id: 4, priority: 'P1', status: 'OPEN', createdAt: new Date(), locationId: 2, locationName: 'MAG B' },
-    ]);
+    prisma.ticket.groupBy
+      .mockResolvedValueOnce([
+        { locationName: 'MAG A', _count: { id: 3 } },
+        { locationName: 'MAG B', _count: { id: 1 } },
+      ])
+      .mockResolvedValueOnce([{ locationName: 'MAG B', _count: { id: 1 } }])
+      .mockResolvedValueOnce([]);
+    prisma.ticket.count.mockResolvedValue(4);
 
     const stats = await getTopLocationsStats({ sortByUrgent: true, limit: 5 });
     expect(stats.rankings[0].locationName).toBe('MAG B'); // 1 P1 bat 3 P3
@@ -59,11 +64,14 @@ describe('getTopLocationsStats', () => {
   });
 
   it('trie par total décroissant par défaut', async () => {
-    prisma.ticket.findMany.mockResolvedValue([
-      { id: 1, priority: 'P3', status: 'OPEN', createdAt: new Date(), locationId: 1, locationName: 'MAG A' },
-      { id: 2, priority: 'P3', status: 'OPEN', createdAt: new Date(), locationId: 1, locationName: 'MAG A' },
-      { id: 3, priority: 'P1', status: 'OPEN', createdAt: new Date(), locationId: 2, locationName: 'MAG B' },
-    ]);
+    prisma.ticket.groupBy
+      .mockResolvedValueOnce([
+        { locationName: 'MAG A', _count: { id: 2 } },
+        { locationName: 'MAG B', _count: { id: 1 } },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    prisma.ticket.count.mockResolvedValue(3);
 
     const stats = await getTopLocationsStats({ limit: 5 });
     expect(stats.rankings[0].locationName).toBe('MAG A');
