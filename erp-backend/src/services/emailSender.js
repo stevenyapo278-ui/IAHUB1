@@ -195,10 +195,9 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
         });
       }
     } catch (err) {
-      // Message source introuvable (purgé/rétention Outlook) → envoi en email neuf plutôt
-      // que d'échouer : le destinataire reçoit quand même sa réponse, sans fil de conversation.
-      if (/Erreur Graph API \(404\)/.test(err.message || '')) {
-        console.warn(`[emailSender] Message source ${inReplyToGraphMessageId} introuvable (404) — envoi sans fil de conversation`);
+      // Message source introuvable ou ID invalide (purgé, rétention, mauvais format) → envoi en email neuf
+      if (/Erreur Graph API \((404|400)\)/.test(err.message || '')) {
+        console.warn(`[emailSender] Message source ${inReplyToGraphMessageId} invalide (${err.message.match(/\(40\d\)/)?.[0] || '400/404'}) — envoi sans fil de conversation`);
         draft = await buildNewMessage();
       } else {
         throw err;

@@ -2619,7 +2619,7 @@ router.post('/:id/forward-email', async (req, res) => {
   // Répondre dans le fil de la conversation existante (thread)
   const lastMsg = ticket.messages[ticket.messages.length - 1];
   const conversationId = lastMsg?.conversationId || null;
-  const inReplyToId = lastMsg?.internetMessageId || lastMsg?.outlookMessageId || null;
+  const inReplyToId = lastMsg?.outlookMessageId || null;
 
   // Destinataire = tous les participants de la conversation SAUF celui qui clique
   const myEmail = (req.user.email || '').toLowerCase();
