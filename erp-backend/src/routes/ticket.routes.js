@@ -2094,7 +2094,7 @@ router.post('/:id/attachments', ticketAttachmentUpload.array('files', 10), async
       data: {
         ticketId,
         filename: file.originalname,
-        mimetype: file.mimetype,
+        mimeType: file.mimetype,
         size: file.size,
         localFilepath: path.join('uploads', 'ticket-attachments', safeFilename),
         source: 'MANUAL',
