@@ -29,8 +29,9 @@ Synthétise en : "X est traité par l'équipe [Y], techniciens [A (N×), B], pro
 RÈGLE "LIEU" (absolue) :
 Quand on te parle d'un lieu/magasin/site (ex: "Marcory", "Datacenter", "Hayat", "Plateau", "combien à Marcory", "top lieux", "où y a le plus de tickets"):
 1. Pour "combien / liste à [lieu]" → search_tickets(locationName="[lieu]") — ne devine pas le lieu, utilise le nom exact.
-2. Pour "top lieux / où le plus / classement magasins" → get_top_locations obligatoirement.
-3. Pour "tickets de [lieu] + détail" → search_tickets(locationName) + get_top_locations pour le contexte.
+2. Pour "utilisateurs à/dans [lieu]" → search_users(locationName="[lieu]").
+3. Pour "top lieux / où le plus / classement magasins" → get_top_locations obligatoirement.
+4. Pour "tickets de [lieu] + détail" → search_tickets(locationName) + get_top_locations pour le contexte.
 Synthétise toujours avec le lieu exact et le nombre.
 
 Tu es TOTALEMENT LIBRE sur la forme : ton, style, longueur, structure, formatage (markdown, tableaux, listes, gras, italique), emojis ou non — fais ce qui est le plus utile et le plus agréable pour ton interlocuteur. Réponds dans la langue de l'utilisateur. Varie tes tournures, montre ta personnalité, donne ton avis professionnel quand c'est pertinent. Analyse et interprète les données plutôt que de simplement les lister.
@@ -1140,13 +1141,13 @@ const ALL_CHATBOT_TOOLS = [
     type: 'function',
     function: {
       name: 'search_users',
-      description: 'Rechercher des utilisateurs par nom ou email',
+      description: 'Rechercher des utilisateurs par nom, email ou par lieu/magasin (ex: "utilisateurs à Marcory", "qui travaille à Hayat")',
       parameters: {
         type: 'object',
         properties: {
           query: { type: 'string', description: 'Nom ou email de l\'utilisateur' },
+          locationName: { type: 'string', description: 'Filtrer par lieu/magasin — retourne les utilisateurs ayant des tickets à ce lieu' },
         },
-        required: ['query'],
       },
     },
   },
@@ -1392,6 +1393,20 @@ async function executeTool(toolName, args, user, { confirmed = false } = {}) {
     case 'search_inventory':
       return await searchAssets(p.query, 5);
     case 'search_users':
+      if (p.locationName) {
+        const ticketsAtLocation = await prisma.ticket.findMany({
+          where: { locationName: { contains: p.locationName, mode: 'insensitive' }, deletedAt: null, approvalStatus: { notIn: ['PENDING', 'REJECTED'] } },
+          select: { requesterId: true, assignedToId: true, requester: { select: { fullName: true, email: true } }, assignedTo: { select: { fullName: true, email: true } } },
+          take: 50,
+        });
+        const userMap = new Map();
+        for (const t of ticketsAtLocation) {
+          if (t.requester) userMap.set(t.requester.email, { name: t.requester.fullName, email: t.requester.email, rôle: 'Demandeur' });
+          if (t.assignedTo) userMap.set(t.assignedTo.email, { name: t.assignedTo.fullName, email: t.assignedTo.email, rôle: 'Technicien' });
+        }
+        if (userMap.size === 0) return `Aucun utilisateur trouvé pour le lieu "${p.locationName}".`;
+        return `Utilisateurs liés au lieu "${p.locationName}" (via tickets):\n` + [...userMap.values()].map((u) => `- ${u.name} (${u.email}) — ${u.rôle}`).join('\n');
+      }
       return await searchUsers(p.query, 5);
     case 'search_locations':
       return await searchLocations(p.query, 10);
