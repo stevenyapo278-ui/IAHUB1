@@ -2620,12 +2620,13 @@ router.post('/:id/forward-email', async (req, res) => {
   const lastMsg = ticket.messages[ticket.messages.length - 1];
   const conversationId = lastMsg?.conversationId || null;
   const inReplyToId = lastMsg?.outlookMessageId || null;
+  const inReplyToHeader = lastMsg?.internetMessageId || null;
 
   const replyTo = req.user.email;
   if (!replyTo) return res.status(400).json({ error: 'Aucune adresse email associée à votre compte.' });
 
   const subject = `Re: ${ticket.sourceSubject || ticket.title}`;
-  // Construire le HTML de la conversation
+  // Corps = transfert de la conversation originale (pas un résumé IA)
   const conversationHtml = ticket.messages.map((msg) => {
     const dir = msg.direction === 'INBOUND' ? '📥 Reçu' : '📤 Envoyé';
     const date = new Date(msg.timestamp).toLocaleString('fr-FR');
@@ -2661,14 +2662,13 @@ router.post('/:id/forward-email', async (req, res) => {
     </div>`;
 
   try {
-    if (!replyTo) return res.status(400).json({ error: 'Aucun destinataire trouvé pour cette conversation.' });
-
     await sendEmail({
       ticketId: ticket.id,
       to: replyTo,
       subject,
       bodyHtml,
       conversationId: conversationId || undefined,
+      inReplyTo: inReplyToHeader || undefined,
       inReplyToGraphMessageId: inReplyToId || undefined,
       saveAsMessage: true,
     });

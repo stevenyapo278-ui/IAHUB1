@@ -171,6 +171,9 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
       toRecipients,
       ...(ccRecipientsPayload.length > 0 ? { ccRecipients: ccRecipientsPayload } : {}),
       ...(logoAttachment ? { attachments: [logoAttachment] } : {}),
+      // Threading même en fallback (nouveau message) : garde le fil Outlook
+      ...(inReplyTo ? { internetMessageHeaders: [{ name: 'In-Reply-To', value: inReplyTo }, { name: 'References', value: inReplyTo }] } : {}),
+      ...(conversationId && !inReplyToGraphMessageId ? { conversationId } : {}),
     };
     return graphFetch(account, '/me/messages', { method: 'POST', body: JSON.stringify(message) });
   };
