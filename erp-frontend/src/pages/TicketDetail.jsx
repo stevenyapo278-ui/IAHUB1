@@ -221,6 +221,8 @@ export default function TicketDetail() {
   const [syncFailures, setSyncFailures] = useState([]);
   const [savingField, setSavingField] = useState(null);
   const [forwarding, setForwarding] = useState(false);
+  const attachmentInputRef = useRef(null);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
 
   const [adjacent, setAdjacent] = useState({ first: null, prev: null, next: null, last: null });
   const slideDirectionRef = useRef('next'); // 'next' = vers la droite→gauche, 'prev' = gauche→droite
@@ -814,6 +816,26 @@ export default function TicketDetail() {
     } catch (err) {
       toast.error(err.response?.data?.error || "Erreur upload image");
       return [];
+    }
+  }
+
+  async function handleAttachmentUpload(e) {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setUploadingAttachment(true);
+    const fd = new FormData();
+    files.forEach((f) => fd.append('files', f));
+    try {
+      const { data } = await api.post(`/tickets/${id}/attachments`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      toast.success(`${files.length} fichier(s) joint(s)`);
+      setTicket((prev) => ({ ...prev, attachments: data.attachments }));
+    } catch (err) {
+      toast.error(err.response?.data?.error || "Erreur lors de l'ajout de la pièce jointe");
+    } finally {
+      setUploadingAttachment(false);
+      if (attachmentInputRef.current) attachmentInputRef.current.value = '';
     }
   }
 
@@ -1750,13 +1772,24 @@ export default function TicketDetail() {
             </div>
 
             {/* Attachments */}
-            {ticket.attachments?.length > 0 && (
               <div className="border-t border-outline-variant/30 pt-4 mt-4">
-                <h4 className="text-[11px] font-extrabold uppercase tracking-wider text-on-surface mb-3 flex items-center gap-1.5">
-                  <Paperclip className="w-3.5 h-3.5 text-primary" />
-                  Pièces jointes ({(ticket?.attachments || []).length})
-                </h4>
-                <div className="flex flex-wrap gap-3">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-[11px] font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-1.5">
+                    <Paperclip className="w-3.5 h-3.5 text-primary" />
+                    Pièces jointes ({(ticket?.attachments || []).length})
+                  </h4>
+                  <input ref={attachmentInputRef} type="file" multiple className="hidden" onChange={handleAttachmentUpload} />
+                  <button
+                    onClick={() => attachmentInputRef.current?.click()}
+                    disabled={uploadingAttachment}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary border border-primary/20 text-[11px] font-bold hover:bg-primary/15 transition-colors disabled:opacity-50"
+                  >
+                    {uploadingAttachment ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                    Joindre
+                  </button>
+                </div>
+                {ticket.attachments?.length > 0 ? (
+                  <div className="flex flex-wrap gap-3">
                   {(ticket?.attachments || []).map((a) => {
                     const isImage = a.mimeType?.startsWith('image/');
                     const fromEmail = a.source === 'INCOMING_EMAIL';
@@ -1792,8 +1825,10 @@ export default function TicketDetail() {
                     );
                   })}
                 </div>
+                ) : (
+                  <p className="text-xs text-on-surface-variant italic">Aucune pièce jointe — cliquez sur Joindre pour ajouter un fichier.</p>
+                )}
               </div>
-            )}
           </div>
 
           {/* Tickets liés / Problèmes racines / Sous-tickets — regroupés dans une modale,

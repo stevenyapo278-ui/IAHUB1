@@ -2047,9 +2047,64 @@ async function notifyRequesterOnStatusChange(id, status) {
 const FOLLOWUP_IMAGES_DIR = path.join(process.cwd(), 'uploads', 'followup-images');
 fs.mkdirSync(FOLLOWUP_IMAGES_DIR, { recursive: true });
 
+const TICKET_ATTACHMENTS_DIR = path.join(process.cwd(), 'uploads', 'ticket-attachments');
+fs.mkdirSync(TICKET_ATTACHMENTS_DIR, { recursive: true });
+
 const followupUpload = multer({
   dest: FOLLOWUP_IMAGES_DIR,
   limits: { fileSize: 10 * 1024 * 1024 },
+});
+
+const ticketAttachmentUpload = multer({
+  dest: TICKET_ATTACHMENTS_DIR,
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
+
+// Joindre manuellement des fichiers à un ticket (pièces jointes)
+router.post('/:id/attachments', ticketAttachmentUpload.array('files', 10), async (req, res) => {
+  const ticketId = Number(req.params.id);
+  const ticket = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { id: true, requesterId: true, requesterIds: true } });
+  if (!ticket) {
+    for (const f of (req.files || [])) { try { fs.unlinkSync(f.path); } catch {} }
+    return res.status(404).json({ error: 'Ticket introuvable' });
+  }
+  // Vérification d'accès (demandeur / observateur / équipe)
+  if (isRequesterOnly(req.user) && ticket.requesterId !== req.user.sub && !(ticket.requesterIds || []).includes(req.user.sub)) {
+    const isObserver = await prisma.ticket.findFirst({ where: { id: ticketId, observers: { some: { id: req.user.sub } } }, select: { id: true } });
+    if (!isObserver) {
+      for (const f of (req.files || [])) { try { fs.unlinkSync(f.path); } catch {} }
+      return res.status(404).json({ error: 'Ticket introuvable' });
+    }
+  }
+  if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'Aucun fichier fourni' });
+
+  const created = [];
+  for (const file of req.files) {
+    const validation = validateUpload(file.originalname, file.mimetype, 'ticket');
+    if (!validation.valid) {
+      for (const f of req.files) { try { fs.unlinkSync(f.path); } catch {} }
+      return res.status(400).json({ error: validation.error });
+    }
+    const ext = path.extname(file.originalname) || '';
+    const safeFilename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+    const destPath = path.join(TICKET_ATTACHMENTS_DIR, safeFilename);
+    try { fs.renameSync(file.path, destPath); } catch { fs.copyFileSync(file.path, destPath); fs.unlinkSync(file.path); }
+    const attachment = await prisma.ticketAttachment.create({
+      data: {
+        ticketId,
+        filename: file.originalname,
+        mimetype: file.mimetype,
+        size: file.size,
+        localFilepath: path.join('uploads', 'ticket-attachments', safeFilename),
+        source: 'MANUAL',
+      },
+    });
+    created.push(attachment);
+  }
+
+  await logEvent(ticketId, 'FOLLOWUP_ADDED', req.user.email || String(req.user.sub), { attachmentCount: created.length }).catch(() => {});
+  const updated = await prisma.ticket.findUnique({ where: { id: ticketId }, include: { attachments: true } });
+  return res.json({ attachments: updated.attachments });
 });
 
 // Upload d'images pour édition de description (collage/clic)
