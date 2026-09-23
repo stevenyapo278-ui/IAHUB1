@@ -224,6 +224,27 @@ export default function TicketDetail() {
 
   const [adjacent, setAdjacent] = useState({ first: null, prev: null, next: null, last: null });
   const slideDirectionRef = useRef('next'); // 'next' = vers la droite→gauche, 'prev' = gauche→droite
+  // Demandeur principal — source de vérité : requesterIds[0] (tableau), fallback requesterId/sourceName
+  // Assure la cohérence entre header, InfoTile et panneau droit (qui utilisent tous requesterIds)
+  const primaryRequester = useMemo(() => {
+    if (!ticket) return null;
+    const ids = Array.isArray(ticket.requesterIds) && ticket.requesterIds.length > 0
+      ? ticket.requesterIds
+      : (ticket.requesterId ? [ticket.requesterId] : []);
+    if (ids.length > 0) {
+      const rid = ids[0];
+      // Résoudre via les relations déjà chargées ou allUsers
+      if (ticket.requester && ticket.requester.id === rid) return ticket.requester;
+      if (ticket.secondaryRequester && ticket.secondaryRequester.id === rid) return ticket.secondaryRequester;
+      if (ticket.createdBy && ticket.createdBy.id === rid) return ticket.createdBy;
+      const fromAll = (allUsers || []).find((u) => u.id === rid);
+      if (fromAll) return fromAll;
+    }
+    // Fallback : requester relation ou sourceName/SourceEmail (tickets email)
+    if (ticket.requester) return ticket.requester;
+    if (ticket.sourceName || ticket.sourceEmail) return { fullName: ticket.sourceName, email: ticket.sourceEmail };
+    return null;
+  }, [ticket, allUsers]);
   const [corrections, setCorrections] = useState([]);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
@@ -1491,9 +1512,9 @@ export default function TicketDetail() {
               <div className="flex flex-wrap items-center gap-2 pb-1">
                 <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-outline-variant/30 bg-surface-container-low/70 text-[11px] font-semibold text-on-surface">
                   <span className="w-5 h-5 rounded-full bg-primary/15 text-primary border border-primary/25 flex items-center justify-center text-[8px] font-black shrink-0">
-                    {initials(ticket.requester?.fullName || ticket.sourceName)}
+                    {initials(primaryRequester?.fullName || ticket.sourceName)}
                   </span>
-                  <span className="truncate max-w-[200px]">{ticket.requester?.fullName || ticket.sourceName || ticket.sourceEmail || 'Demandeur inconnu'}</span>
+                  <span className="truncate max-w-[200px]">{primaryRequester?.fullName || ticket.sourceName || ticket.sourceEmail || 'Demandeur inconnu'}</span>
                 </span>
                 <MetaChip icon={Clock}>{`Créé le ${new Date(ticket.createdAt).toLocaleString('fr-FR')}`}</MetaChip>
                 {ticket.dueDate && (
@@ -1581,7 +1602,7 @@ export default function TicketDetail() {
 
               {/* Grille d'informations rapides */}
               <div className={`grid gap-2.5 ${(ticket.status === 'SOLVED' || ticket.status === 'CLOSED') ? 'grid-cols-2 lg:grid-cols-5' : 'grid-cols-2 lg:grid-cols-4'}`}>
-                <InfoTile icon={User} label="Demandeur" value={ticket.requester?.fullName || ticket.sourceName || ticket.sourceEmail || '—'} copyable />
+                <InfoTile icon={User} label="Demandeur" value={primaryRequester?.fullName || ticket.sourceEmail || '—'} copyable />
                 <InfoTile icon={Layers} label="Équipe" value={ticket.team?.name || 'Non assignée'} />
                 <InfoTile icon={MapPin} label="Lieu" value={ticket.locationName || '—'} tone="violet" />
                 <InfoTile icon={Clock} label="Créé le" value={new Date(ticket.createdAt).toLocaleDateString('fr-FR')} tone="amber" />

@@ -1125,7 +1125,9 @@ router.post(
 
     // Seul un membre du support (SUPERADMIN, ADMIN, TECHNICIAN, HOTLINE) peut créer un ticket pour un autre demandeur
     const canSetRequester = ['SUPERADMIN', 'ADMIN', 'TECHNICIAN', 'HOTLINE'].includes(req.user.role);
-    const finalRequesterId = canSetRequester && requesterId ? Number(requesterId) : req.user.sub;
+    // Priorité : requesterIds[0] > requesterId > req.user.sub
+    const finalRequesterIdFromIds = requesterIds.length > 0 ? Number(requesterIds[0]) : null;
+    const finalRequesterId = canSetRequester && finalRequesterIdFromIds ? finalRequesterIdFromIds : (canSetRequester && requesterId ? Number(requesterId) : req.user.sub);
 
     // Seul un ADMIN/TECHNICIAN/HOTLINE peut fixer le statut initial
     const canSetStatus = ['ADMIN', 'TECHNICIAN', 'HOTLINE', 'SUPERADMIN'].includes(req.user.role);
