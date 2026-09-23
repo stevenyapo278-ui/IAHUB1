@@ -91,6 +91,7 @@ const userSelect = {
   isActive: true,
   receiveDraftAlerts: true,
   avatarUrl: true,
+  roles: true,
   team: { select: { id: true, name: true } },
   permissionGroups: { select: { id: true, name: true } }, // permet d'afficher le groupe actuel d'un utilisateur (groupes exclusifs)
   createdAt: true,
@@ -387,8 +388,9 @@ router.post(
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { email, password, fullName, role, teamId } = req.body;
+    const { email, password, fullName, role, roles, teamId } = req.body;
     const targetRole = role || 'REQUESTER';
+    const targetRoles = roles && Array.isArray(roles) && roles.length ? roles : [targetRole];
 
     if (!canAssignRole(req.user.role, targetRole)) {
       return res.status(403).json({ error: `Vous ne pouvez pas créer un compte avec le rôle ${targetRole}` });
@@ -405,6 +407,7 @@ router.post(
         passwordHash,
         fullName,
         role: targetRole,
+        roles: targetRoles,
         teamId: teamId || null,
       },
       select: userSelect,
@@ -442,7 +445,7 @@ router.patch(
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { email, fullName, role, teamId, isActive, receiveDraftAlerts, password } = req.body;
+    const { email, fullName, role, roles, teamId, isActive, receiveDraftAlerts, password } = req.body;
 
     const target = await prisma.user.findUnique({ where: { id: Number(req.params.id) }, select: { role: true } });
     if (!target) return res.status(404).json({ error: 'Utilisateur introuvable' });
@@ -463,6 +466,11 @@ router.patch(
     }
     if (fullName !== undefined) data.fullName = fullName;
     if (role !== undefined) data.role = role;
+    if (roles !== undefined) {
+      if (!Array.isArray(roles) || roles.length === 0) return res.status(400).json({ error: 'roles doit être un tableau non vide' });
+      data.roles = roles;
+      if (!roles.includes(data.role || target.role)) data.role = roles[0];
+    }
     if (teamId !== undefined) data.teamId = teamId;
     if (isActive !== undefined) data.isActive = isActive;
     if (receiveDraftAlerts !== undefined) data.receiveDraftAlerts = receiveDraftAlerts;

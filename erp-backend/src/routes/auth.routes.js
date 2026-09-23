@@ -130,8 +130,10 @@ router.post(
       const valid = await bcrypt.compare(password, user.passwordHash);
       if (valid) {
         clearFailedLogins(normalizedEmail);
+        const roles = user.roles && user.roles.length ? user.roles : [user.role];
+        const activeRole = roles[0];
         const token = jwt.sign(
-          { sub: user.id, email: user.email, role: user.role, teamId: user.teamId },
+          { sub: user.id, email: user.email, role: activeRole, roles, teamId: user.teamId },
           process.env.JWT_SECRET,
           { expiresIn: process.env.JWT_EXPIRES_IN || '30d' }
         );
@@ -150,7 +152,8 @@ router.post(
             id: user.id,
             email: user.email,
             fullName: user.fullName,
-            role: user.role,
+            role: activeRole,
+            roles,
             teamId: user.teamId,
             permissions,
             mustChangePassword: user.mustChangePassword,
@@ -211,8 +214,10 @@ router.post(
         }
 
         clearFailedLogins(normalizedEmail);
+        const roles2 = account.roles && account.roles.length ? account.roles : [account.role];
+        const activeRole2 = roles2[0];
         const token = jwt.sign(
-          { sub: account.id, email: account.email, role: account.role, teamId: account.teamId },
+          { sub: account.id, email: account.email, role: activeRole2, roles: roles2, teamId: account.teamId },
           process.env.JWT_SECRET,
           { expiresIn: process.env.JWT_EXPIRES_IN || '30d' }
         );
@@ -232,6 +237,7 @@ router.post(
             email: account.email,
             fullName: account.fullName,
             role: account.role,
+            roles: roles2,
             teamId: account.teamId,
             permissions,
             mustChangePassword: account.mustChangePassword,
@@ -346,7 +352,7 @@ router.get('/me', authenticate, async (req, res) => {
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, email: true, fullName: true, role: true, teamId: true, isActive: true, mustChangePassword: true, avatarUrl: true },
+      select: { id: true, email: true, fullName: true, role: true, roles: true, teamId: true, isActive: true, mustChangePassword: true, avatarUrl: true },
     });
 
     if (!user) {
@@ -365,14 +371,16 @@ router.get('/me', authenticate, async (req, res) => {
       }
     }
 
+    const roles = user.roles && user.roles.length ? user.roles : [user.role];
+    const activeRole = req.user.role; // garde le rôle actif du token, pas le rôle principal
     const freshToken = jwt.sign(
-      { sub: user.id, email: user.email, role: user.role, teamId: user.teamId },
+      { sub: user.id, email: user.email, role: activeRole, roles, teamId: user.teamId },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN || '30d' }
     );
 
     const { avatarUrl, ...rest } = await userWithAvatarUrl(user);
-    return res.json({ ...rest, avatarUrl, permissions, token: freshToken });
+    return res.json({ ...rest, roles, avatarUrl, permissions, token: freshToken });
   } catch (err) {
     console.error('[auth.me] Erreur lors de la lecture utilisateur:', err.message);
     return res.status(500).json({ error: 'Erreur serveur lors du chargement du profil' });
@@ -411,6 +419,35 @@ router.post('/avatar', authenticate, avatarUpload.single('avatar'), async (req, 
   }).catch(() => {});
 
   return res.json({ avatarUrl: `${resolveBackendUrl(settings)}${relativePath}` });
+});
+
+// Switch de rôle actif — l'utilisateur doit posséder le rôle demandé
+router.post('/switch-role', authenticate, async (req, res) => {
+  const { role } = req.body;
+  const validRoles = ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN', 'REQUESTER'];
+  if (!validRoles.includes(role)) return res.status(400).json({ error: 'Rôle invalide' });
+
+  const user = await prisma.user.findUnique({ where: { id: req.user.sub }, select: { id: true, email: true, fullName: true, role: true, roles: true, teamId: true, avatarUrl: true, mustChangePassword: true } });
+  if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
+
+  const ownedRoles = user.roles && user.roles.length ? user.roles : [user.role];
+  if (!ownedRoles.includes(role)) return res.status(403).json({ error: 'Vous ne possédez pas ce rôle' });
+
+  const token = jwt.sign(
+    { sub: user.id, email: user.email, role, roles: ownedRoles, teamId: user.teamId },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES_IN || '30d' }
+  );
+
+  let permissions = null;
+  if (role !== 'SUPERADMIN') {
+    try {
+      const groupCount = await prisma.permissionGroup.count({ where: { members: { some: { id: user.id } } } });
+      if (groupCount > 0) permissions = Array.from(await getUserPermissions(user.id));
+    } catch {}
+  }
+
+  return res.json({ token, user: { id: user.id, email: user.email, fullName: user.fullName, role, roles: ownedRoles, teamId: user.teamId, avatarUrl: user.avatarUrl || null, mustChangePassword: user.mustChangePassword, permissions } });
 });
 
 // ── Thème de la page de connexion — public (sans auth) ──────────────────────────

@@ -493,6 +493,37 @@ export default function MainLayout() {
 
           {showUserMenu && (
             <div className="sidebar-dropdown" style={{ bottom: '100%', left: 0, top: 'auto', marginBottom: 8 }}>
+              {user?.roles && user.roles.length > 1 && (
+                <div className="px-3 py-2 border-b border-outline-variant/20">
+                  <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">Changer de rôle</p>
+                  <div className="flex flex-wrap gap-1">
+                    {user.roles.map((r) => (
+                      <button
+                        key={r}
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (r === user.role) { setShowUserMenu(false); return; }
+                          try {
+                            const token = localStorage.getItem('token');
+                            const res = await fetch('/api/auth/switch-role', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ role: r }) });
+                            const data = await res.json();
+                            if (data.token) {
+                              localStorage.setItem('token', data.token);
+                              localStorage.setItem('user', JSON.stringify(data.user));
+                              window.location.reload();
+                            } else if (data.error) {
+                              alert(data.error);
+                            }
+                          } catch (err) { console.error(err); }
+                        }}
+                        className={`px-2 py-1 rounded-md text-[10px] font-bold border transition-colors ${r === user.role ? 'bg-primary text-white border-primary' : 'bg-surface-container text-on-surface-variant border-outline-variant/30 hover:border-primary/40'}`}
+                      >
+                        {r}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <button
                 onClick={(e) => { e.stopPropagation(); setShowUserMenu(false); setShowAccountModal(true); }}
                 className="sidebar-dropdown-item flex items-center gap-2"

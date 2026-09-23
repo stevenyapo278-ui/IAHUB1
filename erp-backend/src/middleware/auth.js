@@ -28,13 +28,17 @@ function authenticate(req, res, next) {
   prisma.user
     .findUnique({
       where: { id: userId },
-      select: { id: true, email: true, fullName: true, role: true, teamId: true, isActive: true },
+      select: { id: true, email: true, fullName: true, role: true, roles: true, teamId: true, isActive: true },
     })
     .then((user) => {
       if (!user || !user.isActive) {
         return res.status(401).json({ error: 'Compte inactif ou supprimé' });
       }
-      req.user = { sub: user.id, email: user.email, fullName: user.fullName, role: user.role, teamId: user.teamId };
+      // Rôle actif = celui du JWT s'il fait partie des rôles possédés, sinon rôle principal
+      const ownedRoles = user.roles && user.roles.length ? user.roles : [user.role];
+      const requestedRole = payload.role;
+      const activeRole = ownedRoles.includes(requestedRole) ? requestedRole : user.role;
+      req.user = { sub: user.id, email: user.email, fullName: user.fullName, role: activeRole, roles: ownedRoles, teamId: user.teamId };
       next();
     })
     .catch((err) => {

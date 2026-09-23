@@ -38,7 +38,7 @@ function assignableRoles(actorRole) {
   return [];
 }
 
-const emptyForm = { email: '', fullName: '', password: '', role: 'REQUESTER', teamId: '' };
+const emptyForm = { email: '', fullName: '', password: '', role: 'REQUESTER', roles: ['REQUESTER'], teamId: '' };
 
 function HighlightText({ text, query }) {
   if (!query || !text) return <>{text}</>;
@@ -196,12 +196,12 @@ export default function Users() {
     } catch (err) { setError(err.response?.data?.error || 'Erreur'); }
   }
 
-  function startEdit(u) { setEditModal({ open: true, user: u }); setEditForm({ fullName: u.fullName, email: u.email, role: u.role, teamId: u.teamId || '', isActive: u.isActive }); }
-  function closeEditModal() { setEditModal({ open: false, user: null }); setEditForm({ fullName: '', email: '', role: 'REQUESTER', teamId: '', isActive: true }); }
+  function startEdit(u) { setEditModal({ open: true, user: u }); setEditForm({ fullName: u.fullName, email: u.email, role: u.role, roles: u.roles || [u.role], teamId: u.teamId || '', isActive: u.isActive }); }
+  function closeEditModal() { setEditModal({ open: false, user: null }); setEditForm({ fullName: '', email: '', role: 'REQUESTER', roles: ['REQUESTER'], teamId: '', isActive: true }); }
   async function saveEdit() {
     if (!editModal.user) return; setSavingEdit(true);
     try {
-      const payload = { ...editForm, teamId: editForm.teamId ? Number(editForm.teamId) : null };
+      const payload = { ...editForm, roles: editForm.roles || [editForm.role], teamId: editForm.teamId ? Number(editForm.teamId) : null };
       await api.patch(`/users/${editModal.user.id}`, payload);
       toast.success(`${editModal.user.fullName} mis à jour`); closeEditModal(); load();
     }
@@ -724,6 +724,22 @@ export default function Users() {
                         {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                       </select>
                     </label>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Tous les rôles (switch)</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {ROLES.map((r) => (
+                        <label key={r} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold cursor-pointer transition-colors ${editForm.roles?.includes(r) ? 'bg-primary text-white border-primary' : 'bg-surface border-outline-variant/40 text-on-surface-variant hover:border-primary/30'}`}>
+                          <input type="checkbox" checked={editForm.roles?.includes(r) || false} onChange={(e) => {
+                            const cur = editForm.roles || [editForm.role];
+                            const next = e.target.checked ? [...new Set([...cur, r])] : cur.filter((x) => x !== r);
+                            if (next.length === 0) return;
+                            setEditForm({ ...editForm, roles: next, role: next.includes(editForm.role) ? editForm.role : next[0] });
+                          }} className="w-3 h-3 accent-primary" />
+                          {ROLE_CONFIG[r]?.label || r}
+                        </label>
+                      ))}
+                    </div>
                   </div>
                   <label className="flex items-center justify-between gap-3 py-2">
                     <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Actif</span>

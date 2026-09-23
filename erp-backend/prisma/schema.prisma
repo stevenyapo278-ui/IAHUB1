@@ -141,6 +141,7 @@ model User {
   passwordHash        String
   fullName            String
   role                Role                 @default(REQUESTER)
+  roles               Role[]               @default([REQUESTER]) // tous les rôles possédés — permet le switch
   team                Team?                @relation(fields: [teamId], references: [id])
   teamId              Int?
   isActive            Boolean              @default(true)

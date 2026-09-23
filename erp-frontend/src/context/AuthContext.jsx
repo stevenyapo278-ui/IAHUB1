@@ -50,6 +50,15 @@ export function AuthProvider({ children }) {
     });
   }
 
+  async function switchRole(role) {
+    const { data } = await api.post('/auth/switch-role', { role });
+    localStorage.setItem('token', data.token);
+    localStorage.setItem('user', JSON.stringify(data.user));
+    setUser(data.user);
+    window.dispatchEvent(new CustomEvent('app:user-updated'));
+    return data.user;
+  }
+
   // Rafraîchit les permissions effectives au chargement de l'app (pas seulement au login) : si un
   // admin retire un droit à un groupe pendant qu'un utilisateur est déjà connecté, ça se reflète
   // au prochain chargement de page plutôt que de rester figé jusqu'à la prochaine reconnexion.
@@ -67,7 +76,7 @@ export function AuthProvider({ children }) {
           if (data.token) {
             localStorage.setItem('token', data.token);
           }
-          const refreshed = { id: data.id, email: data.email, fullName: data.fullName, role: data.role, teamId: data.teamId, permissions: data.permissions, mustChangePassword: data.mustChangePassword, avatarUrl: data.avatarUrl };
+          const refreshed = { id: data.id, email: data.email, fullName: data.fullName, role: data.role, roles: data.roles || [data.role], teamId: data.teamId, permissions: data.permissions, mustChangePassword: data.mustChangePassword, avatarUrl: data.avatarUrl };
           localStorage.setItem('user', JSON.stringify(refreshed));
           setUser(refreshed);
         })
@@ -118,7 +127,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, clearMustChangePassword, getLastLocation }}>
+    <AuthContext.Provider value={{ user, login, logout, clearMustChangePassword, switchRole, getLastLocation }}>
       {children}
     </AuthContext.Provider>
   );
