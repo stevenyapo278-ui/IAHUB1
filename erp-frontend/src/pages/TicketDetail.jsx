@@ -1132,8 +1132,8 @@ export default function TicketDetail() {
   async function handleForwardEmail() {
     setForwarding(true);
     try {
-      await api.post(`/tickets/${id}/forward-email`);
-      toast.success('Conversation envoyée sur votre adresse email');
+      const { data } = await api.post(`/tickets/${id}/forward-email`);
+      toast.success(data.message || 'Réponse envoyée dans la conversation');
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erreur lors du transfert');
     } finally {

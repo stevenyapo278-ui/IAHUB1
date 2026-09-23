@@ -2594,6 +2594,7 @@ router.post('/:id/forward-email', async (req, res) => {
         select: {
           direction: true, sender: true, recipients: true, subject: true,
           bodyHtml: true, body: true, timestamp: true, ccRecipients: true,
+          conversationId: true, internetMessageId: true, outlookMessageId: true,
         },
       },
     },
@@ -2615,11 +2616,14 @@ router.post('/:id/forward-email', async (req, res) => {
     return res.status(400).json({ error: 'Aucun email dans la conversation de ce ticket.' });
   }
 
-  const to = req.user.email;
-  if (!to) return res.status(400).json({ error: 'Aucune adresse email associée à votre compte.' });
+  // Répondre dans le fil de la conversation existante (thread)
+  const lastMsg = ticket.messages[ticket.messages.length - 1];
+  const conversationId = lastMsg?.conversationId || null;
+  const inReplyToId = lastMsg?.internetMessageId || lastMsg?.outlookMessageId || null;
 
+  const subject = `Re: ${ticket.sourceSubject || ticket.title}`;
   // Construire le HTML de la conversation
-  const conversationHtml = ticket.messages.map((msg, idx) => {
+  const conversationHtml = ticket.messages.map((msg) => {
     const dir = msg.direction === 'INBOUND' ? '📥 Reçu' : '📤 Envoyé';
     const date = new Date(msg.timestamp).toLocaleString('fr-FR');
     const from = msg.sender || 'Inconnu';
@@ -2639,7 +2643,6 @@ router.post('/:id/forward-email', async (req, res) => {
       </div>`;
   }).join('');
 
-  const subject = `Transfert — Ticket #${ticket.id} : ${ticket.title}`;
   const bodyHtml = `
     <div style="font-family:Arial,sans-serif;max-width:800px;margin:0 auto">
       <div style="background:#2563eb;color:white;padding:16px 20px;border-radius:8px 8px 0 0">
@@ -2655,17 +2658,24 @@ router.post('/:id/forward-email', async (req, res) => {
     </div>`;
 
   try {
+    // Destinataires : on répond dans le fil à l'expéditeur d'origine
+    const replyTo = ticket.sourceEmail || lastMsg?.sender || null;
+    if (!replyTo) return res.status(400).json({ error: 'Aucun destinataire trouvé pour cette conversation.' });
+
     await sendEmail({
       ticketId: ticket.id,
-      to,
+      to: replyTo,
       subject,
       bodyHtml,
-      saveAsMessage: false,
+      conversationId: conversationId || undefined,
+      inReplyToGraphMessageId: inReplyToId || undefined,
+      saveAsMessage: true,
     });
     await logEvent(ticket.id, 'EMAIL_SENT', req.user.email || 'SYSTEM', {
-      forwardTo: to,
+      replyTo,
+      conversationId,
     }).catch(() => {});
-    return res.json({ success: true, message: `Conversation transférée à ${to}` });
+    return res.json({ success: true, message: `Réponse envoyée dans la conversation (${replyTo})` });
   } catch (err) {
     console.error('[forward-email] Erreur envoi:', err.message);
     return res.status(500).json({ error: 'Erreur lors de l\'envoi : ' + err.message });
