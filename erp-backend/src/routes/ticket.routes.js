@@ -2621,18 +2621,8 @@ router.post('/:id/forward-email', async (req, res) => {
   const conversationId = lastMsg?.conversationId || null;
   const inReplyToId = lastMsg?.outlookMessageId || null;
 
-  // Destinataire = tous les participants de la conversation SAUF celui qui clique
-  const myEmail = (req.user.email || '').toLowerCase();
-  const allParticipants = new Set();
-  if (ticket.sourceEmail) allParticipants.add(ticket.sourceEmail.toLowerCase());
-  for (const m of ticket.messages) {
-    if (m.sender) allParticipants.add(m.sender.toLowerCase());
-    for (const r of (m.recipients || [])) allParticipants.add(r.toLowerCase());
-    for (const c of (m.ccRecipients || [])) allParticipants.add(c.toLowerCase());
-  }
-  allParticipants.delete(myEmail);
-  // Exclure aussi les boîtes support génériques (même domaine que l'expéditeur si besoin)
-  const replyTo = [...allParticipants][0] || ticket.sourceEmail || lastMsg?.sender || null;
+  const replyTo = req.user.email;
+  if (!replyTo) return res.status(400).json({ error: 'Aucune adresse email associée à votre compte.' });
 
   const subject = `Re: ${ticket.sourceSubject || ticket.title}`;
   // Construire le HTML de la conversation
