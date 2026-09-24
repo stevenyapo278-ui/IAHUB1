@@ -79,6 +79,10 @@ app.use(helmet({
       imgSrc: ["'self'", 'data:', 'blob:', 'http:', 'https:'],
       fontSrc: ["'self'", 'data:', "https://fonts.gstatic.com"],
       connectSrc: ["'self'", 'ws:', 'wss:'],
+      frameSrc: ["'self'", 'blob:', 'data:'],
+      objectSrc: ["'self'", 'blob:', 'data:'],
+      mediaSrc: ["'self'", 'blob:', 'data:'],
+      childSrc: ["'self'", 'blob:', 'data:'],
       frameAncestors: ["'none'"],
       upgradeInsecureRequests: null, // désactivé : obligatoire en HTTP sans TLS
     },
