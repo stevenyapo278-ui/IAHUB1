@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { markTicketUpdated } from '../utils/recentlyUpdatedTickets';
@@ -21,7 +22,8 @@ import {
   Flame, Radio, Info, ArrowDown, UserCheck, HelpCircle, Layers, History,
   TrendingUp, Lock, Link2, Merge, Plus, GitBranch, Timer, Play, Square, ListChecks, Boxes,
   ChevronDown, Inbox, Pencil, Save, Search,
-  ChevronsLeft, ChevronLeft, ChevronsRight, Eye, Copy, ShieldAlert, ShieldOff, Loader2, Image as ImageIcon
+  ChevronsLeft, ChevronLeft, ChevronsRight, Eye, Copy, ShieldAlert, ShieldOff, Loader2, Image as ImageIcon,
+  AtSign, File as FileIcon, Archive, Video, Music, Download, Unlock, ShieldCheck
 } from 'lucide-react';
 import {
   MANUAL_STATUS_OPTIONS, STATUS_LABELS, PRIORITY_OPTIONS, TYPE_OPTIONS, SOURCE_OPTIONS,
@@ -72,6 +74,47 @@ const STATUS_ACCENT = {
   SOLVED: 'bg-emerald-500',
   CLOSED: 'bg-slate-400',
 };
+
+// Coordonnées du caret dans un textarea — miroir invisible (textarea-caret)
+// Retourne {top,left,height} relatif au textarea (scroll inclus)
+function getTextareaCaretCoordinates(textarea, position) {
+  const properties = [
+    'direction','boxSizing','width','height','overflowX','overflowY',
+    'borderTopWidth','borderRightWidth','borderBottomWidth','borderLeftWidth','borderStyle',
+    'paddingTop','paddingRight','paddingBottom','paddingLeft',
+    'fontStyle','fontVariant','fontWeight','fontStretch','fontSize','fontSizeAdjust','lineHeight','fontFamily',
+    'textAlign','textTransform','textIndent','textDecoration','letterSpacing','wordSpacing','tabSize','MozTabSize'
+  ];
+  const isFirefox = typeof window !== 'undefined' && window.mozInnerScreenX != null;
+  const div = document.createElement('div');
+  div.id = 'textarea-caret-mirror';
+  document.body.appendChild(div);
+  const style = div.style;
+  const computed = window.getComputedStyle ? window.getComputedStyle(textarea) : textarea.currentStyle;
+  style.whiteSpace = 'pre-wrap';
+  if (textarea.nodeName !== 'INPUT') style.wordWrap = 'break-word';
+  style.position = 'absolute';
+  style.visibility = 'hidden';
+  style.overflow = 'hidden';
+  properties.forEach((prop) => { try { style[prop] = computed[prop]; } catch {} });
+  if (isFirefox) {
+    if (textarea.scrollHeight > parseInt(computed.height, 10)) style.overflowY = 'scroll';
+  } else {
+    style.overflow = 'hidden';
+  }
+  div.textContent = textarea.value.substring(0, position);
+  if (textarea.nodeName === 'INPUT') div.textContent = div.textContent.replace(/\s/g, '\u00a0');
+  const span = document.createElement('span');
+  span.textContent = textarea.value.substring(position) || '.';
+  div.appendChild(span);
+  const coordinates = {
+    top: span.offsetTop + parseInt(computed.borderTopWidth || '0', 10),
+    left: span.offsetLeft + parseInt(computed.borderLeftWidth || '0', 10),
+    height: parseInt(computed.lineHeight || '18', 10) || 18,
+  };
+  document.body.removeChild(div);
+  return coordinates;
+}
 
 function AttachmentThumbnail({ ticketId, attachment }) {
   const [blobUrl, setBlobUrl] = useState(null);
@@ -168,6 +211,15 @@ export default function TicketDetail() {
   const [followupPrivate, setFollowupPrivate] = useState(false);
   const [events, setEvents] = useState([]);
 
+  // Mentions @ Outlook-like dans les suivis
+  const followupRef = useRef(null);
+  const [mentionQuery, setMentionQuery] = useState(null);
+  const [mentionResults, setMentionResults] = useState([]);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [mentionedUsers, setMentionedUsers] = useState([]);
+  const [mentionPos, setMentionPos] = useState({ top: 0, left: 0, width: 320 });
+  const mentionDebounceRef = useRef(null);
+
   // Suppression de suivi
   const [followupToDelete, setFollowupToDelete] = useState(null);
   const [deletingFollowup, setDeletingFollowup] = useState(false);
@@ -223,6 +275,8 @@ export default function TicketDetail() {
   const [forwarding, setForwarding] = useState(false);
   const [conversationIdDraft, setConversationIdDraft] = useState('');
   const [savingConversationId, setSavingConversationId] = useState(false);
+  const [conversationLocked, setConversationLocked] = useState(true);
+  const [showUnlinkConfirm, setShowUnlinkConfirm] = useState(false);
   const attachmentInputRef = useRef(null);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
 
@@ -250,7 +304,11 @@ export default function TicketDetail() {
     return null;
   }, [ticket, allUsers]);
   useEffect(() => {
-    if (ticket) setConversationIdDraft(ticket.outlookConversationId || '');
+    if (ticket) {
+      setConversationIdDraft(ticket.outlookConversationId || '');
+      // Verrouillé par défaut si déjà lié — évite la suppression accidentelle
+      setConversationLocked(!!ticket.outlookConversationId);
+    }
   }, [ticket?.outlookConversationId]);
   const [corrections, setCorrections] = useState([]);
   const [showRejectModal, setShowRejectModal] = useState(false);
@@ -534,6 +592,17 @@ export default function TicketDetail() {
 
   async function downloadAttachment(attachment) {
     try {
+      // Si la prévisualisation est déjà ouverte avec un blob, réutilise-le
+      if (lightboxSrc?.attachment?.id === attachment.id && lightboxSrc?.src) {
+        const a = document.createElement('a');
+        a.href = lightboxSrc.src;
+        a.download = attachment.filename || 'attachment';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        toast.success('Téléchargement lancé');
+        return;
+      }
       const { data } = await api.get(`/tickets/${id}/attachments/${attachment.id}/file`, { responseType: 'blob' });
       const url = URL.createObjectURL(data);
       const a = document.createElement('a');
@@ -543,19 +612,56 @@ export default function TicketDetail() {
       a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 10000);
+      toast.success('Téléchargement lancé');
     } catch {
       setError('Échec du téléchargement de la pièce jointe');
     }
   }
 
-  async function openImageAttachment(attachment) {
+  // Prévisualisation générique — remplace l'ancien openImageAttachment (images seules)
+  async function openAttachment(attachment) {
     try {
       const { data } = await api.get(`/tickets/${id}/attachments/${attachment.id}/file`, { responseType: 'blob' });
+      const mime = attachment.mimeType || data.type || '';
       const url = URL.createObjectURL(data);
-      setLightboxSrc({ src: url, filename: attachment.filename, blob: data, attachment });
+      let textContent = null;
+      const isTextLike = mime.startsWith('text/') || mime.includes('json') || mime.includes('csv') || mime.includes('xml') || /\.(txt|csv|log|json|xml|md|htm|html)$/i.test(attachment.filename);
+      if (isTextLike) {
+        try {
+          textContent = await data.text();
+          if (textContent.length > 80000) textContent = textContent.slice(0, 80000) + '\n\n… (fichier tronqué — télécharger pour voir l’intégralité)';
+        } catch {}
+      }
+      setLightboxSrc({ src: url, filename: attachment.filename, mime, blob: data, attachment, textContent });
     } catch {
-      setError('Impossible d\'ouvrir l\'image');
+      setError('Impossible d\'ouvrir le fichier');
     }
+  }
+
+  async function openImageAttachment(attachment) {
+    return openAttachment(attachment);
+  }
+
+  function getFileKind(attachment) {
+    const mime = (attachment.mimeType || '').toLowerCase();
+    const name = (attachment.filename || '').toLowerCase();
+    if (mime.startsWith('image/')) return 'image';
+    if (mime === 'application/pdf' || name.endsWith('.pdf')) return 'pdf';
+    if (mime.startsWith('video/')) return 'video';
+    if (mime.startsWith('audio/')) return 'audio';
+    if (mime.startsWith('text/') || mime.includes('json') || mime.includes('csv') || mime.includes('xml') || /\.(txt|csv|log|json|xml|md|htm|html)$/i.test(name)) return 'text';
+    if (mime.includes('zip') || mime.includes('rar') || mime.includes('7z') || /\.(zip|rar|7z|tar|gz)$/i.test(name)) return 'archive';
+    if (mime.includes('msword') || mime.includes('officedocument') || mime.includes('presentation') || mime.includes('spreadsheet') || /\.(doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp)$/i.test(name)) return 'office';
+    return 'file';
+  }
+
+  function formatBytes(bytes) {
+    if (!bytes && bytes !== 0) return '';
+    if (bytes === 0) return '0 o';
+    const k = 1024;
+    const sizes = ['o', 'Ko', 'Mo', 'Go'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
   }
 
   useEffect(() => {
@@ -709,32 +815,241 @@ export default function TicketDetail() {
     });
   }
 
+  // ── Mentions @ : logique autocomplete ──────────────────────────────────
+  const fetchMentionResults = useCallback((q) => {
+    if (mentionDebounceRef.current) clearTimeout(mentionDebounceRef.current);
+    mentionDebounceRef.current = setTimeout(async () => {
+      try {
+        const { data } = await api.get('/users/mentionable', { params: { search: q, limit: 8 } });
+        const list = Array.isArray(data) ? data : (data.users || []);
+        setMentionResults(list);
+        setMentionIndex(0);
+      } catch {
+        setMentionResults([]);
+      }
+    }, 180);
+  }, []);
+
+  function updateMentionState(value, cursorPos) {
+    const before = value.slice(0, cursorPos);
+    // Ignorer les mentions déjà validées (@Nom + espace) pour ne pas rouvrir le dropdown
+    let lastCommittedEnd = -1;
+    for (const u of mentionedUsers) {
+      const needle = `@${u.fullName} `;
+      let idx = value.indexOf(needle);
+      while (idx !== -1) {
+        const end = idx + needle.length;
+        if (end <= cursorPos && end > lastCommittedEnd) lastCommittedEnd = end;
+        idx = value.indexOf(needle, idx + 1);
+      }
+    }
+    const subBefore = lastCommittedEnd >= 0 ? before.slice(lastCommittedEnd) : before;
+    // Si pas de commit, subBefore == before ; sinon on coupe après le dernier commit
+    // On cherche le dernier @ dans ce sous-texte
+    const atIdx = subBefore.lastIndexOf('@');
+    if (atIdx === -1) {
+      setMentionQuery(null);
+      return;
+    }
+    const query = subBefore.slice(atIdx + 1);
+    // Fermer si @ suivi d'un email-like déjà complet ou trop long / newline
+    if (query.includes('\n') || query.length > 40) {
+      setMentionQuery(null);
+      return;
+    }
+    // Le @ doit être en début de ligne ou précédé d'un espace (évite les emails)
+    const charBeforeAt = atIdx > 0 ? subBefore[atIdx - 1] : null;
+    if (charBeforeAt && charBeforeAt !== ' ' && charBeforeAt !== '\n' && charBeforeAt !== '\t') {
+      setMentionQuery(null);
+      return;
+    }
+    // Ouvrir le dropdown et lancer la recherche
+    setMentionQuery(query);
+    // Positionner le volet juste à la position du curseur (comme Outlook) — portail fixed
+    if (followupRef.current) {
+      const textarea = followupRef.current;
+      const rect = textarea.getBoundingClientRect();
+      const caret = getTextareaCaretCoordinates(textarea, cursorPos);
+      const dropdownWidth = Math.min(360, Math.max(260, 320));
+      const estHeight = 280;
+      // caret.top/left sont relatifs au textarea, on convertit en viewport
+      const caretLeft = rect.left + caret.left - textarea.scrollLeft;
+      const caretTop = rect.top + caret.top - textarea.scrollTop;
+      const dropdownLeft = Math.min(caretLeft, window.innerWidth - dropdownWidth - 12);
+      const spaceBelowCaret = window.innerHeight - (caretTop + caret.height);
+      const showAbove = spaceBelowCaret < 140 && caretTop > spaceBelowCaret;
+      const top = showAbove ? caretTop - estHeight - 6 : caretTop + caret.height + 6;
+      setMentionPos({
+        top,
+        left: Math.max(8, dropdownLeft),
+        width: dropdownWidth,
+      });
+    }
+    fetchMentionResults(query.trim());
+  }
+
+  function insertMention(user) {
+    const el = followupRef.current;
+    if (!el) return;
+    const cursorPos = el.selectionStart ?? followup.length;
+    const before = followup.slice(0, cursorPos);
+    const after = followup.slice(cursorPos);
+    // Retrouver le dernier @ non committé (même logique que updateMentionState)
+    let lastCommittedEnd = -1;
+    for (const u of mentionedUsers) {
+      const needle = `@${u.fullName} `;
+      let idx = followup.indexOf(needle);
+      while (idx !== -1) {
+        const end = idx + needle.length;
+        if (end <= cursorPos && end > lastCommittedEnd) lastCommittedEnd = end;
+        idx = followup.indexOf(needle, idx + 1);
+      }
+    }
+    const subBefore = lastCommittedEnd >= 0 ? before.slice(lastCommittedEnd) : before;
+    const atIdxInSub = subBefore.lastIndexOf('@');
+    if (atIdxInSub === -1) return;
+    const atIdx = before.length - subBefore.length + atIdxInSub;
+    const mentionText = `@${user.fullName} `;
+    const newVal = followup.slice(0, atIdx) + mentionText + after;
+    setFollowup(newVal);
+    setMentionedUsers((prev) => (prev.some((u) => u.id === user.id) ? prev : [...prev, user]));
+    setMentionQuery(null);
+    setMentionResults([]);
+    // replacer le curseur après la mention
+    setTimeout(() => {
+      el.focus();
+      const newPos = atIdx + mentionText.length;
+      el.setSelectionRange(newPos, newPos);
+    }, 0);
+  }
+
+  function handleFollowupChange(e) {
+    const val = e.target.value;
+    const pos = e.target.selectionStart ?? val.length;
+    setFollowup(val);
+    // Nettoyer les mentions supprimées : garder seulement celles encore présentes
+    if (mentionedUsers.length > 0) {
+      const still = mentionedUsers.filter((u) => val.includes(`@${u.fullName}`));
+      if (still.length !== mentionedUsers.length) setMentionedUsers(still);
+    }
+    updateMentionState(val, pos);
+  }
+
+  function handleFollowupKeyDown(e) {
+    if (mentionQuery !== null && mentionResults.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setMentionIndex((i) => (i + 1) % mentionResults.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setMentionIndex((i) => (i - 1 + mentionResults.length) % mentionResults.length);
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        const chosen = mentionResults[mentionIndex];
+        if (chosen) insertMention(chosen);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setMentionQuery(null);
+        return;
+      }
+    }
+    // Ctrl+Enter pour envoyer (existant)
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      handleAddFollowup(e);
+    }
+  }
+
+  function handleFollowupSelect() {
+    if (followupRef.current) {
+      updateMentionState(followup, followupRef.current.selectionStart ?? followup.length);
+    }
+  }
+
+  // Fermer le dropdown si clic en dehors du textarea + repositionner au scroll/resize
+  useEffect(() => {
+    if (mentionQuery === null) return;
+    function onDocClick(e) {
+      if (followupRef.current && !followupRef.current.contains(e.target)) {
+        const dropdown = document.querySelector('.mention-dropdown');
+        if (dropdown && dropdown.contains(e.target)) return;
+        setMentionQuery(null);
+      }
+    }
+    function updatePos() {
+      if (followupRef.current) {
+        const textarea = followupRef.current;
+        const pos = textarea.selectionStart ?? followup.length;
+        const rect = textarea.getBoundingClientRect();
+        const caret = getTextareaCaretCoordinates(textarea, pos);
+        const dropdownWidth = Math.min(360, Math.max(260, 320));
+        const estHeight = 280;
+        const caretLeft = rect.left + caret.left - textarea.scrollLeft;
+        const caretTop = rect.top + caret.top - textarea.scrollTop;
+        const dropdownLeft = Math.min(caretLeft, window.innerWidth - dropdownWidth - 12);
+        const spaceBelowCaret = window.innerHeight - (caretTop + caret.height);
+        const showAbove = spaceBelowCaret < 140 && caretTop > spaceBelowCaret;
+        const top = showAbove ? caretTop - estHeight - 6 : caretTop + caret.height + 6;
+        setMentionPos({ top, left: Math.max(8, dropdownLeft), width: dropdownWidth });
+      }
+    }
+    document.addEventListener('mousedown', onDocClick);
+    window.addEventListener('scroll', updatePos, true);
+    window.addEventListener('resize', updatePos);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      window.removeEventListener('scroll', updatePos, true);
+      window.removeEventListener('resize', updatePos);
+    };
+  }, [mentionQuery]);
+
   async function handleAddFollowup(e) {
     e.preventDefault();
     if (!followup.trim() && pastedImages.length === 0) return;
     try {
+      // Déterminer les mentions réellement présentes dans le texte final
+      const finalMentioned = mentionedUsers.filter((u) => followup.includes(`@${u.fullName}`));
+      const mentionedUserIds = finalMentioned.map((u) => u.id);
+
+      // Transformer les @Nom en <span data-mention-id="..."> pour affichage + parsing backend
+      let htmlContent = followup;
+      for (const u of finalMentioned) {
+        const esc = u.fullName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const re = new RegExp(`@${esc}(?![\\wÀ-ÿ])`, 'g');
+        htmlContent = htmlContent.replace(re, `<span data-mention-id="${u.id}" class="mention">@${u.fullName}</span>`);
+      }
+
       const hasImages = pastedImages.length > 0;
-      let content = followup;
+      let content = htmlContent;
 
       if (hasImages) {
-        // Envoyer en FormData avec les images
         const fd = new FormData();
-        fd.append('content', followup);
+        // On envoie d'abord le HTML avec mentions, puis on ajoutera les marqueurs images
         if (followupPrivate) fd.append('isPrivate', 'true');
+        if (mentionedUserIds.length > 0) fd.append('mentionedUserIds', JSON.stringify(mentionedUserIds));
         pastedImages.forEach((img, idx) => {
           fd.append('images', img.file);
           content += `\n\n<!--IMAGE_${idx}-->`;
         });
-        // Re-build content with image markers
-        fd.set('content', content);
+        fd.append('content', content);
         await api.post(`/tickets/${id}/followups`, fd);
       } else {
-        await api.post(`/tickets/${id}/followups`, { content, isPrivate: followupPrivate });
+        const payload = { content, isPrivate: followupPrivate };
+        if (mentionedUserIds.length > 0) payload.mentionedUserIds = mentionedUserIds;
+        await api.post(`/tickets/${id}/followups`, payload);
       }
 
-      toast.success('Commentaire ajouté');
+      toast.success(mentionedUserIds.length > 0 ? `Commentaire ajouté — ${mentionedUserIds.length} personne(s) notifiée(s)` : 'Commentaire ajouté');
       setFollowup('');
       setFollowupPrivate(false);
+      setMentionedUsers([]);
+      setMentionQuery(null);
       pastedImages.forEach((img) => URL.revokeObjectURL(img.dataUrl));
       setPastedImages([]);
       load();
@@ -1190,13 +1505,35 @@ export default function TicketDetail() {
   }
 
   async function handleSaveConversationId() {
+    const wantsUnlink = !conversationIdDraft.trim() && !!ticket?.outlookConversationId;
+    if (wantsUnlink) {
+      setShowUnlinkConfirm(true);
+      return;
+    }
     setSavingConversationId(true);
     try {
       const { data } = await api.patch(`/tickets/${id}`, { outlookConversationId: conversationIdDraft.trim() || null });
       setTicket(data);
       toast.success(conversationIdDraft.trim() ? 'Fil lié au ticket (suivis mails automatiques)' : 'Liaison retirée');
+      if (conversationIdDraft.trim()) setConversationLocked(true);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erreur lors de la liaison');
+    } finally {
+      setSavingConversationId(false);
+    }
+  }
+
+  async function confirmUnlinkConversation() {
+    setSavingConversationId(true);
+    try {
+      const { data } = await api.patch(`/tickets/${id}`, { outlookConversationId: null });
+      setTicket(data);
+      setConversationIdDraft('');
+      setConversationLocked(false);
+      setShowUnlinkConfirm(false);
+      toast.success('Liaison du fil retirée');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de la suppression du lien');
     } finally {
       setSavingConversationId(false);
     }
@@ -1809,36 +2146,69 @@ export default function TicketDetail() {
                 {ticket.attachments?.length > 0 ? (
                   <div className="flex flex-wrap gap-3">
                   {(ticket?.attachments || []).map((a) => {
-                    const isImage = a.mimeType?.startsWith('image/');
+                    const kind = getFileKind(a);
                     const fromEmail = a.source === 'INCOMING_EMAIL';
-                    return isImage ? (
-                      <button
-                        key={a.id}
-                        type="button"
-                        onClick={() => openImageAttachment(a)}
-                        title={`${fromEmail ? '(reçu par email) ' : ''}Cliquer pour agrandir`}
-                        className="relative hover:scale-105 hover:shadow-lg transition-all duration-200 group cursor-pointer rounded-xl"
-                      >
-                        <AttachmentThumbnail ticketId={ticket.id} attachment={a} />
-                        <span className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/0 group-hover:bg-black/20 transition-all duration-200">
-                          <Eye className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 drop-shadow transition-all duration-200" />
-                        </span>
-                        {fromEmail && (
-                          <span className="p-1 bg-surface rounded-full text-on-surface-variant shadow-sm border border-outline-variant/40 absolute top-1 right-1">
-                            <Mail className="w-3 h-3 text-primary" />
+                    const isImage = kind === 'image';
+                    if (isImage) {
+                      return (
+                        <button
+                          key={a.id}
+                          type="button"
+                          onClick={() => openAttachment(a)}
+                          title={`${fromEmail ? '(reçu par email) ' : ''}Cliquer pour prévisualiser`}
+                          className="relative hover:scale-105 hover:shadow-lg transition-all duration-200 group cursor-pointer rounded-xl"
+                        >
+                          <AttachmentThumbnail ticketId={ticket.id} attachment={a} />
+                          <span className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/0 group-hover:bg-black/20 transition-all duration-200">
+                            <Eye className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 drop-shadow transition-all duration-200" />
                           </span>
-                        )}
-                      </button>
-                    ) : (
+                          {fromEmail && (
+                            <span className="p-1 bg-surface rounded-full text-on-surface-variant shadow-sm border border-outline-variant/40 absolute top-1 right-1">
+                              <Mail className="w-3 h-3 text-primary" />
+                            </span>
+                          )}
+                        </button>
+                      );
+                    }
+                    // Fichiers non-image : carte avec icône + prévisualisation au clic
+                    const iconMap = {
+                      pdf: <FileText className="w-5 h-5 text-red-500" />,
+                      text: <FileText className="w-5 h-5 text-emerald-600" />,
+                      video: <Video className="w-5 h-5 text-violet-500" />,
+                      audio: <Music className="w-5 h-5 text-amber-500" />,
+                      archive: <Archive className="w-5 h-5 text-orange-500" />,
+                      office: <FileText className="w-5 h-5 text-blue-600" />,
+                      file: <FileIcon className="w-5 h-5 text-slate-500" />,
+                    };
+                    const bgMap = {
+                      pdf: 'bg-red-500/10 border-red-500/20',
+                      text: 'bg-emerald-500/10 border-emerald-500/20',
+                      video: 'bg-violet-500/10 border-violet-500/20',
+                      audio: 'bg-amber-500/10 border-amber-500/20',
+                      archive: 'bg-orange-500/10 border-orange-500/20',
+                      office: 'bg-blue-500/10 border-blue-500/20',
+                      file: 'bg-slate-500/10 border-slate-500/20',
+                    };
+                    return (
                       <button
                         key={a.id}
                         type="button"
-                        onClick={() => downloadAttachment(a)}
-                        title={fromEmail ? 'Reçu par email' : undefined}
-                        className="flex items-center gap-2 px-3.5 py-2 border border-outline-variant/50 bg-surface-container-low/40 text-on-surface text-xs font-semibold rounded-xl hover:bg-surface-container hover:border-primary/40 transition-all cursor-pointer"
+                        onClick={() => openAttachment(a)}
+                        title="Cliquer pour prévisualiser"
+                        className="group flex items-center gap-3 pl-2 pr-3 py-2.5 border border-outline-variant/40 bg-surface-container-low/60 hover:bg-surface-container hover:border-primary/30 hover:shadow-md rounded-xl transition-all cursor-pointer text-left min-w-0"
                       >
-                        {fromEmail ? <Mail className="w-4 h-4 text-primary" /> : <Paperclip className="w-4 h-4 text-primary" />}
-                        <span className="truncate max-w-[180px]">{a.filename}</span>
+                        <span className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 shadow-sm ${bgMap[kind] || bgMap.file}`}>
+                          {iconMap[kind] || iconMap.file}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-xs font-bold text-on-surface truncate max-w-[190px] leading-tight">{a.filename}</span>
+                          <span className="block text-[11px] font-medium text-on-surface-variant truncate">
+                            {a.mimeType || kind.toUpperCase()} {a.size ? `· ${formatBytes(a.size)}` : ''} {fromEmail ? '· email' : ''}
+                          </span>
+                        </span>
+                        <span className="w-7 h-7 rounded-lg bg-primary/10 group-hover:bg-primary text-primary group-hover:text-white flex items-center justify-center shrink-0 transition-colors">
+                          <Eye className="w-3.5 h-3.5" />
+                        </span>
                       </button>
                     );
                   })}
@@ -2246,15 +2616,149 @@ export default function TicketDetail() {
                   </span>
                 </label>
               )}
-              <textarea
-                className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-4 py-3 text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-y min-h-[220px]"
-                placeholder="Ajouter un commentaire ou suivi... (Ctrl+Entrée pour envoyer)"
-                rows={8}
-                value={followup}
-                onChange={(e) => setFollowup(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleAddFollowup(e); } }}
-                onPaste={handlePaste}
-              />
+              <div className="relative">
+                <textarea
+                  ref={followupRef}
+                  className="w-full bg-surface border border-slate-200 dark:border-outline-variant/60 rounded-xl px-4 py-3 text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-y min-h-[220px]"
+                  placeholder="Ajouter un commentaire ou suivi... Tapez @ pour mentionner quelqu'un (Ctrl+Entrée pour envoyer)"
+                  rows={8}
+                  value={followup}
+                  onChange={handleFollowupChange}
+                  onKeyDown={handleFollowupKeyDown}
+                  onKeyUp={handleFollowupSelect}
+                  onClick={handleFollowupSelect}
+                  onPaste={handlePaste}
+                />
+              </div>
+              {/* Dropdown mentions @ — portail premium, positionné à la caret */}
+              {mentionQuery !== null && createPortal(
+                <div
+                  className="mention-dropdown"
+                  style={{
+                    position: 'fixed',
+                    top: mentionPos.top,
+                    left: mentionPos.left,
+                    width: mentionPos.width,
+                    zIndex: 9999,
+                  }}
+                >
+                  {/* Header Outlook-like */}
+                  <div className="flex items-center gap-2 px-2.5 py-2 mb-1 rounded-xl bg-primary/[0.06] border border-primary/10">
+                    <span className="w-7 h-7 rounded-lg bg-primary text-on-primary flex items-center justify-center shrink-0 shadow-sm">
+                      <AtSign className="w-3.5 h-3.5" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-extrabold tracking-wide text-primary leading-none">Mentionner quelqu’un</p>
+                      <p className="text-[10px] font-medium text-on-surface-variant leading-none mt-0.5">
+                        {mentionQuery.trim() ? `Filtre : “${mentionQuery.trim()}”` : 'Tapez un nom ou email'}
+                      </p>
+                    </div>
+                    <span className="ml-auto text-[9px] font-bold px-2 py-0.5 rounded-full bg-surface border border-outline-variant/40 text-on-surface-variant hidden sm:inline-flex">
+                      {mentionResults.length} résultat{mentionResults.length!==1?'s':''}
+                    </span>
+                  </div>
+
+                  {mentionResults.length === 0 ? (
+                    <div className="mx-1 my-2 rounded-xl border border-dashed border-outline-variant/40 bg-surface-container/50 px-3 py-6 text-center">
+                      <div className="w-8 h-8 rounded-full bg-surface-container border border-outline-variant/30 flex items-center justify-center mx-auto mb-2">
+                        <Search className="w-4 h-4 text-on-surface-variant/60" />
+                      </div>
+                      <p className="text-xs font-semibold text-on-surface">Aucun utilisateur trouvé</p>
+                      <p className="text-[11px] text-on-surface-variant mt-1">Essayez un autre nom ou email</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-0.5 max-h-[220px] overflow-y-auto pr-0.5 -mr-0.5">
+                      {mentionResults.map((u, idx) => {
+                        const isActive = idx === mentionIndex;
+                        const isAlready = mentionedUsers.some((m) => m.id === u.id);
+                        return (
+                          <button
+                            key={u.id}
+                            type="button"
+                            onMouseDown={(e) => { e.preventDefault(); insertMention(u); }}
+                            onMouseEnter={() => setMentionIndex(idx)}
+                            className={`group w-full flex items-center gap-3 px-2.5 py-2.5 rounded-xl text-left transition-all duration-150 cursor-pointer ${
+                              isActive
+                                ? 'bg-primary text-on-primary shadow-md shadow-primary/20'
+                                : 'bg-transparent hover:bg-surface-container text-on-surface hover:shadow-sm'
+                            }`}
+                          >
+                            <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-[11px] font-black shrink-0 border shadow-sm transition-colors ${
+                              isActive
+                                ? 'bg-white/20 text-white border-white/30'
+                                : 'bg-primary/10 text-primary border-primary/15 group-hover:bg-primary/15'
+                            }`}>
+                              {initials(u.fullName)}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className={`text-[13px] font-bold leading-none truncate ${isActive ? 'text-white' : 'text-on-surface'}`}>{u.fullName}</p>
+                              <p className={`text-[11px] font-medium truncate leading-none mt-1 ${isActive ? 'text-white/80' : 'text-on-surface-variant'}`}>{u.email}</p>
+                            </div>
+                            {isAlready ? (
+                              <span className={`text-[10px] font-extrabold px-2 py-1 rounded-full shrink-0 flex items-center gap-1 ${isActive ? 'bg-white text-primary' : 'bg-primary/15 text-primary'}`}>
+                                <Check className="w-3 h-3" /> mentionné
+                              </span>
+                            ) : isActive ? (
+                              <span className="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
+                                <ChevronRight className="w-4 h-4 text-white" />
+                              </span>
+                            ) : (
+                              <span className="w-7 h-7 rounded-lg bg-surface-container border border-outline-variant/40 flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <AtSign className="w-3.5 h-3.5 text-on-surface-variant" />
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <div className="mt-2 flex items-center justify-between gap-2 px-1.5 py-1.5 rounded-xl bg-surface-container/60 border border-outline-variant/20">
+                    <div className="flex items-center gap-1.5 text-[10px] font-medium text-on-surface-variant">
+                      <kbd className="px-1.5 py-0.5 rounded-md bg-surface border border-outline-variant/40 text-[10px] font-bold shadow-sm">↑↓</kbd>
+                      <span>naviguer</span>
+                      <kbd className="ml-1 px-1.5 py-0.5 rounded-md bg-surface border border-outline-variant/40 text-[10px] font-bold shadow-sm">↵</kbd>
+                      <span>sélectionner</span>
+                      <kbd className="ml-1 px-1 py-0.5 rounded-md bg-surface border border-outline-variant/40 text-[10px] font-bold shadow-sm">Échap</kbd>
+                    </div>
+                    <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-bold text-primary">
+                      <AtSign className="w-3 h-3" /> Outlook
+                    </span>
+                  </div>
+                </div>,
+                document.body
+              )}
+              {/* Chips des personnes mentionnées — aperçu premium avant envoi */}
+              {mentionedUsers.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-primary/10 bg-primary/[0.04] px-3 py-2.5">
+                  <span className="inline-flex items-center gap-1.5 text-[10px] font-extrabold tracking-wider uppercase text-primary shrink-0">
+                    <Mail className="w-3 h-3" /> Mentionnés
+                  </span>
+                  <span className="w-px h-4 bg-primary/15 shrink-0" aria-hidden />
+                  <div className="flex flex-wrap gap-1.5 flex-1">
+                    {mentionedUsers.filter((u) => followup.includes(`@${u.fullName}`)).map((u) => (
+                      <span key={u.id} className="group inline-flex items-center gap-1.5 pl-1 pr-1 py-1 rounded-full bg-white dark:bg-surface border border-primary/15 shadow-sm text-[12px] font-bold text-primary">
+                        <span className="w-6 h-6 rounded-full bg-gradient-to-br from-primary to-primary/80 text-white flex items-center justify-center text-[9px] font-black shadow-sm">{initials(u.fullName)}</span>
+                        <span className="pr-0.5">@{u.fullName}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFollowup((prev) => prev.replace(`@${u.fullName} `, '').replace(`@${u.fullName}`, ''));
+                            setMentionedUsers((prev) => prev.filter((m) => m.id !== u.id));
+                          }}
+                          className="w-5 h-5 rounded-full bg-surface-container hover:bg-red-500 hover:text-white text-on-surface-variant flex items-center justify-center transition-colors cursor-pointer"
+                          aria-label={`Retirer ${u.fullName}`}
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                  <span className="inline-flex items-center gap-1 text-[11px] font-medium text-on-surface-variant shrink-0">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> email automatique
+                  </span>
+                </div>
+              )}
 
               {/* Pasted images preview */}
               {pastedImages.length > 0 && (
@@ -2337,40 +2841,129 @@ export default function TicketDetail() {
             </div>
            )}
 
-          {/* Liaison fil email — tickets manuels : lier un conversationId Outlook */}
+          {/* Liaison fil email — verrouillée pour éviter la suppression accidentelle */}
           {!['REQUESTER', 'TECHNICIAN'].includes(user?.role) && (
-            <div className="bento-card p-5 space-y-3">
-            <h3 className="bento-card-header -mx-5 -mt-5 mb-0" style={{ borderTopLeftRadius: 'inherit', borderTopRightRadius: 'inherit' }}>
+            <div className={`bento-card p-5 space-y-3 transition-all ${ticket.outlookConversationId && conversationLocked ? 'border-emerald-500/20 shadow-sm' : ''}`}>
+            <h3 className="bento-card-header -mx-5 -mt-5 mb-0 flex items-center justify-between" style={{ borderTopLeftRadius: 'inherit', borderTopRightRadius: 'inherit' }}>
               <div className="flex items-center gap-2">
-                <Link2 className="w-4 h-4" style={{ color: 'var(--color-info)' }} />
-                <span className="text-xs font-semibold" style={{ color: 'var(--color-foreground)' }}>Fil de conversation</span>
+                <span className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 border shadow-sm ${ticket.outlookConversationId && conversationLocked ? 'bg-emerald-500/15 border-emerald-500/20 text-emerald-600' : 'bg-primary/10 border-primary/15 text-primary'}`}>
+                  <Link2 className="w-4 h-4" />
+                </span>
+                <span className="text-xs font-extrabold tracking-wide" style={{ color: 'var(--color-foreground)' }}>Fil de conversation</span>
               </div>
+              {ticket.outlookConversationId ? (
+                <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-black tracking-wider border ${conversationLocked ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/25' : 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/25'}`}>
+                  {conversationLocked ? <><Lock className="w-3 h-3" /> Verrouillé</> : <><Unlock className="w-3 h-3" /> Édition</>}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold bg-surface-container border border-outline-variant/40 text-on-surface-variant">
+                  <Link2 className="w-3 h-3" /> Non lié
+                </span>
+              )}
             </h3>
             <p className="text-xs text-on-surface-variant leading-relaxed">
-              {ticket.outlookConversationId ? 'Fil lié — les prochains mails de ce fil seront rattachés à ce ticket.' : 'Aucun fil lié. Collez un ID de conversation Outlook (depuis le mail) pour rattacher les suivis.'}
+              {ticket.outlookConversationId
+                ? (conversationLocked
+                    ? 'Fil verrouillé — les prochains mails de ce fil sont rattachés à ce ticket. Déverrouillez pour modifier.'
+                    : 'Fil en édition — toute suppression nécessite une confirmation.')
+                : 'Aucun fil lié. Collez un ID de conversation Outlook (depuis le mail) pour rattacher les suivis.'}
             </p>
             <div className="flex gap-2">
-              <input
-                value={conversationIdDraft}
-                onChange={(e) => setConversationIdDraft(e.target.value)}
-                placeholder="AAQkAD..."
-                className="flex-1 px-3 py-2 rounded-xl border border-outline-variant bg-surface text-on-surface text-xs focus:ring-2 focus:ring-primary/20 focus:border-primary focus:outline-none"
-                disabled={savingConversationId}
-              />
-              <button
-                onClick={handleSaveConversationId}
-                disabled={savingConversationId || conversationIdDraft.trim() === (ticket.outlookConversationId || '')}
-                className="px-4 py-2 rounded-xl bg-primary text-white text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors flex items-center gap-1.5 shrink-0"
-              >
-                {savingConversationId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-                {ticket.outlookConversationId ? 'Mettre à jour' : 'Lier'}
-              </button>
+              <div className="relative flex-1">
+                <input
+                  value={conversationIdDraft}
+                  onChange={(e) => setConversationIdDraft(e.target.value)}
+                  placeholder="AAQkAD..."
+                  className={`w-full pl-3 pr-9 py-2.5 rounded-xl border text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all ${
+                    conversationLocked && ticket.outlookConversationId
+                      ? 'bg-surface-container-low border-dashed border-emerald-500/25 text-on-surface-variant cursor-not-allowed pr-9'
+                      : 'bg-surface border-outline-variant text-on-surface'
+                  }`}
+                  disabled={savingConversationId || (conversationLocked && !!ticket.outlookConversationId)}
+                  readOnly={conversationLocked && !!ticket.outlookConversationId}
+                />
+                {conversationLocked && ticket.outlookConversationId && (
+                  <Lock className="w-3.5 h-3.5 text-emerald-600 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                )}
+              </div>
+              {conversationLocked && ticket.outlookConversationId ? (
+                <button
+                  type="button"
+                  onClick={() => setConversationLocked(false)}
+                  className="px-4 py-2.5 rounded-xl bg-surface border border-outline-variant/40 hover:bg-surface-container text-on-surface text-xs font-bold flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer"
+                >
+                  <Unlock className="w-3.5 h-3.5" /> Déverrouiller
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleSaveConversationId}
+                    disabled={savingConversationId || conversationIdDraft.trim() === (ticket.outlookConversationId || '')}
+                    className="px-4 py-2.5 rounded-xl bg-primary text-white text-xs font-bold hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-1.5 shrink-0 shadow-sm cursor-pointer"
+                  >
+                    {savingConversationId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                    {ticket.outlookConversationId ? 'Enregistrer' : 'Lier'}
+                  </button>
+                  {ticket.outlookConversationId && (
+                    <button
+                      type="button"
+                      onClick={() => { setConversationIdDraft(ticket.outlookConversationId || ''); setConversationLocked(true); }}
+                      disabled={savingConversationId}
+                      className="px-3 py-2.5 rounded-xl bg-surface border border-outline-variant/40 hover:bg-surface-container text-on-surface-variant hover:text-on-surface text-xs font-semibold transition-colors cursor-pointer"
+                    >
+                      Annuler
+                    </button>
+                  )}
+                </>
+              )}
             </div>
-            {ticket.outlookConversationId && (
-              <p className="text-[11px] text-emerald-600 dark:text-emerald-400 truncate" title={ticket.outlookConversationId}>
-                Lié : {ticket.outlookConversationId}
-              </p>
+            {/* Barre d’état verrouillée */}
+            {ticket.outlookConversationId && conversationLocked && (
+              <div className="flex items-center gap-2 rounded-xl bg-emerald-500/8 border border-emerald-500/15 px-3 py-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                <p className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400 leading-snug truncate flex-1" title={ticket.outlookConversationId}>
+                  Verrouillé : {ticket.outlookConversationId}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => { navigator.clipboard.writeText(ticket.outlookConversationId); toast.success('ID copié'); }}
+                  className="p-1 rounded-md hover:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 transition-colors shrink-0 cursor-pointer"
+                  title="Copier l’ID"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                </button>
+              </div>
             )}
+            {/* Avertissement édition + suppression */}
+            {ticket.outlookConversationId && !conversationLocked && (
+              <div className="flex flex-col gap-2 rounded-xl bg-amber-500/8 border border-amber-500/20 px-3 py-2.5">
+                <p className="text-[11px] font-medium text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> Mode édition — vider le champ et enregistrer supprimera le lien. Cette action est protégée par une confirmation.
+                </p>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-mono text-on-surface-variant truncate" title={ticket.outlookConversationId}>Actuel : {ticket.outlookConversationId}</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowUnlinkConfirm(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/15 border border-red-500/20 text-red-600 dark:text-red-400 text-[11px] font-bold transition-colors cursor-pointer shrink-0"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Supprimer le lien
+                  </button>
+                </div>
+              </div>
+            )}
+            {/* ConfirmDialog suppression */}
+            <ConfirmDialog
+              open={showUnlinkConfirm}
+              onClose={() => setShowUnlinkConfirm(false)}
+              onConfirm={confirmUnlinkConversation}
+              title="Supprimer le fil de conversation ?"
+              message={`Le ticket #${ticket.id} ne sera plus lié au fil Outlook.\nLes prochains mails de ce fil ne seront plus rattachés automatiquement. Cette action est réversible en recollant l’ID.`}
+              confirmText="Supprimer le lien"
+              confirmVariant="danger"
+              loading={savingConversationId}
+            />
           </div>
           )}
 
@@ -3949,54 +4542,124 @@ export default function TicketDetail() {
         </div>
       )}
 
-      {/* Lightbox image */}
-      {lightboxSrc && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-md cursor-pointer"
-          onClick={() => {
-            if (lightboxSrc?.blob) URL.revokeObjectURL(lightboxSrc.src);
-            setLightboxSrc(null);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') {
-              if (lightboxSrc?.blob) URL.revokeObjectURL(lightboxSrc.src);
-              setLightboxSrc(null);
-            }
-          }}
-          tabIndex={0}
-          autoFocus
-        >
-          <div className="relative flex flex-col items-center gap-3" onClick={(e) => e.stopPropagation()}>
-            <img
-              src={lightboxSrc?.src || lightboxSrc}
-              alt={lightboxSrc?.filename || 'Aperçu'}
-              className="max-w-[90vw] max-h-[85vh] object-contain rounded-xl shadow-2xl border border-white/10"
-            />
-            {lightboxSrc?.filename && (
-              <span className="text-white/70 text-xs font-mono">{lightboxSrc.filename}</span>
-            )}
-            {lightboxSrc?.attachment && (
-              <button
-                type="button"
-                onClick={() => downloadAttachment(lightboxSrc.attachment)}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-semibold transition-all backdrop-blur-sm border border-white/20"
-              >
-                <Paperclip className="w-3.5 h-3.5" />
-                Télécharger
-              </button>
-            )}
-          </div>
-          <button
-            className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-all"
-            onClick={() => {
-              if (lightboxSrc?.blob) URL.revokeObjectURL(lightboxSrc.src);
-              setLightboxSrc(null);
-            }}
+      {/* Prévisualisation fichier — image, PDF, texte, vidéo, audio, etc. */}
+      {lightboxSrc && (() => {
+        const isString = typeof lightboxSrc === 'string';
+        const src = isString ? lightboxSrc : lightboxSrc.src;
+        const filename = isString ? '' : (lightboxSrc.filename || '');
+        const mime = isString ? 'image/*' : (lightboxSrc.mime || '');
+        const attachment = isString ? null : lightboxSrc.attachment;
+        const textContent = !isString ? lightboxSrc.textContent : null;
+        const kind = attachment ? getFileKind(attachment) : (mime?.startsWith('image/') || isString ? 'image' : 'file');
+        const isImage = kind === 'image';
+        const isPdf = kind === 'pdf';
+        const isText = kind === 'text';
+        const isVideo = kind === 'video';
+        const isAudio = kind === 'audio';
+        const close = () => {
+          if (!isString && lightboxSrc?.src) try { URL.revokeObjectURL(lightboxSrc.src); } catch {}
+          setLightboxSrc(null);
+        };
+        const openInNewTab = () => {
+          if (src) window.open(src, '_blank', 'noopener,noreferrer');
+        };
+        return (
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md"
+            onClick={close}
+            onKeyDown={(e) => { if (e.key === 'Escape') close(); }}
+            tabIndex={0}
+            autoFocus
           >
-            <X className="w-6 h-6" />
-          </button>
-        </div>
-      )}
+            <div
+              className={`relative flex flex-col w-full max-w-5xl max-h-[90vh] rounded-2xl overflow-hidden shadow-2xl border ${isImage || isVideo ? 'bg-black border-white/10' : 'bg-surface border-outline-variant/30'}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className={`flex items-center gap-3 px-4 py-3 border-b shrink-0 ${isImage || isVideo ? 'bg-black/60 border-white/10' : 'bg-surface-container-low border-outline-variant/30'}`}>
+                <span className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border shadow-sm ${
+                  isImage ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-400' :
+                  isPdf ? 'bg-red-500/15 border-red-500/20 text-red-500' :
+                  isText ? 'bg-emerald-500/15 border-emerald-500/20 text-emerald-600' :
+                  isVideo ? 'bg-violet-500/20 border-violet-500/30 text-violet-400' :
+                  isAudio ? 'bg-amber-500/15 border-amber-500/20 text-amber-600' :
+                  'bg-primary/10 border-primary/20 text-primary'
+                }`}>
+                  {isImage ? <ImageIcon className="w-5 h-5" /> : isPdf ? <FileText className="w-5 h-5" /> : isVideo ? <Video className="w-5 h-5" /> : isAudio ? <Music className="w-5 h-5" /> : isText ? <FileText className="w-5 h-5" /> : <FileIcon className="w-5 h-5" />}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className={`text-sm font-bold truncate ${isImage || isVideo ? 'text-white' : 'text-on-surface'}`}>{filename || 'Aperçu'}</p>
+                  <p className={`text-xs truncate ${isImage || isVideo ? 'text-white/60' : 'text-on-surface-variant'}`}>{mime || kind.toUpperCase()} {attachment?.size ? `· ${formatBytes(attachment.size)}` : ''}</p>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {src && (
+                    <button type="button" onClick={openInNewTab} title="Ouvrir dans un nouvel onglet" className={`p-2 rounded-xl border transition-all cursor-pointer ${isImage || isVideo ? 'bg-white/10 hover:bg-white/20 text-white border-white/15' : 'bg-surface hover:bg-surface-container border-outline-variant/40 text-on-surface-variant hover:text-on-surface'}`}>
+                      <Eye className="w-4 h-4" />
+                    </button>
+                  )}
+                  {attachment && (
+                    <button type="button" onClick={() => downloadAttachment(attachment)} title="Télécharger" className={`p-2 rounded-xl border transition-all cursor-pointer ${isImage || isVideo ? 'bg-white/10 hover:bg-white/20 text-white border-white/15' : 'bg-primary text-on-primary hover:opacity-90 border-primary shadow-sm'}`}>
+                      <Download className="w-4 h-4" />
+                    </button>
+                  )}
+                  <button type="button" onClick={close} className={`p-2 rounded-xl border transition-all cursor-pointer ${isImage || isVideo ? 'bg-white/10 hover:bg-white/20 text-white border-white/15' : 'bg-surface hover:bg-surface-container border-outline-variant/40 text-on-surface-variant hover:text-on-surface'}`}>
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Contenu */}
+              <div className={`flex-1 overflow-auto flex items-center justify-center ${isImage || isVideo ? 'bg-black p-4' : 'bg-surface p-0'} min-h-[280px]`}>
+                {isImage ? (
+                  <img src={src} alt={filename || 'Aperçu'} className="max-w-full max-h-[70vh] object-contain rounded-xl shadow-2xl" />
+                ) : isPdf ? (
+                  <iframe src={src} title={filename} className="w-full h-[72vh] min-h-[420px] bg-white rounded-b-2xl" />
+                ) : isVideo ? (
+                  <video src={src} controls className="max-w-full max-h-[70vh] rounded-xl" />
+                ) : isAudio ? (
+                  <div className="w-full max-w-lg p-8 flex flex-col items-center gap-4">
+                    <span className="w-20 h-20 rounded-2xl bg-amber-500/15 border border-amber-500/20 flex items-center justify-center"><Music className="w-10 h-10 text-amber-500" /></span>
+                    <p className="text-sm font-bold text-on-surface text-center">{filename}</p>
+                    <audio src={src} controls className="w-full" />
+                  </div>
+                ) : isText && textContent != null ? (
+                  <div className="w-full h-full overflow-auto p-4 bg-surface-container-low/40">
+                    <pre className="text-xs font-mono text-on-surface whitespace-pre-wrap break-words leading-relaxed bg-surface border border-outline-variant/30 rounded-xl p-4 max-h-[65vh] overflow-auto shadow-inner">{textContent || '(fichier vide)'}</pre>
+                  </div>
+                ) : (
+                  <div className="w-full p-8 flex flex-col items-center gap-4 text-center">
+                    <span className="w-20 h-20 rounded-2xl bg-primary/10 border border-primary/15 flex items-center justify-center shadow-sm">
+                      {kind === 'archive' ? <Archive className="w-10 h-10 text-orange-500" /> : kind === 'office' ? <FileText className="w-10 h-10 text-blue-600" /> : <FileIcon className="w-10 h-10 text-slate-500" />}
+                    </span>
+                    <div>
+                      <p className="text-sm font-bold text-on-surface">{filename}</p>
+                      <p className="text-xs text-on-surface-variant mt-1">{mime || 'Fichier'} {attachment?.size ? `· ${formatBytes(attachment.size)}` : ''}</p>
+                      <p className="text-xs text-on-surface-variant/70 mt-2 max-w-md">La prévisualisation n’est pas disponible pour ce type de fichier. Ouvrez-le ou téléchargez-le pour le consulter.</p>
+                    </div>
+                    <div className="flex items-center gap-2 mt-2">
+                      <button type="button" onClick={openInNewTab} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-outline-variant/40 bg-surface hover:bg-surface-container text-on-surface text-xs font-semibold transition-colors cursor-pointer">
+                        <Eye className="w-4 h-4" /> Ouvrir
+                      </button>
+                      {attachment && (
+                        <button type="button" onClick={() => downloadAttachment(attachment)} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-on-primary text-xs font-bold shadow-md hover:opacity-90 transition-opacity cursor-pointer">
+                          <Download className="w-4 h-4" /> Télécharger
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer filename */}
+              {filename && !isText && (
+                <div className={`px-4 py-2 border-t text-xs font-mono truncate text-center shrink-0 ${isImage || isVideo ? 'bg-black/40 border-white/10 text-white/60' : 'bg-surface-container-low border-outline-variant/30 text-on-surface-variant'}`}>
+                  {filename}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
 
     </div>

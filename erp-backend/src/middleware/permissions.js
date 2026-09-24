@@ -1,4 +1,5 @@
 const prisma = require('../prismaClient');
+const { ROLE_DEFAULT_GROUP_NAME } = require('../config/permissions');
 
 async function getUserPermissions(userId) {
   const groups = await prisma.permissionGroup.findMany({
@@ -28,6 +29,19 @@ function requirePermission(key) {
 
     const perms = new Set(groups.flatMap((g) => g.permissions));
     if (perms.has(key)) return next();
+
+    // Impersonation via le switch de rôle : un SUPERADMIN qui a endossé un autre rôle n'est
+    // généralement pas membre des groupes de droits en base. On lui accorde les permissions du
+    // groupe par défaut du rôle actif (même règle que /auth/switch-role et /auth/me), sinon le
+    // frontend afficherait des menus que l'API rejetterait systématiquement en 403.
+    if (Array.isArray(req.user.roles) && req.user.roles.includes('SUPERADMIN')) {
+      const groupName = ROLE_DEFAULT_GROUP_NAME[req.user.role];
+      if (groupName) {
+        const group = await prisma.permissionGroup.findUnique({ where: { name: groupName }, select: { permissions: true } });
+        if (group && group.permissions.includes(key)) return next();
+      }
+    }
+
     return res.status(403).json({ error: 'Accès refusé' });
   };
 }

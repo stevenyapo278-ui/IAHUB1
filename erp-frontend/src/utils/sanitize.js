@@ -7,8 +7,8 @@ DOMPurify.setConfig({
     'table', 'thead', 'tbody', 'tr', 'th', 'td', 'hr', 'div', 'span',
     'img', 'sup', 'sub', 'dl', 'dt', 'dd',
   ],
-  ALLOWED_ATTR: ['href', 'target', 'rel', 'src', 'alt', 'class', 'style', 'width', 'height', 'cid'],
-  ALLOW_DATA_ATTR: false,
+  ALLOWED_ATTR: ['href', 'target', 'rel', 'src', 'alt', 'class', 'style', 'width', 'height', 'cid', 'data-mention-id'],
+  ALLOW_DATA_ATTR: true,
   ALLOWED_URI_REGEXP: /^(?:(?:https?|ftp|mailto|cid):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i,
 });
 

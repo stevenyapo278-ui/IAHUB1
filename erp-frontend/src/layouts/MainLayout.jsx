@@ -38,6 +38,7 @@ import {
   UserCircle,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { toast } from 'sonner';
 import api from '../api/client';
 import { useTheme } from '../context/ThemeContext';
 import { hasPermission } from '../utils/permissions';
@@ -511,6 +512,7 @@ export default function MainLayout() {
                             window.location.reload();
                           } catch (err) {
                             console.error('switch-role', err.response?.data?.error || err.message);
+                            toast.error(err.response?.data?.error || 'Impossible de changer de rôle');
                           }
                         }}
                         className={`px-2 py-1 rounded-md text-[10px] font-bold border transition-colors ${r === user.role ? 'bg-primary text-white border-primary' : 'bg-surface-container text-on-surface-variant border-outline-variant/30 hover:border-primary/40'}`}

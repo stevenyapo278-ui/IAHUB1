@@ -2757,3 +2757,79 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   0%   { transform: translateY(-100%); }
   100% { transform: translateY(0); }
 }
+
+/* ── Mentions @ dans les suivis — Premium Flat (skin-aware) ───────────────── */
+.mention {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 9px 2px 7px;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--color-primary) 16%, white) 0%, color-mix(in srgb, var(--color-primary) 11%, white) 100%);
+  color: var(--color-primary);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 26%, transparent);
+  font-weight: 700;
+  font-size: 0.84em;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--color-primary) 10%, transparent), 0 0 0 1px color-mix(in srgb, var(--color-primary) 6%, transparent);
+  transition: all 0.16s cubic-bezier(0.16,1,0.3,1);
+}
+.mention::before {
+  content: "@";
+  font-weight: 800;
+  opacity: 0.85;
+  font-size: 0.92em;
+}
+.mention:hover {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--color-primary) 22%, white) 0%, color-mix(in srgb, var(--color-primary) 15%, white) 100%);
+  border-color: color-mix(in srgb, var(--color-primary) 34%, transparent);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--color-primary) 14%, transparent), 0 0 0 1px color-mix(in srgb, var(--color-primary) 8%, transparent);
+  transform: translateY(-0.5px);
+}
+.dark .mention {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--color-primary) 24%, #1e293b) 0%, color-mix(in srgb, var(--color-primary) 17%, #0f172a) 100%);
+  border-color: color-mix(in srgb, var(--color-primary) 36%, transparent);
+  color: color-mix(in srgb, var(--color-primary) 88%, white);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.25), 0 0 0 1px color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+.dark .mention:hover {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--color-primary) 30%, #1e293b) 0%, color-mix(in srgb, var(--color-primary) 22%, #0f172a) 100%);
+}
+
+/* Dropdown Outlook-like — portail fixed, Flat + subtle depth */
+.mention-dropdown {
+  position: absolute;
+  z-index: 50;
+  min-width: 300px;
+  max-width: 380px;
+  max-height: 320px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--color-surface-container-lowest);
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 85%, transparent);
+  border-radius: 16px;
+  box-shadow: 0 16px 40px rgba(0,0,0,0.14), 0 6px 16px rgba(0,0,0,0.08), 0 0 0 1px color-mix(in srgb, var(--color-outline-variant) 60%, transparent);
+  padding: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-outline-variant) transparent;
+  animation: mention-pop 0.18s cubic-bezier(0.16,1,0.3,1);
+  backdrop-filter: blur(8px);
+}
+.dark .mention-dropdown {
+  background: #1a1f2e;
+  border-color: #2a3347;
+  box-shadow: 0 20px 48px rgba(0,0,0,0.45), 0 8px 20px rgba(0,0,0,0.28), 0 0 0 1px rgba(255,255,255,0.06);
+}
+.mention-dropdown::-webkit-scrollbar { width: 5px; }
+.mention-dropdown::-webkit-scrollbar-thumb { background: var(--color-outline-variant); border-radius: 999px; }
+.mention-dropdown::-webkit-scrollbar-track { background: transparent; }
+@keyframes mention-pop {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mention, .mention-dropdown { transition: none; animation: none; }
+  .mention:hover { transform: none; }
+}

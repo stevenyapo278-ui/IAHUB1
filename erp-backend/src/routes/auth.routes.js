@@ -89,6 +89,7 @@ router.post(
         passwordHash,
         fullName,
         role: role || 'REQUESTER',
+        roles: [role || 'REQUESTER'], // invariant : role ∈ roles dès la création (sinon roles dérive)
         teamId: teamId || null,
       },
     });
@@ -131,7 +132,10 @@ router.post(
       if (valid) {
         clearFailedLogins(normalizedEmail);
         const roles = user.roles && user.roles.length ? user.roles : [user.role];
-        const activeRole = roles[0];
+        // Rôle actif = rôle principal en base (source de vérité), pas roles[0] : si le tableau
+        // roles a dérivé (compte créé avant la migration roles, rôles édités en SQL…), roles[0]
+        // peut ne pas correspondre au rôle réel du compte et le connecter sous un mauvais rôle.
+        const activeRole = user.role;
         const token = jwt.sign(
           { sub: user.id, email: user.email, role: activeRole, roles, teamId: user.teamId },
           process.env.JWT_SECRET,
@@ -191,6 +195,7 @@ router.post(
               passwordHash: bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), 10),
               fullName: ldapUser.username,
               role: isAdmin ? 'ADMIN' : 'REQUESTER',
+              roles: [isAdmin ? 'ADMIN' : 'REQUESTER'], // invariant : role ∈ roles
               isActive: true,
               mustChangePassword: false,
               authProvider: 'ldap',
@@ -217,7 +222,8 @@ router.post(
 
         clearFailedLogins(normalizedEmail);
         const roles2 = account.roles && account.roles.length ? account.roles : [account.role];
-        const activeRole2 = roles2[0];
+        // Même règle que le login local : le rôle principal en base est la source de vérité
+        const activeRole2 = account.role;
         const token = jwt.sign(
           { sub: account.id, email: account.email, role: activeRole2, roles: roles2, teamId: account.teamId },
           process.env.JWT_SECRET,
@@ -363,7 +369,12 @@ router.get('/me', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Utilisateur introuvable' });
     }
 
-    const roles = user.roles && user.roles.length ? user.roles : [user.role];
+    let roles = user.roles && user.roles.length ? user.roles : [user.role];
+    // Un SUPERADMIN possède implicitement tous les rôles (cf. middleware authenticate) — on
+    // l'expose aussi au frontend pour que le menu « Changer de rôle » reste complet.
+    if (roles.includes('SUPERADMIN') || user.role === 'SUPERADMIN') {
+      roles = ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN', 'REQUESTER'];
+    }
     const activeRole = req.user.role; // garde le rôle actif du token, pas le rôle principal
     let permissions = null;
     if (activeRole !== 'SUPERADMIN') {
@@ -371,8 +382,11 @@ router.get('/me', authenticate, async (req, res) => {
         const groupNameMap = { ADMIN: 'Administrateurs', TECHNICIAN: 'Techniciens', HOTLINE: 'Équipe Hotline', REQUESTER: 'Demandeurs' };
         const targetGroupName = groupNameMap[activeRole];
         if (targetGroupName) {
-          const group = await prisma.permissionGroup.findUnique({ where: { name: targetGroupName }, include: { members: { where: { id: user.id }, select: { id: true } } } });
-          if (group && group.members.length > 0) permissions = group.permissions;
+          const group = await prisma.permissionGroup.findUnique({ where: { name: targetGroupName } });
+          // Le groupe par défaut du rôle ACTIF fait foi (même règle que /auth/switch-role) — sans
+          // ça, le refresh /auth/me d'une session switchée réécrivait permissions avec celles des
+          // groupes en base (rôle principal) ou null, et les pages re-devenaient inaccessibles.
+          if (group) permissions = group.permissions;
         }
       } catch (permErr) {
         console.error('[auth.me] Erreur permissions:', permErr.message);
@@ -386,7 +400,10 @@ router.get('/me', authenticate, async (req, res) => {
     );
 
     const { avatarUrl, ...rest } = await userWithAvatarUrl(user);
-    return res.json({ ...rest, roles, avatarUrl, permissions, token: freshToken });
+    // Le rôle exposé au front est le rôle ACTIF (celui du token), pas le rôle principal en base —
+    // sinon le refresh /auth/me réécrivait user.role avec le rôle principal et re-basculait
+    // l'interface sur l'ancien rôle juste après un /auth/switch-role.
+    return res.json({ ...rest, role: activeRole, roles, avatarUrl, permissions, token: freshToken });
   } catch (err) {
     console.error('[auth.me] Erreur lors de la lecture utilisateur:', err.message);
     return res.status(500).json({ error: 'Erreur serveur lors du chargement du profil' });
@@ -436,9 +453,12 @@ router.post('/switch-role', authenticate, async (req, res) => {
   const user = await prisma.user.findUnique({ where: { id: req.user.sub }, select: { id: true, email: true, fullName: true, role: true, roles: true, teamId: true, avatarUrl: true, mustChangePassword: true } });
   if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
 
-  const ownedRoles = user.roles && user.roles.length ? user.roles : [user.role];
+  let ownedRoles = user.roles && user.roles.length ? user.roles : [user.role];
+  // Un SUPERADMIN peut endosser n'importe quel rôle (il les possède implicitement) — le middleware
+  // authenticate applique la même règle, sinon le rôle demandé serait rejeté à chaque requête.
   const isSuperAdmin = ownedRoles.includes('SUPERADMIN') || user.role === 'SUPERADMIN';
-  if (!isSuperAdmin && !ownedRoles.includes(role)) return res.status(403).json({ error: 'Vous ne possédez pas ce rôle' });
+  if (isSuperAdmin) ownedRoles = ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN', 'REQUESTER'];
+  if (!ownedRoles.includes(role)) return res.status(403).json({ error: 'Vous ne possédez pas ce rôle' });
 
   const token = jwt.sign(
     { sub: user.id, email: user.email, role, roles: ownedRoles, teamId: user.teamId },
@@ -449,15 +469,19 @@ router.post('/switch-role', authenticate, async (req, res) => {
   let permissions = null;
   if (role !== 'SUPERADMIN') {
     try {
-      // Permissions = celles du groupe correspondant au rôle ACTIF, pas toutes les groupes du user
+      // Permissions = celles du groupe correspondant au rôle ACTIF choisi, pas celui du rôle principal.
       const groupNameMap = { ADMIN: 'Administrateurs', TECHNICIAN: 'Techniciens', HOTLINE: 'Équipe Hotline', REQUESTER: 'Demandeurs' };
       const targetGroupName = groupNameMap[role];
       if (targetGroupName) {
         const group = await prisma.permissionGroup.findUnique({ where: { name: targetGroupName }, include: { members: { where: { id: user.id }, select: { id: true } } } });
-        if (group && group.members.length > 0) {
+        // Le groupe par défaut du rôle ACTIF fait foi pour la session switchée, même sans
+        // membership en base : sinon un compte multi-rôles non membre du groupe du rôle endossé
+        // repartait avec permissions=null — la sidebar affichait les liens (config par rôle) mais
+        // ProtectedRoute renvoyait silencieusement au Dashboard à chaque clic.
+        if (group) {
           permissions = group.permissions;
         } else {
-          // Pas de groupe pour ce rôle -> null pour que le front retombe sur les règles par rôle
+          // Pas de groupe pour ce rôle -> null : le front n'affiche que les pages toujours visibles
           permissions = null;
         }
       } else {

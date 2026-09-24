@@ -40,6 +40,7 @@ const TECHNICIAN_DEFAULT_PERMISSIONS = [
 ];
 
 const HOTLINE_DEFAULT_PERMISSIONS = [
+  'tickets.view', // indispensable : la config navigation affiche /tickets aux HOTLINE, sans ça ProtectedRoute bloquait la page
   'tickets.approve',
   'tickets.assign',
   'tickets.manage',
@@ -88,6 +89,7 @@ async function main() {
         passwordHash,
         fullName: 'Super Admin Prosuma',
         role: 'SUPERADMIN',
+        roles: ['SUPERADMIN'], // invariant : role ∈ roles — le switch de rôle est implicite pour SUPERADMIN
       },
     });
     console.log(`Super-admin créé : ${superAdminEmail} / 12345678`);

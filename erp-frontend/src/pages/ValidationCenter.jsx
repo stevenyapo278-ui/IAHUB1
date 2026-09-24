@@ -246,7 +246,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   };
 
   // Si l'URL pointe un onglet non autorisé (ou inconnu), retomber sur le 1er autorisé.
-  const firstAllowedTab = ['tickets', 'drafts', 'reminders', 'closures', 'replyClosed', 'knowledge', 'reviews'].find(tabAllowed) || 'tickets';
+  const firstAllowedTab = ['tickets', 'reviews', 'drafts', 'reminders', 'closures', 'replyClosed', 'knowledge'].find(tabAllowed) || 'tickets';
   const activeTab = tabAllowed(rawTab) ? rawTab : firstAllowedTab;
   const needsTabFix = activeTab !== rawTab;
   useEffect(() => {
@@ -774,6 +774,26 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
         </button>
         )}
 
+        {tabAllowed('reviews') && (
+        <button
+          onClick={() => handleTabChange('reviews')}
+          className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+            activeTab === 'reviews'
+              ? 'bg-orange-600 text-white shadow-md font-extrabold'
+              : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
+          }`}
+          title="Emails que l'IA n'a pas pu trancher — validation Hotline requise"
+        >
+          <AlertTriangle className="w-4 h-4" />
+          <span className="whitespace-nowrap">Révisions Email</span>
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black whitespace-nowrap ${
+            activeTab === 'reviews' ? 'bg-white/20 text-white' : 'bg-orange-500/20 text-orange-600 dark:text-orange-400'
+          }`}>
+            {needsReviewEmails.length}
+          </span>
+        </button>
+        )}
+
         {tabAllowed('drafts') && (
         <button
           onClick={() => handleTabChange('drafts')}
@@ -865,26 +885,6 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             activeTab === 'knowledge' ? 'bg-white/20 text-white' : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
           }`}>
             {pendingKnowledgeDrafts.length}
-          </span>
-        </button>
-        )}
-
-        {tabAllowed('reviews') && (
-        <button
-          onClick={() => handleTabChange('reviews')}
-          className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
-            activeTab === 'reviews'
-              ? 'bg-orange-600 text-white shadow-md font-extrabold'
-              : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
-          }`}
-          title="Emails que l'IA n'a pas pu trancher — validation Hotline requise"
-        >
-          <AlertTriangle className="w-4 h-4" />
-          <span className="whitespace-nowrap">Révisions Email</span>
-          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black whitespace-nowrap ${
-            activeTab === 'reviews' ? 'bg-white/20 text-white' : 'bg-orange-500/20 text-orange-600 dark:text-orange-400'
-          }`}>
-            {needsReviewEmails.length}
           </span>
         </button>
         )}

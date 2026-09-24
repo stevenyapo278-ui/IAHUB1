@@ -2100,9 +2100,8 @@ router.post('/:id/attachments', ticketAttachmentUpload.array('files', 10), async
         ticketId,
         filename: file.originalname,
         mimeType: file.mimetype,
-        size: file.size,
         localFilepath: path.join('uploads', 'ticket-attachments', safeFilename),
-        source: 'MANUAL',
+        source: 'MANUAL_UPLOAD',
       },
     });
     created.push(attachment);
@@ -2259,6 +2258,85 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
   // Régénérer l'embedding avec le nouveau suivi (fire-and-forget)
   const { refreshTicketEmbedding } = require('../services/similarIncidentDetector');
   refreshTicketEmbedding(ticketId);
+
+  // ── Mentions @ : envoi d'email à chaque utilisateur mentionné ────────────
+  // Le frontend envoie mentionedUserIds (JSON stringifié en FormData) et/ou
+  // embarque des <span data-mention-id="123"> dans le HTML sanitizé.
+  // Tous les mentionnés reçoivent un mail avec le contenu du suivi (comme Outlook).
+  (async () => {
+    try {
+      let mentionedIds = [];
+
+      // 1) Champ explicite mentionedUserIds (prioritaire)
+      if (req.body.mentionedUserIds) {
+        try {
+          const raw = req.body.mentionedUserIds;
+          const arr = Array.isArray(raw) ? raw : JSON.parse(raw);
+          if (Array.isArray(arr)) {
+            mentionedIds.push(...arr.map((v) => Number(v)).filter((n) => Number.isInteger(n) && n > 0));
+          }
+        } catch {}
+      }
+      // 1b) Variante : mentions (compat)
+      if (mentionedIds.length === 0 && req.body.mentions) {
+        try {
+          const raw = req.body.mentions;
+          const arr = Array.isArray(raw) ? raw : JSON.parse(raw);
+          if (Array.isArray(arr)) mentionedIds.push(...arr.map((v) => Number(v)).filter((n) => Number.isInteger(n) && n > 0));
+        } catch {}
+      }
+
+      // 2) Fallback : parser le HTML sanitizé (data-mention-id="123")
+      if (mentionedIds.length === 0) {
+        const mentionRegex = /data-mention-id=["'](\d+)["']/g;
+        let m;
+        while ((m = mentionRegex.exec(content)) !== null) {
+          const mid = Number(m[1]);
+          if (Number.isInteger(mid) && mid > 0) mentionedIds.push(mid);
+        }
+        // Support Markdown-like @[Nom](123) si jamais utilisé côté client
+        const mdRegex = /@\[[^\]]+\]\((\d+)\)/g;
+        while ((m = mdRegex.exec(content)) !== null) {
+          const mid = Number(m[1]);
+          if (Number.isInteger(mid) && mid > 0) mentionedIds.push(mid);
+        }
+      }
+
+      mentionedIds = [...new Set(mentionedIds)].filter((uid) => uid !== req.user.sub);
+      if (mentionedIds.length === 0) return;
+
+      const usersToNotify = await prisma.user.findMany({
+        where: { id: { in: mentionedIds }, isActive: true },
+        select: { id: true, email: true, fullName: true },
+      });
+      if (usersToNotify.length === 0) return;
+
+      const { sendFollowupMentionEmail } = require('../services/emailSender');
+      const ticketForMail = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { title: true } });
+      const ticketTitle = ticketForMail?.title || `Ticket #${ticketId}`;
+      const authorName = followup.author?.fullName || req.user.fullName || req.user.email || 'Un utilisateur';
+
+      for (const u of usersToNotify) {
+        if (!u.email) continue;
+        sendFollowupMentionEmail({
+          ticketId,
+          ticketTitle,
+          followupContent: content,
+          followupAuthor: authorName,
+          recipientEmail: u.email,
+          recipientName: u.fullName,
+        }).catch((e) => console.error(`[ticket.routes] Échec mail mention @${u.email} (ticket ${ticketId}):`, e.message));
+      }
+
+      // Journaliser les mentions pour traçabilité (un event par lot)
+      await logEvent(ticketId, 'FOLLOWUP_ADDED', req.user.email || String(req.user.sub), {
+        followupId: followup.id,
+        mentionedUserIds: usersToNotify.map((u) => u.id),
+      }).catch(() => {});
+    } catch (err) {
+      console.error('[ticket.routes] Mentions followup échoué:', err.message);
+    }
+  })();
 
   return res.status(201).json({ followup, imageAttachments });
 });

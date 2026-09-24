@@ -97,6 +97,32 @@ const userSelect = {
   createdAt: true,
 };
 
+// Recherche pour mentions @ : accessible à tout utilisateur authentifié (autocomplete dans les suivis).
+// Retourne seulement id/fullName/email/avatarUrl — pas de détail sensible, pas de pagination lourde.
+router.get('/mentionable', async (req, res) => {
+  const { q, search, limit } = req.query;
+  const term = (q || search || '').trim();
+  const take = Math.min(Math.max(Number(limit) || 20, 1), 50);
+  const where = { isActive: true };
+  if (term) {
+    where.OR = [
+      { fullName: { contains: term, mode: 'insensitive' } },
+      { email: { contains: term, mode: 'insensitive' } },
+    ];
+  }
+  try {
+    const users = await prisma.user.findMany({
+      where,
+      take,
+      select: { id: true, fullName: true, email: true, avatarUrl: true },
+      orderBy: { fullName: 'asc' },
+    });
+    return res.json(users);
+  } catch {
+    return res.json([]);
+  }
+});
+
 // Résolution par liste d'IDs : accessible à tout utilisateur authentifié (utilisé par
 // RemoteUserMultiSelect pour afficher les noms des demandeurs/assignés/observateurs).
 // Doit être AVANT la route GET / avec authorizeAdmin.

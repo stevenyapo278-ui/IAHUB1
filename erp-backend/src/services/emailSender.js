@@ -1232,6 +1232,57 @@ ${buildActionLink(ticketLink, 'Reprendre le ticket')}
   });
 }
 
+// ── Template : Mention dans un suivi ─────────────────────────────────────────
+function buildFollowupMentionHtml({ recipientName, ticketId, ticketTitle, followupContent, followupAuthor, signature, ticketLink }) {
+  // Le contenu du suivi contient des <span class="mention">@Nom</span> — en email on inline le style
+  // (les clients mail ignorent les classes externes). On garde le HTML sanitizé mais on remplace
+  // la pastille par un style email-safe (Flat, Calm Blue).
+  let safeContent = followupContent || '';
+  // Inline-style pour les mentions : pastille bleu clair lisible sur fond blanc
+  safeContent = safeContent.replace(
+    /<span[^>]*class="mention"[^>]*>(.*?)<\/span>/gi,
+    '<span style="display:inline-block;padding:2px 10px;border-radius:9999px;background:#DBEAFE;border:1px solid #93C5FD;color:#1E40AF;font-weight:700;font-size:13px;line-height:1.4;white-space:nowrap;">$1</span>'
+  );
+  // Fallback si le span avait data-mention-id mais pas class (compat)
+  safeContent = safeContent.replace(
+    /<span[^>]*data-mention-id[^>]*>(.*?)<\/span>/gi,
+    '<span style="display:inline-block;padding:2px 10px;border-radius:9999px;background:#DBEAFE;border:1px solid #93C5FD;color:#1E40AF;font-weight:700;font-size:13px;line-height:1.4;white-space:nowrap;">$1</span>'
+  );
+  const textFallback = safeContent.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  return buildEmailLayout({
+    headerTitle: 'Vous avez été mentionné dans un suivi',
+    headerSubtitle: `Ticket #${ticketId} — ${ticketTitle}`,
+    signature,
+    children: `
+<p style="margin:0 0 12px">Bonjour ${recipientName || ''},</p>
+<p style="margin:0 0 12px"><strong style="color:#2563EB">${followupAuthor || 'Un utilisateur'}</strong> vous a mentionné <span style="display:inline-block;padding:1px 8px;border-radius:9999px;background:#EFF6FF;border:1px solid #BFDBFE;color:#1E40AF;font-weight:700;font-size:12px;">@${recipientName || ''}</span> dans un suivi du ticket <strong>#${ticketId}</strong> :</p>
+${buildStyledTable([
+  { label: 'Ticket', value: `<strong>#${ticketId} — ${ticketTitle}</strong>` },
+  { label: 'Auteur', value: followupAuthor || '—' },
+])}
+<div style="margin:16px 0;padding:16px;background:linear-gradient(135deg,#EFF6FF 0%,#F8FAFC 100%);border:1px solid #DBEAFE;border-radius:12px;font-size:14px;line-height:1.6;color:#1E293B;box-shadow:0 1px 3px rgba(37,99,235,0.06);">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #DBEAFE;">
+    <span style="width:28px;height:28px;border-radius:8px;background:#2563EB;display:inline-flex;align-items:center;justify-content:center;color:white;font-weight:800;font-size:12px;">@</span>
+    <span style="font-weight:700;color:#1E40AF;font-size:12px;letter-spacing:0.04em;text-transform:uppercase;">Suivi</span>
+    <span style="margin-left:auto;font-size:11px;color:#64748B;">Ticket #${ticketId}</span>
+  </div>
+  ${safeContent || `<p style="margin:0">${textFallback}</p>`}
+</div>
+${buildActionLink(ticketLink, 'Voir le ticket')}
+<p style="margin:12px 0 0;color:#64748B;font-size:11px;line-height:1.5;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:10px 12px;">💡 Vous recevez cet email car vous avez été mentionné avec <strong style="color:#2563EB">@${recipientName || ''}</strong> dans le suivi. Répondez au ticket pour continuer la discussion.</p>`,
+  });
+}
+
+async function sendFollowupMentionEmail({ ticketId, ticketTitle, followupContent, followupAuthor, recipientEmail, recipientName }) {
+  const settings = await getSystemSettings();
+  const frontendUrl = resolveFrontendUrl(settings);
+  const ticketLink = `${frontendUrl}/tickets/${ticketId}`;
+  const signature = await getEmailSignature();
+  const subject = `[Ticket #${ticketId}] Vous avez été mentionné — ${ticketTitle}`;
+  const bodyHtml = buildFollowupMentionHtml({ recipientName, ticketId, ticketTitle, followupContent, followupAuthor, signature, ticketLink });
+  return sendEmail({ ticketId, to: recipientEmail, subject, bodyHtml, saveAsMessage: false });
+}
+
 // Notifie le technicien assigné qu'un ticket résolu/fermé a été rouvert par le demandeur.
 async function sendReopenNotificationEmail({ ticketId, glpiTicketId, ticketTitle, priority, category, technicianEmail, technicianName, requesterName }) {
   const settings = await getSystemSettings();
@@ -1283,7 +1334,9 @@ module.exports = {
   buildResolvedNotificationHtml,
   buildTicketCreationNotificationHtml,
   buildReopenNotificationHtml,
+  buildFollowupMentionHtml,
   sendReopenNotificationEmail,
+  sendFollowupMentionEmail,
   getEmailSignature,
   wrapDraftContentForSend,
   sendAiDraftEmail,
