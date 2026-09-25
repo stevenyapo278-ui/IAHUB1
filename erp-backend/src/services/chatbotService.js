@@ -6,6 +6,7 @@ const { sanitizeTicketHtml } = require('../utils/security');
 const { recordFirstResponse } = require('./slaService');
 const { logEvent } = require('./ticketEvent');
 const analyticsTools = require('./analyticsTools');
+const { searchEmailRag } = require('./emailRagService');
 
 const SYSTEM_PROMPT = `Tu es MARIE, l'assistante IA Helpdesk IT de Prosuma. Tu es une collègue expérimentée du support IT : naturelle, chaleureuse, efficace.
 
@@ -15,7 +16,7 @@ Tu as une connaissance complète de la structure et du contenu de la base Postgr
 - **Catégories de tickets** : Sécurité, Réseau, Téléphonie, Système, Matériel, Applicatif, Logiciel, Serveur, Test.
 - **Statuts des tickets** : NEW (Nouveau), OPEN (Ouvert), PENDING (En attente), WAITING_FOR_USER (En attente utilisateur), SOLVED (Résolu), CLOSED (Fermé), PLANNED (Planifié).
 - **Priorités** : P1 (Critique), P2 (Haute), P3 (Moyenne), P4 (Basse).
-- **Entités clés** : Tickets (id, titre, contenu, statut, priorité, demandeur, assigné, équipe, lieu, SLA, approbations, suivis/commentaires, temps passés, liens inter-tickets), Utilisateurs (fullName, email, role, team), Équipements/Inventaire (assets, serial, type, lieu), Base de connaissances (articles, procédures).
+- **Entités clés** : Tickets (id, titre, contenu, statut, priorité, demandeur, assigné, équipe, lieu, SLA, approbations, suivis/commentaires, temps passés, liens inter-tickets), Utilisateurs (fullName, email, role, team), Équipements/Inventaire (assets, serial, type, lieu), Base de connaissances (articles, procédures), Mails (IncomingEmail {fromEmail, subject, bodyPreview, conversationId, erpTicketId, receivedAt} + TicketMessage {fil INBOUND/OUTBOUND, conversationId, ticketId, sender, subject, summary} indexés en RAG).
 - **Compétences** : chaque technicien a des compétences (skills) liées à des domaines (ex: Cyrus, EREF, Réseau). Utilise-les pour identifier qui traite quoi.
 
 RÈGLE "QUI TRAITE" (absolue) :
@@ -33,6 +34,14 @@ Quand on te parle d'un lieu/magasin/site (ex: "Marcory", "Datacenter", "Hayat", 
 3. Pour "top lieux / où le plus / classement magasins" → get_top_locations obligatoirement.
 4. Pour "tickets de [lieu] + détail" → search_tickets(locationName) + get_top_locations pour le contexte.
 Synthétise toujours avec le lieu exact et le nombre.
+
+RÈGLE "MAIL" (absolue) :
+Quand on te parle de mails/emails/fil/conversation (ex: "dernier mail de Jean", "mails du ticket 123", "fil Outlook", "mail qui a créé le ticket", "mails d'hier", "panne caisse par mail") :
+1. Pour "mail(s) de [personne]" → search_emails(query="[sujet ou vide]", fromEmail="[personne]") — utilise l'email/nom exact
+2. Pour "mail(s) du ticket #123 / fil 123 / conversationId" → search_emails(query="[sujet]", ticketId=123) ou conversationId
+3. Pour "mail(s) sur [sujet]" → search_emails(query="[sujet]")
+4. Pour "dernier(s) mail(s) + période" → search_emails(query="[sujet]", dateFrom/dateTo="YYYY-MM-DD")
+5. Synthétise avec expéditeur, objet, date, ticket lié (#id), fil, direction (reçu/envoyé) et extrait du contenu
 
 Tu es TOTALEMENT LIBRE sur la forme : ton, style, longueur, structure, formatage (markdown, tableaux, listes, gras, italique), emojis ou non — fais ce qui est le plus utile et le plus agréable pour ton interlocuteur. Réponds dans la langue de l'utilisateur. Varie tes tournures, montre ta personnalité, donne ton avis professionnel quand c'est pertinent. Analyse et interprète les données plutôt que de simplement les lister.
 
@@ -1182,6 +1191,27 @@ const ALL_CHATBOT_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'search_emails',
+      description: 'Rechercher dans les contenus des mails (IncomingEmail + fils TicketMessage) avec RAG hybride. Utile pour : dernier mail d’un expéditeur, fil d’un ticket, mails d’une période, mails sur un sujet. Exemples: "mails de Jean sur pannes caisse", "dernier mail du ticket 123", "mails d’hier sur incident réseau", "mail qui a créé le ticket 456". Retourne extraits avec métadonnées (fromEmail, subject, date, ticketId, conversationId, direction).',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Requête sémantique (mots-clés, objet, contenu)' },
+          fromEmail: { type: 'string', description: 'Filtrer par expéditeur (email ou nom, ex: jean.kouassi@prosuma.ci)' },
+          ticketId: { type: 'integer', description: 'Filtrer par ticket lié (erpTicketId ou ticketId)' },
+          conversationId: { type: 'string', description: 'Filtrer par fil de conversation Outlook' },
+          dateFrom: { type: 'string', description: 'Date début YYYY-MM-DD (inclus)' },
+          dateTo: { type: 'string', description: 'Date fin YYYY-MM-DD (inclus)' },
+          direction: { type: 'string', description: 'INBOUND (reçu) ou OUTBOUND (envoyé) pour TicketMessage' },
+          limit: { type: 'integer', description: 'Nombre max (défaut 5, max 20)' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'add_ticket_followup',
       description: 'Ajouter un commentaire/suivi sur un ticket existant. Utile pour laisser une note, un update, ou un retour d\'information sur un ticket.',
       parameters: {
@@ -1414,6 +1444,33 @@ async function executeTool(toolName, args, user, { confirmed = false } = {}) {
       return await searchTeams(p.query, 10);
     case 'search_knowledge':
       return await searchKnowledge(p.query, 5);
+    case 'search_emails': {
+      const limit = Math.min(Math.max(Number(p.limit) || 5, 1), 20);
+      const results = await searchEmailRag(p.query, {
+        fromEmail: p.fromEmail || null,
+        ticketId: p.ticketId || null,
+        conversationId: p.conversationId || null,
+        dateFrom: p.dateFrom || null,
+        dateTo: p.dateTo || null,
+        direction: p.direction || null,
+        topK: limit,
+      });
+      if (!results || results.length === 0) return `Aucun mail trouvé pour "${p.query}"${p.fromEmail ? ` de ${p.fromEmail}` : ''}${p.ticketId ? ` (ticket #${p.ticketId})` : ''}.`;
+      // Formater pour le LLM : extraits + métadonnées
+      return results.map((r, idx) => {
+        const m = r.metadata || {};
+        const src = r.sourceType === 'INCOMING_EMAIL' ? 'Email entrant' : 'Message du fil';
+        const dir = m.direction ? ` [${m.direction}]` : '';
+        const from = m.fromEmail || '—';
+        const subj = m.subject || 'Sans objet';
+        const date = m.receivedAt ? new Date(m.receivedAt).toLocaleString('fr-FR') : (r.createdAt ? new Date(r.createdAt).toLocaleString('fr-FR') : '—');
+        const ticket = m.ticketId ? ` Ticket #${m.ticketId}` : (m.erpTicketId ? ` Ticket #${m.erpTicketId}` : '');
+        const conv = m.conversationId ? ` Fil:${String(m.conversationId).slice(0, 12)}…` : '';
+        const score = r.combined_score ? ` score:${Number(r.combined_score).toFixed(2)}` : '';
+        const excerpt = r.content ? r.content.substring(0, 600).replace(/\s+/g, ' ') : '';
+        return `#${idx + 1} [${src}${dir}] De:${from} | Objet:"${subj}" | ${date}${ticket}${conv}${score}\n${excerpt}${r.content && r.content.length > 600 ? '…' : ''}`;
+      }).join('\n\n---\n\n');
+    }
     case 'add_ticket_followup':
       if (!confirmed) {
         const visLabel = p.isPrivate ? 'Privé (interne IT)' : 'Public';

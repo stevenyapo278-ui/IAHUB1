@@ -1228,6 +1228,24 @@ model KnowledgeChunk {
   @@index([documentId])
 }
 
+// Corpus mails pour RAG — IncomingEmail + TicketMessage indexés en pgvector
+// Permet au chatbot de répondre en s'appuyant sur les contenus des mails (scénarios : dernier mail d'un expéditeur, fil d'un ticket, mails d'une période, etc.)
+model EmailRagChunk {
+  id         Int      @id @default(autoincrement())
+  sourceType String // INCOMING_EMAIL | TICKET_MESSAGE
+  sourceId   Int
+  chunkIndex Int      @default(0)
+  content    String   @db.Text
+  embedding  Unsupported("vector(768)")?
+  metadata   Json? // {ticketId, conversationId, fromEmail, subject, receivedAt, direction, erpTicketId}
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([sourceType, sourceId, chunkIndex])
+  @@index([sourceType])
+  @@index([createdAt])
+}
+
 // Feedback sur un résultat de recherche de la base de connaissances
 enum KnowledgeFeedbackRating {
   NOT_RELEVANT

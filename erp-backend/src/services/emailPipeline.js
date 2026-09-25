@@ -18,6 +18,7 @@ const { emitTicketCreated, emitTicketAssigned, persistNotification, userHasPermi
 const { tryHandleReminderReply } = require('./draftReplyApproval');
 const { getBreaker } = require('../utils/circuitBreaker');
 const { htmlToText } = require('../utils/htmlToText');
+const { indexIncomingEmail, indexTicketMessage } = require('./emailRagService');
 const { isLowTrustSender } = require('./senderReputation');
 
 // Wrapper pour appliquer les inbox rules sur TOUS les emails, quelle que soit l'issue du pipeline.
@@ -282,6 +283,10 @@ async function processMessage(message, account) {
       ccRecipients, hasAttachments,
     },
   });
+  // RAG mails : indexer le mail entrant (fire-and-forget, n=1 chunk)
+  if (incoming?.id) {
+    indexIncomingEmail(incoming.id).catch((e) => console.warn('[emailRag] indexIncomingEmail failed', e.message));
+  }
 
   let cidMap = {};
   let savedAttachments = [];
@@ -365,12 +370,18 @@ async function processMessage(message, account) {
           ticketStatusAtTime: ticket?.status || null,
         },
       });
+      // RAG mails : indexer le message entrant
+      if (ticketMsg?.id) indexTicketMessage(ticketMsg.id).catch((e) => console.warn('[emailRag] indexTicketMessage failed', e.message));
 
       // Générer le résumé IA en arrière-plan si pas encore disponible
       if (!ticketMsg.summary) {
         generateEmailSummary({ body: cleanBody, direction: 'INBOUND' })
           .then((summary) => {
-            if (summary) return prisma.ticketMessage.update({ where: { id: ticketMsg.id }, data: { summary } });
+            if (summary) {
+              return prisma.ticketMessage.update({ where: { id: ticketMsg.id }, data: { summary } })
+                // RAG : réindexer pour intégrer le résumé IA au corpus
+                .then(() => indexTicketMessage(ticketMsg.id));
+            }
           })
           .catch(() => {});
       }
@@ -689,12 +700,18 @@ async function processMessage(message, account) {
           ticketStatusAtTime: similarTicket?.status || null,
         },
       });
+      // RAG mails : indexer le message entrant
+      if (ticketMsg?.id) indexTicketMessage(ticketMsg.id).catch((e) => console.warn('[emailRag] indexTicketMessage failed', e.message));
 
       // Générer le résumé IA en arrière-plan si pas encore disponible
       if (!ticketMsg.summary) {
         generateEmailSummary({ body: cleanBody, direction: 'INBOUND' })
           .then((summary) => {
-            if (summary) return prisma.ticketMessage.update({ where: { id: ticketMsg.id }, data: { summary } });
+            if (summary) {
+              return prisma.ticketMessage.update({ where: { id: ticketMsg.id }, data: { summary } })
+                // RAG : réindexer pour intégrer le résumé IA au corpus
+                .then(() => indexTicketMessage(ticketMsg.id));
+            }
           })
           .catch(() => {});
       }
@@ -922,6 +939,9 @@ async function processMessage(message, account) {
     // Sauvegarder l'embedding pour la détection future d'incidents similaires
     await saveTicketEmbedding(erpTicketId, subject, cleanBody);
 
+    // RAG mails : indexer le message d'ouverture du nouveau ticket (hors transaction)
+    indexTicketMessage(ticketMsg.id).catch((e) => console.warn('[emailRag] indexTicketMessage failed', e.message));
+
     // Étape 6 : accusé de réception automatique au demandeur — envoyé en RÉPONSE dans le
     // fil de l'email d'origine (createReply), avec les personnes en copie ET la liste To
     // d'origine (boîtes de diffusion comprises) pour une sémantique « Répondre à tous ».
@@ -1016,7 +1036,7 @@ async function processMessage(message, account) {
           fallbackTicketId = fallbackTicket.id;
 
           // Enregistrer le message dans le ticket
-          await prisma.ticketMessage.create({
+          const fallbackMsg = await prisma.ticketMessage.create({
             data: {
               ticketId: fallbackTicket.id,
               direction: 'INBOUND',
@@ -1034,6 +1054,8 @@ async function processMessage(message, account) {
               summary: '[FALLBACK] Message brut — analyse IA échouée',
             },
           });
+          // RAG mails : indexer le message fallback
+          if (fallbackMsg?.id) indexTicketMessage(fallbackMsg.id).catch((e) => console.warn('[emailRag] indexTicketMessage failed', e.message));
 
           console.log(`[emailPipeline] Ticket fallback #${fallbackTicket.id} créé pour email en échec (incoming #${incoming.id})`);
         } catch (fallbackErr) {
