@@ -8,6 +8,20 @@ function stripHtml(html) {
   return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+// Les excerpts sont renvoyés au LLM entre <mail_contenu>…</mail_contenu> : un mail
+// contenant lui-même ces balises (ou un faux bloc prompt) pourrait injecter une
+// délimitation et faire sortir son texte du périmètre. On neutralise donc ces
+// balises au moment de l'indexation, une fois pour toutes.
+function sanitizeUntrustedMarkup(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/<\/?mail_contenu>/gi, ' ')
+    .replace(/<\/?(system|prompt|instructions?|user|assistant|resultats?|ticket_contenu|kb_contenu)>/gi, ' ')
+    .replace(/<\/?(system|prompt|instructions?|user|assistant|resultats?|ticket_contenu|kb_contenu)\b[^>]*>/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function buildIncomingEmailContent(email) {
   const parts = [];
   if (email.subject) parts.push(`Objet: ${email.subject}`);
@@ -20,7 +34,7 @@ function buildIncomingEmailContent(email) {
   if (body) parts.push(`Contenu:\n${body.substring(0, 6000)}`);
   if (email.erpTicketId) parts.push(`Ticket lié: #${email.erpTicketId}`);
   if (email.conversationId) parts.push(`Fil: ${email.conversationId}`);
-  return parts.join('\n\n');
+  return sanitizeUntrustedMarkup(parts.join('\n\n'));
 }
 
 function buildTicketMessageContent(msg) {
@@ -35,7 +49,7 @@ function buildTicketMessageContent(msg) {
   if (body) parts.push(`Contenu:\n${body.substring(0, 6000)}`);
   if (msg.conversationId) parts.push(`Fil: ${msg.conversationId}`);
   parts.push(`Ticket: #${msg.ticketId}`);
-  return parts.join('\n\n');
+  return sanitizeUntrustedMarkup(parts.join('\n\n'));
 }
 
 function chunkText(text, maxLen = 1500, overlap = 200) {
@@ -409,6 +423,7 @@ module.exports = {
   buildIncomingEmailContent,
   buildTicketMessageContent,
   emailViewerScope,
+  sanitizeUntrustedMarkup,
   chunkText,
   indexIncomingEmail,
   indexTicketMessage,
