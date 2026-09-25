@@ -645,8 +645,25 @@ export default function TicketDetail() {
           // fallback vers texte si parse échoue
         }
       }
+      // Word : conversion en HTML lisible (mammoth) — évite les caractères binaires
+      const isWord = /\.(docx|doc)$/i.test(nameLower) || mime.includes('msword') || mime.includes('wordprocessing');
+      if (isWord) {
+        try {
+          const mod = await import('mammoth');
+          const mammothLib = mod.default || mod;
+          const buffer = await data.arrayBuffer();
+          const result = await mammothLib.convertToHtml({ arrayBuffer: buffer });
+          const wordHtml = result.value || '<p>(document vide)</p>';
+          // Limiter la taille HTML pour éviter le gel
+          const limitedHtml = wordHtml.length > 150000 ? wordHtml.slice(0, 150000) + '<p><em>… contenu tronqué</em></p>' : wordHtml;
+          setLightboxSrc({ src: url, filename: attachment.filename, mime, blob: data, attachment, wordHtml: limitedHtml, isWord: true });
+          return;
+        } catch (e) {
+          console.warn('[preview] Word parse failed', e?.message || e);
+        }
+      }
       let textContent = null;
-      const isTextLike = !isExcel && (mime.startsWith('text/') || mime.includes('json') || mime.includes('xml') || /\.(txt|log|json|xml|md|htm|html)$/i.test(nameLower));
+      const isTextLike = !isExcel && !isWord && (mime.startsWith('text/') || mime.includes('json') || mime.includes('xml') || /\.(txt|log|json|xml|md|htm|html)$/i.test(nameLower));
       if (isTextLike) {
         try {
           textContent = await data.text();
@@ -670,11 +687,13 @@ export default function TicketDetail() {
     if (mime === 'application/pdf' || name.endsWith('.pdf')) return 'pdf';
     if (mime.startsWith('video/')) return 'video';
     if (mime.startsWith('audio/')) return 'audio';
-    // Excel / tableur : aperçu en tableau lisible (évite les caractères brouillés)
+    // Excel / tableur : aperçu en tableau lisible
     if (mime.includes('spreadsheet') || mime.includes('excel') || mime.includes('sheet') || /\.(xlsx|xls|csv)$/i.test(name)) return 'excel';
+    // Word : aperçu HTML via mammoth
+    if (mime.includes('msword') || mime.includes('wordprocessing') || /\.(docx|doc)$/i.test(name)) return 'word';
     if (mime.startsWith('text/') || mime.includes('json') || mime.includes('xml') || /\.(txt|log|json|xml|md|htm|html)$/i.test(name)) return 'text';
     if (mime.includes('zip') || mime.includes('rar') || mime.includes('7z') || /\.(zip|rar|7z|tar|gz)$/i.test(name)) return 'archive';
-    if (mime.includes('msword') || mime.includes('officedocument') || mime.includes('presentation') || /\.(doc|docx|ppt|pptx|odt|ods|odp)$/i.test(name)) return 'office';
+    if (mime.includes('presentation') || mime.includes('officedocument') || /\.(ppt|pptx|odt|ods|odp)$/i.test(name)) return 'office';
     return 'file';
   }
 
@@ -2193,10 +2212,11 @@ export default function TicketDetail() {
                         </button>
                       );
                     }
-                    // Fichiers non-image : carte avec icône + prévisualisation au clic (Excel → tableau lisible)
+                    // Fichiers non-image : carte avec icône + prévisualisation au clic (Excel → tableau, Word → HTML)
                     const iconMap = {
                       pdf: <FileText className="w-5 h-5 text-red-500" />,
                       excel: <FileText className="w-5 h-5 text-emerald-600" />,
+                      word: <FileText className="w-5 h-5 text-blue-600" />,
                       text: <FileText className="w-5 h-5 text-sky-600" />,
                       video: <Video className="w-5 h-5 text-violet-500" />,
                       audio: <Music className="w-5 h-5 text-amber-500" />,
@@ -2207,6 +2227,7 @@ export default function TicketDetail() {
                     const bgMap = {
                       pdf: 'bg-red-500/10 border-red-500/20',
                       excel: 'bg-emerald-500/10 border-emerald-500/20',
+                      word: 'bg-blue-500/10 border-blue-500/20',
                       text: 'bg-sky-500/10 border-sky-500/20',
                       video: 'bg-violet-500/10 border-violet-500/20',
                       audio: 'bg-amber-500/10 border-amber-500/20',
@@ -4582,6 +4603,7 @@ export default function TicketDetail() {
         const isVideo = kind === 'video';
         const isAudio = kind === 'audio';
         const isExcel = !isString && !!lightboxSrc.isExcel && Array.isArray(lightboxSrc.sheetData);
+        const isWord = !isString && !!lightboxSrc.isWord && !!lightboxSrc.wordHtml;
         const close = () => {
           if (!isString && lightboxSrc?.src) try { URL.revokeObjectURL(lightboxSrc.src); } catch {}
           setLightboxSrc(null);
@@ -4607,12 +4629,13 @@ export default function TicketDetail() {
                   isImage ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-400' :
                   isPdf ? 'bg-red-500/15 border-red-500/20 text-red-500' :
                   isExcel ? 'bg-emerald-500/15 border-emerald-500/25 text-emerald-600' :
+                  isWord ? 'bg-blue-500/15 border-blue-500/20 text-blue-600' :
                   isText ? 'bg-sky-500/15 border-sky-500/20 text-sky-600' :
                   isVideo ? 'bg-violet-500/20 border-violet-500/30 text-violet-400' :
                   isAudio ? 'bg-amber-500/15 border-amber-500/20 text-amber-600' :
                   'bg-primary/10 border-primary/20 text-primary'
                 }`}>
-                  {isImage ? <ImageIcon className="w-5 h-5" /> : isPdf ? <FileText className="w-5 h-5" /> : isExcel ? <FileText className="w-5 h-5" /> : isVideo ? <Video className="w-5 h-5" /> : isAudio ? <Music className="w-5 h-5" /> : isText ? <FileText className="w-5 h-5" /> : <FileIcon className="w-5 h-5" />}
+                  {isImage ? <ImageIcon className="w-5 h-5" /> : isPdf ? <FileText className="w-5 h-5" /> : isExcel ? <FileText className="w-5 h-5" /> : isWord ? <FileText className="w-5 h-5" /> : isVideo ? <Video className="w-5 h-5" /> : isAudio ? <Music className="w-5 h-5" /> : isText ? <FileText className="w-5 h-5" /> : <FileIcon className="w-5 h-5" />}
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className={`text-sm font-bold truncate ${isImage || isVideo ? 'text-white' : 'text-on-surface'}`}>{filename || 'Aperçu'}</p>
@@ -4685,6 +4708,13 @@ export default function TicketDetail() {
                     {lightboxSrc.truncated && (
                       <p className="text-[11px] text-on-surface-variant italic mt-2 text-center">Aperçu limité — téléchargez le fichier pour voir l’intégralité.</p>
                     )}
+                  </div>
+                ) : isWord ? (
+                  <div className="w-full h-full overflow-auto p-6 bg-white">
+                    <div
+                      className="prose prose-sm max-w-none text-[13px] leading-relaxed text-slate-800 [&_h1]:text-lg [&_h1]:font-bold [&_h1]:mt-4 [&_h1]:mb-2 [&_h2]:text-base [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-1.5 [&_p]:mb-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:mb-1 [&_table]:w-full [&_table]:border-collapse [&_table]:my-3 [&_th]:bg-slate-100 [&_th]:border [&_th]:p-2 [&_th]:text-left [&_th]:font-bold [&_td]:border [&_td]:p-2 [&_img]:max-w-full [&_img]:rounded-lg"
+                      dangerouslySetInnerHTML={{ __html: sanitizeHtml(lightboxSrc.wordHtml || '<p>(document vide)</p>') }}
+                    />
                   </div>
                 ) : (
                   <div className="w-full p-8 flex flex-col items-center gap-4 text-center">
