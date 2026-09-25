@@ -155,6 +155,27 @@ async function retryDeadLetters() {
 }
 scheduleSync('retry DEAD_LETTER', retryDeadLetters, () => 30 * 60); // toutes les 30 min
 
+// ── Backfill RAG des mails ────────────────────────────────────────────────
+// Les hooks d'indexation ne couvrent que les mails À PARTIR du déploiement :
+// sans ce rattrapage, l'historique Outlook resterait invisible pour MARIE.
+// Incrémental (anti-join) : chaque passage prend le prochain lot manquant,
+// se termine seul, et ne coûte un appel Embedding que sur du contenu neuf.
+async function backfillEmailRagJob() {
+  const { backfillEmailRag } = require('./services/emailRagService');
+  const stats = await backfillEmailRag({ batchSize: 30 });
+  if (stats.emails || stats.messages || stats.failed) {
+    console.log(
+      `[server] Backfill RAG mails : ${stats.emails} email(s) + ${stats.messages} message(s) indexé(s), ${stats.failed} échec(s)`
+    );
+  }
+  if (stats.chunksWithoutEmbedding > 0) {
+    console.warn(
+      `[server] Backfill RAG mails : ${stats.chunksWithoutEmbedding} chunk(s) sans embedding — recherche FTS seule (provider IA indisponible à l'indexation ?)`
+    );
+  }
+}
+scheduleSync('backfill RAG mails', backfillEmailRagJob, () => 30 * 60); // toutes les 30 min
+
 // Annuaire Active Directory : reflète les utilisateurs AD dans IA Hub toutes les
 // 10 minutes (création des nouveaux, maj nom complet, désactivation des partants).
 // Ne démarre que si le compte de service LDAP est configuré (.env).

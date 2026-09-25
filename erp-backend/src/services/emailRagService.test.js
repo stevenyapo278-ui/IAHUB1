@@ -20,10 +20,48 @@ const { listRerankCandidates } = require('../utils/reranking');
 const {
   buildIncomingEmailContent,
   buildTicketMessageContent,
+  emailViewerScope,
   chunkText,
   indexIncomingEmail,
+  backfillEmailRag,
   searchEmailRag,
 } = require('./emailRagService');
+
+describe('emailViewerScope (cloisonnement par rôle)', () => {
+  it('laisse passer les rôles support/planification', () => {
+    for (const role of ['SUPERADMIN', 'ADMIN', 'HOTLINE']) {
+      expect(emailViewerScope({ sub: 1, role })).toBeNull();
+    }
+  });
+
+  it('restreint le demandeur à ses propres tickets', () => {
+    const s = emailViewerScope({ sub: 7, role: 'REQUESTER' });
+    expect(s).toEqual({ restricted: true, userId: 7, includeAssigned: false });
+  });
+
+  it('inclut les tickets assignés pour un technicien', () => {
+    const s = emailViewerScope({ sub: 7, role: 'TECHNICIAN' });
+    expect(s.includeAssigned).toBe(true);
+  });
+
+  it('accepte user.id en secours de user.sub', () => {
+    expect(emailViewerScope({ id: 9, role: 'REQUESTER' }).userId).toBe(9);
+  });
+
+  it('verrouille en cas de rôle inconnu ou identifiant absent (fail-closed)', () => {
+    const s = emailViewerScope({ sub: 3, role: 'ROLE_INCONNU' });
+    expect(s.restricted).toBe(true);
+    expect(s.userId).toBe(3);
+    // pas d'identifiant du tout -> aucun accès
+    const s2 = emailViewerScope({ role: 'REQUESTER' });
+    expect(s2.restricted).toBe(true);
+    expect(s2.userId).toBeNull();
+  });
+
+  it('ne restreint pas un appel interne sans viewer (backfill)', () => {
+    expect(emailViewerScope(null)).toBeNull();
+  });
+});
 
 describe('chunkText', () => {
   it('retourne un seul chunk si le texte est court', () => {
@@ -195,5 +233,84 @@ describe('searchEmailRag', () => {
     ]);
     const res = await searchEmailRag('caisse', { topK: 2 });
     expect(res).toHaveLength(2);
+  });
+
+  // ── Cloisonnement : le SQL doit être restreint AVANT tout filtre optionnel ──
+  it('requester : ajoute la sous-requête de périmètre en premier filtre', async () => {
+    prisma.$queryRawUnsafe.mockResolvedValue([]);
+    await searchEmailRag('caisse', { viewer: { sub: 7, role: 'REQUESTER' } });
+    const call = prisma.$queryRawUnsafe.mock.calls[0];
+    const sql = call[0];
+    // le périmètre occupe $5 (après embedding, query, limit, seuil)
+    expect(sql).toContain('"requesterId" = $5');
+    expect(sql).toContain('"_TicketObservers"');
+    expect(sql).toContain('(metadata->>\'ticketId\')::int');
+    expect(call.slice(1)[4]).toBe(7);
+  });
+
+  it('technicien : inclut aussi les tickets qui lui sont assignés', async () => {
+    prisma.$queryRawUnsafe.mockResolvedValue([]);
+    await searchEmailRag('caisse', { viewer: { sub: 7, role: 'TECHNICIAN' } });
+    const sql = prisma.$queryRawUnsafe.mock.calls[0][0];
+    expect(sql).toContain('"assignedToId" = $5');
+  });
+
+  it('le périmètre décale correctement les filtres suivants', async () => {
+    prisma.$queryRawUnsafe.mockResolvedValue([]);
+    await searchEmailRag('caisse', { viewer: { sub: 7, role: 'REQUESTER' }, fromEmail: 'jean' });
+    const call = prisma.$queryRawUnsafe.mock.calls[0];
+    expect(call[0]).toContain('"requesterId" = $5');
+    expect(call[0]).toContain('ILIKE $6'); // fromEmail vient après le périmètre
+    expect(call.slice(1)[5]).toBe('%jean%');
+  });
+
+  it('fail-closed : sans identifiant, la requête ne peut rien retourner', async () => {
+    prisma.$queryRawUnsafe.mockResolvedValue([]);
+    await searchEmailRag('caisse', { viewer: { role: 'REQUESTER' } });
+    expect(prisma.$queryRawUnsafe.mock.calls[0][0]).toContain('1 = 0');
+  });
+
+  it('un rôle support n’ajoute aucun filtre de périmètre', async () => {
+    prisma.$queryRawUnsafe.mockResolvedValue([]);
+    await searchEmailRag('caisse', { viewer: { sub: 1, role: 'SUPERADMIN' } });
+    const sql = prisma.$queryRawUnsafe.mock.calls[0][0];
+    expect(sql).not.toContain('_TicketObservers');
+    expect(sql).not.toContain('1 = 0');
+  });
+});
+
+describe('backfillEmailRag', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    generateEmbedding.mockResolvedValue(new Array(768).fill(0.01));
+  });
+
+  it('sélectionne par anti-join (NOT EXISTS) et non par "N plus récents"', async () => {
+    // 1er appel = sélection des emails, 2e = sélection des messages, 3e = comptage
+    prisma.$queryRawUnsafe.mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce([{ c: 0 }]);
+    const stats = await backfillEmailRag({ batchSize: 30 });
+    const sql = prisma.$queryRawUnsafe.mock.calls[0][0];
+    // L'anti-join est ce qui fait progresser le rattrapage : sans lui, le
+    // backfill rescannerait toujours les mêmes lignes déjà indexées.
+    expect(sql).toContain('NOT EXISTS');
+    expect(sql).toContain("c.\"sourceType\" = 'INCOMING_EMAIL'");
+    expect(prisma.$queryRawUnsafe.mock.calls[0][1]).toBe(30);
+    expect(stats).toEqual({ emails: 0, messages: 0, failed: 0, chunksWithoutEmbedding: 0 });
+  });
+
+  it('indexe les lignes retournées et continue sur erreur sans s\'arrêter', async () => {
+    prisma.$queryRawUnsafe
+      .mockResolvedValueOnce([{ id: 1 }, { id: 2 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ c: 2 }]);
+    prisma.incomingEmail.findUnique.mockResolvedValue({ id: 1, subject: 'S', fromEmail: 'a@b.c', bodyPreview: 'x' });
+    prisma.$executeRawUnsafe.mockResolvedValue(1);
+    // le 2e email plante
+    prisma.incomingEmail.findUnique
+      .mockResolvedValueOnce({ id: 1, subject: 'S', fromEmail: 'a@b.c', bodyPreview: 'x' })
+      .mockRejectedValueOnce(new Error('boom'));
+    const stats = await backfillEmailRag({ batchSize: 10 });
+    expect(stats.emails).toBe(1);
+    expect(stats.failed).toBe(1);
   });
 });

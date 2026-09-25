@@ -1454,6 +1454,9 @@ async function executeTool(toolName, args, user, { confirmed = false } = {}) {
         dateTo: p.dateTo || null,
         direction: p.direction || null,
         topK: limit,
+        // Cloisonnement : un demandeur/technicien ne voit que les mails de SES tickets.
+        // Sans ce `viewer`, le demandeur pourrait lire tout l'historique mail.
+        viewer: user ? { sub: user.sub || user.id, role: user.role } : null,
       });
       if (!results || results.length === 0) return `Aucun mail trouvé pour "${p.query}"${p.fromEmail ? ` de ${p.fromEmail}` : ''}${p.ticketId ? ` (ticket #${p.ticketId})` : ''}.`;
       // Formater pour le LLM : extraits + métadonnées

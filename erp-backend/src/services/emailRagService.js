@@ -136,41 +136,100 @@ async function indexTicketMessage(messageId) {
   return chunks.length;
 }
 
-// Backfill : indexe tous les mails/messages non encore indexés (limité)
-async function backfillEmailRag({ limit = 100 } = {}) {
-  let indexed = 0;
-  const incomingEmails = await prisma.incomingEmail.findMany({
-    take: limit,
-    orderBy: { receivedAt: 'desc' },
-    select: { id: true },
-  });
-  for (const e of incomingEmails) {
-    const exists = await prisma.emailRagChunk.findFirst({ where: { sourceType: 'INCOMING_EMAIL', sourceId: e.id } });
-    if (!exists) {
-      await indexIncomingEmail(e.id).catch(() => {});
-      indexed++;
+/**
+ * Backfill incrémental : indexe les mails/messages qui n'ont PAS encore de chunks.
+ *
+ * Anti-join en SQL plutôt qu'un findFirst par ligne : l'ancienne version
+ * prenait les N plus récents, ignorait ceux déjà indexés, et donc n'avançait
+ * JAMAIS vers l'historique (les 100 derniers restaient les mêmes). Ici chaque
+ * exécution récupère le prochain lot non indexé, donc le rattrapage progresse
+ * et se termine tout seul quand le corpus est complet.
+ *
+ * Chaque exécution Embedding = 1 appel provider par chunk, d'où un lot volontairement
+ * modéré (les nouveaux mails sont déjà indexés en temps réel par les hooks).
+ */
+async function backfillEmailRag({ batchSize = 30 } = {}) {
+  const stats = { emails: 0, messages: 0, failed: 0, chunksWithoutEmbedding: 0 };
+
+  const emails = await prisma.$queryRawUnsafe(
+    `SELECT e.id FROM "IncomingEmail" e
+      WHERE NOT EXISTS (
+        SELECT 1 FROM "EmailRagChunk" c
+        WHERE c."sourceType" = 'INCOMING_EMAIL' AND c."sourceId" = e.id
+      )
+      ORDER BY e."receivedAt" DESC
+      LIMIT $1`,
+    batchSize
+  );
+  for (const row of emails) {
+    try {
+      await indexIncomingEmail(row.id);
+      stats.emails++;
+    } catch (e) {
+      stats.failed++;
+      console.warn(`[emailRag] backfill email #${row.id} échoué:`, e.message);
     }
   }
-  const ticketMessages = await prisma.ticketMessage.findMany({
-    take: limit,
-    orderBy: { timestamp: 'desc' },
-    select: { id: true },
-  });
-  for (const m of ticketMessages) {
-    const exists = await prisma.emailRagChunk.findFirst({ where: { sourceType: 'TICKET_MESSAGE', sourceId: m.id } });
-    if (!exists) {
-      await indexTicketMessage(m.id).catch(() => {});
-      indexed++;
+
+  const messages = await prisma.$queryRawUnsafe(
+    `SELECT m.id FROM "TicketMessage" m
+      WHERE NOT EXISTS (
+        SELECT 1 FROM "EmailRagChunk" c
+        WHERE c."sourceType" = 'TICKET_MESSAGE' AND c."sourceId" = m.id
+      )
+      ORDER BY m."timestamp" DESC
+      LIMIT $1`,
+    batchSize
+  );
+  for (const row of messages) {
+    try {
+      await indexTicketMessage(row.id);
+      stats.messages++;
+    } catch (e) {
+      stats.failed++;
+      console.warn(`[emailRag] backfill message #${row.id} échoué:`, e.message);
     }
   }
-  return indexed;
+
+  // Signale un corpus sans embeddings (provider IA indisponible au moment de
+  // l'indexation) : la recherche tombera en FTS seul, moins pertinente.
+  const noEmb = await prisma.$queryRawUnsafe(
+    `SELECT count(*)::int AS c FROM "EmailRagChunk" WHERE embedding IS NULL`
+  );
+  stats.chunksWithoutEmbedding = noEmb[0]?.c || 0;
+
+  return stats;
 }
 
 // ── Recherche hybride ─────────────────────────────────────────────────
 /**
+ * Périmètre de visibilité selon le rôle de l'utilisateur.
+ * Renvoie null si le rôle voit tout (SUPERADMIN / ADMIN / HOTLINE), sinon un
+ * objet { restricted, userId, includeAssigned } à appliquer en SQL.
+ *
+ * Sans ce filtrage, un demandeur pourrait interroger via le chatbot
+ * l'historique mail complet de l'entreprise (sujets, correspondants).
+ */
+const UNRESTRICTED_EMAIL_ROLES = new Set(['SUPERADMIN', 'ADMIN', 'HOTLINE']);
+
+function emailViewerScope(viewer) {
+  if (!viewer) return null; // appel interne / backfill : pas de contexte utilisateur
+  const role = String(viewer.role || '').toUpperCase();
+  if (UNRESTRICTED_EMAIL_ROLES.has(role)) return null;
+  const userId = Number(viewer.sub || viewer.id);
+  if (!userId || Number.isNaN(userId)) {
+    // Rôle inconnu ou sans identifiant : on verrouille (fail-closed) plutôt
+    // que d'ouvrir l'accès.
+    return { restricted: true, userId: null, includeAssigned: false };
+  }
+  if (role === 'TECHNICIAN') return { restricted: true, userId, includeAssigned: true };
+  return { restricted: true, userId, includeAssigned: false }; // REQUESTER et autres
+}
+
+/**
  * Recherche dans le corpus mails (IncomingEmail + TicketMessage)
  * @param {string} query
- * @param {object} opts {topK, fromEmail, ticketId, conversationId, dateFrom, dateTo, direction}
+ * @param {object} opts {topK, fromEmail, ticketId, conversationId, dateFrom, dateTo, direction, viewer}
  */
 async function searchEmailRag(query, opts = {}) {
   const {
@@ -190,6 +249,7 @@ async function searchEmailRag(query, opts = {}) {
     minScore = 0.12,
     minVectorScore = 0.2,
     relativeFloor = 0.3,
+    viewer = null,
   } = typeof opts === 'number' ? { topK: opts } : opts;
 
   if (!query || !query.trim()) return [];
@@ -221,6 +281,25 @@ async function searchEmailRag(query, opts = {}) {
       values.push(value);
       i++;
     };
+    // ── Cloisonnement par rôle (appliqué en premier) ──
+    // Un demander/technicien ne voit que les mails rattachés à SES tickets.
+    // Les emails non rattachés à un ticket (erpTicketId null) sont exclus :
+    // ils appartiennent à d'autres correspondants.
+    const scope = emailViewerScope(viewer);
+    if (scope && scope.restricted) {
+      if (scope.userId) {
+        const owner = scope.includeAssigned
+          ? '(t."requesterId" = $? OR t."assignedToId" = $?)'
+          : 't."requesterId" = $?';
+        add(
+          `((metadata->>'ticketId')::int) IN (SELECT t.id FROM "Ticket" t WHERE t."deletedAt" IS NULL AND ((${owner}) OR t.id IN (SELECT o."A" FROM "_TicketObservers" o WHERE o."B" = $?)))`,
+          scope.userId
+        );
+      } else {
+        // fail-closed : aucun ticket autorisé
+        conditions.push('1 = 0');
+      }
+    }
     if (fromEmail) {
       add(`(metadata->>'fromEmail' ILIKE $? OR metadata->>'fromName' ILIKE $?)`, `%${fromEmail}%`);
     }
@@ -329,6 +408,7 @@ async function searchEmailRag(query, opts = {}) {
 module.exports = {
   buildIncomingEmailContent,
   buildTicketMessageContent,
+  emailViewerScope,
   chunkText,
   indexIncomingEmail,
   indexTicketMessage,
