@@ -11,6 +11,7 @@ export function useVoiceLive() {
   const [noiseSuppressionEnabled, setNoiseSuppressionEnabled] = useState(() => {
     try { return localStorage.getItem('voiceNoiseSuppression') !== 'false'; } catch { return true; }
   });
+  const [isBrainstormMode, setIsBrainstormMode] = useState(false);
 
   const wsRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -23,6 +24,17 @@ export function useVoiceLive() {
   const readyRef = useRef(false);
   const mutedRef = useRef(false);
   const noiseSuppressionRef = useRef(noiseSuppressionEnabled);
+  // ── Nouvelles références ──
+  // pauseAudioRef : quand Marie parle, on suspend l'envoi PCM pour éviter que
+  // sa propre voix soit retranscrite comme parole utilisateur (faux barge-in).
+  // Note: l'écho-cancellation matérielle gère l'écho physique ; ce flag gère le
+  // cas où le signal de référence AEC n'est pas partagé avec Gemini.
+  const pauseAudioRef = useRef(false);
+  const reconnectCountRef = useRef(0);
+  const reconnectTimerRef = useRef(null);
+  const stoppedRef = useRef(false); // true si l'utilisateur a manuellement arrêté
+  const startingRef = useRef(false); // Verrou anti-double-clic d'initialisation asynchrone
+  const assistantTurnFinishedRef = useRef(true); // Verrou de tour de parole de l'assistante (half-duplex)
 
   useEffect(() => {
     setIsSupported(
@@ -77,23 +89,52 @@ export function useVoiceLive() {
     });
   }, []);
 
+  const playEarcon = useCallback((type = 'listen') => {
+    try {
+      const audioCtx = audioCtxRef.current;
+      if (!audioCtx || audioCtx.state !== 'running') return;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(type === 'listen' ? 587.33 : 880, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.02, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.08);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.08);
+    } catch {}
+  }, []);
+
   const handleTranscript = useCallback((msg) => {
     if (msg.partial) {
       upsertLive(msg.role, msg.text);
     } else if (msg.final) {
       commitLive(msg.role, msg.text);
     } else {
-      // Compatibilité ancien format (fragment brut sans partial/final)
       upsertLive(msg.role, msg.text);
     }
     if (msg.role === 'user') {
       setTranscript(msg.text);
-      if (!msg.final) setState('thinking');
+      if (!msg.final) {
+        setState('thinking');
+        assistantTurnFinishedRef.current = false; // L'utilisateur parle : l'assistante va démarrer son tour
+        pauseAudioRef.current = true; // Verrouiller le micro
+      }
+      if (msg.final) playEarcon('listen');
     } else {
       setReply(msg.text);
       if (!speakingRef.current) setState('speaking');
+      if (msg.final) {
+        assistantTurnFinishedRef.current = true; // L'assistante a fini de générer côté serveur
+        // Ne réouvrir le micro que si tout l'audio a fini d'être joué côté client
+        if (activeSourcesRef.current.length === 0) {
+          pauseAudioRef.current = false; // Réouvrir le micro
+          setState((prev) => (prev === 'speaking' ? 'listening' : prev));
+        }
+      }
     }
-  }, [upsertLive, commitLive]);
+  }, [upsertLive, commitLive, playEarcon]);
 
   const playVoiceChunk = useCallback((buffer) => {
     const audioCtx = audioCtxRef.current;
@@ -111,22 +152,37 @@ export function useVoiceLive() {
     const source = audioCtx.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(audioCtx.destination);
+    if (analyserRef.current) {
+      source.connect(analyserRef.current);
+    }
 
     const now = audioCtx.currentTime;
-    // Jitter buffer : petit délai pour lisser les arrivées réseau et éviter les clics
-    const jitterDelay = 0.04;
+    // Jitter buffer 10ms, séquentiel strict — pas de chevauchement
+    // L'ancien plafonnement `if (startAt-now>0.35) startAt=now` causait deux voix superposées
+    // (même phrase jouée en même temps, décalée de ~0.35s)
+    const jitterDelay = 0.01;
     const startAt = Math.max(nextStartRef.current, now + jitterDelay);
+    // Si dérive > 0.8s (réseau très lent), on log mais on garde la séquence pour éviter le chevauchement
+    if (startAt - now > 0.8) {
+      console.warn(`[voice] Drift ${((startAt-now)*1000).toFixed(0)}ms — maintien séquentiel`);
+    }
     source.start(startAt);
     nextStartRef.current = startAt + audioBuffer.duration;
 
     speakingRef.current = true;
+    pauseAudioRef.current = true; // Marie parle : suspendre l'envoi PCM
     activeSourcesRef.current.push(source);
 
     source.onended = () => {
       activeSourcesRef.current = activeSourcesRef.current.filter((s) => s !== source);
       if (activeSourcesRef.current.length === 0) {
         speakingRef.current = false;
-        setState((prev) => (prev === 'speaking' ? 'listening' : prev));
+        nextStartRef.current = 0;
+        // Re-ouvrir le micro uniquement si l'assistante a fini de générer et que tout l'audio a été joué !
+        if (assistantTurnFinishedRef.current) {
+          pauseAudioRef.current = false; // Marie a fini : reprendre l'envoi PCM
+          setState((prev) => (prev === 'speaking' ? 'listening' : prev));
+        }
       }
     };
   }, []);
@@ -137,10 +193,20 @@ export function useVoiceLive() {
     });
     activeSourcesRef.current = [];
     speakingRef.current = false;
+    assistantTurnFinishedRef.current = true; // Libérer le verrou de parole de l'assistante
+    pauseAudioRef.current = false;
     nextStartRef.current = 0;
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      try { wsRef.current.send(JSON.stringify({ type: 'bargeIn' })); } catch {}
+    }
   }, []);
 
   const cleanupSession = useCallback(() => {
+    startingRef.current = false;
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
@@ -152,6 +218,11 @@ export function useVoiceLive() {
     }
     analyserRef.current = null;
     if (wsRef.current) {
+      // Annuler les handlers pour éviter une cascade de reconnexions concomitantes
+      wsRef.current.onopen = null;
+      wsRef.current.onclose = null;
+      wsRef.current.onerror = null;
+      wsRef.current.onmessage = null;
       try { wsRef.current.close(); } catch {}
       wsRef.current = null;
     }
@@ -170,12 +241,16 @@ export function useVoiceLive() {
   }, []);
 
   const startListening = useCallback(() => {
+    if (startingRef.current || wsRef.current) return;
+    stoppedRef.current = false; // Nouvelle session : autoriser la reconnexion auto
     cleanupSession();
+    startingRef.current = true; // Activer le verrou d'initialisation
     setError(null);
     setTranscript('');
     setReply('');
     setMessages([]);
     readyRef.current = false;
+    assistantTurnFinishedRef.current = true; // Réinitialiser le verrou de parole de l'assistante
 
     const audioCtx = new AudioContext();
     audioCtxRef.current = audioCtx;
@@ -224,29 +299,20 @@ export function useVoiceLive() {
       ws.binaryType = 'arraybuffer';
 
       ws.onopen = () => {
+        startingRef.current = false; // Connexion réussie : libérer le verrou
+        reconnectCountRef.current = 0; // Reset compteur à chaque connexion réussie
         setState('connecting');
         // Configurer le worklet selon le toggle
         try { workletNode.port.postMessage({ type: 'config', noiseGate: { enabled: noiseSuppressionRef.current } }); } catch {}
         workletNode.port.onmessage = (e) => {
-          // Si muté, ne rien envoyer
-          if (mutedRef.current) return;
-          // Filtrage anti-bruit : si activé, n'envoie que les frames avec parole détectée
-          const isNoiseOnly = noiseSuppressionRef.current && e.data.isSpeech === false && !e.data.gateOpen;
-          // On laisse passer quand même ~10% des frames silencieuses pour le VAD Gemini (silence contextuel)
-          const shouldDrop = isNoiseOnly && Math.random() > 0.1;
-          if (readyRef.current && ws.readyState === WebSocket.OPEN && e.data.pcm && !shouldDrop) {
-            // Si gate fermé et filtre actif, remplacer le PCM par du silence plutôt que de dropper
-            if (isNoiseOnly) {
-              const silent = new Int16Array(e.data.pcm.byteLength / 2);
-              ws.send(silent.buffer);
-            } else {
-              ws.send(e.data.pcm);
-            }
+          // Ne pas envoyer de PCM si : muet, pas prêt, WS fermé, ou Marie est en train de parler
+          if (mutedRef.current || pauseAudioRef.current) return;
+          if (readyRef.current && ws.readyState === WebSocket.OPEN && e.data.pcm) {
+            ws.send(e.data.pcm);
           }
-          const effectiveRms = e.data.rms ?? e.data.rawRms ?? 0;
-          // Barge-in : seuil relevé à 0.06 et vérification gate/speech pour éviter les faux positifs (respiration, bruit)
-          const isRealSpeech = e.data.isSpeech !== false && e.data.gateOpen !== false;
-          if (effectiveRms >= 0.06 && speakingRef.current && isRealSpeech) {
+          const effectiveRms = e.data.rawRms ?? e.data.rms ?? 0;
+          // Seuil d'interruption ultra-sensible (0.025) : stoppe l'audio dès les premières syllabes
+          if (effectiveRms >= 0.025 && speakingRef.current) {
             stopPlayback();
           }
         };
@@ -268,6 +334,8 @@ export function useVoiceLive() {
         if (msg.type === 'ready') {
           readyRef.current = true;
           setState('listening');
+        } else if (msg.type === 'brainstorm_mode') {
+          setIsBrainstormMode(!!msg.active);
         } else if (msg.type === 'transcript') {
           handleTranscript(msg);
         } else if (msg.type === 'interrupted') {
@@ -281,7 +349,21 @@ export function useVoiceLive() {
       };
 
       ws.onclose = () => {
-        setState('idle');
+        // Reconnexion automatique (max 3 tentatives, backoff exponentiel)
+        // Ne pas reconnecte si l'utilisateur a manuellement arrêté
+        if (!stoppedRef.current && reconnectCountRef.current < 3) {
+          const delay = Math.pow(2, reconnectCountRef.current) * 1000; // 1s, 2s, 4s
+          reconnectCountRef.current++;
+          setState('reconnecting');
+          reconnectTimerRef.current = setTimeout(() => {
+            if (!stoppedRef.current) {
+              // Relancer uniquement la connexion WS (le stream micro est conservé)
+              startListening();
+            }
+          }, delay);
+        } else {
+          setState('idle');
+        }
       };
 
       ws.onerror = () => {
@@ -296,16 +378,20 @@ export function useVoiceLive() {
       ws.addEventListener('close', () => clearInterval(pingInterval));
 
       source.connect(workletNode);
-      workletNode.connect(analyser);
+      source.connect(analyser); // Direct mic source to analyser for user voice visualization!
       // Ne pas connecter analyser -> destination (évite larsen/écho)
     })().catch((err) => {
+      startingRef.current = false; // Erreur : libérer le verrou
       setError(err.message || 'Erreur lors du démarrage');
       setState('error');
     });
   }, [playVoiceChunk, stopPlayback, cleanupSession, handleTranscript]);
 
   const stopAll = useCallback(() => {
+    stoppedRef.current = true; // Arrêt volontaire : bloquer la reconnexion auto
+    reconnectCountRef.current = 0;
     cleanupSession();
+    setIsBrainstormMode(false); // Reset mode brainstorming !
     setState('idle');
   }, [cleanupSession]);
 
@@ -325,5 +411,6 @@ export function useVoiceLive() {
     stopAll,
     toggleMute,
     toggleNoiseSuppression,
+    isBrainstormMode, // Return brainstorming mode state !
   };
 }
