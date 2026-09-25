@@ -618,21 +618,42 @@ export default function TicketDetail() {
     }
   }
 
-  // Prévisualisation générique — remplace l'ancien openImageAttachment (images seules)
+  // Prévisualisation générique — Excel lisible (tableau) au lieu de caractères brouillés
   async function openAttachment(attachment) {
     try {
       const { data } = await api.get(`/tickets/${id}/attachments/${attachment.id}/file`, { responseType: 'blob' });
-      const mime = attachment.mimeType || data.type || '';
+      const mime = (attachment.mimeType || data.type || '').toLowerCase();
+      const nameLower = (attachment.filename || '').toLowerCase();
       const url = URL.createObjectURL(data);
+      const isExcel = /\.(xlsx|xls|csv)$/i.test(nameLower) || mime.includes('spreadsheet') || mime.includes('excel') || (mime.includes('csv') && nameLower.endsWith('.csv'));
+      // Excel / CSV : parser en tableau (SheetJS) pour affichage lisible
+      if (isExcel) {
+        try {
+          const XLSX = await import('xlsx');
+          const buffer = await data.arrayBuffer();
+          const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+          const sheetName = workbook.SheetNames[0];
+          const sheet = workbook.Sheets[sheetName];
+          // Limiter à 200 lignes / 20 colonnes pour éviter le gel UI
+          const json = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+          const limited = json.slice(0, 201).map((row) => (Array.isArray(row) ? row.slice(0, 20) : row));
+          const truncated = json.length > 201 || (json[0] && json[0].length > 20);
+          setLightboxSrc({ src: url, filename: attachment.filename, mime, blob: data, attachment, sheetData: limited, sheetName, truncated, isExcel: true });
+          return;
+        } catch (e) {
+          console.warn('[preview] Excel parse failed, fallback texte', e.message);
+          // fallback vers texte si parse échoue
+        }
+      }
       let textContent = null;
-      const isTextLike = mime.startsWith('text/') || mime.includes('json') || mime.includes('csv') || mime.includes('xml') || /\.(txt|csv|log|json|xml|md|htm|html)$/i.test(attachment.filename);
+      const isTextLike = !isExcel && (mime.startsWith('text/') || mime.includes('json') || mime.includes('xml') || /\.(txt|log|json|xml|md|htm|html)$/i.test(nameLower));
       if (isTextLike) {
         try {
           textContent = await data.text();
           if (textContent.length > 80000) textContent = textContent.slice(0, 80000) + '\n\n… (fichier tronqué — télécharger pour voir l’intégralité)';
         } catch {}
       }
-      setLightboxSrc({ src: url, filename: attachment.filename, mime, blob: data, attachment, textContent });
+      setLightboxSrc({ src: url, filename: attachment.filename, mime, blob: data, attachment, textContent, isExcel: false });
     } catch {
       setError('Impossible d\'ouvrir le fichier');
     }
@@ -649,9 +670,11 @@ export default function TicketDetail() {
     if (mime === 'application/pdf' || name.endsWith('.pdf')) return 'pdf';
     if (mime.startsWith('video/')) return 'video';
     if (mime.startsWith('audio/')) return 'audio';
-    if (mime.startsWith('text/') || mime.includes('json') || mime.includes('csv') || mime.includes('xml') || /\.(txt|csv|log|json|xml|md|htm|html)$/i.test(name)) return 'text';
+    // Excel / tableur : aperçu en tableau lisible (évite les caractères brouillés)
+    if (mime.includes('spreadsheet') || mime.includes('excel') || mime.includes('sheet') || /\.(xlsx|xls|csv)$/i.test(name)) return 'excel';
+    if (mime.startsWith('text/') || mime.includes('json') || mime.includes('xml') || /\.(txt|log|json|xml|md|htm|html)$/i.test(name)) return 'text';
     if (mime.includes('zip') || mime.includes('rar') || mime.includes('7z') || /\.(zip|rar|7z|tar|gz)$/i.test(name)) return 'archive';
-    if (mime.includes('msword') || mime.includes('officedocument') || mime.includes('presentation') || mime.includes('spreadsheet') || /\.(doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp)$/i.test(name)) return 'office';
+    if (mime.includes('msword') || mime.includes('officedocument') || mime.includes('presentation') || /\.(doc|docx|ppt|pptx|odt|ods|odp)$/i.test(name)) return 'office';
     return 'file';
   }
 
@@ -2170,10 +2193,11 @@ export default function TicketDetail() {
                         </button>
                       );
                     }
-                    // Fichiers non-image : carte avec icône + prévisualisation au clic
+                    // Fichiers non-image : carte avec icône + prévisualisation au clic (Excel → tableau lisible)
                     const iconMap = {
                       pdf: <FileText className="w-5 h-5 text-red-500" />,
-                      text: <FileText className="w-5 h-5 text-emerald-600" />,
+                      excel: <FileText className="w-5 h-5 text-emerald-600" />,
+                      text: <FileText className="w-5 h-5 text-sky-600" />,
                       video: <Video className="w-5 h-5 text-violet-500" />,
                       audio: <Music className="w-5 h-5 text-amber-500" />,
                       archive: <Archive className="w-5 h-5 text-orange-500" />,
@@ -2182,7 +2206,8 @@ export default function TicketDetail() {
                     };
                     const bgMap = {
                       pdf: 'bg-red-500/10 border-red-500/20',
-                      text: 'bg-emerald-500/10 border-emerald-500/20',
+                      excel: 'bg-emerald-500/10 border-emerald-500/20',
+                      text: 'bg-sky-500/10 border-sky-500/20',
                       video: 'bg-violet-500/10 border-violet-500/20',
                       audio: 'bg-amber-500/10 border-amber-500/20',
                       archive: 'bg-orange-500/10 border-orange-500/20',
@@ -4556,6 +4581,7 @@ export default function TicketDetail() {
         const isText = kind === 'text';
         const isVideo = kind === 'video';
         const isAudio = kind === 'audio';
+        const isExcel = !isString && !!lightboxSrc.isExcel && Array.isArray(lightboxSrc.sheetData);
         const close = () => {
           if (!isString && lightboxSrc?.src) try { URL.revokeObjectURL(lightboxSrc.src); } catch {}
           setLightboxSrc(null);
@@ -4580,12 +4606,13 @@ export default function TicketDetail() {
                 <span className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border shadow-sm ${
                   isImage ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-400' :
                   isPdf ? 'bg-red-500/15 border-red-500/20 text-red-500' :
-                  isText ? 'bg-emerald-500/15 border-emerald-500/20 text-emerald-600' :
+                  isExcel ? 'bg-emerald-500/15 border-emerald-500/25 text-emerald-600' :
+                  isText ? 'bg-sky-500/15 border-sky-500/20 text-sky-600' :
                   isVideo ? 'bg-violet-500/20 border-violet-500/30 text-violet-400' :
                   isAudio ? 'bg-amber-500/15 border-amber-500/20 text-amber-600' :
                   'bg-primary/10 border-primary/20 text-primary'
                 }`}>
-                  {isImage ? <ImageIcon className="w-5 h-5" /> : isPdf ? <FileText className="w-5 h-5" /> : isVideo ? <Video className="w-5 h-5" /> : isAudio ? <Music className="w-5 h-5" /> : isText ? <FileText className="w-5 h-5" /> : <FileIcon className="w-5 h-5" />}
+                  {isImage ? <ImageIcon className="w-5 h-5" /> : isPdf ? <FileText className="w-5 h-5" /> : isExcel ? <FileText className="w-5 h-5" /> : isVideo ? <Video className="w-5 h-5" /> : isAudio ? <Music className="w-5 h-5" /> : isText ? <FileText className="w-5 h-5" /> : <FileIcon className="w-5 h-5" />}
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className={`text-sm font-bold truncate ${isImage || isVideo ? 'text-white' : 'text-on-surface'}`}>{filename || 'Aperçu'}</p>
@@ -4625,6 +4652,39 @@ export default function TicketDetail() {
                 ) : isText && textContent != null ? (
                   <div className="w-full h-full overflow-auto p-4 bg-surface-container-low/40">
                     <pre className="text-xs font-mono text-on-surface whitespace-pre-wrap break-words leading-relaxed bg-surface border border-outline-variant/30 rounded-xl p-4 max-h-[65vh] overflow-auto shadow-inner">{textContent || '(fichier vide)'}</pre>
+                  </div>
+                ) : isExcel ? (
+                  <div className="w-full h-full overflow-auto p-4 bg-surface">
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="text-xs font-bold text-on-surface flex items-center gap-2">
+                        <span className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/20 text-emerald-600 flex items-center justify-center"><FileText className="w-4 h-4" /></span>
+                        {lightboxSrc.sheetName || 'Feuille 1'} {lightboxSrc.truncated ? <span className="text-[10px] font-normal text-on-surface-variant">(200 lignes max)</span> : null}
+                      </p>
+                      <span className="text-[11px] font-medium text-on-surface-variant">{lightboxSrc.sheetData.length - 1} lignes · {lightboxSrc.sheetData[0]?.length || 0} colonnes</span>
+                    </div>
+                    <div className="overflow-auto rounded-xl border border-outline-variant/30 shadow-sm max-h-[60vh] bg-surface">
+                      <table className="w-full text-xs border-collapse">
+                        <thead className="sticky top-0 bg-surface-container border-b border-outline-variant/30">
+                          <tr>
+                            {(lightboxSrc.sheetData[0] || []).map((cell, idx) => (
+                              <th key={idx} className="px-3 py-2 text-left font-bold text-on-surface bg-surface-container border-r border-outline-variant/20 last:border-r-0 whitespace-nowrap">{String(cell || `Col ${idx + 1}`)}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {lightboxSrc.sheetData.slice(1).map((row, rIdx) => (
+                            <tr key={rIdx} className={rIdx % 2 === 0 ? 'bg-surface' : 'bg-surface-container-low/40'}>
+                              {row.map((cell, cIdx) => (
+                                <td key={cIdx} className="px-3 py-1.5 border-r border-outline-variant/15 last:border-r-0 border-b border-outline-variant/10 text-on-surface-variant whitespace-nowrap max-w-[260px] truncate" title={String(cell)}>{String(cell)}</td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {lightboxSrc.truncated && (
+                      <p className="text-[11px] text-on-surface-variant italic mt-2 text-center">Aperçu limité — téléchargez le fichier pour voir l’intégralité.</p>
+                    )}
                   </div>
                 ) : (
                   <div className="w-full p-8 flex flex-col items-center gap-4 text-center">
