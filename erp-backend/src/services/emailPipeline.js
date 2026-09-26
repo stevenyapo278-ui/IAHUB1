@@ -342,6 +342,9 @@ async function processMessage(message, account) {
     io.emit('email_received', incoming);
   }
 
+  let erpTicketId = null;
+  let ticketMessageId = null;
+
   try {
     // Étape 1 : chercher un ticket existant par conversation
     const match = await findExistingTicket({ conversationId, inReplyTo, internetMessageId, subject, fromEmail });
@@ -849,7 +852,7 @@ async function processMessage(message, account) {
     // Étape 3 : créer ticket ERP dans une transaction
     const lowTrustSender = await isLowTrustSender(fromEmail).catch(() => false);
 
-    const { erpTicketId, ticketMessageId } = await prisma.$transaction(async (tx) => {
+    const txResult = await prisma.$transaction(async (tx) => {
       const created = await createTicketFromEmail({
         subject, body: cleanBody || bodyPreview, from: fromEmail, fromName, analysis, emailAccountId: account.id, locationId, locationName: resolvedLocationName, lowTrustSender, tx,
         escalateMinutes: ruleMatch?.autoEscalateMinutes || null,
@@ -893,8 +896,11 @@ async function processMessage(message, account) {
         }, tx);
       }
 
-      return { ...created, ticketMessageId: ticketMsg.id };
+      return { erpTicketId: created.erpTicketId, ticketMessageId: ticketMsg.id };
     });
+
+    erpTicketId = txResult.erpTicketId;
+    ticketMessageId = txResult.ticketMessageId;
 
     const { cidMap } = await processIncomingAttachments({
       account, graphMessageId, incomingEmailId: incoming.id,
@@ -940,7 +946,7 @@ async function processMessage(message, account) {
     await saveTicketEmbedding(erpTicketId, subject, cleanBody);
 
     // RAG mails : indexer le message d'ouverture du nouveau ticket (hors transaction)
-    indexTicketMessage(ticketMsg.id).catch((e) => console.warn('[emailRag] indexTicketMessage failed', e.message));
+    indexTicketMessage(ticketMessageId).catch((e) => console.warn('[emailRag] indexTicketMessage failed', e.message));
 
     // Étape 6 : accusé de réception automatique au demandeur — envoyé en RÉPONSE dans le
     // fil de l'email d'origine (createReply), avec les personnes en copie ET la liste To
@@ -1017,47 +1023,52 @@ async function processMessage(message, account) {
       let fallbackTicketId = null;
       if (deadLetter) {
         try {
-          const fallbackTicket = await prisma.ticket.create({
-            data: {
-              title: (subject || '(Email sans analyse IA)').substring(0, 200),
-              content: (bodyPreview || bodyHtml || '').substring(0, 5000),
-              status: 'NEW',
-              approvalStatus: 'PENDING',
-              priority: 'P3',
-              source: 'Email',
-              origin: 'EMAIL',
-              sourceEmail: fromEmail || null,
-              sourceName: (fromEmail || '').split('@')[0],
-              sourceSubject: subject || null,
-              aiProcessed: false,
-              aiSummary: `[FALLBACK] Analyse IA échouée — email nécessitant une révision manuelle. Erreur : ${err.message}`,
-            },
-          });
-          fallbackTicketId = fallbackTicket.id;
+          if (erpTicketId) {
+            console.log(`[emailPipeline] Le ticket IA #${erpTicketId} a déjà été créé avant l'erreur. Pas de ticket de repli (fallback) nécessaire.`);
+            fallbackTicketId = erpTicketId;
+          } else {
+            const fallbackTicket = await prisma.ticket.create({
+              data: {
+                title: (subject || '(Email sans analyse IA)').substring(0, 200),
+                content: (bodyPreview || bodyHtml || '').substring(0, 5000),
+                status: 'NEW',
+                approvalStatus: 'PENDING',
+                priority: 'P3',
+                source: 'Email',
+                origin: 'EMAIL',
+                sourceEmail: fromEmail || null,
+                sourceName: (fromEmail || '').split('@')[0],
+                sourceSubject: subject || null,
+                aiProcessed: false,
+                aiSummary: `[FALLBACK] Analyse IA échouée — email nécessitant une révision manuelle. Erreur : ${err.message}`,
+              },
+            });
+            fallbackTicketId = fallbackTicket.id;
 
-          // Enregistrer le message dans le ticket
-          const fallbackMsg = await prisma.ticketMessage.create({
-            data: {
-              ticketId: fallbackTicket.id,
-              direction: 'INBOUND',
-              sender: fromEmail,
-              recipients: [],
-              ccRecipients: incoming.ccRecipients || [],
-              subject,
-              body: bodyPreview,
-              bodyHtml,
-              outlookMessageId: graphMessageId,
-              internetMessageId,
-              inReplyTo,
-              conversationId,
-              timestamp: receivedAt,
-              summary: '[FALLBACK] Message brut — analyse IA échouée',
-            },
-          });
-          // RAG mails : indexer le message fallback
-          if (fallbackMsg?.id) indexTicketMessage(fallbackMsg.id).catch((e) => console.warn('[emailRag] indexTicketMessage failed', e.message));
+            // Enregistrer le message dans le ticket
+            const fallbackMsg = await prisma.ticketMessage.create({
+              data: {
+                ticketId: fallbackTicket.id,
+                direction: 'INBOUND',
+                sender: fromEmail,
+                recipients: [],
+                ccRecipients: incoming.ccRecipients || [],
+                subject,
+                body: bodyPreview,
+                bodyHtml,
+                outlookMessageId: graphMessageId,
+                internetMessageId,
+                inReplyTo,
+                conversationId,
+                timestamp: receivedAt,
+                summary: '[FALLBACK] Message brut — analyse IA échouée',
+              },
+            });
+            // RAG mails : indexer le message fallback
+            if (fallbackMsg?.id) indexTicketMessage(fallbackMsg.id).catch((e) => console.warn('[emailRag] indexTicketMessage failed', e.message));
 
-          console.log(`[emailPipeline] Ticket fallback #${fallbackTicket.id} créé pour email en échec (incoming #${incoming.id})`);
+            console.log(`[emailPipeline] Ticket fallback #${fallbackTicket.id} créé pour email en échec (incoming #${incoming.id})`);
+          }
         } catch (fallbackErr) {
           console.error('[emailPipeline] Échec création ticket fallback:', fallbackErr.message);
         }
