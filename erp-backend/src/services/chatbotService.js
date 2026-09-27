@@ -7,6 +7,8 @@ const { recordFirstResponse } = require('./slaService');
 const { logEvent } = require('./ticketEvent');
 const analyticsTools = require('./analyticsTools');
 const { searchEmailRag } = require('./emailRagService');
+const { previewReport, sendTicketReportEmail } = require('./ticketReportService');
+const { hasPermission } = require('../middleware/permissions');
 
 const SYSTEM_PROMPT = `Tu es MARIE, l'assistante IA Helpdesk IT de Prosuma. Tu es une collègue expérimentée du support IT : naturelle, chaleureuse, efficace.
 
@@ -92,7 +94,12 @@ En dehors de ça, si le contexte (conversation précédente, profil utilisateur,
 NE JAMAIS ÉNONCER UNE LIMITE :
 - Ne formule jamais de phrase en "je ne peux pas", "je n'ai pas accès à", "cette fonctionnalité n'existe pas".
 - Quand une demande sort de ce que tu peux faire, redirige directement vers l'action utile ou l'endroit approprié, sans jamais énoncer la limite elle-même.
-- Ne dis jamais "c'est fait", "je l'ai créé", "je l'ai assigné" pour une action que tu n'as pas réellement exécutée via un outil.`;
+- Ne dis jamais "c'est fait", "je l'ai créé", "je l'ai assigné" pour une action que tu n'as pas réellement exécutée via un outil.
+
+EXÉCUTION SYNCHRONE — JAMAIS DE PROMESSE DE NOTIFICATION (absolue) :
+- Une action confirmée s'exécute immédiatement, pendant l'échange en cours. N'écris JAMAIS "je vous préviens dès que c'est bon", "c'est en cours d'envoi", "je reviens vers toi dès que ce sera fait" : après ta réponse, aucune suite automatique n'existe.
+- Tant que l'utilisateur n'a pas répondu "oui" à une demande de confirmation, RIEN n'a été exécuté (ni envoi, ni enregistrement). En cas de question sur l'état ("c'est fait ?", "c'est envoyé ?", "tu peux me prévenir quand c'est bon ?"), réponds que rien n'est encore parti et re-présente la confirmation en attente.
+- Toute confirmation d'action passe OBLIGATOIREMENT par l'outil correspondant (ex: send_ticket_report pose lui-même la question et attend "oui"). Ne demande JAMAIS une confirmation dans un message texte libre (ex: "Veux-tu que je t'envoie… ? confirme-moi") : tu ne pourrais pas la traiter au tour suivant. Et si l'utilisateur répond "vas-y"/"c'est parti" sans action en attente, ne simule JAMAIS un envoi : tu n'as rien exécuté.`;
 
 const BRAINSTORM_PROMPT = `Tu es MARIE, l'assistante IA Helpdesk IT de Prosuma, agissant en MODE BRAINSTORMING COLLABORATIF.
 Ta posture change : tu es un partenaire de réflexion stratégique pour les administrateurs et techniciens IT.
@@ -1371,6 +1378,28 @@ const ALL_CHATBOT_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'send_ticket_report',
+      description: "Génère un rapport de tickets au format XLSX (pièce jointe email) et l'envoie à l'utilisateur qui pose la demande, avec copie (CC) : adresses email citées par l'utilisateur, ET/OU les membres des équipes qu'il a nommées (paramètre ccTeams — résolution automatique des adresses des membres actifs). Filtres disponibles : période (ce mois, 7j, 30j…), équipe, catégorie, statut, priorité, mot-clé. Utilise quand l'utilisateur demande un rapport, une liste ou un export « envoyé par email / en xlsx ». L'envoi est TOUJOURS soumis à une confirmation explicite de l'utilisateur avant d'être effectué.",
+      parameters: {
+        type: 'object',
+        properties: {
+          period: { type: 'string', description: "Période : today, yesterday, 7d, 30d, 90d, this_month (ce mois), last_month (mois dernier)" },
+          dateFrom: { type: 'string', description: 'Date de début alternative (YYYY-MM-DD)' },
+          dateTo: { type: 'string', description: 'Date de fin alternative (YYYY-MM-DD)' },
+          team: { type: 'string', description: "Nom de l'équipe (ex: Système, Réseau, Sécurité)" },
+          category: { type: 'string', description: 'Catégorie du ticket (ex: Asten, Réseau, Matériel)' },
+          status: { type: 'string', description: 'Statut (NEW, OPEN, PENDING, WAITING_FOR_USER, SOLVED, CLOSED)' },
+          priority: { type: 'string', enum: ['P1', 'P2', 'P3', 'P4'], description: 'Filtrer par priorité' },
+          search: { type: 'string', description: 'Mot-clé dans le titre ou le contenu des tickets' },
+          cc: { type: 'array', items: { type: 'string' }, description: "Adresses email à mettre en copie (CC) — seulement si l'utilisateur en a mentionné dans sa phrase" },
+          ccTeams: { type: 'array', items: { type: 'string' }, description: "Noms d'équipes dont TOUS les membres actifs doivent être mis en copie, quand l'utilisateur dit « en copie toute l'équipe X » ou « mets les techniciens de l'équipe Sécurité en copie ». Ex: ['Sécurité']" },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'search_teams',
       description: 'Rechercher des équipes par nom et lister leurs membres. Utile pour demander la liste des membres d\'une équipe.',
       parameters: {
@@ -1682,6 +1711,47 @@ async function executeTool(toolName, args, user, { confirmed = false } = {}) {
         };
       }
       return await addTicketFollowup(p.ticketId, p.content, p.isPrivate, user);
+    case 'send_ticket_report': {
+      // Permission restrictive : réservée aux gestionnaires de l'automatisation.
+      if (!(await hasPermission(user, 'automation.manage'))) {
+        return "Vous n'avez pas les droits nécessaires pour demander un rapport par email (permission « Gérer l'automatisation » requise).";
+      }
+      const reportTo = user?.email;
+      if (!reportTo) return "Impossible de déterminer votre adresse email pour l'envoi du rapport.";
+
+      if (!confirmed) {
+        let preview;
+        try {
+          preview = await previewReport(user, p);
+        } catch (err) {
+          return err.code === 'TEAM_NOT_FOUND' ? err.message : `Impossible de préparer le rapport : ${err.message}`;
+        }
+        if (preview.count === 0) {
+          return `Aucun ticket ne correspond à ces critères (${preview.filtersLabel}) — rien à envoyer.`;
+        }
+        const ccList = preview.cc || [];
+        const ccLine = ccList.length > 0
+          ? `\n· Copie (CC) : ${ccList.join(', ')}`
+          : '\n· Copie (CC) : aucune';
+        return {
+          needsConfirmation: true,
+          tool: toolName,
+          args: p,
+          message: `📎 Rapport prêt — ${preview.count} ticket(s)\n· Filtres : ${preview.filtersLabel}\n· Format : XLSX (20 colonnes), en pièce jointe\n· Destinataire : ${reportTo}${ccLine}\n\nEnvoyer ce rapport par email ?`,
+        };
+      }
+
+      try {
+        const result = await sendTicketReportEmail({ user, args: p });
+        if (!result.sent) {
+          return `Aucun ticket ne correspond à ces critères (${result.filtersLabel}) — email non envoyé.`;
+        }
+        const sentCc = result.cc || [];
+        return `✅ Rapport envoyé ! ${result.count} ticket(s) en pièce jointe (${result.filename}) envoyé(s) à ${reportTo}${sentCc.length ? `, avec copie à ${sentCc.join(', ')}` : ''}.`;
+      } catch (err) {
+        return `Échec de l'envoi du rapport : ${err.code === 'TEAM_NOT_FOUND' ? err.message : err.message}`;
+      }
+    }
     default:
       return `Outil inconnu: ${toolName}`;
   }
@@ -1806,11 +1876,13 @@ async function callAIWithTools(messages, options = {}) {
     // Si une confirmation est en attente → renvoyer le message de confirmation
     // et persister l'action en attente dans le state conversationnel
     if (pendingConfirmation) {
-      // Sauvegarder l'action en attente pour le prochain message
+      // Sauvegarder l'action en attente pour le prochain message (prompt de
+      // confirmation conservé pour pouvoir le re-présenter en cas de question)
       if (options._stateKey) {
         await setConversationState(options._stateKey, 'pendingConfirmation', {
           tool: pendingConfirmation.tool,
           args: pendingConfirmation.args,
+          prompt: pendingConfirmation.message,
         }, []);
       }
       return { text: pendingConfirmation.message, toolData: allToolResults.join('\n\n---\n\n'), pendingConfirmation };
@@ -3093,9 +3165,18 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
 
   _stepLog('start', `msg="${message.substring(0, 80)}" userId=${userId} historyLen=${history.length}`);
 
+  // Nettoyer d'éventuels préfixes de contexte de navigation injectés en mode vocal (ex: "[Contexte navigation — ...]")
+  let cleanMessage = message || '';
+  if (cleanMessage.startsWith('[Contexte navigation')) {
+    const closingBracketIndex = cleanMessage.indexOf(']');
+    if (closingBracketIndex !== -1) {
+      cleanMessage = cleanMessage.substring(closingBracketIndex + 1).trim();
+    }
+  }
+
   // ── Petit talk (salutations, remerciements) : réponse directe, zéro recherche, zéro classification ──
   // Évite 2-3 appels LLM + requêtes DB inutiles pour un simple "bonjour"
-  if (isGreetingMessage(message)) {
+  if (isGreetingMessage(cleanMessage)) {
     _stepLog('greeting', 'direct reply');
     return {
       reply: GREETING_REPLIES[Math.floor(Math.random() * GREETING_REPLIES.length)],
@@ -3128,13 +3209,13 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
 
   // ── Détection de confirmation d'action en attente (ex: add_ticket_followup) ──
   if (previousState?.intent === 'pendingConfirmation' && previousState?.params) {
-    const isConfirmation = /^\s*(oui|yes|go|confirme|c'est bon|vas-y|ok|d'accord|je confirme|oui vas|oui je|vas|c'est parti|allons-y|make it so)\b/i.test(message.trim());
-    const isDenial = /^\s*(non|no|annul|pas maintenant|stop|abort|cancel)\b/i.test(message.trim());
+    const isConfirmation = /^\s*(oui|yes|go|confirme|c'est bon|vas-y|ok|d'accord|je confirme|oui vas|oui je|vas|c'est parti|allons-y|make it so)\b/i.test(cleanMessage.trim());
+    const isDenial = /^\s*(non|no|annul|pas maintenant|stop|abort|cancel)\b/i.test(cleanMessage.trim());
 
     if (isConfirmation) {
       const { tool, args } = previousState.params;
       // Whitelist explicite : seuls les outils autorisés peuvent être exécutés via confirmation
-      if (tool !== 'add_ticket_followup') {
+      if (tool !== 'add_ticket_followup' && tool !== 'send_ticket_report') {
         await setConversationState(stateKey, 'general', {}, []);
         return {
           reply: "D'accord.",
@@ -3192,6 +3273,48 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
         pendingTicketData: null,
       };
     }
+
+    // Question sur l'état de l'action ("c'est fait ?", "préviens-moi quand c'est bon")
+    // → réponse déterministe : rien n'est encore exécuté, on re-présente la
+    // confirmation en attente. Évite toute hallucination d'envoi/promesse de
+    // notification différée (l'IA est synchrone : elle ne peut pas reprendre la parole).
+    const pendingPrompt = previousState.params.prompt;
+    const asksStatus = /(c['’]?\s?est\s+(fait|envoy|encore|pr[eê]t|parti|bon)|est[- ]ce\s+que|l['’]?as[- ]tu\s+(fait|envoy)|(tu|on|vous)[\s\S]{0,25}(a|as|avez|a été|a ete)\s+(fait|envoy)|en\s+est\s+o[uù]|pr[eê]ven|notif|quand\s+c['’]?\s?est\s+bon|v[ée]rifi)/i.test(cleanMessage);
+    if (asksStatus && pendingPrompt) {
+      const toolLabel = previousState.params.tool === 'send_ticket_report'
+        ? "aucun email de rapport n'a été envoyé"
+        : "rien n'a été exécuté";
+      return {
+        reply: `Rappel : ${toolLabel} pour l'instant — j'attends toujours ta confirmation. Voici la demande en attente 👇\n\n${pendingPrompt}`,
+        intent: 'general',
+        action: null,
+        widget: null,
+        sources: [],
+        citedTicketIds: [],
+        citedKnowledgeIds: [],
+        pendingTicketData: null,
+        pendingConfirmation: { tool: previousState.params.tool || null, prompt: pendingPrompt },
+      };
+    }
+  }
+
+  // ── Confirmation « en l'air » : aucune action n'est en attente ──
+  // L'utilisateur donne un feu vert ("vas-y", "c'est parti"…) alors que le state
+  // est absent (consommé, conversation différente, session perdue). On répond de
+  // façon déterministe plutôt que de laisser le LLM simuler un envoi "en cours".
+  if (previousState?.intent !== 'pendingConfirmation'
+    && /\b(vas[- ]y|je\s+confirme|c['’]est\s+parti|allons-y|make\s+it\s+so)\b/i.test(cleanMessage.trim())) {
+    return {
+      reply: "Je n'ai aucune action en attente de confirmation — rien n'a été exécuté. Si tu veux un rapport ou une autre action, redis-le moi et je te présenterai la demande de confirmation.",
+      intent: 'general',
+      action: null,
+      widget: null,
+      sources: [],
+      citedTicketIds: [],
+      citedKnowledgeIds: [],
+      pendingTicketData: null,
+      pendingConfirmation: null,
+    };
   }
 
   // ── Contexte utilisateur ──
@@ -3274,6 +3397,10 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
         citedTicketIds: [],
         citedKnowledgeIds: [],
         pendingTicketData: null,
+        pendingConfirmation: {
+          tool: r.pendingConfirmation.tool || null,
+          prompt: r.pendingConfirmation.message || r.text,
+        },
       };
     }
 

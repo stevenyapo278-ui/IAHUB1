@@ -8,6 +8,7 @@ const { logger } = require('../utils/logger');
 const analyticsTools = require('../services/analyticsTools');
 const { searchKnowledge } = require('../services/knowledgeSearch');
 const { searchTeams, searchTickets, buildSearchQuery, handleMessage, executeTool: chatbotExecuteTool } = require('../services/chatbotService');
+const { buildToolResultPayload, toGeminiResponse } = require('../services/voicePayloads');
 const jwt = require('jsonwebtoken');
 
 // Modèle Live officiel GA (doc Google Cloud Gemini Enterprise Agent Platform) :
@@ -15,6 +16,13 @@ const jwt = require('jsonwebtoken');
 const LIVE_MODEL = process.env.LIVE_MODEL || 'gemini-3.8-live';
 const LIVE_VOICE = 'Aoede';
 const LIVE_PORT = process.env.VOICE_LIVE_PORT || 4001;
+
+// Périmètre « UI » des compteurs, aligné sur /dashboard/stats (dashboard.routes.js).
+// Sans ça, les chiffres vocaux dépassent ceux de l'interface (ex. 48 « ouverts »
+// annoncés alors que l'UI en affiche 45) : les tickets en attente d'approbation
+// ou rejetés doivent rester hors des statistiques, comme partout ailleurs.
+const OPEN_STATUSES = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER'];
+const UI_TICKET_BASE = { deletedAt: null, approvalStatus: { notIn: ['PENDING', 'REJECTED'] } };
 
 async function getGeminiApiKey() {
   const provider = await prisma.aiProvider.findFirst({
@@ -94,6 +102,7 @@ const TOOLS = [
 - "mes tickets", "tickets ouverts cette semaine", "tickets de [personne]"
 - recherche de tickets par statut / priorité / lieu / équipe / période
 - performance, causes racines, distribution par catégorie ou équipe
+- demande d'envoi d'un rapport par email (ex: "envoie-moi la liste des tickets de ce mois en xlsx") — l'assistant gère la confirmation puis l'envoi
 - toute question du type "combien", "quel est le total", "classement", "rapport"
 
 Passe la question de l'utilisateur TELLE QUELLE (transcription complète).
@@ -126,9 +135,14 @@ Ne réponds JAMAIS de mémoire : appelle toujours cet outil pour les chiffres.`,
             category: { type: 'string', description: 'Catégorie du ticket (ex: Réseau, Matériel)' },
             person: { type: 'string', description: 'Nom ou email de la personne (demandeur OU technicien)' },
             period: { type: 'string', description: 'Période: today, yesterday, 7d, 30d, 90d' },
-            limit: { type: 'integer', description: 'Nombre max (défaut 10)' },
+            limit: { type: 'integer', description: 'Nombre max (défaut 20, max 50)' },
           },
         },
+      },
+      {
+        name: 'get_context',
+        description: "Page actuelle de l'utilisateur dans l'ERP (route courante). À APPELLER quand la question porte sur « ce ticket », « cette page », « ce que je regarde » — la route contient parfois le numéro de ticket (ex: /tickets/64).",
+        parameters: { type: 'object', properties: {} },
       },
       {
         name: 'check_ticket',
@@ -374,16 +388,40 @@ async function executeTool(name, args, { user = null, sessionHistory = null, ws 
       case 'ask_assistant': {
         const question = (args.question || '').trim();
         if (!question) return { error: 'Question vide' };
+        // Contexte de navigation : le modèle n'a pas toujours la route en tête
+        // (changement de page en session) — on préfixe la question envoyée au pipeline.
+        const navPrefix = toolCtx && toolCtx.nav
+          ? `[Contexte navigation — page actuelle de l'utilisateur : ${toolCtx.nav}] `
+          : '';
         try {
           const startTime = Date.now();
           // Exécution directe sans sur-couche d'audit pour le mode vocal
           const history = Array.isArray(sessionHistory) ? sessionHistory.slice(-6) : [];
-          const result = await handleMessage(question, history, user, null, null, { voiceMode: true });
+          const result = await handleMessage(navPrefix + question, history, user, null, null, { voiceMode: true });
           logger.info(`[voice-live] ask_assistant answered in ${Date.now() - startTime}ms`);
 
           // Notifier le client de l'état du mode brainstorming
           if (ws && ws.readyState === 1) {
             ws.send(JSON.stringify({ type: 'brainstorm_mode', active: !!result.isBrainstormMode }));
+          }
+
+          // Carte « action en attente » : la confirmation d'envoi doit être VISIBLE
+          // en mode vocal (badge carte dans le modal), pas seulement entendue.
+          if (ws && ws.readyState === 1) {
+            if (result.pendingConfirmation) {
+              ws.send(JSON.stringify({
+                type: 'tool_result',
+                name: 'confirmation',
+                data: {
+                  kind: 'confirmation',
+                  tool: result.pendingConfirmation.tool || null,
+                  prompt: result.pendingConfirmation.prompt || result.reply || '',
+                },
+              }));
+            } else {
+              // Action résolue (exécutée / annulée) → retirer la carte de confirmation
+              ws.send(JSON.stringify({ type: 'tool_cleared', name: 'confirmation' }));
+            }
           }
 
           if (Array.isArray(sessionHistory)) {
@@ -427,7 +465,7 @@ async function executeTool(name, args, { user = null, sessionHistory = null, ws 
           }, user);
           const tickets = await prisma.ticket.findMany({
             where,
-            take: Math.min(Number(args.limit) || 10, 50),
+            take: Math.min(Number(args.limit) || 20, 50),
             orderBy: { createdAt: 'desc' },
             select: {
               id: true, title: true, status: true, priority: true, locationName: true,
@@ -449,7 +487,7 @@ async function executeTool(name, args, { user = null, sessionHistory = null, ws 
           };
         }
         // Sans filtre structuré : chemin classique (query texte → AI re-parsing), avec période et cloisonnement rôle (user)
-        const result = await searchTickets(args.query || null, Math.min(Number(args.limit) || 10, 50), user, args.period || null);
+        const result = await searchTickets(args.query || null, Math.min(Number(args.limit) || 20, 50), user, args.period || null);
         const ticketList = Array.isArray(result) ? result : (result?.tickets || []);
         if (!ticketList.length) return { total: 0, tickets: [], message: 'Aucun ticket trouvé' };
         const results = ticketList.map((t) => ({
@@ -460,6 +498,13 @@ async function executeTool(name, args, { user = null, sessionHistory = null, ws 
           creeLe: t.createdAt?.toISOString?.() || '',
         }));
         return { total: results.length, tickets: results };
+      }
+
+      case 'get_context': {
+        // Route courante de l'utilisateur (mise à jour par les messages {type:'navigation'})
+        const navPath = (toolCtx && toolCtx.nav) || '';
+        const ticketMatch = navPath.match(/\/tickets\/(\d+)/);
+        return { page: navPath || 'inconnue', ticketId: ticketMatch ? Number(ticketMatch[1]) : null };
       }
 
       case 'check_ticket': {
@@ -604,8 +649,10 @@ async function executeTool(name, args, { user = null, sessionHistory = null, ws 
         const result = {};
         statuses.forEach((s, i) => { result[s] = counts[i]; });
         result.total = counts.reduce((a, b) => a + b, 0);
-        // Regroupements que l'utilisateur demande naturellement à l'oral, alignés sur l'UI
-        result.ouverts = (result.NEW || 0) + (result.OPEN || 0) + (result.PLANNED || 0);
+        // Regroupements que l'utilisateur demande naturellement à l'oral, alignés sur l'UI :
+        // « ouverts » = les 5 statuts ouverts (PENDING/WAITING inclus, comme la pastille
+        // du dashboard), enAttente reste un détail de sous-ensemble.
+        result.ouverts = OPEN_STATUSES.reduce((sum, s) => sum + (result[s] || 0), 0);
         result.enAttente = (result.PENDING || 0) + (result.WAITING_FOR_USER || 0);
         result.resolus = result.SOLVED || 0;
         result.fermes = result.CLOSED || 0;
@@ -810,7 +857,8 @@ async function executeTool(name, args, { user = null, sessionHistory = null, ws 
         }
         const [total, open, solved, closed] = await Promise.all([
           prisma.ticket.count({ where }),
-          prisma.ticket.count({ where: { ...where, status: 'OPEN' } }),
+          // « ouverts » = les 5 statuts ouverts (aligné dashboard), pas le seul OPEN
+          prisma.ticket.count({ where: { ...where, status: { in: OPEN_STATUSES } } }),
           prisma.ticket.count({ where: { ...where, status: 'SOLVED' } }),
           prisma.ticket.count({ where: { ...where, status: 'CLOSED' } }),
         ]);
@@ -930,6 +978,52 @@ function getPeriodDate(period) {
   return parsePeriod(period);
 }
 
+// ── Snapshot pré-chargé (contexte temps réel injecté dans le prompt) ──
+// Même périmètre que /dashboard/stats : corbeille et suggestions en attente/rejetées
+// exclues, et les 5 statuts ouverts (OPEN_STATUSES). Sans ça, le vocal annonçait
+// 48 « ouverts » (et Total=85) alors que l'UI affiche 45 (et 81) — bug constaté.
+async function fetchVoiceSnapshot(currentUser) {
+  const [total, open, newCount, p1Count, solvedCount, myCount, myRecentTickets, topLocs, topCategories, teamStats] = await Promise.all([
+    prisma.ticket.count({ where: UI_TICKET_BASE }).catch(() => null),
+    prisma.ticket.count({ where: { ...UI_TICKET_BASE, status: { in: OPEN_STATUSES } } }).catch(() => null),
+    prisma.ticket.count({ where: { ...UI_TICKET_BASE, status: 'NEW' } }).catch(() => null),
+    prisma.ticket.count({ where: { ...UI_TICKET_BASE, priority: 'P1', status: { in: OPEN_STATUSES } } }).catch(() => null),
+    prisma.ticket.count({ where: { ...UI_TICKET_BASE, status: { in: ['SOLVED', 'CLOSED'] } } }).catch(() => null),
+    currentUser ? prisma.ticket.count({ where: { ...UI_TICKET_BASE, OR: [{ requesterId: currentUser.sub }, { assignedToId: currentUser.sub }] } }).catch(() => null) : null,
+    currentUser
+      ? prisma.ticket.findMany({
+          where: { ...UI_TICKET_BASE, OR: [{ requesterId: currentUser.sub }, { assignedToId: currentUser.sub }] },
+          take: 10,
+          orderBy: { updatedAt: 'desc' },
+          select: {
+            id: true, title: true, status: true, priority: true, category: true, locationName: true,
+            assignedTo: { select: { fullName: true } },
+            requester: { select: { fullName: true } },
+          },
+        }).catch(() => [])
+      : [],
+    prisma.ticket.groupBy({
+      by: ['locationName'],
+      where: { ...UI_TICKET_BASE, locationName: { not: null }, status: { in: OPEN_STATUSES } },
+      _count: { id: true },
+      orderBy: { _count: { id: 'desc' } },
+      take: 4,
+    }).catch(() => []),
+    prisma.ticket.groupBy({
+      by: ['category'],
+      where: { ...UI_TICKET_BASE, category: { not: null }, status: { in: OPEN_STATUSES } },
+      _count: { id: true },
+      orderBy: { _count: { id: 'desc' } },
+      take: 4,
+    }).catch(() => []),
+    prisma.team.findMany({
+      select: { name: true, _count: { select: { tickets: { where: { ...UI_TICKET_BASE, status: { in: OPEN_STATUSES } } } } } },
+      take: 5,
+    }).catch(() => []),
+  ]);
+  return { total, open, newCount, p1Count, solvedCount, myCount, myRecentTickets, topLocs, topCategories, teamStats, at: new Date().toISOString().slice(0, 16).replace('T', ' ') };
+}
+
 function setupVoiceLive() {
   const tlsCertPath = process.env.TLS_CERT_PATH;
   const tlsKeyPath = process.env.TLS_KEY_PATH;
@@ -967,11 +1061,18 @@ function setupVoiceLive() {
     let currentUser = null;
     let sessionHistory = [];
     // État de confirmation des outils d'écriture à 2 temps (add_ticket_followup)
-    const toolCtx = { pendingFollowup: null };
+    // + navigation courante : route reçue à la connexion (&path=) puis mise à jour
+    // par les messages {type:'navigation'} — lue par l'outil get_context.
+    const toolCtx = { pendingFollowup: null, nav: '' };
+    let sessionNav = '';
+    // Journal des tours finaux (transcripts) pour le résumé de session (get_summary)
+    const sessionLog = [];
     let audioOutChunks = 0; // Preuve de diagnostics : chunks PCM relays au client par tour
     let audioOutBytes = 0;
     try {
       const url = new URL(req.url, 'http://localhost');
+      sessionNav = (url.searchParams.get('path') || '').slice(0, 300);
+      toolCtx.nav = sessionNav;
       const token = url.searchParams.get('token')
         || (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
       if (token) {
@@ -1008,45 +1109,7 @@ function setupVoiceLive() {
       if (cached && now - cachedAt < SNAP_TTL) {
         snap = cached;
       } else {
-        const [total, open, newCount, p1Count, solvedCount, myCount, myRecentTickets, topLocs, topCategories, teamStats] = await Promise.all([
-          prisma.ticket.count({ where: { deletedAt: null } }).catch(() => null),
-          prisma.ticket.count({ where: { deletedAt: null, status: { in: ['NEW', 'OPEN', 'PENDING', 'PLANNED'] } } }).catch(() => null),
-          prisma.ticket.count({ where: { deletedAt: null, status: 'NEW' } }).catch(() => null),
-          prisma.ticket.count({ where: { deletedAt: null, priority: 'P1', status: { in: ['NEW', 'OPEN', 'PENDING', 'PLANNED'] } } }).catch(() => null),
-          prisma.ticket.count({ where: { deletedAt: null, status: { in: ['SOLVED', 'CLOSED'] } } }).catch(() => null),
-          currentUser ? prisma.ticket.count({ where: { deletedAt: null, OR: [{ requesterId: currentUser.sub }, { assignedToId: currentUser.sub }] } }).catch(() => null) : null,
-          currentUser
-            ? prisma.ticket.findMany({
-                where: { deletedAt: null, OR: [{ requesterId: currentUser.sub }, { assignedToId: currentUser.sub }] },
-                take: 10,
-                orderBy: { updatedAt: 'desc' },
-                select: {
-                  id: true, title: true, status: true, priority: true, category: true, locationName: true,
-                  assignedTo: { select: { fullName: true } },
-                  requester: { select: { fullName: true } },
-                },
-              }).catch(() => [])
-            : [],
-          prisma.ticket.groupBy({
-            by: ['locationName'],
-            where: { deletedAt: null, locationName: { not: null }, status: { in: ['NEW', 'OPEN', 'PENDING', 'PLANNED'] } },
-            _count: { id: true },
-            orderBy: { _count: { id: 'desc' } },
-            take: 4,
-          }).catch(() => []),
-          prisma.ticket.groupBy({
-            by: ['category'],
-            where: { deletedAt: null, category: { not: null }, status: { in: ['NEW', 'OPEN', 'PENDING', 'PLANNED'] } },
-            _count: { id: true },
-            orderBy: { _count: { id: 'desc' } },
-            take: 4,
-          }).catch(() => []),
-          prisma.team.findMany({
-            select: { name: true, _count: { select: { tickets: { where: { deletedAt: null, status: { in: ['NEW', 'OPEN', 'PENDING'] } } } } } },
-            take: 5,
-          }).catch(() => []),
-        ]);
-        snap = { total, open, newCount, p1Count, solvedCount, myCount, myRecentTickets, topLocs, topCategories, teamStats, at: new Date().toISOString().slice(0, 16).replace('T', ' ') };
+        snap = await fetchVoiceSnapshot(currentUser);
         snapCache.data[userKey] = snap;
         snapCache.at[userKey] = now;
         if (Object.keys(snapCache.data).length > 50) {
@@ -1077,6 +1140,33 @@ function setupVoiceLive() {
     let inputTranscriptBuf = '';
     let outputTranscriptBuf = '';
 
+    // ── Résumé de session (message client {type:'get_summary'}) ──
+    // Synthétise les transcripts finaux accumulés via le chatbot texte (même
+    // pipeline IA que ask_assistant) — indépendant de la session Gemini en cours.
+    const handleSessionSummary = async () => {
+      const send = (payload) => { if (ws.readyState === 1) ws.send(JSON.stringify(payload)); };
+      if (sessionLog.length === 0) {
+        send({ type: 'session_summary', text: '' });
+        return;
+      }
+      const transcript = sessionLog
+        .map((m) => `${m.role === 'user' ? 'Utilisateur' : 'MARIE'} : ${m.text}`)
+        .join('\n');
+      try {
+        const result = await handleMessage(
+          "Résume en 4 à 6 phrases cet échange entre un utilisateur et l'assistance vocale MARIE : "
+          + 'contexte, demandes exprimées, réponses apportées, suites à donner. '
+          + 'Phrases simples en français, pas de markdown, pas de liste à puces.',
+          [{ role: 'user', content: transcript }],
+          currentUser, null, null, { voiceMode: false },
+        );
+        send({ type: 'session_summary', text: (result && result.reply) || '' });
+      } catch (sumErr) {
+        logger.warn(`[voice-live] Résumé échoué: ${sumErr.message}`);
+        send({ type: 'session_summary', text: '' });
+      }
+    };
+
     // ── Handlers côté client, enregistrés AVANT genai.live.connect() ──
     // connect() ne se résout qu'au setupComplete : s'il échoue ou reste bloqué, ces
     // handlers n'existeraient jamais → session morte sans log, sans {type:'error'}
@@ -1098,6 +1188,16 @@ function setupVoiceLive() {
               } else if (parsed.type === 'bargeIn') {
                 // L'utilisateur a interrompu → signaler à Gemini de s'arrêter
                 logger.info('[voice-live] bargeIn received from client');
+              } else if (parsed.type === 'navigation') {
+                // L'utilisateur a navigué (mini-orbe) → Marie doit savoir où il en est
+                sessionNav = String(parsed.path || '').slice(0, 300);
+                toolCtx.nav = sessionNav;
+                logger.info(`[voice-live] Navigation → ${sessionNav || '(inconnue)'}`);
+              } else if (parsed.type === 'get_summary') {
+                // Résumé de fin de session : généré hors Gemini via les transcripts
+                handleSessionSummary().catch((sumErr) => {
+                  logger.warn(`[voice-live] get_summary failed: ${sumErr.message}`);
+                });
               }
               return; // JSON traité — seuls les vrais messages JSON sont ignorés par le flux PCM
             }
@@ -1142,12 +1242,16 @@ function setupVoiceLive() {
             '',
             '══ RÈGLE ABSOLUE — DONNÉES EN TEMPS RÉEL ══',
             'Le bloc SNAPSHOT ci-dessous contient les métriques EXACTES et À JOUR du helpdesk.',
-            'Pour TOUTE question sur les chiffres globaux (total tickets, ouverts, nouveaux, critiques, résolus),',
+            'Pour TOUTE question sur les CHIFFRES globaux (total tickets, ouverts, nouveaux, critiques, résolus),',
             'les sites les plus impactés, les catégories principales ou les équipes,',
             'TU DOIS répondre IMMÉDIATEMENT et DIRECTEMENT en utilisant ces chiffres — SANS appeler aucun outil.',
+            'ATTENTION : le snapshot ne contient que des AGRÉGATS — JAMAIS de titres, de techniciens ni de liste de tickets.',
             '',
             '══ QUAND UTILISER UN OUTIL ══',
+            '- Contenu ou détail d\'un sous-ensemble (« ça concerne quoi », titres, techniciens assignés, liste des P1 ou d\'une équipe/catégorie/personne) → search_tickets IMMÉDIATEMENT (params priority / team / category / person / status), SANS attendre. Ne dis JAMAIS « je ne dispose pas des détails » : va chercher.',
+            '- Liste complète demandée → search_tickets avec limit=20 pour tout couvrir.',
             '- Détails d\'un ticket spécifique non listé dans le snapshot → check_ticket ou search_tickets',
+            '- Question portant sur « ce ticket », « cette page », « ce que je regarde » → get_context d\'abord (route courante ; /tickets/64 = ticket numéro 64)',
             '- Date de création, "dernier ticket créé", "tickets récents" → search_tickets avec limit=1 (tri du plus récent, champ "creeLe" = date)',
             '- Tickets d\'une équipe, d\'une catégorie ou d\'une personne → search_tickets (params team / category / person)',
             '- Mails (dernier mail, fil d\'un ticket) → search_emails',
@@ -1156,14 +1260,25 @@ function setupVoiceLive() {
             '- Classements détaillés techniciens/lieux → get_top_technicians / get_top_locations',
             '- Création ou modification de ticket → create_ticket / update_ticket_status',
             '- Question qui nécessite une vraie analyse → ask_assistant',
-            '- NE PAS appeler d\'outil si la réponse est déjà dans le snapshot.',
+            '- NE PAS appeler d\'outil si la réponse EST un chiffre déjà présent dans le snapshot.',
+            '- Les chiffres du snapshot = tickets ACTIFS ; si un outil renvoie aussi des tickets résolus/fermés, distingue-les clairement.',
+            '',
+            '══ ACTIONS EN ATTENTE DE CONFIRMATION ══',
+            'Si une action est en attente de confirmation (ex: envoi de rapport par email),',
+            'lorsque l\'utilisateur répond (par exemple par "oui", "confirme", "non", "annule"),',
+            'TU DOIS IMPÉRATIVEMENT appeler l\'outil ask_assistant avec la réponse de l\'utilisateur (ex: {"question": "oui"})',
+            'afin que le système puisse réellement exécuter l\'action (ou l\'annuler) et mettre à jour l\'interface.',
+            'Ne confirme JAMAIS que l\'action a été effectuée sans avoir d\'abord appelé ask_assistant.',
             '',
             '══ FORMAT DE RÉPONSE VOCALE ══',
-            '- Réponds en 1 à 3 phrases concises, fluides et naturelles à l\'oral.',
+            '- Réponds en 1 à 3 phrases concises, fluides et naturelles à l\'oral (réponses générales).',
+            '- LISTES COMPLÈTES : quand on te demande de lister (titres, techniciens, « tous les X »), annonce le total puis énumère TOUS les éléments — une phrase par ticket si besoin. Ne tronque JAMAIS : si le snapshot annonce 8 tickets, couvre bien les 8.',
             '- JAMAIS de markdown : pas d\'astérisques, pas de tirets listes, pas de dièses.',
             '- Les numéros de tickets : dis toujours "ticket numéro X", jamais "#X".',
             '- JAMAIS "je vérifie", "un instant", "laissez-moi chercher" — réponds directement.',
             '- Si tu ne sais pas : dis-le simplement en une phrase.',
+            '',
+            `PAGE ACTUELLE DE L\'UTILISATEUR (au démarrage) : ${sessionNav || 'inconnue'} — mets à jour mentalement via get_context si l\'utilisateur navigue.`,
             snapshotBlock,
           ].join('\n'),
           speechConfig: {
@@ -1228,11 +1343,15 @@ function setupVoiceLive() {
                   }
                   if (inputTranscriptBuf) {
                     ws.send(JSON.stringify({ type: 'transcript', role: 'user', text: inputTranscriptBuf, final: true }));
+                    sessionLog.push({ role: 'user', text: inputTranscriptBuf });
+                    if (sessionLog.length > 60) sessionLog.shift();
                     inputTranscriptBuf = '';
                   }
                   if (outputTranscriptBuf) {
                     const formattedOutput = formatSpokenTextFrench(outputTranscriptBuf);
                     ws.send(JSON.stringify({ type: 'transcript', role: 'assistant', text: formattedOutput, final: true }));
+                    sessionLog.push({ role: 'assistant', text: formattedOutput });
+                    if (sessionLog.length > 60) sessionLog.shift();
                     outputTranscriptBuf = '';
                   }
                 }
@@ -1276,15 +1395,29 @@ function setupVoiceLive() {
 
                       try {
                         const result = await executeTool(fcName, fcArgs, { user: currentUser, sessionHistory, ws, toolCtx });
+                        // Retour visuel côté front : fin du chip « Marie utilise… » + payload
+                        // sanitisé (cartes) si l'outil a un résultat affichable.
+                        if (ws && ws.readyState === 1) {
+                          ws.send(JSON.stringify({ type: 'tool_finished', name: fcName }));
+                          const payload = buildToolResultPayload(fcName, result);
+                          if (payload) {
+                            ws.send(JSON.stringify({ type: 'tool_result', name: fcName, data: payload }));
+                          }
+                        }
                         return { id: fcId, name: fcName, response: result };
                       } catch (toolErr) {
                         logger.error(`[voice-live] Tool ${fcName} error: ${toolErr.message}`);
+                        if (ws && ws.readyState === 1) {
+                          ws.send(JSON.stringify({ type: 'tool_finished', name: fcName }));
+                        }
                         return { id: fcId, name: fcName, response: { error: toolErr.message, success: false } };
                       }
                     })
                   );
                   logger.info(`[voice-live] ${fcList.length} tool(s) executed in ${Date.now() - t0}ms`);
-                  const functionResponses = results.map((r) => r.value || r.reason);
+                  // Chaque response doit être un objet plat (Struct proto Gemini) :
+                  // search_teams renvoie un tableau → sinon session fermée en code 1007.
+                  const functionResponses = results.map((r) => toGeminiResponse(r.value || r.reason));
                   try {
                     await session.sendToolResponse({ functionResponses });
                   } catch (respErr) {
@@ -1366,4 +1499,4 @@ function invalidateVoiceCache(userIds = []) {
   }
 }
 
-module.exports = { setupVoiceLive, invalidateVoiceCache };
+module.exports = { setupVoiceLive, invalidateVoiceCache, executeTool, fetchVoiceSnapshot };
