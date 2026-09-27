@@ -3,6 +3,7 @@ const {
   detectIntentRegex,
   extractSearchParamsRegex,
   resolveCanonicalTeamName,
+  buildSearchQuery,
 } = require('./chatbotService');
 
 describe('Chatbot Team & Person Fixes', () => {
@@ -41,5 +42,69 @@ describe('Chatbot Team & Person Fixes', () => {
   it('searchTeams s\'exécute et renvoie un tableau', async () => {
     const teams = await searchTeams('', 10);
     expect(Array.isArray(teams)).toBe(true);
+  });
+});
+
+describe('Ouvreurs de phrase jamais pris pour une personne', () => {
+  it('"parle moi des tickets du système" ne produit AUCUN personName', () => {
+    const params = extractSearchParamsRegex('parle moi des tickets du système');
+    expect(params?.personName).toBeUndefined();
+  });
+
+  it('"répartition des tickets ouverts par équipe" ne produit AUCUN personName', () => {
+    const params = extractSearchParamsRegex('répartition des tickets ouverts par équipe');
+    expect(params?.personName).toBeUndefined();
+  });
+
+  it('"liste des tickets du système" ne produit AUCUN personName', () => {
+    const params = extractSearchParamsRegex('liste des tickets du système');
+    expect(params?.personName).toBeUndefined();
+  });
+
+  it('"combien de tickets en cours" ne produit AUCUN personName', () => {
+    const params = extractSearchParamsRegex('combien de tickets en cours');
+    expect(params?.personName).toBeUndefined();
+  });
+
+  it('un vrai prénom en minuscules reste détecté ("steven yapo a t il des tickets ?")', () => {
+    const params = extractSearchParamsRegex('steven yapo a t il des tickets ?');
+    expect(params?.personName).toBe('steven yapo');
+  });
+
+  it('"Jean Pierre a-t-il des tickets ?" reste détecté (pas de faux négatif)', () => {
+    const params = extractSearchParamsRegex('Jean Pierre a-t-il des tickets ?');
+    expect(params?.personName).toBe('Jean Pierre');
+  });
+});
+
+describe('Filtre équipe + mot-clé dans buildSearchQuery', () => {
+  it('équipe seule → OR contient le filtre équipe', () => {
+    const where = buildSearchQuery({ teamName: 'Système' }, { sub: 1, role: 'ADMIN' });
+    expect(where.OR).toBeDefined();
+    expect(JSON.stringify(where.OR)).toContain('Système');
+    expect(where.AND).toBeUndefined();
+  });
+
+  it('équipe + mot-clé → mot-clé en OR (globale) ET équipe conservée dans AND', () => {
+    const where = buildSearchQuery({ teamName: 'Système', keyword: 'sauvegarde' }, { sub: 1, role: 'ADMIN' });
+    const hasKeywordInOr = where.OR.some((c) => c.title && c.title.contains === 'sauvegarde');
+    expect(hasKeywordInOr).toBe(true);
+    expect(where.AND).toBeDefined();
+    expect(JSON.stringify(where.AND)).toContain('Système');
+  });
+
+  it('équipe + mot-clé pour un REQUESTER → équipe conservée, rôle non appliqué au mot-clé', () => {
+    const where = buildSearchQuery({ teamName: 'Réseau', keyword: 'vpn' }, { sub: 999, role: 'REQUESTER' });
+    expect(where.AND).toBeDefined();
+    expect(JSON.stringify(where.AND)).toContain('Réseau');
+    // La recherche mot-clé reste globale : pas de scope rôle dans l'OR
+    const hasRoleFilter = JSON.stringify(where.OR).includes('999');
+    expect(hasRoleFilter).toBe(false);
+  });
+
+  it('mot-clé seul reste globale (AND absent) — régression fix sauvegarde #73', () => {
+    const where = buildSearchQuery({ keyword: 'sauvegarde' }, { sub: 999, role: 'REQUESTER' });
+    expect(where.OR).toBeDefined();
+    expect(where.AND).toBeUndefined();
   });
 });

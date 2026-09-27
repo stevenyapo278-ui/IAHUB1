@@ -9,7 +9,7 @@ import {
   ThumbsUp, ThumbsDown, Copy, Reply, X, Bot, TrendingUp, AlertTriangle,
   Timer, BarChart3, HelpCircle, Pin, PinOff, Archive, ArchiveRestore,
   MoreHorizontal, Search, Users, Edit3, Check, ChevronDown, PlusCircle,
-  Mic, MicOff,
+  Mic, MicOff, Lightbulb,
 } from 'lucide-react';
 import VoiceVisualizer from '../components/VoiceVisualizer';
 import VoiceModeModal from '../components/VoiceModeModal';
@@ -275,6 +275,7 @@ export default function ChatPage() {
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
+  const [isBrainstormMode, setIsBrainstormMode] = useState(false);
 
   // Voice recognition
   const { isListening, transcript, error: voiceError, isSupported: voiceSupported, startListening, stopListening, resetTranscript } = useVoiceRecognition({
@@ -329,7 +330,10 @@ export default function ChatPage() {
   async function selectConversation(convId) {
     setConversationId(convId);
     try {
-      const { data } = await api.get(`/chat/history?conversationId=${convId}`);
+      const res = await api.get(`/chat/history?conversationId=${convId}`);
+      const data = res.data;
+      const isBrainstorm = res.headers['x-brainstorm-mode'] === 'true';
+      setIsBrainstormMode(isBrainstorm);
       const msgs = data.map((m) => ({ id: m.id, role: m.role, content: m.content, sources: m.sources, rating: m.rating }));
       setMessages(msgs);
       setRevealedIds(new Set(msgs.map((m) => m.id).filter(Boolean)));
@@ -343,6 +347,7 @@ export default function ChatPage() {
   async function handleNewConversation() {
     setConversationId(null);
     setMessages([]);
+    setIsBrainstormMode(false); // Reset mode brainstorming !
     setRevealedIds(new Set());
     setInput('');
     setReplyTo(null);
@@ -415,7 +420,7 @@ export default function ChatPage() {
       const history = [...messages, newUserMsg].slice(-30).map((m) => ({ role: m.role, content: m.content }));
 
       let data;
-      const payload = { message: userMessage, history, conversationId };
+      const payload = { message: userMessage, history, conversationId, isBrainstorm: isBrainstormMode };
 
       if (attachment) {
         const formData = new FormData();
@@ -423,11 +428,16 @@ export default function ChatPage() {
         formData.append('history', JSON.stringify(history));
         if (conversationId) formData.append('conversationId', conversationId);
         formData.append('attachment', attachment);
+        if (isBrainstormMode) formData.append('isBrainstorm', 'true');
         const res = await api.post('/chat', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
         data = res.data;
       } else {
         const res = await api.post('/chat', payload);
         data = res.data;
+      }
+
+      if (data && data.isBrainstormMode !== undefined) {
+        setIsBrainstormMode(data.isBrainstormMode);
       }
 
       setMessages((prev) => [...prev, { role: 'assistant', content: data.reply, sources: data.sources, action: data.action, widget: data.widget }]);
@@ -600,7 +610,7 @@ export default function ChatPage() {
               </button>
             )}
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center">
+              <div className={`w-8 h-8 rounded-xl bg-gradient-to-br ${isBrainstormMode ? 'from-purple-600 via-fuchsia-600 to-pink-600 animate-gradient' : 'from-primary to-blue-600'} flex items-center justify-center transition-all duration-500`}>
                 <Bot className="w-4 h-4 text-white" />
               </div>
               <div>
@@ -618,6 +628,22 @@ export default function ChatPage() {
             Nouveau
           </button>
         </div>
+
+        {/* Bannière Mode Brainstorming */}
+        {isBrainstormMode && (
+          <div className="bg-purple-500/10 border-b border-purple-500/20 px-4 py-1.5 flex items-center justify-between shrink-0">
+            <span className="text-[11px] text-purple-600 dark:text-purple-400 font-semibold flex items-center gap-1.5">
+              <span className="animate-pulse w-2 h-2 rounded-full bg-purple-500"></span>
+              💡 SESSION DE BRAINSTORMING EN COURS
+            </span>
+            <button
+              onClick={() => setIsBrainstormMode(false)}
+              className="text-[11px] text-purple-600 dark:text-purple-400 hover:underline cursor-pointer font-medium"
+            >
+              Quitter le mode brainstorming
+            </button>
+          </div>
+        )}
 
         {/* Messages / Welcome */}
         <div className="flex-1 overflow-y-auto">
@@ -725,11 +751,20 @@ export default function ChatPage() {
               <button
                 onClick={() => sendMessage()}
                 disabled={!input.trim() || loading || isArchived}
-                className="p-2 rounded-xl bg-primary text-white disabled:opacity-40 hover:bg-primary/90 transition-colors cursor-pointer disabled:cursor-not-allowed shrink-0 mb-0.5"
+                className={`p-2 rounded-xl text-white disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-not-allowed shrink-0 mb-0.5 ${isBrainstormMode ? 'bg-purple-600 hover:bg-purple-500' : 'bg-primary hover:bg-primary/90'}`}
                 aria-label="Envoyer"
               >
                 <Send className="w-4 h-4" />
               </button>
+              {!isArchived && (
+                <button
+                  onClick={() => setIsBrainstormMode(!isBrainstormMode)}
+                  className={`p-2 rounded-xl transition-colors cursor-pointer shrink-0 mb-0.5 ${isBrainstormMode ? 'text-purple-500 bg-purple-500/10 hover:bg-purple-500/20' : 'text-on-surface-variant hover:bg-surface-container-high'}`}
+                  title={isBrainstormMode ? 'Désactiver le brainstorming' : 'Lancer un brainstorming'}
+                >
+                  <Lightbulb className="w-4 h-4" />
+                </button>
+              )}
               {voiceSupported && (
                 <>
                   <button

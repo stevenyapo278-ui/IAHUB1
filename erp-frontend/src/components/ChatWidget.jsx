@@ -159,6 +159,7 @@ export default function ChatWidget() {
 
   // Voice mode (full-screen assistant)
   const [voiceModeOpen, setVoiceModeOpen] = useState(false);
+  const [isBrainstormMode, setIsBrainstormMode] = useState(false);
 
   // Conversation management
   const [conversationId, setConversationId] = useState(null);
@@ -266,6 +267,7 @@ export default function ChatWidget() {
       setConversationId(data.id);
       setConversations((prev) => [data, ...prev]);
       setMessages([WELCOME_MESSAGE]);
+      setIsBrainstormMode(false); // Reset mode brainstorming !
       setReplyTo(null);
       removeAttachment();
       setInput('');
@@ -282,7 +284,10 @@ export default function ChatWidget() {
     setLoading(true);
     setMessages([WELCOME_MESSAGE]);
     try {
-      const { data } = await api.get(`/chat/history?conversationId=${convId}`);
+      const res = await api.get(`/chat/history?conversationId=${convId}`);
+      const data = res.data;
+      const isBrainstorm = res.headers['x-brainstorm-mode'] === 'true';
+      setIsBrainstormMode(isBrainstorm);
       if (data.length > 0) {
         setMessages([WELCOME_MESSAGE, ...data.map((m) => ({ id: m.id, role: m.role, content: m.content, sources: m.sources, rating: m.rating, widget: m.widget }))]);
       }
@@ -325,9 +330,13 @@ export default function ChatWidget() {
         formData.append('history', JSON.stringify(history));
         if (conversationId) formData.append('conversationId', conversationId);
         formData.append('attachment', attachment);
+        if (isBrainstormMode) formData.append('isBrainstorm', 'true');
         ({ data } = await api.post('/chat', formData, { headers: { 'Content-Type': 'multipart/form-data' } }));
       } else {
-        ({ data } = await api.post('/chat', { message: userMessage, history, conversationId: conversationId || undefined }));
+        ({ data } = await api.post('/chat', { message: userMessage, history, conversationId: conversationId || undefined, isBrainstorm: isBrainstormMode }));
+      }
+      if (data && data.isBrainstormMode !== undefined) {
+        setIsBrainstormMode(data.isBrainstormMode);
       }
       // Mettre à jour la conversationId si une nouvelle conversation a été créée
       if (data.conversationId && !conversationId) {
@@ -416,7 +425,7 @@ export default function ChatWidget() {
               ref={dragRef}
               onMouseDown={onDragStart}
               onTouchStart={onDragStart}
-              className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-primary to-blue-700 text-white shrink-0 select-none"
+              className={`flex items-center justify-between px-4 py-3 bg-gradient-to-r ${isBrainstormMode ? 'from-purple-600 via-fuchsia-600 to-pink-600' : 'from-primary to-blue-700'} text-white shrink-0 select-none transition-all duration-500`}
               style={{ cursor: dragging ? 'grabbing' : 'grab' }}
             >
               <div className="flex items-center gap-2">
@@ -439,6 +448,22 @@ export default function ChatWidget() {
                 </button>
               </div>
             </div>
+
+            {/* Bannière Mode Brainstorming */}
+            {isBrainstormMode && (
+              <div className="bg-purple-500/10 border-b border-purple-500/20 px-4 py-1.5 flex items-center justify-between shrink-0">
+                <span className="text-[10px] text-purple-400 font-semibold flex items-center gap-1">
+                  <span className="animate-pulse w-1.5 h-1.5 rounded-full bg-purple-500"></span>
+                  💡 SESSION DE BRAINSTORMING EN COURS
+                </span>
+                <button
+                  onClick={() => setIsBrainstormMode(false)}
+                  className="text-[10px] text-purple-400 hover:text-purple-300 underline cursor-pointer font-medium"
+                >
+                  Quitter
+                </button>
+              </div>
+            )}
 
             {/* Liste des conversations */}
             {showConversationList && (
@@ -560,8 +585,15 @@ export default function ChatWidget() {
                   disabled={loading}
                   className="flex-1 bg-transparent text-[13px] text-on-surface placeholder-on-surface-variant/50 focus:outline-none disabled:opacity-50"
                 />
-                <button onClick={() => sendMessage()} disabled={!input.trim() || loading} className="p-1.5 rounded-lg bg-primary text-white disabled:opacity-40 hover:bg-primary/90 transition-colors cursor-pointer disabled:cursor-not-allowed" aria-label="Envoyer">
+                <button onClick={() => sendMessage()} disabled={!input.trim() || loading} className={`p-1.5 rounded-lg text-white disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-not-allowed ${isBrainstormMode ? 'bg-purple-600 hover:bg-purple-500' : 'bg-primary hover:bg-primary/90'}`} aria-label="Envoyer">
                   <span className="material-symbols-outlined text-[16px]">send</span>
+                </button>
+                <button
+                  onClick={() => setIsBrainstormMode(!isBrainstormMode)}
+                  className={`p-1.5 rounded-lg transition-colors cursor-pointer ${isBrainstormMode ? 'text-purple-500 bg-purple-500/10 hover:bg-purple-500/20' : 'text-on-surface-variant hover:bg-surface-container-high'}`}
+                  title={isBrainstormMode ? 'Désactiver le brainstorming' : 'Lancer un brainstorming'}
+                >
+                  <span className="material-symbols-outlined text-[16px] block">lightbulb</span>
                 </button>
                 {voiceSupported && (
                   <>

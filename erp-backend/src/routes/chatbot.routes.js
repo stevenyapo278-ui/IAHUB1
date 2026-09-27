@@ -259,7 +259,7 @@ router.post('/', authenticate, async (req, res) => {
   const startTime = Date.now();
 
   try {
-    const { message, history = [], conversationId } = req.body;
+    const { message, history = [], conversationId, isBrainstorm } = req.body;
 
     if (!message || !message.trim()) {
       return res.status(400).json({ error: 'Le message ne peut pas être vide.' });
@@ -337,7 +337,7 @@ router.post('/', authenticate, async (req, res) => {
 
     let result;
     try {
-      result = await handleMessage(message.trim(), dbHistory.length > 0 ? dbHistory : history, req.user, conv?.pendingTicketData || null, convId, { existingSummary, summaryModelId });
+      result = await handleMessage(message.trim(), dbHistory.length > 0 ? dbHistory : history, req.user, conv?.pendingTicketData || null, convId, { existingSummary, summaryModelId, isBrainstorm: !!isBrainstorm });
     } catch (handlerErr) {
       console.error('[chatbot] ═══ ERREUR HANDLEMESSAGE ═══');
       console.error('[chatbot] Message:', message.trim().substring(0, 200));
@@ -423,6 +423,18 @@ router.get('/history', authenticate, async (req, res) => {
       orderBy: { createdAt: 'asc' },
       take: conversationId ? 200 : 50,
     });
+
+    if (conversationId) {
+      const conv = await prisma.conversation.findUnique({
+        where: { id: Number(conversationId) },
+        select: { state: true },
+      });
+      const isBrainstorm = conv?.state?.isBrainstormMode === true;
+      res.setHeader('x-brainstorm-mode', isBrainstorm ? 'true' : 'false');
+    } else {
+      res.setHeader('x-brainstorm-mode', 'false');
+    }
+
     res.json(messages);
   } catch (err) {
     res.status(500).json({ error: 'Erreur de chargement.' });

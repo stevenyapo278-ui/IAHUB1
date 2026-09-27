@@ -35,6 +35,16 @@ Quand on te parle d'un lieu/magasin/site (ex: "Marcory", "Datacenter", "Hayat", 
 4. Pour "tickets de [lieu] + détail" → search_tickets(locationName) + get_top_locations pour le contexte.
 Synthétise toujours avec le lieu exact et le nombre.
 
+RÈGLE "ÉQUIPE" (absolue) :
+Quand on te parle d'une ÉQUIPE de traitement (ex: "tickets de l'équipe Système", "les tickets système", "ceux de Réseau", "la charge de Sécurité", "répartition par équipe", "détail des tickets de l'équipe Téléphonie") :
+1. "tickets de l'équipe X" / "tickets X" / "ceux de X" (X ∈ {Sécurité, Réseau, Téléphonie, Système, Matériel, Applicatif, Logiciel, DÉVELOPPEMENT}) → search_tickets(team="X"). Ajoute status="NEW" ou status="OPEN" si l'utilisateur parle de tickets ouverts/nouveaux.
+2. "répartition / distribution / bilan / charge par équipe" (sans équipe précise) → get_team_report (période si indiquée).
+3. "détail / liste des tickets ouverts de l'équipe X" → get_team_report(teamName="X") — retourne la liste des tickets ouverts de cette équipe.
+4. "rapport statistique de l'équipe X" → generate_report(team="X").
+5. Si une recherche "tickets X" ne donne rien, élargis : essaie team="X", puis en secours le mot-clé X (catégorie/intitulé). Ne conclus jamais "aucun ticket" après un seul essai.
+6. HOMONYMIE "système" : ça peut désigner l'ÉQUIPE Système, la CATÉGORIE "Système", ou un sujet technique (serveur, OS, sauvegarde...). Si la question porte sur ce que TRAITE une équipe → filtre team. Si elle porte sur un PROBLÈME technique → mot-clé. Dis toujours en clair ce que tu as filtré ("tickets de l'équipe Système" vs "tickets contenant 'système'").
+7. Le début de phrase n'est JAMAIS un nom : "parle moi", "dis-moi", "montre", "liste", "combien", "quel", "explique" sont des verbes/pronoms — ne les envoie jamais comme personne à search_tickets.
+
 RÈGLE "MAIL" (absolue) :
 Quand on te parle de mails/emails/fil/conversation (ex: "dernier mail de Jean", "mails du ticket 123", "fil Outlook", "mail qui a créé le ticket", "mails d'hier", "panne caisse par mail") :
 1. Pour "mail(s) de [personne]" → search_emails(query="[sujet ou vide]", fromEmail="[personne]") — utilise l'email/nom exact
@@ -83,6 +93,24 @@ NE JAMAIS ÉNONCER UNE LIMITE :
 - Ne formule jamais de phrase en "je ne peux pas", "je n'ai pas accès à", "cette fonctionnalité n'existe pas".
 - Quand une demande sort de ce que tu peux faire, redirige directement vers l'action utile ou l'endroit approprié, sans jamais énoncer la limite elle-même.
 - Ne dis jamais "c'est fait", "je l'ai créé", "je l'ai assigné" pour une action que tu n'as pas réellement exécutée via un outil.`;
+
+const BRAINSTORM_PROMPT = `Tu es MARIE, l'assistante IA Helpdesk IT de Prosuma, agissant en MODE BRAINSTORMING COLLABORATIF.
+Ta posture change : tu es un partenaire de réflexion stratégique pour les administrateurs et techniciens IT.
+
+CONSIGNES DE SÉANCE :
+1. POSTURE SOCRATIQUE : Pose une seule question ouverte ou demande de clarification à la fois pour guider l'utilisateur. Ne submerge pas l'utilisateur avec de longs paragraphes. Sois collaborative.
+2. ANCRAGE RÉEL : Suggère à l'utilisateur de s'appuyer sur des données concrètes de notre helpdesk. Propose activement d'exécuter des outils de diagnostic (ex: analyze_root_cause, search_tickets, search_knowledge, get_top_locations, get_top_technicians) pour illustrer la réflexion.
+3. PHASES DU BRAINSTORMING : Guide l'utilisateur à travers 5 phases successives. Identifie dans quelle phase vous vous trouvez selon le contexte :
+   - Phase 1 : CADRAGE → Définir précisément le problème ou le sujet, les symptômes et le périmètre.
+   - Phase 2 : DIAGNOSTIC / DONNÉES → Tirer des statistiques, analyser les causes racines, rechercher les tickets ou articles pertinents.
+   - Phase 3 : IDÉATION → Brainstormer des solutions, des hypothèses, des processus alternatifs.
+   - Phase 4 : PLAN D'ACTION → Formuler des recommandations concrètes, attribuer des priorités.
+   - Phase 5 : CLÔTURE & SYNTHÈSE → Rédiger une synthèse claire, proposer de créer une procédure KB (Base de Connaissances) ou un plan d'action consolidé.
+
+4. TON : Enthousiaste, analytique, bienveillant et professionnel.
+5. EXIGENCE VOCALE : Si l'utilisateur communique en mode vocal (détecté par l'option voiceMode), sois extrêmement concise (maximum 2 phrases courtes et percutantes) pour maintenir un dialogue fluide, et propose de rédiger la synthèse finale sous forme écrite dans le chat.
+
+RECOURS AUX OUTILS : Tu as accès à tous tes outils habituels. Utilise-les dès que nécessaire pour valider une hypothèse ou analyser une tendance.`;
 
 // ── Nettoyage minimal des réponses IA ──────────────────────────────────
 
@@ -265,12 +293,32 @@ function extractSearchParamsRegex(query) {
     if (nameAtStartMatch) {
       const cand = nameAtStartMatch[1].trim();
       const lowerCand = cand.toLowerCase();
+      // Ouvreurs de phrase : verbes impératifs / interrogatifs / pronoms. Ce ne sont
+      // JAMAIS des noms de personnes ("parle moi des tickets du système" → pas de personName).
+      // Les phrases complètes se testent en prefix, les mots seuls en égalité stricte
+      // (startsWith('je') bloquerait à tort "Jean Pierre").
       const forbidden = [
-        'liste des', 'montre les', 'tous les', 'quand il', 'quel est', 'est ce', 'y a', 'il y', 'le ticket',
-        'un ticket', 'quels sont', 'je veux', 'je souhaite', 'je voudrais', 'peux tu', 'dis moi', 'evalue le',
-        'évalue le', 'évaluer le', 'performance de', 'bilan de', 'les demandes', 'ouverture de',
+        'liste des', 'montre les', 'montre moi', 'tous les', 'quand il', 'quel est', 'est ce', 'est-ce',
+        'y a', 'il y', 'le ticket', 'les tickets', 'un ticket', 'quels sont', 'quelles sont',
+        'je veux', 'je souhaite', 'je voudrais', 'je peux', 'peux tu', 'peux-tu',
+        'dis moi', 'dis-moi', 'parle moi', 'parle-moi', 'donne moi', 'donne-moi',
+        'qui traite', 'qui s occupe', 'qui gère', 'qui gere', 'on a', 'il existe',
+        'evalue le', 'évalue le', 'évaluer le', 'performance de', 'bilan de', 'les demandes', 'ouverture de',
+        'existe t', 'exist t', 'peut on', 'peut-on', 'c est', 'ce qu',
       ];
-      if (!forbidden.some((f) => lowerCand.startsWith(f)) && !NON_PERSON_TERMS.test(cand)) {
+      const forbiddenFirstWords = new Set([
+        'parle', 'dis', 'donne', 'donnez', 'liste', 'montre', 'explique', 'raconte', 'résume', 'resume',
+        'réponds', 'reponds', 'combien', 'pourquoi', 'comment', 'quand', 'qui', 'quel', 'quelle',
+        'quelles', 'quels', 'je', 'tu', 'nous', 'vous', 'on', 'est', 'ce', 'cette', 'ces', 'il', 'elle',
+        'ils', 'elles', 'y', 'existent', 'existe', 'serait', 'peut', 'va', 'vois', 'regarde', 'cherche',
+        'répartition', 'repartition', 'distribution', 'classement', 'statistiques', 'statistique',
+        'synthèse', 'synthese', 'historique', 'analyse', 'tableau', 'graphique', 'bilan', 'rapport',
+        'merci', 'bonjour', 'salut', 'ok', 'oui', 'non', 'svp', 'stp', 'hello', 'total',
+      ]);
+      const firstWord = lowerCand.split(/\s+/)[0];
+      if (!forbidden.some((f) => lowerCand.startsWith(f))
+        && !forbiddenFirstWords.has(firstWord)
+        && !NON_PERSON_TERMS.test(cand)) {
         params.personName = cand;
       }
     }
@@ -349,6 +397,10 @@ Règles:
 - "fermés" → statuses: ["CLOSED"]
 - "P1" ou "critique" → priorities: ["P1"]
 - "équipe Abidjan" → teamName: "Abidjan"
+- ÉQUIPE CONNUE : Sécurité, Réseau, Téléphonie, Système, Matériel, Applicatif, Logiciel, DÉVELOPPEMENT.
+  "tickets de l'équipe système", "les tickets système", "du système", "ceux de Réseau", "charge Sécurité" → teamName: "Système"/"Réseau"/"Sécurité"... PAS keyword.
+  Seule exception : si le mot désigne clairement un sujet technique ("panne système", "ticket système d'exploitation"), alors keyword.
+- Les ouvreurs de phrase ne sont PAS des personnes : "parle moi", "dis moi", "dis-moi", "montre", "donne", "liste", "explique", "raconte", "résume", "combien", "quel", "quelle", "quelles", "pourquoi", "comment", "quand", "qui", "je", "tu", "on", "nous", "vous" → NE JAMAIS dans personName.
 - "Casino" → locationName: "Casino"
 - Extrais UN seul mot-clé significatif si présent (ex: "VPN" dans "tickets VPN"). PAS de mots vides (la, les, des, un, une, qui, pour, etc.)
 - Si le message contient un nom de personne connu (ex: "Yapo", "Jean", "Diallo"), PAS keyword.
@@ -584,10 +636,14 @@ function buildSearchQuery(params, user) {
     where.priority = params.priorities.length === 1 ? params.priorities[0] : { in: params.priorities };
   }
 
-  // Équipe : filtre à la fois ticket.team.name ET assignedTo.team.name avec variantes d'accents
+  // Équipe : filtre à la fois ticket.team.name ET assignedTo.team.name avec variantes d'accents.
+  // teamFilter est conservé en variable : si un filtre mot-clé écrase where.OR plus bas,
+  // on le reporte dans where.AND pour ne pas perdre la contrainte d'équipe.
+  let teamFilter = null;
+  let teamPlacedInOr = false;
   if (params.teamName) {
     const variants = getKeywordVariants(params.teamName);
-    const teamFilter = {
+    teamFilter = {
       OR: variants.flatMap(v => [
         { team: { name: { contains: v, mode: 'insensitive' } } },
         { assignedTo: { team: { name: { contains: v, mode: 'insensitive' } } } },
@@ -597,6 +653,7 @@ function buildSearchQuery(params, user) {
       where.AND = [...(where.AND || []), teamFilter];
     } else {
       where.OR = teamFilter.OR;
+      teamPlacedInOr = true;
     }
   }
 
@@ -668,6 +725,12 @@ function buildSearchQuery(params, user) {
     // Pour le chatbot : la recherche par mot-clé est globale (tous les tickets),
     // pas restreinte aux seuls tickets du demandeur/technicien. Un utilisateur qui
     // cherche "sauvegarde" doit trouver #73 même si ce n'est pas son ticket.
+    // En revanche, si un filtre équipe occupait where.OR, il est reporté dans AND :
+    // "tickets système" doit rester RESTREINT à l'équipe Système.
+    if (teamFilter && teamPlacedInOr) {
+      where.AND = [...(where.AND || []), teamFilter];
+      teamPlacedInOr = false;
+    }
     where.OR = keywordFilter;
   }
 
@@ -743,8 +806,19 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
         params.dateFrom = regexParams.dateFrom;
         params.dateTo = regexParams.dateTo;
       }
-      // Compléter avec la personne regex si le LLM ne l'a pas détectée (ex: "tickets de Mariam Fofana")
-      if (regexParams && regexParams.personName && !params.personName && !params.requesterName && !params.assignedToName) {
+      // Compléter avec la personne regex si le LLM ne l'a pas détectée (ex: "tickets de Mariam Fofana").
+      // MAIS jamais si le LLM a déjà trouvé un filtre de contenu (keyword, équipe, statut, lieu,
+      // dates, ID) : le LLM fait foi, le regex n'est qu'un filet de sécurité. Sans cette garde,
+      // "parle moi des tickets du système" recevait personName="parle moi" par-dessus
+      // keyword="système", puis retournait 0 ticket (cf. broad-person-search plus bas).
+      const llmHasContentFilter = !!(
+        params.keyword || params.teamName || params.locationName || params.ticketId
+        || params.dateFrom || params.dateTo
+        || (params.statuses && params.statuses.length)
+        || (params.priorities && params.priorities.length)
+      );
+      if (regexParams && regexParams.personName && !params.personName && !params.requesterName
+        && !params.assignedToName && !llmHasContentFilter) {
         params.personName = regexParams.personName;
       }
       // Compléter avec l'ID regex si le LLM l'a raté (ex: "montre-moi le ticket #12"
@@ -783,13 +857,25 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
     // ── Personne avec rôle AMBIGU ("tickets de Mariam") → recherche élargie ──
     // On cherche demandeur OU assigné OU observateur en une seule passe (cf. leçon ticket
     // #253 : un technicien assigné n'est jamais trouvé par un filtre requester seul).
+    // On ne fait un retour ANTICIPÉ que si la personne existe vraiment OU si elle est le
+    // seul filtre : sinon (personne introuvable + autres filtres présents) on retombe sur
+    // buildSearchQuery pour ne pas renvoyer un vide alors que keyword/équipe sont valides.
     if (params.personName && !params.requesterName && !params.assignedToName && !params.isMyTicketsRef) {
       _slog('broad-person-search', `personName="${params.personName}"`);
       const broad = await findTicketsForPersonAnyRole(params.personName, {
         limit: params.wantFullList ? 100 : limit, period, user,
       });
       _slog('broad-done', `tickets=${broad.tickets.length} totalCount=${broad.totalCount}`);
-      return { ...broad, personName: params.personName };
+      const hasOtherFilters = !!(
+        params.keyword || params.teamName || params.locationName || params.ticketId
+        || (params.statuses && params.statuses.length)
+        || (params.priorities && params.priorities.length)
+      );
+      if (broad.totalCount > 0 || !hasOtherFilters) {
+        return { ...broad, personName: params.personName };
+      }
+      _slog('broad-empty-with-filters', `person "${params.personName}" → 0 ticket, on utilise les autres filtres`);
+      delete params.personName;
     }
 
     const where = buildSearchQuery(params, user);
@@ -842,27 +928,59 @@ async function searchTickets(query, limit = 20, user = null, period = null) {
 }
 
 // ── Recherche d'inventaire (assets) ───────────────────────────────────
-
+// Accès direct Prisma : l'API HTTP exige une authentification (401 sans token),
+// un self-fetch sans en-tête retournait systématiquement [].
 async function searchAssets(query, limit = 5) {
   if (!query || !query.trim()) return [];
   try {
-    const response = await fetch(`http://localhost:4000/api/assets?q=${encodeURIComponent(query.trim())}&pageSize=${limit}`);
-    if (!response.ok) return [];
-    const data = await response.json();
-    return data.assets || [];
+    const term = query.trim();
+    return await prisma.asset.findMany({
+      where: {
+        OR: [
+          { name: { contains: term, mode: 'insensitive' } },
+          { serialNumber: { contains: term, mode: 'insensitive' } },
+          { inventoryNumber: { contains: term, mode: 'insensitive' } },
+          { model: { contains: term, mode: 'insensitive' } },
+          { manufacturer: { contains: term, mode: 'insensitive' } },
+        ],
+      },
+      orderBy: [{ assetType: 'asc' }, { name: 'asc' }],
+      take: limit,
+      include: {
+        location: { select: { id: true, name: true, completename: true } },
+        owner: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+        team: { select: { id: true, name: true } },
+        _count: { select: { tickets: true } },
+      },
+    });
   } catch {
     return [];
   }
 }
 
 // ── Recherche d'utilisateurs ──────────────────────────────────────────
-
+// Accès direct Prisma (cf. searchAssets) : annuaire consultable par le chatbot
+// pour "qui est X ?", "de quelle équipe est X ?", "qui traite Y ?".
 async function searchUsers(query, limit = 5) {
   if (!query || !query.trim()) return [];
   try {
-    const response = await fetch(`http://localhost:4000/api/users?search=${encodeURIComponent(query.trim())}&limit=${limit}`);
-    if (!response.ok) return [];
-    return await response.json();
+    const term = query.trim();
+    return await prisma.user.findMany({
+      where: {
+        OR: [
+          { fullName: { contains: term, mode: 'insensitive' } },
+          { email: { contains: term, mode: 'insensitive' } },
+          { team: { name: { contains: term, mode: 'insensitive' } } },
+        ],
+      },
+      take: limit,
+      orderBy: { fullName: 'asc' },
+      select: {
+        id: true, email: true, fullName: true, role: true, isActive: true,
+        avatarUrl: true, createdAt: true,
+        team: { select: { id: true, name: true } },
+      },
+    });
   } catch {
     return [];
   }
@@ -873,10 +991,23 @@ async function searchUsers(query, limit = 5) {
 async function searchLocations(query, limit = 10) {
   if (!query || !query.trim()) return [];
   try {
-    const response = await fetch(`http://localhost:4000/api/locations?q=${encodeURIComponent(query.trim())}`);
-    if (!response.ok) return [];
-    const data = await response.json();
-    return Array.isArray(data) ? data.slice(0, limit) : [];
+    const term = query.trim();
+    return await prisma.location.findMany({
+      where: {
+        OR: [
+          { name: { contains: term, mode: 'insensitive' } },
+          { completename: { contains: term, mode: 'insensitive' } },
+          { town: { contains: term, mode: 'insensitive' } },
+        ],
+      },
+      orderBy: [{ isCustom: 'asc' }, { completename: 'asc' }],
+      take: limit,
+      select: {
+        id: true, name: true, completename: true, town: true, building: true,
+        isActive: true, isCustom: true,
+        _count: { select: { requesterLinks: true } },
+      },
+    });
   } catch {
     return [];
   }
@@ -931,6 +1062,7 @@ const ALL_CHATBOT_TOOLS = [
           assignedTo: { type: 'string', description: 'Filtrer par nom du technicien assigné' },
           requester: { type: 'string', description: 'Filtrer par nom ou email du demandeur. Pour "mes tickets", utiliser le nom de l\'utilisateur connecté (voir contexte profil)' },
           person: { type: 'string', description: 'Personne SANS rôle précisé ("tickets de Jean") → cherche comme demandeur OU assigné OU observateur. Préférer ceci à requester/assignedTo quand l\'utilisateur n\'a pas précisé, ou si requester ne renvoie rien' },
+          team: { type: 'string', description: 'Filtrer par nom d\'équipe (ex: "Système", "Réseau", "Sécurité", "Applicatif", "Matériel", "Logiciel", "Téléphonie"). OBLIGATOIRE pour toute question du type "tickets de l\'équipe X", "les tickets système", "ceux de Réseau". Ne pas confondre avec un mot-clé libre.' },
           period: { type: 'string', description: 'Période: today, yesterday, 7d, 30d, 90d, ou une date YYYY-MM-DD' },
           limit: { type: 'integer', description: 'Nombre max de résultats (défaut: 20)' },
         },
@@ -1089,11 +1221,13 @@ const ALL_CHATBOT_TOOLS = [
     type: 'function',
     function: {
       name: 'get_team_report',
-      description: 'Répartition des tickets ouverts par équipe. Utile pour les bilans et réunions.',
+      description: 'Répartition des tickets ouverts par équipe. Avec teamName, détaille les tickets ouverts d\'une équipe précise (ex: "détail des tickets de l\'équipe Système"). Utile pour les bilans et réunions.',
       parameters: {
         type: 'object',
         properties: {
           period: { type: 'string', description: 'Période: today, 7d, 30d, 90d (défaut: 30d)' },
+          teamName: { type: 'string', description: 'Nom de l\'équipe à détailler (ex: "Système", "Réseau"). Omis = répartition globale.' },
+          limit: { type: 'integer', description: 'Nombre max de tickets détaillés (défaut: 20)' },
         },
       },
     },
@@ -1130,12 +1264,13 @@ const ALL_CHATBOT_TOOLS = [
     type: 'function',
     function: {
       name: 'generate_report',
-      description: 'Rapport statistique global: nombre total de tickets, ouverts, résolus, par statut/priorité',
+      description: 'Rapport statistique global: nombre total de tickets, ouverts, résolus, par statut/priorité. Avec team, limite le rapport à une équipe.',
       parameters: {
         type: 'object',
         properties: {
           period: { type: 'string', description: 'Période: today, 7d, 30d, 90d, ou null pour tout' },
           fullList: { type: 'boolean', description: 'Inclure la liste complète des tickets (défaut: false)' },
+          team: { type: 'string', description: 'Nom de l\'équipe (ex: "Système") pour limiter le rapport à cette équipe' },
         },
       },
     },
@@ -1275,6 +1410,48 @@ async function executeTool(toolName, args, user, { confirmed = false } = {}) {
   const p = args || {};
   switch (toolName) {
     case 'search_tickets': {
+      // ── Équipe : filtre maîtrisé 100% côté serveur ──
+      // "tickets de l'équipe Système" / "les tickets système" ne doit JAMAIS dépendre
+      // d'une re-parse en texte libre : on construit la requête Prisma directement
+      // (teamName + les filtres additionnels fournis par le modèle).
+      if (p.team) {
+        const searchParams = { teamName: p.team };
+        if (p.query) searchParams.keyword = p.query;
+        else if (p.category) searchParams.keyword = p.category;
+        if (p.status) searchParams.statuses = [p.status];
+        if (p.priority) searchParams.priorities = [p.priority];
+        if (p.locationName) searchParams.locationName = p.locationName;
+        if (p.assignedTo) searchParams.assignedToName = p.assignedTo;
+        if (p.requester) searchParams.requesterName = p.requester;
+        if (p.person) searchParams.personName = p.person;
+
+        const where = buildSearchQuery(searchParams, user);
+        if (p.period) {
+          const { start, end } = resolvePeriodDates(p.period);
+          if (start) where.createdAt = { ...where.createdAt, gte: start };
+          if (end) where.createdAt = { ...where.createdAt, lt: end };
+        }
+        const teamTickets = await prisma.ticket.findMany({
+          where,
+          take: p.limit || 20,
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true, title: true, status: true, priority: true, locationName: true, category: true,
+            createdAt: true, approvalStatus: true,
+            requester: { select: { fullName: true, email: true } },
+            assignedTo: { select: { fullName: true } },
+            team: { select: { name: true } },
+          },
+        });
+        console.log(`[chatbot] search_tickets team="${p.team}": ${teamTickets.length} résultats`);
+        return teamTickets.map(t => ({
+          id: t.id, title: t.title, status: t.status, priority: t.priority,
+          locationName: t.locationName, requester: t.requester?.fullName || null,
+          assignedTo: t.assignedTo?.fullName || null, team: t.team?.name || null,
+          createdAt: t.createdAt, category: t.category,
+        }));
+      }
+
       // "tickets de <Personne>" sans rôle précisé → recherche élargie demandeur OU assigné
       // (cf. leçon ticket #253) plutôt qu'un filtre demandeur seul qui rate les techniciens.
       if (p.person && !p.requester && !p.assignedTo) {
@@ -1283,6 +1460,7 @@ async function executeTool(toolName, args, user, { confirmed = false } = {}) {
           if (p.status && t.status !== p.status) return false;
           if (p.priority && t.priority !== p.priority) return false;
           if (p.locationName && !t.locationName?.toLowerCase().includes(p.locationName.toLowerCase())) return false;
+          if (p.team && !t.team?.name?.toLowerCase().includes(p.team.toLowerCase())) return false;
           return true;
         }).map(t => ({
           id: t.id, title: t.title, status: t.status, priority: t.priority,
@@ -1297,7 +1475,7 @@ async function executeTool(toolName, args, user, { confirmed = false } = {}) {
       // status, priority, etc.), on construit la requête Prisma directement sans repasser
       // par callSearchParamsAI qui risque de réinterpréter le query (ex: "Siège Abidjan"
       // → teamName:"Abidjan" au lieu de locationName:"Siège Abidjan"). ──
-      const hasStructuredParams = p.locationName || p.status || p.priority || p.assignedTo || p.requester || p.person || p.category || p.period;
+      const hasStructuredParams = p.locationName || p.status || p.priority || p.assignedTo || p.requester || p.person || p.category || p.period || p.team;
       if (hasStructuredParams && !p.query) {
         const searchParams = {};
         if (p.locationName) searchParams.locationName = p.locationName;
@@ -1342,6 +1520,7 @@ async function executeTool(toolName, args, user, { confirmed = false } = {}) {
         if (p.locationName && !t.locationName?.toLowerCase().includes(p.locationName.toLowerCase())) return false;
         if (p.assignedTo && !t.assignedTo?.fullName?.toLowerCase().includes(p.assignedTo.toLowerCase())) return false;
         if (p.requester && !t.requester?.fullName?.toLowerCase().includes(p.requester.toLowerCase())) return false;
+        if (p.team && !t.team?.name?.toLowerCase().includes(p.team.toLowerCase())) return false;
         return true;
       }).map(t => ({
         id: t.id, title: t.title, status: t.status, priority: t.priority,
@@ -1421,13 +1600,19 @@ async function executeTool(toolName, args, user, { confirmed = false } = {}) {
         }));
     }
     case 'get_team_report':
+      // teamName → détail des tickets ouverts de CETTE équipe (analyticsTools.getOpenTicketsByTeam),
+      // sinon répartition globale par équipe.
+      if (p.teamName) {
+        const teamTickets = await analyticsTools.getOpenTicketsByTeam({ teamName: p.teamName, limit: p.limit || 20 });
+        return { teamName: p.teamName, totalOpen: teamTickets.length, tickets: teamTickets };
+      }
       return await analyticsTools.getTeamDistribution({ period: p.period || '30d' });
     case 'get_category_distribution':
       return await analyticsTools.getCategoryDistribution({ period: p.period, locationId: p.locationId });
     case 'analyze_root_cause':
       return await analyticsTools.analyzeRootCause({ locationName: p.locationName, filterKeyword: p.filterKeyword });
     case 'generate_report':
-      return await generateReport(p.period || null, p.fullList || false);
+      return await generateReport(p.period || null, p.fullList || false, p.team || null);
     case 'search_inventory':
       return await searchAssets(p.query, 5);
     case 'search_users':
@@ -2885,18 +3070,20 @@ ${rescueContext}`;
 // ── Message handler ────────────────────────────────────────────────────
 
 async function handleMessage(message, conversationHistory = [], user = null, pendingTicketData = null, conversationId = null, options = {}) {
+  let optsObj = options || {};
   let history = Array.isArray(conversationHistory) ? conversationHistory : [];
   let currentUser = user;
   let currentPending = pendingTicketData;
   let currentConvId = conversationId;
 
   if (conversationHistory && !Array.isArray(conversationHistory) && typeof conversationHistory === 'object') {
-    const opts = conversationHistory;
-    history = Array.isArray(opts.conversationHistory) ? opts.conversationHistory : (Array.isArray(opts.history) ? opts.history : []);
-    currentUser = opts.user || user;
-    currentPending = opts.pendingTicketData || pendingTicketData;
-    currentConvId = opts.conversationId || conversationId;
+    optsObj = { ...conversationHistory, ...optsObj };
+    history = Array.isArray(optsObj.conversationHistory) ? optsObj.conversationHistory : (Array.isArray(optsObj.history) ? optsObj.history : []);
+    currentUser = optsObj.user || user;
+    currentPending = optsObj.pendingTicketData || pendingTicketData;
+    currentConvId = optsObj.conversationId || conversationId;
   }
+  options = optsObj;
 
   const userId = currentUser?.sub || currentUser?.id || null;
   // Clé d'état conversationnel : PAR CONVERSATION (pas par user) sinon les conversations
@@ -2925,6 +3112,19 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   // Récupérer le state conversationnel précédent (isolé par conversation)
   const previousState = await getConversationState(stateKey);
   _stepLog('context', `prevIntent=${previousState?.intent || 'none'} prevTickets=${previousState?.tickets?.length || 0}`);
+
+  // ── Détection du mode brainstorming ──
+  const lowerMessage = message.toLowerCase();
+  const startsBrainstorm = lowerMessage.includes('/brainstorm start') || lowerMessage.includes('mode brainstorming') || lowerMessage.includes('aide-moi à brainstormer') || lowerMessage.includes('lance un brainstorming');
+  const stopsBrainstorm = lowerMessage.includes('/brainstorm stop') || lowerMessage.includes('quitter le brainstorming') || lowerMessage.includes('arrêter le brainstorming');
+
+  let isBrainstormMode = !!options.isBrainstorm || !!previousState?.isBrainstormMode;
+  if (startsBrainstorm) {
+    isBrainstormMode = true;
+  } else if (stopsBrainstorm) {
+    isBrainstormMode = false;
+  }
+  _stepLog('brainstorm', `isBrainstormMode=${isBrainstormMode}`);
 
   // ── Détection de confirmation d'action en attente (ex: add_ticket_followup) ──
   if (previousState?.intent === 'pendingConfirmation' && previousState?.params) {
@@ -3011,7 +3211,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
 
   // ── Construire le prompt système avec contexte utilisateur ──
   const userContextLine = userContext ? `\n\n**Profil de l\'utilisateur :** ${userContext}` : '';
-  let forcedSystem = SYSTEM_PROMPT + buildCapabilityLine() + userContextLine;
+  let forcedSystem = (isBrainstormMode ? BRAINSTORM_PROMPT : SYSTEM_PROMPT) + buildCapabilityLine() + userContextLine;
 
   // ── Injecter le contexte de la recherche précédente pour les follow-ups ──
   if (previousState?.lastToolData || previousState?.lastMessage || previousState?.lastTicketIds?.length) {
@@ -3189,8 +3389,8 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     }
   }
 
-  // ═══ PASSE 2 : Audit & Ajustement — désactivé en vocal (économise 1 LLM call, chiffres déjà garantis par snapshot) ═══
-  if (reply && !isGreetingMessage(message) && !options.voiceMode) {
+  // ═══ PASSE 2 : Audit & Ajustement — désactivé en vocal ou en mode brainstorming (économise 1 LLM call, chiffres déjà garantis par snapshot) ═══
+  if (reply && !isGreetingMessage(message) && !options.voiceMode && !isBrainstormMode) {
     try {
       _stepLog('pass2-audit', `draftLen=${reply.length}`);
       reply = await auditAndAdjustResponse(message, reply, {
@@ -3221,24 +3421,30 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
   _stepLog('done', `replyLen=${(reply || '').length} citedTickets=${citedTicketIds.length}`);
 
   // ── Persister le contexte de recherche pour les follow-ups multi-tour ──
-  if (stateKey && toolData) {
+  if (stateKey && (toolData || isBrainstormMode)) {
     // Extraire entités structurées pour résolution pronominale ("son ticket", "ce problème")
     const ticketIds = [...new Set((String(toolData).match(/(?:#|\bticket\s*n?°?\s*)(\d+)/gi) || []).map((s) => Number(s.replace(/[^\d]/g, ''))).filter((n) => n > 0))].slice(0, 5);
     // Personne / lieu mentionnés dans toolData (heuristique simple)
     const personMatch = String(toolData).match(/(?:demandeur|assigné|technicien)\s*:\s*([A-ZÀ-ÿ][a-zà-ÿ]+(?:\s[A-ZÀ-ÿ][a-zà-ÿ]+)+)/);
     const locationMatch = String(toolData).match(/(?:lieu|magasin|site)\s*:\s*([A-ZÀ-ÿ][\w\s>-]+)/i);
     await setConversationState(stateKey, 'agentic', {
-      lastToolData: toolData.substring(0, 6000),
+      lastToolData: toolData ? toolData.substring(0, 6000) : null,
       lastMessage: message,
       lastTicketIds: ticketIds.length ? ticketIds : (citedTicketIds || []).slice(0, 5),
       lastPerson: personMatch ? personMatch[1].trim() : null,
       lastLocation: locationMatch ? locationMatch[1].trim() : null,
+      isBrainstormMode: isBrainstormMode, // Persister le mode brainstorming !
+    }, []);
+  } else if (stateKey && previousState?.isBrainstormMode && !isBrainstormMode) {
+    // Si on vient de désactiver le mode brainstorming, on nettoie le state
+    await setConversationState(stateKey, 'agentic', {
+      isBrainstormMode: false,
     }, []);
   }
 
   return {
     reply,
-    intent: 'general',
+    intent: isBrainstormMode ? 'brainstorm' : 'general',
     action: null,
     widget: null,
     sources: [],
@@ -3246,6 +3452,7 @@ async function handleMessage(message, conversationHistory = [], user = null, pen
     citedKnowledgeIds,
     pendingTicketData: null,
     _newSummary,
+    isBrainstormMode: isBrainstormMode, // Renvoyer le statut du mode brainstorming !
   };
 }
 
@@ -3393,4 +3600,5 @@ module.exports = {
   extractSearchParamsRegex,
   resolveCanonicalTeamName,
   buildSearchQuery,
+  executeTool,
 };
