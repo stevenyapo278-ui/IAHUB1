@@ -136,6 +136,10 @@ function notifyRelatedUsers(ticket, eventName, { type, title, message, metadata 
 }
 
 function emitTicketCreated(ticket) {
+  try {
+    const { invalidateVoiceCache } = require('../routes/voiceLive.routes');
+    invalidateVoiceCache([ticket?.requesterId, ticket?.assignedToId, ticket?.createdById]);
+  } catch {}
   if (!io) return;
   io.to('notifications').emit('ticket_created', {
     id: ticket.id,
@@ -171,6 +175,10 @@ function emitTicketCreated(ticket) {
 }
 
 function emitTicketUpdated(ticket, changes) {
+  try {
+    const { invalidateVoiceCache } = require('../routes/voiceLive.routes');
+    invalidateVoiceCache([ticket?.requesterId, ticket?.assignedToId]);
+  } catch {}
   if (!io) return;
   const payload = {
     id: ticket.id,

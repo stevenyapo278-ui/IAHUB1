@@ -116,25 +116,71 @@ export function useVoiceLive() {
     }
     if (msg.role === 'user') {
       setTranscript(msg.text);
-      if (!msg.final) {
-        setState('thinking');
-        assistantTurnFinishedRef.current = false; // L'utilisateur parle : l'assistante va démarrer son tour
-        pauseAudioRef.current = true; // Verrouiller le micro
-      }
+      setState('thinking');
+      assistantTurnFinishedRef.current = false; // L'utilisateur parle/a parlé : l'assistante démarre son tour
       if (msg.final) playEarcon('listen');
     } else {
       setReply(msg.text);
-      if (!speakingRef.current) setState('speaking');
+      setState('speaking'); // S'assurer que l'état passe bien à 'speaking' quand Marie parle
       if (msg.final) {
         assistantTurnFinishedRef.current = true; // L'assistante a fini de générer côté serveur
         // Ne réouvrir le micro que si tout l'audio a fini d'être joué côté client
         if (activeSourcesRef.current.length === 0) {
           pauseAudioRef.current = false; // Réouvrir le micro
-          setState((prev) => (prev === 'speaking' ? 'listening' : prev));
+          setState('listening');
         }
       }
     }
   }, [upsertLive, commitLive, playEarcon]);
+
+  const handleToolStarting = useCallback((toolName) => {
+    if (mutedRef.current) return;
+
+    // Passer en état de réflexion immédiatement pour donner un retour visuel à l'utilisateur
+    setState('thinking');
+
+    // Émettre un signal sonore doux et futuriste de "calcul" (double pulse sine wave)
+    // Cela indique à l'utilisateur que l'assistant travaille en arrière-plan sans bloquer l'audio
+    // et évite le bug de Chrome/Linux où l'API speechSynthesis coupe ou suspend le micro.
+    try {
+      const audioCtx = audioCtxRef.current;
+      if (!audioCtx || audioCtx.state !== 'running') {
+        if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+        return;
+      }
+
+      const now = audioCtx.currentTime;
+      
+      // Pulse 1 : Note basse et ronde (Do5)
+      const osc1 = audioCtx.createOscillator();
+      const gain1 = audioCtx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(523.25, now);
+      gain1.gain.setValueAtTime(0, now);
+      gain1.gain.linearRampToValueAtTime(0.015, now + 0.05);
+      gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+      osc1.connect(gain1);
+      gain1.connect(audioCtx.destination);
+      osc1.start(now);
+      osc1.stop(now + 0.25);
+
+      // Pulse 2 : Légèrement décalé, note plus haute pour un effet "chime" de qualité (Mi5)
+      const osc2 = audioCtx.createOscillator();
+      const gain2 = audioCtx.createGain();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(659.25, now + 0.08);
+      gain2.gain.setValueAtTime(0, now + 0.08);
+      gain2.gain.linearRampToValueAtTime(0.012, now + 0.13);
+      gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+      osc2.connect(gain2);
+      gain2.connect(audioCtx.destination);
+      osc2.start(now + 0.08);
+      osc2.stop(now + 0.35);
+
+    } catch (err) {
+      console.warn('[useVoiceLive] Tool starting chime failed:', err.message);
+    }
+  }, []);
 
   const playVoiceChunk = useCallback((buffer) => {
     const audioCtx = audioCtxRef.current;
@@ -170,6 +216,7 @@ export function useVoiceLive() {
     nextStartRef.current = startAt + audioBuffer.duration;
 
     speakingRef.current = true;
+    setState('speaking'); // Marie commence à parler (orbe bleu actif)
     pauseAudioRef.current = true; // Marie parle : suspendre l'envoi PCM
     activeSourcesRef.current.push(source);
 
@@ -181,7 +228,7 @@ export function useVoiceLive() {
         // Re-ouvrir le micro uniquement si l'assistante a fini de générer et que tout l'audio a été joué !
         if (assistantTurnFinishedRef.current) {
           pauseAudioRef.current = false; // Marie a fini : reprendre l'envoi PCM
-          setState((prev) => (prev === 'speaking' ? 'listening' : prev));
+          setState('listening'); // S'assurer qu'on repasse bien en écoute
         }
       }
     };
@@ -196,6 +243,7 @@ export function useVoiceLive() {
     assistantTurnFinishedRef.current = true; // Libérer le verrou de parole de l'assistante
     pauseAudioRef.current = false;
     nextStartRef.current = 0;
+    setState('listening'); // Repasser immédiatement en écoute
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       try { wsRef.current.send(JSON.stringify({ type: 'bargeIn' })); } catch {}
     }
@@ -265,7 +313,7 @@ export function useVoiceLive() {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
-          sampleRate: 16000,
+          sampleRate: 16000, // Spec gemini-3.8-live : entrée PCM mono 16 kHz
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
@@ -305,15 +353,19 @@ export function useVoiceLive() {
         // Configurer le worklet selon le toggle
         try { workletNode.port.postMessage({ type: 'config', noiseGate: { enabled: noiseSuppressionRef.current } }); } catch {}
         workletNode.port.onmessage = (e) => {
-          // Ne pas envoyer de PCM si : muet, pas prêt, WS fermé, ou Marie est en train de parler
-          if (mutedRef.current || pauseAudioRef.current) return;
+          if (mutedRef.current) return;
+
+          // Sécurité anti-veille du navigateur sur l'AudioContext
+          if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+          }
+
+          // Bloquer l'envoi du micro pendant que Marie parle pour éviter l'auto-interruption par écho sur les serveurs Google
+          if (pauseAudioRef.current) return;
+
+          // Ne pas envoyer de PCM si le WS n'est pas ouvert ou si on n'est pas prêt
           if (readyRef.current && ws.readyState === WebSocket.OPEN && e.data.pcm) {
             ws.send(e.data.pcm);
-          }
-          const effectiveRms = e.data.rawRms ?? e.data.rms ?? 0;
-          // Seuil d'interruption ultra-sensible (0.025) : stoppe l'audio dès les premières syllabes
-          if (effectiveRms >= 0.025 && speakingRef.current) {
-            stopPlayback();
           }
         };
       };
@@ -336,6 +388,8 @@ export function useVoiceLive() {
           setState('listening');
         } else if (msg.type === 'brainstorm_mode') {
           setIsBrainstormMode(!!msg.active);
+        } else if (msg.type === 'tool_starting') {
+          handleToolStarting(msg.name);
         } else if (msg.type === 'transcript') {
           handleTranscript(msg);
         } else if (msg.type === 'interrupted') {
@@ -349,6 +403,16 @@ export function useVoiceLive() {
       };
 
       ws.onclose = () => {
+        // Libérer le socket AVANT de replanifier : wsRef n'est remis à null que par
+        // cleanupSession(), donc sans cette libération startListening() sortait
+        // immédiatement (garde `|| wsRef.current`) → reconnexion auto morte et bandeau
+        // bloqué sur « Reconnexion… » (il fallait stopper puis redémarrer à la main).
+        ws.onopen = null;
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.onclose = null;
+        if (wsRef.current === ws) wsRef.current = null;
+        startingRef.current = false;
         // Reconnexion automatique (max 3 tentatives, backoff exponentiel)
         // Ne pas reconnecte si l'utilisateur a manuellement arrêté
         if (!stoppedRef.current && reconnectCountRef.current < 3) {

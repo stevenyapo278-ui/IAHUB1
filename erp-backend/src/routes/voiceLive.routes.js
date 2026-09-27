@@ -7,10 +7,12 @@ const prisma = require('../prismaClient');
 const { logger } = require('../utils/logger');
 const analyticsTools = require('../services/analyticsTools');
 const { searchKnowledge } = require('../services/knowledgeSearch');
-const { searchTeams, searchTickets, buildSearchQuery, handleMessage } = require('../services/chatbotService');
+const { searchTeams, searchTickets, buildSearchQuery, handleMessage, executeTool: chatbotExecuteTool } = require('../services/chatbotService');
 const jwt = require('jsonwebtoken');
 
-const LIVE_MODEL = 'gemini-2.5-flash-native-audio-preview-12-2025';
+// Modèle Live officiel GA (doc Google Cloud Gemini Enterprise Agent Platform) :
+// entrée attendue PCM mono 16 kHz, sortie 24 kHz.
+const LIVE_MODEL = process.env.LIVE_MODEL || 'gemini-3.8-live';
 const LIVE_VOICE = 'Aoede';
 const LIVE_PORT = process.env.VOICE_LIVE_PORT || 4001;
 
@@ -48,6 +50,40 @@ function formatTicket(t) {
   };
 }
 
+function formatSpokenTextFrench(text) {
+  if (!text || typeof text !== 'string') return '';
+
+  return text
+    .replace(/[*_~`#]/g, '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/^[-+*]\s+/gm, '')
+    .replace(/\bNEW\b/g, 'nouveau')
+    .replace(/\bOPEN\b/g, 'en cours')
+    .replace(/\bPENDING\b/g, 'en attente')
+    .replace(/\bWAITING_FOR_USER\b/g, 'en attente de réponse')
+    .replace(/\bSOLVED\b/g, 'résolu')
+    .replace(/\bCLOSED\b/g, 'fermé')
+    .replace(/\bPLANNED\b/g, 'planifié')
+    .replace(/\bP1\b/gi, 'priorité 1 critique')
+    .replace(/\bP2\b/gi, 'priorité 2 haute')
+    .replace(/\bP3\b/gi, 'priorité 3 moyenne')
+    .replace(/\bP4\b/gi, 'priorité 4 basse')
+    .replace(/#(\d+)/g, 'ticket numéro $1')
+    .replace(/\bticket\s*n°?\s*(\d+)/gi, 'ticket numéro $1')
+    .replace(/\bAD\b/g, 'Active Directory')
+    .replace(/\bSSL\b/g, 'S S L')
+    .replace(/\bVPN\b/g, 'V P N')
+    .replace(/\bGLPI\b/g, 'G L P I')
+    .replace(/\bAPI\b/g, 'A P I')
+    .replace(/\bIP\b/g, 'I P')
+    .replace(/\bCPU\b/g, 'C P U')
+    .replace(/\bRAM\b/g, 'R A M')
+    .replace(/\bERP\b/g, 'E R P')
+    .replace(/\bIT\b/g, 'I T')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 const TOOLS = [
   {
     functionDeclarations: [
@@ -76,7 +112,7 @@ Ne réponds JAMAIS de mémoire : appelle toujours cet outil pour les chiffres.`,
       },
       {
         name: 'search_tickets',
-        description: 'Recherche de tickets par mot-clé, statut, priorité, lieu, technicien, demandeur, période. Très flexible.',
+        description: 'Recherche de tickets par mot-clé, statut, priorité, lieu, équipe, technicien, demandeur, période. Triés du PLUS RÉCENT au plus ancien : avec limit=1 tu obtiens le dernier ticket créé (champ "creeLe" = date de création).',
         parameters: {
           type: 'object',
           properties: {
@@ -86,6 +122,9 @@ Ne réponds JAMAIS de mémoire : appelle toujours cet outil pour les chiffres.`,
             locationName: { type: 'string', description: 'Filtrer par lieu/magasin' },
             assignedTo: { type: 'string', description: 'Nom du technicien assigné' },
             requester: { type: 'string', description: 'Nom ou email du demandeur' },
+            team: { type: 'string', description: "Nom de l'équipe (ex: Système, Réseau, Sécurité)" },
+            category: { type: 'string', description: 'Catégorie du ticket (ex: Réseau, Matériel)' },
+            person: { type: 'string', description: 'Nom ou email de la personne (demandeur OU technicien)' },
             period: { type: 'string', description: 'Période: today, yesterday, 7d, 30d, 90d' },
             limit: { type: 'integer', description: 'Nombre max (défaut 10)' },
           },
@@ -282,27 +321,75 @@ Ne réponds JAMAIS de mémoire : appelle toujours cet outil pour les chiffres.`,
           required: ['query'],
         },
       },
+      {
+        name: 'find_similar_tickets',
+        description: 'Chercher des tickets similaires à un problème donné, ou à un ticket existant par son numéro (similarité sémantique).',
+        parameters: {
+          type: 'object',
+          properties: {
+            ticketId: { type: 'integer', description: 'Numéro du ticket source pour chercher des similaires (optionnel)' },
+            title: { type: 'string', description: 'Titre ou description du problème (optionnel si ticketId fourni)' },
+            description: { type: 'string', description: 'Description détaillée (optionnel)' },
+          },
+        },
+      },
+      {
+        name: 'search_emails',
+        description: 'Rechercher dans les contenus des mails (entrant + fils de ticket) : dernier mail d\'un expéditeur, fil d\'un ticket, mails d\'une période ou sur un sujet. Retourne extraits avec expéditeur, objet, date, ticket lié.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'Requête sémantique (mots-clés, objet, contenu)' },
+            fromEmail: { type: 'string', description: 'Filtrer par expéditeur (email ou nom)' },
+            ticketId: { type: 'integer', description: 'Filtrer par ticket lié' },
+            conversationId: { type: 'string', description: 'Filtrer par fil de conversation Outlook' },
+            dateFrom: { type: 'string', description: 'Date début YYYY-MM-DD (inclus)' },
+            dateTo: { type: 'string', description: 'Date fin YYYY-MM-DD (inclus)' },
+            direction: { type: 'string', description: 'INBOUND (reçu) ou OUTBOUND (envoyé)' },
+            limit: { type: 'integer', description: 'Nombre max (défaut 5, max 20)' },
+          },
+          required: ['query'],
+        },
+      },
+      {
+        name: 'add_ticket_followup',
+        description: 'Ajouter un commentaire/suivi sur un ticket existant (note, update, retour d\'information). Demande TOUJOURS la confirmation de l\'utilisateur avant de l\'appeler.',
+        parameters: {
+          type: 'object',
+          properties: {
+            ticketId: { type: 'integer', description: 'Numéro du ticket' },
+            content: { type: 'string', description: 'Contenu du commentaire (texte libre)' },
+            isPrivate: { type: 'boolean', description: 'Si true, visible uniquement par l\'équipe interne (défaut: false)' },
+          },
+          required: ['ticketId', 'content'],
+        },
+      },
     ],
   },
 ];
 
-async function executeTool(name, args, { user = null, sessionHistory = null } = {}) {
+async function executeTool(name, args, { user = null, sessionHistory = null, ws = null, toolCtx = null } = {}) {
   try {
     switch (name) {
       case 'ask_assistant': {
         const question = (args.question || '').trim();
         if (!question) return { error: 'Question vide' };
         try {
-          // Route la question vers le MÊME cerveau que le chat texte (detection d'intention,
-          // extraction des paramètres, buildSearchQuery…) : les chiffres annoncés à l'oral sont
-          // garantis identiques à ceux du chat. history maintenu par session pour les follow-ups
-          // ("et pour la semaine dernière ?").
-          const history = Array.isArray(sessionHistory) ? sessionHistory.slice(-10) : [];
-          const result = await handleMessage(question, history, user, null, null, {});
+          const startTime = Date.now();
+          // Exécution directe sans sur-couche d'audit pour le mode vocal
+          const history = Array.isArray(sessionHistory) ? sessionHistory.slice(-6) : [];
+          const result = await handleMessage(question, history, user, null, null, { voiceMode: true });
+          logger.info(`[voice-live] ask_assistant answered in ${Date.now() - startTime}ms`);
+
+          // Notifier le client de l'état du mode brainstorming
+          if (ws && ws.readyState === 1) {
+            ws.send(JSON.stringify({ type: 'brainstorm_mode', active: !!result.isBrainstormMode }));
+          }
+
           if (Array.isArray(sessionHistory)) {
             sessionHistory.push({ role: 'user', content: question });
             sessionHistory.push({ role: 'assistant', content: result.reply || '' });
-            if (sessionHistory.length > 20) sessionHistory.splice(0, sessionHistory.length - 20);
+            if (sessionHistory.length > 10) sessionHistory.splice(0, sessionHistory.length - 10);
           }
           return {
             success: true,
@@ -313,26 +400,31 @@ async function executeTool(name, args, { user = null, sessionHistory = null } = 
           logger.error(`[voice-live] ask_assistant error: ${err.message}`);
           return {
             success: false,
-            answer: 'Je rencontre un souci temporaire pour récupérer ces informations. Réessaie dans un instant.',
+            answer: 'Je rencontre un souci temporaire pour récupérer ces informations.',
           };
         }
       }
       case 'search_tickets': {
         // Même moteur que le chatbot texte : les filtres structurés (status, priority,
-        // locationName, assignedTo, requester, period) annoncés dans le schéma du tool sont
-        // réellement appliqués via buildSearchQuery. Avant, seuls query/period étaient pris
-        // en compte — les réponses chiffrées ne correspondaient pas à la question posée.
-        const hasStructuredFilters = !!(args.status || args.priority || args.locationName || args.assignedTo || args.requester);
-        if (hasStructuredFilters) {
+        // locationName, assignedTo, requester, team, category, person, period) annoncés
+        // dans le schéma du tool sont réellement appliqués via buildSearchQuery. On passe
+        // l'utilisateur (user) pour appliquer le cloisonnement par rôle (RBAC).
+        const hasStructuredFilters = !!(args.status || args.priority || args.locationName || args.assignedTo || args.requester || args.team || args.person || args.category);
+        // SANS mot-clé (ex: {limit:1} pour "le dernier ticket créé") : le chemin AI de
+        // searchTickets() renvoie vide dès que query est nulle → requête Prisma directe
+        // (tri createdAt desc) au lieu de perdre l'appel.
+        if (hasStructuredFilters || !String(args.query || '').trim()) {
           const where = buildSearchQuery({
+            teamName: args.team || undefined,
+            personName: args.person || undefined,
             statuses: args.status ? [args.status] : undefined,
             priorities: args.priority ? [args.priority] : undefined,
             locationName: args.locationName || undefined,
             assignedToName: args.assignedTo || undefined,
             requesterName: args.requester || undefined,
-            keyword: args.query || undefined,
+            keyword: args.query || args.category || undefined,
             dateFrom: args.period && args.period !== 'all' ? getPeriodDate(args.period)?.toISOString?.() : undefined,
-          }, null);
+          }, user);
           const tickets = await prisma.ticket.findMany({
             where,
             take: Math.min(Number(args.limit) || 10, 50),
@@ -356,8 +448,8 @@ async function executeTool(name, args, { user = null, sessionHistory = null } = 
             })),
           };
         }
-        // Sans filtre structuré : chemin classique (query texte → AI re-parsing), avec période
-        const result = await searchTickets(args.query || null, Math.min(Number(args.limit) || 10, 50), null, args.period || null);
+        // Sans filtre structuré : chemin classique (query texte → AI re-parsing), avec période et cloisonnement rôle (user)
+        const result = await searchTickets(args.query || null, Math.min(Number(args.limit) || 10, 50), user, args.period || null);
         const ticketList = Array.isArray(result) ? result : (result?.tickets || []);
         if (!ticketList.length) return { total: 0, tickets: [], message: 'Aucun ticket trouvé' };
         const results = ticketList.map((t) => ({
@@ -377,7 +469,7 @@ async function executeTool(name, args, { user = null, sessionHistory = null } = 
           where: { id: ticketId },
           select: {
             id: true, title: true, content: true, status: true, priority: true,
-            category: true, locationName: true,
+            category: true, locationName: true, requesterId: true, assignedToId: true, teamId: true,
             createdAt: true, updatedAt: true, solvedAt: true, closedAt: true,
             requester: { select: { fullName: true, email: true } },
             assignedTo: { select: { fullName: true, email: true } },
@@ -396,6 +488,39 @@ async function executeTool(name, args, { user = null, sessionHistory = null } = 
           },
         });
         if (!ticket) return { error: `Ticket #${args.ticketId} non trouvé` };
+
+        // 🛡️ Policy Gate: Restriction de lecture (Inspiré de live-dj EP3)
+        const userRole = user?.role;
+        const userId = user ? Number(user.sub) : null;
+        let isAuthorized = false;
+
+        if (['SUPERADMIN', 'ADMIN', 'HOTLINE'].includes(userRole)) {
+          isAuthorized = true;
+        } else if (userRole === 'TECHNICIAN') {
+          // Un technicien peut lire si le ticket lui est assigné, s'il est demandeur ou s'il appartient à sa propre équipe
+          if (ticket.assignedToId === userId || ticket.requesterId === userId) {
+            isAuthorized = true;
+          } else if (ticket.teamId && userId) {
+            const member = await prisma.user.findFirst({
+              where: { id: userId, teamId: ticket.teamId }
+            });
+            if (member) isAuthorized = true;
+          }
+        } else if (userRole === 'REQUESTER') {
+          // Un demandeur ne peut lire que ses propres tickets
+          if (ticket.requesterId === userId) {
+            isAuthorized = true;
+          }
+        }
+
+        if (!isAuthorized) {
+          logger.warn(`[voice-live] Policy Gate: Bloqué check_ticket sur ticket #${ticketId} pour l'utilisateur #${userId} (${userRole})`);
+          return {
+            error: 'Permission refusée',
+            answer: `Désolée, tu n'as pas l'autorisation d'accéder aux informations du ticket numéro ${ticketId} car tu n'es ni son demandeur ni son technicien.`,
+          };
+        }
+
         const totalTime = ticket.timeEntries?.reduce((sum, e) => sum + (e.minutes || 0), 0) || 0;
         return {
           ticket: formatTicket(ticket),
@@ -411,19 +536,53 @@ async function executeTool(name, args, { user = null, sessionHistory = null } = 
       }
 
       case 'get_ticket_summary': {
+        const ticketId = Number(args.ticketId);
+        if (!ticketId || isNaN(ticketId)) return { error: 'Numéro de ticket invalide' };
         const ticket = await prisma.ticket.findUnique({
-          where: { id: Number(args.ticketId) },
+          where: { id: ticketId },
           select: {
             id: true, title: true, content: true, status: true, priority: true,
             category: true, locationName: true, createdAt: true, updatedAt: true,
-            solvedAt: true, requester: { select: { fullName: true } },
+            solvedAt: true, requesterId: true, assignedToId: true, teamId: true,
+            requester: { select: { fullName: true } },
             assignedTo: { select: { fullName: true } },
             team: { select: { name: true } },
             // NB : la relation Followup s'appelle author (pas user) — cf. schema.prisma
             followups: { select: { content: true, createdAt: true, author: { select: { fullName: true } } } },
           },
         });
-        if (!ticket) return { error: `Ticket #${args.ticketId} non trouvé` };
+        if (!ticket) return { error: `Ticket #${ticketId} non trouvé` };
+
+        // 🛡️ Policy Gate: Restriction de lecture (Inspiré de live-dj EP3)
+        const userRole = user?.role;
+        const userId = user ? Number(user.sub) : null;
+        let isAuthorized = false;
+
+        if (['SUPERADMIN', 'ADMIN', 'HOTLINE'].includes(userRole)) {
+          isAuthorized = true;
+        } else if (userRole === 'TECHNICIAN') {
+          if (ticket.assignedToId === userId || ticket.requesterId === userId) {
+            isAuthorized = true;
+          } else if (ticket.teamId && userId) {
+            const member = await prisma.user.findFirst({
+              where: { id: userId, teamId: ticket.teamId }
+            });
+            if (member) isAuthorized = true;
+          }
+        } else if (userRole === 'REQUESTER') {
+          if (ticket.requesterId === userId) {
+            isAuthorized = true;
+          }
+        }
+
+        if (!isAuthorized) {
+          logger.warn(`[voice-live] Policy Gate: Bloqué get_ticket_summary sur ticket #${ticketId} pour l'utilisateur #${userId} (${userRole})`);
+          return {
+            error: 'Permission refusée',
+            answer: `Désolée, tu n'as pas l'autorisation de consulter le résumé du ticket numéro ${ticketId} car tu n'es ni son demandeur ni son technicien.`,
+          };
+        }
+
         return {
           ticket: formatTicket(ticket),
           resume: `${ticket.title}. Statut: ${ticket.status}. Priorité: ${ticket.priority}. `
@@ -494,15 +653,29 @@ async function executeTool(name, args, { user = null, sessionHistory = null } = 
       }
 
       case 'create_ticket': {
+        const userId = user ? Number(user.sub) : null;
         const ticket = await prisma.ticket.create({
           data: {
-            title: args.title, content: args.content,
-            priority: args.priority || 'P3', status: 'NEW',
+            title: args.title,
+            content: args.content || `Créé via l'assistant vocal par ${user?.email || 'un utilisateur'}.`,
+            priority: args.priority || 'P3',
+            status: 'NEW',
             category: args.category || null,
             locationName: args.locationName || null,
+            origin: 'CHATBOT', // 'CHATBOT' représente l'assistant vocal vocal/chatbot
+            ...(userId ? { requesterId: userId, createdById: userId } : {}),
           },
           select: { id: true, title: true, status: true, priority: true },
         });
+
+        // Logger l'événement de création dans l'historique du ticket (Inspiré de live-dj EP3)
+        try {
+          const { logEvent } = require('../services/ticketEvent');
+          await logEvent(ticket.id, 'CREATED', user?.email || 'VOICE_ASSISTANT', { source: 'VOICE' });
+        } catch (logErr) {
+          logger.error(`[voice-live] Échec logEvent create_ticket: ${logErr.message}`);
+        }
+
         return {
           success: true,
           message: `Ticket #${ticket.id} créé avec succès`,
@@ -511,16 +684,62 @@ async function executeTool(name, args, { user = null, sessionHistory = null } = 
       }
 
       case 'update_ticket_status': {
+        const ticketId = Number(args.ticketId);
+        if (!ticketId || isNaN(ticketId)) return { error: 'Numéro de ticket invalide' };
+
         const ticket = await prisma.ticket.findUnique({
-          where: { id: Number(args.ticketId) },
-          select: { id: true, title: true, status: true },
+          where: { id: ticketId },
+          select: { id: true, title: true, status: true, requesterId: true, assignedToId: true, teamId: true },
         });
-        if (!ticket) return { error: `Ticket #${args.ticketId} non trouvé` };
+        if (!ticket) return { error: `Ticket #${ticketId} non trouvé` };
+
+        // 🛡️ Policy Gate : Validation de l'autorisation de mise à jour (Inspiré de live-dj EP3)
+        const userRole = user?.role;
+        const userId = user ? Number(user.sub) : null;
+        let isAuthorized = false;
+
+        if (['SUPERADMIN', 'ADMIN', 'HOTLINE'].includes(userRole)) {
+          isAuthorized = true;
+        } else if (userRole === 'TECHNICIAN') {
+          // Un technicien peut modifier si le ticket lui est assigné ou s'il appartient à son équipe
+          if (ticket.assignedToId === userId) {
+            isAuthorized = true;
+          } else if (ticket.teamId && userId) {
+            const member = await prisma.user.findFirst({
+              where: { id: userId, teamId: ticket.teamId }
+            });
+            if (member) isAuthorized = true;
+          }
+        } else if (userRole === 'REQUESTER') {
+          // Un demandeur ne peut modifier que ses propres tickets
+          if (ticket.requesterId === userId) {
+            isAuthorized = true;
+          }
+        }
+
+        if (!isAuthorized) {
+          logger.warn(`[voice-live] Policy Gate: Bloqué update_ticket_status sur ticket #${ticketId} pour l'utilisateur #${userId} (${userRole})`);
+          return {
+            success: false,
+            error: 'Permission refusée',
+            answer: `Désolée, tu n'as pas l'autorisation de modifier le statut du ticket numéro ${ticketId} car tu n'es ni son demandeur ni son technicien assigné.`,
+          };
+        }
+
         const updated = await prisma.ticket.update({
-          where: { id: Number(args.ticketId) },
+          where: { id: ticketId },
           data: { status: args.status },
           select: { id: true, title: true, status: true },
         });
+
+        // Logger la mise à jour (Inspiré de live-dj EP3)
+        try {
+          const { logEvent } = require('../services/ticketEvent');
+          await logEvent(updated.id, 'STATUS_UPDATED', user?.email || 'VOICE_ASSISTANT', { oldStatus: ticket.status, newStatus: updated.status, via: 'VOICE' });
+        } catch (logErr) {
+          logger.error(`[voice-live] Échec logEvent update_ticket_status: ${logErr.message}`);
+        }
+
         return {
           success: true,
           message: `Ticket #${updated.id} passé de ${ticket.status} à ${updated.status}`,
@@ -668,6 +887,32 @@ async function executeTool(name, args, { user = null, sessionHistory = null } = 
         return { equipements: assets, total: assets.length };
       }
 
+      // ── Outils hérités du chatbot texte : délégués au MÊME moteur (schéma + exécution
+      // unifiés, RBAC inclus) pour éviter toute divergence de comportement ──
+      case 'find_similar_tickets':
+        return await chatbotExecuteTool(name, args, user);
+
+      case 'search_emails':
+        return await chatbotExecuteTool(name, args, user);
+
+      case 'add_ticket_followup': {
+        // Confirmation vocale en 2 temps : le chatbot renvoie needsConfirmation → on le
+        // relaie à Gemini qui demande à l'utilisateur ; à la répétition des mêmes args
+        // (fenêtre de 120s), toolCtx.pendingFollowup autorise l'exécution réelle.
+        const key = `${Number(args.ticketId) || args.ticketId}|${String(args.content || '')}`;
+        const pending = toolCtx && toolCtx.pendingFollowup;
+        if (pending && pending.key === key && Date.now() - pending.at < 120000) {
+          toolCtx.pendingFollowup = null;
+          return await chatbotExecuteTool(name, args, user, { confirmed: true });
+        }
+        const res = await chatbotExecuteTool(name, args, user);
+        if (res && res.needsConfirmation) {
+          if (toolCtx) toolCtx.pendingFollowup = { key, at: Date.now() };
+          return { ...res, message: `${res.message} Dis « confirme » et je l'ajoute.` };
+        }
+        return res;
+      }
+
       default:
         return { error: `Outil inconnu: ${name}` };
     }
@@ -721,6 +966,10 @@ function setupVoiceLive() {
     // comportement identique à l'ancien fonctionnement).
     let currentUser = null;
     let sessionHistory = [];
+    // État de confirmation des outils d'écriture à 2 temps (add_ticket_followup)
+    const toolCtx = { pendingFollowup: null };
+    let audioOutChunks = 0; // Preuve de diagnostics : chunks PCM relays au client par tour
+    let audioOutBytes = 0;
     try {
       const url = new URL(req.url, 'http://localhost');
       const token = url.searchParams.get('token')
@@ -759,14 +1008,45 @@ function setupVoiceLive() {
       if (cached && now - cachedAt < SNAP_TTL) {
         snap = cached;
       } else {
-        const [total, open, newCount, myCount, topLocs] = await Promise.all([
+        const [total, open, newCount, p1Count, solvedCount, myCount, myRecentTickets, topLocs, topCategories, teamStats] = await Promise.all([
           prisma.ticket.count({ where: { deletedAt: null } }).catch(() => null),
           prisma.ticket.count({ where: { deletedAt: null, status: { in: ['NEW', 'OPEN', 'PENDING', 'PLANNED'] } } }).catch(() => null),
           prisma.ticket.count({ where: { deletedAt: null, status: 'NEW' } }).catch(() => null),
-          currentUser ? prisma.ticket.count({ where: { deletedAt: null, requesterIds: { has: currentUser.sub } } }).catch(() => null) : null,
-          prisma.ticket.groupBy({ by: ['locationName'], where: { deletedAt: null, locationName: { not: null }, status: { in: ['NEW', 'OPEN', 'PENDING', 'PLANNED'] } }, _count: { id: true }, orderBy: { _count: { id: 'desc' } }, take: 3 }).catch(() => []),
+          prisma.ticket.count({ where: { deletedAt: null, priority: 'P1', status: { in: ['NEW', 'OPEN', 'PENDING', 'PLANNED'] } } }).catch(() => null),
+          prisma.ticket.count({ where: { deletedAt: null, status: { in: ['SOLVED', 'CLOSED'] } } }).catch(() => null),
+          currentUser ? prisma.ticket.count({ where: { deletedAt: null, OR: [{ requesterId: currentUser.sub }, { assignedToId: currentUser.sub }] } }).catch(() => null) : null,
+          currentUser
+            ? prisma.ticket.findMany({
+                where: { deletedAt: null, OR: [{ requesterId: currentUser.sub }, { assignedToId: currentUser.sub }] },
+                take: 10,
+                orderBy: { updatedAt: 'desc' },
+                select: {
+                  id: true, title: true, status: true, priority: true, category: true, locationName: true,
+                  assignedTo: { select: { fullName: true } },
+                  requester: { select: { fullName: true } },
+                },
+              }).catch(() => [])
+            : [],
+          prisma.ticket.groupBy({
+            by: ['locationName'],
+            where: { deletedAt: null, locationName: { not: null }, status: { in: ['NEW', 'OPEN', 'PENDING', 'PLANNED'] } },
+            _count: { id: true },
+            orderBy: { _count: { id: 'desc' } },
+            take: 4,
+          }).catch(() => []),
+          prisma.ticket.groupBy({
+            by: ['category'],
+            where: { deletedAt: null, category: { not: null }, status: { in: ['NEW', 'OPEN', 'PENDING', 'PLANNED'] } },
+            _count: { id: true },
+            orderBy: { _count: { id: 'desc' } },
+            take: 4,
+          }).catch(() => []),
+          prisma.team.findMany({
+            select: { name: true, _count: { select: { tickets: { where: { deletedAt: null, status: { in: ['NEW', 'OPEN', 'PENDING'] } } } } } },
+            take: 5,
+          }).catch(() => []),
         ]);
-        snap = { total, open, newCount, myCount, topLocs, at: new Date().toISOString().slice(0, 16).replace('T', ' ') };
+        snap = { total, open, newCount, p1Count, solvedCount, myCount, myRecentTickets, topLocs, topCategories, teamStats, at: new Date().toISOString().slice(0, 16).replace('T', ' ') };
         snapCache.data[userKey] = snap;
         snapCache.at[userKey] = now;
         if (Object.keys(snapCache.data).length > 50) {
@@ -775,10 +1055,21 @@ function setupVoiceLive() {
         }
       }
       const parts = [];
-      if (snap.total != null) parts.push(`Tickets totaux: ${snap.total}, ouverts: ${snap.open}, nouveaux: ${snap.newCount}`);
-      if (snap.myCount != null) parts.push(`Tes tickets (demandeur): ${snap.myCount}`);
-      if (snap.topLocs?.length) parts.push(`Top lieux: ${snap.topLocs.map((l) => `${l.locationName} (${l._count.id})`).join(', ')}`);
-      if (parts.length) snapshotBlock = `\n\n--- SNAPSHOT TEMPS RÉEL (${snap.at}) ---\n${parts.join(' | ')}\nUtilise ces chiffres directement si la question porte dessus — pas besoin d'appeler un outil. Pour tout détail (liste, ticket précis, stats par lieu/équipe) appelle l'outil adapté.\n`;
+      if (snap.total != null) parts.push(`METRIQUES GLOBALES: Total=${snap.total}, Ouverts=${snap.open}, Nouveaux=${snap.newCount}, P1 Critiques=${snap.p1Count || 0}, Résolus=${snap.solvedCount || 0}`);
+      if (currentUser) {
+        parts.push(`UTILISATEUR CONNECTÉ: #${currentUser.sub} (${currentUser.role}) | Total de ses tickets=${snap.myCount || 0}`);
+      }
+      if (snap.myRecentTickets?.length) {
+        const ticketSummaryList = snap.myRecentTickets.map(t => `#${t.id} "${t.title}" [Statut: ${t.status}, Priorité: ${t.priority}, Catégorie: ${t.category || 'N/A'}, Lieu: ${t.locationName || 'N/A'}, Tech: ${t.assignedTo?.fullName || 'non assigné'}]`).join('\n  - ');
+        parts.push(`LISTE DÉTAILLÉE DE TES TICKETS RÉCENTS :\n  - ${ticketSummaryList}`);
+      }
+      if (snap.topLocs?.length) parts.push(`SITES LES PLUS IMPACTES: ${snap.topLocs.map((l) => `${l.locationName} (${l._count.id} tickets)`).join(', ')}`);
+      if (snap.topCategories?.length) parts.push(`CATEGORIES PRINCIPALES: ${snap.topCategories.map((c) => `${c.category} (${c._count.id})`).join(', ')}`);
+      if (snap.teamStats?.length) parts.push(`EQUIPES: ${snap.teamStats.map((t) => `${t.name} (${t._count.tickets} ouverts)`).join(', ')}`);
+
+      if (parts.length) {
+        snapshotBlock = `\n\n--- DONNÉES TEMPS RÉEL PRÉCHARGÉES (${snap.at}) ---\n${parts.join('\n')}\n\nRÈGLE ABSOLUE POUR LES DONNÉES : Toutes les informations ci-dessus sur les tickets de l'utilisateur, leurs statuts, priorités et catégories sont 100% EXACTES. Quand l'utilisateur pose une question sur ses tickets ou les chiffres globaux du helpdesk, RÉPONDS DIRECTEMENT À L'ORAL en utilisant ce bloc SANS faire aucun appel d'outil !\n`;
+      }
     } catch (snapErr) {
       logger.warn('[voice-live] Snapshot échoué:', snapErr.message);
     }
@@ -786,42 +1077,93 @@ function setupVoiceLive() {
     let inputTranscriptBuf = '';
     let outputTranscriptBuf = '';
 
+    // ── Handlers côté client, enregistrés AVANT genai.live.connect() ──
+    // connect() ne se résout qu'au setupComplete : s'il échoue ou reste bloqué, ces
+    // handlers n'existeraient jamais → session morte sans log, sans {type:'error'}
+    // envoyé au front et sans reconnexion (constaté : 48 sessions ouvertes / 43 setupComplete).
+    // `session` est null tant que connect n'a pas résolu : les frames mic reçues avant
+    // le ready sont simplement ignorées (garde ci-dessous).
+    ws.on('message', async (data) => {
+      try {
+        if (Buffer.isBuffer(data) && data.length > 2 && session) {
+          // Vérifier si c'est du JSON (ping, bargeIn) ou du PCM brut
+          if (data[0] === 0x7B) {
+            let parsed = null;
+            try {
+              parsed = JSON.parse(data.toString());
+            } catch { /* Pas du JSON valide → PCM brut (0x7B peut être une donnée audio) */ }
+            if (parsed) {
+              if (parsed.type === 'ping') {
+                // Keep-alive : rien à faire côté Gemini
+              } else if (parsed.type === 'bargeIn') {
+                // L'utilisateur a interrompu → signaler à Gemini de s'arrêter
+                logger.info('[voice-live] bargeIn received from client');
+              }
+              return; // JSON traité — seuls les vrais messages JSON sont ignorés par le flux PCM
+            }
+            // Sinon : on tombe au-dessus et on traite ce buffer comme du PCM
+          }
+          await session.sendRealtimeInput({
+            audio: { data: data.toString('base64'), mimeType: 'audio/pcm;rate=16000' },
+          });
+        }
+      } catch (err) {
+        logger.error('[voice-live] upstream error:', err.message);
+      }
+    });
+
+    ws.on('close', () => {
+      logger.info('[voice-live] Client disconnected');
+      try { session?.close?.(); } catch {}
+    });
+
+    ws.on('error', (err) => {
+      logger.error('[voice-live] WS error:', err.message);
+      try { session?.close?.(); } catch {}
+    });
+
     try {
       const apiKey = await getGeminiApiKey();
       const genai = new GoogleGenAI({ apiKey });
 
-      session = await genai.live.connect({
+      // connect() ne se résout qu'au setupComplete : sans timeout, un refus ou une
+      // session fermée par Google laisse le client dans le vide (jamais de ready,
+      // jamais d'erreur côté front, jamais de log côté serveur).
+      const CONNECT_TIMEOUT_MS = 10000;
+      let connectTimedOut = false;
+      let connectTimeoutHandle;
+      const connectPromise = genai.live.connect({
         model: LIVE_MODEL,
         config: {
           responseModalities: ['AUDIO'],
           systemInstruction: [
             'Tu es MARIE, assistante vocale amicale et professionnelle du helpdesk IT Prosuma.',
-            'Tu parles en français, de manière claire, concise et naturelle.',
+            'Tu parles en français, de manière claire, concise et naturelle à l\'oral.',
             '',
-            'RÈGLE ABSOLUE — DONNÉES ET CHIFFRES :',
-            "- Pour TOUTE question qui implique des chiffres, des tickets, des statistiques, des classements, des périodes (aujourd'hui, cette semaine, ce mois), des tickets d'une personne, d'un lieu, d'une équipe, ou un rapport → tu DOIS appeler l'outil ask_assistant avec la question EXACTE de l'utilisateur.",
-            '- Ne devine JAMAIS un chiffre. Ne réponds jamais de mémoire.',
-            '- Lis attentivement le champ answer renvoyé par ask_assistant et restitue-le fidèlement à l oral, sans recalculer ni arrondir.',
+            '══ RÈGLE ABSOLUE — DONNÉES EN TEMPS RÉEL ══',
+            'Le bloc SNAPSHOT ci-dessous contient les métriques EXACTES et À JOUR du helpdesk.',
+            'Pour TOUTE question sur les chiffres globaux (total tickets, ouverts, nouveaux, critiques, résolus),',
+            'les sites les plus impactés, les catégories principales ou les équipes,',
+            'TU DOIS répondre IMMÉDIATEMENT et DIRECTEMENT en utilisant ces chiffres — SANS appeler aucun outil.',
             '',
-            'ACTIONS (création / modification) :',
-            '- Utilise create_ticket ou update_ticket_status uniquement pour les actions de création ou de changement de statut.',
+            '══ QUAND UTILISER UN OUTIL ══',
+            '- Détails d\'un ticket spécifique non listé dans le snapshot → check_ticket ou search_tickets',
+            '- Date de création, "dernier ticket créé", "tickets récents" → search_tickets avec limit=1 (tri du plus récent, champ "creeLe" = date)',
+            '- Tickets d\'une équipe, d\'une catégorie ou d\'une personne → search_tickets (params team / category / person)',
+            '- Mails (dernier mail, fil d\'un ticket) → search_emails',
+            '- Tickets similaires / doublons → find_similar_tickets',
+            '- Ajouter un suivi/commentaire sur un ticket → add_ticket_followup (demande d\'abord la confirmation)',
+            '- Classements détaillés techniciens/lieux → get_top_technicians / get_top_locations',
+            '- Création ou modification de ticket → create_ticket / update_ticket_status',
+            '- Question qui nécessite une vraie analyse → ask_assistant',
+            '- NE PAS appeler d\'outil si la réponse est déjà dans le snapshot.',
             '',
-            'COMPORTEMENT :',
-            '- Laisse toujours l utilisateur terminer sa question (écoute jusqu au bout).',
-            "- Ne dis JAMAIS \"je vérifie\" ou \"un instant\" avant d'avoir le résultat — la technique gère l'attente, pas toi.",
-            '- Sois concise à l oral : pas de longs tableaux, synthétise.',
-            '- Varie tes transitions : "voici ce que je trouve", "d après les données", "pour te répondre précisément"... — jamais deux fois la même formule.',
-            '',
-            'FLUIDITÉ VOCALE :',
-            '- Parle en phrases complètes et fluides, sans couper entre deux propositions.',
-            '- Ne t interromps jamais toi-même en milieu de phrase.',
-            '',
-            'SCHÉMA TICKET (colonnes et valeurs exactes — ne jamais inventer) :',
-            '- status: NEW | OPEN | PENDING | WAITING_FOR_USER | SOLVED | CLOSED | PLANNED',
-            '- priority: P1 (Critique) | P2 (Haute) | P3 (Moyenne) | P4 (Basse)',
-            '- category: Réseau | Système | Logiciel | Matériel | Téléphonie | Applicatif | Sécurité | Demande reporting',
-            '- team: Réseau | Système | Sécurité | Applicatif | Logiciel | Matériel | Téléphonie | DÉVELOPPEMENT',
-            '- Exemple: "tickets P1" → priority P1, "tickets ouverts" → status NEW/OPEN/PENDING/PLANNED',
+            '══ FORMAT DE RÉPONSE VOCALE ══',
+            '- Réponds en 1 à 3 phrases concises, fluides et naturelles à l\'oral.',
+            '- JAMAIS de markdown : pas d\'astérisques, pas de tirets listes, pas de dièses.',
+            '- Les numéros de tickets : dis toujours "ticket numéro X", jamais "#X".',
+            '- JAMAIS "je vérifie", "un instant", "laissez-moi chercher" — réponds directement.',
+            '- Si tu ne sais pas : dis-le simplement en une phrase.',
             snapshotBlock,
           ].join('\n'),
           speechConfig: {
@@ -829,15 +1171,15 @@ function setupVoiceLive() {
               prebuiltVoiceConfig: { voiceName: LIVE_VOICE },
             },
           },
-          // ── Détection de fin de parole — compromis rapidité / précision ──
-          // 900ms était trop patient (transcription lente). 500ms + HIGH est plus
-          // réactif tout en gardant prefix 100ms pour ne pas couper les attaques.
+          // ── Détection de fin de parole — compromis rapidité / précision (Inspiré de live-dj & Google Best Practices) ──
+          // Passer prefixPaddingMs à 200ms permet de capturer les consonnes d'attaque (T, P, C, etc.) au début des phrases.
+          // Passer silenceDurationMs de 800ms (un peu trop lent, forçait l'utilisateur à attendre trop longtemps) à 500ms (le "sweet-spot" standard).
           realtimeInputConfig: {
             automaticActivityDetection: {
               disabled: false,
               startOfSpeechSensitivity: 'START_SENSITIVITY_HIGH',
               endOfSpeechSensitivity: 'END_SENSITIVITY_HIGH',
-              prefixPaddingMs: 100,
+              prefixPaddingMs: 200,
               silenceDurationMs: 500,
             },
           },
@@ -875,27 +1217,35 @@ function setupVoiceLive() {
                 if (sc.outputTranscription?.text) {
                   outputTranscriptBuf += sc.outputTranscription.text;
                   if (outputTranscriptBuf.length > 10000) outputTranscriptBuf = outputTranscriptBuf.slice(-10000);
-                  ws.send(JSON.stringify({ type: 'transcript', role: 'assistant', text: outputTranscriptBuf, partial: true }));
+                  const formattedOutput = formatSpokenTextFrench(outputTranscriptBuf);
+                  ws.send(JSON.stringify({ type: 'transcript', role: 'assistant', text: formattedOutput, partial: true }));
                 }
                 if (sc.turnComplete || sc.interrupted) {
-                  // Fin de tour (ou interruption) : on commit les phrases complètes
+                  if (audioOutChunks > 0) {
+                    logger.info(`[voice-live] audio out (tour): ${audioOutChunks} chunk(s), ${audioOutBytes} octets envoyés au client`);
+                    audioOutChunks = 0;
+                    audioOutBytes = 0;
+                  }
                   if (inputTranscriptBuf) {
                     ws.send(JSON.stringify({ type: 'transcript', role: 'user', text: inputTranscriptBuf, final: true }));
                     inputTranscriptBuf = '';
                   }
                   if (outputTranscriptBuf) {
-                    ws.send(JSON.stringify({ type: 'transcript', role: 'assistant', text: outputTranscriptBuf, final: true }));
+                    const formattedOutput = formatSpokenTextFrench(outputTranscriptBuf);
+                    ws.send(JSON.stringify({ type: 'transcript', role: 'assistant', text: formattedOutput, final: true }));
                     outputTranscriptBuf = '';
                   }
                 }
                 if (sc.modelTurn?.parts) {
-                  // Coalescence : regrouper les petits chunks PCM en un seul envoi pour réduire jitter et hachure
+                  // serverContent est INCRÉMENTAL : chaque message porte les NOUVELLES parties
+                  // du tour. On relaie TOUTES les parts — l'ancien compteur de dédup (slice)
+                  // supprimait tout l'audio après le 1er chunk de chaque tour (voix muette).
                   const pcmParts = sc.modelTurn.parts.filter((p) => p.inlineData?.data);
-                  if (pcmParts.length > 1) {
+                  if (pcmParts.length) {
                     const combined = Buffer.concat(pcmParts.map((p) => Buffer.from(p.inlineData.data, 'base64')));
                     ws.send(combined);
-                  } else if (pcmParts.length === 1) {
-                    ws.send(Buffer.from(pcmParts[0].inlineData.data, 'base64'));
+                    audioOutChunks += pcmParts.length;
+                    audioOutBytes += combined.length;
                   }
                 }
                 if (sc.interrupted) {
@@ -906,24 +1256,39 @@ function setupVoiceLive() {
               if (msg.toolCall) {
                 const fcs = msg.toolCall.functionCalls;
                 if (fcs && typeof fcs[Symbol.iterator] === 'function') {
-                  for (const fc of fcs) {
-                    const fcName = String(fc.name || '');
-                    const fcArgs = JSON.parse(JSON.stringify(fc.args || {}));
-                    const fcId = String(fc.id || '');
-                    logger.info(`[voice-live] Tool: ${fcName}`);
-                    try {
-                      const result = await executeTool(fcName, fcArgs, { user: currentUser, sessionHistory });
-                      await session.sendToolResponse({
-                        functionResponses: [{ id: fcId, name: fcName, response: result }],
-                      });
-                    } catch (toolErr) {
-                      logger.error(`[voice-live] Tool ${fcName} error: ${toolErr.message}`);
+                  const fcList = [...fcs];
+                  // ── Exécution PARALLÈLE de tous les tool calls du tour ──
+                  // Avant : exécution séquentielle (chaque outil attendait le précédent)
+                  // Maintenant : tous les outils démarrent en même temps → latence = max(outils)
+                  // au lieu de sum(outils). Gain typique : 200-500ms sur des questions multi-outils.
+                  const t0 = Date.now();
+                  const results = await Promise.allSettled(
+                    fcList.map(async (fc) => {
+                      const fcName = String(fc.name || '');
+                      const fcArgs = JSON.parse(JSON.stringify(fc.args || {}));
+                      const fcId = String(fc.id || '');
+                      logger.info(`[voice-live] Tool (parallel): ${fcName} ${JSON.stringify(fcArgs).substring(0, 200)}`);
+
+                      // Notifier le client du démarrage de l'outil (transitions vocales d'attente V2)
+                      if (ws && ws.readyState === 1) {
+                        ws.send(JSON.stringify({ type: 'tool_starting', name: fcName }));
+                      }
+
                       try {
-                        await session.sendToolResponse({
-                          functionResponses: [{ id: fcId, name: fcName, response: { error: toolErr.message, success: false } }],
-                        });
-                      } catch {}
-                    }
+                        const result = await executeTool(fcName, fcArgs, { user: currentUser, sessionHistory, ws, toolCtx });
+                        return { id: fcId, name: fcName, response: result };
+                      } catch (toolErr) {
+                        logger.error(`[voice-live] Tool ${fcName} error: ${toolErr.message}`);
+                        return { id: fcId, name: fcName, response: { error: toolErr.message, success: false } };
+                      }
+                    })
+                  );
+                  logger.info(`[voice-live] ${fcList.length} tool(s) executed in ${Date.now() - t0}ms`);
+                  const functionResponses = results.map((r) => r.value || r.reason);
+                  try {
+                    await session.sendToolResponse({ functionResponses });
+                  } catch (respErr) {
+                    logger.error('[voice-live] sendToolResponse error:', respErr.message);
                   }
                 }
               }
@@ -937,8 +1302,10 @@ function setupVoiceLive() {
               ws.send(JSON.stringify({ type: 'error', message: err?.message || 'Gemini error' }));
             }
           },
-          onclose: () => {
-            logger.info('[voice-live] Gemini session closed');
+          onclose: (e) => {
+            // e.code/e.reason : SEULE trace d'un refus de session Google (les fermetures
+            // avant setupComplete n'arrivaient jamais dans le catch → zéro log avant).
+            logger.info(`[voice-live] Gemini session closed${e ? ` code=${e.code} reason=${e.reason || '(aucune)'}` : ''}`);
             if (ws.readyState === 1) {
               ws.send(JSON.stringify({ type: 'session_closed' }));
               ws.close();
@@ -946,28 +1313,24 @@ function setupVoiceLive() {
           },
         },
       });
-
-      ws.on('message', async (data) => {
-        try {
-          if (Buffer.isBuffer(data) && session) {
-            await session.sendRealtimeInput({
-              audio: { data: data.toString('base64'), mimeType: 'audio/pcm;rate=16000' },
-            });
-          }
-        } catch (err) {
-          logger.error('[voice-live] upstream error:', err.message);
-        }
-      });
-
-      ws.on('close', () => {
-        logger.info('[voice-live] Client disconnected');
-        try { session?.close?.(); } catch {}
-      });
-
-      ws.on('error', (err) => {
-        logger.error('[voice-live] WS error:', err.message);
-        try { session?.close?.(); } catch {}
-      });
+      // Si le timeout gagne la course mais que connect finit par résoudre plus tard,
+      // fermer la session orpheline. On teste `connectTimedOut` (positionné par le timer)
+      // et NON un "connectOk" qui serait encore false à la résolution normale de la
+      // promesse (ordre des microtasks) — cela fermait la session aussitôt ouverte.
+      connectPromise.then((s) => { if (connectTimedOut) { try { s?.close?.(); } catch {} } }).catch(() => {});
+      try {
+        session = await Promise.race([
+          connectPromise,
+          new Promise((_, reject) => {
+            connectTimeoutHandle = setTimeout(() => {
+              connectTimedOut = true;
+              reject(new Error(`Gemini connect timeout (${CONNECT_TIMEOUT_MS}ms)`));
+            }, CONNECT_TIMEOUT_MS);
+          }),
+        ]);
+      } finally {
+        clearTimeout(connectTimeoutHandle);
+      }
     } catch (err) {
       logger.error('[voice-live] Setup error:', err.message);
       if (ws.readyState === 1) {
@@ -982,4 +1345,25 @@ function setupVoiceLive() {
   });
 }
 
-module.exports = { setupVoiceLive };
+function invalidateVoiceCache(userIds = []) {
+  try {
+    const snapCache = global._voiceSnapshotCache;
+    if (!snapCache || !snapCache.data) return;
+    if (!userIds || userIds.length === 0) {
+      snapCache.data = {};
+      snapCache.at = {};
+      return;
+    }
+    delete snapCache.data['anon'];
+    delete snapCache.at['anon'];
+    for (const id of userIds) {
+      if (!id) continue;
+      delete snapCache.data[`u:${id}`];
+      delete snapCache.at[`u:${id}`];
+    }
+  } catch (err) {
+    logger.warn('[voice-live] Cache invalidation error:', err.message);
+  }
+}
+
+module.exports = { setupVoiceLive, invalidateVoiceCache };

@@ -45,6 +45,8 @@ services:
       BACKEND_URL: http://localhost:4000
       PORT: 4000
       VOICE_LIVE_PORT: 4001
+      # Modèle Live GA officiel (doc Google Cloud) : entrée PCM 16 kHz, sortie 24 kHz
+      LIVE_MODEL: gemini-3.8-live
       AUTH_EMAIL_DOMAIN: ${AUTH_EMAIL_DOMAIN:-}
       LDAP_ENABLED: ${LDAP_ENABLED:-false}
       LDAP_URL: ${LDAP_URL:-ldap://10.0.70.1}

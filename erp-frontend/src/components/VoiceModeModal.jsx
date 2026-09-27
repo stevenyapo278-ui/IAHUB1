@@ -7,6 +7,7 @@ import VoiceVisualizer from './VoiceVisualizer';
 const STATE_CONFIG = {
   idle: { label: 'En attente', color: '#64748b' },
   connecting: { label: 'Connexion…', color: '#eab308' },
+  reconnecting: { label: 'Reconnexion…', color: '#f97316' },
   listening: { label: 'Écoute…', color: '#3b82f6' },
   thinking: { label: 'Réflexion…', color: '#a855f7' },
   speaking: { label: 'Parle…', color: '#22c55e' },
@@ -30,10 +31,21 @@ export default function VoiceModeModal({ isOpen, onClose }) {
     stopAll,
     toggleMute,
     toggleNoiseSuppression,
+    isBrainstormMode,
   } = useVoiceLive();
 
-  const isActive = ['listening', 'speaking', 'thinking'].includes(state);
-  const config = STATE_CONFIG[state] || STATE_CONFIG.idle;
+  const isActive = ['listening', 'speaking', 'thinking', 'reconnecting'].includes(state);
+  const baseConfig = STATE_CONFIG[state] || STATE_CONFIG.idle;
+
+  // Surcharger les couleurs d'état en mode brainstorming
+  const config = isBrainstormMode
+    ? {
+        ...baseConfig,
+        color: state === 'listening'
+          ? '#a855f7' // Violet d'écoute brainstorming !
+          : (state === 'speaking' || state === 'thinking' ? '#ec4899' : baseConfig.color) // Rose d'idées/réponses !
+      }
+    : baseConfig;
 
   const handleClose = useCallback(() => {
     stopAll();
@@ -99,7 +111,9 @@ export default function VoiceModeModal({ isOpen, onClose }) {
           className="text-center mb-8"
         >
           <h1 className="text-3xl font-light tracking-[0.3em] text-white/90">MARIE</h1>
-          <p className="text-xs text-white/40 mt-1 tracking-widest uppercase">Assistant vocal</p>
+          <p className="text-xs text-white/40 mt-1 tracking-widest uppercase">
+            {isBrainstormMode ? '💡 Session Brainstorming' : 'Assistant vocal'}
+          </p>
         </motion.div>
 
         {/* Orb area */}
@@ -139,7 +153,7 @@ export default function VoiceModeModal({ isOpen, onClose }) {
 
           {/* VoiceVisualizer */}
           <div className="absolute inset-2 overflow-hidden rounded-full opacity-60">
-            <VoiceVisualizer analyserNode={analyserNode} color={config.color} isActive={isActive} />
+            <VoiceVisualizer analyserNode={analyserNode} color={config.color} isActive={isActive} state={state} />
           </div>
 
           {/* Core orb */}
@@ -147,6 +161,23 @@ export default function VoiceModeModal({ isOpen, onClose }) {
             onClick={isActive ? stopAll : startListening}
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
+            animate={
+              state === 'listening'
+                ? {
+                    scale: [1, 1.04, 1],
+                    boxShadow: [
+                      `0 8px 32px ${config.color}44`,
+                      `0 8px 48px ${config.color}77`,
+                      `0 8px 32px ${config.color}44`,
+                    ],
+                  }
+                : {}
+            }
+            transition={{
+              duration: 2,
+              repeat: Infinity,
+              ease: 'easeInOut',
+            }}
             className="relative z-10 w-24 h-24 rounded-full flex items-center justify-center cursor-pointer focus:outline-none"
             style={{
               background: `linear-gradient(135deg, ${config.color}33, ${config.color}11)`,
@@ -181,12 +212,21 @@ export default function VoiceModeModal({ isOpen, onClose }) {
 
         {/* Status label */}
         <div className="flex items-center gap-2 mb-4">
-          <motion.div
-            className="w-2 h-2 rounded-full"
-            style={{ backgroundColor: config.color }}
-            animate={isActive ? { opacity: [1, 0.3, 1] } : { opacity: 0.6 }}
-            transition={{ duration: 1.5, repeat: Infinity }}
-          />
+          {state === 'listening' ? (
+            <div className="flex items-end gap-0.5 h-3.5 shrink-0" title="Microphone actif - Écoute en cours">
+              <motion.div className="w-0.5 bg-blue-400 rounded-full" animate={{ height: [4, 12, 4] }} transition={{ duration: 0.6, repeat: Infinity, ease: 'easeInOut' }} style={{ height: 4 }} />
+              <motion.div className="w-0.5 bg-blue-400 rounded-full" animate={{ height: [6, 16, 6] }} transition={{ duration: 0.7, repeat: Infinity, ease: 'easeInOut', delay: 0.15 }} style={{ height: 6 }} />
+              <motion.div className="w-0.5 bg-blue-400 rounded-full" animate={{ height: [8, 10, 8] }} transition={{ duration: 0.5, repeat: Infinity, ease: 'easeInOut', delay: 0.3 }} style={{ height: 8 }} />
+              <motion.div className="w-0.5 bg-blue-400 rounded-full" animate={{ height: [4, 14, 4] }} transition={{ duration: 0.8, repeat: Infinity, ease: 'easeInOut', delay: 0.45 }} style={{ height: 4 }} />
+            </div>
+          ) : (
+            <motion.div
+              className="w-2 h-2 rounded-full"
+              style={{ backgroundColor: config.color }}
+              animate={isActive ? { opacity: [1, 0.3, 1] } : { opacity: 0.6 }}
+              transition={{ duration: 1.5, repeat: Infinity }}
+            />
+          )}
           <span className="text-xs text-white/60 tracking-widest uppercase">{config.label}</span>
         </div>
 
