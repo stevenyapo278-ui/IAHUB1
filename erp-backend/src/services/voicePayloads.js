@@ -85,6 +85,32 @@ const BUILDERS = {
         : {}),
     };
   },
+
+  send_ticket_report: (r) => {
+    if (!r) return null;
+    if (typeof r === 'object' && r.needsConfirmation) {
+      return {
+        kind: 'confirmation',
+        tool: r.tool || 'send_ticket_report',
+        prompt: r.message,
+      };
+    }
+    if (typeof r === 'string' && r.includes('Rapport envoyé')) {
+      return {
+        kind: 'action',
+        action: 'report_sent',
+        message: r,
+      };
+    }
+    if (r.sent) {
+      return {
+        kind: 'action',
+        action: 'report_sent',
+        message: typeof r.message === 'string' ? r.message : 'Rapport envoyé par email',
+      };
+    }
+    return null;
+  },
 };
 
 function buildToolResultPayload(name, result) {

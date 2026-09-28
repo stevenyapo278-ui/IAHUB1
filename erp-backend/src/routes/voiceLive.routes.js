@@ -378,6 +378,25 @@ Ne réponds JAMAIS de mémoire : appelle toujours cet outil pour les chiffres.`,
           required: ['ticketId', 'content'],
         },
       },
+      {
+        name: 'send_ticket_report',
+        description: "Générer et envoyer un rapport Excel (XLSX) contenant les tickets correspondants par email à l'utilisateur.",
+        parameters: {
+          type: 'object',
+          properties: {
+            period: { type: 'string', description: "Période : today, yesterday, 7d, 30d, 90d, this_month (ce mois), last_month (mois dernier)" },
+            dateFrom: { type: 'string', description: 'Date de début alternative (YYYY-MM-DD)' },
+            dateTo: { type: 'string', description: 'Date de fin alternative (YYYY-MM-DD)' },
+            team: { type: 'string', description: "Nom de l'équipe (ex: Système, Réseau, Sécurité)" },
+            category: { type: 'string', description: 'Catégorie du ticket (ex: Asten, Réseau, Matériel)' },
+            status: { type: 'string', description: 'Statut (NEW, OPEN, PENDING, WAITING_FOR_USER, SOLVED, CLOSED)' },
+            priority: { type: 'string', enum: ['P1', 'P2', 'P3', 'P4'], description: 'Filtrer par priorité' },
+            search: { type: 'string', description: 'Mot-clé dans le titre ou le contenu des tickets' },
+            cc: { type: 'array', items: { type: 'string' }, description: "Adresses email à mettre en copie (CC) — seulement si l'utilisateur en a mentionné dans sa phrase" },
+            ccTeams: { type: 'array', items: { type: 'string' }, description: "Noms d'équipes dont TOUS les membres actifs doivent être mis en copie" },
+          },
+        },
+      },
     ],
   },
 ];
@@ -941,6 +960,9 @@ async function executeTool(name, args, { user = null, sessionHistory = null, ws 
         return await chatbotExecuteTool(name, args, user);
 
       case 'search_emails':
+        return await chatbotExecuteTool(name, args, user);
+
+      case 'send_ticket_report':
         return await chatbotExecuteTool(name, args, user);
 
       case 'add_ticket_followup': {
