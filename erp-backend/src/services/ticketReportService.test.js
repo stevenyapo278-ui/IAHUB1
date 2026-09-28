@@ -6,13 +6,14 @@ jest.mock('../prismaClient', () => ({
   ticket: { findMany: jest.fn(async () => []) },
 }));
 jest.mock('./emailSender', () => ({
+  sendEmail: jest.fn(async () => undefined),
   sendEmailViaSmtp: jest.fn(async () => undefined),
   getActiveEmailAccount: jest.fn(async () => ({ provider: 'SMTP', id: 1, name: 'defaut' })),
   buildEmailLayout: jest.fn(({ children }) => `<html><body>${children}</body></html>`),
 }));
 
 const prisma = require('../prismaClient');
-const { sendEmailViaSmtp, getActiveEmailAccount } = require('./emailSender');
+const { sendEmail, sendEmailViaSmtp, getActiveEmailAccount } = require('./emailSender');
 const {
   periodToRange,
   periodLabel,
@@ -205,7 +206,7 @@ describe('previewReport — compte sans rien envoyer', () => {
     expect(preview.count).toBe(2);
     expect(preview.filtersLabel).toContain('statut : OPEN');
     expect(preview.cc).toEqual([]);
-    expect(sendEmailViaSmtp).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
     expect(prisma.ticket.findMany).toHaveBeenCalled();
   });
 
@@ -227,14 +228,14 @@ describe('sendTicketReportEmail — envoi avec pièce jointe', () => {
     const result = await sendTicketReportEmail({ user: requester, args: { period: '7d' }, cc: [] });
     expect(result.sent).toBe(false);
     expect(result.count).toBe(0);
-    expect(sendEmailViaSmtp).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
   });
 
   it("échoue explicitement sans compte email configuré", async () => {
     prisma.ticket.findMany.mockResolvedValue([{ id: 1 }]);
     getActiveEmailAccount.mockResolvedValue(null);
     await expect(sendTicketReportEmail({ user: requester, args: {} })).rejects.toThrow(/Aucun compte email/);
-    expect(sendEmailViaSmtp).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
   });
 
   it('envoie XLSX en pièce jointe, au demandeur, avec CC', async () => {
@@ -257,8 +258,9 @@ describe('sendTicketReportEmail — envoi avec pièce jointe', () => {
     expect(result.sent).toBe(true);
     expect(result.count).toBe(1);
     expect(result.filename).toMatch(/^rapport_tickets_\d{4}-\d{2}-\d{2}\.xlsx$/);
-    expect(sendEmailViaSmtp).toHaveBeenCalledTimes(1);
-    const mail = sendEmailViaSmtp.mock.calls[0][0];
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    const mail = sendEmail.mock.calls[0][0];
+    expect(sendEmailViaSmtp).not.toHaveBeenCalled();
     expect(mail.to).toBe('demandeur@prosuma.ci');
     expect(mail.cc).toEqual(['chef@prosuma.ci']);
     expect(mail.subject).toContain('Rapport de tickets');

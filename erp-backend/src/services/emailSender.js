@@ -44,12 +44,50 @@ function getLogoAttachmentIfReferenced(bodyHtml, signatureLogoUrl) {
 // affiche la réponse comme un email totalement séparé du fil de conversation de l'utilisateur,
 // plutôt que de s'enchaîner avec "RE:" au même endroit que les échanges précédents.
 // `attachments` : pièces jointes additionnelles [{ filename, content: Buffer, contentType }].
+// Traduit les erreurs de connexion/auth nodemailer en message explicite incluant la cible
+// (hôte:port) : sans ça, l'utilisateur voit un "Connection refused" brut en anglais qui ne
+// dit pas si le problème vient du compte, du pare-feu ou d'une mauvaise config SMTP.
+function describeSmtpError(err, account) {
+  const host = account.smtpHost;
+  const port = account.smtpPort || 587;
+  const target = `${host}:${port}`;
+  const code = err.code || '';
+  const msg = err.message || '';
+  if (code === 'ECONNREFUSED' || /ECONNREFUSED|connection refused/i.test(msg)) {
+    return `Échec de connexion au serveur SMTP ${target} (connexions refusées : pare-feu sortant ou hôte/port incorrect) — ${msg}`;
+  }
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
+    return `Hôte SMTP introuvable : ${host} — ${msg}`;
+  }
+  if (code === 'ETIMEDOUT' || /timeout/i.test(msg)) {
+    return `Délai dépassé en contactant le serveur SMTP ${target} — ${msg}`;
+  }
+  if (code === 'EAUTH') {
+    return `Authentification refusée par le serveur SMTP ${target} (identifiants invalides) — ${msg}`;
+  }
+  if (code === 'ESOCKET') {
+    return `Erreur de connexion au serveur SMTP ${target} — ${msg}`;
+  }
+  return `Échec d'envoi SMTP vers ${target} — ${msg}`;
+}
+
 async function sendEmailViaSmtp({ to, cc, subject, bodyHtml, account, logoAttachment, attachments: extraAttachments = [] }) {
+  // Garde-fou : sans hôte SMTP, nodemailer retombe silencieusement sur localhost:587 et
+  // échoue avec un ECONNREFUSED illisible — surtout pour un compte OAuth (OUTLOOK) qui
+  // n'a aucun identifiant SMTP et aurait dû partir via l'API Graph (sendEmail).
+  if (!account?.smtpHost) {
+    throw new Error(
+      `Le compte email « ${account?.label || account?.emailAddress || 'inconnu'} » n'a pas d'hôte SMTP configuré — envoi impossible par SMTP (compte OAuth/Graph ou configuration incomplète)`,
+    );
+  }
   const transporter = nodemailer.createTransport({
     host: account.smtpHost,
     port: account.smtpPort || 587,
     secure: account.useTls === false ? false : account.smtpPort === 465,
     auth: { user: account.username, pass: account.password },
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 30000,
   });
   const attachments = [
     ...(logoAttachment ? [{
@@ -68,7 +106,15 @@ async function sendEmailViaSmtp({ to, cc, subject, bodyHtml, account, logoAttach
     html: bodyHtml,
     attachments: attachments.length > 0 ? attachments : undefined,
   };
-  return transporter.sendMail(mailOptions);
+  try {
+    return await transporter.sendMail(mailOptions);
+  } catch (err) {
+    const wrapped = new Error(describeSmtpError(err, account));
+    wrapped.code = err.code;
+    wrapped.responseCode = err.responseCode;
+    wrapped.cause = err;
+    throw wrapped;
+  }
 }
 
 // Sélection du compte d'envoi actif : Outlook par défaut → Outlook actif → SMTP par défaut → SMTP actif.
@@ -94,7 +140,7 @@ async function getActiveEmailAccount() {
   return account;
 }
 
-async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo = null, conversationId = null, inReplyToGraphMessageId = null, saveAsMessage = true }) {
+async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo = null, conversationId = null, inReplyToGraphMessageId = null, saveAsMessage = true, attachments = [] }) {
   const account = await getActiveEmailAccount();
   if (!account) throw new Error('Aucun compte email configuré pour l\'envoi (Outlook/M365 ou SMTP)');
   const isOutlook = account.provider === 'OUTLOOK';
@@ -121,7 +167,7 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
     const toFiltered = toList.filter((addr) => addr.toLowerCase() !== senderAddress);
     const smtpTo = toFiltered.length > 0 ? toFiltered : toList;
     const ccList = (cc || []).filter((addr) => addr && String(addr).toLowerCase().trim() !== senderAddress);
-    await sendEmailViaSmtp({ to: smtpTo, cc: ccList, subject, bodyHtml: effectiveBodyHtml, account, logoAttachment });
+    await sendEmailViaSmtp({ to: smtpTo, cc: ccList, subject, bodyHtml: effectiveBodyHtml, account, logoAttachment, attachments });
     if (saveAsMessage && ticketId) {
       const sender = account.emailAddress || account.username;
       // Récupérer le statut actuel du ticket pour le suivi
@@ -178,13 +224,25 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
 
   const isSimulatedId = typeof inReplyToGraphMessageId === 'string' && inReplyToGraphMessageId.startsWith('SIM-');
 
+  // Pièces jointes additionnelles ({ filename, content: Buffer, contentType }) converties au
+  // format fileAttachment de Graph (contentBytes en base64), avec le logo inline éventuel.
+  const graphAttachments = [
+    ...(logoAttachment ? [logoAttachment] : []),
+    ...(attachments || []).map((a) => ({
+      '@odata.type': '#microsoft.graph.fileAttachment',
+      name: a.filename,
+      contentType: a.contentType || 'application/octet-stream',
+      contentBytes: (Buffer.isBuffer(a.content) ? a.content : Buffer.from(a.content)).toString('base64'),
+    })),
+  ];
+
   const buildNewMessage = () => {
     const message = {
       subject,
       body: { contentType: 'HTML', content: effectiveBodyHtml },
       toRecipients,
       ...(ccRecipientsPayload.length > 0 ? { ccRecipients: ccRecipientsPayload } : {}),
-      ...(logoAttachment ? { attachments: [logoAttachment] } : {}),
+      ...(graphAttachments.length > 0 ? { attachments: graphAttachments } : {}),
     };
     return graphFetch(account, '/me/messages', { method: 'POST', body: JSON.stringify(message) });
   };
@@ -202,11 +260,13 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
           ccRecipients: ccRecipientsPayload,
         }),
       });
-      if (logoAttachment) {
-        await graphFetch(account, `/me/messages/${draft.id}/attachments`, {
-          method: 'POST',
-          body: JSON.stringify(logoAttachment),
-        });
+      if (graphAttachments.length > 0) {
+        for (const att of graphAttachments) {
+          await graphFetch(account, `/me/messages/${draft.id}/attachments`, {
+            method: 'POST',
+            body: JSON.stringify(att),
+          });
+        }
       }
     } catch (err) {
       // Message source introuvable ou ID invalide (purgé, rétention, mauvais format) → envoi en email neuf

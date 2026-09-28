@@ -1749,7 +1749,8 @@ async function executeTool(toolName, args, user, { confirmed = false } = {}) {
         const sentCc = result.cc || [];
         return `✅ Rapport envoyé ! ${result.count} ticket(s) en pièce jointe (${result.filename}) envoyé(s) à ${reportTo}${sentCc.length ? `, avec copie à ${sentCc.join(', ')}` : ''}.`;
       } catch (err) {
-        return `Échec de l'envoi du rapport : ${err.code === 'TEAM_NOT_FOUND' ? err.message : err.message}`;
+        console.error('[chatbot] Échec envoi rapport:', err.message);
+        return `Échec de l'envoi du rapport : ${err.message}`;
       }
     }
     default:

@@ -122,7 +122,8 @@ router.delete('/:id', async (req, res) => {
 
 // ── Test de connectivité d'un compte mail ──────────────────────────────────
 // Outlook/M365 : tente un rafraîchissement du token OAuth2 + appel /me/mailFolders/inbox
-// IMAP générique : teste la connexion TCP sur imapHost:imapPort
+// SMTP (IMAP_SMTP / GMAIL) : test complet nodemailer (EHLO + auth) avec timeouts courts
+// IMAP : test TCP sur imapHost:imapPort (complément)
 router.post('/:id/test', async (req, res) => {
   const id = Number(req.params.id);
   const account = await prisma.emailAccount.findUnique({ where: { id } });
@@ -131,7 +132,7 @@ router.post('/:id/test', async (req, res) => {
   const t0 = Date.now();
 
   try {
-    if (account.provider === 'OUTLOOK' || account.provider === 'GMAIL') {
+    if (account.provider === 'OUTLOOK') {
       // Utilise graphFetch (même chemin que le poller) : rafraîchit le token et fait un appel léger
       const { graphFetch } = require('../utils/graphClient');
 
@@ -149,15 +150,37 @@ router.post('/:id/test', async (req, res) => {
       });
     }
 
-    // IMAP/SMTP générique : test TCP sur imapHost:imapPort
-    if (account.provider === 'IMAP' || account.provider === 'GENERIC') {
+    // SMTP (IMAP_SMTP, GMAIL…) : c'est l'envoi qui nous intéresse — nodemailer.verify()
+    // fait EHLO (+ AUTH si identifiants) et valide la config exacte utilisée par sendEmail.
+    if (account.smtpHost) {
+      const nodemailer = require('nodemailer');
+      const smtpPort = account.smtpPort || 587;
+      const transporter = nodemailer.createTransport({
+        host: account.smtpHost,
+        port: smtpPort,
+        secure: account.useTls === false ? false : smtpPort === 465,
+        auth: account.username ? { user: account.username, pass: account.password } : undefined,
+        connectionTimeout: 8000,
+        greetingTimeout: 8000,
+        socketTimeout: 8000,
+      });
+      try {
+        await transporter.verify();
+      } catch (smtpErr) {
+        return res.json({ ok: false, latencyMs: Date.now() - t0, error: smtpErr.message });
+      }
+      return res.json({
+        ok: true,
+        latencyMs: Date.now() - t0,
+        details: `SMTP ${account.smtpHost}:${smtpPort} opérationnel${account.username ? ' (authentification validée)' : ''}`,
+      });
+    }
+
+    // Pas de SMTP → test TCP IMAP si configuré, sinon erreur explicite
+    if (account.imapHost) {
       const net = require('net');
       const host = account.imapHost;
       const port = account.imapPort || 993;
-
-      if (!host) {
-        return res.json({ ok: false, error: 'Hôte IMAP non configuré' });
-      }
 
       await new Promise((resolve, reject) => {
         const socket = net.createConnection({ host, port, timeout: 8000 }, () => {
@@ -171,10 +194,10 @@ router.post('/:id/test', async (req, res) => {
         });
       });
 
-      return res.json({ ok: true, latencyMs: Date.now() - t0, details: `Connexion TCP réussie sur ${host}:${port}` });
+      return res.json({ ok: true, latencyMs: Date.now() - t0, details: `Connexion TCP IMAP réussie sur ${host}:${port} — aucun hôte SMTP configuré (envoi impossible)` });
     }
 
-    return res.json({ ok: false, error: `Type de fournisseur non pris en charge pour le test : ${account.provider}` });
+    return res.json({ ok: false, error: `Aucun hôte SMTP/IMAP configuré pour ce compte (${account.provider})` });
   } catch (err) {
     return res.json({ ok: false, error: err.message });
   }

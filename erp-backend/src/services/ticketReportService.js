@@ -1,7 +1,7 @@
 const ExcelJS = require('exceljs');
 const prisma = require('../prismaClient');
 const { buildTicketWhereClause } = require('./ticketQueryService');
-const { sendEmailViaSmtp, getActiveEmailAccount, buildEmailLayout } = require('./emailSender');
+const { sendEmail, getActiveEmailAccount, buildEmailLayout } = require('./emailSender');
 
 // Colonnes du rapport — identiques à GET /tickets/export (même perimetre, même rendu).
 const REPORT_SELECT = {
@@ -292,13 +292,16 @@ async function sendTicketReportEmail({ user, args = {}, cc }) {
       </p>`,
   });
 
-  await sendEmailViaSmtp({
+  // sendEmail route selon le provider du compte actif (API Graph pour OUTLOOK, SMTP sinon) :
+  // partir de sendEmailViaSmtp échouait systématiquement sur un compte Outlook (aucun hôte
+  // SMTP → nodemailer retombe sur localhost:587 → ECONNREFUSED).
+  await sendEmail({
     to: user.email,
-    cc: ccList.length > 0 ? ccList : undefined,
+    cc: ccList,
     subject,
     bodyHtml: html,
-    account,
     attachments: [{ filename, content: buffer, contentType: XLSX_MIME }],
+    saveAsMessage: false,
   });
 
   console.log(`[ticketReport] Rapport envoyé à ${user.email}${ccList.length ? ` (cc: ${ccList.join(', ')})` : ''} — ${tickets.length} ticket(s)`);

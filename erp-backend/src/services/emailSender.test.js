@@ -10,8 +10,10 @@ jest.mock('./systemSettings', () => ({
 }));
 jest.mock('./ticketEvent', () => ({ logEvent: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('./emailSummaryGenerator', () => ({ generateEmailSummary: jest.fn().mockResolvedValue(null) }));
+jest.mock('nodemailer', () => ({ createTransport: jest.fn(() => ({ sendMail: jest.fn(), verify: jest.fn() })) }));
 
 const prisma = require('../prismaClient');
+const nodemailer = require('nodemailer');
 const { graphFetch } = require('../utils/graphClient');
 const { buildAcknowledgementHtml, buildKnownIncidentNotificationHtml, sendAiDraftEmail } = require('./emailSender');
 
@@ -179,5 +181,108 @@ describe('sendAiDraftEmail — envoi unifié des brouillons IA', () => {
     const newMsg = findGraphCall('/me/messages');
     const body = parseBody(newMsg);
     expect(body.toRecipients.map((r) => r.emailAddress.address)).toEqual(['demandeur@ex.com']);
+  });
+});
+
+describe('sendEmail — routage par provider + pièces jointes', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    graphFetch.mockImplementation(async (_account, p) => {
+      if (String(p).includes('/createReply')) return { id: 'draft-1' };
+      return { id: 'draft-2', internetMessageId: '<sent@prosuma.ci>' };
+    });
+  });
+
+  const setupOutlookAccount = () => {
+    prisma.emailAccount.findFirst.mockResolvedValue({ provider: 'OUTLOOK', emailAddress: 'support@prosuma.ci', refreshToken: 'r' });
+  };
+
+  // Compte actif IMAP_SMTP : les deux recherches OUTLOOK ne retournent rien, la 3e oui.
+  const setupSmtpAccount = (overrides = {}) => {
+    prisma.emailAccount.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        provider: 'IMAP_SMTP',
+        label: 'SMTP Pro',
+        emailAddress: 'smtp@prosuma.ci',
+        smtpHost: 'mail.prosuma.ci',
+        smtpPort: 587,
+        username: 'smtp@prosuma.ci',
+        password: 'secret',
+        useTls: true,
+        ...overrides,
+      });
+  };
+
+  it('joint le fichier à la création Graph (fileAttachment base64) pour un compte Outlook', async () => {
+    setupOutlookAccount();
+    const { sendEmail } = require('./emailSender');
+    const buffer = Buffer.from('PK\u0003\u0004contenu-xlsx');
+    await sendEmail({
+      to: 'demandeur@prosuma.ci',
+      subject: 'Rapport de tickets',
+      bodyHtml: '<p>rapport</p>',
+      saveAsMessage: false,
+      attachments: [{ filename: 'rapport_tickets.xlsx', content: buffer, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }],
+    });
+    const call = graphFetch.mock.calls.find(([_, p]) => String(p) === '/me/messages');
+    expect(call).toBeTruthy();
+    const body = JSON.parse(call[2].body);
+    expect(body.attachments).toHaveLength(1);
+    expect(body.attachments[0]).toMatchObject({
+      '@odata.type': '#microsoft.graph.fileAttachment',
+      name: 'rapport_tickets.xlsx',
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      contentBytes: buffer.toString('base64'),
+    });
+    // Jamais de tentative SMTP pour un compte Outlook
+    expect(nodemailer.createTransport).not.toHaveBeenCalled();
+  });
+
+  it('utilise nodemailer (SMTP) pour un compte IMAP_SMTP et transmet les pièces jointes', async () => {
+    setupSmtpAccount();
+    const sendMail = jest.fn().mockResolvedValue({ accepted: ['demandeur@prosuma.ci'] });
+    nodemailer.createTransport.mockReturnValue({ sendMail });
+    const { sendEmail } = require('./emailSender');
+    const buffer = Buffer.from('xlsx');
+    await sendEmail({
+      to: 'demandeur@prosuma.ci',
+      subject: 'Rapport de tickets',
+      bodyHtml: '<p>rapport</p>',
+      saveAsMessage: false,
+      attachments: [{ filename: 'rapport.xlsx', content: buffer, contentType: 'application/octet-stream' }],
+    });
+    expect(nodemailer.createTransport).toHaveBeenCalledWith(expect.objectContaining({
+      host: 'mail.prosuma.ci',
+      port: 587,
+    }));
+    const mail = sendMail.mock.calls[0][0];
+    expect(mail.to).toBe('demandeur@prosuma.ci');
+    expect(mail.attachments).toEqual([{ filename: 'rapport.xlsx', content: buffer, contentType: 'application/octet-stream' }]);
+    expect(graphFetch).not.toHaveBeenCalled();
+  });
+
+  it("refuse un compte sans hôte SMTP au lieu de retomber sur localhost:587", async () => {
+    const { sendEmailViaSmtp } = require('./emailSender');
+    await expect(sendEmailViaSmtp({
+      to: 'a@b.c',
+      subject: 'S',
+      bodyHtml: '<p>x</p>',
+      account: { label: 'Boîte principale', emailAddress: 'support@prosuma.ci' },
+    })).rejects.toThrow(/n'a pas d'hôte SMTP configuré/);
+    expect(nodemailer.createTransport).not.toHaveBeenCalled();
+  });
+
+  it("contextualise l'erreur de connexion SMTP en français avec hôte:port", async () => {
+    const connErr = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:587'), { code: 'ESOCKET' });
+    nodemailer.createTransport.mockReturnValue({ sendMail: jest.fn().mockRejectedValue(connErr) });
+    const { sendEmailViaSmtp } = require('./emailSender');
+    await expect(sendEmailViaSmtp({
+      to: 'a@b.c',
+      subject: 'S',
+      bodyHtml: '<p>x</p>',
+      account: { label: 'SMTP Pro', emailAddress: 'smtp@prosuma.ci', smtpHost: 'mail.prosuma.ci', smtpPort: 587 },
+    })).rejects.toThrow(/Échec de connexion au serveur SMTP mail\.prosuma\.ci:587/);
   });
 });
