@@ -1032,7 +1032,9 @@ async function searchTeams(query = '', limit = 10) {
       select: {
         id: true,
         name: true,
-        description: true,
+        // Team n'a PAS de champ `description` : le selecter faisait échouer toute la
+        // requête (erreur Prisma attrapée silencieusement → tableau vide).
+        category: true,
         groupEmail: true,
         members: { select: { id: true, fullName: true, role: true } },
         _count: { select: { tickets: true } },
@@ -1045,8 +1047,8 @@ async function searchTeams(query = '', limit = 10) {
     const cleanQ = normalizeAccents(query.trim().toLowerCase());
     const filtered = teams.filter((t) => {
       const nameClean = normalizeAccents(t.name.toLowerCase());
-      const descClean = normalizeAccents((t.description || '').toLowerCase());
-      return nameClean.includes(cleanQ) || cleanQ.includes(nameClean);
+      const catClean = normalizeAccents((t.category || '').toLowerCase());
+      return nameClean.includes(cleanQ) || catClean.includes(cleanQ) || cleanQ.includes(nameClean);
     });
     return filtered.slice(0, limit);
   } catch (err) {
@@ -1534,7 +1536,10 @@ async function executeTool(toolName, args, user, { confirmed = false } = {}) {
       // par callSearchParamsAI qui risque de réinterpréter le query (ex: "Siège Abidjan"
       // → teamName:"Abidjan" au lieu de locationName:"Siège Abidjan"). ──
       const hasStructuredParams = p.locationName || p.status || p.priority || p.assignedTo || p.requester || p.person || p.category || p.period || p.team;
-      if (hasStructuredParams && !p.query) {
+      // Sans query ni paramètre structuré ({limit:3} = « les 3 derniers tickets créés »),
+      // searchTickets('') renvoyait vide → requête Prisma directe, tri createdAt desc.
+      const noCriteria = !String(p.query || '').trim() && !hasStructuredParams;
+      if ((hasStructuredParams && !p.query) || noCriteria) {
         const searchParams = {};
         if (p.locationName) searchParams.locationName = p.locationName;
         if (p.status) searchParams.statuses = [p.status];
