@@ -77,10 +77,22 @@ describe('resolveReportQuery — filtres → paramètres Prisma', () => {
       period: '30d', status: 'OPEN', priority: 'P2', category: 'Réseau', search: 'incident',
     });
     expect(query.dateFrom && query.dateTo).toBeTruthy();
-    expect(query.status).toBe('OPEN');
+    // « OPEN » issu du langage naturel = groupe Ouverts (NEW/OPEN/PLANNED/PENDING/WAITING)
+    expect(query.status).toBe('OPEN_GROUP');
     expect(query.priority).toBe('P2');
     expect(query.category).toBe('Réseau');
     expect(query.search).toBe('incident');
+  });
+
+  it('conserve un statut déjà explicite (OPEN_GROUP, NEW, SOLVED…)', async () => {
+    expect((await resolveReportQuery({ status: 'OPEN_GROUP' })).status).toBe('OPEN_GROUP');
+    expect((await resolveReportQuery({ status: 'NEW' })).status).toBe('NEW');
+    expect((await resolveReportQuery({ status: 'CLOSED_GROUP' })).status).toBe('CLOSED_GROUP');
+  });
+
+  it('normalise la casse sans réécrire une valeur inconnue', async () => {
+    expect((await resolveReportQuery({ status: 'solved' })).status).toBe('SOLVED');
+    expect((await resolveReportQuery({ status: 'valeur_inconnue' })).status).toBe('valeur_inconnue');
   });
 
   it("dateFrom/dateTo explicites priment sur la période", async () => {
@@ -174,6 +186,10 @@ describe('describeFilters — résumé affiché avant confirmation', () => {
     expect(label).toContain('mot-clé : « print »');
   });
 
+  it('libellé lisible pour le groupe Ouverts', () => {
+    expect(describeFilters({ status: 'OPEN_GROUP' })).toContain('statut : Ouverts (NEW, OPEN, PLANNED, PENDING, WAITING_FOR_USER)');
+  });
+
   it('sans filtre renvoie la mention par défaut', () => {
     expect(describeFilters({})).toBe('tous les tickets visibles pour vous');
   });
@@ -204,10 +220,22 @@ describe('previewReport — compte sans rien envoyer', () => {
     prisma.ticket.findMany.mockResolvedValueOnce([{ id: 1 }, { id: 2 }]);
     const preview = await previewReport(requester, { period: '7d', status: 'OPEN' });
     expect(preview.count).toBe(2);
-    expect(preview.filtersLabel).toContain('statut : OPEN');
+    expect(preview.filtersLabel).toContain('statut : Ouverts');
+    expect(preview.to).toBe('demandeur@prosuma.ci');
     expect(preview.cc).toEqual([]);
     expect(sendEmail).not.toHaveBeenCalled();
     expect(prisma.ticket.findMany).toHaveBeenCalled();
+  });
+
+  it('prévient le destinataire explicite (paramètre to)', async () => {
+    prisma.ticket.findMany.mockResolvedValueOnce([{ id: 1 }]);
+    const preview = await previewReport(requester, { status: 'OPEN_GROUP', to: 'steven.yapo@prosuma.ci' });
+    expect(preview.to).toBe('steven.yapo@prosuma.ci');
+  });
+
+  it('rejette un destinataire invalide avant tout envoi', async () => {
+    await expect(previewReport(requester, { to: 'pas-une-adresse' })).rejects.toMatchObject({ code: 'INVALID_RECIPIENT' });
+    expect(sendEmail).not.toHaveBeenCalled();
   });
 
   it('résout les membres d\'équipe en CC pendant le preview', async () => {
@@ -270,5 +298,29 @@ describe('sendTicketReportEmail — envoi avec pièce jointe', () => {
     expect(mail.attachments[0].contentType).toContain('spreadsheetml');
     expect(mail.attachments[0].content.length).toBeGreaterThan(1000);
     expect(getActiveEmailAccount).toHaveBeenCalled();
+  });
+
+  it('adresse le rapport au destinataire cité et l\'exclut du CC', async () => {
+    getActiveEmailAccount.mockResolvedValue({ provider: 'SMTP', id: 1, name: 'defaut' });
+    prisma.ticket.findMany.mockResolvedValue([
+      {
+        id: 42, title: 'Serveur en feu', status: 'OPEN', priority: 'P1', category: 'Système',
+        type: 'incident', source: 'CHATBOT', createdAt: new Date(), solvedAt: null, closedAt: null,
+        slaResponseDueAt: null, slaResolutionDueAt: null, slaBreachedAt: null, firstResponseAt: null,
+        aiProcessed: false, approvalStatus: null,
+        requester: null, assignedTo: null, assignees: [], team: null, locationName: null, observers: [],
+      },
+    ]);
+    const result = await sendTicketReportEmail({
+      user: requester,
+      args: { status: 'OPEN', to: 'steven.yapo@prosuma.ci' },
+      cc: ['steven.yapo@prosuma.ci', 'chef@prosuma.ci'],
+    });
+    expect(result.sent).toBe(true);
+    expect(result.to).toBe('steven.yapo@prosuma.ci');
+    const mail = sendEmail.mock.calls[0][0];
+    expect(mail.to).toBe('steven.yapo@prosuma.ci');
+    expect(mail.cc).toEqual(['chef@prosuma.ci']);
+    expect(mail.subject).toContain('1 ticket');
   });
 });

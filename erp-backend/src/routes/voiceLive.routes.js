@@ -7,7 +7,7 @@ const prisma = require('../prismaClient');
 const { logger } = require('../utils/logger');
 const analyticsTools = require('../services/analyticsTools');
 const { searchKnowledge } = require('../services/knowledgeSearch');
-const { searchTeams, searchTickets, buildSearchQuery, handleMessage, executeTool: chatbotExecuteTool } = require('../services/chatbotService');
+const { searchTeams, searchTickets, buildSearchQuery, findTicketsForPersonAnyRole, handleMessage, executeTool: chatbotExecuteTool } = require('../services/chatbotService');
 const { buildToolResultPayload, toGeminiResponse } = require('../services/voicePayloads');
 const jwt = require('jsonwebtoken');
 
@@ -121,7 +121,7 @@ Ne réponds JAMAIS de mémoire : appelle toujours cet outil pour les chiffres.`,
       },
       {
         name: 'search_tickets',
-        description: 'Recherche de tickets par mot-clé, statut, priorité, lieu, équipe, technicien, demandeur, période. Triés du PLUS RÉCENT au plus ancien : avec limit=1 tu obtiens le dernier ticket créé (champ "creeLe" = date de création).',
+        description: 'Recherche de tickets par mot-clé, statut, priorité, lieu, équipe, technicien, demandeur, période. Triés du PLUS RÉCENT au plus ancien : avec limit=1 tu obtiens le dernier ticket créé (champ "creeLe" = date de création). Le résultat contient "total" (nombre RÉEL de tickets en base) et "returned" (nombre de tickets listés, borné par "limit") : si total > returned, annonce le total et précise que tu n\'en détailles que returned.',
         parameters: {
           type: 'object',
           properties: {
@@ -380,7 +380,7 @@ Ne réponds JAMAIS de mémoire : appelle toujours cet outil pour les chiffres.`,
       },
       {
         name: 'send_ticket_report',
-        description: "Générer et envoyer un rapport Excel (XLSX) contenant les tickets correspondants par email à l'utilisateur.",
+        description: "Générer et envoyer un rapport Excel (XLSX) contenant les tickets correspondants par email (à l'utilisateur, ou à l'adresse citée).",
         parameters: {
           type: 'object',
           properties: {
@@ -389,9 +389,10 @@ Ne réponds JAMAIS de mémoire : appelle toujours cet outil pour les chiffres.`,
             dateTo: { type: 'string', description: 'Date de fin alternative (YYYY-MM-DD)' },
             team: { type: 'string', description: "Nom de l'équipe (ex: Système, Réseau, Sécurité)" },
             category: { type: 'string', description: 'Catégorie du ticket (ex: Asten, Réseau, Matériel)' },
-            status: { type: 'string', description: 'Statut (NEW, OPEN, PENDING, WAITING_FOR_USER, SOLVED, CLOSED)' },
+            status: { type: 'string', description: 'Statut. OPEN_GROUP = tous les tickets ouverts/non clôturés (NEW, OPEN, PLANNED, PENDING, WAITING_FOR_USER) — à utiliser dès que l\'utilisateur parle de « tickets ouverts ». Autres : NEW, PLANNED, PENDING, WAITING_FOR_USER, SOLVED, CLOSED, PENDING_GROUP, CLOSED_GROUP, NOT_CLOSED.' },
             priority: { type: 'string', enum: ['P1', 'P2', 'P3', 'P4'], description: 'Filtrer par priorité' },
             search: { type: 'string', description: 'Mot-clé dans le titre ou le contenu des tickets' },
+            to: { type: 'string', description: "Adresse email du destinataire — UNIQUEMENT si l'utilisateur a cité une adresse" },
             cc: { type: 'array', items: { type: 'string' }, description: "Adresses email à mettre en copie (CC) — seulement si l'utilisateur en a mentionné dans sa phrase" },
             ccTeams: { type: 'array', items: { type: 'string' }, description: "Noms d'équipes dont TOUS les membres actifs doivent être mis en copie" },
           },
@@ -466,7 +467,39 @@ async function executeTool(name, args, { user = null, sessionHistory = null, ws 
         // locationName, assignedTo, requester, team, category, person, period) annoncés
         // dans le schéma du tool sont réellement appliqués via buildSearchQuery. On passe
         // l'utilisateur (user) pour appliquer le cloisonnement par rôle (RBAC).
-        const hasStructuredFilters = !!(args.status || args.priority || args.locationName || args.assignedTo || args.requester || args.team || args.person || args.category);
+        //
+        // ⚠️ total = nombre RÉEL en base (prisma.ticket.count), JAMAIS tickets.length :
+        // la liste est tronquée à `limit` (défaut 20) et annoncer « 20 tickets » alors
+        // qu'il y en a plus était le bug « je n'ai que 20 tickets » constaté en prod.
+        const limit = Math.min(Number(args.limit) || 20, 50);
+        const hasOtherFilters = !!(args.status || args.priority || args.locationName || args.assignedTo || args.requester || args.team || args.category);
+        const hasStructuredFilters = hasOtherFilters || !!args.person;
+
+        // Personne seule (« les tickets de Steven Yapo ») → recherche élargie identique au
+        // chatbot texte : demandeur OU assigné OU co-assigné OU observateur, avec les rôles
+        // annotés (roles) et le total réel. buildSearchQuery ne couvre que requester/assignedTo.
+        if (args.person && !hasOtherFilters) {
+          const broad = await findTicketsForPersonAnyRole(args.person, {
+            limit,
+            period: args.period && args.period !== 'all' ? args.period : null,
+            user,
+          });
+          return {
+            total: broad.totalCount,
+            returned: broad.tickets.length,
+            limit,
+            truncated: broad.totalCount > broad.tickets.length,
+            tickets: broad.tickets.map((t) => ({
+              id: t.id, titre: t.title, statut: t.status, priorite: t.priority,
+              lieu: t.locationName || '',
+              demandeur: t.requester?.fullName || t.requester?.email || '',
+              technicien: t.assignedTo?.fullName || t.assignedTo?.email || '',
+              creeLe: t.createdAt?.toISOString?.() || '',
+              roles: (t.personRoles || []).join(', '),
+            })),
+          };
+        }
+
         // SANS mot-clé (ex: {limit:1} pour "le dernier ticket créé") : le chemin AI de
         // searchTickets() renvoie vide dès que query est nulle → requête Prisma directe
         // (tri createdAt desc) au lieu de perdre l'appel.
@@ -482,20 +515,26 @@ async function executeTool(name, args, { user = null, sessionHistory = null, ws 
             keyword: args.query || args.category || undefined,
             dateFrom: args.period && args.period !== 'all' ? getPeriodDate(args.period)?.toISOString?.() : undefined,
           }, user);
-          const tickets = await prisma.ticket.findMany({
-            where,
-            take: Math.min(Number(args.limit) || 20, 50),
-            orderBy: { createdAt: 'desc' },
-            select: {
-              id: true, title: true, status: true, priority: true, locationName: true,
-              createdAt: true,
-              requester: { select: { fullName: true, email: true } },
-              assignedTo: { select: { fullName: true, email: true } },
-              team: { select: { name: true } },
-            },
-          });
+          const [tickets, total] = await Promise.all([
+            prisma.ticket.findMany({
+              where,
+              take: limit,
+              orderBy: { createdAt: 'desc' },
+              select: {
+                id: true, title: true, status: true, priority: true, locationName: true,
+                createdAt: true,
+                requester: { select: { fullName: true, email: true } },
+                assignedTo: { select: { fullName: true, email: true } },
+                team: { select: { name: true } },
+              },
+            }),
+            prisma.ticket.count({ where }),
+          ]);
           return {
-            total: tickets.length,
+            total,
+            returned: tickets.length,
+            limit,
+            truncated: total > tickets.length,
             tickets: tickets.map((t) => ({
               id: t.id, titre: t.title, statut: t.status, priorite: t.priority,
               lieu: t.locationName || '',
@@ -506,9 +545,12 @@ async function executeTool(name, args, { user = null, sessionHistory = null, ws 
           };
         }
         // Sans filtre structuré : chemin classique (query texte → AI re-parsing), avec période et cloisonnement rôle (user)
-        const result = await searchTickets(args.query || null, Math.min(Number(args.limit) || 20, 50), user, args.period || null);
+        const result = await searchTickets(args.query || null, limit, user, args.period || null);
         const ticketList = Array.isArray(result) ? result : (result?.tickets || []);
-        if (!ticketList.length) return { total: 0, tickets: [], message: 'Aucun ticket trouvé' };
+        const totalCount = (!Array.isArray(result) && Number.isFinite(result?.totalCount))
+          ? result.totalCount
+          : ticketList.length;
+        if (!ticketList.length) return { total: 0, returned: 0, limit, truncated: false, tickets: [], message: 'Aucun ticket trouvé' };
         const results = ticketList.map((t) => ({
           id: t.id, titre: t.title, statut: t.status, priorite: t.priority,
           lieu: t.locationName || '',
@@ -516,7 +558,13 @@ async function executeTool(name, args, { user = null, sessionHistory = null, ws 
           technicien: t.assignedTo?.fullName || t.assignedTo?.email || '',
           creeLe: t.createdAt?.toISOString?.() || '',
         }));
-        return { total: results.length, tickets: results };
+        return {
+          total: totalCount,
+          returned: results.length,
+          limit,
+          truncated: totalCount > results.length,
+          tickets: results,
+        };
       }
 
       case 'get_context': {
@@ -1271,7 +1319,7 @@ function setupVoiceLive() {
             '',
             '══ QUAND UTILISER UN OUTIL ══',
             '- Contenu ou détail d\'un sous-ensemble (« ça concerne quoi », titres, techniciens assignés, liste des P1 ou d\'une équipe/catégorie/personne) → search_tickets IMMÉDIATEMENT (params priority / team / category / person / status), SANS attendre. Ne dis JAMAIS « je ne dispose pas des détails » : va chercher.',
-            '- Liste complète demandée → search_tickets avec limit=20 pour tout couvrir.',
+            '- Liste complète demandée → search_tickets avec limit=50 pour tout couvrir. Le champ "total" = nombre RÉEL de tickets ; "returned" = ceux détaillés dans la réponse. Si total > returned, annonce le total puis dis que tu n\'en détails qu\'une partie.',
             '- Détails d\'un ticket spécifique non listé dans le snapshot → check_ticket ou search_tickets',
             '- Question portant sur « ce ticket », « cette page », « ce que je regarde » → get_context d\'abord (route courante ; /tickets/64 = ticket numéro 64)',
             '- Date de création, "dernier ticket créé", "tickets récents" → search_tickets avec limit=1 (tri du plus récent, champ "creeLe" = date)',
@@ -1299,7 +1347,7 @@ function setupVoiceLive() {
             '',
             '══ FORMAT DE RÉPONSE VOCALE ══',
             '- Réponds en 1 à 3 phrases concises, fluides et naturelles à l\'oral (réponses générales).',
-            '- LISTES COMPLÈTES : quand on te demande de lister (titres, techniciens, « tous les X »), annonce le total puis énumère TOUS les éléments — une phrase par ticket si besoin. Ne tronque JAMAIS : si le snapshot annonce 8 tickets, couvre bien les 8.',
+            '- LISTES COMPLÈTES : quand on te demande de lister (titres, techniciens, « tous les X »), annonce le total (champ "total" du résultat) puis énumère les éléments — une phrase par ticket si besoin. Si "returned" est inférieur à "total", dis clairement « N tickets au total, j\'en détaille X » : ne présente JAMAIS returned comme le total.',
             '- JAMAIS de markdown : pas d\'astérisques, pas de tirets listes, pas de dièses.',
             '- Les numéros de tickets : dis toujours "ticket numéro X", jamais "#X".',
             '- JAMAIS "je vérifie", "un instant", "laissez-moi chercher" — réponds directement.',

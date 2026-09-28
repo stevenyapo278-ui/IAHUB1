@@ -76,6 +76,41 @@ function periodLabel(period) {
   return `${range.dateFrom} → ${range.dateTo}`;
 }
 
+// ── Statuts en langage naturel → filtre réel ─────────────────────────────────
+// « tickets ouverts » = le groupe Ouverts (badge « Ouverts » du dashboard, filtre
+// « Ouverts (actifs) » de l'ERP), PAS le statut exact OPEN qui ne couvre que les
+// tickets en cours de traitement. Sans cette conversion, un rapport « ouverts »
+// excluait silencieusement NEW, PLANNED, PENDING et WAITING_FOR_USER.
+const STATUS_ALIASES = {
+  OPEN: 'OPEN_GROUP',
+  OUVERT: 'OPEN_GROUP',
+  OUVERTS: 'OPEN_GROUP',
+  'TICKETS_OUVERTS': 'OPEN_GROUP',
+};
+
+const KNOWN_STATUS_VALUES = new Set([
+  'NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER', 'SOLVED', 'CLOSED',
+  'OPEN_GROUP', 'PENDING_GROUP', 'CLOSED_GROUP', 'NOT_CLOSED', 'SOLVED_GROUP',
+  ...Object.keys(STATUS_ALIASES),
+]);
+
+function normalizeReportStatus(status) {
+  if (!status) return status;
+  const key = String(status).trim().toUpperCase().replace(/\s+/g, '_');
+  if (!KNOWN_STATUS_VALUES.has(key)) return status;
+  return STATUS_ALIASES[key] || key;
+}
+
+// Étiquettes lisibles des statuts/groupes pour le résumé affiché avant confirmation.
+const STATUS_FILTER_LABELS = {
+  OPEN_GROUP: 'Ouverts (NEW, OPEN, PLANNED, PENDING, WAITING_FOR_USER)',
+  PENDING_GROUP: 'En attente (PENDING, WAITING_FOR_USER)',
+  PENDING: 'En attente (PENDING, WAITING_FOR_USER)',
+  CLOSED_GROUP: 'Clôturés / résolus (SOLVED, CLOSED)',
+  NOT_CLOSED: 'Tous sauf clôturés',
+  SOLVED_GROUP: 'Résolu (SOLVED)',
+};
+
 // ── Args de l'outil LLM → paramètres de filtre Prisma ────────────────────────
 async function resolveReportQuery(args = {}) {
   const query = {};
@@ -88,7 +123,7 @@ async function resolveReportQuery(args = {}) {
   if (args.dateFrom) query.dateFrom = args.dateFrom;
   if (args.dateTo) query.dateTo = args.dateTo;
 
-  if (args.status) query.status = args.status;
+  if (args.status) query.status = normalizeReportStatus(args.status);
   if (args.priority) query.priority = args.priority;
   if (args.category) query.category = args.category;
   if (args.search || args.query) query.search = args.search || args.query;
@@ -157,6 +192,23 @@ async function resolveCcEmails(args = {}, recipientEmail = null) {
   return [...new Set(emails)].filter((e) => e !== rcpt).slice(0, 20);
 }
 
+// ── Destinataire du rapport ──────────────────────────────────────────────────
+// Par défaut : l'utilisateur qui demande le rapport. args.to permet de l'adresser
+// à quelqu'un d'autre (« envoie-le à steven.yapo@prosuma.ci »).
+const EMAIL_RE = /^\S+@\S+\.\S+$/;
+
+function resolveRecipient(user, args = {}, explicitTo = null) {
+  const raw = explicitTo || args.to;
+  if (!raw) return user?.email || null;
+  const value = String(raw).trim();
+  if (!EMAIL_RE.test(value)) {
+    const err = new Error(`Adresse email du destinataire invalide : « ${value} »`);
+    err.code = 'INVALID_RECIPIENT';
+    throw err;
+  }
+  return value;
+}
+
 // ── Récupération des tickets (même périmètre RBAC que GET /export) ───────────
 async function fetchReportTickets(user, query) {
   const where = buildTicketWhereClause(user, query);
@@ -176,7 +228,7 @@ function describeFilters(query) {
   }
   if (query._teamName || query.teamId) parts.push(`équipe : ${query._teamName || `#${query.teamId}`}`);
   if (query.category) parts.push(`catégorie : « ${query.category} »`);
-  if (query.status) parts.push(`statut : ${query.status}`);
+  if (query.status) parts.push(`statut : ${STATUS_FILTER_LABELS[query.status] || query.status}`);
   if (query.priority) parts.push(`priorité : ${query.priority}`);
   if (query.search) parts.push(`mot-clé : « ${query.search} »`);
   return parts.length > 0 ? parts.join(' · ') : 'tous les tickets visibles pour vous';
@@ -247,22 +299,27 @@ async function buildTicketsXlsxBuffer(tickets) {
 
 // ── Aperçu (avant confirmation) : compte les tickets sans rien envoyer ───────
 async function previewReport(user, args = {}) {
+  const to = resolveRecipient(user, args);
   const query = await resolveReportQuery(args);
   const tickets = await fetchReportTickets(user, query);
   return {
     count: tickets.length,
     filtersLabel: describeFilters(query),
-    cc: await resolveCcEmails(args, user?.email),
+    to,
+    cc: await resolveCcEmails(args, to),
     query,
   };
 }
 
 // ── Envoi : fetch → XLSX → email avec pièce jointe ───────────────────────────
-async function sendTicketReportEmail({ user, args = {}, cc }) {
+async function sendTicketReportEmail({ user, args = {}, cc, to }) {
+  const recipient = resolveRecipient(user, args, to);
+  if (!recipient) throw new Error('Adresse email du destinataire introuvable');
+
   const query = await resolveReportQuery(args);
   const tickets = await fetchReportTickets(user, query);
   if (tickets.length === 0) {
-    return { count: 0, sent: false, filtersLabel: describeFilters(query), cc: [] };
+    return { count: 0, sent: false, filtersLabel: describeFilters(query), cc: [], to: recipient };
   }
 
   const account = await getActiveEmailAccount();
@@ -270,7 +327,7 @@ async function sendTicketReportEmail({ user, args = {}, cc }) {
   if (!user?.email) throw new Error('Adresse email de l\'expéditeur introuvable');
 
   // Copie : adresses explicites (param cc) + membres des équipes citées (ccTeams)
-  const ccList = await resolveCcEmails(cc && cc.length > 0 ? { ...args, cc } : args, user.email);
+  const ccList = await resolveCcEmails(cc && cc.length > 0 ? { ...args, cc } : args, recipient);
 
   const day = new Date().toISOString().slice(0, 10);
   const filename = `rapport_tickets_${day}.xlsx`;
@@ -296,7 +353,7 @@ async function sendTicketReportEmail({ user, args = {}, cc }) {
   // partir de sendEmailViaSmtp échouait systématiquement sur un compte Outlook (aucun hôte
   // SMTP → nodemailer retombe sur localhost:587 → ECONNREFUSED).
   await sendEmail({
-    to: user.email,
+    to: recipient,
     cc: ccList,
     subject,
     bodyHtml: html,
@@ -304,14 +361,16 @@ async function sendTicketReportEmail({ user, args = {}, cc }) {
     saveAsMessage: false,
   });
 
-  console.log(`[ticketReport] Rapport envoyé à ${user.email}${ccList.length ? ` (cc: ${ccList.join(', ')})` : ''} — ${tickets.length} ticket(s)`);
-  return { count: tickets.length, sent: true, filename, subject, filtersLabel, cc: ccList };
+  console.log(`[ticketReport] Rapport envoyé à ${recipient}${ccList.length ? ` (cc: ${ccList.join(', ')})` : ''} — ${tickets.length} ticket(s)`);
+  return { count: tickets.length, sent: true, filename, subject, filtersLabel, cc: ccList, to: recipient };
 }
 
 module.exports = {
   periodToRange,
   periodLabel,
   resolveReportQuery,
+  resolveRecipient,
+  normalizeReportStatus,
   resolveCcEmails,
   fetchReportTickets,
   describeFilters,

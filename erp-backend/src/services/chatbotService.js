@@ -75,9 +75,13 @@ RÈGLE DE RESTITUTION ET FORMATAGE PROPRE (Absolue) :
 RÈGLE DES OUTILS ET TRANSPARENCE :
 - Ne dis JAMAIS "Je peux lancer l'outil X, voulez-vous que je le fasse ?" ou "Je n'ai pas la main pour exécuter cet outil". Si un outil existe, il est utilisé automatiquement et tu présentes directement les résultats. Si la donnée est là, réponds directement avec les chiffres réels.
 
+RÈGLE RAPPORT « TICKETS OUVERTS » (absolue) :
+- Quand on te demande un rapport/export de « tickets ouverts », « non clôturés », « non résolus », « en cours », « actifs » → passe status="OPEN_GROUP" (le groupe Ouverts : NEW, OPEN, PLANNED, PENDING, WAITING_FOR_USER), JAMAIS status="OPEN" seul qui ne couvre que les tickets en cours de traitement et en sous-nombre le rapport.
+- Si l'utilisateur cite explicitement un destinataire (« envoie-le à steven.yapo@prosuma.ci »), renseigne le paramètre to avec cette adresse. Sinon, ne mets pas to : le rapport part vers l'utilisateur.
+
 RÈGLE DE VÉRACITÉ — JAMAIS D'INVENTION (absolue, prime sur tout le reste) :
 - Les seuls numéros de tickets, chiffres, statuts et noms que tu peux citer sont ceux du contexte fourni. Écrire "#XXX", "[Ticket 6]", "#123 (détail non chargé)" ou tout numéro/statut absent du contexte est INTERDIT — même pour "compléter" un tableau.
-- Si l'en-tête annonce un total (ex. "Tickets pertinents trouvés (7)") mais que le détail n'affiche que 5 lignes, dis-le tel quel : "j'ai bien 7 tickets au total, mais le détail des 2 derniers n'est pas chargé" et propose de relancer l'affichage — n'imagine JAMAIS les lignes manquantes.
+- Un résultat de search_tickets porte "total" (nombre RÉEL en base), "returned" (lignes listées, borné par "limit") et "truncated". Annonce toujours le total réel (« 37 tickets au total, j'en détaille 20 ») et n'imagine JAMAIS les lignes manquantes : si returned < total, dis-le tel quel et propose d'élargir la liste. Ne présente JAMAIS returned comme étant le total.
 - Si une donnée manque, dis-le simplement et propose de la récupérer. "Je vérifie et je reviens vers toi" vaut mille fois une réponse inventée.
 - Si tu n'as effectué aucune recherche (pas de contexte de tickets), ne fais AUCUNE affirmation chiffrée sur des tickets.
 En dehors de ça, aucune contrainte sur la forme : sois naturelle.
@@ -569,12 +573,12 @@ async function findTicketsForPersonAnyRole(personName, { limit = 20, period = nu
     return toks.some((t) => s.includes(t));
   };
   const annotated = tickets.map((t) => {
-    const roles = [];
-    if (nameMatches(t.requester?.fullName)) roles.push('demandeur');
-    if (nameMatches(t.assignedTo?.fullName)) roles.push('assigné');
-    if ((t.assignees || []).some((a) => nameMatches(a.fullName))) roles.push('assigné');
-    if ((t.observers || []).some((o) => nameMatches(o.fullName))) roles.push('observateur');
-    return { ...t, personRoles: roles };
+    const roles = new Set();
+    if (nameMatches(t.requester?.fullName)) roles.add('demandeur');
+    if (nameMatches(t.assignedTo?.fullName)) roles.add('assigné');
+    if ((t.assignees || []).some((a) => nameMatches(a.fullName))) roles.add('assigné');
+    if ((t.observers || []).some((o) => nameMatches(o.fullName))) roles.add('observateur');
+    return { ...t, personRoles: [...roles] };
   });
   return { tickets: annotated, totalCount, matchLevel };
 }
@@ -1071,7 +1075,7 @@ const ALL_CHATBOT_TOOLS = [
           person: { type: 'string', description: 'Personne SANS rôle précisé ("tickets de Jean") → cherche comme demandeur OU assigné OU observateur. Préférer ceci à requester/assignedTo quand l\'utilisateur n\'a pas précisé, ou si requester ne renvoie rien' },
           team: { type: 'string', description: 'Filtrer par nom d\'équipe (ex: "Système", "Réseau", "Sécurité", "Applicatif", "Matériel", "Logiciel", "Téléphonie"). OBLIGATOIRE pour toute question du type "tickets de l\'équipe X", "les tickets système", "ceux de Réseau". Ne pas confondre avec un mot-clé libre.' },
           period: { type: 'string', description: 'Période: today, yesterday, 7d, 30d, 90d, ou une date YYYY-MM-DD' },
-          limit: { type: 'integer', description: 'Nombre max de résultats (défaut: 20)' },
+          limit: { type: 'integer', description: "Nombre max de résultats listés (défaut: 20). Le résultat indique total (nombre réel en base), returned (lignes listées) et truncated : n'annonces jamais returned comme le total." },
         },
       },
     },
@@ -1379,7 +1383,7 @@ const ALL_CHATBOT_TOOLS = [
     type: 'function',
     function: {
       name: 'send_ticket_report',
-      description: "Génère un rapport de tickets au format XLSX (pièce jointe email) et l'envoie à l'utilisateur qui pose la demande, avec copie (CC) : adresses email citées par l'utilisateur, ET/OU les membres des équipes qu'il a nommées (paramètre ccTeams — résolution automatique des adresses des membres actifs). Filtres disponibles : période (ce mois, 7j, 30j…), équipe, catégorie, statut, priorité, mot-clé. Utilise quand l'utilisateur demande un rapport, une liste ou un export « envoyé par email / en xlsx ». L'envoi est TOUJOURS soumis à une confirmation explicite de l'utilisateur avant d'être effectué.",
+      description: "Génère un rapport de tickets au format XLSX (pièce jointe email) et l'envoie par email, avec copie (CC) : adresses email citées par l'utilisateur, ET/OU les membres des équipes qu'il a nommées (paramètre ccTeams — résolution automatique des adresses des membres actifs). Destinataire : l'utilisateur qui pose la demande par défaut, ou l'adresse citée (paramètre to). Filtres disponibles : période (ce mois, 7j, 30j…), équipe, catégorie, statut, priorité, mot-clé. Utilise quand l'utilisateur demande un rapport, une liste ou un export « envoyé par email / en xlsx ». L'envoi est TOUJOURS soumis à une confirmation explicite de l'utilisateur avant d'être effectué.",
       parameters: {
         type: 'object',
         properties: {
@@ -1388,9 +1392,10 @@ const ALL_CHATBOT_TOOLS = [
           dateTo: { type: 'string', description: 'Date de fin alternative (YYYY-MM-DD)' },
           team: { type: 'string', description: "Nom de l'équipe (ex: Système, Réseau, Sécurité)" },
           category: { type: 'string', description: 'Catégorie du ticket (ex: Asten, Réseau, Matériel)' },
-          status: { type: 'string', description: 'Statut (NEW, OPEN, PENDING, WAITING_FOR_USER, SOLVED, CLOSED)' },
+          status: { type: 'string', description: 'Statut. OPEN_GROUP = TOUS les tickets ouverts/non clôturés (NEW, OPEN, PLANNED, PENDING, WAITING_FOR_USER) — UTILISE CETTE VALEUR dès que l\'utilisateur dit « ouverts », « non résolus », « en cours de traitement », « actifs ». Autres valeurs : NEW, PLANNED, PENDING, WAITING_FOR_USER, SOLVED, CLOSED, PENDING_GROUP, CLOSED_GROUP, NOT_CLOSED. Remarque : OPEN est converti automatiquement en OPEN_GROUP.' },
           priority: { type: 'string', enum: ['P1', 'P2', 'P3', 'P4'], description: 'Filtrer par priorité' },
           search: { type: 'string', description: 'Mot-clé dans le titre ou le contenu des tickets' },
+          to: { type: 'string', description: "Adresse email du destinataire — UNIQUEMENT si l'utilisateur a explicitement cité une adresse ou un destinataire (ex: « envoie-le à steven.yapo@prosuma.ci »). Sinon, ne pas renseigner : le rapport part vers l'utilisateur." },
           cc: { type: 'array', items: { type: 'string' }, description: "Adresses email à mettre en copie (CC) — seulement si l'utilisateur en a mentionné dans sa phrase" },
           ccTeams: { type: 'array', items: { type: 'string' }, description: "Noms d'équipes dont TOUS les membres actifs doivent être mis en copie, quand l'utilisateur dit « en copie toute l'équipe X » ou « mets les techniciens de l'équipe Sécurité en copie ». Ex: ['Sécurité']" },
         },
@@ -1460,44 +1465,68 @@ async function executeTool(toolName, args, user, { confirmed = false } = {}) {
           if (start) where.createdAt = { ...where.createdAt, gte: start };
           if (end) where.createdAt = { ...where.createdAt, lt: end };
         }
-        const teamTickets = await prisma.ticket.findMany({
-          where,
-          take: p.limit || 20,
-          orderBy: { createdAt: 'desc' },
-          select: {
-            id: true, title: true, status: true, priority: true, locationName: true, category: true,
-            createdAt: true, approvalStatus: true,
-            requester: { select: { fullName: true, email: true } },
-            assignedTo: { select: { fullName: true } },
-            team: { select: { name: true } },
-          },
-        });
-        console.log(`[chatbot] search_tickets team="${p.team}": ${teamTickets.length} résultats`);
-        return teamTickets.map(t => ({
-          id: t.id, title: t.title, status: t.status, priority: t.priority,
-          locationName: t.locationName, requester: t.requester?.fullName || null,
-          assignedTo: t.assignedTo?.fullName || null, team: t.team?.name || null,
-          createdAt: t.createdAt, category: t.category,
-        }));
+        const limit = p.limit || 20;
+        const [teamTickets, total] = await Promise.all([
+          prisma.ticket.findMany({
+            where,
+            take: limit,
+            orderBy: { createdAt: 'desc' },
+            select: {
+              id: true, title: true, status: true, priority: true, locationName: true, category: true,
+              createdAt: true, approvalStatus: true,
+              requester: { select: { fullName: true, email: true } },
+              assignedTo: { select: { fullName: true } },
+              team: { select: { name: true } },
+            },
+          }),
+          prisma.ticket.count({ where }),
+        ]);
+        console.log(`[chatbot] search_tickets team="${p.team}": ${teamTickets.length}/${total} résultats`);
+        return {
+          total,
+          returned: teamTickets.length,
+          limit,
+          truncated: total > teamTickets.length,
+          tickets: teamTickets.map(t => ({
+            id: t.id, title: t.title, status: t.status, priority: t.priority,
+            locationName: t.locationName, requester: t.requester?.fullName || null,
+            assignedTo: t.assignedTo?.fullName || null, team: t.team?.name || null,
+            createdAt: t.createdAt, category: t.category,
+          })),
+        };
       }
 
       // "tickets de <Personne>" sans rôle précisé → recherche élargie demandeur OU assigné
       // (cf. leçon ticket #253) plutôt qu'un filtre demandeur seul qui rate les techniciens.
       if (p.person && !p.requester && !p.assignedTo) {
-        const broad = await findTicketsForPersonAnyRole(p.person, { limit: p.limit || 20, period: p.period, user });
-        return broad.tickets.filter(t => {
+        const limit = p.limit || 20;
+        const broad = await findTicketsForPersonAnyRole(p.person, { limit, period: p.period, user });
+        const filtered = broad.tickets.filter(t => {
           if (p.status && t.status !== p.status) return false;
           if (p.priority && t.priority !== p.priority) return false;
           if (p.locationName && !t.locationName?.toLowerCase().includes(p.locationName.toLowerCase())) return false;
           if (p.team && !t.team?.name?.toLowerCase().includes(p.team.toLowerCase())) return false;
           return true;
-        }).map(t => ({
-          id: t.id, title: t.title, status: t.status, priority: t.priority,
-          locationName: t.locationName, requester: t.requester?.fullName || null,
-          assignedTo: t.assignedTo?.fullName || null, team: t.team?.name || null,
-          createdAt: t.createdAt, category: t.category,
-          personRoles: t.personRoles,
-        }));
+        });
+        // total = nombre RÉEL en base (jamais la longueur de la liste tronquée à `limit`).
+        const nothingRemoved = filtered.length === broad.tickets.length;
+        const notTruncated = broad.tickets.length < limit;
+        const total = nothingRemoved
+          ? broad.totalCount
+          : (notTruncated ? filtered.length : null);
+        return {
+          ...(total === null ? {} : { total }),
+          returned: filtered.length,
+          limit,
+          truncated: total === null ? broad.tickets.length >= limit : total > filtered.length,
+          tickets: filtered.map(t => ({
+            id: t.id, title: t.title, status: t.status, priority: t.priority,
+            locationName: t.locationName, requester: t.requester?.fullName || null,
+            assignedTo: t.assignedTo?.fullName || null, team: t.team?.name || null,
+            createdAt: t.createdAt, category: t.category,
+            personRoles: t.personRoles,
+          })),
+        };
       }
 
       // ── Chemin direct : quand le LLM fournit des params structurés (locationName,
@@ -1517,33 +1546,52 @@ async function executeTool(toolName, args, user, { confirmed = false } = {}) {
         if (p.period) searchParams.period = p.period;
 
         const where = buildSearchQuery(searchParams, user);
-        const tickets = await prisma.ticket.findMany({
-          where,
-          take: p.limit || 20,
-          orderBy: { createdAt: 'desc' },
-          select: {
-            id: true, title: true, status: true, priority: true, locationName: true, category: true,
-            content: true, createdAt: true, slaResolutionDueAt: true, approvalStatus: true,
-            requester: { select: { fullName: true, email: true } },
-            assignedTo: { select: { fullName: true } },
-            team: { select: { name: true } },
-          },
-        });
-        console.log(`[chatbot] search_tickets direct: ${tickets.length} résultats pour ${JSON.stringify(searchParams)}`);
-        return tickets.map(t => ({
-          id: t.id, title: t.title, status: t.status, priority: t.priority,
-          locationName: t.locationName, requester: t.requester?.fullName || null,
-          assignedTo: t.assignedTo?.fullName || null, team: t.team?.name || null,
-          createdAt: t.createdAt, category: t.category,
-        }));
+        // period n'est pas un filtre de buildSearchQuery → appliqué ici (sinon « tickets
+        // de X cette semaine » partait sans borne de dates et faussait le total).
+        if (p.period) {
+          const { start, end } = resolvePeriodDates(p.period);
+          if (start) where.createdAt = { ...where.createdAt, gte: start };
+          if (end) where.createdAt = { ...where.createdAt, lt: end };
+        }
+        const limit = p.limit || 20;
+        const [tickets, total] = await Promise.all([
+          prisma.ticket.findMany({
+            where,
+            take: limit,
+            orderBy: { createdAt: 'desc' },
+            select: {
+              id: true, title: true, status: true, priority: true, locationName: true, category: true,
+              content: true, createdAt: true, slaResolutionDueAt: true, approvalStatus: true,
+              requester: { select: { fullName: true, email: true } },
+              assignedTo: { select: { fullName: true } },
+              team: { select: { name: true } },
+            },
+          }),
+          prisma.ticket.count({ where }),
+        ]);
+        console.log(`[chatbot] search_tickets direct: ${tickets.length}/${total} résultats pour ${JSON.stringify(searchParams)}`);
+        return {
+          total,
+          returned: tickets.length,
+          limit,
+          truncated: total > tickets.length,
+          tickets: tickets.map(t => ({
+            id: t.id, title: t.title, status: t.status, priority: t.priority,
+            locationName: t.locationName, requester: t.requester?.fullName || null,
+            assignedTo: t.assignedTo?.fullName || null, team: t.team?.name || null,
+            createdAt: t.createdAt, category: t.category,
+          })),
+        };
       }
 
       // ── Chemin classique : query texte → AI re-parsing ──
       const q = [p.query, p.locationName, p.assignedTo, p.requester, p.category].filter(Boolean).join(' ');
-      const result = await searchTickets(q || ' ', p.limit || 20, user, p.period);
+      const limit = p.limit || 20;
+      const result = await searchTickets(q || ' ', limit, user, p.period);
       const tickets = result.tickets || result;
+      const totalCount = (!Array.isArray(result) && Number.isFinite(result?.totalCount)) ? result.totalCount : null;
       // Filtrer côté JS si des filtres spécifiques sont demandés
-      return tickets.filter(t => {
+      const filtered = tickets.filter(t => {
         if (p.status && t.status !== p.status) return false;
         if (p.priority && t.priority !== p.priority) return false;
         if (p.locationName && !t.locationName?.toLowerCase().includes(p.locationName.toLowerCase())) return false;
@@ -1551,12 +1599,24 @@ async function executeTool(toolName, args, user, { confirmed = false } = {}) {
         if (p.requester && !t.requester?.fullName?.toLowerCase().includes(p.requester.toLowerCase())) return false;
         if (p.team && !t.team?.name?.toLowerCase().includes(p.team.toLowerCase())) return false;
         return true;
-      }).map(t => ({
-        id: t.id, title: t.title, status: t.status, priority: t.priority,
-        locationName: t.locationName, requester: t.requester?.fullName || null,
-        assignedTo: t.assignedTo?.fullName || null, team: t.team?.name || null,
-        createdAt: t.createdAt, category: t.category,
-      }));
+      });
+      const nothingRemoved = filtered.length === tickets.length;
+      const notTruncated = tickets.length < limit;
+      const total = totalCount === null
+        ? null
+        : (nothingRemoved ? totalCount : (notTruncated ? filtered.length : null));
+      return {
+        ...(total === null ? {} : { total }),
+        returned: filtered.length,
+        limit,
+        truncated: total === null ? tickets.length >= limit : total > filtered.length,
+        tickets: filtered.map(t => ({
+          id: t.id, title: t.title, status: t.status, priority: t.priority,
+          locationName: t.locationName, requester: t.requester?.fullName || null,
+          assignedTo: t.assignedTo?.fullName || null, team: t.team?.name || null,
+          createdAt: t.createdAt, category: t.category,
+        })),
+      };
     }
     case 'check_ticket':
       return await checkTicketStatus(p.ticketId);
@@ -1724,11 +1784,13 @@ async function executeTool(toolName, args, user, { confirmed = false } = {}) {
         try {
           preview = await previewReport(user, p);
         } catch (err) {
-          return err.code === 'TEAM_NOT_FOUND' ? err.message : `Impossible de préparer le rapport : ${err.message}`;
+          if (err.code === 'TEAM_NOT_FOUND' || err.code === 'INVALID_RECIPIENT') return err.message;
+          return `Impossible de préparer le rapport : ${err.message}`;
         }
         if (preview.count === 0) {
           return `Aucun ticket ne correspond à ces critères (${preview.filtersLabel}) — rien à envoyer.`;
         }
+        const recipient = preview.to || reportTo;
         const ccList = preview.cc || [];
         const ccLine = ccList.length > 0
           ? `\n· Copie (CC) : ${ccList.join(', ')}`
@@ -1737,7 +1799,7 @@ async function executeTool(toolName, args, user, { confirmed = false } = {}) {
           needsConfirmation: true,
           tool: toolName,
           args: p,
-          message: `📎 Rapport prêt — ${preview.count} ticket(s)\n· Filtres : ${preview.filtersLabel}\n· Format : XLSX (20 colonnes), en pièce jointe\n· Destinataire : ${reportTo}${ccLine}\n\nEnvoyer ce rapport par email ?`,
+          message: `📎 Rapport prêt — ${preview.count} ticket(s)\n· Filtres : ${preview.filtersLabel}\n· Format : XLSX (20 colonnes), en pièce jointe\n· Destinataire : ${recipient}${ccLine}\n\nEnvoyer ce rapport par email ?`,
         };
       }
 
@@ -1747,9 +1809,11 @@ async function executeTool(toolName, args, user, { confirmed = false } = {}) {
           return `Aucun ticket ne correspond à ces critères (${result.filtersLabel}) — email non envoyé.`;
         }
         const sentCc = result.cc || [];
-        return `✅ Rapport envoyé ! ${result.count} ticket(s) en pièce jointe (${result.filename}) envoyé(s) à ${reportTo}${sentCc.length ? `, avec copie à ${sentCc.join(', ')}` : ''}.`;
+        const recipient = result.to || reportTo;
+        return `✅ Rapport envoyé ! ${result.count} ticket(s) en pièce jointe (${result.filename}) envoyé(s) à ${recipient}${sentCc.length ? `, avec copie à ${sentCc.join(', ')}` : ''}.`;
       } catch (err) {
         console.error('[chatbot] Échec envoi rapport:', err.message);
+        if (err.code === 'INVALID_RECIPIENT') return err.message;
         return `Échec de l'envoi du rapport : ${err.message}`;
       }
     }
