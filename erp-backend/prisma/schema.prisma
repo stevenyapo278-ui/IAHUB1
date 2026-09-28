@@ -76,6 +76,22 @@ enum TicketEventType {
   DELETED
   RESTORED
   RESOLUTION_CONFIRMED_ON_CLOSED
+  // Utilisés par le code mais absents de la base (logEvent échouait silencieusement
+  // ou faisait échouer l'endpoint — voir migration 20260928120000)
+  REPLY_ON_CLOSED_REOPENED
+  REPLY_ON_CLOSED_NEW_TICKET
+  REPLY_ON_CLOSED_DISMISSED
+  FOLLOWUP_EDITED
+  FOLLOWUP_DELETED
+  STATUS_UPDATED
+  MAJOR_INCIDENT_PROMOTED
+  EMAIL_LOOP_SKIPPED
+  FOLLOWUP_MADE_PRIVATE
+  FOLLOWUP_MADE_PUBLIC
+  // Nouvelle demande détectée dans un fil existant (ticket EN COURS) — décision de la Hotline
+  NEW_TICKET_SUGGESTED
+  NEW_TICKET_SUGGESTED_CREATED
+  NEW_TICKET_SUGGESTED_DISMISSED
 }
 
 enum TicketPriority {
@@ -131,6 +147,9 @@ enum ApprovalStatus {
   PENDING
   APPROVED
   REJECTED
+  // Brouillon de réponse IA neutralisé parce qu'un mail plus récent a déclenché une nouvelle
+  // génération sur le même ticket : jamais deux propositions concurrentes.
+  SUPERSEDED
 }
 
 model User {
@@ -414,7 +433,7 @@ model Ticket {
   contentEmbedding      Unsupported("vector(768)")?
 
   // Garde-fous sur l'analyse d'intention automatique des réponses email
-  splitCount      Int       @default(0) // nombre de tickets déjà créés par scission depuis ce ticket
+  splitCount      Int       @default(0) // ancien compteur de scission automatique : la création d'un ticket séparé est désormais décidée par la Hotline (Centre de Validation)
   firstOpenedAt   DateTime? // date du tout premier passage à OPEN, pour plafonner la durée de vie totale
   aiExchangeCount Int       @default(0) // nombre de réponses de suivi déjà générées par l'IA sur la conversation en cours, remis à 0 à la résolution — au-delà du seuil (followupEscalation.js), on escalade systématiquement vers un humain
 
@@ -446,6 +465,17 @@ model Ticket {
   replyOnClosedSubject      String?   // sujet de l'email de réponse
   replyOnClosedBody         String?   // contenu texte de la réponse (pour création de nouveau ticket)
   replyOnClosedBodyHtml     String?   // contenu HTML de la réponse
+
+  // Nouvelle demande détectée sur un ticket EN COURS — une réponse du demandeur porte sur un
+  // AUTRE besoin, sans rapport avec le problème du ticket. La Hotline décide : créer un ticket
+  // séparé ou ignorer (le ticket d'origine n'est pas modifié).
+  newTicketSuggested          Boolean   @default(false)
+  newTicketSuggestedAt        DateTime?
+  newTicketSuggestedSender    String?   // email du demandeur
+  newTicketSuggestedSubject   String?   // sujet de l'email
+  newTicketSuggestedSummary   String?   // résumé du nouveau sujet fourni par l'IA (futur titre)
+  newTicketSuggestedBody      String?   // contenu texte de la réponse
+  newTicketSuggestedBodyHtml  String?   // contenu HTML de la réponse
 
   // Champs alignés sur le formulaire de ticket classique
   type       TicketType    @default(INCIDENT)
@@ -1070,6 +1100,16 @@ model AiEmailDraft {
   // qui ne répondent à aucun message précis (ex: accusé de réception initial).
   inReplyToGraphMessageId String?
   outlookConversationId   String?
+
+  // Traçabilité de la génération : confiance retournée par le modèle, extraits de la base de
+  // connaissances réellement utilisés (KnowledgeChunk.id) et aperçu du premier d'entre eux.
+  // Permet au valideur de voir SUR QUOI l'IA s'appuie avant d'approuver une affirmation.
+  aiConfidence      Float?
+  knowledgeChunkIds Int[]      @default([])
+  knowledgeSnippet  String?    @db.Text
+  // Derniers échanges vus par l'IA au moment de la génération (snapshot) :
+  // [{ direction, sender, timestamp, body }, ...] corps tronqué — contexte affiché sur la carte.
+  contextMessages   Json?
 
   status       ApprovalStatus @default(PENDING)
   reviewedBy   User?          @relation(fields: [reviewedById], references: [id])

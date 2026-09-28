@@ -1,4 +1,4 @@
-const { validateAndCleanAnalysis } = require('./emailAnalysisValidator');
+const { validateAndCleanAnalysis, validateAndCleanIntent } = require('./emailAnalysisValidator');
 describe('emailAnalysisValidator', () => {
   const availableSkills = [{ name: 'PORT USB' }, { name: 'VPN' }];
   const availableLocations = [{ completename: 'Siège > MONOP COCODY' }, { completename: 'CENTRALE D ACHATS' }];
@@ -65,5 +65,29 @@ describe('emailAnalysisValidator', () => {
 
     expect(cleaned.suggestedSkill).toBeNull();
     expect(cleaned.location).toBeNull();
+  });
+});
+
+describe('validateAndCleanIntent — NEW_ISSUE_IN_THREAD', () => {
+  test('garde l\'intention quand un résumé exploitable est fourni (et le tronque à 300)', () => {
+    const cleaned = validateAndCleanIntent({
+      intent: 'NEW_ISSUE_IN_THREAD',
+      confidence: 0.9,
+      newIssueSummary: `  ${'a'.repeat(400)}  `,
+    });
+
+    expect(cleaned.intent).toBe('NEW_ISSUE_IN_THREAD');
+    expect(cleaned.newIssueSummary).toHaveLength(300);
+  });
+
+  test('rétrograde en NEW_INFO quand aucun résumé n\'est fourni (aucune suggestion posée)', () => {
+    const cleaned = validateAndCleanIntent({
+      intent: 'NEW_ISSUE_IN_THREAD',
+      confidence: 0.9,
+      newIssueSummary: '   ',
+    });
+
+    expect(cleaned.intent).toBe('NEW_INFO');
+    expect(cleaned.newIssueSummary).toBeNull();
   });
 });

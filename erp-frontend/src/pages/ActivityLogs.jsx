@@ -42,6 +42,13 @@ const EVENT_META = {
   AI_LOW_CONFIDENCE_CLOSE_SKIPPED: { icon: Bot,           color: 'text-yellow-600 dark:text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/20', label: 'IA - Fermeture skip (conf faible)' },
   AI_LIFETIME_EXCEEDED:         { icon: Bot,              color: 'text-orange-600 dark:text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20', label: 'IA - Durée de vie dépassée' },
   AI_SPLIT_LIMIT_REACHED:       { icon: Bot,              color: 'text-red-600 dark:text-red-400',    bg: 'bg-red-500/10',    border: 'border-red-500/20',    label: 'IA - Limite scissions atteinte' },
+  REPLY_ON_CLOSED_SUGGESTED:    { icon: Mail,             color: 'text-violet-600 dark:text-violet-400', bg: 'bg-violet-500/10', border: 'border-violet-500/20', label: 'Réponse suggérée (ticket fermé)' },
+  REPLY_ON_CLOSED_REOPENED:     { icon: RefreshCw,        color: 'text-violet-600 dark:text-violet-400', bg: 'bg-violet-500/10', border: 'border-violet-500/20', label: 'Ticket fermé rouvert suite à une réponse' },
+  REPLY_ON_CLOSED_NEW_TICKET:   { icon: FileText,         color: 'text-violet-600 dark:text-violet-400', bg: 'bg-violet-500/10', border: 'border-violet-500/20', label: 'Nouvelle demande créée (ticket fermé)' },
+  REPLY_ON_CLOSED_DISMISSED:    { icon: XCircle,          color: 'text-slate-600 dark:text-zinc-400',  bg: 'bg-slate-500/10',  border: 'border-slate-500/20', label: 'Suggestion ignorée (ticket fermé)' },
+  NEW_TICKET_SUGGESTED:         { icon: Sparkles,         color: 'text-indigo-600 dark:text-indigo-400', bg: 'bg-indigo-500/10', border: 'border-indigo-500/20', label: 'Nouvelle demande détectée' },
+  NEW_TICKET_SUGGESTED_CREATED: { icon: FileText,         color: 'text-indigo-600 dark:text-indigo-400', bg: 'bg-indigo-500/10', border: 'border-indigo-500/20', label: 'Ticket créé depuis la suggestion' },
+  NEW_TICKET_SUGGESTED_DISMISSED: { icon: XCircle,        color: 'text-slate-600 dark:text-zinc-400',  bg: 'bg-slate-500/10',  border: 'border-slate-500/20', label: 'Suggestion de nouvelle demande ignorée' },
 };
 
 const TYPE_OPTIONS = Object.keys(EVENT_META);

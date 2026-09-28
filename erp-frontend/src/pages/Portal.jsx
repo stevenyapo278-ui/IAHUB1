@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import { PRIORITY_CONFIG, STATUS_CONFIG, PRIORITY_OPTIONS, TYPE_OPTIONS, ORIGIN_CONFIG } from '../constants/tickets';
 import SlaBadge from '../components/SlaBadge';
+import ImageAttachmentsEditor from '../components/ImageAttachmentsEditor';
+import { clipboardImageFiles, imageItemsFromFiles, revokeImageItems } from '../utils/imageAttachments';
 import EmptyState from '../components/EmptyState';
 import { sanitizeHtml } from '../utils/sanitize';
 import useSystemSettings from '../hooks/useSystemSettings';
@@ -140,31 +142,27 @@ export default function Portal() {
     setModalTicketId(null);
     setDetail(null);
     setComment('');
+    revokeImageItems(pastedImages);
     setPastedImages([]);
   }
 
-  function handlePaste(e) {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    for (const item of items) {
-      if (item.type?.startsWith('image/')) {
-        e.preventDefault();
-        const file = item.getAsFile();
-        if (!file) continue;
-        const id = `paste-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        const dataUrl = URL.createObjectURL(file);
-        setPastedImages((prev) => [...prev, { id, file, dataUrl }]);
-        toast.success('Image collée — elle sera envoyée avec le commentaire');
-      }
-    }
+  // Images du commentaire : collage (Ctrl+V), fichier ou glisser-déposer
+  function addCommentImages(files) {
+    const items = imageItemsFromFiles(files, 'portal');
+    if (items.length === 0) return;
+    setPastedImages((prev) => [...prev, ...items]);
+    toast.success(
+      items.length > 1
+        ? `${items.length} images ajoutées — elles partiront avec le commentaire`
+        : 'Image ajoutée — elle partira avec le commentaire',
+    );
   }
 
-  function removePastedImage(id) {
-    setPastedImages((prev) => {
-      const img = prev.find((i) => i.id === id);
-      if (img) URL.revokeObjectURL(img.dataUrl);
-      return prev.filter((i) => i.id !== id);
-    });
+  function handlePaste(e) {
+    const files = clipboardImageFiles(e);
+    if (files.length === 0) return;
+    e.preventDefault();
+    addCommentImages(files);
   }
 
   async function submitComment(ticketId) {
@@ -183,6 +181,7 @@ export default function Portal() {
       await api.post(`/tickets/${ticketId}/followups`, fd);
       toast.success('Commentaire ajouté');
       setComment('');
+      revokeImageItems(pastedImages);
       setPastedImages([]);
       const { data } = await api.get(`/tickets/${ticketId}`);
       setDetail(data);
@@ -663,21 +662,14 @@ export default function Portal() {
 
                   {/* Footer modal : commentaire */}
                   <div className="px-6 py-4 border-t border-outline-variant/20 shrink-0">
-                    {pastedImages.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mb-2">
-                        {pastedImages.map((img) => (
-                          <div key={img.id} className="relative group">
-                            <img src={img.dataUrl} alt="image collée" className="h-16 w-16 object-cover rounded-xl border border-outline-variant/40" />
-                            <button
-                              onClick={() => removePastedImage(img.id)}
-                              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-error text-on-error flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    {/* Images du commentaire — collage, fichier, glisser-déposer */}
+                    <div className="mb-2">
+                      <ImageAttachmentsEditor
+                        items={pastedImages}
+                        onChange={setPastedImages}
+                        onFiles={addCommentImages}
+                      />
+                    </div>
                     <div className="flex gap-2">
                       <textarea
                         rows={1}

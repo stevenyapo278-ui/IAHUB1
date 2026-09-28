@@ -88,8 +88,8 @@ async function createTicketFromEmail({ subject, body, from, fromName, analysis, 
     console.error('[ticketCreator] Auto-assignation échouée:', err.message);
   }
 
-  // Attacher les observateurs suggérés : defaultObservers de l'équipe + techniciens
-  // ayant traité cette catégorie par le passé (hors technicien assigné) —
+  // Attacher les observateurs de l'équipe : defaultObservers déjà renseignés
+  // dans la vue Équipe (hors technicien assigné) —
   // voir ticketSuggestionService.suggestObservers.
   try {
     const current = await tx.ticket.findUnique({
@@ -99,7 +99,6 @@ async function createTicketFromEmail({ subject, body, from, fromName, analysis, 
     const { suggestObservers } = require('./ticketSuggestionService');
     const suggested = await suggestObservers({
       teamId: current?.teamId || null,
-      category: current?.category || erpTicket.category,
       excludeIds: current?.assignedToId ? [current.assignedToId] : [],
       db: tx,
     });

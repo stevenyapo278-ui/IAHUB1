@@ -66,7 +66,12 @@ async function generateFollowupReply({ ticketId, lastMessageBody, fromEmail, fro
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
     if (parsed.canAnswer !== true) {
-      return { canAnswer: false, replyHtml: '', usedKnowledgeChunkIds: [], confidence: 0 };
+      // skipReason (ALREADY_ANSWERED / NOT_ENOUGH_INFO) est reporté à l'appelant pour journaliser
+      // une escalade honnête au lieu d'un « GENERATION_FAILED » générique.
+      const skipReason = typeof parsed.skipReason === 'string' && parsed.skipReason.trim()
+        ? parsed.skipReason.trim().substring(0, 40)
+        : null;
+      return { canAnswer: false, replyHtml: '', usedKnowledgeChunkIds: [], confidence: 0, skipReason };
     }
     const confidence = typeof parsed.confidence === 'number' ? Math.max(0, Math.min(1, parsed.confidence)) : 0;
     return {

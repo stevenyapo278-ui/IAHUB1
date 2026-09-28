@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import io from 'socket.io-client';
 import { toast } from 'sonner';
-import { Ticket, Flame, UserCheck, RefreshCw, ExternalLink } from 'lucide-react';
+import { Ticket, Flame, UserCheck, RefreshCw, ExternalLink, Sparkles } from 'lucide-react';
 import { useAuth } from './AuthContext';
 import { sendBrowserNotification, requestBrowserNotifPermission } from '../utils/browserNotification';
 import { playTicketCreated, playTicketAssigned, playTicketUpdated, playAlertP1 } from '../utils/sounds';
@@ -220,7 +220,7 @@ export function SocketProvider({ children }) {
         {
           body: `${data.sender} a répondu au ticket #${data.ticketId} (${data.status})`,
           tag: `reply-suggestion-${data.ticketId}`,
-          onClick: () => navigateRef.current('/email-drafts?tab=replyClosed'),
+          onClick: () => navigateRef.current('/email-drafts?tab=replies&sub=closed'),
         }
       );
       toast(
@@ -245,7 +245,45 @@ export function SocketProvider({ children }) {
         </div>,
         {
           duration: 8000,
-          onClick: () => navigateRef.current('/email-drafts?tab=replyClosed'),
+          onClick: () => navigateRef.current('/email-drafts?tab=replies&sub=closed'),
+        }
+      );
+    });
+
+    // Nouvelle demande détectée sur un ticket EN COURS (autre besoin dans le fil)
+    newSocket.on('ticket_new_suggestion', (data) => {
+      playTicketAssigned();
+      sendBrowserNotification(
+        'Nouvelle demande détectée',
+        {
+          body: `${data.sender} a évoqué un autre besoin sur le ticket #${data.ticketId} (${data.status})`,
+          tag: `new-suggestion-${data.ticketId}`,
+          onClick: () => navigateRef.current('/email-drafts?tab=replies&sub=open'),
+        }
+      );
+      toast(
+        <div className="flex items-start gap-3 w-full min-w-0 pr-2 group cursor-pointer">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
+            <Sparkles className="w-4 h-4 text-indigo-500" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-xs font-bold text-on-surface">Nouvelle demande détectée</span>
+              <span className="px-1.5 py-0.2 rounded-md text-[10px] font-mono font-extrabold bg-indigo-500/15 text-indigo-500 shrink-0">
+                #{data.ticketId}
+              </span>
+            </div>
+            <p className="text-xs text-on-surface-variant font-medium truncate mt-0.5 max-w-[240px]">
+              {data.sender} a évoqué un autre besoin — ticket {data.status}
+            </p>
+          </div>
+          <div className="shrink-0 text-on-surface-variant/40 group-hover:text-indigo-500 transition-colors self-center">
+            <ExternalLink className="w-3.5 h-3.5" />
+          </div>
+        </div>,
+        {
+          duration: 8000,
+          onClick: () => navigateRef.current('/email-drafts?tab=replies&sub=open'),
         }
       );
     });

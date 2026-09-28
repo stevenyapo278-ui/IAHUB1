@@ -26,7 +26,13 @@ jest.mock('../prismaClient', () => ({
     findUnique: (...args) => mockTicketMessageFindUnique(...args),
     findFirst: jest.fn().mockResolvedValue(null),
   },
-  aiEmailDraft: { create: (...args) => mockAiEmailDraftCreate(...args) },
+  aiEmailDraft: {
+    create: (...args) => mockAiEmailDraftCreate(...args),
+    updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+  },
+  knowledgeChunk: {
+    findUnique: jest.fn().mockResolvedValue(null),
+  },
 }));
 
 jest.mock('./emailPoller', () => ({ pollAllAccounts: jest.fn() }));
@@ -183,5 +189,39 @@ describe('emailPipeline — conversation IA multi-tours sur les emails de suivi'
 
     expect(mockAnalyzeIntent).toHaveBeenCalled();
     expect(mockAiEmailDraftCreate).toHaveBeenCalled();
+  });
+
+  it('neutralise le brouillon antérieur et trace confiance / sources / contexte à chaque génération', async () => {
+    const prismaMock = require('../prismaClient');
+    prismaMock.aiEmailDraft.updateMany.mockResolvedValue({ count: 1 });
+    mockAiEmailDraftCreate.mockResolvedValue({ id: 77, subject: '[Ticket #EN_ATTENTE] RE: Imprimante', createdAt: new Date() });
+    mockGenerateFollowupReply.mockResolvedValue({ canAnswer: true, replyHtml: '<p>ok</p>', confidence: 0.87, usedKnowledgeChunkIds: [11, 12] });
+    mockTicketMessageFindMany.mockResolvedValue([
+      // findMany est en orderBy timestamp desc : le plus récent d'abord
+      { direction: 'INBOUND', body: 'Toujours la meme panne', sender: 'user@client.com', timestamp: new Date('2026-09-28T10:10:00Z') },
+      { direction: 'OUTBOUND', body: 'Nous nous en occupons', sender: 'support@prosuma.ci', timestamp: new Date('2026-09-28T10:05:00Z') },
+      { direction: 'INBOUND', body: 'Imprimante en panne', sender: 'user@client.com', timestamp: new Date('2026-09-28T10:00:00Z') },
+    ]);
+
+    await processMessage(buildMessage(), { id: 1 });
+
+    // Jamais deux propositions concurrentes : le brouillon PENDING antérieur est neutralisé
+    expect(prismaMock.aiEmailDraft.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { ticketId: 42, status: 'PENDING', draftKind: 'CONVERSATION_FOLLOWUP' },
+      data: expect.objectContaining({ status: 'SUPERSEDED' }),
+    }));
+
+    const created = mockAiEmailDraftCreate.mock.calls[0][0].data;
+    expect(created).toEqual(expect.objectContaining({
+      ticketId: 42,
+      aiConfidence: 0.87,
+      knowledgeChunkIds: [11, 12],
+    }));
+    // Contexte = derniers échanges vus par l'IA, du plus récent au plus ancien, corps tronqué
+    expect(Array.isArray(created.contextMessages)).toBe(true);
+    expect(created.contextMessages[0].body).toContain('Toujours la meme panne');
+    expect(created.contextMessages[0].direction).toBe('INBOUND');
+    expect(created.contextMessages.length).toBeLessThanOrEqual(4);
+    expect(created.contextMessages[0].body.length).toBeLessThanOrEqual(400);
   });
 });

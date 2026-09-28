@@ -15,7 +15,6 @@ const CONFIDENCE_THRESHOLD_FOR_REOPEN = 0.6;
 const MAX_CLOSE_SUGGESTIONS = 2;
 
 // Garde-fous anti-boucle/anti-dérive
-const MAX_SPLITS_PER_TICKET = 3; // au-delà, on suppose un problème de classification plutôt que de vrais nouveaux sujets
 const MAX_TICKET_LIFETIME_DAYS = 60; // au-delà, on ne réinitialise plus le compteur de relances indéfiniment
 
 // Analyse l'intention d'un email de réponse utilisateur sur un ticket existant.
@@ -113,11 +112,11 @@ function daysSince(date) {
 }
 
 // Applique les changements de statut selon l'intention détectée et le niveau de confiance.
-// context.fromEmail/fromName/originalBody/originalSubject servent à créer le nouveau ticket en cas de NEW_ISSUE_IN_THREAD.
+// context.fromEmail/fromName/originalBody/originalSubject servent à remplir les suggestions
+// (réponse sur ticket fermé, ou nouvelle demande détectée sur un ticket en cours).
 async function applyIntentActions(ticketId, { intent, confidence, newIssueSummary, isAutoReply }, actor = 'AI', context = {}) {
   const { logEvent } = require('./ticketEvent');
-  const { createTicketFromEmail } = require('./ticketCreator');
-  const { fromEmail, fromName, emailAccountId, originalBody, originalSubject, originalBodyHtml } = context;
+  const { fromEmail, originalBody, originalSubject, originalBodyHtml } = context;
 
   // Réponse automatique détectée (auto-reply, disclaimer, accusé système) : on ne change rien au statut,
   // on trace juste l'événement pour audit. Évite qu'un "résolu" présent dans une signature ferme un ticket.
@@ -226,51 +225,53 @@ async function applyIntentActions(ticketId, { intent, confidence, newIssueSummar
       updates.replyOnClosedBodyHtml = originalBodyHtml || null;
       await logEvent(ticketId, 'REPLY_ON_CLOSED_SUGGESTED', actor, { intent, confidence, originalStatus: ticket.status, newIssueSummary });
     } else {
-      // Ticket actif : la clôture est suggérée à la Hotline, et on ouvre un ticket séparé pour le nouveau sujet.
-      const canSuggestClose = confidence >= CONFIDENCE_THRESHOLD_FOR_CLOSE
-        && (ticket?.closeSuggestionCount || 0) < MAX_CLOSE_SUGGESTIONS;
-      updates.status = 'WAITING_FOR_USER';
-      updates.lastUserReplyAt = new Date();
-      if (canSuggestClose) {
-        updates.closeSuggested = true;
-        updates.closeSuggestedAt = new Date();
-        updates.closeSuggestionConfidence = confidence;
-        updates.closeSuggestionCount = (ticket?.closeSuggestionCount || 0) + 1;
-        await logEvent(ticketId, 'CLOSURE_SUGGESTED', actor, { intent, confidence, newIssueSummary });
-      } else {
-        const reason = (ticket?.closeSuggestionCount || 0) >= MAX_CLOSE_SUGGESTIONS ? 'limit_reached' : 'low_confidence';
-        await logEvent(ticketId, 'CLOSURE_NOT_SUGGESTED', actor, { intent, confidence, newIssueSummary, reason });
-      }
-
-      const splitCount = ticket?.splitCount || 0;
-      if (newIssueSummary && fromEmail && splitCount < MAX_SPLITS_PER_TICKET) {
-        const { erpTicketId } = await createTicketFromEmail({
-          subject: originalSubject || `Nouveau sujet détecté dans le suivi du ticket #${ticketId}`,
-          body: originalBody || newIssueSummary,
-          from: fromEmail,
-          fromName,
-          analysis: { suggestedTitle: newIssueSummary, summary: newIssueSummary, priority: 'P3' },
-          emailAccountId,
-        });
-        updates.splitCount = splitCount + 1;
-        await logEvent(ticketId, 'SPLIT_NEW_ISSUE', actor, { newTicketId: erpTicketId, newIssueSummary });
-        await logEvent(erpTicketId, 'CREATED_FROM_SPLIT', actor, { originTicketId: ticketId });
-      } else if (newIssueSummary && splitCount >= MAX_SPLITS_PER_TICKET) {
-        updates.status = 'WAITING_FOR_USER';
-        await logEvent(ticketId, 'AI_SPLIT_LIMIT_REACHED', actor, { splitCount, newIssueSummary });
+      // Ticket EN COURS : la réponse porte sur un AUTRE besoin. On ne touche ni au statut ni
+      // au ticket d'origine (le problème initial peut être toujours d'actualité) — on pose
+      // seulement la suggestion « nouvelle demande » : la Hotline créera un ticket séparé ou
+      // ignorera depuis le Centre de Validation.
+      const alreadySuggested = !!ticket?.newTicketSuggested;
+      updates.newTicketSuggested = true;
+      updates.newTicketSuggestedAt = new Date();
+      updates.newTicketSuggestedSender = fromEmail;
+      updates.newTicketSuggestedSubject = originalSubject || '';
+      updates.newTicketSuggestedSummary = (newIssueSummary || '').substring(0, 300);
+      updates.newTicketSuggestedBody = (originalBody || '').substring(0, 5000);
+      updates.newTicketSuggestedBodyHtml = originalBodyHtml || null;
+      // Anti-boucle : un email supplémentaire du même fil rafraîchit la suggestion
+      // (corps/expéditeur à jour) sans re-notifier ni re-journaliser à chaque message.
+      if (!alreadySuggested) {
+        await logEvent(ticketId, 'NEW_TICKET_SUGGESTED', actor, { intent, confidence, newIssueSummary });
       }
     }
   } else if (intent === 'QUESTION' || intent === 'UNKNOWN') {
-    updates.status = 'WAITING_FOR_USER';
-    updates.lastUserReplyAt = new Date();
+    const wasClosed = ['SOLVED', 'CLOSED'].includes(ticket?.status);
+    if (wasClosed) {
+      // Ticket fermé : on ne touche surtout pas au statut (sinon il se « dé-ferme » tout seul
+      // en WAITING_FOR_USER sans jamais apparaître dans le Centre de Validation). On pose la
+      // suggestion : la Hotline décide entre rouvrir et créer une nouvelle demande.
+      updates.replyOnClosedSuggested = true;
+      updates.replyOnClosedSuggestedAt = new Date();
+      updates.replyOnClosedSender = fromEmail;
+      updates.replyOnClosedSubject = originalSubject || '';
+      updates.replyOnClosedBody = (originalBody || '').substring(0, 5000);
+      updates.replyOnClosedBodyHtml = originalBodyHtml || null;
+      await logEvent(ticketId, 'REPLY_ON_CLOSED_SUGGESTED', actor, { intent, confidence, originalStatus: ticket.status });
+    } else {
+      updates.status = 'WAITING_FOR_USER';
+      updates.lastUserReplyAt = new Date();
+    }
   }
 
   if (Object.keys(updates).length > 0) {
     const updated = await prisma.ticket.update({ where: { id: ticketId }, data: updates });
-    await logEvent(ticketId, 'STATUS_CHANGED', actor, { intent, confidence, newStatus: updates.status });
+    // Certains effets (suggestions reply-on-closed / nouvelle demande) n'ont PAS de changement
+    // de statut : ne pas journaliser un « statut modifié » fantôme avec newStatus undefined.
+    if (updates.status) {
+      await logEvent(ticketId, 'STATUS_CHANGED', actor, { intent, confidence, newStatus: updates.status });
+    }
 
     if (updates.status === 'WAITING_FOR_USER') {
-      await logEvent(ticketId, 'NEEDS_HUMAN_REVIEW', actor, { intent, confidence, reason: 'low_confidence_or_split_limit' });
+      await logEvent(ticketId, 'NEEDS_HUMAN_REVIEW', actor, { intent, confidence, reason: 'low_confidence' });
     }
 
     // Si le ticket était SOLVED/CLOSED et repasse en OPEN → notifier le technicien assigné

@@ -162,7 +162,15 @@ export default function MainLayout() {
           ? pendingTicketsRes.data.length
           : 0;
 
-        const pendingDraftsCount = Array.isArray(draftsRes?.data) ? draftsRes.data.length : 0;
+        // La réponse est un objet paginé { items, total, ... } : lire .length sur data
+        // donnait toujours 0 (badge muet pour « Réponses IA »).
+        const pendingDraftsCount = typeof draftsRes?.data?.total === 'number'
+          ? draftsRes.data.total
+          : Array.isArray(draftsRes?.data?.items)
+          ? draftsRes.data.items.length
+          : Array.isArray(draftsRes?.data)
+          ? draftsRes.data.length
+          : 0;
         const pendingKnowledgeCount = Array.isArray(knowledgeRes?.data) ? knowledgeRes.data.length : 0;
         const replySuggestionsCount = replyRes?.data?.count || 0;
 
@@ -188,6 +196,8 @@ export default function MainLayout() {
       socket.on('ticket_reply_suggestion', fetchSidebarBadges);
       socket.on('email_received', fetchSidebarBadges);
       socket.on('email_updated', fetchSidebarBadges);
+      // Nouvelle réponse IA en attente de validation → le compteur doit bouger immédiatement
+      socket.on('ai_draft_created', fetchSidebarBadges);
     }
 
     return () => {
@@ -196,8 +206,10 @@ export default function MainLayout() {
       if (socket) {
         socket.off('ticket_created', fetchSidebarBadges);
         socket.off('ticket_updated', fetchSidebarBadges);
+        socket.off('ticket_reply_suggestion', fetchSidebarBadges);
         socket.off('email_received', fetchSidebarBadges);
         socket.off('email_updated', fetchSidebarBadges);
+        socket.off('ai_draft_created', fetchSidebarBadges);
       }
     };
   }, [user, socket]);

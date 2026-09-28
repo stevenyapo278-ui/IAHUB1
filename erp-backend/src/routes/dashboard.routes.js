@@ -149,10 +149,14 @@ router.get('/pending-approvals', async (req, res) => {
   return res.json(tickets);
 });
 
-// Nombre de suggestions "réponse sur ticket fermé" en attente
+// Nombre de suggestions en attente de décision au Centre de Validation :
+// réponse sur ticket fermé + nouvelle demande détectée sur un ticket en cours
 router.get('/reply-suggestions-count', async (req, res) => {
   const count = await prisma.ticket.count({
-    where: { ...NOT_DELETED, replyOnClosedSuggested: true },
+    where: {
+      ...NOT_DELETED,
+      OR: [{ replyOnClosedSuggested: true }, { newTicketSuggested: true }],
+    },
   });
   return res.json({ count });
 });
@@ -192,7 +196,7 @@ router.get('/needs-human-review', async (req, res) => {
 // Brouillons en attente de validation (réponses IA + relances automatiques)
 router.get('/pending-ai-drafts', async (req, res) => {
   const page = Math.max(1, parseInt(req.query.page) || 1);
-  const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 50), 200);
+  const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 50), 500);
   const skip = (page - 1) * limit;
   const status = req.query.status || 'PENDING';
 

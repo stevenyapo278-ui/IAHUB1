@@ -55,4 +55,49 @@ describe('decideFollowupAction', () => {
       aiExchangeCount: MAX_AI_EXCHANGES_PER_TICKET - 1,
     })).toEqual({ action: 'GENERATE_DRAFT', lowConfidenceIntent: false });
   });
+
+  it('ne régénère rien quand le support vient de répondre et que le client envoie une simple information', () => {
+    expect(decideFollowupAction({
+      intent: 'NEW_INFO',
+      confidence: 0.9,
+      aiExchangeCount: 0,
+      minutesSinceLastOutbound: 5,
+    })).toEqual({ action: 'NONE', reason: 'ALREADY_ANSWERED' });
+  });
+
+  it('génère quand même pour NEW_INFO si la dernière réponse sortante est ancienne', () => {
+    expect(decideFollowupAction({
+      intent: 'NEW_INFO',
+      confidence: 0.9,
+      aiExchangeCount: 0,
+      minutesSinceLastOutbound: 45,
+    })).toEqual({ action: 'GENERATE_DRAFT', lowConfidenceIntent: false });
+  });
+
+  it('génère quand même pour NEW_INFO si aucune réponse n\'est jamais partie sur le fil', () => {
+    expect(decideFollowupAction({
+      intent: 'NEW_INFO',
+      confidence: 0.9,
+      aiExchangeCount: 0,
+      minutesSinceLastOutbound: null,
+    })).toEqual({ action: 'GENERATE_DRAFT', lowConfidenceIntent: false });
+  });
+
+  it('répond à une vraie question même si le support vient de répondre (pas de silence gênant)', () => {
+    expect(decideFollowupAction({
+      intent: 'QUESTION',
+      confidence: 0.9,
+      aiExchangeCount: 0,
+      minutesSinceLastOutbound: 2,
+    })).toEqual({ action: 'GENERATE_DRAFT', lowConfidenceIntent: false });
+  });
+
+  it('court-circuite aussi le seuil de tours : une information déjà couverte n\'escalade pas', () => {
+    expect(decideFollowupAction({
+      intent: 'NEW_INFO',
+      confidence: 0.9,
+      aiExchangeCount: MAX_AI_EXCHANGES_PER_TICKET + 2,
+      minutesSinceLastOutbound: 1,
+    })).toEqual({ action: 'NONE', reason: 'ALREADY_ANSWERED' });
+  });
 });

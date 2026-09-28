@@ -290,6 +290,20 @@ function validateAndCleanIntent(rawIntent = {}, headers = {}, bodyText = '') {
     }
   }
 
+  // NEW_ISSUE_IN_THREAD doit fournir un résumé exploitable du nouveau sujet : sans lui, ni la
+  // suggestion lisible ni le titre du futur ticket ne sont possibles → on retombe sur
+  // « information sur le même problème » (aucune suggestion posée).
+  if (result.intent === 'NEW_ISSUE_IN_THREAD') {
+    const summary = String(result.newIssueSummary || '').replace(/\s+/g, ' ').trim();
+    if (summary.length < 4) {
+      console.log('[emailAnalysisValidator] NEW_ISSUE_IN_THREAD invalidé : aucun newIssueSummary fourni');
+      result.intent = 'NEW_INFO';
+      result.newIssueSummary = null;
+    } else {
+      result.newIssueSummary = summary.substring(0, 300);
+    }
+  }
+
   return result;
 }
 

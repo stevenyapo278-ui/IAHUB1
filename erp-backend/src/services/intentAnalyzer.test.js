@@ -81,9 +81,13 @@ describe('applyIntentActions — validation humaine obligatoire des clôtures', 
     expect(updateCall.data.closeSuggested).toBe(true);
   });
 
-  it('suggère aussi la clôture sur NEW_ISSUE_IN_THREAD (split) au lieu de fermer automatiquement', async () => {
+  it('NEW_ISSUE_IN_THREAD sur ticket EN COURS : pose la suggestion sans toucher au statut ni scinder', async () => {
+    const { logEvent } = require('./ticketEvent');
+    const { createTicketFromEmail } = require('./ticketCreator');
+    logEvent.mockClear();
+
     mockTicketFindUnique.mockResolvedValue({
-      id: 1, status: 'OPEN', firstOpenedAt: new Date(), splitCount: 0, closeSuggestionCount: 0,
+      id: 1, status: 'OPEN', firstOpenedAt: new Date(), closeSuggestionCount: 0,
     });
     await applyIntentActions(
       1,
@@ -93,26 +97,58 @@ describe('applyIntentActions — validation humaine obligatoire des clôtures', 
     );
 
     const updateCall = mockTicketUpdate.mock.calls[0][0];
-    expect(updateCall.data.closeSuggested).toBe(true);
-    expect(updateCall.data.status).not.toBe('SOLVED');
-    expect(updateCall.data.status).toBe('WAITING_FOR_USER');
+    // Le ticket d'origine ne bouge pas : ni statut, ni clôture suggérée
+    expect(updateCall.data.status).toBeUndefined();
+    expect(updateCall.data.closeSuggested).toBeUndefined();
+    expect(updateCall.data.newTicketSuggested).toBe(true);
+    expect(updateCall.data.newTicketSuggestedSummary).toBe('Nouveau souci');
+    expect(updateCall.data.newTicketSuggestedBody).toBe('corps');
+    expect(updateCall.data.newTicketSuggestedSender).toBe('user@ex.com');
+    expect(createTicketFromEmail).not.toHaveBeenCalled();
+    expect(logEvent).toHaveBeenCalledWith(1, 'NEW_TICKET_SUGGESTED', 'AI', expect.objectContaining({ newIssueSummary: 'Nouveau souci' }));
   });
 
-  it('scinde le nouveau sujet même si la clôture n\'est pas suggérée (confiance insuffisante)', async () => {
-    const { createTicketFromEmail } = require('./ticketCreator');
+  it('NEW_ISSUE_IN_THREAD sur ticket EN COURS : ne re-notifie pas si la suggestion existe déjà', async () => {
+    const { logEvent } = require('./ticketEvent');
+    logEvent.mockClear();
 
     mockTicketFindUnique.mockResolvedValue({
-      id: 1, status: 'OPEN', firstOpenedAt: new Date(), splitCount: 0, closeSuggestionCount: 0,
+      id: 1, status: 'OPEN', newTicketSuggested: true, closeSuggestionCount: 0,
     });
     await applyIntentActions(
       1,
-      { intent: 'NEW_ISSUE_IN_THREAD', confidence: 0.4, newIssueSummary: 'Nouveau souci' },
+      { intent: 'NEW_ISSUE_IN_THREAD', confidence: 0.9, newIssueSummary: 'Encore un souci' },
+      'AI',
+      { fromEmail: 'user@ex.com', fromName: 'User', originalBody: 'corps mis à jour', originalSubject: 'sujet' }
+    );
+
+    // Le contenu est rafraîchi, mais aucune notification/journalisation supplémentaire
+    const updateCall = mockTicketUpdate.mock.calls[0][0];
+    expect(updateCall.data.newTicketSuggested).toBe(true);
+    expect(updateCall.data.newTicketSuggestedBody).toBe('corps mis à jour');
+    expect(logEvent.mock.calls.filter((c) => c[1] === 'NEW_TICKET_SUGGESTED')).toHaveLength(0);
+  });
+
+  it('NEW_ISSUE_IN_THREAD sur ticket FERMÉ : garde la suggestion reply-on-closed existante', async () => {
+    const { logEvent } = require('./ticketEvent');
+    const { createTicketFromEmail } = require('./ticketCreator');
+    logEvent.mockClear();
+
+    mockTicketFindUnique.mockResolvedValue({
+      id: 1, status: 'CLOSED', closeSuggestionCount: 0,
+    });
+    await applyIntentActions(
+      1,
+      { intent: 'NEW_ISSUE_IN_THREAD', confidence: 0.95, newIssueSummary: 'Autre problème' },
       'AI',
       { fromEmail: 'user@ex.com', fromName: 'User', originalBody: 'corps', originalSubject: 'sujet' }
     );
 
-    expect(createTicketFromEmail).toHaveBeenCalled();
     const updateCall = mockTicketUpdate.mock.calls[0][0];
-    expect(updateCall.data.closeSuggested).toBeUndefined();
+    expect(updateCall.data.replyOnClosedSuggested).toBe(true);
+    expect(updateCall.data.status).toBeUndefined();
+    expect(updateCall.data.newTicketSuggested).toBeUndefined();
+    expect(createTicketFromEmail).not.toHaveBeenCalled();
+    expect(logEvent).toHaveBeenCalledWith(1, 'REPLY_ON_CLOSED_SUGGESTED', 'AI', expect.anything());
   });
 });

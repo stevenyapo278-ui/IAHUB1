@@ -412,7 +412,7 @@ async function processMessage(message, account) {
         where: { ticketId: match.ticketId },
         orderBy: { timestamp: 'desc' },
         take: 5,
-        select: { direction: true, body: true, timestamp: true },
+        select: { direction: true, body: true, sender: true, timestamp: true },
       });
 
       // Analyser l'intention de la réponse
@@ -428,14 +428,28 @@ async function processMessage(message, account) {
 
       await applyIntentActions(match.ticketId, intentResult, fromEmail, {
         fromEmail, fromName, emailAccountId: account.id,
-        originalBody: bodyPreview, originalSubject: subject,
+        // cleanBody = corps complet nettoyé (bodyPreview de Graph n'en fait que ~255 caractères :
+        // c'est lui qui alimente replyOnClosedBody, donc le contenu de la nouvelle demande).
+        originalBody: cleanBody, originalSubject: subject,
         originalBodyHtml: bodyHtml,
       });
 
-      // Si une suggestion "réponse sur ticket fermé" a été créée, notifier les clients en temps réel
-      const updatedTicket = await prisma.ticket.findUnique({ where: { id: match.ticketId }, select: { replyOnClosedSuggested: true, status: true } });
+      // Si une suggestion "réponse sur ticket fermé" ou "nouvelle demande" a été créée,
+      // notifier les clients en temps réel
+      const updatedTicket = await prisma.ticket.findUnique({
+        where: { id: match.ticketId },
+        select: { replyOnClosedSuggested: true, newTicketSuggested: true, status: true },
+      });
       if (updatedTicket?.replyOnClosedSuggested && io) {
         io.emit('ticket_reply_suggestion', {
+          ticketId: match.ticketId,
+          status: updatedTicket.status,
+          sender: fromEmail,
+          subject,
+        });
+      }
+      if (updatedTicket?.newTicketSuggested && io) {
+        io.emit('ticket_new_suggestion', {
           ticketId: match.ticketId,
           status: updatedTicket.status,
           sender: fromEmail,
@@ -449,10 +463,21 @@ async function processMessage(message, account) {
       // rond (followupEscalation.js — seuil de tours prioritaire sur la confiance).
       if (!intentResult.isAutoReply) {
         const ticketForFollowup = await prisma.ticket.findUnique({ where: { id: match.ticketId } });
+        // Dernière réponse déjà partie sur ce fil (envoyée par le support ou par l'IA) : sert à
+        // éviter de régénérer une réponse qui reprendrait une information déjà transmise.
+        const lastOutbound = await prisma.ticketMessage.findFirst({
+          where: { ticketId: match.ticketId, direction: 'OUTBOUND' },
+          orderBy: { timestamp: 'desc' },
+          select: { timestamp: true },
+        });
+        const minutesSinceLastOutbound = lastOutbound
+          ? Math.round((Date.now() - lastOutbound.timestamp.getTime()) / 60000)
+          : null;
         const followupDecision = decideFollowupAction({
           intent: intentResult.intent,
           confidence: intentResult.confidence,
           aiExchangeCount: ticketForFollowup?.aiExchangeCount || 0,
+          minutesSinceLastOutbound,
         });
 
         if (followupDecision.action === 'ESCALATE') {
@@ -468,11 +493,38 @@ async function processMessage(message, account) {
 
           if (!replyResult.canAnswer) {
             await prisma.ticket.update({ where: { id: match.ticketId }, data: { status: 'WAITING_FOR_USER' } });
-            await logEvent(match.ticketId, 'AI_CONVERSATION_ESCALATED', 'AI', { reason: 'GENERATION_FAILED' });
-            await logEvent(match.ticketId, 'NEEDS_HUMAN_REVIEW', 'AI', { reason: 'GENERATION_FAILED' });
+            const skipReason = replyResult.skipReason || 'GENERATION_FAILED';
+            await logEvent(match.ticketId, 'AI_CONVERSATION_ESCALATED', 'AI', { reason: skipReason });
+            await logEvent(match.ticketId, 'NEEDS_HUMAN_REVIEW', 'AI', { reason: skipReason });
           } else {
             const nextExchangeTurn = (ticketForFollowup?.aiExchangeCount || 0) + 1;
             await prisma.ticket.update({ where: { id: match.ticketId }, data: { aiExchangeCount: nextExchangeTurn } });
+
+            // Anti-doublon : le brouillon précédent ne contient pas le mail qui vient d'arriver.
+            // On le neutralise pour qu'il n'y ait JAMAIS deux propositions concurrentes validables
+            // sur le même ticket (sinon on risque d'envoyer une réponse périmée après la nouvelle).
+            const superseded = await prisma.aiEmailDraft.updateMany({
+              where: { ticketId: match.ticketId, status: 'PENDING', draftKind: 'CONVERSATION_FOLLOWUP' },
+              data: {
+                status: 'SUPERSEDED',
+                reviewNote: 'Remplacé : un mail plus récent a déclenché une nouvelle génération',
+              },
+            });
+
+            // Traçabilité de la source : confiance retournée par le modèle + aperçu du premier
+            // extrait de base de connaissances utilisé, pour que le valideur voie sur quoi
+            // s'appuie l'IA (les ids seuls ne sont pas lisibles dans l'interface).
+            const knowledgeChunkIds = (replyResult.usedKnowledgeChunkIds || [])
+              .filter((v) => Number.isInteger(v))
+              .slice(0, 20);
+            let knowledgeSnippet = null;
+            if (knowledgeChunkIds.length > 0) {
+              const chunk = await prisma.knowledgeChunk.findUnique({
+                where: { id: knowledgeChunkIds[0] },
+                select: { content: true },
+              });
+              knowledgeSnippet = chunk?.content ? chunk.content.substring(0, 280) : null;
+            }
 
             // Brouillon stocké BRUT (replyHtml de l'IA, sans gabarit) : le gabarit commun
             // (bandeau « Réponse à votre demande » + signature) est ajouté au moment de
@@ -481,7 +533,7 @@ async function processMessage(message, account) {
             // brouillon et son approbation. Le placeholder #EN_ATTENTE reste remplacé par
             // le vrai numéro de ticket à l'envoi (voir ticketApproval.js, aiemaildraft.routes.js,
             // draftapproval.routes.js, draftReplyApproval.js).
-            await prisma.aiEmailDraft.create({
+            const createdDraft = await prisma.aiEmailDraft.create({
               data: {
                 ticketId: match.ticketId,
                 recipientEmail: fromEmail,
@@ -492,13 +544,40 @@ async function processMessage(message, account) {
                 exchangeTurn: nextExchangeTurn,
                 inReplyToGraphMessageId: graphMessageId,
                 outlookConversationId: conversationId,
+                aiConfidence: replyResult.confidence,
+                knowledgeChunkIds,
+                knowledgeSnippet,
+                // Snapshot du contexte vu par l'IA (4 derniers échanges, corps tronqué) :
+                // affiché sur la carte du centre de validation pour juger la proposition
+                // sans rouvrir le ticket. recentMessages est passé en ordre ascendant par
+                // analyzeIntent (.reverse() in-place) → on reprend la fin puis on re inverse.
+                contextMessages: recentMessages.slice(-4).reverse().map((m) => ({
+                  direction: m.direction,
+                  sender: m.sender,
+                  timestamp: m.timestamp,
+                  body: (m.body || '').substring(0, 400),
+                })),
               },
             });
             await logEvent(match.ticketId, 'AI_FOLLOWUP_DRAFT_GENERATED', 'AI', {
               exchangeTurn: nextExchangeTurn,
               lowConfidenceIntent: followupDecision.lowConfidenceIntent,
               confidence: replyResult.confidence,
+              knowledgeChunks: knowledgeChunkIds.length,
+              supersededPrevious: superseded.count,
             });
+
+            // Le Centre de Validation n'a aucun abonnement temps réel sur les brouillons :
+            // sans cet événement la file reste périmée jusqu'au rechargement manuel.
+            if (io) {
+              io.emit('ai_draft_created', {
+                draftId: createdDraft.id,
+                ticketId: match.ticketId,
+                subject: createdDraft.subject,
+                createdAt: createdDraft.createdAt,
+                supersededCount: superseded.count,
+              });
+            }
           }
         }
       }

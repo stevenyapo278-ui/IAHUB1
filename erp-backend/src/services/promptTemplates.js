@@ -302,14 +302,16 @@ Si l'un de ces indices est présent ET que le message ne contient par ailleurs a
 - NEW_INFO : l'utilisateur ajoute des informations utiles sur le même problème, sans dire si c'est résolu ou non
 - QUESTION : l'utilisateur pose une question, sans confirmer une résolution
 - REOPEN : l'utilisateur signale que le problème est réapparu après résolution
-- NEW_ISSUE_IN_THREAD : l'utilisateur confirme que le problème initial est résolu MAIS évoque aussi un problème différent, nouveau, sans rapport
+- NEW_ISSUE_IN_THREAD : le message exprime un AUTRE besoin (nouvelle demande, autre panne, autre service, autre utilisateur concerné) sans rapport avec le problème du ticket — que le problème initial soit résolu ou non. Exemples : « au fait, l'imprimante du 3e étage est en panne », « j'ai aussi un souci sur mon accès VPN » alors que le ticket parle d'une déconnexion Outlook.
 - UNKNOWN : intention non déterminable, message ambigu ou trop court (ex: "ok", "merci" seul, sans rapport explicite avec le problème)
 
-RÈGLES STRICTES pour RESOLVED / NEW_ISSUE_IN_THREAD :
-1) Tu DOIS fournir evidence : la citation EXACTE, mot pour mot, de la phrase du message de l'utilisateur qui prouve la résolution du problème précis du ticket. Sans phrase pertinente et personnalisée (jamais une signature, un disclaimer ou un merci isolé), evidence doit être une chaîne vide et intent doit être UNKNOWN.
-2) userAnsweredSupport : true uniquement si le message de l'utilisateur répond à une question/réponse du Support présente dans l'historique (ou confirme explicitement la résolution par rapport à un message du Support). Un message spontané sans lien avec l'historique reste traité normalement mais c'est un signal faible de résolution.
-3) Compare toujours le contenu du message au problème PRÉCIS décrit dans le titre/résumé du ticket avant de choisir STILL_PRESENT — si le message décrit une situation positive opposée à ce problème (le service qui était down redevient up, la connexion qui manquait est rétablie, etc.), c'est RESOLVED, même sans le mot "résolu".
-4) Tiens compte des éventuels rejets récents : si le ticket a déjà été rejeté pour un motif semblable, sois beaucoup plus prudent.
+RÈGLES STRICTES :
+1) RESOLVED exige evidence : la citation EXACTE, mot pour mot, de la phrase du message de l'utilisateur qui prouve la résolution du problème précis du ticket. Sans phrase pertinente et personnalisée (jamais une signature, un disclaimer ou un merci isolé), evidence doit être une chaîne vide et intent doit être UNKNOWN.
+2) NEW_ISSUE_IN_THREAD exige newIssueSummary : une phrase courte (moins de 250 caractères) résumant le NOUVEAU sujet, et evidence doit être une chaîne vide (cette intention ne prouve rien sur la résolution du problème d'origine). Si tu ne peux pas résumer le nouveau sujet, n'utilise pas NEW_ISSUE_IN_THREAD.
+3) NEW_ISSUE_IN_THREAD uniquement si le sujet est VRAIMENT sans rapport avec le problème du ticket. Un complément d'information sur le MÊME problème est NEW_INFO (ou STILL_PRESENT / QUESTION selon le cas), jamais NEW_ISSUE_IN_THREAD.
+4) userAnsweredSupport : true uniquement si le message de l'utilisateur répond à une question/réponse du Support présente dans l'historique (ou confirme explicitement la résolution par rapport à un message du Support). Un message spontané sans lien avec l'historique reste traité normalement mais est un signal faible de résolution.
+5) Compare toujours le contenu du message au problème PRÉCIS décrit dans le titre/résumé du ticket avant de choisir STILL_PRESENT — si le message décrit une situation positive opposée à ce problème (le service qui était down redevient up, la connexion qui manquait est rétablie, etc.), c'est RESOLVED, même sans le mot "résolu".
+6) Tiens compte des éventuels rejets récents : si le ticket a déjà été rejeté pour un motif semblable, sois beaucoup plus prudent.
 
 Réponds UNIQUEMENT avec un objet JSON strict sur une seule ligne, sans markdown, au format :
 {"intent": "UN_DES_CODES", "confidence": 0.0 à 1.0, "newIssueSummary": "résumé court du nouveau sujet si NEW_ISSUE_IN_THREAD, sinon null", "isAutoReply": true ou false, "evidence": "citation exacte justifiant RESOLVED, sinon chaîne vide", "userAnsweredSupport": true ou false}`,
@@ -447,12 +449,16 @@ Dernier message de l'utilisateur :
 
 Rédige une réponse utile et précise si tu disposes d'assez d'éléments pour aider l'utilisateur. Si tu n'as pas assez d'informations ou que la base de connaissances ne couvre pas ce cas, indique-le honnêtement plutôt que d'inventer une solution.
 
+Anti-répétition (obligatoire) :
+- L'historique ci-dessus contient déjà les réponses envoyées par le Support. Ne reprend JAMAIS une information que le Support a déjà transmise : n'utilise l'historique que pour comprendre le contexte, pas pour le resservir.
+- Si la question de l'utilisateur est déjà traitée par un échange précédent (réponse déjà envoyée), ne réponds pas : renvoie {"canAnswer": false, "skipReason": "ALREADY_ANSWERED"}.
+
 Règles strictes de format :
 - Réponse courte : 1 à 2 paragraphes maximum, va droit au but, pas de répétition de ce que l'utilisateur a déjà dit.
 - N'inclus JAMAIS de formule de politesse ("Bonjour", "Cordialement"...), de signature, ni le nom de l'expéditeur ou du destinataire — ils sont ajoutés automatiquement par le système. Ta réponse doit commencer directement par le contenu utile.
 
 Réponds UNIQUEMENT avec un objet JSON strict, sans markdown, au format :
-{"canAnswer": true ou false, "replyHtml": "réponse en HTML simple (paragraphes, listes), sans formule de politesse ni signature, vide si canAnswer est false", "usedKnowledgeChunkIds": [identifiants numériques des extraits de connaissance réellement utilisés], "confidence": 0.0 à 1.0}`,
+{"canAnswer": true ou false, "skipReason": "vide si canAnswer est true, sinon ALREADY_ANSWERED ou NOT_ENOUGH_INFO", "replyHtml": "réponse en HTML simple (paragraphes, listes), sans formule de politesse ni signature, vide si canAnswer est false", "usedKnowledgeChunkIds": [identifiants numériques des extraits de connaissance réellement utilisés], "confidence": 0.0 à 1.0}`,
   },
 
   extractSkill: {
