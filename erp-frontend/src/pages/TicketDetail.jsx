@@ -276,8 +276,9 @@ export default function TicketDetail() {
   const [allUsers, setAllUsers] = useState([]);
   const [syncFailures, setSyncFailures] = useState([]);
   const [savingField, setSavingField] = useState(null);
-  // Personnes suggérées par l'IA de triage (technicien scoré + observateurs) — affichées
-  // directement dans « Propriétés du ticket » (GET /tickets/:id/triage-suggestions).
+  // Technicien suggéré par l'IA de triage — affiché directement dans « Propriétés du
+  // ticket » (GET /tickets/:id/triage-suggestions). Les observateurs ne sont pas
+  // suggérés : ils sont définis dans la vue Équipe et rattachés à la création.
   const [peopleSug, setPeopleSug] = useState(null);
   const [forwarding, setForwarding] = useState(false);
   const [conversationIdDraft, setConversationIdDraft] = useState('');
@@ -483,7 +484,7 @@ export default function TicketDetail() {
     load();
   }, [id, load]);
 
-  // ── Personnes suggérées (IA de triage) ───────────────────────────────────────
+  // ── Technicien suggéré (IA de triage) ────────────────────────────────────────
   // Même endpoint que le centre de validation (permission tickets.approve côté serveur) :
   // silencieux si 403 ou si le ticket ne porte aucune suggestion utile.
   const fetchPeopleSug = useCallback(() => {
@@ -502,10 +503,8 @@ export default function TicketDetail() {
     return undefined;
   }, [canApprove, fetchPeopleSug]);
 
-  const currentObserverIds = (ticket?.observers || []).map((o) => o.id);
   const suggestedTech = peopleSug?.technician && !peopleSug.technician.current ? peopleSug.technician : null;
-  const suggestedObservers = (peopleSug?.observers || []).filter((o) => !currentObserverIds.includes(o.id));
-  const showPeopleSuggestions = canApprove && !!peopleSug && (suggestedTech || suggestedObservers.length > 0);
+  const showPeopleSuggestions = canApprove && !!suggestedTech;
 
   async function applySuggestedTechnician() {
     if (!suggestedTech) return;
@@ -513,22 +512,6 @@ export default function TicketDetail() {
       setSavingField('sugAssignee');
       await api.patch(`/tickets/${id}`, { assigneeIds: [suggestedTech.id] });
       toast.success(`Technicien suggéré appliqué — ${suggestedTech.fullName}`);
-      fetchPeopleSug();
-      load();
-    } catch (err) {
-      toast.error(err.response?.data?.error || "Échec de l'application de la suggestion");
-    } finally {
-      setSavingField(null);
-    }
-  }
-
-  async function applySuggestedObservers() {
-    if (suggestedObservers.length === 0) return;
-    try {
-      setSavingField('sugObservers');
-      const merged = [...new Set([...currentObserverIds, ...suggestedObservers.map((o) => o.id)])];
-      await api.patch(`/tickets/${id}`, { observerIds: merged });
-      toast.success(`${suggestedObservers.length} observateur(s) suggéré(s) ajouté(s)`);
       fetchPeopleSug();
       load();
     } catch (err) {
@@ -3426,14 +3409,14 @@ export default function TicketDetail() {
                 )}
               </div>
 
-              {/* Personnes suggérées par l'IA — affichées ici plutôt que dans une zone
-                  de suggestion à part (centré sur les personnes : technicien + observateurs) */}
+              {/* Technicien suggéré par l'IA — affiché ici plutôt que dans une zone de
+                  suggestion à part. Les observateurs relèvent de la vue Équipe. */}
               {showPeopleSuggestions && (
                 <div className="sm:col-span-2 rounded-xl border border-blue-500/20 bg-blue-500/5 p-3 space-y-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-1.5">
                       <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                      Personnes suggérées par l'IA
+                      Technicien suggéré par l'IA
                     </span>
                     <span className="text-[9px] font-bold text-on-surface-variant">compétence · historique · charge</span>
                   </div>
@@ -3461,27 +3444,6 @@ export default function TicketDetail() {
                         className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-blue-600 hover:bg-blue-700 text-white transition-all disabled:opacity-50 shrink-0"
                       >
                         {savingField === 'sugAssignee' ? '…' : 'Appliquer'}
-                      </button>
-                    </div>
-                  )}
-
-                  {suggestedObservers.length > 0 && (
-                    <div className="flex items-center justify-between gap-3 flex-wrap border-t border-blue-500/15 pt-2.5">
-                      <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                        <span className="text-[10px] font-bold text-on-surface-variant shrink-0">Observateurs :</span>
-                        {suggestedObservers.map((o) => (
-                          <span key={o.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/25 text-[11px] font-semibold text-blue-700 dark:text-blue-300">
-                            {o.fullName}
-                          </span>
-                        ))}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={applySuggestedObservers}
-                        disabled={savingField === 'sugObservers'}
-                        className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-blue-600 hover:bg-blue-700 text-white transition-all disabled:opacity-50 shrink-0"
-                      >
-                        {savingField === 'sugObservers' ? '…' : `Appliquer (${suggestedObservers.length})`}
                       </button>
                     </div>
                   )}

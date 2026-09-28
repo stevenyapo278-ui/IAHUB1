@@ -405,11 +405,10 @@ async function suggestTriage(ticket) {
       }
     : null;
 
-  const [observers, priority, analysis] = await Promise.all([
-    suggestObservers({
-      teamId: team?.id || ticket.teamId || null,
-      excludeIds: [best?.id, ticket.assignedToId].filter(Boolean),
-    }),
+  // Les observateurs ne sont PAS un objet de suggestion : ils sont définis une fois
+  // pour toutes dans la vue Équipe (defaultObservers) et rattachés automatiquement
+  // à la création (ticketCreator.suggestObservers).
+  const [priority, analysis] = await Promise.all([
     suggestPriority({ ticket }),
     suggestAnalysisFields(ticket),
   ]);
@@ -418,7 +417,6 @@ async function suggestTriage(ticket) {
     analysis,
     technician,
     team: team ? { ...team, current: ticket.teamId === team.id } : null,
-    observers,
     priority,
     ranked: ranked.slice(0, 5).map((c) => ({
       id: c.id, fullName: c.fullName, score: c.score, skillLevel: c.skillLevel,
