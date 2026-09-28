@@ -140,8 +140,9 @@ export default function TicketEvolution() {
     return f;
   }, [statusFilter, priorityFilter, teamFilter, sourceFilter, teams]);
 
+  // Les filtres de période de /tickets s'appellent dateFrom/dateTo (pas startDate/endDate)
   const buildDrillParams = useCallback(() => {
-    const p = { startDate, endDate };
+    const p = { dateFrom: startDate, dateTo: endDate };
     if (statusFilter) p.status = statusFilter;
     if (priorityFilter) p.priority = priorityFilter;
     if (teamFilter) p.teamId = teamFilter;
@@ -149,8 +150,11 @@ export default function TicketEvolution() {
     return p;
   }, [startDate, endDate, statusFilter, priorityFilter, teamFilter, sourceFilter]);
 
-  const openDrillDown = useCallback((title, extraParams) => {
-    const params = { ...buildDrillParams(), ...extraParams };
+  const openDrillDown = useCallback((title, extraParams, { byResolution = false } = {}) => {
+    const base = buildDrillParams();
+    // Drill « Résolus » : la fenêtre porte sur la date de résolution, pas sur la création
+    if (byResolution) { delete base.dateFrom; delete base.dateTo; }
+    const params = { ...base, ...extraParams };
     setDrillDown({ title, params });
     setDrillLoading(true);
     setDrillTickets([]);
@@ -350,11 +354,11 @@ export default function TicketEvolution() {
             <StatCard icon={BarChart3} label="Créés" value={totals.created} color="bg-blue-500/10 text-blue-500"
               onClick={() => openDrillDown('Tickets créés', {})} />
             <StatCard icon={CheckCircle2} label="Résolus" value={totals.resolved} color="bg-emerald-500/10 text-emerald-500"
-              onClick={() => openDrillDown('Tickets résolus', { status: 'SOLVED' })} />
+              onClick={() => openDrillDown('Tickets résolus', { resolutionFrom: startDate, resolutionTo: endDate }, { byResolution: true })} />
             <StatCard icon={AlertTriangle} label="P1 critiques" value={totals.p1} color="bg-red-500/10 text-red-500"
               onClick={() => openDrillDown('Tickets P1 critiques', { priority: 'P1' })} />
             <StatCard icon={XCircle} label="SLA dépassés" value={totals.slaBreached} color="bg-orange-500/10 text-orange-500"
-              onClick={() => openDrillDown('SLA dépassés', { due: 'overdue' })} />
+              onClick={() => openDrillDown('SLA dépassés', { slaBreached: 'true' })} />
             <StatCard icon={Clock} label="Jours résol." value={totals.avgResolutionDays} color="bg-violet-500/10 text-violet-500" sub="moyen" />
             <StatCard icon={TrendingUp} label="Taux réponse" value={`${totals.responseRate || 0}%`} color="bg-teal-500/10 text-teal-500" />
           </div>

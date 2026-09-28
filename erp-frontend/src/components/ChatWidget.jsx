@@ -3,9 +3,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import MarkdownContent from './MarkdownContent';
 import MarieLoader from './MarieLoader';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip } from 'recharts';
-import { Download, BarChart2, Send, Paperclip, MessageSquare, Users, TrendingUp, AlertTriangle, Timer, BarChart3, HelpCircle, PlusCircle, X, Mic, MicOff, Bot } from 'lucide-react';
+import { Download, BarChart2, Send, Paperclip, MessageSquare, Users, TrendingUp, AlertTriangle, Timer, BarChart3, HelpCircle, PlusCircle, X, Mic, MicOff, Bot, Check } from 'lucide-react';
 import VoiceVisualizer from './VoiceVisualizer';
-import VoiceModeModal from './VoiceModeModal';
+import { useVoiceSession } from '../context/VoiceSessionContext';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
@@ -157,12 +157,14 @@ export default function ChatWidget() {
     }
   });
 
-  // Voice mode (full-screen assistant)
-  const [voiceModeOpen, setVoiceModeOpen] = useState(false);
+  // Voice mode : session globale (modal + mini-orbe montés par VoiceSessionProvider)
+  const { open: openVoice } = useVoiceSession();
   const [isBrainstormMode, setIsBrainstormMode] = useState(false);
 
   // Conversation management
   const [conversationId, setConversationId] = useState(null);
+  // Action en attente de confirmation côté serveur (ex: rapport à envoyer)
+  const [pendingAction, setPendingAction] = useState(null);
   const [conversations, setConversations] = useState([]);
   const [showConversationList, setShowConversationList] = useState(false);
 
@@ -269,6 +271,7 @@ export default function ChatWidget() {
       setMessages([WELCOME_MESSAGE]);
       setIsBrainstormMode(false); // Reset mode brainstorming !
       setReplyTo(null);
+      setPendingAction(null);
       removeAttachment();
       setInput('');
       setShowConversationList(false);
@@ -291,7 +294,13 @@ export default function ChatWidget() {
       if (data.length > 0) {
         setMessages([WELCOME_MESSAGE, ...data.map((m) => ({ id: m.id, role: m.role, content: m.content, sources: m.sources, rating: m.rating, widget: m.widget }))]);
       }
-    } catch {}
+      try {
+        const resPending = await api.get(`/chat/pending-confirmation?conversationId=${convId}`);
+        setPendingAction(resPending.data?.pendingConfirmation || null);
+      } catch { setPendingAction(null); }
+    } catch {
+      setPendingAction(null);
+    }
     setLoading(false);
     inputRef.current?.focus();
   }
@@ -343,6 +352,7 @@ export default function ChatWidget() {
         setConversationId(data.conversationId);
         loadConversations();
       }
+      setPendingAction(data.pendingConfirmation || null);
       setMessages((prev) => [...prev, { role: 'assistant', content: data.reply, sources: data.sources, action: data.action, widget: data.widget }]);
       removeAttachment();
     } catch {
@@ -375,6 +385,7 @@ export default function ChatWidget() {
         setConversationId(data.conversationId);
         loadConversations();
       }
+      setPendingAction(data.pendingConfirmation || null);
 
       return data.reply;
     } catch (err) {
@@ -568,6 +579,42 @@ export default function ChatWidget() {
               </div>
             )}
 
+            {/* Carte « action en attente » — confirmation d'envoi, etc. */}
+            {pendingAction && (
+              <div className="px-3 pt-1 shrink-0">
+                <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 overflow-hidden animate-fade-in">
+                  <div className="flex items-center gap-2 px-3 py-1.5 border-b border-amber-500/25">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                    <span className="text-[10.5px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wide">
+                      Action en attente ·{' '}
+                      {pendingAction.tool === 'send_ticket_report' ? 'Rapport par email'
+                        : pendingAction.tool === 'add_ticket_followup' ? 'Ajout de commentaire'
+                        : 'Confirmation requise'}
+                    </span>
+                  </div>
+                  <div className="px-3 py-2 text-[11.5px] leading-relaxed text-on-surface whitespace-pre-line line-clamp-3">
+                    {pendingAction.prompt}
+                  </div>
+                  <div className="flex items-center gap-2 px-3 pb-2">
+                    <button
+                      onClick={() => sendMessage('oui')}
+                      disabled={loading}
+                      className="flex items-center gap-1 px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-[11.5px] font-bold transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      <Check className="w-3 h-3" /> Envoyer
+                    </button>
+                    <button
+                      onClick={() => sendMessage('non annule')}
+                      disabled={loading}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-outline-variant/50 hover:bg-surface-container-high text-on-surface-variant text-[11.5px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      <X className="w-3 h-3" /> Annuler
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Input */}
             <div className="px-3 pb-3 pt-1 shrink-0">
               <div className="flex items-center gap-2 bg-surface-container border border-outline-variant/60 rounded-xl px-3 py-2">
@@ -598,7 +645,7 @@ export default function ChatWidget() {
                 {voiceSupported && (
                   <>
                     <button
-                      onClick={() => setVoiceModeOpen(true)}
+                      onClick={openVoice}
                       className="p-1.5 rounded-lg hover:bg-surface-container-high text-on-surface-variant transition-colors cursor-pointer"
                       title="Mode vocal (assistant complet)"
                     >
@@ -628,12 +675,6 @@ export default function ChatWidget() {
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Mode vocal plein écran */}
-      <VoiceModeModal
-        isOpen={voiceModeOpen}
-        onClose={() => setVoiceModeOpen(false)}
-      />
     </>
   );
 }

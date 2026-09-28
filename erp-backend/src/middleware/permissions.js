@@ -9,6 +9,31 @@ async function getUserPermissions(userId) {
   return new Set(groups.flatMap((g) => g.permissions));
 }
 
+// Vérification de permission HORS middleware (services : chatbot, rapports…).
+// Mêmes règles que requirePermission : SUPERADMIN passe toujours ; sinon seules
+// les permissions des groupes de droits comptent ; un SUPERADMIN ayant endossé
+// un autre rôle garde les permissions du groupe par défaut de ce rôle.
+async function hasPermission(user, key) {
+  if (!user || !key) return false;
+  if (user.role === 'SUPERADMIN') return true;
+
+  const groups = await prisma.permissionGroup.findMany({
+    where: { members: { some: { id: user.sub } } },
+    select: { permissions: true },
+  });
+  const perms = new Set(groups.flatMap((g) => g.permissions));
+  if (perms.has(key)) return true;
+
+  if (Array.isArray(user.roles) && user.roles.includes('SUPERADMIN')) {
+    const groupName = ROLE_DEFAULT_GROUP_NAME[user.role];
+    if (groupName) {
+      const group = await prisma.permissionGroup.findUnique({ where: { name: groupName }, select: { permissions: true } });
+      if (group && group.permissions.includes(key)) return true;
+    }
+  }
+  return false;
+}
+
 // requirePermission(key) : SUPERADMIN passe toujours (au-dessus de tout groupe). Pour tous les
 // autres rôles (ADMIN inclus), seules les permissions des groupes de droits de l'utilisateur
 // comptent — le rôle ne sert plus jamais de filet de secours. Un utilisateur sans aucun groupe
@@ -20,28 +45,7 @@ async function getUserPermissions(userId) {
 function requirePermission(key) {
   return async (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: 'Authentification requise' });
-    if (req.user.role === 'SUPERADMIN') return next();
-
-    const groups = await prisma.permissionGroup.findMany({
-      where: { members: { some: { id: req.user.sub } } },
-      select: { permissions: true },
-    });
-
-    const perms = new Set(groups.flatMap((g) => g.permissions));
-    if (perms.has(key)) return next();
-
-    // Impersonation via le switch de rôle : un SUPERADMIN qui a endossé un autre rôle n'est
-    // généralement pas membre des groupes de droits en base. On lui accorde les permissions du
-    // groupe par défaut du rôle actif (même règle que /auth/switch-role et /auth/me), sinon le
-    // frontend afficherait des menus que l'API rejetterait systématiquement en 403.
-    if (Array.isArray(req.user.roles) && req.user.roles.includes('SUPERADMIN')) {
-      const groupName = ROLE_DEFAULT_GROUP_NAME[req.user.role];
-      if (groupName) {
-        const group = await prisma.permissionGroup.findUnique({ where: { name: groupName }, select: { permissions: true } });
-        if (group && group.permissions.includes(key)) return next();
-      }
-    }
-
+    if (await hasPermission(req.user, key)) return next();
     return res.status(403).json({ error: 'Accès refusé' });
   };
 }
@@ -54,4 +58,4 @@ function requireSuperAdmin(req, res, next) {
   next();
 }
 
-module.exports = { requirePermission, getUserPermissions, requireSuperAdmin };
+module.exports = { requirePermission, getUserPermissions, requireSuperAdmin, hasPermission };

@@ -15,8 +15,11 @@ export function useDashboard(id) {
 }
 
 // ── Dashboard data (existing endpoints, now with SWR) ──
-export function useDashboardStats(days = 30) {
-  const { data, error, isLoading } = useSWR(`/dashboard/stats?days=${days}`, fetcher, {
+// scope : 'all' (défaut) | 'open' | 'closed' — sélecteur par widget.
+// enabled=false → clé nulle, la requête n'est émise que si un widget le demande.
+export function useDashboardStats(days = 30, scope = 'all', enabled = true) {
+  const key = enabled ? `/dashboard/stats?days=${days}&scope=${scope}` : null;
+  const { data, error, isLoading } = useSWR(key, fetcher, {
     refreshInterval: 30000,
   });
   return { stats: data, isLoading, error };

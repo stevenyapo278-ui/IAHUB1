@@ -36,6 +36,8 @@ import {
   Settings2,
   Monitor,
   UserCircle,
+  Menu,
+  X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'sonner';
@@ -50,6 +52,7 @@ import NotificationPanel from '../components/NotificationPanel';
 import LayoutSettings from '../components/LayoutSettings';
 import CustomizerDrawer from '../components/CustomizerDrawer';
 import CursorGlow from '../components/CursorGlow';
+import Tooltip from '../components/ui/tooltip';
 import { useNotifications } from '../context/NotificationContext';
 import { useUserPreferences } from '../context/UserPreferencesContext';
 import { useSocket } from '../context/SocketContext';
@@ -126,6 +129,9 @@ export default function MainLayout() {
   const [showLayoutSettings, setShowLayoutSettings] = useState(false);
   const [showCustomizer, setShowCustomizer] = useState(false);
   const [sidebarHovered, setSidebarHovered] = useState(false);
+  // Tiroir mobile : sidebar en overlay sous 768px (hamburger dans la topbar)
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const isMobileViewport = () => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches;
   const [sidebarPinned, setSidebarPinned] = useState(() => {
     try { return localStorage.getItem('sidebarPinned') === 'true'; } catch { return false; }
   });
@@ -214,6 +220,7 @@ export default function MainLayout() {
     setShowOrgMenu(false);
     setShowSystemMenu(false);
     setShowUserMenu(false);
+    setMobileOpen(false);
   }, [location.pathname]);
 
   function handleLogout() { setShowLogoutConfirm(true); }
@@ -331,12 +338,22 @@ export default function MainLayout() {
       <CursorGlow />
       <GlobalSearch />
 
+      {/* Backdrop du tiroir mobile */}
+      {mobileOpen && (
+        <div className="sidebar-backdrop" onClick={() => setMobileOpen(false)} aria-hidden="true" />
+      )}
+
       {/* SIDEBAR */}
       <aside
         ref={sidebarRef}
-        className={`app-sidebar ${isSidebarExpanded ? 'expanded' : ''}`}
-        onMouseEnter={() => setSidebarHovered(true)}
-        onMouseLeave={() => { if (!sidebarPinned) setSidebarHovered(false); setShowOrgMenu(false); setShowSystemMenu(false); }}
+        className={`app-sidebar ${isSidebarExpanded || mobileOpen ? 'expanded' : ''} ${mobileOpen ? 'mobile-open' : ''}`}
+        onMouseEnter={() => { if (!isMobileViewport()) setSidebarHovered(true); }}
+        onMouseLeave={() => {
+          if (isMobileViewport()) return;
+          if (!sidebarPinned) setSidebarHovered(false);
+          setShowOrgMenu(false);
+          setShowSystemMenu(false);
+        }}
       >
         {/* Logo */}
         <div className="sidebar-logo flex items-center gap-3">
@@ -350,15 +367,15 @@ export default function MainLayout() {
           </div>
           {/* Bouton épingler/détacher la sidebar */}
           {isSidebarExpanded && (
-            <button
-              onClick={() => {
-                const next = !sidebarPinned;
-                setSidebarPinned(next);
-                try { localStorage.setItem('sidebarPinned', String(next)); } catch {}
-              }}
-              className="ml-auto shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-colors"
-              title={sidebarPinned ? 'Détacher la barre latérale' : 'Épingler la barre latérale'}
-            >
+            <Tooltip content={sidebarPinned ? 'Détacher la barre latérale' : 'Épingler la barre latérale'} side="right">
+              <button
+                onClick={() => {
+                  const next = !sidebarPinned;
+                  setSidebarPinned(next);
+                  try { localStorage.setItem('sidebarPinned', String(next)); } catch {}
+                }}
+                className="ml-auto shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-colors"
+              >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 {sidebarPinned ? (
                   <><line x1="12" y1="17" x2="12" y2="22" /><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" /></>
@@ -366,12 +383,16 @@ export default function MainLayout() {
                   <><line x1="12" y1="17" x2="12" y2="22" /><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" /><line x1="3" y1="3" x2="21" y2="21" strokeOpacity="0.5" /></>
                 )}
               </svg>
-            </button>
+              </button>
+            </Tooltip>
           )}
         </div>
 
-        {/* Navigation */}
-        <nav className="sidebar-nav">
+        {/* Navigation — clic sur un lien : ferme le tiroir mobile */}
+        <nav
+          className="sidebar-nav"
+          onClick={(e) => { if (e.target.closest('a[href]')) setMobileOpen(false); }}
+        >
           {/* Tant que les réglages ne sont pas chargés (1er passage sans cache), on ne rend
               pas la nav : évite le flash d'items que la navigationConfig va masquer. */}
           {settingsLoading && !systemSettings ? (
@@ -553,11 +574,11 @@ export default function MainLayout() {
 
       {/* MAIN CONTENT */}
       <div
-        className="flex-1 flex flex-col overflow-hidden transition-all duration-200"
+        className="app-main flex-1 flex flex-col overflow-hidden transition-all duration-200"
         style={{ marginLeft: sidebarW }}
       >
         <header
-          className="h-14 flex items-center px-6 shrink-0 border-b backdrop-blur-xl sticky top-0 z-30 transition-all duration-200"
+          className="h-14 flex items-center gap-2 sm:gap-3 px-4 sm:px-6 shrink-0 border-b backdrop-blur-xl sticky top-0 z-30 transition-all duration-200"
           style={{
             backgroundColor: 'color-mix(in srgb, var(--color-surface-container-lowest) 80%, transparent)',
             borderColor: 'var(--color-outline-variant)',
@@ -565,6 +586,18 @@ export default function MainLayout() {
             backdropFilter: 'blur(20px) saturate(1.4)',
           }}
         >
+          {/* Hamburger — ouvre le tiroir de navigation en mobile */}
+          <button
+            onClick={() => setMobileOpen((v) => !v)}
+            className="md:hidden shrink-0 w-9 h-9 flex items-center justify-center rounded-xl border border-outline-variant/60 hover:bg-surface-container-high transition-all"
+            aria-label={mobileOpen ? 'Fermer le menu' : 'Ouvrir le menu'}
+            aria-expanded={mobileOpen}
+          >
+            {mobileOpen
+              ? <X className="w-4 h-4 text-on-surface-variant" />
+              : <Menu className="w-4 h-4 text-on-surface-variant" />}
+          </button>
+
           {/* Left: Dynamic Breadcrumb Header */}
           <div className="flex items-center gap-2 text-xs font-medium min-w-0 flex-1">
             <span className="text-on-surface-variant font-normal hidden sm:inline-block">
@@ -604,11 +637,11 @@ export default function MainLayout() {
 
             {/* Notifications */}
             <div className="relative" ref={notifBtnRef}>
-              <button
-                onClick={toggleNotifications}
-                className="relative w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:bg-surface-container-high hover:border-primary/40 border border-outline-variant/60 group"
-                title={`Alertes${unreadCount > 0 ? ` (${unreadCount} non lues)` : ''}`}
-              >
+              <Tooltip content={`Alertes${unreadCount > 0 ? ` (${unreadCount} non lues)` : ''}`}>
+                <button
+                  onClick={toggleNotifications}
+                  className="relative w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:bg-surface-container-high hover:border-primary/40 border border-outline-variant/60 group"
+                >
                 <Bell className="w-4 h-4 text-on-surface-variant group-hover:text-primary transition-colors" />
                 {unreadCount > 0 && (
                   <span
@@ -618,42 +651,46 @@ export default function MainLayout() {
                     {unreadCount > 99 ? '99+' : unreadCount}
                   </span>
                 )}
-              </button>
+                </button>
+              </Tooltip>
               <NotificationPanel open={showNotifications} onClose={() => setShowNotifications(false)} />
             </div>
 
             {/* Layout settings — Skin & Layout panel */}
-            <button
-              onClick={() => setShowLayoutSettings(true)}
-              className="w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:bg-surface-container-high hover:border-primary/40 border border-outline-variant/60 group"
-              title="Personnaliser l'apparence"
-            >
-              <Palette className="w-4 h-4 text-on-surface-variant group-hover:text-primary transition-colors" />
-            </button>
+            <Tooltip content="Personnaliser l'apparence">
+              <button
+                onClick={() => setShowLayoutSettings(true)}
+                className="w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:bg-surface-container-high hover:border-primary/40 border border-outline-variant/60 group"
+              >
+                <Palette className="w-4 h-4 text-on-surface-variant group-hover:text-primary transition-colors" />
+              </button>
+            </Tooltip>
 
             {/* Customizer — Dashboard widgets, tables & shortcuts */}
-            <button
-              onClick={() => setShowCustomizer(true)}
-              className="w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:bg-surface-container-high hover:border-primary/40 border border-outline-variant/60 group"
-              title="Personnaliser le dashboard & les tables"
-            >
-              <Settings2 className="w-4 h-4 text-on-surface-variant group-hover:text-primary transition-colors" />
-            </button>
+            <Tooltip content="Personnaliser le dashboard & les tables">
+              <button
+                onClick={() => setShowCustomizer(true)}
+                className="w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:bg-surface-container-high hover:border-primary/40 border border-outline-variant/60 group"
+              >
+                <Settings2 className="w-4 h-4 text-on-surface-variant group-hover:text-primary transition-colors" />
+              </button>
+            </Tooltip>
 
             {/* Theme toggle — Soleil ↔ Lune avec rotation premium */}
-            <button
-              onClick={toggleTheme}
-              className="theme-toggle-btn w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:bg-surface-container-high hover:border-primary/40 border border-outline-variant/60 active:scale-90"
-              title={theme === 'dark' ? 'Basculer en Mode clair' : 'Basculer en Mode sombre'}
-              aria-label={theme === 'dark' ? 'Basculer en Mode clair' : 'Basculer en Mode sombre'}
-            >
-              <span className={`theme-toggle-icon ${theme === 'dark' ? 'active' : ''}`} aria-hidden="true">
-                <Sun className="w-4 h-4 text-amber-400" />
-              </span>
-              <span className={`theme-toggle-icon ${theme !== 'dark' ? 'active' : ''}`} aria-hidden="true">
-                <Moon className="w-4 h-4 text-indigo-600 dark:text-indigo-300" />
-              </span>
-            </button>
+            <Tooltip content={theme === 'dark' ? 'Basculer en Mode clair' : 'Basculer en Mode sombre'}>
+              <button
+                onClick={toggleTheme}
+                className="theme-toggle-btn w-9 h-9 rounded-xl flex items-center justify-center transition-all hover:bg-surface-container-high hover:border-primary/40 border border-outline-variant/60 active:scale-90"
+                aria-label={theme === 'dark' ? 'Basculer en Mode clair' : 'Basculer en Mode sombre'}
+              >
+                <span className={`theme-toggle-icon ${theme === 'dark' ? 'active' : ''}`} aria-hidden="true">
+                  <Sun className="w-4 h-4 text-amber-400" />
+                </span>
+                <span className={`theme-toggle-icon ${theme !== 'dark' ? 'active' : ''}`} aria-hidden="true">
+                  <Moon className="w-4 h-4 text-indigo-600 dark:text-indigo-300" />
+                </span>
+              </button>
+            </Tooltip>
           </div>
         </header>
 

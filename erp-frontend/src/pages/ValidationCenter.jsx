@@ -22,7 +22,10 @@ import Pagination from '../components/Pagination';
 import {
   MapPin, Layers, Flame, Bot, AlertOctagon,
 } from 'lucide-react';
-import { ORIGIN_CONFIG } from '../constants/tickets';
+import EmptyState from '../components/EmptyState';
+import FadeIn from '../components/FadeIn';
+import { ORIGIN_CONFIG, URGENCY_IMPACT_OPTIONS } from '../constants/tickets';
+import { flattenCategoryTree } from '../utils/categoryTree';
 import {
   clearClosureAnalysis,
   getClosureAnalysisState,
@@ -69,6 +72,54 @@ function matchesSearch(item, tab, q) {
     ];
   }
   return fields.some((v) => v && String(v).toLowerCase().includes(q));
+}
+
+// Champ de formulaire de triage : label + badge « modifié » (vs valeur actuelle du ticket).
+function TriageField({ label, badge, children, wide }) {
+  return (
+    <label className={`space-y-1 ${wide ? 'col-span-2' : ''}`}>
+      <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+        {label}
+        {badge && (
+          <span className="px-1 py-0.5 text-[8px] font-extrabold rounded bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 uppercase">
+            {badge}
+          </span>
+        )}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+const TRIAGE_INPUT = 'w-full px-2.5 py-1.5 rounded-lg bg-surface-container border border-outline-variant/30 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-blue-500/40';
+
+// Formulaire pré-rempli à partir des suggestions : chaque champ prend la valeur
+// suggérée (alternative de catégorie, technicien scoré, priorité matrice, équipe
+// historique…) quand elle existe, sinon la valeur actuelle du ticket.
+function buildTriageForm(data) {
+  const c = data.current || {};
+  return {
+    title: c.title || '',
+    category: data.analysis?.categoryAlternative?.value || data.analysis?.category || c.category || '',
+    type: data.analysis?.type || c.type || 'INCIDENT',
+    impact: data.analysis?.impact || c.impact || 'MEDIUM',
+    urgency: data.analysis?.urgency || c.urgency || 'MEDIUM',
+    priority: data.priority?.value || c.priority || 'P3',
+    locationId: c.locationId || '',
+    teamId: data.team?.id || c.teamId || '',
+    assignedToId: data.technician?.id || c.assignedToId || '',
+    observerIds: [...new Set([...(c.observerIds || []), ...(data.observers || []).map((o) => o.id)])],
+  };
+}
+
+// Nombre de champs du formulaire qui diffèrent de la valeur réelle du ticket.
+// Utilisé par l'en-tête du panneau (badge « modifié ») et par le footer de la
+// modale (bouton « Approuver avec ces corrections » + garde-fou de fermeture).
+function countTriageChanges(current, form) {
+  const obsChanged = JSON.stringify([...(form.observerIds || [])].sort())
+    !== JSON.stringify([...(current.observerIds || [])].sort());
+  return ['title', 'category', 'type', 'impact', 'urgency', 'priority', 'locationId', 'teamId', 'assignedToId']
+    .filter((k) => String(form[k] ?? '') !== String(current[k] ?? '')).length + (obsChanged ? 1 : 0);
 }
 
 export default function ValidationCenter({ defaultTab = 'tickets' }) {
@@ -128,6 +179,15 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
 
   // Modale détail ticket (onglets Tickets & Clôtures IA)
   const [detailTicket, setDetailTicket] = useState(null);
+
+  // Suggestions de triage du ticket affiché (équipe, technicien, observateurs,
+  // priorité) — recalculées par GET /tickets/:id/triage-suggestions.
+  // Stockées avec leur ticketId : l'affichage est dérivé (aucun reset dans un effet).
+  const [triageSug, setTriageSug] = useState(null); // { ticketId, data }
+  // Formulaire de triage éditable, pré-rempli avec les suggestions
+  const [triageForm, setTriageForm] = useState(null);
+  const [triageLists, setTriageLists] = useState(null);
+  const [savingTriage, setSavingTriage] = useState(false);
 
   // Modale détail brouillon de connaissance
   const [detailKb, setDetailKb] = useState(null);
@@ -283,15 +343,133 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   }[activeTab] || 'Rechercher...';
 
   // --- ACTIONS TICKET PENDING ---
+  // Listes de référence pour le formulaire de triage (chargées une fois).
+  // Le staff est dérivé de GET /teams (members + defaultObservers) : GET /users
+  // est réservé aux admins et refuserait la Hotline.
+  useEffect(() => {
+    Promise.all([
+      api.get('/teams').catch(() => ({ data: [] })),
+      api.get('/locations').catch(() => ({ data: [] })),
+      api.get('/categories').catch(() => ({ data: [] })),
+    ]).then(([t, l, c]) => {
+      const teams = Array.isArray(t.data) ? t.data : (t.data.teams || []);
+      const byId = new Map();
+      for (const team of teams) {
+        for (const m of team.members || []) byId.set(m.id, { ...m, team: { name: team.name } });
+        for (const o of team.defaultObservers || []) {
+          if (!byId.has(o.id)) byId.set(o.id, { ...o, team: { name: team.name } });
+        }
+      }
+      setTriageLists({
+        teams,
+        users: [...byId.values()].sort((a, b) => String(a.fullName).localeCompare(String(b.fullName), 'fr')),
+        locations: Array.isArray(l.data) ? l.data : (l.data.locations || []),
+        categories: Array.isArray(c.data) ? c.data : (c.data.categories || []),
+      });
+    });
+  }, []);
+
+  // Suggestions de triage pour le ticket de la modale détail (onglet Tickets uniquement)
+  // — le formulaire est PRÉ-REMPLI avec les valeurs suggérées dès la réponse.
+  useEffect(() => {
+    const ticketId = detailTicket?.id;
+    if (!ticketId || activeTab !== 'tickets') return undefined;
+    let cancelled = false;
+    api.get(`/tickets/${ticketId}/triage-suggestions`)
+      .then(({ data }) => {
+        if (cancelled) return;
+        setTriageSug({ ticketId, data });
+        setTriageForm(buildTriageForm(data));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [detailTicket?.id, activeTab]);
+  const triageSugForTicket = triageSug && detailTicket && triageSug.ticketId === detailTicket.id ? triageSug.data : null;
+  // Écart entre le formulaire de triage et le ticket réel (dérivé au rendu, sans effet)
+  const triageDirtyCount = triageSugForTicket && triageForm
+    ? countTriageChanges(triageSugForTicket.current || {}, triageForm)
+    : 0;
+
+  // Enregistrer tous les champs du formulaire (pré-remplis avec les suggestions).
+  // Retourne true en cas de succès — réutilisé par « Approuver avec ces corrections ».
+  async function saveTriage() {
+    if (!detailTicket || !triageForm) return false;
+    setSavingTriage(true);
+    try {
+      await api.patch(`/tickets/${detailTicket.id}`, {
+        title: triageForm.title,
+        category: triageForm.category || null,
+        type: triageForm.type,
+        impact: triageForm.impact,
+        urgency: triageForm.urgency,
+        priority: triageForm.priority,
+        locationId: triageForm.locationId ? Number(triageForm.locationId) : null,
+        teamId: triageForm.teamId ? Number(triageForm.teamId) : null,
+        assignedToId: triageForm.assignedToId ? Number(triageForm.assignedToId) : null,
+        observerIds: triageForm.observerIds.map(Number),
+      });
+      toast.success(`Triage enregistré — ticket #${detailTicket.id}`);
+      const [{ data: full }, { data: sug }] = await Promise.all([
+        api.get(`/tickets/${detailTicket.id}`),
+        api.get(`/tickets/${detailTicket.id}/triage-suggestions`),
+      ]);
+      setDetailTicket(full);
+      setTriageSug({ ticketId: detailTicket.id, data: sug });
+      setTriageForm(buildTriageForm(sug));
+      loadAllData(true);
+      return true;
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de l\'enregistrement du triage');
+      return false;
+    } finally {
+      setSavingTriage(false);
+    }
+  }
+
+  async function handleSaveTriage() {
+    await saveTriage();
+  }
+
+  // Approbation en un clic depuis la modale : enregistre d'abord les corrections
+  // de triage si le formulaire est modifié, puis approuve et ferme la modale.
+  async function handleApproveWithTriage() {
+    if (!detailTicket) return;
+    if (triageDirtyCount > 0) {
+      const saved = await saveTriage();
+      if (!saved) return; // le formulaire reste ouvert, les corrections sont conservées
+    }
+    const approved = await handleApproveTicket(detailTicket.id);
+    if (approved) setDetailTicket(null);
+  }
+
+  // Fermeture de la modale détail : avertissement si des corrections de triage
+  // n'ont pas été enregistrées (le ticket en base reste alors inchangé).
+  function confirmDiscardTriage(action) {
+    return triageDirtyCount <= 0 || window.confirm(
+      `${triageDirtyCount} modification(s) de triage non enregistrée(s) — le ticket en base est inchangé.\n${action}`
+    );
+  }
+
+  function closeDetailTicket() {
+    if (confirmDiscardTriage('Fermer quand même ?')) setDetailTicket(null);
+  }
+
+  function openFullTicket() {
+    if (!detailTicket || !confirmDiscardTriage('Ouvrir le ticket complet quand même ?')) return;
+    navigate(`/tickets/${detailTicket.id}`);
+  }
+
   async function handleApproveTicket(ticketId) {
     try {
       const res = await api.post(`/tickets/${ticketId}/approve`);
       playApproval();
       toast.success(`Ticket #${ticketId} approuvé !`);
       loadAllData(true);
+      return true;
     } catch (err) {
       playError();
       toast.error(err.response?.data?.error || 'Erreur lors de l\'approbation du ticket');
+      return false;
     }
   }
 
@@ -713,13 +891,12 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   }
 
   const noResultsBlock = (
-    <div className="p-12 text-center bento-card border-dashed space-y-3">
-      <Search className="w-12 h-12 text-on-surface-variant/40 mx-auto" />
-      <h3 className="text-base font-bold text-on-surface">Aucun résultat pour cette recherche</h3>
-      <p className="text-xs text-on-surface-variant max-w-md mx-auto">
-        Aucun élément ne correspond à « {searchQuery.trim()} ». Essayez avec d'autres mots-clés.
-      </p>
-    </div>
+    <EmptyState
+      icon="search"
+      title="Aucun résultat pour cette recherche"
+      description={`Aucun élément ne correspond à « ${searchQuery.trim()} ». Essayez avec d'autres mots-clés.`}
+      className="border-dashed py-10"
+    />
   );
 
   return (
@@ -932,6 +1109,8 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
 
       {/* ── CONTENU SCROLLABLE ── */}
       <div className="flex-1 overflow-y-auto min-h-0 space-y-6 pt-2">
+        {/* Contenu d'onglet animé au changement (fondu + slide-up discret) */}
+        <FadeIn key={activeTab} y={8} className="space-y-6">
 
       {/* CONTENU DE L'ONGLET 1 : TICKETS EN ATTENTE GLPI */}
       {activeTab === 'tickets' && (
@@ -944,13 +1123,12 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             </div>
           ) : filteredList.length === 0 ? (
             activeList.length === 0 ? (
-              <div className="p-12 text-center bento-card border-dashed space-y-3">
-                <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto" />
-                <h3 className="text-base font-bold text-on-surface">Aucun ticket en attente d'approbation</h3>
-                <p className="text-xs text-on-surface-variant max-w-md mx-auto">
-                  Tous les tickets créés ont été validés et transmis.
-                </p>
-              </div>
+              <EmptyState
+                icon="tickets"
+                title="Aucun ticket en attente d'approbation"
+                description="Tous les tickets créés ont été validés et transmis."
+                className="border-dashed py-10"
+              />
             ) : noResultsBlock
           ) : (
             <div className="space-y-4">
@@ -1148,13 +1326,12 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             </div>
           ) : filteredList.length === 0 ? (
             activeList.length === 0 ? (
-              <div className="p-12 text-center bento-card border-dashed space-y-3">
-                <MailCheck className="w-12 h-12 text-purple-500 mx-auto" />
-                <h3 className="text-base font-bold text-on-surface">Aucune réponse IA en attente de validation</h3>
-                <p className="text-xs text-on-surface-variant max-w-md mx-auto">
-                  Toutes les réponses automatiques suggérées par l'IA ont été examinées et envoyées.
-                </p>
-              </div>
+              <EmptyState
+                icon="inbox"
+                title="Aucune réponse IA en attente de validation"
+                description="Toutes les réponses automatiques suggérées par l'IA ont été examinées et envoyées."
+                className="border-dashed py-10"
+              />
             ) : noResultsBlock
           ) : (
             <div className="space-y-6">
@@ -1341,13 +1518,12 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             </div>
           ) : filteredList.length === 0 ? (
             activeList.length === 0 ? (
-              <div className="p-12 text-center bento-card border-dashed space-y-3">
-                <Bell className="w-12 h-12 text-amber-500 mx-auto" />
-                <h3 className="text-base font-bold text-on-surface">Aucune relance automatique en attente</h3>
-                <p className="text-xs text-on-surface-variant max-w-md mx-auto">
-                  Les prochaines relances de tickets en attente apparaîtront ici pour approbation.
-                </p>
-              </div>
+              <EmptyState
+                icon="inbox"
+                title="Aucune relance automatique en attente"
+                description="Les prochaines relances de tickets en attente apparaîtront ici pour approbation."
+                className="border-dashed py-10"
+              />
             ) : noResultsBlock
           ) : (
             <div className="space-y-6">
@@ -1710,15 +1886,14 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             </div>
           ) : filteredList.length === 0 ? (
             activeList.length === 0 ? (
-              <div className="p-12 text-center bento-card border-dashed space-y-3">
-                <CheckCircle2 className="w-12 h-12 text-cyan-500 mx-auto" />
-                <h3 className="text-base font-bold text-on-surface">Aucune clôture suggérée en attente</h3>
-                <p className="text-xs text-on-surface-variant max-w-md mx-auto">
-                  {user?.role === 'TECHNICIAN'
-                    ? "Aucune clôture suggérée par l'IA sur vos tickets assignés pour le moment."
-                    : "L'IA ne clôt plus les tickets automatiquement : lorsqu'elle détecte un problème résolu, elle propose la clôture ici pour validation par la Hotline."}
-                </p>
-              </div>
+              <EmptyState
+                icon="default"
+                title="Aucune clôture suggérée en attente"
+                description={user?.role === 'TECHNICIAN'
+                  ? "Aucune clôture suggérée par l'IA sur vos tickets assignés pour le moment."
+                  : "L'IA ne clôt plus les tickets automatiquement : lorsqu'elle détecte un problème résolu, elle propose la clôture ici pour validation par la Hotline."}
+                className="border-dashed py-10"
+              />
             ) : noResultsBlock
           ) : (
             <div className="space-y-4">
@@ -1803,13 +1978,12 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
           {closureSubTab === 'rejected' && (
             <div className="space-y-3">
               {rejectedClosures.length === 0 ? (
-                <div className="p-12 text-center bento-card border-dashed space-y-3">
-                  <XCircle className="w-12 h-12 text-amber-500 mx-auto" />
-                  <h3 className="text-base font-bold text-on-surface">Aucune clôture rejetée</h3>
-                  <p className="text-xs text-on-surface-variant max-w-md mx-auto">
-                    Les suggestions de clôture rejetées par la Hotline apparaissent ici pour pouvoir être récupérées.
-                  </p>
-                </div>
+                <EmptyState
+                    icon="default"
+                    title="Aucune clôture rejetée"
+                    description="Les suggestions de clôture rejetées par la Hotline apparaissent ici pour pouvoir être récupérées."
+                    className="border-dashed py-10"
+                  />
               ) : (
                 rejectedClosures.map((t) => (
                   <div
@@ -1895,13 +2069,12 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
               ))}
             </div>
           ) : filteredList.length === 0 ? (
-            <div className="p-12 text-center bento-card border-dashed space-y-3">
-              <MailCheck className="w-12 h-12 text-emerald-500 mx-auto" />
-              <h3 className="text-base font-bold text-on-surface">Aucune réponse sur ticket fermé</h3>
-              <p className="text-xs text-on-surface-variant max-w-md mx-auto">
-                Quand un demandeur répond à un email concernant un ticket résolu ou fermé, la suggestion apparaît ici.
-              </p>
-            </div>
+            <EmptyState
+              icon="inbox"
+              title="Aucune réponse sur ticket fermé"
+              description="Quand un demandeur répond à un email concernant un ticket résolu ou fermé, la suggestion apparaît ici."
+              className="border-dashed py-10"
+            />
           ) : (
             <div className="space-y-4">
               {paginatedList.map((t) => (
@@ -2009,13 +2182,12 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             </div>
           ) : filteredList.length === 0 ? (
             activeList.length === 0 ? (
-              <div className="p-12 text-center bento-card border-dashed space-y-3">
-                <BookOpen className="w-12 h-12 text-emerald-500 mx-auto" />
-                <h3 className="text-base font-bold text-on-surface">Aucun brouillon de connaissance en attente</h3>
-                <p className="text-xs text-on-surface-variant max-w-md mx-auto">
-                  Utilisez le bouton "Capturer dans la KB" depuis un ticket résolu pour générer un article de base de connaissances.
-                </p>
-              </div>
+              <EmptyState
+                icon="knowledge"
+                title="Aucun brouillon de connaissance en attente"
+                description='Utilisez le bouton "Capturer dans la KB" depuis un ticket résolu pour générer un article de base de connaissances.'
+                className="border-dashed py-10"
+              />
             ) : noResultsBlock
           ) : (
             <div className="space-y-6">
@@ -2218,13 +2390,12 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             </div>
           ) : filteredList.length === 0 ? (
             activeList.length === 0 ? (
-              <div className="p-12 text-center bento-card border-dashed space-y-3">
-                <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto" />
-                <h3 className="text-base font-bold text-on-surface">Aucun email en attente de révision</h3>
-                <p className="text-xs text-on-surface-variant max-w-md mx-auto">
-                  Tous les emails entrants ont été traités automatiquement par l'IA.
-                </p>
-              </div>
+              <EmptyState
+                icon="inbox"
+                title="Aucun email en attente de révision"
+                description="Tous les emails entrants ont été traités automatiquement par l'IA."
+                className="border-dashed py-10"
+              />
             ) : noResultsBlock
           ) : (
             <div className="space-y-4">
@@ -2376,6 +2547,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
         </div>
       )}
 
+        </FadeIn>
       </div>{/* fin scrollable */}
 
       {/* ── PAGINATION (fixe en bas) ── */}
@@ -2619,7 +2791,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
 
       {/* MODALE DÉTAIL TICKET (onglets Tickets, Clôtures IA & Réponses sur fermés) */}
       {detailTicket && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fadeIn" onClick={() => setDetailTicket(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fadeIn" onClick={closeDetailTicket}>
           <div className="bg-surface border border-outline-variant/40 rounded-3xl max-w-3xl w-full max-h-[85vh] shadow-2xl flex flex-col" onClick={(e) => e.stopPropagation()}>
             {/* Header */}
             <div className="flex items-center justify-between p-6 pb-4 border-b border-outline-variant/20">
@@ -2644,7 +2816,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                   <p className="text-[11px] text-on-surface-variant">Ticket #{detailTicket.id}</p>
                 </div>
               </div>
-              <button onClick={() => setDetailTicket(null)} className="p-2 rounded-xl hover:bg-surface-container-high text-on-surface-variant transition-all">
+              <button onClick={closeDetailTicket} className="p-2 rounded-xl hover:bg-surface-container-high text-on-surface-variant transition-all">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -2726,6 +2898,204 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                   <Bot className="w-3.5 h-3.5 inline mr-1 -mt-0.5" />{detailTicket.aiSummary}
                 </p>
               )}
+
+              {/* Formulaire de triage — champs PRÉ-REMPLIS avec les suggestions */}
+              {activeTab === 'tickets' && triageSugForTicket && triageForm && triageLists && (() => {
+                const cur = triageSugForTicket.current || {};
+                const flatCats = flattenCategoryTree(triageLists.categories);
+                const staff = triageLists.users;
+                const techRoles = new Set(['TECHNICIAN', 'ADMIN', 'SUPERADMIN']);
+                const badge = (key) => (String(triageForm[key] ?? '') !== String(cur[key] ?? '') ? 'modifié' : null);
+                const obsChanged = JSON.stringify([...triageForm.observerIds].sort())
+                  !== JSON.stringify([...(cur.observerIds || [])].sort());
+                const tech = triageSugForTicket.technician;
+                // Dérivée au niveau composant (partagée avec le footer de la modale)
+                const changedCount = triageDirtyCount;
+                const userById = (id) => staff.find((u) => u.id === Number(id));
+                const setField = (key, value) => setTriageForm((f) => ({ ...f, [key]: value }));
+                return (
+                  <div className="p-4 rounded-2xl bg-blue-500/5 border border-blue-500/20 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                        <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">
+                          Triage pré-rempli · compétence · historique · charge
+                        </span>
+                      </div>
+                      {changedCount > 0 ? (
+                        <span
+                          className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/40"
+                          title="Le ticket en base est inchangé tant que vous n'avez pas cliqué sur « Enregistrer le triage » ou « Approuver »."
+                        >
+                          Non enregistré · {changedCount} champ(s)
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-semibold text-on-surface-variant">
+                          {changedCount} champ(s) modifié(s)
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <TriageField wide label="Titre" badge={badge('title')}>
+                        <input
+                          type="text"
+                          className={TRIAGE_INPUT}
+                          value={triageForm.title}
+                          onChange={(e) => setField('title', e.target.value)}
+                        />
+                      </TriageField>
+
+                      <TriageField label="Catégorie" badge={badge('category')}>
+                        <select className={TRIAGE_INPUT} value={triageForm.category} onChange={(e) => setField('category', e.target.value)}>
+                          <option value="">— Aucune —</option>
+                          {flatCats.map((c) => (
+                            <option key={c.id} value={c.name}>{c.label}</option>
+                          ))}
+                          {triageForm.category && !flatCats.some((c) => c.name === triageForm.category) && (
+                            <option value={triageForm.category}>{triageForm.category}</option>
+                          )}
+                        </select>
+                      </TriageField>
+
+                      <TriageField label="Type" badge={badge('type')}>
+                        <select className={TRIAGE_INPUT} value={triageForm.type} onChange={(e) => setField('type', e.target.value)}>
+                          <option value="INCIDENT">Incident</option>
+                          <option value="REQUEST">Demande</option>
+                          <option value="INFORMATION">Information</option>
+                          <option value="ACCESS_REQUEST">Demande d'accès</option>
+                        </select>
+                      </TriageField>
+
+                      <TriageField label="Priorité" badge={badge('priority')}>
+                        <select className={TRIAGE_INPUT} value={triageForm.priority} onChange={(e) => setField('priority', e.target.value)}>
+                          {['P1', 'P2', 'P3', 'P4'].map((p) => (
+                            <option key={p} value={p}>{PRIORITY_LABELS[p] || p}</option>
+                          ))}
+                        </select>
+                      </TriageField>
+
+                      <TriageField label="Impact" badge={badge('impact')}>
+                        <select className={TRIAGE_INPUT} value={triageForm.impact} onChange={(e) => setField('impact', e.target.value)}>
+                          {URGENCY_IMPACT_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>{o.label}</option>
+                          ))}
+                        </select>
+                      </TriageField>
+
+                      <TriageField label="Urgence" badge={badge('urgency')}>
+                        <select className={TRIAGE_INPUT} value={triageForm.urgency} onChange={(e) => setField('urgency', e.target.value)}>
+                          {URGENCY_IMPACT_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>{o.label}</option>
+                          ))}
+                        </select>
+                      </TriageField>
+
+                      <TriageField label="Localisation" badge={badge('locationId')}>
+                        <select className={TRIAGE_INPUT} value={triageForm.locationId} onChange={(e) => setField('locationId', e.target.value)}>
+                          <option value="">INDÉTERMINÉ</option>
+                          {triageLists.locations.map((l) => (
+                            <option key={l.id} value={l.id}>{l.completename || l.name}</option>
+                          ))}
+                        </select>
+                      </TriageField>
+
+                      <TriageField label="Équipe" badge={badge('teamId')}>
+                        <select className={TRIAGE_INPUT} value={triageForm.teamId} onChange={(e) => setField('teamId', e.target.value)}>
+                          <option value="">— Aucune —</option>
+                          {triageLists.teams.map((t) => (
+                            <option key={t.id} value={t.id}>{t.name}</option>
+                          ))}
+                          {triageForm.teamId && !triageLists.teams.some((t) => t.id === Number(triageForm.teamId)) && (
+                            <option value={triageForm.teamId}>{cur.teamName || `Équipe #${triageForm.teamId}`}</option>
+                          )}
+                        </select>
+                      </TriageField>
+
+                      <TriageField wide label="Technicien" badge={badge('assignedToId')}>
+                        <select className={TRIAGE_INPUT} value={triageForm.assignedToId} onChange={(e) => setField('assignedToId', e.target.value)}>
+                          <option value="">— Non assigné —</option>
+                          {staff.filter((u) => techRoles.has(u.role)).map((u) => (
+                            <option key={u.id} value={u.id}>{u.fullName}{u.team ? ` — ${u.team.name}` : ''}</option>
+                          ))}
+                          {triageForm.assignedToId && !staff.some((u) => u.id === Number(triageForm.assignedToId)) && (
+                            <option value={triageForm.assignedToId}>{cur.assignedToName || `Utilisateur #${triageForm.assignedToId}`}</option>
+                          )}
+                        </select>
+                        {tech && (
+                          <p className="text-[10px] text-on-surface-variant leading-snug mt-1">
+                            <b className="text-emerald-600 dark:text-emerald-400">Suggéré : {tech.fullName} (score {tech.score})</b>
+                            {' — '}{tech.reasons.join(' · ')}
+                          </p>
+                        )}
+                      </TriageField>
+
+                      <TriageField wide label={`Observateurs (${triageForm.observerIds.length})`} badge={obsChanged ? 'modifié' : null}>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {triageForm.observerIds.map((id) => (
+                            <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-violet-500/10 border border-violet-500/25 text-violet-700 dark:text-violet-300 text-[11px] font-bold">
+                              {userById(id)?.fullName || `Utilisateur #${id}`}
+                              <button
+                                type="button"
+                                onClick={() => setField('observerIds', triageForm.observerIds.filter((x) => x !== Number(id)))}
+                                className="hover:text-violet-900 dark:hover:text-white"
+                                aria-label="Retirer"
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))}
+                          <select
+                            className="w-auto min-w-[150px] px-2 py-1 rounded-lg bg-surface-container border border-outline-variant/30 text-[11px] text-on-surface focus:outline-none"
+                            value=""
+                            onChange={(e) => {
+                              if (e.target.value) setField('observerIds', [...triageForm.observerIds, Number(e.target.value)]);
+                            }}
+                          >
+                            <option value="">+ Ajouter…</option>
+                            {staff.filter((u) => !triageForm.observerIds.includes(u.id)).map((u) => (
+                              <option key={u.id} value={u.id}>{u.fullName}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </TriageField>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-3 pt-1">
+                      <div className="min-w-0 space-y-0.5">
+                        {triageSugForTicket.priority?.reasons?.length > 0 && (
+                          <p className="text-[10px] text-on-surface-variant truncate" title={triageSugForTicket.priority.reasons.join(' · ')}>
+                            Priorité : {triageSugForTicket.priority.reasons.join(' · ')}
+                          </p>
+                        )}
+                        {triageSugForTicket.analysis?.categoryAlternative && (
+                          <p className="text-[10px] text-amber-700 dark:text-amber-400 truncate" title={triageSugForTicket.analysis.categoryAlternative.reasons.join(' · ')}>
+                            {triageSugForTicket.analysis.source} → catégorie proposée « {triageSugForTicket.analysis.categoryAlternative.value} »
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setTriageForm(buildTriageForm(triageSugForTicket))}
+                          disabled={savingTriage}
+                          className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-surface-container hover:bg-surface-container-high text-on-surface transition-all disabled:opacity-50"
+                        >
+                          Réinitialiser
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSaveTriage}
+                          disabled={savingTriage}
+                          className="px-4 py-1.5 rounded-lg text-[11px] font-bold bg-blue-600 hover:bg-blue-700 text-white transition-all disabled:opacity-50"
+                        >
+                          {savingTriage ? '…' : 'Enregistrer le triage'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Contenu complet */}
               <div className="p-4 rounded-2xl bg-surface-container-low/40 border border-outline-variant/20 space-y-2">
@@ -2832,7 +3202,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             {/* Footer */}
             <div className="p-4 border-t border-outline-variant/20 flex items-center justify-end gap-2">
               <button
-                onClick={() => navigate(`/tickets/${detailTicket.id}`)}
+                onClick={openFullTicket}
                 className="px-4 py-2 rounded-xl text-xs font-semibold border border-outline-variant/40 hover:bg-surface-container text-on-surface transition-all flex items-center gap-1.5"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
@@ -2865,7 +3235,35 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                   </button>
                 </>
               )}
-              <button onClick={() => setDetailTicket(null)} className="px-4 py-2 rounded-xl text-xs font-semibold bg-surface-container hover:bg-surface-container-high text-on-surface transition-all">
+              {/* Approbation depuis la modale : enregistre les corrections de triage
+                  puis approuve en un clic (permission tickets.approve exigée pour
+                  accéder à l'onglet). */}
+              {activeTab === 'tickets' && detailTicket.approvalStatus === 'PENDING' && (
+                <>
+                  <button
+                    onClick={() => openRejectModal(detailTicket.id)}
+                    className="px-4 py-2 rounded-xl text-xs font-bold border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-all"
+                  >
+                    Rejeter
+                  </button>
+                  <button
+                    onClick={handleApproveWithTriage}
+                    disabled={savingTriage}
+                    title={triageDirtyCount > 0
+                      ? 'Enregistre les corrections de triage puis approuve le ticket'
+                      : 'Approuve le ticket'}
+                    className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-500/20 transition-all flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    <Check className="w-4 h-4" />
+                    {savingTriage
+                      ? '…'
+                      : triageDirtyCount > 0
+                        ? `Approuver avec ces corrections (${triageDirtyCount})`
+                        : 'Approuver'}
+                  </button>
+                </>
+              )}
+              <button onClick={closeDetailTicket} className="px-4 py-2 rounded-xl text-xs font-semibold bg-surface-container hover:bg-surface-container-high text-on-surface transition-all">
                 Fermer
               </button>
             </div>

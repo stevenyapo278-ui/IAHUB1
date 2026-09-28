@@ -45,7 +45,19 @@ export default function TicketFilterBar({
   searchInputRef,
   // Contexte utilisateur pour les filtres personnalisés
   currentUser,
+  // Compteurs de facettes (/tickets/facets) — ignorés si absents
+  facets,
 }) {
+  // Compteur d'un quick toggle : ignore le filtre de sa propre dimension (côté serveur)
+  const quickCount = (key, val) => {
+    if (!facets) return undefined;
+    if (key === 'priority') return facets.priority?.[val];
+    if (key === 'status') return facets.groups?.[val] ?? facets.status?.[val];
+    if (key === 'assignedToId' && val === 'none') return facets.flags?.unassigned;
+    if (key === 'aiProcessed') return facets.flags?.aiProcessed;
+    if (key === 'closeSuggested') return facets.flags?.closeSuggested;
+    return undefined;
+  };
   // Équipe du technicien connecté (si applicable)
   const myTeam = currentUser?.role === 'TECHNICIAN' && currentUser?.teamId
     ? teams?.find((t) => t.id === currentUser.teamId)
@@ -125,6 +137,7 @@ export default function TicketFilterBar({
         {/* ── Filtres rapides généraux ── */}
         {QUICK_TOGGLES.map(({ key, val, label, Icon }) => {
           const active = filters[key] === val;
+          const count = quickCount(key, val);
           return (
             <button
               key={`${key}-${val}`}
@@ -137,6 +150,13 @@ export default function TicketFilterBar({
             >
               <Icon className="w-3 h-3" />
               {label}
+              {count !== undefined && (
+                <span className={`ml-0.5 px-1 py-px rounded-md text-[10px] font-bold tabular-nums ${
+                  active ? 'bg-primary/15 text-primary' : 'bg-surface-muted text-on-surface-variant/70'
+                }`}>
+                  {count}
+                </span>
+              )}
             </button>
           );
         })}

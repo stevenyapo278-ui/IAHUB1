@@ -7,6 +7,8 @@ const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { notifyMajorIncidentResolved, sendTicketStatusNotification, sendResolvedNotificationEmail, sendTicketCreationNotification, sendAcknowledgement, sendAssignmentNotificationEmail, sendEmail } = require('../services/emailSender');
 const { approveTicket } = require('../services/ticketApproval');
+const { isRequesterOnly, buildTicketWhereClause } = require('../services/ticketQueryService');
+const { buildTicketsXlsxBuffer } = require('../services/ticketReportService');
 const { autoAssignTechnician } = require('../services/ticketAutoAssign');
 const { logEvent } = require('../services/ticketEvent');
 const { auditLog } = require('../services/auditLogService');
@@ -19,7 +21,6 @@ const { normalizeLinkType, normalizeLinkEndpoints, normalizeParentChildType, res
 const { formatTicketTitle, UNDETERMINED } = require('../utils/ticketTitle');
 const { sanitizeTicketHtml } = require('../utils/security');
 const multer = require('multer');
-const ExcelJS = require('exceljs');
 const { validateUpload, safeFilename: makeSafeFilename } = require('../utils/security');
 
 const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); // 20 Mo max
@@ -51,13 +52,6 @@ const STATUS_LABELS = {
   PENDING: 'En attente', WAITING_FOR_USER: 'En attente utilisateur',
   SOLVED: 'Résolu', CLOSED: 'Fermé',
 };
-
-// Un compte REQUESTER (créé automatiquement via AD/LDAP ou manuellement) ne voit que ses propres
-// tickets : liste, détail, pièces jointes, corrections et export sont forcés sur ses tickets —
-// aucun contenu des autres demandeurs ne doit fuiter, même si le client manipule les filtres.
-function isRequesterOnly(user) {
-  return user.role === 'REQUESTER';
-}
 
 // Un technicien ne voit que les tickets qui lui sont assignés ou qu'il a ouverts.
 function isTechnicianOnly(user) {
@@ -131,171 +125,51 @@ function requireTicketAssignOrTechnicianStatusOnly(req, res, next) {
   return requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN'])(req, res, next);
 }
 
-function buildTicketSearchCondition(rawTerm) {
-  if (!rawTerm || typeof rawTerm !== 'string') return null;
-  const term = rawTerm.trim();
-  if (!term) return null;
+// ── Compteurs affichés sur les chips de filtre (« P1 (12) ») ──────────────────
+// Même périmètre RBAC que la liste ; chaque compteur ignore le filtre de SA propre
+// dimension pour montrer les alternatives disponibles (mode facettes).
+router.get('/facets', async (req, res) => {
+  const facetWhere = (omitKey) => {
+    const q = { ...req.query };
+    delete q[omitKey];
+    delete q.page;
+    delete q.limit;
+    delete q.sortBy;
+    delete q.sortOrder;
+    return buildTicketWhereClause(req.user, q);
+  };
 
-  const conditions = [
-    { title: { contains: term, mode: 'insensitive' } },
-    { content: { contains: term, mode: 'insensitive' } },
-    { category: { contains: term, mode: 'insensitive' } },
-    { locationName: { contains: term, mode: 'insensitive' } },
-    { sourceEmail: { contains: term, mode: 'insensitive' } },
-    { sourceName: { contains: term, mode: 'insensitive' } },
-    { sourceSubject: { contains: term, mode: 'insensitive' } },
-    { aiSummary: { contains: term, mode: 'insensitive' } },
-    { requester: { fullName: { contains: term, mode: 'insensitive' } } },
-    { requester: { email: { contains: term, mode: 'insensitive' } } },
-    { secondaryRequester: { fullName: { contains: term, mode: 'insensitive' } } },
-    { secondaryRequester: { email: { contains: term, mode: 'insensitive' } } },
-    { assignedTo: { fullName: { contains: term, mode: 'insensitive' } } },
-    { assignedTo: { email: { contains: term, mode: 'insensitive' } } },
-    { assignees: { some: { fullName: { contains: term, mode: 'insensitive' } } } },
-    { assignees: { some: { email: { contains: term, mode: 'insensitive' } } } },
-    { team: { name: { contains: term, mode: 'insensitive' } } },
-    { observers: { some: { fullName: { contains: term, mode: 'insensitive' } } } },
-    { observers: { some: { email: { contains: term, mode: 'insensitive' } } } },
-  ];
+  const [byPriority, byStatus, total, unassigned, aiProcessedCount, closeSuggestedCount] = await Promise.all([
+    prisma.ticket.groupBy({ by: ['priority'], where: facetWhere('priority'), _count: true }),
+    prisma.ticket.groupBy({ by: ['status'], where: facetWhere('status'), _count: true }),
+    prisma.ticket.count({ where: facetWhere(null) }),
+    prisma.ticket.count({ where: { AND: [facetWhere('assignedToId'), { assignedToId: null, assignees: { none: {} } }] } }),
+    prisma.ticket.count({ where: { AND: [facetWhere('aiProcessed'), { aiProcessed: true }] } }),
+    prisma.ticket.count({ where: { AND: [facetWhere('closeSuggested'), { closeSuggested: true }] } }),
+  ]);
 
-  // Identifiant numérique (#9, ticket #9, ou 9)
-  const numericStr = term.replace(/^#/, '').replace(/^ticket\s*#?/i, '').trim();
-  const numericId = parseInt(numericStr, 10);
-  if (!isNaN(numericId) && numericId > 0 && String(numericId) === numericStr) {
-    conditions.push({ id: numericId });
-  }
+  const priority = {};
+  for (const row of byPriority) priority[row.priority || 'NONE'] = row._count;
+  const status = {};
+  for (const row of byStatus) status[row.status] = row._count;
 
-  // Recherche par niveau de priorité (P1, P2, P3, P4)
-  const upperTerm = term.toUpperCase();
-  if (['P1', 'P2', 'P3', 'P4'].includes(upperTerm)) {
-    conditions.push({ priority: upperTerm });
-  }
+  const countOf = (keys) => keys.reduce((n, k) => n + (status[k] || 0), 0);
+  const OPEN_GROUP_STATUSES = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER'];
+  const closed = countOf(['SOLVED', 'CLOSED']);
 
-  return { OR: conditions };
-}
-
-function buildTicketWhereClause(user, queryParams = {}) {
-  const {
-    status, priority, teamId, assignedToId, mine, title, search, query,
-    category, locationId, aiProcessed, due, closeSuggested, approvalStatus,
-    dateFrom, dateTo, source, origin, replyOnClosedSuggested,
-  } = queryParams;
-
-  const andConditions = [
-    { deletedAt: null },
-  ];
-
-  if (approvalStatus) {
-    andConditions.push({ approvalStatus });
-  } else {
-    andConditions.push({ approvalStatus: { notIn: ['PENDING', 'REJECTED'] } });
-  }
-
-  if (isRequesterOnly(user)) {
-    andConditions.push({
-      OR: [
-        { requesterId: user.sub },
-        { secondaryRequesterId: user.sub },
-        { requesterIds: { has: user.sub } },
-        { observers: { some: { id: user.sub } } },
-      ],
-    });
-  }
-
-  if (status) {
-    if (status === 'OPEN_GROUP') {
-      andConditions.push({ status: { in: ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER'] } });
-    } else if (status === 'PENDING_GROUP' || status === 'PENDING') {
-      andConditions.push({ status: { in: ['PENDING', 'WAITING_FOR_USER'] } });
-    } else if (status === 'CLOSED_GROUP') {
-      andConditions.push({ status: { in: ['SOLVED', 'CLOSED'] } });
-    } else if (status === 'NOT_CLOSED') {
-      andConditions.push({ status: { notIn: ['SOLVED', 'CLOSED'] } });
-    } else if (status === 'SOLVED_GROUP') {
-      andConditions.push({ status: 'SOLVED' });
-    } else {
-      andConditions.push({ status });
-    }
-  }
-
-  if (priority) andConditions.push({ priority });
-  if (source) andConditions.push({ source });
-  if (origin) andConditions.push({ origin });
-  if (teamId) andConditions.push({ teamId: Number(teamId) });
-
-  if (assignedToId === 'none') {
-    andConditions.push({ assignedToId: null, assignees: { none: {} } });
-  } else if (assignedToId) {
-    const techId = Number(assignedToId);
-    andConditions.push({
-      OR: [
-        { assignedToId: techId },
-        { assignees: { some: { id: techId } } },
-      ],
-    });
-  }
-
-  if (category) andConditions.push({ category: { contains: category, mode: 'insensitive' } });
-  if (locationId) andConditions.push({ locationId: Number(locationId) });
-  if (aiProcessed === 'true') andConditions.push({ aiProcessed: true });
-
-  if (mine === 'true') {
-    if (user.role === 'REQUESTER') {
-      andConditions.push({
-        OR: [
-          { requesterId: user.sub },
-          { observers: { some: { id: user.sub } } },
-        ],
-      });
-    } else {
-      andConditions.push({
-        OR: [
-          { assignedToId: user.sub },
-          { assignees: { some: { id: user.sub } } },
-          { requesterId: user.sub },
-          { observers: { some: { id: user.sub } } },
-        ],
-      });
-    }
-  }
-
-  if (approvalStatus) andConditions.push({ approvalStatus });
-
-  if (due === 'overdue') {
-    andConditions.push({ dueDate: { not: null, lt: new Date() } });
-    if (!status) andConditions.push({ status: { notIn: ['SOLVED', 'CLOSED'] } });
-  } else if (due === 'due') {
-    andConditions.push({ dueDate: { not: null } });
-  } else if (due === 'undue') {
-    andConditions.push({ dueDate: null });
-  }
-
-  if (closeSuggested === 'true') andConditions.push({ closeSuggested: true });
-  if (closeSuggested === 'false') andConditions.push({ closeSuggested: false });
-
-  if (replyOnClosedSuggested === 'true') andConditions.push({ replyOnClosedSuggested: true });
-  if (replyOnClosedSuggested === 'false') andConditions.push({ replyOnClosedSuggested: false });
-
-  if (dateFrom || dateTo) {
-    const dateCond = {};
-    if (dateFrom) dateCond.gte = new Date(dateFrom);
-    if (dateTo) {
-      const end = new Date(dateTo);
-      // Only append end-of-day if no time was provided (plain date like "2026-09-13")
-      if (!dateTo.includes('T')) end.setHours(23, 59, 59, 999);
-      dateCond.lte = end;
-    }
-    andConditions.push({ createdAt: dateCond });
-  }
-
-  const searchQuery = title || search || query;
-  const searchCond = buildTicketSearchCondition(searchQuery);
-  if (searchCond) {
-    andConditions.push(searchCond);
-  }
-
-  return { AND: andConditions };
-}
+  return res.json({
+    priority,
+    status,
+    groups: {
+      OPEN_GROUP: countOf(OPEN_GROUP_STATUSES),
+      PENDING_GROUP: countOf(['PENDING', 'WAITING_FOR_USER']),
+      CLOSED_GROUP: closed,
+      NOT_CLOSED: total - closed,
+    },
+    flags: { unassigned: unassigned, aiProcessed: aiProcessedCount, closeSuggested: closeSuggestedCount },
+    total,
+  });
+});
 
 // List tickets (with optional filters + pagination + sorting)
 router.get('/', async (req, res) => {
@@ -425,67 +299,10 @@ router.get('/export', async (req, res) => {
   });
 
   if (format === 'xlsx') {
-    const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet('Tickets');
-    sheet.columns = [
-      { header: 'ID', key: 'id', width: 8 },
-      { header: 'Titre', key: 'title', width: 45 },
-      { header: 'Statut', key: 'status', width: 16 },
-      { header: 'Priorité', key: 'priority', width: 10 },
-      { header: 'Catégorie', key: 'category', width: 22 },
-      { header: 'Type', key: 'type', width: 12 },
-      { header: 'Source', key: 'source', width: 12 },
-      { header: 'Demandeur', key: 'requester', width: 28 },
-      { header: 'Technicien', key: 'technician', width: 28 },
-      { header: 'Équipe', key: 'team', width: 20 },
-      { header: 'Lieu', key: 'location', width: 18 },
-      { header: 'Créé le', key: 'createdAt', width: 18 },
-      { header: 'Résolu le', key: 'solvedAt', width: 18 },
-      { header: 'Fermé le', key: 'closedAt', width: 18 },
-      { header: 'SLA réponse due', key: 'slaResponseDueAt', width: 18 },
-      { header: 'SLA résolution due', key: 'slaResolutionDueAt', width: 18 },
-      { header: 'SLA dépassé le', key: 'slaBreachedAt', width: 18 },
-      { header: 'Première réponse', key: 'firstResponseAt', width: 18 },
-      { header: 'IA', key: 'aiProcessed', width: 6 },
-      { header: 'Approbation', key: 'approvalStatus', width: 14 },
-    ];
-    // Colonnes de dates : format français + en-tête en gras, figée et filtrable
-    for (const col of ['createdAt', 'solvedAt', 'closedAt', 'slaResponseDueAt', 'slaResolutionDueAt', 'slaBreachedAt', 'firstResponseAt']) {
-      sheet.getColumn(col).numFmt = 'dd/mm/yyyy hh:mm';
-    }
-    const headerRow = sheet.getRow(1);
-    headerRow.font = { bold: true };
-    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F0FE' } };
-    sheet.views = [{ state: 'frozen', ySplit: 1 }];
-    sheet.autoFilter = { from: 'A1', to: 'T1' };
-
-    for (const t of tickets) {
-      sheet.addRow({
-        id: t.id,
-        title: t.title,
-        status: t.status,
-        priority: t.priority,
-        category: t.category || '',
-        type: t.type,
-        source: t.source || '',
-        requester: t.requester?.fullName ? `${t.requester.fullName} (${t.requester.email})` : (t.requester?.email || ''),
-        technician: t.assignedTo?.fullName ? `${t.assignedTo.fullName} (${t.assignedTo.email})` : (t.assignedTo?.email || ''),
-        team: t.team?.name || '',
-        location: t.locationName || '',
-        createdAt: t.createdAt,
-        solvedAt: t.solvedAt,
-        closedAt: t.closedAt,
-        slaResponseDueAt: t.slaResponseDueAt,
-        slaResolutionDueAt: t.slaResolutionDueAt,
-        slaBreachedAt: t.slaBreachedAt,
-        firstResponseAt: t.firstResponseAt,
-        aiProcessed: t.aiProcessed ? 'oui' : 'non',
-        approvalStatus: t.approvalStatus,
-      });
-    }
+    const buffer = await buildTicketsXlsxBuffer(tickets);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="tickets_export_${new Date().toISOString().slice(0, 10)}.xlsx"`);
-    return workbook.xlsx.write(res);
+    return res.send(buffer);
   }
 
   if (format === 'csv') {
@@ -709,6 +526,52 @@ router.get('/pending-approval', async (req, res) => {
     prisma.ticket.count({ where }),
   ]);
   return res.json({ items, total });
+});
+
+// ── Suggestions de triage (équipe, technicien, observateurs, priorité) ───────
+// Recalculées à la volée pour un ticket en attente : compétence (UserSkill) +
+// historique (tickets de même catégorie, auto-assignations corrigées) + charge
+// active. Servies au Centre de Validation pour permettre de corriger les champs
+// avant d'approuver.
+router.get('/:id/triage-suggestions', requirePermission('tickets.approve', ['ADMIN', 'HOTLINE', 'TECHNICIAN']), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const ticket = await prisma.ticket.findUnique({
+      where: { id },
+      include: {
+        team: { select: { id: true, name: true } },
+        assignedTo: { select: { id: true, fullName: true } },
+        observers: { select: { id: true, fullName: true } },
+      },
+    });
+    if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
+
+    const { suggestTriage } = require('../services/ticketSuggestionService');
+    const suggestions = await suggestTriage(ticket);
+    return res.json({
+      ticketId: ticket.id,
+      current: {
+        title: ticket.title,
+        teamId: ticket.teamId,
+        teamName: ticket.team?.name || null,
+        assignedToId: ticket.assignedToId,
+        assignedToName: ticket.assignedTo?.fullName || null,
+        priority: ticket.priority,
+        category: ticket.category,
+        type: ticket.type,
+        impact: ticket.impact,
+        urgency: ticket.urgency,
+        locationId: ticket.locationId,
+        locationName: ticket.locationName,
+        observerIds: (ticket.observers || []).map((o) => o.id),
+        observers: ticket.observers || [],
+      },
+      ...suggestions,
+    });
+  } catch (err) {
+    console.error('[ticket.routes] Erreur triage-suggestions:', err);
+    return res.status(500).json({ error: 'Erreur lors du calcul des suggestions' });
+  }
 });
 
 // ── Preview tooltip : données allégées pour le hover ─────────────────────────

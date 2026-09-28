@@ -12,7 +12,7 @@ import {
   Mic, MicOff, Lightbulb,
 } from 'lucide-react';
 import VoiceVisualizer from '../components/VoiceVisualizer';
-import VoiceModeModal from '../components/VoiceModeModal';
+import { useVoiceSession } from '../context/VoiceSessionContext';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
 import { useVoiceRecognition } from '../hooks/useVoiceRecognition';
@@ -276,6 +276,8 @@ export default function ChatPage() {
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
   const [isBrainstormMode, setIsBrainstormMode] = useState(false);
+  // Action en attente de confirmation côté serveur (ex: rapport à envoyer) — {tool, prompt}
+  const [pendingAction, setPendingAction] = useState(null);
 
   // Voice recognition
   const { isListening, transcript, error: voiceError, isSupported: voiceSupported, startListening, stopListening, resetTranscript } = useVoiceRecognition({
@@ -285,8 +287,8 @@ export default function ChatPage() {
     }
   });
 
-  // Voice mode (full-screen assistant)
-  const [voiceModeOpen, setVoiceModeOpen] = useState(false);
+  // Voice mode : session globale (modal + mini-orbe montés par VoiceSessionProvider)
+  const { open: openVoice } = useVoiceSession();
 
   // Déterminer si la conversation active est archivée
   const activeConv = conversations.find(c => c.id === conversationId);
@@ -337,9 +339,15 @@ export default function ChatPage() {
       const msgs = data.map((m) => ({ id: m.id, role: m.role, content: m.content, sources: m.sources, rating: m.rating }));
       setMessages(msgs);
       setRevealedIds(new Set(msgs.map((m) => m.id).filter(Boolean)));
+      // Restaurer l'action en attente (survit au rechargement de page)
+      try {
+        const resPending = await api.get(`/chat/pending-confirmation?conversationId=${convId}`);
+        setPendingAction(resPending.data?.pendingConfirmation || null);
+      } catch { setPendingAction(null); }
     } catch {
       setMessages([]);
       setRevealedIds(new Set());
+      setPendingAction(null);
     }
   }
 
@@ -351,6 +359,7 @@ export default function ChatPage() {
     setRevealedIds(new Set());
     setInput('');
     setReplyTo(null);
+    setPendingAction(null);
     removeAttachment();
     inputRef.current?.focus();
   }
@@ -439,6 +448,7 @@ export default function ChatPage() {
       if (data && data.isBrainstormMode !== undefined) {
         setIsBrainstormMode(data.isBrainstormMode);
       }
+      setPendingAction(data.pendingConfirmation || null);
 
       setMessages((prev) => [...prev, { role: 'assistant', content: data.reply, sources: data.sources, action: data.action, widget: data.widget }]);
 
@@ -484,6 +494,7 @@ export default function ChatPage() {
         setConversationId(data.conversationId);
         fetchConversations();
       }
+      setPendingAction(data.pendingConfirmation || null);
 
       return data.reply;
     } catch (err) {
@@ -618,6 +629,12 @@ export default function ChatPage() {
                 <p className="text-[10px] text-on-surface-variant leading-tight">Helpdesk IT Prosuma</p>
               </div>
             </div>
+            {pendingAction && (
+              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-[10px] font-bold animate-fade-in" title="Une action attend ta confirmation en bas du chat">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                1 action en attente
+              </span>
+            )}
           </div>
           <button
             onClick={handleNewConversation}
@@ -714,6 +731,42 @@ export default function ChatPage() {
         {/* Input */}
         <div className="px-4 pb-4 pt-2 shrink-0">
           <div className="max-w-3xl mx-auto">
+            {/* Carte « action en attente » — confirmation d'envoi, etc. */}
+            {pendingAction && (
+              <div className="mb-2 rounded-xl border border-amber-500/40 bg-amber-500/10 overflow-hidden animate-fade-in">
+                <div className="flex items-center gap-2 px-3 py-2 border-b border-amber-500/25">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wide">
+                    Action en attente ·{' '}
+                    {pendingAction.tool === 'send_ticket_report' ? 'Rapport par email'
+                      : pendingAction.tool === 'add_ticket_followup' ? 'Ajout de commentaire'
+                      : 'Confirmation requise'}
+                  </span>
+                  <span className="ml-auto text-[10px] text-amber-600/70 dark:text-amber-400/70 font-medium hidden sm:inline">
+                    Rien n'est encore exécuté
+                  </span>
+                </div>
+                <div className="px-3 py-2 text-[12.5px] leading-relaxed text-on-surface whitespace-pre-line line-clamp-4">
+                  {pendingAction.prompt}
+                </div>
+                <div className="flex items-center gap-2 px-3 pb-2.5">
+                  <button
+                    onClick={() => sendMessage('oui')}
+                    disabled={loading || isArchived}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-[12px] font-bold transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Check className="w-3.5 h-3.5" /> Envoyer
+                  </button>
+                  <button
+                    onClick={() => sendMessage('non annule')}
+                    disabled={loading || isArchived}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-outline-variant/50 hover:bg-surface-container-high text-on-surface-variant text-[12px] font-semibold transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <X className="w-3.5 h-3.5" /> Annuler
+                  </button>
+                </div>
+              </div>
+            )}
             {attachmentPreview && (
               <div className="mb-2 relative inline-block">
                 <img src={attachmentPreview} alt="Pièce jointe" className="h-20 rounded-xl border border-outline-variant/40 object-cover" />
@@ -768,7 +821,7 @@ export default function ChatPage() {
               {voiceSupported && (
                 <>
                   <button
-                    onClick={() => setVoiceModeOpen(true)}
+                    onClick={openVoice}
                     className="p-2 rounded-xl hover:bg-surface-container-high text-on-surface-variant transition-colors cursor-pointer shrink-0 mb-0.5"
                     title="Mode vocal (assistant complet)"
                     disabled={isArchived}
@@ -802,12 +855,6 @@ export default function ChatPage() {
           </div>
         </div>
       </div>
-
-      {/* Mode vocal plein écran */}
-      <VoiceModeModal
-        isOpen={voiceModeOpen}
-        onClose={() => setVoiceModeOpen(false)}
-      />
     </div>
   );
 }

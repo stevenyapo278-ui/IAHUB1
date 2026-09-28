@@ -17,7 +17,8 @@ export default function RadarWidget({ stats, config }) {
   const maxTeamCount = Math.max(1, ...teams.map((t) => t.count));
   const totalTeamTickets = teams.reduce((s, t) => s + t.count, 0);
 
-  const radarData = teams.slice(0, 6).map((t) => ({
+  // Toutes les équipes affichées (plus de slice : l'utilisateur doit voir la ligne complète)
+  const radarData = teams.map((t) => ({
     team: t.teamName || 'Non assignée',
     volume: Math.round((t.count / maxTeamCount) * 100),
     resolution: totalTeamTickets > 0 ? Math.round((t.count / totalTeamTickets) * 100) : 0,

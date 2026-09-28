@@ -74,6 +74,16 @@ export function getWidgetMeta(type) {
   return WIDGET_CATALOG.find(w => w.type === type);
 }
 
+// Widgets de répartition dont le périmètre (Tous/Ouverts/Fermés) est sélectionnable.
+// (Statuts/donut/tunnel non concernés : leur dimension EST le statut.)
+export const SCOPE_SELECTABLE = new Set([
+  'chart_by_category',
+  'chart_by_priority',
+  'chart_bar_grouped',
+  'chart_radar_teams',
+  'team_breakdown',
+]);
+
 // Get unique categories
 export function getWidgetCategories() {
   return [...new Set(WIDGET_CATALOG.map(w => w.category))];

@@ -5,16 +5,27 @@
 
 const VALID_LEVELS = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
 
+// L'interface (URGENCY_IMPACT_OPTIONS) et certains tickets historiques utilisent une
+// gamme étendue : VERY_LOW / VERY_HIGH / MAJOR. Sans cette normalisation, la matrice
+// ne reconnaît pas la valeur et retombe sur P3 par défaut (bug réel : un ticket
+// MAJOR / VERY_HIGH affichait « → P3 » alors qu'il est classé P1).
+const LEVEL_ALIASES = { VERY_LOW: 'LOW', VERY_HIGH: 'CRITICAL', MAJOR: 'CRITICAL' };
+
+const normalizeLevel = (value, fallback = 'MEDIUM') => {
+  const v = String(value || fallback).toUpperCase().trim();
+  return LEVEL_ALIASES[v] || v;
+};
+
 /**
  * Calcule la priorité P1-P4 en fonction de l'impact, de l'urgence et du type de demande.
- * @param {string} impact - 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
- * @param {string} urgency - 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
+ * @param {string} impact - 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' (+ alias VERY_LOW/VERY_HIGH/MAJOR)
+ * @param {string} urgency - 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' (+ alias VERY_LOW/VERY_HIGH/MAJOR)
  * @param {string} [requestType] - 'INCIDENT' | 'SERVICE_REQUEST' | 'INFORMATION' | 'ACCESS_REQUEST'
  * @returns {string} 'P1' | 'P2' | 'P3' | 'P4'
  */
 function calculatePriority(impact = 'MEDIUM', urgency = 'MEDIUM', requestType = 'INCIDENT') {
-  const imp = (impact || 'MEDIUM').toUpperCase().trim();
-  const urg = (urgency || 'MEDIUM').toUpperCase().trim();
+  const imp = normalizeLevel(impact, 'MEDIUM');
+  const urg = normalizeLevel(urgency, 'MEDIUM');
   const reqType = (requestType || 'INCIDENT').toUpperCase().trim();
 
   // Si demande purement d'information, la priorité est P4 par défaut

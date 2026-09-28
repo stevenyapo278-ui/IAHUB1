@@ -24,7 +24,9 @@ router.get('/', async (req, res) => {
     include: {
       members: { select: { id: true, fullName: true, email: true, role: true, avatarUrl: true } },
       defaultObservers: { select: { id: true, fullName: true, email: true, role: true, avatarUrl: true } },
-      _count: { select: { tickets: { where: { status: { notIn: ['SOLVED', 'CLOSED'] } } } } },
+      // Tickets « ouverts » de l'équipe : même périmètre que /dashboard/stats
+      // (corbeille et suggestions en attente/rejetées exclues).
+      _count: { select: { tickets: { where: { deletedAt: null, approvalStatus: { notIn: ['PENDING', 'REJECTED'] }, status: { notIn: ['SOLVED', 'CLOSED'] } } } } },
     },
     orderBy: { name: 'asc' },
   });
@@ -47,7 +49,12 @@ router.get('/:id', async (req, res) => {
 
   const loadCounts = await prisma.ticket.groupBy({
     by: ['assignedToId'],
-    where: { assignedToId: { in: team.members.map((m) => m.id) }, status: { in: ACTIVE_STATUSES } },
+    where: {
+      assignedToId: { in: team.members.map((m) => m.id) },
+      status: { in: ACTIVE_STATUSES },
+      deletedAt: null,
+      approvalStatus: { notIn: ['PENDING', 'REJECTED'] },
+    },
     _count: { id: true },
   });
   const loadByUserId = Object.fromEntries(loadCounts.map((c) => [c.assignedToId, c._count.id]));

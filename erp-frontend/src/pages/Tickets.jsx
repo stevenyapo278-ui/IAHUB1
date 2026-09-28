@@ -165,6 +165,64 @@ function Avatar({ user, name, colorClass = 'bg-blue-500/15 text-blue-600 dark:te
   return <UserAvatar user={user} name={name} size="sm" colorClass={colorClass} />;
 }
 
+// Carte ticket réutilisée par la vue Grille et par la variante mobile de la vue Table
+function TicketCard({ t, query, onClick }) {
+  return (
+    <motion.div initial={false} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={onClick}
+      className="rounded-xl border border-border/25 bg-surface hover:border-primary/30 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer group relative overflow-hidden p-4 flex flex-col gap-3">
+      <div className={`absolute top-0 left-0 right-0 h-0.5 ${
+        t.priority === 'P1' ? 'bg-red-500' : t.priority === 'P2' ? 'bg-orange-400' :
+        t.priority === 'P3' ? 'bg-amber-400' : 'bg-emerald-500'
+      }`} />
+      <div className="flex items-start justify-between gap-2 pt-1">
+        <div className="flex items-center gap-1.5">
+          <PriorityDot priority={t.priority} />
+          <span className="text-[11px] font-mono text-muted-foreground">#{t.id}</span>
+        </div>
+        <StatusPill status={t.status} />
+      </div>
+      <div>
+        <p className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors leading-snug line-clamp-2">
+          <HighlightText text={t.title} query={query} />
+        </p>
+        {t.category && (
+          <span className="mt-1 inline-block text-[10px] font-medium text-muted-foreground bg-surface-muted px-2 py-0.5 rounded-full">
+            {t.category}
+          </span>
+        )}
+      </div>
+      <div className="flex items-center justify-between gap-2 mt-auto">
+        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          {t.locationName && <><MapPin className="w-3 h-3 shrink-0" /><span className="truncate max-w-[100px]">{t.locationName}</span></>}
+        </div>
+        {t.assignedTo ? (
+          <div className="flex items-center gap-1.5">
+            <Avatar user={t.assignedTo} name={t.assignedTo.fullName} />
+            <span className="text-[11px] font-medium text-foreground truncate max-w-[80px]">{t.assignedTo.fullName}</span>
+          </div>
+        ) : (
+          <span className="text-[10px] text-muted-foreground/60 italic">Non assigné</span>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+// True sous 640px : la vue Table rend des cartes (AG Grid est illisible en mobile)
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 640px)').matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 640px)');
+    const onChange = (e) => setIsMobile(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return isMobile;
+}
+
 // ── AG Grid cell renderers ───────────────────────────────────────────────────
 function PriorityRenderer({ data }) {
   if (!data) return null;
@@ -826,6 +884,40 @@ function FlipCounter({ value }) {
   );
 }
 
+// ── Helpers liste ─────────────────────────────────────────────────────────────
+
+// Params communs à la liste, au refresh silencieux et à la sélection groupée
+function buildListParams({ filters, debouncedSearch, sortBy, sortOrder, page, pageSize, viewMode }) {
+  const loadAll = viewMode === 'kanban' || viewMode === 'folders';
+  const params = { page: loadAll ? 1 : page, limit: loadAll ? 500 : pageSize, sortBy, sortOrder };
+  if (filters.status) params.status = filters.status;
+  if (filters.priority) params.priority = filters.priority;
+  if (filters.source) params.source = filters.source;
+  if (filters.origin) params.origin = filters.origin;
+  if (filters.category) params.category = filters.category;
+  if (filters.teamId) params.teamId = filters.teamId;
+  if (filters.assignedToId) params.assignedToId = filters.assignedToId;
+  if (filters.mine) params.mine = filters.mine;
+  if (filters.aiProcessed) params.aiProcessed = filters.aiProcessed;
+  if (filters.approvalStatus) params.approvalStatus = filters.approvalStatus;
+  if (filters.closeSuggested) params.closeSuggested = filters.closeSuggested;
+  if (filters.dateFrom) params.dateFrom = filters.dateFrom;
+  if (filters.dateTo) params.dateTo = filters.dateTo;
+  if (debouncedSearch) params.search = debouncedSearch;
+  return params;
+}
+
+// Deux réponses identiques → aucun setState : le polling de 15 s ne re-render
+// le composant que si quelque chose a réellement changé.
+function sameTicketList(a, b) {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].id !== b[i].id || a[i].updatedAt !== b[i].updatedAt || a[i].status !== b[i].status) return false;
+  }
+  return true;
+}
+
 export default function Tickets() {
   const { user } = useAuth();
   const { autonomousMode } = useSystemSettings();
@@ -943,6 +1035,7 @@ export default function Tickets() {
   const isDark = theme === 'dark';
 
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('tickets_view_mode') || 'table');
+  const isMobile = useIsMobile();
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [showTrash, setShowTrash] = useState(false);
@@ -962,14 +1055,24 @@ export default function Tickets() {
     if (savedViewsKey) localStorage.setItem(savedViewsKey, JSON.stringify(views));
   }
 
+  // Nommer une vue : modale maison plutôt que window.prompt (natif, hors charte)
+  const [saveViewOpen, setSaveViewOpen] = useState(false);
+  const [saveViewName, setSaveViewName] = useState('');
+
   function saveCurrentView() {
     if (!savedViewsKey) return;
-    const name = window.prompt('Nom de la vue à enregistrer :');
+    setSaveViewName('');
+    setSaveViewOpen(true);
+  }
+
+  function commitSaveView() {
+    const name = saveViewName.trim();
     if (!name) return;
     const view = { name, filters: { ...filters }, search: searchQuery, sortBy, sortOrder };
     const existing = savedViews.findIndex((v) => v.name === name);
     const next = existing >= 0 ? savedViews.map((v, i) => (i === existing ? view : v)) : [...savedViews, view];
     persistSavedViews(next);
+    setSaveViewOpen(false);
     toast.success(`Vue « ${name} » enregistrée`);
   }
 
@@ -1182,24 +1285,7 @@ export default function Tickets() {
     } else {
       setRefreshing(true);
     }
-    const isKanbanView = viewMode === 'kanban';
-    const isFoldersView = viewMode === 'folders';
-    const loadAll = isKanbanView || isFoldersView;
-    const params = { page: loadAll ? 1 : page, limit: loadAll ? 500 : pageSize, sortBy, sortOrder };
-    if (filters.status) params.status = filters.status;
-    if (filters.priority) params.priority = filters.priority;
-    if (filters.source) params.source = filters.source;
-    if (filters.origin) params.origin = filters.origin;
-    if (filters.category) params.category = filters.category;
-    if (filters.teamId) params.teamId = filters.teamId;
-    if (filters.assignedToId) params.assignedToId = filters.assignedToId;
-    if (filters.mine) params.mine = filters.mine;
-    if (filters.aiProcessed) params.aiProcessed = filters.aiProcessed;
-    if (filters.approvalStatus) params.approvalStatus = filters.approvalStatus;
-    if (filters.closeSuggested) params.closeSuggested = filters.closeSuggested;
-    if (filters.dateFrom) params.dateFrom = filters.dateFrom;
-    if (filters.dateTo) params.dateTo = filters.dateTo;
-    if (debouncedSearch) params.search = debouncedSearch;
+    const params = buildListParams({ filters, debouncedSearch, sortBy, sortOrder, page, pageSize, viewMode });
     api.get('/tickets', { params, signal: controller.signal })
       .then(({ data }) => {
         setTickets(data.items);
@@ -1223,26 +1309,20 @@ export default function Tickets() {
       });
   }, [page, pageSize, sortBy, sortOrder, filters, debouncedSearch, viewMode]);
 
+  // Réf de la liste affichée : compare avant de setState pendant le polling
+  const ticketsRef = useRef(tickets);
+  useEffect(() => { ticketsRef.current = tickets; }, [tickets]);
+
   const refreshTicketsSilently = useCallback(function refreshTicketsSilently() {
-    const isKanbanView = viewMode === 'kanban';
-    const isFoldersView = viewMode === 'folders';
-    const loadAll = isKanbanView || isFoldersView;
-    const params = { page: loadAll ? 1 : page, limit: loadAll ? 500 : pageSize, sortBy, sortOrder };
-    if (filters.status) params.status = filters.status;
-    if (filters.priority) params.priority = filters.priority;
-    if (filters.source) params.source = filters.source;
-    if (filters.origin) params.origin = filters.origin;
-    if (filters.category) params.category = filters.category;
-    if (filters.teamId) params.teamId = filters.teamId;
-    if (filters.assignedToId) params.assignedToId = filters.assignedToId;
-    if (filters.mine) params.mine = filters.mine;
-    if (filters.aiProcessed) params.aiProcessed = filters.aiProcessed;
-    if (filters.approvalStatus) params.approvalStatus = filters.approvalStatus;
-    if (filters.closeSuggested) params.closeSuggested = filters.closeSuggested;
-    if (filters.dateFrom) params.dateFrom = filters.dateFrom;
-    if (filters.dateTo) params.dateTo = filters.dateTo;
-    if (debouncedSearch) params.search = debouncedSearch;
-    api.get('/tickets', { params }).then(({ data }) => { setTickets(data.items); setTotalPages(data.pages); setTotalCount(data.total); if (data.stats) setServerStats(data.stats); }).catch(() => {});
+    const params = buildListParams({ filters, debouncedSearch, sortBy, sortOrder, page, pageSize, viewMode });
+    api.get('/tickets', { params }).then(({ data }) => {
+      // Rien n'a bougé depuis le dernier fetch → pas de re-render
+      if (sameTicketList(ticketsRef.current, data.items)) return;
+      setTickets(data.items);
+      setTotalPages(data.pages);
+      setTotalCount(data.total);
+      if (data.stats) setServerStats(data.stats);
+    }).catch(() => {});
   }, [page, pageSize, sortBy, sortOrder, filters, debouncedSearch, viewMode]);
 
   useEffect(() => { loadTickets(); }, [filters, page, pageSize, debouncedSearch, sortBy, sortOrder, showTrash, viewMode]);
@@ -1270,24 +1350,113 @@ export default function Tickets() {
       if (document.visibilityState === 'visible') refreshTicketsSilently();
     }, 15000);
     return () => clearInterval(intervalId);
-  }, [filters, debouncedSearch, sortBy, sortOrder, showTrash]);
+  }, [refreshTicketsSilently, showTrash]);
+
+  // ── Temps réel : re-fetch immédiat quand le serveur signale un changement ──
+  // (ticket créé / mis à jour / assigné vu par SocketContext → CustomEvent)
+  useEffect(() => {
+    if (showTrash) return undefined;
+    let debounceTimer = null;
+    const onTicketsChanged = () => {
+      if (document.visibilityState !== 'visible') return;
+      // Debounce : les événements arrivent en rafale (création + assignation + mise à jour)
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => refreshTicketsSilently(), 700);
+    };
+    window.addEventListener('tickets:changed', onTicketsChanged);
+    return () => {
+      window.removeEventListener('tickets:changed', onTicketsChanged);
+      if (debounceTimer) clearTimeout(debounceTimer);
+    };
+  }, [refreshTicketsSilently, showTrash]);
+
+  // ── Compteurs des chips de filtre (« P1 (12) ») ─────────────────────────────
+  const [facetsData, setFacetsData] = useState(null);
+  const facets = showTrash ? null : facetsData; // null en corbeille, sans setState dans l'effet
+  useEffect(() => {
+    if (showTrash) return undefined;
+    let cancelled = false;
+    const params = buildListParams({ filters, debouncedSearch, sortBy, sortOrder, page: 1, pageSize: 1, viewMode });
+    api.get('/tickets/facets', { params })
+      .then(({ data }) => { if (!cancelled) setFacetsData(data); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [filters, debouncedSearch, sortBy, sortOrder, viewMode, showTrash]);
 
   const tableContainerRef = useRef(null);
   const abortRef = useRef(null);
   const searchInputRef = useRef(null);
+
+  // ── Navigation clavier dans la table (↑↓ + Enter, / pour chercher) ──────────
+  // Curseur identifié par id d'affiché : aucun effet de reset nécessaire quand la liste change
+  const [kbCursorId, setKbCursorId] = useState(null);
+  const kbCursor = kbCursorId == null ? -1 : tickets.findIndex((t) => t.id === kbCursorId);
+  const gridApiRef = useRef(null);
+  const handleGridReady = useCallback((event) => { gridApiRef.current = event.api; }, []);
+  const kbRowClass = useCallback((params) => (params.data?.id === kbCursorId ? ['kb-cursor-row'] : []), [kbCursorId]);
+  // AG Grid n'évalue getRowClass qu'au moment du rendu des lignes : on force le refresh
+  useEffect(() => { gridApiRef.current?.redrawRows(); }, [kbCursorId]);
+
   useEffect(() => {
     const onKey = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); searchInputRef.current?.focus(); }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); searchInputRef.current?.focus(); return; }
+      const tag = e.target?.tagName;
+      const inField = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target?.isContentEditable;
+      if (inField) return;
+      if (e.key === '/') { e.preventDefault(); searchInputRef.current?.focus(); return; }
+      if (showTrash) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (!tickets.length) return;
+        e.preventDefault();
+        const delta = e.key === 'ArrowDown' ? 1 : -1;
+        const base = kbCursor >= 0 ? kbCursor : (delta > 0 ? -1 : 0);
+        const next = Math.min(Math.max(base + delta, 0), tickets.length - 1);
+        setKbCursorId(tickets[next].id);
+        gridApiRef.current?.ensureIndexVisible(next);
+        return;
+      }
+      if (e.key === 'Enter' && kbCursor >= 0 && tickets[kbCursor]) {
+        e.preventDefault();
+        navigate(`/tickets/${tickets[kbCursor].id}${buildFilterQueryString()}`);
+        return;
+      }
+      if (e.key === 'Escape') setKbCursorId(null);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [tickets, kbCursor, showTrash]);
 
   function toggleSelect(id) {
     setSelectedIds((ids) => (ids.includes(id) ? ids.filter((i) => i !== id) : [...ids, id]));
   }
   function toggleSelectAll() {
     setSelectedIds((ids) => (ids.length === tickets.length ? [] : tickets.map((t) => t.id)));
+  }
+
+  // Sélectionner TOUS les tickets du filtre courant (toutes pages confondues),
+  // pas seulement ceux de la page affichée — bouton proposé par DataGrid.
+  const selectingAllRef = useRef(false);
+  async function handleSelectAllFiltered() {
+    if (selectingAllRef.current) return;
+    selectingAllRef.current = true;
+    try {
+      const ids = [];
+      let pageNum = 1;
+      let pages = 1;
+      do {
+        const params = buildListParams({ filters, debouncedSearch, sortBy, sortOrder, page: pageNum, pageSize: 500, viewMode });
+        const { data } = await api.get('/tickets', { params });
+        for (const t of data.items || []) ids.push(t.id);
+        pages = data.pages || 1;
+        pageNum += 1;
+      } while (pageNum <= pages && pageNum <= 20); // garde-fou : 10 000 tickets
+      setSelectedIds(ids);
+      toast.success(`${ids.length} ticket${ids.length > 1 ? 's' : ''} sélectionné${ids.length > 1 ? 's' : ''}`);
+    } catch {
+      toast.error('Impossible de sélectionner les tickets filtrés');
+    } finally {
+      selectingAllRef.current = false;
+    }
   }
 
   const [bulkChanges, setBulkChanges] = useState({ status: '', priority: '', assignedToId: '' });
@@ -1799,12 +1968,14 @@ export default function Tickets() {
 
       {/* ── COMPACT HEADER ──────────────────────────────────────────────────── */}
       <div className="flex items-center gap-3 px-4 sm:px-6 py-3 border-b border-border/20 bg-surface shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <Ticket className="w-4 h-4 text-primary shrink-0" />
-          <h1 className="text-sm font-bold text-foreground whitespace-nowrap">Tickets</h1>
-          <span className="text-[11px] text-muted-foreground font-medium tabular-nums">
-            {totalCount > 0 && `${totalCount}`}
-          </span>
+        <div className="flex items-center gap-2.5 min-w-0">
+          <Ticket className="w-4.5 h-4.5 text-primary shrink-0" />
+          <h1 className="text-[15px] font-black tracking-tight text-foreground whitespace-nowrap">Tickets</h1>
+          {totalCount > 0 && (
+            <span className="hidden sm:inline-flex items-center px-1.5 py-0.5 rounded-md bg-surface-muted text-[10px] font-bold text-muted-foreground tabular-nums">
+              {totalCount}
+            </span>
+          )}
         </div>
 
         <span className="hidden sm:flex items-center gap-1 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
@@ -1921,6 +2092,7 @@ export default function Tickets() {
         onClearSearch={() => { setSearchQuery(''); setDebouncedSearch(''); setPage(1); }}
         searchInputRef={searchInputRef}
         currentUser={user ? { id: user.id, role: user.role, teamId: user.teamId } : null}
+        facets={facets}
       />
 
       {/* ── MAIN CONTENT ────────────────────────────────────────────────────── */}
@@ -2007,50 +2179,25 @@ export default function Tickets() {
           <div className="p-4 sm:p-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
             <AnimatePresence mode="popLayout">
               {tickets.map((t) => (
-                <motion.div key={t.id} initial={false} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                  onClick={() => navigate(`/tickets/${t.id}${buildFilterQueryString()}`)}
-                  className="rounded-xl border border-border/25 bg-surface hover:border-primary/30 hover:shadow-sm transition-all cursor-pointer group relative overflow-hidden p-4 flex flex-col gap-3">
-                  <div className={`absolute top-0 left-0 right-0 h-0.5 ${
-                    t.priority === 'P1' ? 'bg-red-500' : t.priority === 'P2' ? 'bg-orange-400' :
-                    t.priority === 'P3' ? 'bg-amber-400' : 'bg-emerald-500'
-                  }`} />
-                  <div className="flex items-start justify-between gap-2 pt-1">
-                    <div className="flex items-center gap-1.5">
-                      <PriorityDot priority={t.priority} />
-                      <span className="text-[11px] font-mono text-muted-foreground">#{t.id}</span>
-                    </div>
-                    <StatusPill status={t.status} />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors leading-snug line-clamp-2">
-                      <HighlightText text={t.title} query={debouncedSearch} />
-                    </p>
-                    {t.category && (
-                      <span className="mt-1 inline-block text-[10px] font-medium text-muted-foreground bg-surface-muted px-2 py-0.5 rounded-full">
-                        {t.category}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center justify-between gap-2 mt-auto">
-                    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                      {t.locationName && <><MapPin className="w-3 h-3 shrink-0" /><span className="truncate max-w-[100px]">{t.locationName}</span></>}
-                    </div>
-                    {t.assignedTo ? (
-                      <div className="flex items-center gap-1.5">
-                        <Avatar user={t.assignedTo} name={t.assignedTo.fullName} />
-                        <span className="text-[11px] font-medium text-foreground truncate max-w-[80px]">{t.assignedTo.fullName}</span>
-                      </div>
-                    ) : (
-                      <span className="text-[10px] text-muted-foreground/60 italic">Non assigné</span>
-                    )}
-                  </div>
-                </motion.div>
+                <TicketCard key={t.id} t={t} query={debouncedSearch}
+                  onClick={() => navigate(`/tickets/${t.id}${buildFilterQueryString()}`)} />
               ))}
             </AnimatePresence>
             {tickets.length === 0 && (
               <div className="col-span-full py-16">
                 <EmptyState icon="tickets" title="Aucun ticket trouvé" description="Modifie les filtres ou crée un nouveau ticket." />
               </div>
+            )}
+          </div>
+        ) : viewMode === 'table' && isMobile ? (
+          /* ── TABLE VIEW — variante mobile : AG Grid est illisible sous 640px ── */
+          <div className="p-4 space-y-3 overflow-auto">
+            {tickets.map((t) => (
+              <TicketCard key={t.id} t={t} query={debouncedSearch}
+                onClick={() => navigate(`/tickets/${t.id}${buildFilterQueryString()}`)} />
+            ))}
+            {tickets.length === 0 && (
+              <EmptyState icon="tickets" title="Aucun ticket trouvé" description="Modifie les filtres ou crée un nouveau ticket." />
             )}
           </div>
         ) : (
@@ -2071,8 +2218,12 @@ export default function Tickets() {
                 suppressRowClickSelection={!!showSelectionColumn}
                 onRowClick={(data) => navigate(`/tickets/${data.id}${buildFilterQueryString()}`)}
                 noRowsText="Aucun ticket trouvé"
+                totalFilteredCount={showSelectionColumn ? totalCount : undefined}
+                onSelectAllFiltered={handleSelectAllFiltered}
                 extraGridOptions={{
                   onSortChanged: handleGridSortChanged,
+                  onGridReady: handleGridReady,
+                  getRowClass: kbRowClass,
                 }}
                 className="rounded-2xl overflow-hidden flex-1"
               />
@@ -2171,6 +2322,54 @@ export default function Tickets() {
         searchQuery={searchQuery} setSearchQuery={setSearchQuery}
         setDebouncedSearch={setDebouncedSearch} setPage={setPage}
       />
+
+      {/* ── SAVE VIEW MODAL (nommage) ─────────────────────────────────────────── */}
+      {createPortal(
+        <AnimatePresence>
+          {saveViewOpen && (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                onClick={() => setSaveViewOpen(false)} className="fixed inset-0 bg-black/60 backdrop-blur-sm cursor-pointer" />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.97, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.97, y: 12 }} transition={{ type: 'spring', duration: 0.3, bounce: 0.1 }}
+                role="dialog" aria-modal="true" aria-label="Enregistrer la vue"
+                className="relative w-full max-w-sm rounded-2xl border border-border/40 bg-surface p-5 shadow-2xl z-10"
+              >
+                <div className="flex items-center gap-2.5 mb-4">
+                  <div className="p-1.5 bg-primary/10 rounded-lg">
+                    <ListChecks className="w-4 h-4 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-foreground">Enregistrer la vue</h3>
+                    <p className="text-[11px] text-muted-foreground">Filtres, recherche et tri seront restaurés tels quels.</p>
+                  </div>
+                </div>
+                <input
+                  autoFocus
+                  type="text"
+                  value={saveViewName}
+                  onChange={(e) => setSaveViewName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') commitSaveView(); if (e.key === 'Escape') setSaveViewOpen(false); }}
+                  placeholder="Nom de la vue (ex. « P1 du matin »)"
+                  className="w-full px-3 py-2 text-sm bg-surface border border-outline-variant/40 rounded-xl text-on-surface placeholder-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                />
+                <div className="flex justify-end gap-2 mt-4">
+                  <button onClick={() => setSaveViewOpen(false)}
+                    className="px-3 py-1.5 rounded-xl text-xs font-semibold text-muted-foreground hover:bg-surface-muted transition-colors">
+                    Annuler
+                  </button>
+                  <button onClick={commitSaveView} disabled={!saveViewName.trim()}
+                    className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40">
+                    Enregistrer
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
 
       {/* ── CREATE TICKET MODAL ──────────────────────────────────────────────── */}
       {createPortal(

@@ -18,6 +18,14 @@ import WorkloadTeamsWidget from './widgets/WorkloadTeamsWidget';
 import AiPipelineWidget from './widgets/AiPipelineWidget';
 import QuickAccessWidget from './widgets/QuickAccessWidget';
 import IntegrationsWidget from './widgets/IntegrationsWidget';
+import { getWidgetMeta, SCOPE_SELECTABLE } from './widgetCatalog';
+
+// Périmètres disponibles — le choix est persisté dans widget.config.scope
+const SCOPES = [
+  { key: 'all', label: 'Tous' },
+  { key: 'open', label: 'Ouverts' },
+  { key: 'closed', label: 'Fermés' },
+];
 
 function Skeleton() {
   return (
@@ -25,6 +33,78 @@ function Skeleton() {
       <div className="h-4 bg-surface-container-high rounded w-1/3" />
       <div className="h-8 bg-surface-container-high rounded w-1/2" />
       <div className="h-20 bg-surface-container-high rounded" />
+    </div>
+  );
+}
+
+/* Sous-titre de précision : ce que le chiffre mesure réellement. */
+function subtitleFor(widgetType, periodLabel, scope) {
+  const p = periodLabel || 'toutes périodes';
+  switch (widgetType) {
+    case 'kpi_open_tickets':
+      return `Statuts ouverts · ${p}`;
+    case 'kpi_total_tickets':
+      return `Tous statuts actifs · ${p}`;
+    case 'kpi_resolution_rate':
+      return `Résolus + fermés ÷ total · ${p}`;
+    case 'kpi_pending':
+      return `Statut « en attente » · ${p}`;
+    case 'kpi_ai_processed':
+      return `Tickets marqués traités par l'IA · ${p}`;
+    case 'kpi_sla_breach':
+      return `SLA de résolution dépassé · ${p}`;
+    case 'chart_tickets_trend':
+    case 'chart_area_stacked':
+    case 'chart_ticket_flow':
+      return `Créés vs résolus · ${p}`;
+    case 'chart_gauge':
+      return `Résolus + fermés ÷ total · ${p}`;
+    case 'chart_heatmap':
+      return 'Tickets créés · 20 semaines glissantes';
+    case 'chart_workload_teams':
+      return 'Statuts ouverts · toutes périodes';
+    case 'team_workload':
+    case 'tech_performance':
+      return `Performance des techniciens · ${p}`;
+    case 'recent_tickets':
+      return 'Derniers tickets mis à jour';
+    case 'sla_status':
+      return `Pilotage SLA · ${p}`;
+    case 'ai_pipeline':
+      return 'Brouillons IA, validations et revues humaines';
+    case 'quick_access':
+      return 'Raccourcis vers les modules';
+    case 'integrations_health':
+      return 'État des connecteurs';
+    default: {
+      const scopeLabel = scope === 'open'
+        ? 'Tickets ouverts'
+        : scope === 'closed'
+          ? 'Tickets fermés'
+          : 'Tous les statuts';
+      return `${scopeLabel} · ${p}`;
+    }
+  }
+}
+
+function ScopeChips({ value, onChange }) {
+  return (
+    <div className="flex shrink-0 rounded-lg border border-outline-variant/40 overflow-hidden">
+      {SCOPES.map((s) => (
+        <button
+          key={s.key}
+          type="button"
+          title={`Périmètre : ${s.label}`}
+          onClick={() => onChange(s.key)}
+          className={`px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide transition-colors ${
+            value === s.key
+              ? 'bg-primary text-on-primary'
+              : 'bg-surface-container text-muted-foreground hover:bg-surface-container-high'
+          }`}
+        >
+          {s.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -69,8 +149,10 @@ function resolveWidget(widget, allData) {
       return <FunnelWidget stats={stats} config={widget.config} />;
 
     case 'chart_gauge': {
-      const totalTickets = stats?.totalTickets || 0;
-      const resolvedTickets = stats?.resolvedTickets || stats?.closedTickets || 0;
+      // /dashboard/stats renvoie `total` et `resolved` (les anciens champs
+      // totalTickets/resolvedTickets n'ont jamais existé → jauge toujours à 0)
+      const totalTickets = stats?.total || 0;
+      const resolvedTickets = stats?.resolved || 0;
       const resolutionRate = totalTickets > 0 ? Math.round((resolvedTickets / totalTickets) * 100) : 0;
       return <GaugeWidget value={resolutionRate} label="Résolution" config={widget.config} />;
     }
@@ -111,9 +193,51 @@ function resolveWidget(widget, allData) {
 }
 
 export default function WidgetRenderer({ widget, allData }) {
+  const widgetType = widget.widgetType;
+  const canSelectScope = SCOPE_SELECTABLE.has(widgetType);
+  // Hors widgets à sélecteur, le périmètre affiché ET appliqué reste 'all'
+  const scope = canSelectScope ? (widget.config?.scope || 'all') : 'all';
+  const title = widget.title || getWidgetMeta(widgetType)?.name || widgetType;
+  const subtitle = subtitleFor(widgetType, allData.periodLabel, scope);
+
+  // Données du périmètre sélectionné (les KPI et les répartitions « statuts »
+  // restent toujours sur 'all')
+  const scopedStats =
+    scope === 'open' ? allData.statsOpen
+      : scope === 'closed' ? allData.statsClosed
+        : allData.stats;
+  const waiting = canSelectScope && scope !== 'all' && !scopedStats;
+
+  const scopedAllData = scopedStats && scopedStats !== allData.stats
+    ? { ...allData, stats: scopedStats }
+    : allData;
+
   return (
-    <Suspense fallback={<Skeleton />}>
-      {resolveWidget(widget, allData)}
-    </Suspense>
+    <div className="flex flex-col h-full min-h-0">
+      {/* Header de précision : titre + périmètre réel du chiffre affiché */}
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div className="min-w-0">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground truncate" title={title}>
+            {title}
+          </p>
+          <p className="text-[10px] text-muted-foreground/70 truncate" title={subtitle}>
+            {subtitle}
+          </p>
+        </div>
+        {canSelectScope && (
+          <ScopeChips value={scope} onChange={(s) => allData.onScopeChange?.(widget, s)} />
+        )}
+      </div>
+
+      {waiting ? (
+        <Skeleton />
+      ) : (
+        <div className="flex-1 min-h-0">
+          <Suspense fallback={<Skeleton />}>
+            {resolveWidget(widget, scopedAllData)}
+          </Suspense>
+        </div>
+      )}
+    </div>
   );
 }

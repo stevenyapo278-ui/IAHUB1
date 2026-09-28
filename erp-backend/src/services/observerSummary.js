@@ -25,10 +25,12 @@ async function sendObserverSummary() {
   if (currentTime !== settings.observerSummaryTime) return null;
 
   // Trouver tous les tickets ouverts avec des observateurs
+  // (même périmètre que /dashboard/stats : corbeille + suggestions en attente/rejetées exclues)
   const tickets = await prisma.ticket.findMany({
     where: {
       status: { in: ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER'] },
       deletedAt: null,
+      approvalStatus: { notIn: ['PENDING', 'REJECTED'] },
       observers: { some: {} },
     },
     include: {

@@ -55,8 +55,14 @@ export function SocketProvider({ children }) {
 
     // ── Ticket créé ────────────────────────────────────────────────────
     newSocket.on('ticket_created', (ticket) => {
+      // Signal pour les vues listes (re-fetch immédiat au lieu d'attendre le polling)
+      window.dispatchEvent(new CustomEvent('tickets:changed', { detail: { type: 'created', id: ticket.id } }));
       const p1 = ticket.priority === 'P1';
-      if (p1) playAlertP1(); else playTicketCreated();
+      if (p1) {
+        playAlertP1();
+        // Signal pour l'UI vocale (carte alerte en session MARIE / mini-orbe)
+        window.dispatchEvent(new CustomEvent('voice:p1-alert', { detail: ticket }));
+      } else playTicketCreated();
       sendBrowserNotification(
         p1 ? '🚨 Incident critique' : 'Nouveau ticket',
         {
@@ -102,6 +108,7 @@ export function SocketProvider({ children }) {
 
     // ── Ticket assigné ─────────────────────────────────────────────────
     newSocket.on('ticket_assigned_to_you', (data) => {
+      window.dispatchEvent(new CustomEvent('tickets:changed', { detail: { type: 'assigned', id: data.ticketId } }));
       playTicketAssigned();
       const methodLabel =
         data.method === 'ai_skills' ? '✨ Par compétence IA' :
@@ -151,6 +158,9 @@ export function SocketProvider({ children }) {
     const UPDATE_DEDUP_MS = 3000;
 
     newSocket.on('ticket_updated', (data) => {
+      // Signal pour les vues listes : tout changement (statut, assignation, contenu…) doit
+      // rafraîchir la liste immédiatement, pas seulement les changements de statut.
+      window.dispatchEvent(new CustomEvent('tickets:changed', { detail: { type: 'updated', id: data.id } }));
       if (data.changes?.status) {
         // Skip toast if the current user just updated this ticket themselves
         if (wasRecentlyUpdatedByMe(data.id)) return;

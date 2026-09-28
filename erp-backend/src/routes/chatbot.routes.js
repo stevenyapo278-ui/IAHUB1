@@ -404,10 +404,48 @@ router.post('/', authenticate, async (req, res) => {
       ipAddress: req.ip,
     });
 
-    res.json({ ...result, conversationId: convId });
+    // Action en attente de confirmation (source de vérité : conversation.state)
+    // → le front affiche la carte « action en attente » + le badge, quel que soit
+    // le type de retour du service (nouvelle confirmation, question d'état, etc.)
+    let pendingConfirmation = null;
+    try {
+      const fresh = await prisma.conversation.findUnique({ where: { id: convId }, select: { state: true } });
+      const st = fresh?.state;
+      if (st?.intent === 'pendingConfirmation' && st?.params?.prompt) {
+        pendingConfirmation = { tool: st.params.tool || null, prompt: st.params.prompt };
+      }
+    } catch (stateErr) {
+      console.warn('[chatbot] lecture state pendingConfirmation:', stateErr.message);
+    }
+
+    res.json({ ...result, conversationId: convId, pendingConfirmation });
   } catch (err) {
     console.error('[chatbot] Erreur:', err.stack || err);
     res.status(500).json({ error: 'Erreur interne du chatbot.' });
+  }
+});
+
+// GET /api/chat/pending-confirmation — restaure l'action en attente après un
+// rechargement de page (le state survit côté serveur, pas côté client)
+router.get('/pending-confirmation', authenticate, async (req, res) => {
+  try {
+    const convId = req.query.conversationId ? Number(req.query.conversationId) : null;
+    if (!convId) return res.json({ pendingConfirmation: null });
+
+    const conv = await prisma.conversation.findUnique({
+      where: { id: convId },
+      select: { userId: true, state: true },
+    });
+    if (!conv || conv.userId !== req.user.sub) return res.json({ pendingConfirmation: null });
+
+    const st = conv.state;
+    const pendingConfirmation = st?.intent === 'pendingConfirmation' && st?.params?.prompt
+      ? { tool: st.params.tool || null, prompt: st.params.prompt }
+      : null;
+    res.json({ pendingConfirmation });
+  } catch (err) {
+    console.error('[chatbot] Erreur pending-confirmation:', err.message);
+    res.status(500).json({ error: 'Erreur de chargement.' });
   }
 });
 

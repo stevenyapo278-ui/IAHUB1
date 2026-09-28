@@ -5,25 +5,12 @@ import { GripVertical, X, Plus } from 'lucide-react';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import { getWidgetMeta } from './widgetCatalog';
+import { sizeFloor, defaultSize, overlaps, computeDefaultPosition } from './gridLayout';
 
 const BREAKPOINTS = { lg: 1200, md: 996, sm: 768, xs: 480 };
 const COLS = { lg: 12, md: 10, sm: 6, xs: 4 };
 const MARGIN = [12, 12];
 const ROW_HEIGHT = 90;
-
-/* Taille min/max par catégorie de widget — empêche les widgets trop petits ou géants */
-const SIZE_CONSTRAINTS = {
-  KPIs:       { minW: 2, minH: 2, maxW: 4, maxH: 3 },
-  Graphiques: { minW: 3, minH: 3, maxW: 8, maxH: 6 },
-  Tableaux:   { minW: 4, minH: 3, maxW: 8, maxH: 8 },
-  Données:    { minW: 3, minH: 2, maxW: 6, maxH: 5 },
-};
-const DEFAULT_CONSTRAINTS = { minW: 3, minH: 2, maxW: 6, maxH: 4 };
-
-function sizeFloor(widgetType) {
-  const category = getWidgetMeta(widgetType)?.category;
-  return SIZE_CONSTRAINTS[category] || DEFAULT_CONSTRAINTS;
-}
 
 /* Normalise un layout servi par l'API : coerce, dédoublonne, aligne sur les
    widgets réellement présents et génère une entrée pour les orphelins. */
@@ -169,15 +156,20 @@ export default memo(function DashboardGrid({
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     const colWidth = (width - MARGIN[0] * (COLS.lg - 1)) / COLS.lg;
-    const meta = getWidgetMeta(widgetType);
-    const floor = sizeFloor(widgetType);
-    const w = Math.min(floor.maxW, Math.max(floor.minW, meta?.defaultW || 4));
-    const h = Math.min(floor.maxH, Math.max(floor.minH, meta?.defaultH || 3));
+    const { w, h } = defaultSize(widgetType);
     const gridX = Math.max(0, Math.min(COLS.lg - w, Math.floor(x / (colWidth + MARGIN[0]))));
     const gridY = Math.max(0, Math.floor(y / (ROW_HEIGHT + MARGIN[1])));
+    const requested = { x: gridX, y: gridY, w, h };
 
-    onWidgetDrop(widgetType, { x: gridX, y: gridY, w, h });
-  }, [isEditing, onWidgetDrop, width]);
+    // Jamais de chevauchement : en zone déjà prise, on retombe sur le premier
+    // emplacement libre. Sans ce garde, react-grid-layout résout la collision en
+    // DÉPLAÇANT les widgets déjà en place.
+    const position = overlaps(baseLayout, requested)
+      ? computeDefaultPosition(widgetType, baseLayout)
+      : requested;
+
+    onWidgetDrop(widgetType, position);
+  }, [isEditing, onWidgetDrop, width, baseLayout]);
 
   return (
     <motion.div
@@ -235,9 +227,7 @@ export default memo(function DashboardGrid({
                 {isEditing && (
                   <div className="drag-handle" title="Glisser pour déplacer">
                     <GripVertical className="w-4 h-4 shrink-0 opacity-60" />
-                    <span className="drag-handle__label truncate">
-                      {getWidgetMeta(widget.widgetType)?.name || widget.widgetType}
-                    </span>
+                    {/* Le titre du widget est dans le header de WidgetRenderer */}
                     {onRemoveWidget && (
                       <button
                         type="button"

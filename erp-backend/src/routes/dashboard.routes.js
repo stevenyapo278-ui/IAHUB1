@@ -10,11 +10,21 @@ router.use(authenticate);
 // Tous les endpoints dashboard nécessitent au minimum tickets.view
 router.use(requirePermission('tickets.view'));
 
+// Définition « ouverts » partagée, identique au badge « Ouverts » de la vue tickets (OPEN_GROUP)
+const OPEN_STATUSES = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER'];
+
+// La corbeille n'apparaît dans AUCUN comptage : tous les endpoints ci-dessous filtrent
+// deletedAt = null (aligné sur buildTicketWhereClause de la vue tickets).
+const NOT_DELETED = { deletedAt: null };
+
 router.get('/stats', async (req, res) => {
-  const { startDate, endDate } = req.query;
+  const { startDate, endDate, days: daysParam, scope } = req.query;
   const where = {};
+  where.deletedAt = null;
   // Les tickets en attente d'approbation ou rejetés restent hors des statistiques principales
   where.approvalStatus = { notIn: ['PENDING', 'REJECTED'] };
+
+  // Période : dates explicites, sinon `days` (sélecteur de période de la barre d'outils)
   if (startDate || endDate) {
     where.createdAt = {};
     if (startDate) where.createdAt.gte = new Date(startDate);
@@ -23,15 +33,38 @@ router.get('/stats', async (req, res) => {
       if (endDate.length <= 10) end.setHours(23, 59, 59, 999);
       where.createdAt.lte = end;
     }
+  } else if (daysParam) {
+    const days = Math.min(Math.max(parseInt(daysParam, 10) || 0, 1), 365);
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    since.setHours(0, 0, 0, 0);
+    where.createdAt = { gte: since };
   }
 
-  const [byStatus, byPriority, byTeam, byCategory, total, openCount] = await Promise.all([
+  // Périmètre statuts : all (défaut) | open | closed — sélecteur par widget
+  const statusScope = scope === 'open'
+    ? OPEN_STATUSES
+    : scope === 'closed'
+      ? ['SOLVED', 'CLOSED']
+      : null;
+  if (statusScope) where.status = { in: statusScope };
+
+  // Compteurs dérivés : intersection entre le périmètre demandé et le groupe
+  // (scope=closed → 0 ouvert, scope=open → 0 résolu, sans polluer le where).
+  const RESOLVED_STATUSES = ['SOLVED', 'CLOSED'];
+  const openInScope = statusScope ? OPEN_STATUSES.filter((s) => statusScope.includes(s)) : OPEN_STATUSES;
+  const resolvedInScope = statusScope ? RESOLVED_STATUSES.filter((s) => statusScope.includes(s)) : RESOLVED_STATUSES;
+
+  const [byStatus, byPriority, byTeam, byCategory, byTeamPriority, total, openCount, resolvedCount, aiProcessedCount] = await Promise.all([
     prisma.ticket.groupBy({ by: ['status'], where, _count: true }),
     prisma.ticket.groupBy({ by: ['priority'], where, _count: true }),
     prisma.ticket.groupBy({ by: ['teamId'], where, _count: true }),
     prisma.ticket.groupBy({ by: ['category'], where, _count: true }),
+    prisma.ticket.groupBy({ by: ['teamId', 'priority'], where, _count: true }),
     prisma.ticket.count({ where }),
-    prisma.ticket.count({ where: { ...where, status: { in: ['NEW', 'OPEN', 'PLANNED', 'PENDING'] } } }),
+    prisma.ticket.count({ where: { ...where, status: { in: openInScope } } }),
+    prisma.ticket.count({ where: { ...where, status: { in: resolvedInScope } } }),
+    prisma.ticket.count({ where: { ...where, aiProcessed: true } }),
   ]);
 
   const teamIds = byTeam.map((t) => t.teamId).filter((id) => id !== null);
@@ -40,10 +73,13 @@ router.get('/stats', async (req, res) => {
     select: { id: true, name: true },
   });
   const teamNameById = Object.fromEntries(teams.map((t) => [t.id, t.name]));
+  const teamLabel = (id) => (id ? teamNameById[id] || 'Inconnue' : 'Non assignée');
 
   return res.json({
     total,
     open: openCount,
+    resolved: resolvedCount,
+    aiProcessed: aiProcessedCount,
     byStatus: byStatus.map((s) => ({ status: s.status, count: s._count })),
     byPriority: byPriority.map((p) => ({ priority: p.priority, count: p._count })),
     byCategory: byCategory
@@ -51,9 +87,13 @@ router.get('/stats', async (req, res) => {
       .sort((a, b) => b.count - a.count),
     byTeam: byTeam.map((t) => ({
       teamId: t.teamId,
-      teamName: t.teamId ? teamNameById[t.teamId] || 'Inconnue' : 'Non assignée',
+      teamName: teamLabel(t.teamId),
       count: t._count,
     })),
+    // Croisement équipe × priorité (barres groupées)
+    byTeamPriority: byTeamPriority
+      .map((t) => ({ teamId: t.teamId, teamName: teamLabel(t.teamId), priority: t.priority, count: t._count }))
+      .sort((a, b) => b.count - a.count),
   });
 });
 
@@ -64,6 +104,7 @@ router.get('/workload-by-team', async (req, res) => {
     FROM "Ticket"
     WHERE status IN ('NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER')
       AND "approvalStatus" NOT IN ('PENDING', 'REJECTED')
+      AND "deletedAt" IS NULL
     GROUP BY "teamId"
     ORDER BY count DESC
   `;
@@ -96,7 +137,7 @@ router.get('/workload-by-team', async (req, res) => {
 // Tickets en attente d'approbation
 router.get('/pending-approvals', async (req, res) => {
   const tickets = await prisma.ticket.findMany({
-    where: { approvalStatus: 'PENDING' },
+    where: { ...NOT_DELETED, approvalStatus: 'PENDING' },
     include: {
       requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
       assignedTo: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
@@ -111,7 +152,7 @@ router.get('/pending-approvals', async (req, res) => {
 // Nombre de suggestions "réponse sur ticket fermé" en attente
 router.get('/reply-suggestions-count', async (req, res) => {
   const count = await prisma.ticket.count({
-    where: { replyOnClosedSuggested: true },
+    where: { ...NOT_DELETED, replyOnClosedSuggested: true },
   });
   return res.json({ count });
 });
@@ -119,6 +160,7 @@ router.get('/reply-suggestions-count', async (req, res) => {
 // Activité récente / derniers tickets
 router.get('/recent-activity', async (req, res) => {
   const tickets = await prisma.ticket.findMany({
+    where: NOT_DELETED,
     include: {
       requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
       assignedTo: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
@@ -139,11 +181,11 @@ router.get('/needs-human-review', async (req, res) => {
     take: 20,
     distinct: ['ticketId'],
     include: {
-      ticket: { select: { id: true, title: true, status: true } },
+      ticket: { select: { id: true, title: true, status: true, deletedAt: true } },
     },
   });
 
-  const stillWaiting = recentEvents.filter((e) => e.ticket?.status === 'WAITING_FOR_USER');
+  const stillWaiting = recentEvents.filter((e) => e.ticket?.status === 'WAITING_FOR_USER' && !e.ticket.deletedAt);
   return res.json(stillWaiting);
 });
 
@@ -217,15 +259,22 @@ router.get('/integrations', requirePermission('settings.integrations'), async (r
 
 // Performance par technicien
 router.get('/technician-performance', requirePermission('tickets.assign'), async (req, res) => {
-  const { startDate, endDate } = req.query;
+  const { startDate, endDate, days: daysParam } = req.query;
   const dateFilter = {};
   if (startDate) dateFilter.gte = new Date(startDate);
+  else if (daysParam) {
+    const days = Math.min(Math.max(parseInt(daysParam, 10) || 0, 1), 365);
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    since.setHours(0, 0, 0, 0);
+    dateFilter.gte = since;
+  }
   if (endDate) {
     const end = new Date(endDate);
     if (endDate.length <= 10) end.setHours(23, 59, 59, 999);
     dateFilter.lte = end;
   }
-  const ticketDateWhere = (startDate || endDate) ? { createdAt: dateFilter } : {};
+  const ticketDateWhere = dateFilter.gte || dateFilter.lte ? { createdAt: dateFilter } : {};
 
   const technicians = await prisma.user.findMany({
     where: { role: { in: ['TECHNICIAN', 'ADMIN'] }, isActive: true },
@@ -235,9 +284,9 @@ router.get('/technician-performance', requirePermission('tickets.assign'), async
   const results = await Promise.all(
     technicians.map(async (tech) => {
       const [assigned, open, solved] = await Promise.all([
-        prisma.ticket.count({ where: { assignedToId: tech.id, ...ticketDateWhere } }),
-        prisma.ticket.count({ where: { assignedToId: tech.id, status: { in: ['NEW', 'OPEN', 'PLANNED', 'PENDING'] }, ...ticketDateWhere } }),
-        prisma.ticket.count({ where: { assignedToId: tech.id, status: { in: ['SOLVED', 'CLOSED'] }, ...ticketDateWhere } }),
+        prisma.ticket.count({ where: { ...NOT_DELETED, assignedToId: tech.id, ...ticketDateWhere } }),
+        prisma.ticket.count({ where: { ...NOT_DELETED, assignedToId: tech.id, status: { in: OPEN_STATUSES }, ...ticketDateWhere } }),
+        prisma.ticket.count({ where: { ...NOT_DELETED, assignedToId: tech.id, status: { in: ['SOLVED', 'CLOSED'] }, ...ticketDateWhere } }),
       ]);
       return { id: tech.id, fullName: tech.fullName, email: tech.email, assigned, open, solved };
     })
@@ -288,6 +337,7 @@ router.get('/technician-stats', async (req, res) => {
     // Tickets liés aux techniciens sur la période : créés OU résolus dans la plage
     const tickets = await prisma.ticket.findMany({
       where: {
+        ...NOT_DELETED,
         assignedToId: { in: techIds },
         OR: [{ createdAt: range }, { solvedAt: range }, { closedAt: range }],
       },
@@ -421,7 +471,7 @@ router.get('/activity-trend', async (req, res) => {
 
     // Récupère tous les tickets créés dans la période
     const tickets = await prisma.ticket.findMany({
-      where: { createdAt: { gte: since, lte: until } },
+      where: { ...NOT_DELETED, createdAt: { gte: since, lte: until } },
       select: { createdAt: true, status: true, priority: true },
     });
 
@@ -473,7 +523,7 @@ router.get('/activity-trend', async (req, res) => {
     const dateFilter = { gte: since, lte: until };
     const [tickets, techPerf, aiDrafts, byStatus, byPriority, byCategory, byTeam, slaTickets, teams] = await Promise.all([
       prisma.ticket.findMany({
-        where: { createdAt: dateFilter },
+        where: { ...NOT_DELETED, createdAt: dateFilter },
         include: {
           requester: { select: { fullName: true, email: true, avatarUrl: true } },
           assignedTo: { select: { fullName: true, avatarUrl: true } },
@@ -486,12 +536,12 @@ router.get('/activity-trend', async (req, res) => {
         select: { fullName: true, email: true, avatarUrl: true },
       }),
       prisma.aiEmailDraft.count({ where: { status: 'APPROVED', createdAt: dateFilter } }),
-      prisma.ticket.groupBy({ by: ['status'], where: { createdAt: dateFilter }, _count: true }),
-      prisma.ticket.groupBy({ by: ['priority'], where: { createdAt: dateFilter }, _count: true }),
-      prisma.ticket.groupBy({ by: ['category'], where: { createdAt: dateFilter }, _count: true }),
-      prisma.ticket.groupBy({ by: ['teamId'], where: { createdAt: dateFilter }, _count: true }),
+      prisma.ticket.groupBy({ by: ['status'], where: { ...NOT_DELETED, createdAt: dateFilter }, _count: true }),
+      prisma.ticket.groupBy({ by: ['priority'], where: { ...NOT_DELETED, createdAt: dateFilter }, _count: true }),
+      prisma.ticket.groupBy({ by: ['category'], where: { ...NOT_DELETED, createdAt: dateFilter }, _count: true }),
+      prisma.ticket.groupBy({ by: ['teamId'], where: { ...NOT_DELETED, createdAt: dateFilter }, _count: true }),
       prisma.ticket.findMany({
-        where: { createdAt: dateFilter },
+        where: { ...NOT_DELETED, createdAt: dateFilter },
         select: {
           priority: true, status: true, slaBreachedAt: true, slaResolutionDueAt: true,
           firstResponseAt: true, csatScore: true, createdAt: true, solvedAt: true, closedAt: true,
@@ -545,7 +595,6 @@ router.get('/activity-trend', async (req, res) => {
     if (format === 'pdf') {
       // SLA data pour le rapport
       const RESOLVED = ['SOLVED', 'CLOSED'];
-      const OPEN = ['NEW', 'OPEN', 'PLANNED', 'PENDING'];
       const slaByPriority = {};
       for (const p of ['P1', 'P2', 'P3', 'P4']) {
         const pool = slaTickets.filter((t) => t.priority === p);
@@ -582,7 +631,7 @@ router.get('/activity-trend', async (req, res) => {
       });
       const techIds = techStats.map((t) => t.id);
       const techTickets = await prisma.ticket.findMany({
-        where: { assignedToId: { in: techIds }, createdAt: dateFilter },
+        where: { ...NOT_DELETED, assignedToId: { in: techIds }, createdAt: dateFilter },
         select: { assignedToId: true, status: true, slaBreachedAt: true, slaResolutionDueAt: true, csatScore: true, createdAt: true, solvedAt: true, closedAt: true },
       });
 
@@ -649,7 +698,7 @@ router.get('/sla-analytics', requirePermission('tickets.assign'), async (req, re
     since.setHours(0, 0, 0, 0);
 
     const tickets = await prisma.ticket.findMany({
-      where: { createdAt: { gte: since } },
+      where: { ...NOT_DELETED, createdAt: { gte: since } },
       select: {
         id: true, priority: true, status: true, createdAt: true, solvedAt: true,
         slaBreachedAt: true, slaResolutionDueAt: true, slaResponseDueAt: true,
@@ -658,7 +707,7 @@ router.get('/sla-analytics', requirePermission('tickets.assign'), async (req, re
     });
 
     const RESOLVED = ['SOLVED', 'CLOSED'];
-    const OPEN = ['NEW', 'OPEN', 'PLANNED', 'PENDING'];
+    const OPEN = OPEN_STATUSES;
 
     // Statistiques par priorité
     const byPriority = {};
@@ -693,6 +742,7 @@ router.get('/sla-analytics', requirePermission('tickets.assign'), async (req, re
     // Tickets ouverts en retard SLA (échéance de résolution dépassée)
     const overdue = await prisma.ticket.findMany({
       where: {
+        ...NOT_DELETED,
         status: { in: OPEN },
         slaResolutionDueAt: { not: null, lt: new Date() },
         slaBreachedAt: null,
@@ -766,7 +816,7 @@ router.get('/closure-stats', async (req, res) => {
     else bucket.rejected += 1;
   }
 
-  const pending = await prisma.ticket.count({ where: { closeSuggested: true } });
+  const pending = await prisma.ticket.count({ where: { ...NOT_DELETED, closeSuggested: true } });
   const suggested = events.filter((e) => e.type === 'CLOSURE_SUGGESTED').length;
 
   return res.json({
@@ -796,7 +846,7 @@ router.get('/ticket-heatmap', async (req, res) => {
     startDate.setDate(startDate.getDate() - (maxWeeks - 1) * 7);
 
     const tickets = await prisma.ticket.findMany({
-      where: { createdAt: { gte: startDate } },
+      where: { ...NOT_DELETED, createdAt: { gte: startDate } },
       select: { createdAt: true },
     });
 
@@ -867,26 +917,43 @@ router.get('/ticket-evolution', async (req, res) => {
     // Déterminer le groupement (jour/semaine/mois)
     const groupBy = groupByParam || (totalDays > 90 ? 'month' : totalDays > 30 ? 'week' : 'day');
 
-    // Construire le filtre de tickets
-    const ticketWhere = { createdAt: { gte: since, lte: until } };
+    // Périmètre commun aligné sur /stats et la vue tickets :
+    // corbeille exclue + tickets en attente d'approbation ou rejetés exclus.
+    const sharedScope = { ...NOT_DELETED, approvalStatus: { notIn: ['PENDING', 'REJECTED'] } };
+    if (priority) sharedScope.priority = priority;
+    if (teamId) sharedScope.teamId = Number(teamId);
+    if (category) sharedScope.category = category;
+    if (assignedToId) sharedScope.assignedToId = Number(assignedToId);
+    if (source) sharedScope.source = source;
+
+    // Tickets CRÉÉS sur la période (séries créées/P1-P4/SLA, breakdown, taux de réponse)
+    const ticketWhere = { ...sharedScope, createdAt: { gte: since, lte: until } };
     if (status) ticketWhere.status = status;
-    if (priority) ticketWhere.priority = priority;
-    if (teamId) ticketWhere.teamId = Number(teamId);
-    if (category) ticketWhere.category = category;
-    if (assignedToId) ticketWhere.assignedToId = Number(assignedToId);
-    if (source) ticketWhere.source = source;
 
-    // Récupérer tous les tickets de la période
-    const tickets = await prisma.ticket.findMany({
-      where: ticketWhere,
-      select: {
-        id: true, status: true, priority: true, category: true, source: true,
-        createdAt: true, solvedAt: true, closedAt: true, teamId: true, assignedToId: true,
-        slaBreachedAt: true, firstResponseAt: true,
-      },
-    });
+    // Tickets RÉSOLUS sur la période : la résolution doit être survenue pendant, même si le
+    // ticket a été créé avant (sinon les « Résolus » de la carte et de la série divergent).
+    // Statut résolu exigé : la réouverture ne remet pas solvedAt à null.
+    const RESOLVED_STATUSES = ['SOLVED', 'CLOSED'];
+    const resolvedStatuses = status
+      ? RESOLVED_STATUSES.filter((s) => s === status)
+      : RESOLVED_STATUSES;
+    const resolvedWhere = {
+      ...sharedScope,
+      status: { in: resolvedStatuses },
+      OR: [{ solvedAt: { gte: since, lte: until } }, { closedAt: { gte: since, lte: until } }],
+    };
 
-    // Fonction de groupement temporel
+    const SELECT_FIELDS = {
+      id: true, status: true, priority: true, category: true, source: true,
+      createdAt: true, solvedAt: true, closedAt: true, teamId: true, assignedToId: true,
+      slaBreachedAt: true, firstResponseAt: true,
+    };
+    const [tickets, resolvedTickets] = await Promise.all([
+      prisma.ticket.findMany({ where: ticketWhere, select: SELECT_FIELDS }),
+      prisma.ticket.findMany({ where: resolvedWhere, select: SELECT_FIELDS }),
+    ]);
+
+    // Fonction de groupement temporel (buckets en date locale, cohérents avec since/until)
     function getDateKey(date) {
       const d = new Date(date);
       if (groupBy === 'month') return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -895,7 +962,7 @@ router.get('/ticket-evolution', async (req, res) => {
         const weekNum = Math.ceil(((d - startOfYear) / 86400000 + startOfYear.getDay() + 1) / 7);
         return `${d.getFullYear()}-W${String(weekNum).padStart(2, '0')}`;
       }
-      return d.toISOString().slice(0, 10);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     }
 
     function getLabel(key) {
@@ -936,30 +1003,39 @@ router.get('/ticket-evolution', async (req, res) => {
         else if (t.priority === 'P4') series[key].p4 += 1;
         if (t.slaBreachedAt) series[key].slaBreached += 1;
       }
-      // Les résolutions
-      const resolvedAt = t.solvedAt || t.closedAt;
-      if (resolvedAt && ['SOLVED', 'CLOSED'].includes(t.status)) {
-        const rKey = getDateKey(resolvedAt);
-        if (series[rKey]) series[rKey].resolved += 1;
-      }
     }
 
-    // Calculer les stats globales
+    // Résolutions bucketisées sur l'instant de résolution (dataset dédié).
+    // On retient la date qui tombe DANS la période : un ticket résolu avant puis clos pendant
+    // doit rester dans les clés de la série, sinon la carte « Résolus » dépasse sa somme.
+    const resolutionDate = (t) => {
+      if (t.solvedAt && t.solvedAt >= since && t.solvedAt <= until) return t.solvedAt;
+      if (t.closedAt && t.closedAt >= since && t.closedAt <= until) return t.closedAt;
+      return t.solvedAt || t.closedAt;
+    };
+    for (const t of resolvedTickets) {
+      const rKey = getDateKey(resolutionDate(t));
+      if (series[rKey]) series[rKey].resolved += 1;
+    }
+
+    // Totaux : chaque carte = la somme exacte de sa série
     const totalCreated = tickets.length;
-    const totalResolved = tickets.filter((t) => ['SOLVED', 'CLOSED'].includes(t.status)).length;
+    const totalResolved = resolvedTickets.length;
     const totalP1 = tickets.filter((t) => t.priority === 'P1').length;
     const totalBreached = tickets.filter((t) => t.slaBreachedAt).length;
     const totalWithFirstResponse = tickets.filter((t) => t.firstResponseAt).length;
+    // Durée moyenne : du ticket à sa PREMIÈRE résolution (solvedAt, sinon closedAt),
+    // indépendamment de la date bucketisée (un ticket résolu avant puis clos pendant
+    // est compté dans la période, sa durée s'arrête à sa résolution).
     const avgResolutionDays = totalResolved > 0
       ? Math.round(
-          tickets
-            .filter((t) => t.solvedAt || t.closedAt)
+          resolvedTickets
             .reduce((sum, t) => sum + ((t.solvedAt || t.closedAt) - t.createdAt) / (1000 * 60 * 60 * 24), 0)
           / totalResolved * 10
         ) / 10
       : 0;
 
-    // Répartition par statut (global)
+    // Répartition par statut/priorité : tickets créés sur la période (cohérent avec « Créés »)
     const statusBreakdown = {};
     for (const t of tickets) {
       statusBreakdown[t.status] = (statusBreakdown[t.status] || 0) + 1;

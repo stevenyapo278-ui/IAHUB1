@@ -42,33 +42,37 @@ function getLogoAttachmentIfReferenced(bodyHtml, signatureLogoUrl) {
 // inReplyToGraphMessageId (id Outlook du dernier message reçu, cf. TicketMessage.outlookMessageId) :
 // si fourni, on répond via /createReply au lieu de créer un message de zéro — sans ça, Outlook
 // affiche la réponse comme un email totalement séparé du fil de conversation de l'utilisateur,
-// au lieu de s'enchaîner avec "RE:" au même endroit que les échanges précédents.
-async function sendEmailViaSmtp({ to, cc, subject, bodyHtml, account, logoAttachment }) {
+// plutôt que de s'enchaîner avec "RE:" au même endroit que les échanges précédents.
+// `attachments` : pièces jointes additionnelles [{ filename, content: Buffer, contentType }].
+async function sendEmailViaSmtp({ to, cc, subject, bodyHtml, account, logoAttachment, attachments: extraAttachments = [] }) {
   const transporter = nodemailer.createTransport({
     host: account.smtpHost,
     port: account.smtpPort || 587,
     secure: account.useTls === false ? false : account.smtpPort === 465,
     auth: { user: account.username, pass: account.password },
   });
-  const attachments = logoAttachment ? [{
-    filename: logoAttachment.name,
-    content: Buffer.from(logoAttachment.contentBytes, 'base64'),
-    contentType: logoAttachment.contentType,
-    cid: LOGO_CONTENT_ID,
-  }] : undefined;
+  const attachments = [
+    ...(logoAttachment ? [{
+      filename: logoAttachment.name,
+      content: Buffer.from(logoAttachment.contentBytes, 'base64'),
+      contentType: logoAttachment.contentType,
+      cid: LOGO_CONTENT_ID,
+    }] : []),
+    ...extraAttachments,
+  ];
   const mailOptions = {
     from: account.emailAddress,
     to: Array.isArray(to) ? to.join(', ') : to,
     cc: cc && cc.length > 0 ? cc.join(', ') : undefined,
     subject,
     html: bodyHtml,
-    attachments,
+    attachments: attachments.length > 0 ? attachments : undefined,
   };
   return transporter.sendMail(mailOptions);
 }
 
-async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo = null, conversationId = null, inReplyToGraphMessageId = null, saveAsMessage = true }) {
-  // Priorité au compte par défaut Outlook, sinon Outlook actif, sinon SMTP
+// Sélection du compte d'envoi actif : Outlook par défaut → Outlook actif → SMTP par défaut → SMTP actif.
+async function getActiveEmailAccount() {
   let account = await prisma.emailAccount.findFirst({
     where: { provider: 'OUTLOOK', isActive: true, isDefault: true, refreshToken: { not: null } },
   });
@@ -77,8 +81,6 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
       where: { provider: 'OUTLOOK', isActive: true, refreshToken: { not: null } },
     });
   }
-  const isOutlook = !!account;
-
   if (!account) {
     account = await prisma.emailAccount.findFirst({
       where: { provider: 'IMAP_SMTP', isActive: true, isDefault: true, smtpHost: { not: null } },
@@ -89,8 +91,13 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
       where: { provider: 'IMAP_SMTP', isActive: true, smtpHost: { not: null } },
     });
   }
+  return account;
+}
 
+async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo = null, conversationId = null, inReplyToGraphMessageId = null, saveAsMessage = true }) {
+  const account = await getActiveEmailAccount();
   if (!account) throw new Error('Aucun compte email configuré pour l\'envoi (Outlook/M365 ou SMTP)');
+  const isOutlook = account.provider === 'OUTLOOK';
 
   const settings = await getSystemSettings();
   let logoAttachment = getLogoAttachmentIfReferenced(bodyHtml, settings.signatureLogoUrl);
@@ -1312,6 +1319,8 @@ async function sendReopenNotificationEmail({ ticketId, glpiTicketId, ticketTitle
 
 module.exports = {
   sendEmail,
+  sendEmailViaSmtp,
+  getActiveEmailAccount,
   sendAcknowledgement,
   sendReminder,
   sendKnownIncidentNotification,

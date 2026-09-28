@@ -1,108 +1,43 @@
 const prisma = require('../prismaClient');
+const { scoreCandidates } = require('./ticketSuggestionService');
 
 // Statuts considérés comme "charge active" d'un technicien pour le calcul du moins chargé —
 // un ticket déjà résolu/clos ne doit plus compter dans son équilibrage de charge.
 const ACTIVE_STATUSES = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER'];
+// Même périmètre que /dashboard/stats : la corbeille et les tickets en attente
+// d'approbation (ou rejetés) n'entrent jamais dans le calcul de charge.
+const CHARGE_BASE = { deletedAt: null, approvalStatus: { notIn: ['PENDING', 'REJECTED'] } };
 
-// Trouve les techniciens compétents pour un domaine donné, triés par niveau de compétence
-// puis par charge de travail. Retourne le meilleur candidat.
+// Trouve le meilleur technicien pour un domaine donné : tous les candidats
+// (compétence exacte → partielle → équipe) sont scorés avec la compétence
+// (UserSkill), l'historique (tickets de même catégorie résolus, auto-assignations
+// corrigées) et la charge active — voir ticketSuggestionService.scoreCandidates.
 async function findBestTechnician(category, aiCategory) {
   const skillName = aiCategory || category;
   if (!skillName) return { team: null, technician: null };
 
-  // Étape 1 : chercher par compétence exacte (assignation intelligente)
-  const skilledUsers = await prisma.userSkill.findMany({
-    where: {
-      skill: { name: { equals: skillName, mode: 'insensitive' } },
-      user: { isActive: true, role: { in: ['TECHNICIAN', 'ADMIN', 'SUPERADMIN'] } },
-    },
-    include: { user: { select: { id: true, fullName: true } } },
-    orderBy: { level: 'desc' },
-  });
+  const { ranked, method } = await scoreCandidates(skillName, category, category);
+  if (ranked.length === 0) return { team: null, technician: null };
 
-  if (skilledUsers.length > 0) {
-    const techIds = skilledUsers.map((s) => s.user.id);
-    const loadCounts = await prisma.ticket.groupBy({
-      by: ['assignedToId'],
-      where: { assignedToId: { in: techIds }, status: { in: ACTIVE_STATUSES } },
-      _count: { id: true },
-    });
-    const loadByUserId = Object.fromEntries(loadCounts.map((c) => [c.assignedToId, c._count.id]));
-
-    // Trier par niveau de compétence (desc) puis charge (asc)
-    const sorted = skilledUsers.sort((a, b) => {
-      if (b.level !== a.level) return b.level - a.level;
-      return (loadByUserId[a.user.id] || 0) - (loadByUserId[b.user.id] || 0);
-    });
-
-    const bestTech = sorted[0].user;
-    // Résoudre l'équipe du technicien sélectionné
-    const techWithTeam = await prisma.user.findUnique({
-      where: { id: bestTech.id },
-      select: { id: true, fullName: true, teamId: true, team: { select: { id: true, name: true } } },
-    });
-    const resolvedTeam = techWithTeam?.team || null;
-    return { team: resolvedTeam, technician: { id: bestTech.id, fullName: bestTech.fullName }, skillLevel: sorted[0].level, method: 'skill' };
+  const best = ranked[0];
+  // Résoudre l'équipe du technicien sélectionné (ou par nom si méthode équipe)
+  let team = null;
+  if (best.teamId) {
+    team = await prisma.team.findUnique({ where: { id: best.teamId }, select: { id: true, name: true } });
   }
-
-  // Étape 1b : chercher par compétence partielle (ex: "PORT USB" contient "USB")
-  if (skillName.length >= 3) {
-    const words = skillName.split(/\s+/).filter((w) => w.length >= 3);
-    for (const word of words) {
-      const partialUsers = await prisma.userSkill.findMany({
-        where: {
-          skill: { name: { contains: word, mode: 'insensitive' } },
-          user: { isActive: true, role: { in: ['TECHNICIAN', 'ADMIN', 'SUPERADMIN'] } },
-        },
-        include: { user: { select: { id: true, fullName: true } } },
-        orderBy: { level: 'desc' },
-      });
-
-      if (partialUsers.length > 0) {
-        const techIds = partialUsers.map((s) => s.user.id);
-        const loadCounts = await prisma.ticket.groupBy({
-          by: ['assignedToId'],
-          where: { assignedToId: { in: techIds }, status: { in: ACTIVE_STATUSES } },
-          _count: { id: true },
-        });
-        const loadByUserId = Object.fromEntries(loadCounts.map((c) => [c.assignedToId, c._count.id]));
-        const sorted = partialUsers.sort((a, b) => {
-          if (b.level !== a.level) return b.level - a.level;
-          return (loadByUserId[a.user.id] || 0) - (loadByUserId[b.user.id] || 0);
-        });
-        const bestTech = sorted[0].user;
-        // Résoudre l'équipe du technicien sélectionné
-        const techWithTeam = await prisma.user.findUnique({
-          where: { id: bestTech.id },
-          select: { id: true, fullName: true, teamId: true, team: { select: { id: true, name: true } } },
-        });
-        const resolvedTeam = techWithTeam?.team || null;
-        return { team: resolvedTeam, technician: { id: bestTech.id, fullName: bestTech.fullName }, skillLevel: sorted[0].level, method: 'skill_partial' };
-      }
-    }
+  if (!team) {
+    team = await prisma.team.findFirst({
+      where: { name: { equals: category, mode: 'insensitive' } },
+      select: { id: true, name: true },
+    });
   }
-
-  // Étape 2 : fallback sur l'assignation par équipe (comportement existant)
-  const team = await prisma.team.findFirst({
-    where: { name: { equals: category, mode: 'insensitive' } },
-    include: { members: { where: { role: { in: ['TECHNICIAN', 'ADMIN', 'SUPERADMIN'] }, isActive: true }, select: { id: true, fullName: true } } },
-  });
-  if (!team || team.members.length === 0) return { team: null, technician: null };
-
-  const loadCounts = await prisma.ticket.groupBy({
-    by: ['assignedToId'],
-    where: { assignedToId: { in: team.members.map((m) => m.id) }, status: { in: ACTIVE_STATUSES } },
-    _count: { id: true },
-  });
-  const loadByUserId = Object.fromEntries(loadCounts.map((c) => [c.assignedToId, c._count.id]));
-
-  const leastLoaded = team.members.reduce((best, current) => {
-    const currentLoad = loadByUserId[current.id] || 0;
-    const bestLoad = loadByUserId[best.id] || 0;
-    return currentLoad < bestLoad ? current : best;
-  });
-
-  return { team, technician: leastLoaded, method: 'team' };
+  return {
+    team,
+    technician: { id: best.id, fullName: best.fullName },
+    skillLevel: best.skillLevel,
+    score: best.score,
+    method: best.method || method,
+  };
 }
 
 const { sendAssignmentNotificationEmail } = require('./emailSender');
@@ -127,7 +62,7 @@ async function notifyAssignedTechnician(ticketId, technicianId) {
 }
 
 // Choisit automatiquement un technicien (par compétence d'abord, puis par équipe)
-// et l'assigne au ticket — le moins chargé parmi les candidats.
+// et l'assigne au ticket — le meilleur score compétence + historique + charge.
 // Retourne le technicien assigné ou null.
 async function autoAssignTechnician(ticketId, category) {
   const { team, technician } = await findBestTechnician(category, null);
@@ -174,7 +109,9 @@ async function autoAssignTechnicianWithAI(ticketId, category, aiCategory) {
         ticketId,
         newTechnicianId: technician.id,
         wasAutoAssigned: true,
-        reason: method === 'skill' ? 'assignation_ia_competence' : 'assignation_ia_equipe',
+        reason: method === 'skill' ? 'assignation_ia_competence'
+          : method === 'skill_partial' ? 'assignation_ia_competence_partielle'
+          : 'assignation_ia_equipe',
       },
     });
   } catch (err) {

@@ -22,12 +22,21 @@ import {
 } from './useDashboard';
 import DashboardGrid from './DashboardGrid';
 import DashboardToolbar from './DashboardToolbar';
+import { StatCardSkeleton } from '../components/Skeleton';
 import WidgetPicker from './WidgetPicker';
 import WidgetRenderer from './WidgetRenderer';
-import { getWidgetMeta } from './widgetCatalog';
+import { getWidgetMeta, SCOPE_SELECTABLE } from './widgetCatalog';
 import { LAYOUT_PRESETS, applyPreset, autoDistribute } from './layoutPresets';
+import { computeDefaultPosition, overlaps } from './gridLayout';
 
 const PERIOD_MAP = { '7d': 7, '30d': 30, '90d': 90, '180d': 180 };
+// Libellés de période pour les sous-titres (précision) des widgets
+const PERIOD_LABELS = {
+  '7d': '7 derniers jours',
+  '30d': '30 derniers jours',
+  '90d': '90 derniers jours',
+  '180d': '180 derniers jours',
+};
 
 /* Clé localStorage du dernier dashboard actif, par utilisateur */
 const lastDashboardKey = (userId) => `dashboard:last-active:${userId || 'anon'}`;
@@ -47,47 +56,6 @@ function writeLastDashboardId(userId, id) {
   } catch {
     /* quota / mode privé : ignorer */
   }
-}
-
-function computeDefaultPosition(widgetType, existingLayout) {
-  const meta = getWidgetMeta(widgetType);
-  const w = meta?.defaultW || 4;
-  const h = meta?.defaultH || 3;
-  const COLS = 12;
-
-  if (existingLayout.length === 0) {
-    return { x: 0, y: 0, w, h };
-  }
-
-  // Construire l'ensemble des cellules occupées
-  const occupied = new Set();
-  for (const { x, y, w: ew, h: eh } of existingLayout) {
-    for (let dx = 0; dx < ew; dx++) {
-      for (let dy = 0; dy < eh; dy++) {
-        occupied.add(`${x + dx},${y + dy}`);
-      }
-    }
-  }
-
-  // Plafond de recherche : 5 lignes au-delà du bas du layout existant
-  const maxY = Math.max(...existingLayout.map((l) => l.y + l.h)) + 5;
-
-  // Chercher le premier emplacement libre (gauche→droite, haut→bas)
-  for (let y = 0; y <= maxY; y++) {
-    for (let x = 0; x <= COLS - w; x++) {
-      let fits = true;
-      for (let dx = 0; dx < w && fits; dx++) {
-        for (let dy = 0; dy < h && fits; dy++) {
-          if (occupied.has(`${x + dx},${y + dy}`)) fits = false;
-        }
-      }
-      if (fits) return { x, y, w, h };
-    }
-  }
-
-  // Fallback : tout en bas à gauche
-  const bottomY = Math.max(...existingLayout.map((l) => l.y + l.h));
-  return { x: 0, y: bottomY, w, h };
 }
 
 export default function DashboardPage() {
@@ -111,7 +79,32 @@ export default function DashboardPage() {
 
   // SWR hooks
   const { dashboards, isLoading: isLoadingDashboards, mutate: mutateDashboards } = useDashboards();
-  const { stats, isLoading: isLoadingStats, error: errorStats } = useDashboardStats(days);
+
+  // Active dashboard data — déclaré AVANT les hooks de stats : les scopes
+  // demandés (sélecteur par widget) dépendent des widgets du dashboard actif.
+  const activeDashboard = useMemo(
+    () => dashboards.find((d) => d.id === activeDashboardId) || null,
+    [dashboards, activeDashboardId],
+  );
+  const currentWidgets = activeDashboard?.widgets || [];
+  const currentLayout = activeDashboard?.layout || [];
+
+  const periodLabel = PERIOD_LABELS[activePeriod] || 'toutes périodes';
+
+  // Périmètres réellement utilisés par les widgets (config.scope) : les fetchs
+  // open/closed ne sont émis que s'ils servent à au moins un widget sélectionnable.
+  const neededScopes = useMemo(() => {
+    const scopes = new Set();
+    for (const w of currentWidgets) {
+      const scope = SCOPE_SELECTABLE.has(w.widgetType) ? w.config?.scope : null;
+      if (scope === 'open' || scope === 'closed') scopes.add(scope);
+    }
+    return scopes;
+  }, [currentWidgets]);
+
+  const { stats, isLoading: isLoadingStats, error: errorStats } = useDashboardStats(days, 'all', true);
+  const { stats: statsOpen } = useDashboardStats(days, 'open', neededScopes.has('open'));
+  const { stats: statsClosed } = useDashboardStats(days, 'closed', neededScopes.has('closed'));
   const { trend, isLoading: isLoadingTrend, error: errorTrend } = useActivityTrend(days);
   const { activity } = useRecentActivity();
   const { techPerformance } = useTechnicianPerformance(days);
@@ -123,14 +116,6 @@ export default function DashboardPage() {
   const { replySuggestions } = useReplySuggestions();
   const { heatmap } = useTicketHeatmap(20);
   const { workloadByTeam } = useWorkloadByTeam();
-
-  // Active dashboard data
-  const activeDashboard = useMemo(
-    () => dashboards.find((d) => d.id === activeDashboardId) || null,
-    [dashboards, activeDashboardId],
-  );
-  const currentWidgets = activeDashboard?.widgets || [];
-  const currentLayout = activeDashboard?.layout || [];
 
   // On mount: pick a dashboard
   useEffect(() => {
@@ -162,6 +147,16 @@ export default function DashboardPage() {
   // Dernier layout commité par la grille (pending save)
   const pendingLayoutRef = useRef(null);
 
+  // Miroir du dernier layout connu côté client. Le cache SWR (`currentLayout`)
+  // peut rester périmé entre un flush et son refetch — les ajouts/suppressions
+  // construisent leur PATCH dessus pour ne JAMAIS réécrire d'anciennes positions.
+  const latestLayoutRef = useRef(null);
+
+  // Changement de dashboard / nouveau dashboard : on repart du cache serveur
+  useEffect(() => {
+    latestLayoutRef.current = null;
+  }, [activeDashboardId]);
+
   const flushLayoutSave = useCallback(() => {
     if (layoutSaveTimeout.current) {
       clearTimeout(layoutSaveTimeout.current);
@@ -177,6 +172,9 @@ export default function DashboardPage() {
   const handleLayoutChange = useCallback(
     (newLayout) => {
       if (!activeDashboardId) return;
+
+      // Miroir toujours à jour du layout tel que la grille l'affiche
+      latestLayoutRef.current = newLayout;
 
       // Ignore les re-compactions identiques au layout servi : sans ce garde,
       // chaque re-render du serveur relance une sauvegarde (layout instable).
@@ -235,24 +233,38 @@ export default function DashboardPage() {
       if (!activeDashboardId) return;
 
       try {
+        // Base la plus fraîche côté client : miroir du layout affiché (couvre le
+        // debounce 800 ms ET la fenêtre flush→refetch où le cache SWR est périmé).
+        const base = latestLayoutRef.current ?? currentLayout;
+        // Purge des entrées orphelines (widget supprimé dont le layout garde la trace)
+        const liveLayout = base.filter((l) =>
+          currentWidgets.some((w) => w.id === l.i),
+        );
+
+        // Position demandée uniquement si elle ne chevauche rien ; sinon repli
+        // sur le premier emplacement libre. Les widgets déjà en place ne bougent jamais.
+        const pos = position && !overlaps(liveLayout, position)
+          ? position
+          : computeDefaultPosition(widgetType, liveLayout);
+
         // 1. Créer le widget (source de vérité pour l'id généré)
         const { data: newWidget } = await api.post(`/dashboards/${activeDashboardId}/widgets`, {
           widgetType,
         });
 
-        // 2. Position calculée contre le layout actuel + purge des entrées
-        //    orphelines (widget supprimé dont le layout garde la trace)
-        const liveLayout = currentLayout.filter((l) =>
-          currentWidgets.some((w) => w.id === l.i),
-        );
-        const pos = position || computeDefaultPosition(widgetType, liveLayout);
-        const layoutEntry = { i: newWidget.id, ...pos };
+        // 2. Écriture atomique : on annule le flush en attente, notre PATCH
+        //    contient déjà le layout complet + la nouvelle entrée.
+        if (layoutSaveTimeout.current) {
+          clearTimeout(layoutSaveTimeout.current);
+          layoutSaveTimeout.current = null;
+        }
+        pendingLayoutRef.current = null;
 
-        await api.patch(`/dashboards/${activeDashboardId}`, {
-          layout: [...liveLayout, layoutEntry],
-        });
+        const newLayout = [...liveLayout, { i: newWidget.id, ...pos }];
+        await api.patch(`/dashboards/${activeDashboardId}`, { layout: newLayout });
+        latestLayoutRef.current = newLayout;
 
-        mutateDashboards();
+        await mutateDashboards();
         setShowPicker(false);
       } catch {
         // silently fail
@@ -270,6 +282,23 @@ export default function DashboardPage() {
     [handleAddWidget],
   );
 
+  // Sélecteur de périmètre par widget (Tous | Ouverts | Fermés) —
+  // choix persisté dans widget.config.scope (aucune migration nécessaire)
+  const handleScopeChange = useCallback(
+    async (widget, scope) => {
+      if (!activeDashboardId) return;
+      try {
+        await api.patch(`/dashboards/${activeDashboardId}/widgets/${widget.id}`, {
+          config: { ...(widget.config || {}), scope },
+        });
+        await mutateDashboards();
+      } catch {
+        // silently fail
+      }
+    },
+    [activeDashboardId, mutateDashboards],
+  );
+
   // Remove widget
   const handleRemoveWidget = useCallback(
     async (widgetId) => {
@@ -278,13 +307,20 @@ export default function DashboardPage() {
       try {
         await api.delete(`/dashboards/${activeDashboardId}/widgets/${widgetId}`);
 
-        // Purge l'entrée du layout + les entrées orphelines restantes
+        // Base fraîche (cf. handleAddWidget) : purge l'entrée du layout + les
+        // entrées orphelines restantes, sans réécrire d'anciennes positions
         const kept = currentWidgets.filter((w) => w.id !== widgetId);
         const keptIds = new Set(kept.map((w) => w.id));
-        const newLayout = currentLayout.filter((l) => keptIds.has(l.i));
+        const newLayout = (latestLayoutRef.current ?? currentLayout).filter((l) => keptIds.has(l.i));
+        if (layoutSaveTimeout.current) {
+          clearTimeout(layoutSaveTimeout.current);
+          layoutSaveTimeout.current = null;
+        }
+        pendingLayoutRef.current = null;
         await api.patch(`/dashboards/${activeDashboardId}`, { layout: newLayout });
+        latestLayoutRef.current = newLayout;
 
-        mutateDashboards();
+        await mutateDashboards();
       } catch {
         // silently fail
       }
@@ -310,6 +346,7 @@ export default function DashboardPage() {
   const applyTemplate = useCallback(async () => {
     if (!activeDashboardId) return;
     pendingLayoutRef.current = null;
+    latestLayoutRef.current = null;
     if (layoutSaveTimeout.current) {
       clearTimeout(layoutSaveTimeout.current);
       layoutSaveTimeout.current = null;
@@ -372,6 +409,7 @@ export default function DashboardPage() {
     async (newLayout) => {
       if (!activeDashboardId) return;
       pendingLayoutRef.current = null;
+      latestLayoutRef.current = newLayout;
       if (layoutSaveTimeout.current) {
         clearTimeout(layoutSaveTimeout.current);
         layoutSaveTimeout.current = null;
@@ -514,10 +552,20 @@ export default function DashboardPage() {
         reportLoading={reportLoading}
       />
 
-      {/* Loading state */}
+      {/* Loading state — squelette de grille pour éviter tout saut de mise en page */}
       {(isLoadingStats || isLoadingTrend) && !stats && (
-        <div className="flex items-center justify-center py-20">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+        <div className="space-y-4" role="status" aria-label="Chargement du dashboard">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+            {Array.from({ length: 6 }, (_, i) => (
+              <StatCardSkeleton key={i} />
+            ))}
+          </div>
+          <div className="bg-surface-container-lowest border border-outline-variant/60 rounded-2xl p-lg animate-pulse space-y-3">
+            <div className="h-3 w-40 rounded-lg bg-surface-container-high/60" />
+            <div className="h-8 w-24 rounded-lg bg-surface-container-high/60" />
+            <div className="h-32 w-full rounded-lg bg-surface-container-high/40" />
+          </div>
+          <span className="sr-only">Chargement des statistiques…</span>
         </div>
       )}
 
@@ -542,6 +590,8 @@ export default function DashboardPage() {
               widget={widget}
               allData={{
                 stats,
+                statsOpen,
+                statsClosed,
                 trend,
                 activity,
                 techPerformance,
@@ -554,6 +604,8 @@ export default function DashboardPage() {
                 heatmap,
                 workloadByTeam,
                 period: activePeriod,
+                periodLabel,
+                onScopeChange: handleScopeChange,
               }}
             />
           )}

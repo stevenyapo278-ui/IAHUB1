@@ -16,6 +16,8 @@ import { ThemeProvider } from './context/ThemeContext'
 import { SocketProvider } from './context/SocketContext'
 import { NotificationProvider } from './context/NotificationContext'
 import { UserPreferencesProvider } from './context/UserPreferencesContext'
+import { VoiceSessionProvider } from './context/VoiceSessionContext'
+import { TooltipProvider } from './components/ui/tooltip'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
@@ -25,7 +27,11 @@ createRoot(document.getElementById('root')).render(
           <SocketProvider>
             <NotificationProvider>
               <UserPreferencesProvider>
-                  <App />
+                <VoiceSessionProvider>
+                  <TooltipProvider>
+                    <App />
+                  </TooltipProvider>
+                </VoiceSessionProvider>
                 <Toaster />
               </UserPreferencesProvider>
             </NotificationProvider>

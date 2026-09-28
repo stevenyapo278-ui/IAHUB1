@@ -1242,6 +1242,36 @@ html.theme-animating *::after {
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
 }
 
+/* ── Mobile / tablette étroite : la sidebar devient un tiroir (drawer) ── */
+@media (max-width: 767px) {
+  .app-sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    z-index: 60;
+  }
+  .app-sidebar.mobile-open {
+    transform: translateX(0);
+    box-shadow: 0 0 60px rgba(0, 0, 0, 0.45);
+  }
+  /* Le marginLeft inline du conteneur principal est neutralisé en mobile */
+  .app-main {
+    margin-left: 0 !important;
+  }
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(2px);
+    animation: fade-in 0.2s ease;
+  }
+}
+/* Hors mobile : le backdrop n'existe pas visuellement */
+.sidebar-backdrop {
+  display: none;
+}
+
 /* ── Logo ─────────────────────────────────────────────────────────────────── */
 .sidebar-logo {
   display: flex;

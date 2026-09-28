@@ -88,27 +88,29 @@ async function createTicketFromEmail({ subject, body, from, fromName, analysis, 
     console.error('[ticketCreator] Auto-assignation échouée:', err.message);
   }
 
-  // Attacher automatiquement les observateurs par défaut de l'équipe associée
+  // Attacher les observateurs suggérés : defaultObservers de l'équipe + techniciens
+  // ayant traité cette catégorie par le passé (hors technicien assigné) —
+  // voir ticketSuggestionService.suggestObservers.
   try {
-    const updatedTicket = await tx.ticket.findUnique({ where: { id: erpTicket.id }, select: { teamId: true } });
-    if (updatedTicket?.teamId) {
-      const teamObj = await tx.team.findUnique({
-        where: { id: updatedTicket.teamId },
-        include: { defaultObservers: { select: { id: true } } },
+    const current = await tx.ticket.findUnique({
+      where: { id: erpTicket.id },
+      select: { teamId: true, assignedToId: true, category: true },
+    });
+    const { suggestObservers } = require('./ticketSuggestionService');
+    const suggested = await suggestObservers({
+      teamId: current?.teamId || null,
+      category: current?.category || erpTicket.category,
+      excludeIds: current?.assignedToId ? [current.assignedToId] : [],
+      db: tx,
+    });
+    if (suggested.length > 0) {
+      await tx.ticket.update({
+        where: { id: erpTicket.id },
+        data: { observers: { connect: suggested.map((o) => ({ id: o.id })) } },
       });
-      if (teamObj?.defaultObservers?.length > 0) {
-        await tx.ticket.update({
-          where: { id: erpTicket.id },
-          data: {
-            observers: {
-              connect: teamObj.defaultObservers.map((o) => ({ id: o.id })),
-            },
-          },
-        });
-      }
     }
   } catch (err) {
-    console.error('[ticketCreator] Échec rattachement observateurs équipe:', err.message);
+    console.error('[ticketCreator] Échec rattachement observateurs suggérés:', err.message);
   }
 
   // Notification IMMÉDIATE à la Hotline quand le ticket est créé en attente d'approbation (PENDING).

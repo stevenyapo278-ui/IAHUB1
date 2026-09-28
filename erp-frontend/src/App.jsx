@@ -136,7 +136,7 @@ export default function App() {
             <Route path="teams" element={<ProtectedRoute permission="teams.manage"><Teams /></ProtectedRoute>} />
             <Route path="knowledge-base" element={<KnowledgeBase />} />
             <Route path="inbox" element={<ProtectedRoute permission="inbox.sync"><Inbox /></ProtectedRoute>} />
-            <Route path="email-drafts" element={<ProtectedRoute permission="emaildrafts.manage"><ValidationCenter defaultTab="drafts" /></ProtectedRoute>} />
+            <Route path="email-drafts" element={<ProtectedRoute permission="emaildrafts.manage"><ValidationCenter /></ProtectedRoute>} />
 
             <Route
               path="technician-stats"

@@ -24,7 +24,6 @@
 import { useMemo, useRef, useCallback, useEffect } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
-import { RefreshCw } from 'lucide-react';
 import UserAvatar from './UserAvatar';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -121,7 +120,12 @@ function ensureThemeInjected() {
       background-color: var(--ag-selected-row-background-color) !important;
     }
     .ag-theme-katalyst-datagrid .ag-row-selected:hover {
-      background-color: color-mix(in srgb, var(--color-primary, #0067ff) 12%, transparent) !important;
+      background-color: color-mix(in srgb, var(--ag-checkbox-checked-color) 12%, transparent) !important;
+    }
+    /* Curseur clavier (navigation ↑↓ sans focus cell) */
+    .ag-theme-katalyst-datagrid .ag-row.kb-cursor-row {
+      background-color: color-mix(in srgb, var(--ag-checkbox-checked-color) 8%, transparent) !important;
+      box-shadow: inset 3px 0 0 0 var(--ag-checkbox-checked-color);
     }
 
     /* Cells — clean typography */
@@ -295,10 +299,21 @@ export default function DataGrid({
   return (
     <div className={`relative flex flex-col ${className}`} ref={containerRef}>
       {loading && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60 backdrop-blur-sm rounded-xl">
-          <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-surface shadow-lg border border-border/30">
-            <RefreshCw className="w-4 h-4 animate-spin text-primary" />
-            <span className="text-xs font-semibold text-muted-foreground">Chargement...</span>
+        <div
+          className="absolute inset-0 z-10 bg-background/70 backdrop-blur-[2px] rounded-xl overflow-hidden"
+          role="status"
+          aria-label="Chargement du tableau"
+        >
+          <div className="p-4 space-y-3 animate-pulse">
+            <div className="h-4 w-1/4 rounded-lg bg-surface-container-high/70" />
+            {Array.from({ length: 6 }, (_, i) => (
+              <div key={i} className="flex items-center gap-4">
+                <div className="h-3.5 flex-1 rounded-lg bg-surface-container-high/50" />
+                <div className="h-3.5 w-20 rounded-lg bg-surface-container-high/50" />
+                <div className="h-3.5 w-16 rounded-lg bg-surface-container-high/50" />
+              </div>
+            ))}
+            <span className="sr-only">Chargement…</span>
           </div>
         </div>
       )}

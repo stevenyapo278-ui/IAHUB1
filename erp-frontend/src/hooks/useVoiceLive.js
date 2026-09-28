@@ -12,12 +12,19 @@ export function useVoiceLive() {
     try { return localStorage.getItem('voiceNoiseSuppression') !== 'false'; } catch { return true; }
   });
   const [isBrainstormMode, setIsBrainstormMode] = useState(false);
+  // ── Retours visuels des outils (chip « Marie utilise… » + cartes) ──
+  const [activeTool, setActiveTool] = useState(null); // nom de l'outil en cours
+  const [toolResult, setToolResult] = useState(null); // dernier payload sanitisé {name, data}
+  const [summary, setSummary] = useState(''); // résumé de session (get_summary)
+  const [summaryPending, setSummaryPending] = useState(false);
+  const [playbackAnalyserNode, setPlaybackAnalyserNode] = useState(null); // sortie → orbe
 
   const wsRef = useRef(null);
   const audioCtxRef = useRef(null);
   const workletRef = useRef(null);
   const streamRef = useRef(null);
   const analyserRef = useRef(null);
+  const playbackAnalyserRef = useRef(null); // analyser de la chaîne de sortie (parole de Marie)
   const nextStartRef = useRef(0);
   const activeSourcesRef = useRef([]);
   const speakingRef = useRef(false);
@@ -198,8 +205,10 @@ export function useVoiceLive() {
     const source = audioCtx.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(audioCtx.destination);
-    if (analyserRef.current) {
-      source.connect(analyserRef.current);
+    // Analyser DÉDIÉ à la sortie : l'orbe réagit à la parole de Marie sans
+    // mélanger le micro (le micro garde le sien pour l'état listening).
+    if (playbackAnalyserRef.current) {
+      source.connect(playbackAnalyserRef.current);
     }
 
     const now = audioCtx.currentTime;
@@ -265,6 +274,8 @@ export function useVoiceLive() {
       workletRef.current = null;
     }
     analyserRef.current = null;
+    playbackAnalyserRef.current = null;
+    setPlaybackAnalyserNode(null);
     if (wsRef.current) {
       // Annuler les handlers pour éviter une cascade de reconnexions concomitantes
       wsRef.current.onopen = null;
@@ -297,6 +308,10 @@ export function useVoiceLive() {
     setTranscript('');
     setReply('');
     setMessages([]);
+    setActiveTool(null);
+    setToolResult(null);
+    setSummary('');
+    setSummaryPending(false);
     readyRef.current = false;
     assistantTurnFinishedRef.current = true; // Réinitialiser le verrou de parole de l'assistante
 
@@ -336,12 +351,22 @@ export function useVoiceLive() {
       analyser.smoothingTimeConstant = 0.8;
       analyserRef.current = analyser;
 
+      // Analyser de sortie : alimentera l'orbe pendant que Marie parle
+      const playbackAnalyser = audioCtx.createAnalyser();
+      playbackAnalyser.fftSize = 256;
+      playbackAnalyser.smoothingTimeConstant = 0.8;
+      playbackAnalyserRef.current = playbackAnalyser;
+      setPlaybackAnalyserNode(playbackAnalyser);
+
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       // JWT passé en query string : le backend authentifie la session vocale (filtrage par rôle
       // dans le pipeline chatbot, "mes tickets" = ceux de l'utilisateur connecté, comme au chat).
+      // `path` = route courante : alimente le contexte de navigation (outil get_context).
       const token = localStorage.getItem('token');
-      const authQuery = token ? `?token=${encodeURIComponent(token)}` : '';
-      const ws = new WebSocket(`${proto}://${location.hostname}:4001${authQuery}`);
+      const qs = new URLSearchParams();
+      if (token) qs.set('token', token);
+      qs.set('path', `${location.pathname}${location.search}`);
+      const ws = new WebSocket(`${proto}://${location.hostname}:4001?${qs.toString()}`);
       wsRef.current = ws;
 
       ws.binaryType = 'arraybuffer';
@@ -389,7 +414,16 @@ export function useVoiceLive() {
         } else if (msg.type === 'brainstorm_mode') {
           setIsBrainstormMode(!!msg.active);
         } else if (msg.type === 'tool_starting') {
+          setActiveTool(msg.name || null);
           handleToolStarting(msg.name);
+        } else if (msg.type === 'tool_finished') {
+          setActiveTool(null);
+        } else if (msg.type === 'tool_result') {
+          // Payload sanitisé du backend → cartes (Phase 2)
+          setToolResult({ name: msg.name, data: msg.data });
+        } else if (msg.type === 'tool_cleared') {
+          // Retirer une carte précise (ex: confirmation d'envoi résolue)
+          setToolResult((prev) => (prev && prev.name === msg.name ? null : prev));
         } else if (msg.type === 'transcript') {
           handleTranscript(msg);
         } else if (msg.type === 'interrupted') {
@@ -397,6 +431,9 @@ export function useVoiceLive() {
         } else if (msg.type === 'error') {
           setError(msg.message);
           setState('error');
+        } else if (msg.type === 'session_summary') {
+          setSummary(msg.text || '');
+          setSummaryPending(false);
         } else if (msg.type === 'session_closed') {
           setState('idle');
         }
@@ -451,6 +488,35 @@ export function useVoiceLive() {
     });
   }, [playVoiceChunk, stopPlayback, cleanupSession, handleTranscript]);
 
+  // Informer Marie d'un changement de page (contexte outil get_context)
+  const sendNavigation = useCallback((path) => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({ type: 'navigation', path: String(path || '').slice(0, 300) }));
+      } catch {}
+    }
+  }, []);
+
+  // Demander un résumé de session (transcripts finaux) → event session_summary
+  const requestSummary = useCallback(() => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      setSummary('');
+      setSummaryPending(true);
+      try {
+        ws.send(JSON.stringify({ type: 'get_summary' }));
+      } catch {
+        setSummaryPending(false);
+      }
+    }
+  }, []);
+
+  // Masquer la carte résumé (bouton ✕ du modal)
+  const clearSummary = useCallback(() => {
+    setSummary('');
+  }, []);
+
   const stopAll = useCallback(() => {
     stoppedRef.current = true; // Arrêt volontaire : bloquer la reconnexion auto
     reconnectCountRef.current = 0;
@@ -471,10 +537,18 @@ export function useVoiceLive() {
     isMuted,
     noiseSuppressionEnabled,
     analyserNode: analyserRef.current,
+    playbackAnalyserNode,
+    activeTool,
+    toolResult,
+    summary,
+    summaryPending,
     startListening,
     stopAll,
     toggleMute,
     toggleNoiseSuppression,
+    sendNavigation,
+    requestSummary,
+    clearSummary,
     isBrainstormMode, // Return brainstorming mode state !
   };
 }

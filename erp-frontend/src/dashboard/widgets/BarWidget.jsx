@@ -43,15 +43,29 @@ function PriorityBars({ stats }) {
 }
 
 function GroupedBars({ stats }) {
-  const teams = (stats?.byTeam || []).slice(0, 6);
   const priorities = ['P1', 'P2', 'P3', 'P4'];
-  const data = teams.map((t) => {
-    const row = { name: t.teamName || 'Non assigné' };
-    priorities.forEach((p) => {
-      row[p] = t.byPriority?.find(bp => bp.priority === p)?.count || 0;
-    });
-    return row;
-  });
+
+  // Croisement équipe × priorité fourni par /dashboard/stats (byTeamPriority)
+  const byTeam = new Map();
+  for (const r of stats?.byTeamPriority || []) {
+    if (!byTeam.has(r.teamName)) {
+      byTeam.set(r.teamName, { name: r.teamName, P1: 0, P2: 0, P3: 0, P4: 0, _total: 0 });
+    }
+    const row = byTeam.get(r.teamName);
+    if (priorities.includes(r.priority)) row[r.priority] = r.count;
+    row._total += r.count;
+  }
+
+  // Toutes les lignes : top 6 équipes + barre « Autres » pour le reste
+  const teams = [...byTeam.values()].sort((a, b) => b._total - a._total);
+  let data = teams.slice(0, 6).map(({ _total, ...row }) => row);
+  if (teams.length > 6) {
+    const autres = { name: 'Autres', P1: 0, P2: 0, P3: 0, P4: 0 };
+    for (const t of teams.slice(6)) {
+      for (const p of priorities) autres[p] += t[p];
+    }
+    data = [...data, autres];
+  }
 
   if (!data.length) {
     return <div className="h-full flex items-center justify-center text-xs text-on-surface-variant">Aucune donnée</div>;
