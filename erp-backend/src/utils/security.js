@@ -179,7 +179,7 @@ const TICKET_PATCH_ALLOWED = new Set([
 // Champs autorisés pour la création de ticket (POST)
 const TICKET_POST_ALLOWED = new Set([
   'title', 'content', 'priority', 'category', 'teamId', 'assignedToId',
-  'requesterId', 'requiresApproval', 'type', 'urgency', 'impact',
+  'requesterId', 'type', 'urgency', 'impact',
   'source', 'externalId', 'status', 'openedAt', 'locationId', 'dueDate',
   'observerIds', 'assetIds', 'customFields',
 ]);

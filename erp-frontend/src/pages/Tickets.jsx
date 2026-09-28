@@ -66,6 +66,8 @@ import SearchableMultiSelect from '../components/SearchableMultiSelect';
 import RemoteUserSelect from '../components/RemoteUserSelect';
 import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
 import SlaBadge from '../components/SlaBadge';
+import ImageAttachmentsEditor from '../components/ImageAttachmentsEditor';
+import { clipboardImageFiles, imageItemsFromFiles, revokeImageItems } from '../utils/imageAttachments';
 import DataGrid from '../components/DataGrid';
 import TicketFilterBar from '../components/TicketFilterBar';
 import {
@@ -100,7 +102,6 @@ const EMPTY_FORM = {  title: '',
   requesterIds: [],
   observerIds: [],
   assetIds: [],
-  requiresApproval: false,
 };
 
 function HighlightText({ text, query }) {
@@ -1604,28 +1605,23 @@ export default function Tickets() {
       }).catch(() => setCustomFieldDefs([]));
   }, [form.category]);
 
-  function handlePaste(e) {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    for (const item of items) {
-      if (item.type?.startsWith('image/')) {
-        e.preventDefault();
-        const file = item.getAsFile();
-        if (!file) continue;
-        const id = `paste-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        const dataUrl = URL.createObjectURL(file);
-        setPastedImages((prev) => [...prev, { id, file, dataUrl }]);
-        toast.success('Image collée — elle sera envoyée avec le ticket');
-      }
-    }
+  // Images de la description : collage (Ctrl+V), fichier ou glisser-déposer
+  function addFormImages(files) {
+    const items = imageItemsFromFiles(files, 'ticket');
+    if (items.length === 0) return;
+    setPastedImages((prev) => [...prev, ...items]);
+    toast.success(
+      items.length > 1
+        ? `${items.length} images ajoutées — elles partiront avec le ticket`
+        : 'Image ajoutée — elle partira avec le ticket',
+    );
   }
 
-  function removePastedImage(id) {
-    setPastedImages((prev) => {
-      const img = prev.find((p) => p.id === id);
-      if (img) URL.revokeObjectURL(img.dataUrl);
-      return prev.filter((p) => p.id !== id);
-    });
+  function handlePaste(e) {
+    const files = clipboardImageFiles(e);
+    if (files.length === 0) return;
+    e.preventDefault();
+    addFormImages(files);
   }
 
   async function searchTicketsForDuplicate(query) {
@@ -1720,7 +1716,7 @@ export default function Tickets() {
       markCreationStarted();
       await api.post('/tickets', payload, { headers: { 'Content-Type': 'multipart/form-data' } });
       toast.success('Ticket créé');
-      pastedImages.forEach((img) => URL.revokeObjectURL(img.dataUrl));
+      revokeImageItems(pastedImages);
       setPastedImages([]);
       setForm(EMPTY_FORM); setCustomValues({}); setAttachment(null); setShowForm(false); setSearchParams({});
       loadTickets();
@@ -1733,7 +1729,7 @@ export default function Tickets() {
 
   function toggleForm() {
     if (showForm) {
-      pastedImages.forEach((img) => URL.revokeObjectURL(img.dataUrl));
+      revokeImageItems(pastedImages);
       setPastedImages([]);
     }
     setShowForm((v) => !v);
@@ -1763,7 +1759,6 @@ export default function Tickets() {
       teamId: t.teamId || prev.teamId,
       assignedToId: t.assignedToId || prev.assignedToId,
       dueDate: t.dueDate || prev.dueDate,
-      requiresApproval: t.requiresApproval ?? prev.requiresApproval,
     }));
     toast.success(`Modèle « ${t.name} » appliqué`);
   }
@@ -2622,23 +2617,13 @@ export default function Tickets() {
                     <textarea rows={4} value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })}
                       onPaste={handlePaste}
                       placeholder="Décrivez le problème (collez des images directement avec Ctrl+V)..." className={`${FIELD_CLS} resize-none`} />
-                    {pastedImages.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {pastedImages.map((img) => (
-                          <div key={img.id} className="relative group w-20 h-20 rounded-lg overflow-hidden border border-border/40 bg-surface-container shrink-0">
-                            <img src={img.dataUrl} alt="Aperçu" className="w-full h-full object-cover" />
-                            <button
-                              type="button"
-                              onClick={() => removePastedImage(img.id)}
-                              className="absolute top-1 right-1 bg-black/60 hover:bg-black text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                              title="Supprimer l'image"
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    <div className="mt-2">
+                      <ImageAttachmentsEditor
+                        items={pastedImages}
+                        onChange={setPastedImages}
+                        onFiles={addFormImages}
+                      />
+                    </div>
                   </FormField>
 
                   <FormField label="Pièce jointe">

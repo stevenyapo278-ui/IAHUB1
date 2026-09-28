@@ -9,7 +9,7 @@ import { PRIORITY_OPTIONS, TYPE_OPTIONS, URGENCY_IMPACT_OPTIONS, SOURCE_OPTIONS,
 const EMPTY_FORM = {
   name: '', description: '', title: '', content: '',
   priority: 'P3', category: '', type: 'INCIDENT', source: '', urgency: 'MEDIUM', impact: 'MEDIUM',
-  locationId: '', teamId: '', assignedToId: '', dueDate: '', requiresApproval: false,
+  locationId: '', teamId: '', assignedToId: '', dueDate: '',
 };
 
 export default function TemplatesTab() {
@@ -62,7 +62,7 @@ export default function TemplatesTab() {
       priority: template.priority || 'P3', category: template.category || '', type: template.type || 'INCIDENT',
       source: template.source || '', urgency: template.urgency || 'MEDIUM', impact: template.impact || 'MEDIUM',
       locationId: template.locationId || '', teamId: template.teamId || '', assignedToId: template.assignedToId || '',
-      dueDate: template.dueDate ? template.dueDate.substring(0, 10) : '', requiresApproval: template.requiresApproval || false,
+      dueDate: template.dueDate ? template.dueDate.substring(0, 10) : '',
     });
   }
 
@@ -225,13 +225,6 @@ export default function TemplatesTab() {
               <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Échéance</span>
               <input type="date" className={inputCls} value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
             </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Approbation</span>
-              <select className={inputCls} value={form.requiresApproval ? 'true' : 'false'} onChange={(e) => setForm({ ...form, requiresApproval: e.target.value === 'true' })}>
-                <option value="false">Non requis</option>
-                <option value="true">Requise (Hotline)</option>
-              </select>
-            </label>
           </div>
 
           <label className="flex flex-col gap-1">
@@ -278,9 +271,6 @@ export default function TemplatesTab() {
                       <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
                         {users.find((u) => u.id === t.assignedToId)?.fullName || `User #${t.assignedToId}`}
                       </span>
-                    )}
-                    {t.requiresApproval && (
-                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400">Approbation</span>
                     )}
                     {!t.isActive && <span className="text-[9px] font-bold text-on-surface-variant uppercase">Inactif</span>}
                   </div>

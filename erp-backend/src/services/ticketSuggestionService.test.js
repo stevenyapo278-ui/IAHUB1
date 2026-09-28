@@ -1,7 +1,8 @@
 // Moteur de suggestions de triage (Centre de Validation) :
-// tous les champs (équipe, technicien, observateurs, priorité) doivent être
-// suggérés en combinant compétence (UserSkill), historique (tickets de même
-// catégorie, auto-assignations corrigées) et charge active.
+// équipe, technicien et priorité sont suggérés en combinant compétence
+// (UserSkill), historique (tickets de même catégorie, auto-assignations
+// corrigées) et charge active ; les observateurs viennent des defaultObservers
+// de la vue Équipe.
 jest.mock('../prismaClient', () => ({
   userSkill: { findMany: jest.fn(async () => []) },
   ticket: { groupBy: jest.fn(async () => []), findMany: jest.fn(async () => []) },
@@ -59,22 +60,26 @@ describe('suggestPriority — matrice impact × urgence avec alias UI', () => {
   });
 });
 
-describe('suggestObservers — défauts équipe + historique, hors technicien assigné', () => {
-  it('combine les observateurs par défaut et les techniciens historiques', async () => {
-    prisma.team.findUnique.mockResolvedValueOnce({ defaultObservers: [{ id: 1, fullName: 'Observateur équipe' }] });
-    prisma.ticket.groupBy.mockResolvedValueOnce([
-      { assignedToId: 3, _count: { id: 12 } }, // technicien assigné : exclu
-      { assignedToId: 2, _count: { id: 7 } },
-      { assignedToId: 1, _count: { id: 4 } }, // déjà observateur par défaut : exclu (seen)
-    ]);
-    prisma.user.findMany.mockResolvedValueOnce([{ id: 2, fullName: 'Historique Tech' }]);
+describe('suggestObservers — defaultObservers de la vue Équipe, hors technicien assigné', () => {
+  it('reprend les observateurs configurés sur l\'équipe, sans calcul d\'historique', async () => {
+    prisma.team.findUnique.mockResolvedValueOnce({
+      defaultObservers: [
+        { id: 1, fullName: 'Observateur équipe' },
+        { id: 3, fullName: 'Technicien assigné' },
+      ],
+    });
 
-    const observers = await suggestObservers({ teamId: 9, category: 'Matériel', excludeIds: [3] });
+    const observers = await suggestObservers({ teamId: 9, excludeIds: [3] });
 
-    expect(observers.map((o) => o.id)).toEqual([1, 2]);
+    expect(observers.map((o) => o.id)).toEqual([1]);
     expect(observers[0].source).toBe('equipe');
-    expect(observers[1].source).toBe('historique');
-    expect(observers[1].reasons[0]).toContain('7 ticket(s)');
+    expect(observers[0].reasons[0]).toContain('défaut');
+    expect(prisma.ticket.groupBy).not.toHaveBeenCalled();
+  });
+
+  it('ne suggère rien sans équipe', async () => {
+    await expect(suggestObservers({ teamId: null })).resolves.toEqual([]);
+    expect(prisma.team.findUnique).not.toHaveBeenCalled();
   });
 });
 

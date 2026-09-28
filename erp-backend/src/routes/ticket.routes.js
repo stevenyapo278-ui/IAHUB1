@@ -531,8 +531,9 @@ router.get('/pending-approval', async (req, res) => {
 // ── Suggestions de triage (équipe, technicien, observateurs, priorité) ───────
 // Recalculées à la volée pour un ticket en attente : compétence (UserSkill) +
 // historique (tickets de même catégorie, auto-assignations corrigées) + charge
-// active. Servies au Centre de Validation pour permettre de corriger les champs
-// avant d'approuver.
+// active. Les observateurs proviennent uniquement des defaultObservers de
+// l'équipe (vue Équipe). Servies au Centre de Validation pour permettre de
+// corriger les champs avant d'approuver.
 router.get('/:id/triage-suggestions', requirePermission('tickets.approve', ['ADMIN', 'HOTLINE', 'TECHNICIAN']), async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -705,12 +706,14 @@ router.post('/:id/accept-reply-suggestion/reopen', requirePermission('tickets.ap
       },
     });
 
-    await logEvent(id, 'REPLY_ON_CLOSED_REOPENED', req.user.sub, {
+    await logEvent(id, 'REPLY_ON_CLOSED_REOPENED', req.user.email || String(req.user.sub), {
       originalStatus: ticket.status,
       sender: ticket.replyOnClosedSender,
     });
 
-    if (io) io.emit('ticket_updated', { id, status: 'OPEN' });
+    // `io` n'existe pas dans ce module (variable locale à utils/socket) : la référence
+    // provoquait un ReferenceError → 500 alors que le ticket était déjà réouvert.
+    emitTicketUpdated(updated, { status: updated.status });
 
     return res.json({ ticket: updated, message: 'Ticket rouvert avec succès' });
   } catch (err) {
@@ -718,6 +721,48 @@ router.post('/:id/accept-reply-suggestion/reopen', requirePermission('tickets.ap
     return res.status(500).json({ error: 'Erreur interne' });
   }
 });
+
+// Crée le ticket séparé décrit par une suggestion (réponse sur ticket fermé ou nouvelle
+// demande détectée sur un ticket en cours) : titre normalisé, SLA calculé.
+// Le transfert du fil Outlook (et l'extinction des flags) reste fait par l'appelant.
+async function createTicketFromSuggestion(sourceTicket, { sender, title, body }) {
+  const titleBase = String(title || sourceTicket.title || '')
+    .replace(/^\s*(?:re|fw|fwd)\s*:\s*/gi, '')
+    .trim();
+  const newTitle = formatTicketTitle(titleBase) || `NOUVELLE DEMANDE SUITE AU TICKET #${sourceTicket.id}`;
+
+  const newTicket = await prisma.ticket.create({
+    data: {
+      title: newTitle,
+      content: body || '',
+      status: 'OPEN',
+      priority: sourceTicket.priority,
+      category: sourceTicket.category,
+      type: sourceTicket.type,
+      source: 'Email',
+      origin: 'EMAIL',
+      requesterId: sourceTicket.requesterId,
+      sourceEmail: sender || sourceTicket.sourceEmail,
+      sourceName: sender || sourceTicket.sourceName,
+      teamId: sourceTicket.teamId,
+      // La conversation Outlook est transférée : sans ça, les prochaines réponses de
+      // l'utilisateur dans ce fil se rattacheront encore au ticket d'origine et la même
+      // suggestion réapparaîtrait indéfiniment dans le Centre de Validation.
+      outlookConversationId: sourceTicket.outlookConversationId || null,
+    },
+    include: {
+      requester: { select: { id: true, fullName: true, email: true } },
+    },
+  });
+
+  try {
+    await applySla(newTicket);
+  } catch (err) {
+    console.error('[ticket.routes] Calcul SLA nouvelle demande échoué:', err.message);
+  }
+
+  return newTicket;
+}
 
 // Créer une nouvelle demande suite à une réponse sur un ticket fermé
 router.post('/:id/accept-reply-suggestion/new-ticket', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
@@ -730,27 +775,13 @@ router.post('/:id/accept-reply-suggestion/new-ticket', requirePermission('ticket
     if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
     if (!ticket.replyOnClosedSuggested) return res.status(400).json({ error: 'Aucune suggestion de réponse sur ticket fermé en cours' });
 
-    // Créer un nouveau ticket à partir du contenu de la réponse
-    const newTicket = await prisma.ticket.create({
-      data: {
-        title: ticket.replyOnClosedSubject || `Re: ${ticket.title}`,
-        content: ticket.replyOnClosedBody || '',
-        status: 'OPEN',
-        priority: ticket.priority,
-        category: ticket.category,
-        type: ticket.type,
-        source: 'Email',
-        origin: 'EMAIL',
-        requesterId: ticket.requesterId,
-        sourceEmail: ticket.replyOnClosedSender || ticket.sourceEmail,
-        sourceName: ticket.replyOnClosedSender || ticket.sourceName,
-      },
-      include: {
-        requester: { select: { id: true, fullName: true, email: true } },
-      },
+    const newTicket = await createTicketFromSuggestion(ticket, {
+      sender: ticket.replyOnClosedSender,
+      title: ticket.replyOnClosedSubject,
+      body: ticket.replyOnClosedBody || ticket.replyOnClosedBodyHtml || '',
     });
 
-    // Marquer le ticket original comme traité (suggestion consommée)
+    // Marquer le ticket original comme traité (suggestion consommée) + transfert de fil
     await prisma.ticket.update({
       where: { id },
       data: {
@@ -760,16 +791,22 @@ router.post('/:id/accept-reply-suggestion/new-ticket', requirePermission('ticket
         replyOnClosedSubject: null,
         replyOnClosedBody: null,
         replyOnClosedBodyHtml: null,
+        ...(ticket.outlookConversationId ? { outlookConversationId: null } : {}),
       },
     });
 
-    await logEvent(id, 'REPLY_ON_CLOSED_NEW_TICKET', req.user.sub, {
+    await logEvent(id, 'REPLY_ON_CLOSED_NEW_TICKET', req.user.email || String(req.user.sub), {
       originalStatus: ticket.status,
-      newTicketId: newTicket.id,
+      targetTicketId: newTicket.id,
       sender: ticket.replyOnClosedSender,
     });
 
-    if (io) io.emit('ticket_created', { id: newTicket.id, title: newTicket.title });
+    await logEvent(newTicket.id, 'CREATED', req.user.email || String(req.user.sub), {
+      origin: 'REPLY_ON_CLOSED',
+      originTicketId: id,
+    });
+
+    emitTicketCreated(newTicket);
 
     return res.json({ ticket: newTicket, message: 'Nouvelle demande créée avec succès' });
   } catch (err) {
@@ -798,7 +835,7 @@ router.post('/:id/dismiss-reply-suggestion', requirePermission('tickets.approve'
       },
     });
 
-    await logEvent(id, 'REPLY_ON_CLOSED_DISMISSED', req.user.sub, {
+    await logEvent(id, 'REPLY_ON_CLOSED_DISMISSED', req.user.email || String(req.user.sub), {
       originalStatus: ticket.status,
       sender: ticket.replyOnClosedSender,
     });
@@ -806,6 +843,114 @@ router.post('/:id/dismiss-reply-suggestion', requirePermission('tickets.approve'
     return res.json({ message: 'Suggestion ignorée' });
   } catch (err) {
     console.error('[ticket.routes] Erreur dismiss reply-on-closed:', err);
+    return res.status(500).json({ error: 'Erreur interne' });
+  }
+});
+
+// ── Nouvelle demande détectée sur un ticket EN COURS ─────────────────────────
+// Une réponse du demandeur porte sur un AUTRE besoin que le problème du ticket.
+// La Hotline décide depuis le Centre de Validation : créer un ticket séparé ou ignorer.
+// Le ticket d'origine n'est pas modifié (ni statut ni clôture suggérée).
+router.get('/new-ticket-suggestions', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const tickets = await prisma.ticket.findMany({
+      where: { newTicketSuggested: true },
+      orderBy: { newTicketSuggestedAt: 'desc' },
+      take: limit,
+      select: {
+        id: true, title: true, content: true, status: true, priority: true,
+        category: true, type: true, createdAt: true, sourceName: true, sourceEmail: true,
+        newTicketSuggestedAt: true, newTicketSuggestedSender: true, newTicketSuggestedSubject: true,
+        newTicketSuggestedSummary: true, newTicketSuggestedBody: true, newTicketSuggestedBodyHtml: true,
+        requester: { select: { id: true, fullName: true, email: true } },
+        assignedTo: { select: { id: true, fullName: true } },
+      },
+    });
+    return res.json(tickets);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Créer le ticket séparé décrit par la suggestion
+router.post('/:id/accept-new-ticket-suggestion', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+  const id = Number(req.params.id);
+  try {
+    const ticket = await prisma.ticket.findUnique({ where: { id } });
+    if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
+    if (!ticket.newTicketSuggested) return res.status(400).json({ error: 'Aucune suggestion de nouvelle demande en cours' });
+
+    const newTicket = await createTicketFromSuggestion(ticket, {
+      sender: ticket.newTicketSuggestedSender,
+      // Le résumé IA décrit le NOUVEAU sujet (le sujet de l'email est encore celui de l'ancien fil)
+      title: ticket.newTicketSuggestedSummary || ticket.newTicketSuggestedSubject,
+      body: ticket.newTicketSuggestedBody || ticket.newTicketSuggestedBodyHtml || '',
+    });
+
+    await prisma.ticket.update({
+      where: { id },
+      data: {
+        newTicketSuggested: false,
+        newTicketSuggestedAt: null,
+        newTicketSuggestedSender: null,
+        newTicketSuggestedSubject: null,
+        newTicketSuggestedSummary: null,
+        newTicketSuggestedBody: null,
+        newTicketSuggestedBodyHtml: null,
+        ...(ticket.outlookConversationId ? { outlookConversationId: null } : {}),
+      },
+    });
+
+    await logEvent(id, 'NEW_TICKET_SUGGESTED_CREATED', req.user.email || String(req.user.sub), {
+      targetTicketId: newTicket.id,
+      sender: ticket.newTicketSuggestedSender,
+      summary: ticket.newTicketSuggestedSummary,
+    });
+
+    await logEvent(newTicket.id, 'CREATED', req.user.email || String(req.user.sub), {
+      origin: 'NEW_TICKET_SUGGESTED',
+      originTicketId: id,
+    });
+
+    emitTicketCreated(newTicket);
+
+    return res.json({ ticket: newTicket, message: 'Nouvelle demande créée avec succès' });
+  } catch (err) {
+    console.error('[ticket.routes] Erreur création depuis suggestion nouvelle demande:', err);
+    return res.status(500).json({ error: 'Erreur interne' });
+  }
+});
+
+// Ignorer la suggestion (le ticket d'origine continue normalement)
+router.post('/:id/dismiss-new-ticket-suggestion', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+  const id = Number(req.params.id);
+  try {
+    const ticket = await prisma.ticket.findUnique({ where: { id } });
+    if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
+    if (!ticket.newTicketSuggested) return res.status(400).json({ error: 'Aucune suggestion en cours' });
+
+    await prisma.ticket.update({
+      where: { id },
+      data: {
+        newTicketSuggested: false,
+        newTicketSuggestedAt: null,
+        newTicketSuggestedSender: null,
+        newTicketSuggestedSubject: null,
+        newTicketSuggestedSummary: null,
+        newTicketSuggestedBody: null,
+        newTicketSuggestedBodyHtml: null,
+      },
+    });
+
+    await logEvent(id, 'NEW_TICKET_SUGGESTED_DISMISSED', req.user.email || String(req.user.sub), {
+      sender: ticket.newTicketSuggestedSender,
+      summary: ticket.newTicketSuggestedSummary,
+    });
+
+    return res.json({ message: 'Suggestion ignorée' });
+  } catch (err) {
+    console.error('[ticket.routes] Erreur dismiss nouvelle demande:', err);
     return res.status(500).json({ error: 'Erreur interne' });
   }
 });
@@ -925,7 +1070,7 @@ router.post(
     }
 
     const {
-      title, content, priority, category, teamId, assignedToId, requesterId, secondaryRequesterId, requiresApproval,
+      title, content, priority, category, teamId, assignedToId, requesterId, secondaryRequesterId,
       type, urgency, impact, source, externalId, status, openedAt, locationId, dueDate,
     } = req.body;
 
@@ -1051,10 +1196,12 @@ router.post(
         ...(finalStatus === 'SOLVED' ? { solvedAt: new Date() } : {}),
         ...(finalStatus === 'CLOSED' ? { closedAt: new Date() } : {}),
         ...(openedAt ? { createdAt: new Date(openedAt) } : {}),
-        // Les tickets créés manuellement sont directement approuvés sauf si le modèle
-        // exige une validation (requiresApproval=true). Les tickets email/IA passent
-        // toujours par la validation Hotline (PENDING dans createTicketFromEmail).
-        approvalStatus: requiresApproval ? 'PENDING' : 'APPROVED',
+        // Tickets créés manuellement (portail ou back-office) : TOUJOURS approuvés, ils ne
+        // passent JAMAIS par le centre de validation. Seuls les tickets email/IA
+        // (createTicketFromEmail, ticketCreator, chatbot) y arrivent en PENDING.
+        // (requiresApproval est ignoré : le formulaire multipart envoyait "false" — chaîne
+        // truthy en JS — et chaque ticket manuel atterrissait en PENDING.)
+        approvalStatus: 'APPROVED',
         type: type || 'INCIDENT',
         urgency: urgency || 'MEDIUM',
         impact: impact || 'MEDIUM',
@@ -1395,6 +1542,11 @@ router.patch('/:id', allowTechnicianStatusOnly, requireTicketAssignOrTechnicianS
     });
 
     const ticket = await prisma.ticket.update({ where: { id }, data });
+
+    // Description modifiée : purge éventuelle des images de suivi devenues orphelines
+    if (content !== undefined) {
+      await cleanupOrphanFollowupImages(id);
+    }
 
     // Recalculer les échéances SLA si la priorité change (et ticket toujours actif)
     if (data.priority !== undefined) {
@@ -1924,6 +2076,109 @@ const followupUpload = multer({
   limits: { fileSize: 10 * 1024 * 1024 },
 });
 
+// Supprime les fichiers temporaires reçus par multer (réponses en erreur avant
+// leur enregistrement définitif).
+function dropUploadedFiles(files = []) {
+  for (const f of files) { try { fs.unlinkSync(f.path); } catch {} }
+}
+
+// Écrit les images d'un suivi sur disque + crée la TicketAttachment associée.
+// Partagé par la création (POST) et la modification (PATCH) d'un suivi.
+// Lance une Error (message prêt à afficher) si un fichier est refusé — les
+// fichiers déjà traités sont alors supprimés.
+async function saveFollowupImages(files = [], ticketId) {
+  const saved = [];
+  for (const file of files) {
+    const validation = validateUpload(file.originalname, file.mimetype, 'followup');
+    if (!validation.valid) {
+      dropUploadedFiles(files);
+      throw new Error(validation.error);
+    }
+    const ext = path.extname(file.originalname) || '.png';
+    const safeFilename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+    const destPath = path.join(FOLLOWUP_IMAGES_DIR, safeFilename);
+    try {
+      fs.renameSync(file.path, destPath);
+    } catch {
+      // rename peut échouer (ex: autre périphérique) → copie puis suppression
+      fs.copyFileSync(file.path, destPath);
+      fs.unlinkSync(file.path);
+    }
+
+    const attachment = await prisma.ticketAttachment.create({
+      data: {
+        ticketId,
+        filename: file.originalname || safeFilename,
+        mimeType: file.mimetype || 'image/png',
+        localFilepath: path.join('uploads', 'followup-images', safeFilename),
+      },
+    });
+
+    saved.push({
+      id: attachment.id,
+      filename: safeFilename,
+      url: `/uploads/followup-images/${safeFilename}`,
+    });
+  }
+  return saved;
+}
+
+// Remplace les marqueurs <!--IMAGE_<n>--> du contenu par les <img> correspondants.
+// On garde un chemin relatif (/uploads/…) pour que les images s'affichent quel
+// que soit le domaine, l'IP (ex: Dokploy) ou le port d'accès.
+function applyFollowupImageMarkers(content = '', images = []) {
+  let out = content;
+  images.forEach((img, idx) => {
+    out = out.replace(new RegExp(`<!--IMAGE_${idx}-->?`, 'gi'), `<img src="${img.url}" alt="image jointe" />`);
+  });
+  return out.replace(/<!--IMAGE_\d+-->?/gi, '');
+}
+
+// Supprime les images de suivi qui ne sont plus référencées nulle part dans le
+// ticket (contenu du ticket + tous ses suivis) : ligne TicketAttachment + fichier
+// sur disque. Sans ça, une image retirée d'un suivi restait affichée dans la
+// zone « Pièces jointes » du ticket.
+// Ne touche qu'aux pièces stockées dans uploads/followup-images/ (les pièces
+// jointes manuelles et celles venues par email sont ignorées).
+async function cleanupOrphanFollowupImages(ticketId) {
+  try {
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { content: true, followups: { select: { content: true } } },
+    });
+    if (!ticket) return { removed: 0 };
+
+    const referenced = new Set();
+    const scan = (html) => {
+      if (!html) return;
+      for (const m of html.matchAll(/\/uploads\/followup-images\/([A-Za-z0-9._-]+)/g)) referenced.add(m[1]);
+    };
+    scan(ticket.content);
+    (ticket.followups || []).forEach((f) => scan(f.content));
+
+    const rows = await prisma.ticketAttachment.findMany({
+      where: { ticketId },
+      select: { id: true, localFilepath: true },
+    });
+
+    let removed = 0;
+    for (const row of rows) {
+      const parts = (row.localFilepath || '').split(/[\\/]/);
+      if (!parts.includes('followup-images')) continue;
+      const safeName = parts[parts.length - 1];
+      if (!safeName || referenced.has(safeName)) continue;
+
+      await prisma.ticketAttachment.delete({ where: { id: row.id } });
+      try { fs.unlinkSync(path.join(process.cwd(), row.localFilepath)); } catch {}
+      removed += 1;
+    }
+    return { removed };
+  } catch (err) {
+    console.error('[ticket.routes] Nettoyage images de suivi échoué:', err.message);
+    return { removed: 0 };
+  }
+}
+
 const ticketAttachmentUpload = multer({
   dest: TICKET_ATTACHMENTS_DIR,
   limits: { fileSize: 10 * 1024 * 1024 },
@@ -2011,6 +2266,7 @@ router.post('/:id/content-images', followupUpload.array('images', 10), async (re
 router.post('/:id/followups', followupUpload.array('images', 10), [body('content').notEmpty()], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
+    dropUploadedFiles(req.files);
     return res.status(400).json({ errors: errors.array() });
   }
 
@@ -2018,6 +2274,7 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
 
   const ticket = await prisma.ticket.findUnique({ where: { id: ticketId } });
   if (!ticket) {
+    dropUploadedFiles(req.files);
     return res.status(404).json({ error: 'Ticket introuvable' });
   }
 
@@ -2027,10 +2284,14 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
       where: { id: ticketId, observers: { some: { id: req.user.sub } } },
       select: { id: true },
     });
-    if (!isObserver) return res.status(404).json({ error: 'Ticket introuvable' });
+    if (!isObserver) {
+      dropUploadedFiles(req.files);
+      return res.status(404).json({ error: 'Ticket introuvable' });
+    }
   }
   if (isTechnicianOnly(req.user)) {
     if (['SOLVED', 'CLOSED'].includes(ticket.status)) {
+      dropUploadedFiles(req.files);
       return res.status(403).json({ error: 'Un technicien ne peut pas ajouter de suivi sur un ticket résolu ou fermé.' });
     }
     // Un technicien peut commenter les tickets qui lui sont assignés (direct ou multi-assignees)
@@ -2043,61 +2304,21 @@ router.post('/:id/followups', followupUpload.array('images', 10), [body('content
     });
     const isTeamTicket = !isAssigned && !isMultiAssigned && ticket.teamId != null && ticket.teamId === req.user.teamId;
     if (!isAssigned && !isMultiAssigned && !isTeamTicket) {
+      dropUploadedFiles(req.files);
       return res.status(403).json({ error: 'Vous ne pouvez ajouter un suivi que sur les tickets qui vous sont assignés ou qui appartiennent à votre équipe.' });
     }
   }
 
   // Sauvegarder les images uploadées et créer des TicketAttachment
-  const imageAttachments = [];
-  if (req.files && req.files.length > 0) {
-    for (const file of req.files) {
-      // Valider chaque fichier uploadé
-      const fileValidation = validateUpload(file.originalname, file.mimetype, 'followup');
-      if (!fileValidation.valid) {
-        // Supprimer les fichiers déjà traités et rejeter
-        for (const f of req.files) { try { fs.unlinkSync(f.path); } catch {} }
-        return res.status(400).json({ error: fileValidation.error });
-      }
-      const ext = path.extname(file.originalname) || '.png';
-      const safeFilename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
-      const destPath = path.join(FOLLOWUP_IMAGES_DIR, safeFilename);
-      try {
-        fs.renameSync(file.path, destPath);
-      } catch {
-        // Si rename échoue (ex:跨设备), fallback sur copie + suppression
-        fs.copyFileSync(file.path, destPath);
-        fs.unlinkSync(file.path);
-      }
-
-      const localFilepath = path.join('uploads', 'followup-images', safeFilename);
-      const attachment = await prisma.ticketAttachment.create({
-        data: {
-          ticketId,
-          filename: file.originalname || safeFilename,
-          mimeType: file.mimetype || 'image/png',
-          localFilepath,
-        },
-      });
-
-      imageAttachments.push({
-        id: attachment.id,
-        filename: safeFilename,
-        url: `/uploads/followup-images/${safeFilename}`,
-      });
-    }
+  let imageAttachments = [];
+  try {
+    imageAttachments = await saveFollowupImages(req.files || [], ticketId);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
   }
 
   // Construire le contenu final : remplacer les marqueurs IMAGE_<n> par des <img> tags
-  // On utilise toujours un chemin relatif (/uploads/...) pour que les images s'affichent
-  // correctement quel que soit le domaine, l'IP (ex: Dokploy) ou le port d'accès.
-  let content = req.body.content || '';
-  imageAttachments.forEach((img, idx) => {
-    const markerRegex = new RegExp(`<!--IMAGE_${idx}-->?`, 'gi');
-    content = content.replace(markerRegex, `<img src="${img.url}" alt="image collée" />`);
-  });
-  content = content.replace(/<!--IMAGE_\d+-->?/gi, '');
-  // Sanitizer le HTML pour prévenir les XSS stockés
-  content = sanitizeTicketHtml(content);
+  const content = sanitizeTicketHtml(applyFollowupImageMarkers(req.body.content || '', imageAttachments));
 
   const followup = await prisma.followup.create({
     data: {
@@ -2223,7 +2444,7 @@ router.patch('/:id/followups/:followupId/visibility', forbidTechnicianTicketEdit
   });
 
   try {
-    await logEvent(ticketId, isPrivate ? 'FOLLOWUP_MADE_PRIVATE' : 'FOLLOWUP_MADE_PUBLIC', req.user.sub, { followupId });
+    await logEvent(ticketId, isPrivate ? 'FOLLOWUP_MADE_PRIVATE' : 'FOLLOWUP_MADE_PUBLIC', req.user.email || String(req.user.sub), { followupId });
   } catch (err) {
     console.error('[ticket.routes] Log visibilité commentaire échoué:', err.message);
   }
@@ -2232,18 +2453,22 @@ router.patch('/:id/followups/:followupId/visibility', forbidTechnicianTicketEdit
 });
 
 // Modifier le contenu d'un commentaire
-router.patch('/:id/followups/:followupId', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), async (req, res) => {
+// Modifier un commentaire (son auteur, ou ADMIN/SUPERADMIN) — accepte aussi des
+// images jointes en multipart pour ajouter une image à un suivi existant.
+router.patch('/:id/followups/:followupId', requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN']), followupUpload.array('images', 10), async (req, res) => {
   const ticketId = Number(req.params.id);
   const followupId = Number(req.params.followupId);
   const { content } = req.body;
 
   if (!content || !content.trim()) {
+    dropUploadedFiles(req.files);
     return res.status(400).json({ error: 'Le contenu ne peut pas être vide' });
   }
 
   if (isTechnicianOnly(req.user)) {
     const parentTicket = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { status: true } });
     if (parentTicket && ['SOLVED', 'CLOSED'].includes(parentTicket.status)) {
+      dropUploadedFiles(req.files);
       return res.status(403).json({ error: 'Un technicien ne peut pas modifier un suivi sur un ticket résolu ou fermé.' });
     }
   }
@@ -2252,31 +2477,51 @@ router.patch('/:id/followups/:followupId', requirePermission('tickets.assign', [
     where: { id: followupId, ticketId },
     include: { author: { select: { id: true, fullName: true, avatarUrl: true } } },
   });
-  if (!followup) return res.status(404).json({ error: 'Commentaire introuvable' });
+  if (!followup) {
+    dropUploadedFiles(req.files);
+    return res.status(404).json({ error: 'Commentaire introuvable' });
+  }
 
   if (followup.source === 'glpi') {
+    dropUploadedFiles(req.files);
     return res.status(403).json({ error: 'Impossible de modifier un commentaire synchronisé depuis GLPI' });
   }
 
   const isAdmin = ['ADMIN', 'SUPERADMIN'].includes(req.user.role);
   if (!isAdmin && followup.authorId !== req.user.sub) {
+    dropUploadedFiles(req.files);
     return res.status(403).json({ error: 'Vous ne pouvez modifier que vos propres commentaires' });
   }
 
-  const sanitized = sanitizeTicketHtml(content.trim());
+  // Nouvelles images éventuelles (collées / glissées / choisies à l'édition)
+  let imageAttachments = [];
+  try {
+    imageAttachments = await saveFollowupImages(req.files || [], ticketId);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+
+  const sanitized = sanitizeTicketHtml(applyFollowupImageMarkers(content.trim(), imageAttachments));
   const updated = await prisma.followup.update({
     where: { id: followupId },
     data: { content: sanitized, updatedAt: new Date() },
     include: { author: { select: { id: true, fullName: true, avatarUrl: true } } },
   });
 
+  // Une image retirée du suivi ne doit plus apparaître dans « Pièces jointes »
+  const cleanup = await cleanupOrphanFollowupImages(ticketId);
+
   try {
-    await logEvent(ticketId, 'FOLLOWUP_EDITED', req.user.sub, { followupId });
+    await logEvent(ticketId, 'FOLLOWUP_EDITED', req.user.email || String(req.user.sub), {
+      followupId,
+      imagesAdded: imageAttachments.length,
+      imagesRemoved: cleanup.removed,
+    });
   } catch (err) {
     console.error('[ticket.routes] Log édition commentaire échoué:', err.message);
   }
 
-  return res.json({ followup: updated });
+  return res.json({ followup: updated, imageAttachments, imagesRemoved: cleanup.removed });
 });
 
 // Supprimer un commentaire (ADMIN / SUPERADMIN uniquement)
@@ -2295,8 +2540,11 @@ router.delete('/:id/followups/:followupId', requirePermission('tickets.assign', 
 
   await prisma.followup.delete({ where: { id: followupId } });
 
+  // Les images propres à ce suivi ne doivent plus figer dans « Pièces jointes »
+  await cleanupOrphanFollowupImages(ticketId);
+
   try {
-    await logEvent(ticketId, 'FOLLOWUP_DELETED', req.user.sub, { followupId });
+    await logEvent(ticketId, 'FOLLOWUP_DELETED', req.user.email || String(req.user.sub), { followupId });
   } catch (err) {
     console.error('[ticket.routes] Log suppression commentaire échoué:', err.message);
   }

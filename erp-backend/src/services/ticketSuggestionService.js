@@ -241,45 +241,23 @@ async function suggestTeam({ aiTeam, aiTeamId, category, bestCandidate }) {
 }
 
 // ── Suggestion d'observateurs ─────────────────────────────────────────────────
-// DefaultObservers de l'équipe + techniciens ayant traité cette catégorie
-// (hors technicien assigné) — maximum 4, triés par score décroissant.
+// Uniquement les defaultObservers déjà renseignés dans la vue Équipe : pas de
+// calcul d'historique. Le technicien assigné reste exclu.
 // `db` permet d'utiliser la connexion d'une transaction (ticketCreator).
-async function suggestObservers({ teamId, category, excludeIds = [], db = prisma }) {
-  const suggestions = [];
+async function suggestObservers({ teamId, excludeIds = [], db = prisma }) {
+  if (!teamId) return [];
+  const team = await db.team.findUnique({
+    where: { id: teamId },
+    select: { defaultObservers: { select: { id: true, fullName: true } } },
+  });
   const seen = new Set(excludeIds);
-
-  if (teamId) {
-    const team = await db.team.findUnique({
-      where: { id: teamId },
-      select: { defaultObservers: { select: { id: true, fullName: true } } },
-    });
-    for (const o of team?.defaultObservers || []) {
-      if (seen.has(o.id)) continue;
-      seen.add(o.id);
-      suggestions.push({ ...o, reasons: ['Observateur par défaut de l\'équipe'], source: 'equipe' });
-    }
+  const suggestions = [];
+  for (const o of team?.defaultObservers || []) {
+    if (seen.has(o.id)) continue;
+    seen.add(o.id);
+    suggestions.push({ ...o, reasons: ['Observateur par défaut de l\'équipe'], source: 'equipe' });
   }
-
-  if (category && suggestions.length < 4) {
-    const byCat = await db.ticket.groupBy({
-      by: ['assignedToId'],
-      where: { deletedAt: null, approvalStatus: { notIn: ['PENDING', 'REJECTED'] }, assignedToId: { not: null }, category: { equals: category, mode: 'insensitive' } },
-      _count: { id: true },
-    });
-    byCat.sort((a, b) => countOf(b) - countOf(a));
-    const ids = byCat.map((r) => r.assignedToId).filter((id) => !seen.has(id)).slice(0, 4 - suggestions.length);
-    if (ids.length > 0) {
-      const users = await db.user.findMany({ where: { id: { in: ids }, isActive: true }, select: { id: true, fullName: true } });
-      const countById = Object.fromEntries(byCat.map((r) => [r.assignedToId, countOf(r)]));
-      for (const u of users) {
-        if (seen.has(u.id)) continue;
-        seen.add(u.id);
-        suggestions.push({ ...u, reasons: [`Historique : a traité ${countById[u.id]} ticket(s) de cette catégorie`], source: 'historique' });
-      }
-    }
-  }
-
-  return suggestions.slice(0, 4);
+  return suggestions;
 }
 
 // ── Suggestion de priorité ────────────────────────────────────────────────────
@@ -430,7 +408,6 @@ async function suggestTriage(ticket) {
   const [observers, priority, analysis] = await Promise.all([
     suggestObservers({
       teamId: team?.id || ticket.teamId || null,
-      category: ticket.category,
       excludeIds: [best?.id, ticket.assignedToId].filter(Boolean),
     }),
     suggestPriority({ ticket }),

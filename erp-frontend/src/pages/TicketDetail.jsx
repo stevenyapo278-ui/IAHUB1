@@ -14,6 +14,8 @@ import { playApproval, playRejection, playError } from '../utils/sounds';
 import SearchableSelect from '../components/SearchableSelect';
 import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
 import SlaBadge from '../components/SlaBadge';
+import ImageAttachmentsEditor from '../components/ImageAttachmentsEditor';
+import { clipboardImageFiles, imageItemsFromFiles, imageSrc, revokeImageItems } from '../utils/imageAttachments';
 import { flattenCategoryTree } from '../utils/categoryTree';
 import {
   ArrowLeft, Clock, User, Tag, AlertTriangle, CheckCircle2,
@@ -249,6 +251,8 @@ export default function TicketDetail() {
   const [mergeSelected, setMergeSelected] = useState([]);
   const [mergeLoading, setMergeLoading] = useState(false);
   const [merging, setMerging] = useState(false);
+  // Images du suivi en cours de rédaction : [{ id, url, file, filename }]
+  // (aperçu local, envoyées en multipart à l'envoi)
   const [pastedImages, setPastedImages] = useState([]);
   const [lightboxSrc, setLightboxSrc] = useState(null);
   const [error, setError] = useState('');
@@ -272,6 +276,9 @@ export default function TicketDetail() {
   const [allUsers, setAllUsers] = useState([]);
   const [syncFailures, setSyncFailures] = useState([]);
   const [savingField, setSavingField] = useState(null);
+  // Personnes suggérées par l'IA de triage (technicien scoré + observateurs) — affichées
+  // directement dans « Propriétés du ticket » (GET /tickets/:id/triage-suggestions).
+  const [peopleSug, setPeopleSug] = useState(null);
   const [forwarding, setForwarding] = useState(false);
   const [conversationIdDraft, setConversationIdDraft] = useState('');
   const [savingConversationId, setSavingConversationId] = useState(false);
@@ -342,8 +349,8 @@ export default function TicketDetail() {
 
   const [editingContent, setEditingContent] = useState(false);
   const [editingContentValue, setEditingContentValue] = useState('');
+  // Images de la description en édition : [{ id, url }] (existantes ou déjà uploadées)
   const [editingContentImages, setEditingContentImages] = useState([]);
-  const [editingContentNewImages, setEditingContentNewImages] = useState([]);
   const [savingContent, setSavingContent] = useState(false);
 
   const openEscalateModal = async () => {
@@ -476,6 +483,61 @@ export default function TicketDetail() {
     load();
   }, [id, load]);
 
+  // ── Personnes suggérées (IA de triage) ───────────────────────────────────────
+  // Même endpoint que le centre de validation (permission tickets.approve côté serveur) :
+  // silencieux si 403 ou si le ticket ne porte aucune suggestion utile.
+  const fetchPeopleSug = useCallback(() => {
+    api
+      .get(`/tickets/${id}/triage-suggestions`)
+      .then(({ data }) => setPeopleSug(data))
+      .catch(() => setPeopleSug(null));
+  }, [id]);
+
+  useEffect(() => {
+    if (!canApprove) {
+      setPeopleSug(null);
+      return undefined;
+    }
+    fetchPeopleSug();
+    return undefined;
+  }, [canApprove, fetchPeopleSug]);
+
+  const currentObserverIds = (ticket?.observers || []).map((o) => o.id);
+  const suggestedTech = peopleSug?.technician && !peopleSug.technician.current ? peopleSug.technician : null;
+  const suggestedObservers = (peopleSug?.observers || []).filter((o) => !currentObserverIds.includes(o.id));
+  const showPeopleSuggestions = canApprove && !!peopleSug && (suggestedTech || suggestedObservers.length > 0);
+
+  async function applySuggestedTechnician() {
+    if (!suggestedTech) return;
+    try {
+      setSavingField('sugAssignee');
+      await api.patch(`/tickets/${id}`, { assigneeIds: [suggestedTech.id] });
+      toast.success(`Technicien suggéré appliqué — ${suggestedTech.fullName}`);
+      fetchPeopleSug();
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || "Échec de l'application de la suggestion");
+    } finally {
+      setSavingField(null);
+    }
+  }
+
+  async function applySuggestedObservers() {
+    if (suggestedObservers.length === 0) return;
+    try {
+      setSavingField('sugObservers');
+      const merged = [...new Set([...currentObserverIds, ...suggestedObservers.map((o) => o.id)])];
+      await api.patch(`/tickets/${id}`, { observerIds: merged });
+      toast.success(`${suggestedObservers.length} observateur(s) suggéré(s) ajouté(s)`);
+      fetchPeopleSug();
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || "Échec de l'application de la suggestion");
+    } finally {
+      setSavingField(null);
+    }
+  }
+
   // Navigation ‹ › : hérite des filtres de la liste (passés en query params lors du clic
   // depuis /tickets). Sans paramètres, le serveur applique son défaut (non clôturés,
   // ni rejetés, ni corbeille) — les boutons ne font plus traverser toute la base.
@@ -562,7 +624,9 @@ export default function TicketDetail() {
   useEffect(() => {
     const container = followupContainerRef.current;
     if (!container) return;
-    container.querySelectorAll('img[src^="/uploads/"]').forEach((img) => {
+    // Les vignettes de l'éditeur d'images (data-editor-thumb) gardent leur
+    // taille miniature et leur URL relative : on ne les traite pas ici.
+    container.querySelectorAll('img[src^="/uploads/"]:not([data-editor-thumb])').forEach((img) => {
       if (img.getAttribute('data-abs-processed')) return;
       img.setAttribute('data-abs-processed', 'true');
       const src = img.getAttribute('src');
@@ -581,7 +645,7 @@ export default function TicketDetail() {
     if (!container) return;
     function handleClick(e) {
       const img = e.target.closest('img');
-      if (img && img.src) {
+      if (img && img.src && !img.hasAttribute('data-editor-thumb')) {
         e.preventDefault();
         setLightboxSrc(img.src);
       }
@@ -833,28 +897,23 @@ export default function TicketDetail() {
     }
   }
 
-  function handlePaste(e) {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    for (const item of items) {
-      if (item.type?.startsWith('image/')) {
-        e.preventDefault();
-        const file = item.getAsFile();
-        if (!file) continue;
-        const id = `paste-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        const dataUrl = URL.createObjectURL(file);
-        setPastedImages((prev) => [...prev, { id, file, dataUrl }]);
-        toast.success('Image collée — elle sera envoyée avec le commentaire');
-      }
-    }
+  // Ajout d'images au suivi en cours de rédaction (collage, fichier, glisser-déposer)
+  function addFollowupFiles(files) {
+    const items = imageItemsFromFiles(files, 'followup');
+    if (items.length === 0) return;
+    setPastedImages((prev) => [...prev, ...items]);
+    toast.success(
+      items.length > 1
+        ? `${items.length} images ajoutées — elles partiront avec le commentaire`
+        : 'Image ajoutée — elle partira avec le commentaire',
+    );
   }
 
-  function removePastedImage(id) {
-    setPastedImages((prev) => {
-      const img = prev.find((p) => p.id === id);
-      if (img) URL.revokeObjectURL(img.dataUrl);
-      return prev.filter((p) => p.id !== id);
-    });
+  function handlePaste(e) {
+    const files = clipboardImageFiles(e);
+    if (files.length === 0) return;
+    e.preventDefault();
+    addFollowupFiles(files);
   }
 
   // ── Mentions @ : logique autocomplete ──────────────────────────────────
@@ -1092,7 +1151,7 @@ export default function TicketDetail() {
       setFollowupPrivate(false);
       setMentionedUsers([]);
       setMentionQuery(null);
-      pastedImages.forEach((img) => URL.revokeObjectURL(img.dataUrl));
+      revokeImageItems(pastedImages);
       setPastedImages([]);
       load();
     } catch (err) {
@@ -1114,25 +1173,57 @@ export default function TicketDetail() {
     setEditingFollowupId(f.id);
     const { text, images } = extractCleanTextAndImages(f.content || '');
     setEditingFollowupContent(text);
-    setEditingFollowupImages(images);
+    // Images déjà enregistrées : { id, url } — pas de file ⇒ rien à téléverser
+    setEditingFollowupImages(images.map((html, i) => ({ id: `fu-${f.id}-${i}`, url: imageSrc(html) })));
   }
 
   function cancelEditFollowup() {
+    revokeImageItems(editingFollowupImages);
     setEditingFollowupId(null);
     setEditingFollowupContent('');
     setEditingFollowupImages([]);
   }
 
+  // Collage / fichier / glisser-déposer d'images dans le suivi en cours d'édition
+  function addEditFollowupFiles(files) {
+    const items = imageItemsFromFiles(files, 'edit');
+    if (items.length === 0) return;
+    setEditingFollowupImages((prev) => [...prev, ...items]);
+  }
+
+  function handleEditFollowupPaste(e) {
+    const files = clipboardImageFiles(e);
+    if (files.length === 0) return;
+    e.preventDefault();
+    addEditFollowupFiles(files);
+  }
+
   async function saveEditFollowup(followupId) {
-    if (!editingFollowupContent.trim() && editingFollowupImages.length === 0) return;
+    const text = editingFollowupContent.trim();
+    const savedTags = editingFollowupImages
+      .filter((img) => !img.file)
+      .map((img) => `<img src="${img.url}" alt="image jointe" />`);
+    const pending = editingFollowupImages.filter((img) => img.file);
+    if (!text && savedTags.length === 0 && pending.length === 0) return;
+
     setSavingFollowupEdit(true);
     try {
-      let finalContent = editingFollowupContent.trim();
-      if (editingFollowupImages.length > 0) {
-        finalContent += (finalContent ? '\n\n' : '') + editingFollowupImages.join('\n\n');
+      let body = text;
+      if (savedTags.length > 0) body += (body ? '\n\n' : '') + savedTags.join('\n\n');
+
+      if (pending.length > 0) {
+        // Nouvelles images : multipart, remplacées par des <img> côté serveur
+        const markers = pending.map((_, i) => `<!--IMAGE_${i}-->`).join('\n\n');
+        const fd = new FormData();
+        pending.forEach((img) => fd.append('images', img.file));
+        fd.append('content', body ? `${body}\n\n${markers}` : markers);
+        await api.patch(`/tickets/${id}/followups/${followupId}`, fd);
+      } else {
+        await api.patch(`/tickets/${id}/followups/${followupId}`, { content: body });
       }
-      await api.patch(`/tickets/${id}/followups/${followupId}`, { content: finalContent });
+
       toast.success('Commentaire modifié');
+      revokeImageItems(editingFollowupImages);
       setEditingFollowupId(null);
       setEditingFollowupContent('');
       setEditingFollowupImages([]);
@@ -1162,8 +1253,7 @@ export default function TicketDetail() {
   function startEditContent() {
     const { text, images } = extractCleanTextAndImages(ticket?.content || '');
     setEditingContentValue(text);
-    setEditingContentImages(images);
-    setEditingContentNewImages([]);
+    setEditingContentImages(images.map((html, i) => ({ id: `content-${i}`, url: imageSrc(html) })));
     setEditingContent(true);
   }
 
@@ -1202,54 +1292,36 @@ export default function TicketDetail() {
   }
 
   function handleContentPaste(e) {
-    const items = Array.from(e.clipboardData?.items || []);
-    const imageItems = items.filter((it) => it.type?.startsWith('image/'));
-    if (imageItems.length === 0) return;
+    const files = clipboardImageFiles(e);
+    if (files.length === 0) return;
     e.preventDefault();
-    const files = imageItems.map((it) => it.getAsFile()).filter(Boolean);
-    if (files.length === 0) return;
+    addContentImages(files);
+  }
+
+  // Les images de la description sont téléversées tout de suite (endpoint dédié),
+  // contrairement à celles d'un suivi qui partent à l'enregistrement.
+  function addContentImages(files) {
     uploadContentImages(files).then((uploaded) => {
-      if (uploaded.length > 0) {
-        setEditingContentNewImages((prev) => [...prev, ...uploaded]);
-      }
+      if (uploaded.length === 0) return;
+      setEditingContentImages((prev) => [
+        ...prev,
+        ...uploaded.map((img, i) => ({ id: `content-new-${Date.now()}-${i}`, url: img.url, filename: img.filename })),
+      ]);
     });
-  }
-
-  function handleContentFileSelect(e) {
-    const files = Array.from(e.target.files || []);
-    if (files.length === 0) return;
-    uploadContentImages(files).then((uploaded) => {
-      if (uploaded.length > 0) {
-        setEditingContentNewImages((prev) => [...prev, ...uploaded]);
-      }
-    });
-    e.target.value = '';
-  }
-
-  function removeContentNewImage(idx) {
-    setEditingContentNewImages((prev) => prev.filter((_, i) => i !== idx));
-  }
-
-  function removeContentExistingImage(idx) {
-    setEditingContentImages((prev) => prev.filter((_, i) => i !== idx));
   }
 
   async function handleSaveContent() {
     setSavingContent(true);
     try {
       let finalContent = editingContentValue.trim();
-      // Réattacher les images existantes (non éditables)
-      if (editingContentImages.length > 0) {
-        finalContent += (finalContent ? '\n\n' : '') + editingContentImages.join('\n\n');
-      }
-      // Insérer les nouvelles images à la fin
-      if (editingContentNewImages.length > 0) {
-        const newImgTags = editingContentNewImages.map((img) => `<img src="${img.url}" alt="image" />`).join('\n');
-        finalContent += (finalContent ? '\n\n' : '') + newImgTags;
-      }
+      const tags = editingContentImages
+        .filter((img) => img.url)
+        .map((img) => `<img src="${img.url}" alt="image jointe" />`);
+      if (tags.length > 0) finalContent += (finalContent ? '\n\n' : '') + tags.join('\n\n');
       await api.patch(`/tickets/${id}`, { content: finalContent });
       toast.success('Description du ticket modifiée');
       setEditingContent(false);
+      setEditingContentImages([]);
       load();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erreur lors de la modification de la description');
@@ -2088,40 +2160,12 @@ export default function TicketDetail() {
                     }}
                     autoFocus
                   />
-                  {(editingContentImages.length > 0 || editingContentNewImages.length > 0) && (
-                    <div className="flex flex-wrap gap-2">
-                      {editingContentImages.map((url, i) => (
-                        <div key={`old-${i}`} className="relative group/img">
-                          <img src={url} alt="" className="h-16 w-16 object-cover rounded-lg border border-outline-variant/40" />
-                          <button
-                            type="button"
-                            onClick={() => removeContentExistingImage(i)}
-                            className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity cursor-pointer"
-                          >
-                            <X className="w-2.5 h-2.5" />
-                          </button>
-                        </div>
-                      ))}
-                      {editingContentNewImages.map((img, i) => (
-                        <div key={`new-${i}`} className="relative group/img">
-                          <img src={img.url} alt="" className="h-16 w-16 object-cover rounded-lg border border-primary/40" />
-                          <button
-                            type="button"
-                            onClick={() => removeContentNewImage(i)}
-                            className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity cursor-pointer"
-                          >
-                            <X className="w-2.5 h-2.5" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <ImageAttachmentsEditor
+                    items={editingContentImages}
+                    onChange={setEditingContentImages}
+                    onFiles={addContentImages}
+                  />
                   <div className="flex items-center gap-2">
-                    <label className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-outline-variant/40 bg-surface-container text-on-surface-variant text-[10px] font-semibold hover:bg-surface-container-high transition-colors cursor-pointer">
-                      <ImageIcon className="w-3 h-3" />
-                      Ajouter une image
-                      <input type="file" accept="image/*" multiple className="hidden" onChange={handleContentFileSelect} />
-                    </label>
                     <button
                       type="button"
                       onClick={handleSaveContent}
@@ -2404,21 +2448,18 @@ export default function TicketDetail() {
                               rows={6}
                               value={editingFollowupContent}
                               onChange={(e) => setEditingFollowupContent(e.target.value)}
+                              onPaste={handleEditFollowupPaste}
                               onKeyDown={(e) => {
                                 if (e.key === 'Escape') cancelEditFollowup();
                                 if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') saveEditFollowup(item.data.id);
                               }}
                               autoFocus
                             />
-                            {editingFollowupImages.length > 0 && (
-                              <div className="flex flex-wrap gap-2 p-2 rounded-xl border border-outline-variant/30 bg-surface-container-low/40">
-                                {editingFollowupImages.map((img, idx) => (
-                                  <div key={idx} className="relative group">
-                                    <div dangerouslySetInnerHTML={{ __html: img }} className="[&>img]:max-w-[120px] [&>img]:max-h-[80px] [&>img]:rounded-lg [&>img]:border [&>img]:border-outline-variant/50" />
-                                  </div>
-                                ))}
-                              </div>
-                            )}
+                            <ImageAttachmentsEditor
+                              items={editingFollowupImages}
+                              onChange={setEditingFollowupImages}
+                              onFiles={addEditFollowupFiles}
+                            />
                             <div className="flex items-center gap-2">
                               <button
                                 onClick={() => saveEditFollowup(item.data.id)}
@@ -2806,33 +2847,15 @@ export default function TicketDetail() {
                 </div>
               )}
 
-              {/* Pasted images preview */}
-              {pastedImages.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {pastedImages.map((img) => (
-                    <div key={img.id} className="relative group">
-                      <img
-                        src={img.dataUrl}
-                        alt="image collée"
-                        className="h-16 w-16 object-cover rounded-xl border border-outline-variant/40 shadow-sm"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removePastedImage(img.id)}
-                        className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center shadow-md opacity-0 group-hover:opacity-100 transition-all hover:scale-110"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ))}
-                  <span className="text-[10px] text-on-surface-variant self-end pb-1 font-medium">
-                    {pastedImages.length} image{pastedImages.length > 1 ? 's' : ''} collée{pastedImages.length > 1 ? 's' : ''}
-                  </span>
-                </div>
-              )}
+              {/* Images jointes au suivi — collage (Ctrl+V), fichier, glisser-déposer */}
+              <ImageAttachmentsEditor
+                items={pastedImages}
+                onChange={setPastedImages}
+                onFiles={addFollowupFiles}
+              />
 
               <div className="flex items-center justify-between">
-                <span className="text-[10px] text-on-surface-variant font-medium">Astuce : Appuyez sur <kbd className="px-1.5 py-0.5 bg-surface-container border border-outline-variant/40 rounded text-[9px] font-mono">Ctrl+Entrée</kbd> pour soumettre. Vous pouvez <kbd className="px-1.5 py-0.5 bg-surface-container border border-outline-variant/40 rounded text-[9px] font-mono">Coller</kbd> des images directement.</span>
+                <span className="text-[10px] text-on-surface-variant font-medium">Astuce : Appuyez sur <kbd className="px-1.5 py-0.5 bg-surface-container border border-outline-variant/40 rounded text-[9px] font-mono">Ctrl+Entrée</kbd> pour soumettre.</span>
                 <button
                   type="submit"
                   disabled={!followup.trim() && pastedImages.length === 0}
@@ -3402,6 +3425,68 @@ export default function TicketDetail() {
                   </div>
                 )}
               </div>
+
+              {/* Personnes suggérées par l'IA — affichées ici plutôt que dans une zone
+                  de suggestion à part (centré sur les personnes : technicien + observateurs) */}
+              {showPeopleSuggestions && (
+                <div className="sm:col-span-2 rounded-xl border border-blue-500/20 bg-blue-500/5 p-3 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                      Personnes suggérées par l'IA
+                    </span>
+                    <span className="text-[9px] font-bold text-on-surface-variant">compétence · historique · charge</span>
+                  </div>
+
+                  {suggestedTech && (
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-7 h-7 rounded-full bg-blue-500/15 border border-blue-500/25 flex items-center justify-center text-[10px] font-black text-blue-700 dark:text-blue-300 shrink-0">
+                          {initials(suggestedTech.fullName)}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-on-surface truncate">
+                            {suggestedTech.fullName}
+                            <span className="ml-1.5 text-[9px] font-black text-blue-600 dark:text-blue-400">score {suggestedTech.score}</span>
+                          </p>
+                          <p className="text-[10px] text-on-surface-variant truncate" title={(suggestedTech.reasons || []).join(' · ')}>
+                            {(suggestedTech.reasons || []).join(' · ') || 'Technicien suggéré'}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={applySuggestedTechnician}
+                        disabled={savingField === 'sugAssignee'}
+                        className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-blue-600 hover:bg-blue-700 text-white transition-all disabled:opacity-50 shrink-0"
+                      >
+                        {savingField === 'sugAssignee' ? '…' : 'Appliquer'}
+                      </button>
+                    </div>
+                  )}
+
+                  {suggestedObservers.length > 0 && (
+                    <div className="flex items-center justify-between gap-3 flex-wrap border-t border-blue-500/15 pt-2.5">
+                      <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                        <span className="text-[10px] font-bold text-on-surface-variant shrink-0">Observateurs :</span>
+                        {suggestedObservers.map((o) => (
+                          <span key={o.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/25 text-[11px] font-semibold text-blue-700 dark:text-blue-300">
+                            {o.fullName}
+                          </span>
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={applySuggestedObservers}
+                        disabled={savingField === 'sugObservers'}
+                        className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-blue-600 hover:bg-blue-700 text-white transition-all disabled:opacity-50 shrink-0"
+                      >
+                        {savingField === 'sugObservers' ? '…' : `Appliquer (${suggestedObservers.length})`}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div>
                 <label className="block text-[11px] font-extrabold uppercase tracking-wider text-on-surface mb-1 flex items-center gap-1">
@@ -4821,6 +4906,13 @@ function eventLabel(type) {
     FOLLOWUP_MADE_PRIVATE: 'Commentaire rendu privé',
     FOLLOWUP_MADE_PUBLIC: 'Commentaire rendu public',
     REPLY_ON_CLOSED_SUGGESTED: 'Réponse suggérée (ticket fermé)',
+    REPLY_ON_CLOSED_REOPENED: 'Réponse sur ticket fermé : ticket rouvert',
+    REPLY_ON_CLOSED_NEW_TICKET: 'Réponse sur ticket fermé : nouvelle demande créée',
+    REPLY_ON_CLOSED_DISMISSED: 'Réponse sur ticket fermé : suggestion ignorée',
+    NEW_TICKET_SUGGESTED: 'Nouvelle demande détectée dans le fil',
+    NEW_TICKET_SUGGESTED_CREATED: 'Nouvelle demande créée depuis la suggestion',
+    NEW_TICKET_SUGGESTED_DISMISSED: 'Suggestion de nouvelle demande ignorée',
+    FOLLOWUP_EDITED: 'Commentaire modifié',
   };
   return labels[type] || type;
 }

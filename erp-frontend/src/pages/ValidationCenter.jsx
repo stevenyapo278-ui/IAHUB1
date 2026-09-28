@@ -5,16 +5,14 @@ import {
   ShieldCheck, Ticket, MailCheck, Clock, CheckCircle2,
   XCircle, AlertTriangle, RefreshCw, ChevronRight, ChevronUp, ChevronDown, User, Users,
   Sparkles, ExternalLink, Send, ArrowRight, Shield, Check, X,
-  Bell, BookOpen, Edit3, Tags, HelpCircle, TrendingUp, Search, Eye,
+  Bell, BookOpen, Edit3, Tags, HelpCircle, Search, Eye,
 } from 'lucide-react';
 import { staggerContainer, staggerItem } from '../utils/animations';
-import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid,
-} from 'recharts';
 import { sanitizeHtml } from '../utils/sanitize';
 import api from '../api/client';
 import useSystemSettings from '../hooks/useSystemSettings';
 import { useAuth } from '../context/AuthContext';
+import { useSocket } from '../context/SocketContext';
 import { hasPermission } from '../utils/permissions';
 import { playApproval, playRejection, playError } from '../utils/sounds';
 import UserAvatar from '../components/UserAvatar';
@@ -24,8 +22,7 @@ import {
 } from 'lucide-react';
 import EmptyState from '../components/EmptyState';
 import FadeIn from '../components/FadeIn';
-import { ORIGIN_CONFIG, URGENCY_IMPACT_OPTIONS } from '../constants/tickets';
-import { flattenCategoryTree } from '../utils/categoryTree';
+import { ORIGIN_CONFIG } from '../constants/tickets';
 import {
   clearClosureAnalysis,
   getClosureAnalysisState,
@@ -46,13 +43,22 @@ const LEVEL_LABELS = {
   MEDIUM: 'Moyenne', LOW: 'Basse', VERY_LOW: 'Très basse',
 };
 
+// L'objet du brouillon contient encore le placeholder [Ticket #EN_ATTENTE] (le vrai numéro n'est
+// substitué qu'au moment de l'envoi) : on l'affiche déjà résolu pour ne jamais valider à l'aveugle.
+function resolveDraftSubject(draft, ticketObj) {
+  const raw = draft?.subject || '(sans objet)';
+  const number = ticketObj?.id || draft?.ticketId;
+  return raw.replace(/#EN_ATTENTE/g, number ? `#${number}` : 'EN_ATTENTE');
+}
+
 function matchesSearch(item, tab, q) {
   let fields = [];
-  if (tab === 'tickets' || tab === 'closures' || tab === 'replyClosed') {
+  if (tab === 'tickets' || tab === 'closures' || tab === 'replies') {
     fields = [
       item.title, item.content, item.category,
       item.requester?.fullName, item.sourceName, item.sourceEmail,
       item.replyOnClosedSender, item.replyOnClosedSubject,
+      item.newTicketSuggestedSender, item.newTicketSuggestedSubject, item.newTicketSuggestedSummary,
       String(item.id || ''),
     ];
   } else if (tab === 'drafts' || tab === 'reminders') {
@@ -74,78 +80,35 @@ function matchesSearch(item, tab, q) {
   return fields.some((v) => v && String(v).toLowerCase().includes(q));
 }
 
-// Champ de formulaire de triage : label + badge « modifié » (vs valeur actuelle du ticket).
-function TriageField({ label, badge, children, wide }) {
-  return (
-    <label className={`space-y-1 ${wide ? 'col-span-2' : ''}`}>
-      <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
-        {label}
-        {badge && (
-          <span className="px-1 py-0.5 text-[8px] font-extrabold rounded bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 uppercase">
-            {badge}
-          </span>
-        )}
-      </span>
-      {children}
-    </label>
-  );
-}
-
-const TRIAGE_INPUT = 'w-full px-2.5 py-1.5 rounded-lg bg-surface-container border border-outline-variant/30 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-blue-500/40';
-
-// Formulaire pré-rempli à partir des suggestions : chaque champ prend la valeur
-// suggérée (alternative de catégorie, technicien scoré, priorité matrice, équipe
-// historique…) quand elle existe, sinon la valeur actuelle du ticket.
-function buildTriageForm(data) {
-  const c = data.current || {};
-  return {
-    title: c.title || '',
-    category: data.analysis?.categoryAlternative?.value || data.analysis?.category || c.category || '',
-    type: data.analysis?.type || c.type || 'INCIDENT',
-    impact: data.analysis?.impact || c.impact || 'MEDIUM',
-    urgency: data.analysis?.urgency || c.urgency || 'MEDIUM',
-    priority: data.priority?.value || c.priority || 'P3',
-    locationId: c.locationId || '',
-    teamId: data.team?.id || c.teamId || '',
-    assignedToId: data.technician?.id || c.assignedToId || '',
-    observerIds: [...new Set([...(c.observerIds || []), ...(data.observers || []).map((o) => o.id)])],
-  };
-}
-
-// Nombre de champs du formulaire qui diffèrent de la valeur réelle du ticket.
-// Utilisé par l'en-tête du panneau (badge « modifié ») et par le footer de la
-// modale (bouton « Approuver avec ces corrections » + garde-fou de fermeture).
-function countTriageChanges(current, form) {
-  const obsChanged = JSON.stringify([...(form.observerIds || [])].sort())
-    !== JSON.stringify([...(current.observerIds || [])].sort());
-  return ['title', 'category', 'type', 'impact', 'urgency', 'priority', 'locationId', 'teamId', 'assignedToId']
-    .filter((k) => String(form[k] ?? '') !== String(current[k] ?? '')).length + (obsChanged ? 1 : 0);
-}
-
 export default function ValidationCenter({ defaultTab = 'tickets' }) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { autonomousMode } = useSystemSettings();
   const { user } = useAuth();
-  const rawTab = searchParams.get('tab') || defaultTab;
+  const socket = useSocket();
+  // L'onglet « Réponses » regroupe les deux vues (ticket fermé / ticket ouvert).
+  // Les anciens liens ?tab=replyClosed / ?tab=newRequests sont redirigés ici.
+  const LEGACY_TAB_ALIASES = { replyClosed: 'replies', newRequests: 'replies' };
+  const requestedTab = searchParams.get('tab') || defaultTab;
+  const rawTab = LEGACY_TAB_ALIASES[requestedTab] || requestedTab;
+  const rawSub = searchParams.get('sub');
+  const activeSub = rawSub === 'closed' || rawSub === 'open'
+    ? rawSub
+    : (requestedTab === 'newRequests' ? 'open' : 'closed');
 
   const [pendingTickets, setPendingTickets] = useState([]);
   const [pendingDrafts, setPendingDrafts] = useState([]);
   const [reminderDrafts, setReminderDrafts] = useState([]);
   const [pendingKnowledgeDrafts, setPendingKnowledgeDrafts] = useState([]);
   const [pendingClosures, setPendingClosures] = useState([]);
-  const [rejectedClosures, setRejectedClosures] = useState([]);
   // Réponses sur tickets fermés (demandeur a répondu à un email sur un ticket SOLVED/CLOSED)
   const [replySuggestions, setReplySuggestions] = useState([]);
+  const [newTicketSuggestions, setNewTicketSuggestions] = useState([]);
   const [processingReplyId, setProcessingReplyId] = useState(null);
   // Emails entrants marqués NEEDS_REVIEW par le pipeline (demande de révision Hotline)
   const [needsReviewEmails, setNeedsReviewEmails] = useState([]);
   const [processingReviewId, setProcessingReviewId] = useState(null);
   const [bulkResolving, setBulkResolving] = useState(false);
-  const [closureStats, setClosureStats] = useState(null);
-  // Sous-onglet dans Clôtures IA : 'pending' | 'rejected'
-  const [closureSubTab, setClosureSubTab] = useState('pending');
-  const [recoveringClosureId, setRecoveringClosureId] = useState(null);
   // Analyse des clôtures portée par le store module (survit à la navigation et au reload)
   const analysis = useSyncExternalStore(subscribeClosureAnalysis, getClosureAnalysisState);
   const [loading, setLoading] = useState(true);
@@ -180,15 +143,6 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   // Modale détail ticket (onglets Tickets & Clôtures IA)
   const [detailTicket, setDetailTicket] = useState(null);
 
-  // Suggestions de triage du ticket affiché (équipe, technicien, observateurs,
-  // priorité) — recalculées par GET /tickets/:id/triage-suggestions.
-  // Stockées avec leur ticketId : l'affichage est dérivé (aucun reset dans un effet).
-  const [triageSug, setTriageSug] = useState(null); // { ticketId, data }
-  // Formulaire de triage éditable, pré-rempli avec les suggestions
-  const [triageForm, setTriageForm] = useState(null);
-  const [triageLists, setTriageLists] = useState(null);
-  const [savingTriage, setSavingTriage] = useState(false);
-
   // Modale détail brouillon de connaissance
   const [detailKb, setDetailKb] = useState(null);
 
@@ -215,6 +169,11 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   const [expandedCards, setExpandedCards] = useState(new Set());
   const [selectedDraftIds, setSelectedDraftIds] = useState(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  // Rejet d'une réponse IA AVEC motif (le motif est stocké en reviewNote côté serveur
+  // et sert de retour d'erreur exploitable — un rejet muet n'apprend rien à personne).
+  const [rejectDraftId, setRejectDraftId] = useState(null);
+  const [draftRejectReason, setDraftRejectReason] = useState('');
+  const [rejectingDraft, setRejectingDraft] = useState(false);
 
   function loadAllData(silent = false) {
     if (!silent) setLoading(true);
@@ -228,12 +187,11 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
       api.get(`/tickets?closeSuggested=true${mineFilter}&limit=100`).catch(() => ({ data: { tickets: [] } })),
       api.get('/dashboard/pending-ai-drafts?limit=500').catch(() => ({ data: { items: [] } })),
       api.get('/knowledge/drafts').catch(() => ({ data: [] })),
-      api.get('/dashboard/closure-stats?days=30').catch(() => null),
-      api.get('/tickets/rejected-closures?limit=50').catch(() => ({ data: [] })),
       api.get('/inbox/needs-review').catch(() => ({ data: { items: [] } })),
       api.get('/tickets/reply-suggestions?limit=50').catch(() => ({ data: [] })),
+      api.get('/tickets/new-ticket-suggestions?limit=50').catch(() => ({ data: [] })),
     ])
-      .then(([ticketsRes, closuresRes, draftsRes, knowledgeRes, closureStatsRes, rejectedRes, needsReviewRes, replySuggestionsRes]) => {
+      .then(([ticketsRes, closuresRes, draftsRes, knowledgeRes, needsReviewRes, replySuggestionsRes, newSuggestionsRes]) => {
         const ticketList = Array.isArray(ticketsRes.data)
           ? ticketsRes.data
           : ticketsRes.data?.items || [];
@@ -244,9 +202,6 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
           : closuresRes.data?.items || [];
         closureList.sort((a, b) => new Date(b.closeSuggestedAt || 0) - new Date(a.closeSuggestedAt || 0));
         setPendingClosures(closureList);
-
-        const rejectedList = Array.isArray(rejectedRes.data) ? rejectedRes.data : [];
-        setRejectedClosures(rejectedList);
 
         const draftList = Array.isArray(draftsRes.data)
           ? draftsRes.data
@@ -267,8 +222,10 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
         const replyList = Array.isArray(replySuggestionsRes?.data) ? replySuggestionsRes.data : [];
         setReplySuggestions(replyList);
 
-        // Statistiques + série temporelle de l'évolution des clôtures suggérées
-        setClosureStats(closureStatsRes?.data || null);
+        // Nouvelles demandes détectées sur un ticket en cours
+        const newReqList = Array.isArray(newSuggestionsRes?.data) ? newSuggestionsRes.data : [];
+        setNewTicketSuggestions(newReqList);
+
         window.dispatchEvent(new CustomEvent('sidebar:refresh-badges'));
       })
       .catch((err) => toast.error(err.response?.data?.error || 'Erreur lors du chargement des validations'))
@@ -282,10 +239,32 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     loadAllData();
   }, []);
 
+  // Temps réel : sans cet écoute, la file des réponses IA reste périmée jusqu'au rechargement
+  // manuel — on peut valider une proposition alors qu'un mail plus récent vient de la remplacer.
+  useEffect(() => {
+    if (!socket) return undefined;
+    function onDraftCreated(payload) {
+      loadAllData(true);
+      if (payload?.supersededCount > 0) {
+        toast.info(`Nouvelle réponse IA : ${payload.supersededCount} proposition(s) antérieure(s) neutralisée(s)`);
+      } else {
+        toast('Nouvelle réponse IA en attente de validation');
+      }
+    }
+    socket.on('ai_draft_created', onDraftCreated);
+    return () => socket.off('ai_draft_created', onDraftCreated);
+  }, [socket]);
+
   function handleTabChange(tab) {
     setSearchParams({ tab });
     setCurrentPage(1);
     setSelectedDraftIds(new Set());
+  }
+
+  // Changement de vue dans l'onglet « Réponses » : closed = ticket fermé, open = ticket ouvert
+  function handleSubChange(sub) {
+    setSearchParams({ tab: 'replies', sub });
+    setCurrentPage(1);
   }
 
   // ── Onglets filtrés par droits (cohérent avec les gates backend) ─────────────
@@ -295,7 +274,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     drafts: 'emaildrafts.manage', // PATCH/POST /ai-email-drafts/:id/approve|reject
     reminders: 'automation.manage', // POST /reminders/run + config
     closures: 'tickets.approve', // POST /tickets/:id/validate-close
-    replyClosed: 'tickets.approve', // POST /tickets/:id/accept-reply-suggestion/*
+    replies: 'tickets.approve', // GET /tickets/reply-suggestions + /tickets/new-ticket-suggestions, POST accept/reopen/dismiss
     knowledge: 'knowledge.manage', // POST /knowledge/drafts/:id/approve|reject
     reviews: 'inbox.sync', // GET /inbox/needs-review + POST /inbox/:id/force-ticket
   };
@@ -306,19 +285,23 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   };
 
   // Si l'URL pointe un onglet non autorisé (ou inconnu), retomber sur le 1er autorisé.
-  const firstAllowedTab = ['tickets', 'reviews', 'drafts', 'reminders', 'closures', 'replyClosed', 'knowledge'].find(tabAllowed) || 'tickets';
+  const firstAllowedTab = ['tickets', 'reviews', 'drafts', 'reminders', 'closures', 'replies', 'knowledge'].find(tabAllowed) || 'tickets';
   const activeTab = tabAllowed(rawTab) ? rawTab : firstAllowedTab;
   const needsTabFix = activeTab !== rawTab;
   useEffect(() => {
     if (needsTabFix) setSearchParams({ tab: activeTab }, { replace: true });
   }, [needsTabFix, activeTab]);
 
+  // Vues de l'onglet « Réponses » (partagent la même modale de détail)
+  const isReplyClosedView = activeTab === 'replies' && activeSub === 'closed';
+  const isReplyOpenView = activeTab === 'replies' && activeSub === 'open';
+
   const activeList = {
     tickets: pendingTickets,
     drafts: pendingDrafts,
     reminders: reminderDrafts,
     closures: pendingClosures,
-    replyClosed: replySuggestions,
+    replies: activeSub === 'open' ? newTicketSuggestions : replySuggestions,
     knowledge: pendingKnowledgeDrafts,
     reviews: needsReviewEmails,
   }[activeTab] || [];
@@ -338,124 +321,18 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     drafts: 'Rechercher une réponse IA (ticket, destinataire, contenu)...',
     reminders: 'Rechercher une relance (ticket, destinataire)...',
     closures: 'Rechercher un ticket à clôturer (titre, demandeur)...',
+    replies: 'Rechercher une réponse (titre, expéditeur, résumé)...',
     knowledge: 'Rechercher un article (titre, problème, solution, tags)...',
     reviews: 'Rechercher un email à réviser (objet, expéditeur, contenu)...',
   }[activeTab] || 'Rechercher...';
 
   // --- ACTIONS TICKET PENDING ---
-  // Listes de référence pour le formulaire de triage (chargées une fois).
-  // Le staff est dérivé de GET /teams (members + defaultObservers) : GET /users
-  // est réservé aux admins et refuserait la Hotline.
-  useEffect(() => {
-    Promise.all([
-      api.get('/teams').catch(() => ({ data: [] })),
-      api.get('/locations').catch(() => ({ data: [] })),
-      api.get('/categories').catch(() => ({ data: [] })),
-    ]).then(([t, l, c]) => {
-      const teams = Array.isArray(t.data) ? t.data : (t.data.teams || []);
-      const byId = new Map();
-      for (const team of teams) {
-        for (const m of team.members || []) byId.set(m.id, { ...m, team: { name: team.name } });
-        for (const o of team.defaultObservers || []) {
-          if (!byId.has(o.id)) byId.set(o.id, { ...o, team: { name: team.name } });
-        }
-      }
-      setTriageLists({
-        teams,
-        users: [...byId.values()].sort((a, b) => String(a.fullName).localeCompare(String(b.fullName), 'fr')),
-        locations: Array.isArray(l.data) ? l.data : (l.data.locations || []),
-        categories: Array.isArray(c.data) ? c.data : (c.data.categories || []),
-      });
-    });
-  }, []);
-
-  // Suggestions de triage pour le ticket de la modale détail (onglet Tickets uniquement)
-  // — le formulaire est PRÉ-REMPLI avec les valeurs suggérées dès la réponse.
-  useEffect(() => {
-    const ticketId = detailTicket?.id;
-    if (!ticketId || activeTab !== 'tickets') return undefined;
-    let cancelled = false;
-    api.get(`/tickets/${ticketId}/triage-suggestions`)
-      .then(({ data }) => {
-        if (cancelled) return;
-        setTriageSug({ ticketId, data });
-        setTriageForm(buildTriageForm(data));
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [detailTicket?.id, activeTab]);
-  const triageSugForTicket = triageSug && detailTicket && triageSug.ticketId === detailTicket.id ? triageSug.data : null;
-  // Écart entre le formulaire de triage et le ticket réel (dérivé au rendu, sans effet)
-  const triageDirtyCount = triageSugForTicket && triageForm
-    ? countTriageChanges(triageSugForTicket.current || {}, triageForm)
-    : 0;
-
-  // Enregistrer tous les champs du formulaire (pré-remplis avec les suggestions).
-  // Retourne true en cas de succès — réutilisé par « Approuver avec ces corrections ».
-  async function saveTriage() {
-    if (!detailTicket || !triageForm) return false;
-    setSavingTriage(true);
-    try {
-      await api.patch(`/tickets/${detailTicket.id}`, {
-        title: triageForm.title,
-        category: triageForm.category || null,
-        type: triageForm.type,
-        impact: triageForm.impact,
-        urgency: triageForm.urgency,
-        priority: triageForm.priority,
-        locationId: triageForm.locationId ? Number(triageForm.locationId) : null,
-        teamId: triageForm.teamId ? Number(triageForm.teamId) : null,
-        assignedToId: triageForm.assignedToId ? Number(triageForm.assignedToId) : null,
-        observerIds: triageForm.observerIds.map(Number),
-      });
-      toast.success(`Triage enregistré — ticket #${detailTicket.id}`);
-      const [{ data: full }, { data: sug }] = await Promise.all([
-        api.get(`/tickets/${detailTicket.id}`),
-        api.get(`/tickets/${detailTicket.id}/triage-suggestions`),
-      ]);
-      setDetailTicket(full);
-      setTriageSug({ ticketId: detailTicket.id, data: sug });
-      setTriageForm(buildTriageForm(sug));
-      loadAllData(true);
-      return true;
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'Erreur lors de l\'enregistrement du triage');
-      return false;
-    } finally {
-      setSavingTriage(false);
-    }
-  }
-
-  async function handleSaveTriage() {
-    await saveTriage();
-  }
-
-  // Approbation en un clic depuis la modale : enregistre d'abord les corrections
-  // de triage si le formulaire est modifié, puis approuve et ferme la modale.
-  async function handleApproveWithTriage() {
-    if (!detailTicket) return;
-    if (triageDirtyCount > 0) {
-      const saved = await saveTriage();
-      if (!saved) return; // le formulaire reste ouvert, les corrections sont conservées
-    }
-    const approved = await handleApproveTicket(detailTicket.id);
-    if (approved) setDetailTicket(null);
-  }
-
-  // Fermeture de la modale détail : avertissement si des corrections de triage
-  // n'ont pas été enregistrées (le ticket en base reste alors inchangé).
-  function confirmDiscardTriage(action) {
-    return triageDirtyCount <= 0 || window.confirm(
-      `${triageDirtyCount} modification(s) de triage non enregistrée(s) — le ticket en base est inchangé.\n${action}`
-    );
-  }
-
   function closeDetailTicket() {
-    if (confirmDiscardTriage('Fermer quand même ?')) setDetailTicket(null);
+    setDetailTicket(null);
   }
 
   function openFullTicket() {
-    if (!detailTicket || !confirmDiscardTriage('Ouvrir le ticket complet quand même ?')) return;
+    if (!detailTicket) return;
     navigate(`/tickets/${detailTicket.id}`);
   }
 
@@ -629,25 +506,12 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     }
   }
 
-  async function handleRecoverClosure(ticketId) {
-    setRecoveringClosureId(ticketId);
-    try {
-      await api.post(`/tickets/${ticketId}/recover-closure`);
-      playApproval();
-      toast.success('Suggestion de clôture récupérée — elle réapparaît dans la file de validation');
-      loadAllData(true);
-    } catch (err) {
-      playError();
-      toast.error(err.response?.data?.error || 'Erreur lors de la récupération');
-    } finally {
-      setRecoveringClosureId(null);
-    }
-  }
-
   // --- ACTIONS BROUILLON IA ---
   async function handleApproveDraft(draft) {
     const ticketObj = draft.ticket;
-    const isTicketPending = ticketObj && (!ticketObj.glpiTicketId || ticketObj.approvalStatus === 'PENDING');
+    // Le ticket n'est « en attente » que s'il doit encore être approuvé (approvalStatus PENDING) :
+    // sinon on envoie directement la réponse, sans passer par la modale combinée.
+    const isTicketPending = ticketObj && ticketObj.approvalStatus === 'PENDING';
 
     if (isTicketPending) {
       // Déclencher la modale d'approbation combinée !
@@ -718,13 +582,27 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     }
   }
 
-  async function handleRejectDraft(draftId) {
+  function openDraftRejectModal(draftId) {
+    setRejectDraftId(draftId);
+    setDraftRejectReason('');
+  }
+
+  async function handleConfirmRejectDraft() {
+    if (!rejectDraftId) return;
+    setRejectingDraft(true);
     try {
-      await api.post(`/ai-email-drafts/${draftId}/reject`);
-      toast.success('Brouillon de réponse rejeté');
+      await api.post(`/ai-email-drafts/${rejectDraftId}/reject`, {
+        ...(draftRejectReason.trim() ? { reviewNote: draftRejectReason.trim() } : {}),
+      });
+      playRejection();
+      toast.success('Réponse IA rejetée (motif enregistré)');
+      setRejectDraftId(null);
       loadAllData(true);
     } catch (err) {
+      playError();
       toast.error(err.response?.data?.error || 'Erreur lors du rejet');
+    } finally {
+      setRejectingDraft(false);
     }
   }
 
@@ -777,6 +655,34 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     setProcessingReplyId(ticketId);
     try {
       await api.post(`/tickets/${ticketId}/dismiss-reply-suggestion`);
+      toast.success('Suggestion ignorée');
+      loadAllData(true);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de l\'ignore');
+    } finally {
+      setProcessingReplyId(null);
+    }
+  }
+
+  // --- Nouvelles demandes détectées sur un ticket en cours ---
+  async function handleAcceptNewSuggestion(ticketId) {
+    setProcessingReplyId(ticketId);
+    try {
+      const res = await api.post(`/tickets/${ticketId}/accept-new-ticket-suggestion`);
+      toast.success(`Nouvelle demande #${res.data.ticket.id} créée`);
+      playApproval();
+      loadAllData(true);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de la création');
+    } finally {
+      setProcessingReplyId(null);
+    }
+  }
+
+  async function handleDismissNewSuggestion(ticketId) {
+    setProcessingReplyId(ticketId);
+    try {
+      await api.post(`/tickets/${ticketId}/dismiss-new-ticket-suggestion`);
       toast.success('Suggestion ignorée');
       loadAllData(true);
     } catch (err) {
@@ -931,11 +837,11 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
       </div>
 
       {/* Barre d'onglets Principale — seuls les onglets autorisés par les droits sont affichés */}
-      <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-surface-container border border-outline-variant/30 w-full">
+      <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-surface-container border border-outline-variant/30 w-full overflow-x-auto">
         {tabAllowed('tickets') && (
         <button
           onClick={() => handleTabChange('tickets')}
-          className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+          className={`min-w-max flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
             activeTab === 'tickets'
               ? 'bg-blue-600 text-white shadow-md font-extrabold'
               : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
@@ -954,7 +860,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
         {tabAllowed('reviews') && (
         <button
           onClick={() => handleTabChange('reviews')}
-          className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+          className={`min-w-max flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
             activeTab === 'reviews'
               ? 'bg-orange-600 text-white shadow-md font-extrabold'
               : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
@@ -974,7 +880,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
         {tabAllowed('drafts') && (
         <button
           onClick={() => handleTabChange('drafts')}
-          className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+          className={`min-w-max flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
             activeTab === 'drafts'
               ? 'bg-purple-600 text-white shadow-md font-extrabold'
               : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
@@ -993,7 +899,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
         {tabAllowed('reminders') && (
         <button
           onClick={() => handleTabChange('reminders')}
-          className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+          className={`min-w-max flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
             activeTab === 'reminders'
               ? 'bg-amber-600 text-white shadow-md font-extrabold'
               : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
@@ -1012,7 +918,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
         {tabAllowed('closures') && (
         <button
           onClick={() => handleTabChange('closures')}
-          className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+          className={`min-w-max flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
             activeTab === 'closures'
               ? 'bg-cyan-600 text-white shadow-md font-extrabold'
               : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
@@ -1028,21 +934,21 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
         </button>
         )}
 
-        {tabAllowed('replyClosed') && (
+        {tabAllowed('replies') && (
         <button
-          onClick={() => handleTabChange('replyClosed')}
-          className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
-            activeTab === 'replyClosed'
+          onClick={() => handleTabChange('replies')}
+          className={`min-w-max flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+            activeTab === 'replies'
               ? 'bg-violet-600 text-white shadow-md font-extrabold'
               : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
           }`}
         >
           <MailCheck className="w-4 h-4" />
-          <span className="whitespace-nowrap">Réponses sur fermés</span>
+          <span className="whitespace-nowrap">Réponses</span>
           <span className={`px-2 py-0.5 rounded-full text-[10px] font-black whitespace-nowrap ${
-            activeTab === 'replyClosed' ? 'bg-white/20 text-white' : 'bg-violet-500/20 text-violet-600 dark:text-violet-400'
+            activeTab === 'replies' ? 'bg-white/20 text-white' : 'bg-violet-500/20 text-violet-600 dark:text-violet-400'
           }`}>
-            {replySuggestions.length}
+            {replySuggestions.length + newTicketSuggestions.length}
           </span>
         </button>
         )}
@@ -1050,7 +956,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
         {tabAllowed('knowledge') && (
         <button
           onClick={() => handleTabChange('knowledge')}
-          className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+          className={`min-w-max flex-1 py-2.5 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
             activeTab === 'knowledge'
               ? 'bg-emerald-600 text-white shadow-md font-extrabold'
               : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
@@ -1367,8 +1273,10 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
 
               {paginatedList.map((draft) => {
                 const ticketObj = draft.ticket;
-                const glpiId = ticketObj?.glpiTicketId;
-                const isTicketPending = ticketObj && (!glpiId || ticketObj.approvalStatus === 'PENDING');
+                // Un ticket « en attente » = approvalStatus PENDING (aucun id GLPI n'existe sur
+                // Ticket : l'ancienne condition sur glpiTicketId était toujours vraie et
+                // affichait le badge « non créé » à tort).
+                const isTicketPending = ticketObj && ticketObj.approvalStatus === 'PENDING';
 
                 return (
                   <div
@@ -1391,25 +1299,31 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                         </div>
                         <div>
                           <h3 className="text-sm font-bold text-on-surface">
-                            Réponse pour : {ticketObj?.title || (draft.ticketId ? `Ticket #EN_ATTENTE` : 'Ticket sans numéro')}
+                            Réponse pour : {ticketObj?.title || (draft.ticketId ? `Ticket #${draft.ticketId}` : 'Ticket sans numéro')}
                           </h3>
                           <p className="text-[11px] text-on-surface-variant">
-                            Demandeur : <strong className="text-on-surface">{ticketObj?.requester?.fullName || draft.recipientEmail || 'Inconnu'}</strong>
+                            Demandeur : <strong className="text-on-surface">{ticketObj?.requester?.fullName || draft.recipientName || draft.recipientEmail || 'Inconnu'}</strong>
+                          </p>
+                          <p className="text-[11px] text-on-surface-variant mt-0.5 truncate">
+                            Objet : <strong className="text-on-surface">{resolveDraftSubject(draft, ticketObj)}</strong>
                           </p>
                           <p className="text-[11px] text-on-surface-variant mt-0.5">
                             Créé le <strong className="text-on-surface font-semibold">{new Date(draft.createdAt).toLocaleString('fr-FR')}</strong>
+                            {draft.ticketId && (
+                              <button
+                                onClick={() => navigate(`/tickets/${draft.ticketId}`)}
+                                className="ml-2 inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 font-bold hover:underline"
+                              >
+                                <ExternalLink className="w-3 h-3" /> Voir le ticket
+                              </button>
+                            )}
                           </p>
                         </div>
                       </div>
 
-                      {/* BADGE ÉTAT GLPI CLAIR ET VISIBLE */}
+                      {/* BADGE ÉTAT DU TICKET (approbation interne) */}
                       <div className="flex items-center gap-2">
-                        {glpiId ? (
-                          <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-500/30 flex items-center gap-1.5">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            🔗 Créé (#{glpiId})
-                          </span>
-                        ) : isTicketPending ? (
+                        {isTicketPending ? (
                           <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 dark:bg-amber-500/15 dark:text-amber-400 border border-amber-300 dark:border-amber-500/30 flex items-center gap-1.5">
                             <Shield className="w-3.5 h-3.5" />
                             {autonomousMode ? '🛡️ Ticket en attente d\'approbation' : '🛡️ Ticket non créé (En attente)'}
@@ -1422,16 +1336,76 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                       </div>
                     </div>
 
+                    {/* CONTEXTE : ce à quoi l'IA répond — snapshot pris au moment de la génération.
+                        Sans ça, le valideur juge une proposition sans voir ni le mail reçu,
+                        ni ce que le support a déjà envoyé (= doublons invisibles). */}
+                    {Array.isArray(draft.contextMessages) && draft.contextMessages.length > 0 && (
+                      <div className="p-4 rounded-2xl bg-surface-container-low/60 border border-outline-variant/20 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">
+                            Contexte vu par l'IA
+                          </span>
+                          <span className="text-[10px] text-on-surface-variant">
+                            {draft.contextMessages.length} dernier(s) échange(s)
+                          </span>
+                        </div>
+                        {draft.contextMessages.map((m, idx) => (
+                          <div key={`${m.timestamp}-${idx}`} className="flex items-start gap-2">
+                            <span
+                              className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                m.direction === 'INBOUND'
+                                  ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30'
+                                  : 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30'
+                              }`}
+                            >
+                              {m.direction === 'INBOUND' ? '👤 Client' : '📨 Support'}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-on-surface-variant">
+                                  {m.timestamp ? new Date(m.timestamp).toLocaleString('fr-FR') : ''}
+                                </span>
+                                {idx === 0 && (
+                                  <span className="text-[10px] font-bold text-purple-600 dark:text-purple-400">
+                                    ← mail auquel l'IA répond
+                                  </span>
+                                )}
+                              </div>
+                              <p className={`text-xs text-on-surface leading-snug ${idx === 0 ? 'font-semibold' : ''}`}>
+                                {(m.body || '').substring(0, 220)}
+                                {(m.body || '').length > 220 ? '…' : ''}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
                     {/* Proposition de contenu IA */}
                     <div className="p-4 rounded-2xl bg-surface-container-low/40 border border-outline-variant/20 space-y-2">
                       <div className="flex items-center justify-between text-[11px] font-bold text-on-surface-variant">
                         <span>Proposition de réponse IA</span>
                         {draft.aiConfidence != null && (
-                          <span className="text-purple-600 dark:text-purple-400 font-mono">
+                          <span className={`font-mono ${draft.aiConfidence < 0.5 ? 'text-red-600 dark:text-red-400' : 'text-purple-600 dark:text-purple-400'}`}>
                             {Math.round(draft.aiConfidence * 100)}% confiance
+                            {draft.aiConfidence < 0.5 && ' (faible)'}
                           </span>
                         )}
                       </div>
+
+                      {/* Source de l'IA : sur quoi s'appuie l'affirmation (extraits de la base
+                          de connaissances utilisés à la génération) */}
+                      {draft.knowledgeSnippet && (
+                        <div className="p-3 rounded-xl bg-purple-500/5 border border-purple-500/20 space-y-1">
+                          <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400">
+                            <BookOpen className="w-3 h-3" />
+                            Source base de connaissances ({draft.knowledgeChunkIds?.length || 0} extrait(s))
+                          </div>
+                          <p className="text-[11px] text-on-surface-variant leading-snug line-clamp-3">
+                            {draft.knowledgeSnippet}
+                          </p>
+                        </div>
+                      )}
 
                       {editingDraftId === draft.id ? (
                         <div className="space-y-3 pt-1">
@@ -1485,7 +1459,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
 
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => handleRejectDraft(draft.id)}
+                          onClick={() => openDraftRejectModal(draft.id)}
                           className="px-3.5 py-2 rounded-xl text-xs font-bold border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-all"
                         >
                           Rejeter la réponse
@@ -1571,7 +1545,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                         Détails
                       </button>
                       <button
-                        onClick={() => handleRejectDraft(draft.id)}
+                        onClick={() => openDraftRejectModal(draft.id)}
                         className="px-3.5 py-2 rounded-xl text-xs font-bold border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-all"
                       >
                         Ne pas envoyer
@@ -1611,34 +1585,8 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
           </div>
           )}
 
-          {/* Sous-onglets Clôtures IA */}
-          <div className="flex gap-1 p-1 rounded-2xl bg-surface-container-low border border-outline-variant/30">
-            <button
-              onClick={() => setClosureSubTab('pending')}
-              className={`flex-1 py-2 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
-                closureSubTab === 'pending'
-                  ? 'bg-cyan-600 text-white shadow-md'
-                  : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
-              }`}
-            >
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              En attente ({pendingClosures.length})
-            </button>
-            <button
-              onClick={() => setClosureSubTab('rejected')}
-              className={`flex-1 py-2 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
-                closureSubTab === 'rejected'
-                  ? 'bg-amber-600 text-white shadow-md'
-                  : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
-              }`}
-            >
-              <XCircle className="w-3.5 h-3.5" />
-              Rejetées ({rejectedClosures.length})
-            </button>
-          </div>
-
           {/* Résultats détaillés de la dernière analyse IA */}
-          {closureSubTab === 'pending' && analysis.results && (
+          {analysis.results && (
             <div className="space-y-4">
               {/* Résumé rapide */}
               <div className="bento-card p-6 space-y-4" style={{ borderColor: 'color-mix(in srgb, #06b6d4 20%, var(--color-border))' }}>
@@ -1801,84 +1749,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             </div>
           )}
 
-          {/* Suivi de l'évolution : file actuelle + tendance 30 jours (ADMIN/HOTLINE uniquement) */}
-          {closureSubTab === 'pending' && closureStats && user?.role !== 'TECHNICIAN' && (
-            <div className="bento-card p-6 space-y-5">
-              <div className="flex items-center gap-2">
-                <TrendingUp className="w-4 h-4 text-cyan-500" />
-                <h3 className="text-xs font-extrabold uppercase tracking-wider text-on-surface">
-                  Évolution des clôtures suggérées — 30 jours
-                </h3>
-              </div>
-
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                <div className="p-3 rounded-2xl border border-cyan-500/25 bg-cyan-500/10">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-cyan-600 dark:text-cyan-400">En attente</p>
-                  <p className="text-2xl font-extrabold text-on-surface">{closureStats.pending}</p>
-                </div>
-                <div className="p-3 rounded-2xl border border-outline-variant/30 bg-surface-container">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Suggérées</p>
-                  <p className="text-2xl font-extrabold text-on-surface">{closureStats.suggested}</p>
-                </div>
-                <div className="p-3 rounded-2xl border border-emerald-500/25 bg-emerald-500/10">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Validées</p>
-                  <p className="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400">{closureStats.validated}</p>
-                </div>
-                <div className="p-3 rounded-2xl border border-red-500/25 bg-red-500/10">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-red-600 dark:text-red-400">Rejetées</p>
-                  <p className="text-2xl font-extrabold text-red-600 dark:text-red-400">{closureStats.rejected}</p>
-                </div>
-                <div className="p-3 rounded-2xl border border-outline-variant/30 bg-surface-container">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Acceptation</p>
-                  <p className={`text-2xl font-extrabold ${closureStats.acceptanceRate === null || closureStats.acceptanceRate >= 50 ? 'text-on-surface' : 'text-red-500'}`}>
-                    {closureStats.acceptanceRate === null ? '—' : `${closureStats.acceptanceRate}%`}
-                  </p>
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
-                  Suggérées vs décisions Hotline (par jour)
-                </p>
-                <div className="w-full" style={{ height: '180px' }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={closureStats.series} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--color-outline-variant)" strokeOpacity={0.4} />
-                      <XAxis
-                        dataKey="date"
-                        tickFormatter={(d) => d.slice(8, 10) + '/' + d.slice(5, 7)}
-                        tick={{ fontSize: 10, fill: 'var(--color-on-surface-variant)' }}
-                        interval="preserveStartEnd"
-                      />
-                      <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: 'var(--color-on-surface-variant)' }} />
-                      <Tooltip
-                        cursor={{ fill: 'var(--color-surface-container-high)' }}
-                        contentStyle={{
-                          backgroundColor: 'var(--color-surface-container-lowest)',
-                          border: '1px solid var(--color-outline-variant)',
-                          borderRadius: '12px',
-                          fontSize: '11px',
-                        }}
-                        labelFormatter={(d) => new Date(d).toLocaleDateString('fr-FR')}
-                      />
-                      <Legend wrapperStyle={{ fontSize: '11px' }} />
-                      <Bar dataKey="suggested" name="Suggérées" fill="#06b6d4" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="validated" name="Validées" fill="#10b981" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="rejected" name="Rejetées" fill="#ef4444" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-                {closureStats.acceptanceRate !== null && closureStats.acceptanceRate < 50 && (
-                  <p className="text-[11px] text-red-500 font-semibold flex items-center gap-1">
-                    <AlertTriangle className="w-3.5 h-3.5" />
-                    Taux d'acceptation sous 50 % : la classification IA dérive, vérifier le prompt analyzeIntent.
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-
-          {closureSubTab === 'pending' && (loading ? (
+          {loading ? (
             <div className="space-y-3">
               {[1, 2, 3].map((i) => (
                 <div key={i} className="h-32 bento-card animate-pulse" />
@@ -1972,95 +1843,51 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                 </div>
               ))}
             </div>
-          ))}
-
-          {/* Liste des clôtures rejetées */}
-          {closureSubTab === 'rejected' && (
-            <div className="space-y-3">
-              {rejectedClosures.length === 0 ? (
-                <EmptyState
-                    icon="default"
-                    title="Aucune clôture rejetée"
-                    description="Les suggestions de clôture rejetées par la Hotline apparaissent ici pour pouvoir être récupérées."
-                    className="border-dashed py-10"
-                  />
-              ) : (
-                rejectedClosures.map((t) => (
-                  <div
-                    key={t.id}
-                    className="bento-card p-6 flex flex-col md:flex-row md:items-center justify-between gap-6 hover-interactive transition-all"
-                    style={{ borderColor: 'color-mix(in srgb, #f59e0b 25%, var(--color-border))' }}
-                  >
-                    <div className="space-y-2 flex-1 min-w-0">
-                      <div className="flex items-center gap-2.5 flex-wrap">
-                        <span className="px-2.5 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-400 text-[10px] font-extrabold border border-amber-500/30 uppercase tracking-wider">
-                          ❌ Clôture rejetée
-                        </span>
-                        {t.rejectionConfidence != null && (
-                          <span className="px-2.5 py-0.5 rounded-md bg-surface-container text-on-surface-variant text-[10px] font-bold border border-outline-variant/30">
-                            Confiance IA : {Math.round(t.rejectionConfidence * 100)}%
-                          </span>
-                        )}
-                        {t.category && (
-                          <span className="px-2.5 py-0.5 rounded-md bg-surface-container text-on-surface-variant text-[10px] font-bold border border-outline-variant/30">
-                            {t.category}
-                          </span>
-                        )}
-                        <span className="text-[11px] text-on-surface-variant font-mono">#{t.id}</span>
-                      </div>
-
-                      <h3 className="text-base font-bold text-on-surface truncate">{t.title}</h3>
-                      <p className="text-xs text-on-surface-variant line-clamp-2">{t.content}</p>
-
-                      {t.rejectionReason && (
-                        <div className="p-2 rounded-xl bg-amber-500/5 border border-amber-500/15">
-                          <p className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mb-0.5">Motif du rejet :</p>
-                          <p className="text-[11px] text-on-surface-variant italic">"{t.rejectionReason}"</p>
-                        </div>
-                      )}
-
-                      <div className="flex items-center gap-4 text-[11px] text-on-surface-variant pt-1 flex-wrap">
-                        <span className="flex items-center gap-1">
-                          <User className="w-3.5 h-3.5 text-primary" />
-                          {t.requester?.fullName || t.sourceName || t.sourceEmail || 'Demandeur anonyme'}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Clock className="w-3.5 h-3.5 text-primary" />
-                          Rejetée le {t.rejectedAt ? new Date(t.rejectedAt).toLocaleString('fr-FR') : '—'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex items-center gap-2 shrink-0 border-t md:border-t-0 pt-4 md:pt-0 border-outline-variant/20">
-                      <button
-                        onClick={() => navigate(`/tickets/${t.id}`)}
-                        className="px-3.5 py-2 rounded-xl text-xs font-semibold border border-outline-variant/40 hover:bg-surface-container text-on-surface transition-all flex items-center gap-1"
-                      >
-                        <span>Détails</span>
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </button>
-
-                      <button
-                        onClick={() => handleRecoverClosure(t.id)}
-                        disabled={recoveringClosureId === t.id || !t.canRecover}
-                        title={!t.canRecover ? 'Limite de suggestions atteinte pour ce ticket' : 'Remettre cette suggestion en file de validation'}
-                        className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-500/20 transition-all flex items-center gap-1.5 disabled:opacity-50"
-                      >
-                        <RefreshCw className={`w-4 h-4 ${recoveringClosureId === t.id ? 'animate-spin' : ''}`} />
-                        <span>{recoveringClosureId === t.id ? 'Récupération...' : 'Récupérer'}</span>
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
           )}
+
         </div>
       )}
 
-      {/* CONTENU DE L'ONGLET RÉPONSES SUR TICKETS FERMÉS */}
-      {activeTab === 'replyClosed' && (
+      {/* SOUS-ONGLETS DE L'ONGLET RÉPONSES : ticket fermé / ticket ouvert */}
+      {activeTab === 'replies' && (
+        <div className="flex items-center gap-1.5 p-1.5 rounded-2xl bg-surface-container border border-outline-variant/30 w-fit">
+          <button
+            onClick={() => handleSubChange('closed')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+              isReplyClosedView
+                ? 'bg-violet-600 text-white shadow-md font-extrabold'
+                : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
+            }`}
+          >
+            <MailCheck className="w-3.5 h-3.5" />
+            <span className="whitespace-nowrap">Réponses sur ticket fermé</span>
+            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-black whitespace-nowrap ${
+              isReplyClosedView ? 'bg-white/20 text-white' : 'bg-violet-500/20 text-violet-600 dark:text-violet-400'
+            }`}>
+              {replySuggestions.length}
+            </span>
+          </button>
+          <button
+            onClick={() => handleSubChange('open')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+              isReplyOpenView
+                ? 'bg-indigo-600 text-white shadow-md font-extrabold'
+                : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span className="whitespace-nowrap">Réponses sur ticket ouvert</span>
+            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-black whitespace-nowrap ${
+              isReplyOpenView ? 'bg-white/20 text-white' : 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-400'
+            }`}>
+              {newTicketSuggestions.length}
+            </span>
+          </button>
+        </div>
+      )}
+
+      {/* CONTENU DE L'ONGLET RÉPONSES — vue TICKET FERMÉ */}
+      {isReplyClosedView && (
         <div className="space-y-4">
           {loading ? (
             <div className="space-y-3">
@@ -2162,6 +1989,120 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                     >
                       <RefreshCw className="w-4 h-4" />
                       Rouvrir le ticket
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* CONTENU DE L'ONGLET RÉPONSES — vue TICKET OUVERT (nouvelle demande détectée) */}
+      {isReplyOpenView && (
+        <div className="space-y-4">
+          {loading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-36 bento-card animate-pulse" />
+              ))}
+            </div>
+          ) : filteredList.length === 0 ? (
+            <EmptyState
+              icon="inbox"
+              title="Aucune réponse sur ticket ouvert"
+              description="Quand la réponse d'un demandeur porte sur un autre besoin que le problème du ticket, la suggestion apparaît ici pour ouvrir un ticket séparé."
+              className="border-dashed py-10"
+            />
+          ) : (
+            <div className="space-y-4">
+              {paginatedList.map((t) => (
+                <div
+                  key={t.id}
+                  className="bento-card p-5 flex flex-col gap-4 hover-interactive transition-all"
+                  style={{ borderColor: 'color-mix(in srgb, #6366f1 25%, var(--color-border))' }}
+                >
+                  <div className="space-y-2.5 flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="px-2.5 py-0.5 rounded-md bg-indigo-500/15 text-indigo-700 dark:text-indigo-400 text-[10px] font-extrabold border border-indigo-500/30 uppercase tracking-wider flex items-center gap-1">
+                        <Sparkles className="w-3 h-3" /> Nouvelle demande détectée
+                      </span>
+                      <span className={`px-2 py-0.5 rounded-md border text-[10px] font-bold ${PRIORITY_BADGES[t.priority] || PRIORITY_BADGES.MEDIUM}`}>
+                        {PRIORITY_LABELS[t.priority] || t.priority}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-surface-container-high text-on-surface-variant text-[10px] font-bold uppercase">
+                        {t.status}
+                      </span>
+                    </div>
+
+                    <h3 className="text-sm font-extrabold text-on-surface leading-tight">
+                      Ticket #{t.id} — {t.title}
+                    </h3>
+
+                    <div className="flex items-center gap-3 text-xs text-on-surface-variant flex-wrap">
+                      <span className="flex items-center gap-1">
+                        <User className="w-3 h-3" />
+                        {t.requester?.fullName || t.sourceName || t.newTicketSuggestedSender || 'Inconnu'}
+                      </span>
+                      {t.newTicketSuggestedSender && (
+                        <span className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 font-semibold">
+                          <MailCheck className="w-3 h-3" />
+                          {t.newTicketSuggestedSender}
+                        </span>
+                      )}
+                      {t.newTicketSuggestedAt && (
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {new Date(t.newTicketSuggestedAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      )}
+                      {t.assignedTo && (
+                        <span className="flex items-center gap-1">
+                          <ArrowRight className="w-3 h-3" />
+                          {t.assignedTo.fullName}
+                        </span>
+                      )}
+                    </div>
+
+                    {t.newTicketSuggestedSummary && (
+                      <div className="rounded-xl bg-indigo-500/10 border border-indigo-500/25 px-3.5 py-2.5 space-y-1">
+                        <p className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
+                          <Sparkles className="w-3 h-3" /> Nouveau sujet détecté
+                        </p>
+                        <p className="text-sm font-bold text-on-surface leading-snug">
+                          {t.newTicketSuggestedSummary}
+                        </p>
+                        {t.newTicketSuggestedSubject && (
+                          <p className="text-xs italic text-on-surface-variant">
+                            Sujet de l'email : {t.newTicketSuggestedSubject}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-outline-variant/20">
+                    <button
+                      onClick={() => setDetailTicket(t)}
+                      className="px-3.5 py-2 rounded-xl text-xs font-bold border border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/10 transition-all flex items-center gap-1.5"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      Détails
+                    </button>
+                    <button
+                      onClick={() => handleDismissNewSuggestion(t.id)}
+                      disabled={processingReplyId === t.id}
+                      className="px-3.5 py-2 rounded-xl text-xs font-bold border border-outline-variant/40 text-on-surface-variant hover:bg-surface-container-high transition-all disabled:opacity-50"
+                    >
+                      Ignorer
+                    </button>
+                    <button
+                      onClick={() => handleAcceptNewSuggestion(t.id)}
+                      disabled={processingReplyId === t.id}
+                      className="px-4 py-2 rounded-xl text-xs font-bold btn-primary shadow-md transition-all disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      <Ticket className="w-3.5 h-3.5" />
+                      Créer la demande
                     </button>
                   </div>
                 </div>
@@ -2733,9 +2674,10 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                   <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
                     detailDraft.status === 'PENDING' ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400'
                     : detailDraft.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400'
+                    : detailDraft.status === 'SUPERSEDED' ? 'bg-slate-200 text-slate-700 dark:bg-slate-500/20 dark:text-slate-300'
                     : 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400'
                   }`}>
-                    {detailDraft.status}
+                    {detailDraft.status === 'SUPERSEDED' ? 'SUPERSEDED (remplacé)' : detailDraft.status}
                   </span>
                 </div>
                 {detailDraft.aiConfidence != null && (
@@ -2748,6 +2690,20 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                   <div className="p-3 rounded-xl bg-surface-container-low/40 border border-outline-variant/20 space-y-1">
                     <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Tour d'échange</span>
                     <p className="text-xs font-semibold text-on-surface">#{detailDraft.exchangeTurn}</p>
+                  </div>
+                )}
+                {detailDraft.knowledgeSnippet && (
+                  <div className="p-3 rounded-xl bg-purple-500/5 border border-purple-500/20 space-y-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400">
+                      Source IA ({detailDraft.knowledgeChunkIds?.length || 0} extrait(s))
+                    </span>
+                    <p className="text-[11px] text-on-surface-variant leading-snug">{detailDraft.knowledgeSnippet}</p>
+                  </div>
+                )}
+                {detailDraft.reviewNote && (
+                  <div className="p-3 rounded-xl bg-surface-container-low/40 border border-outline-variant/20 space-y-1 col-span-2">
+                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Note de revue</span>
+                    <p className="text-xs text-on-surface">{detailDraft.reviewNote}</p>
                   </div>
                 )}
               </div>
@@ -2789,7 +2745,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
         </div>
       )}
 
-      {/* MODALE DÉTAIL TICKET (onglets Tickets, Clôtures IA & Réponses sur fermés) */}
+      {/* MODALE DÉTAIL TICKET (onglets Tickets, Clôtures IA & Réponses — fermé/ouvert) */}
       {detailTicket && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fadeIn" onClick={closeDetailTicket}>
           <div className="bg-surface border border-outline-variant/40 rounded-3xl max-w-3xl w-full max-h-[85vh] shadow-2xl flex flex-col" onClick={(e) => e.stopPropagation()}>
@@ -2798,19 +2754,23 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
               <div className="flex items-center gap-3">
                 <div className={`p-2 rounded-xl ${
                   activeTab === 'closures' ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400'
-                  : activeTab === 'replyClosed' ? 'bg-violet-500/10 text-violet-600 dark:text-violet-400'
+                  : isReplyClosedView ? 'bg-violet-500/10 text-violet-600 dark:text-violet-400'
+                  : isReplyOpenView ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'
                   : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
                 }`}>
                   {activeTab === 'closures'
                     ? <CheckCircle2 className="w-5 h-5" />
-                    : activeTab === 'replyClosed'
+                    : isReplyClosedView
                     ? <MailCheck className="w-5 h-5" />
+                    : isReplyOpenView
+                    ? <Sparkles className="w-5 h-5" />
                     : <Ticket className="w-5 h-5" />}
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-on-surface">
                     {activeTab === 'closures' ? 'Détail de la clôture suggérée'
-                      : activeTab === 'replyClosed' ? 'Réponse sur ticket fermé'
+                      : isReplyClosedView ? 'Réponse sur ticket fermé'
+                      : isReplyOpenView ? 'Nouvelle demande détectée'
                       : 'Détail du ticket en attente'}
                   </h3>
                   <p className="text-[11px] text-on-surface-variant">Ticket #{detailTicket.id}</p>
@@ -2829,10 +2789,15 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                   <span className="px-2.5 py-0.5 rounded-md bg-cyan-500/15 text-cyan-700 dark:text-cyan-400 text-[10px] font-extrabold border border-cyan-500/30 uppercase tracking-wider">
                     🤖 Clôture suggérée par l'IA
                   </span>
-                ) : activeTab === 'replyClosed' ? (
+                ) : isReplyClosedView ? (
                   <span className="px-2.5 py-0.5 rounded-md bg-violet-500/15 text-violet-700 dark:text-violet-400 text-[10px] font-extrabold border border-violet-500/30 uppercase tracking-wider">
                     <MailCheck className="w-3 h-3 inline mr-1" />
                     Réponse sur ticket {detailTicket.status}
+                  </span>
+                ) : isReplyOpenView ? (
+                  <span className="px-2.5 py-0.5 rounded-md bg-indigo-500/15 text-indigo-700 dark:text-indigo-400 text-[10px] font-extrabold border border-indigo-500/30 uppercase tracking-wider">
+                    <Sparkles className="w-3 h-3 inline mr-1" />
+                    Réponse portant sur un autre besoin
                   </span>
                 ) : (
                   <span className="px-2.5 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-400 text-[10px] font-extrabold border border-amber-500/30 uppercase tracking-wider">
@@ -2899,208 +2864,27 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                 </p>
               )}
 
-              {/* Formulaire de triage — champs PRÉ-REMPLIS avec les suggestions */}
-              {activeTab === 'tickets' && triageSugForTicket && triageForm && triageLists && (() => {
-                const cur = triageSugForTicket.current || {};
-                const flatCats = flattenCategoryTree(triageLists.categories);
-                const staff = triageLists.users;
-                const techRoles = new Set(['TECHNICIAN', 'ADMIN', 'SUPERADMIN']);
-                const badge = (key) => (String(triageForm[key] ?? '') !== String(cur[key] ?? '') ? 'modifié' : null);
-                const obsChanged = JSON.stringify([...triageForm.observerIds].sort())
-                  !== JSON.stringify([...(cur.observerIds || [])].sort());
-                const tech = triageSugForTicket.technician;
-                // Dérivée au niveau composant (partagée avec le footer de la modale)
-                const changedCount = triageDirtyCount;
-                const userById = (id) => staff.find((u) => u.id === Number(id));
-                const setField = (key, value) => setTriageForm((f) => ({ ...f, [key]: value }));
-                return (
-                  <div className="p-4 rounded-2xl bg-blue-500/5 border border-blue-500/20 space-y-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <Sparkles className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                        <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">
-                          Triage pré-rempli · compétence · historique · charge
-                        </span>
-                      </div>
-                      {changedCount > 0 ? (
-                        <span
-                          className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/40"
-                          title="Le ticket en base est inchangé tant que vous n'avez pas cliqué sur « Enregistrer le triage » ou « Approuver »."
-                        >
-                          Non enregistré · {changedCount} champ(s)
-                        </span>
-                      ) : (
-                        <span className="text-[10px] font-semibold text-on-surface-variant">
-                          {changedCount} champ(s) modifié(s)
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2.5">
-                      <TriageField wide label="Titre" badge={badge('title')}>
-                        <input
-                          type="text"
-                          className={TRIAGE_INPUT}
-                          value={triageForm.title}
-                          onChange={(e) => setField('title', e.target.value)}
-                        />
-                      </TriageField>
-
-                      <TriageField label="Catégorie" badge={badge('category')}>
-                        <select className={TRIAGE_INPUT} value={triageForm.category} onChange={(e) => setField('category', e.target.value)}>
-                          <option value="">— Aucune —</option>
-                          {flatCats.map((c) => (
-                            <option key={c.id} value={c.name}>{c.label}</option>
-                          ))}
-                          {triageForm.category && !flatCats.some((c) => c.name === triageForm.category) && (
-                            <option value={triageForm.category}>{triageForm.category}</option>
-                          )}
-                        </select>
-                      </TriageField>
-
-                      <TriageField label="Type" badge={badge('type')}>
-                        <select className={TRIAGE_INPUT} value={triageForm.type} onChange={(e) => setField('type', e.target.value)}>
-                          <option value="INCIDENT">Incident</option>
-                          <option value="REQUEST">Demande</option>
-                          <option value="INFORMATION">Information</option>
-                          <option value="ACCESS_REQUEST">Demande d'accès</option>
-                        </select>
-                      </TriageField>
-
-                      <TriageField label="Priorité" badge={badge('priority')}>
-                        <select className={TRIAGE_INPUT} value={triageForm.priority} onChange={(e) => setField('priority', e.target.value)}>
-                          {['P1', 'P2', 'P3', 'P4'].map((p) => (
-                            <option key={p} value={p}>{PRIORITY_LABELS[p] || p}</option>
-                          ))}
-                        </select>
-                      </TriageField>
-
-                      <TriageField label="Impact" badge={badge('impact')}>
-                        <select className={TRIAGE_INPUT} value={triageForm.impact} onChange={(e) => setField('impact', e.target.value)}>
-                          {URGENCY_IMPACT_OPTIONS.map((o) => (
-                            <option key={o.value} value={o.value}>{o.label}</option>
-                          ))}
-                        </select>
-                      </TriageField>
-
-                      <TriageField label="Urgence" badge={badge('urgency')}>
-                        <select className={TRIAGE_INPUT} value={triageForm.urgency} onChange={(e) => setField('urgency', e.target.value)}>
-                          {URGENCY_IMPACT_OPTIONS.map((o) => (
-                            <option key={o.value} value={o.value}>{o.label}</option>
-                          ))}
-                        </select>
-                      </TriageField>
-
-                      <TriageField label="Localisation" badge={badge('locationId')}>
-                        <select className={TRIAGE_INPUT} value={triageForm.locationId} onChange={(e) => setField('locationId', e.target.value)}>
-                          <option value="">INDÉTERMINÉ</option>
-                          {triageLists.locations.map((l) => (
-                            <option key={l.id} value={l.id}>{l.completename || l.name}</option>
-                          ))}
-                        </select>
-                      </TriageField>
-
-                      <TriageField label="Équipe" badge={badge('teamId')}>
-                        <select className={TRIAGE_INPUT} value={triageForm.teamId} onChange={(e) => setField('teamId', e.target.value)}>
-                          <option value="">— Aucune —</option>
-                          {triageLists.teams.map((t) => (
-                            <option key={t.id} value={t.id}>{t.name}</option>
-                          ))}
-                          {triageForm.teamId && !triageLists.teams.some((t) => t.id === Number(triageForm.teamId)) && (
-                            <option value={triageForm.teamId}>{cur.teamName || `Équipe #${triageForm.teamId}`}</option>
-                          )}
-                        </select>
-                      </TriageField>
-
-                      <TriageField wide label="Technicien" badge={badge('assignedToId')}>
-                        <select className={TRIAGE_INPUT} value={triageForm.assignedToId} onChange={(e) => setField('assignedToId', e.target.value)}>
-                          <option value="">— Non assigné —</option>
-                          {staff.filter((u) => techRoles.has(u.role)).map((u) => (
-                            <option key={u.id} value={u.id}>{u.fullName}{u.team ? ` — ${u.team.name}` : ''}</option>
-                          ))}
-                          {triageForm.assignedToId && !staff.some((u) => u.id === Number(triageForm.assignedToId)) && (
-                            <option value={triageForm.assignedToId}>{cur.assignedToName || `Utilisateur #${triageForm.assignedToId}`}</option>
-                          )}
-                        </select>
-                        {tech && (
-                          <p className="text-[10px] text-on-surface-variant leading-snug mt-1">
-                            <b className="text-emerald-600 dark:text-emerald-400">Suggéré : {tech.fullName} (score {tech.score})</b>
-                            {' — '}{tech.reasons.join(' · ')}
-                          </p>
-                        )}
-                      </TriageField>
-
-                      <TriageField wide label={`Observateurs (${triageForm.observerIds.length})`} badge={obsChanged ? 'modifié' : null}>
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          {triageForm.observerIds.map((id) => (
-                            <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-violet-500/10 border border-violet-500/25 text-violet-700 dark:text-violet-300 text-[11px] font-bold">
-                              {userById(id)?.fullName || `Utilisateur #${id}`}
-                              <button
-                                type="button"
-                                onClick={() => setField('observerIds', triageForm.observerIds.filter((x) => x !== Number(id)))}
-                                className="hover:text-violet-900 dark:hover:text-white"
-                                aria-label="Retirer"
-                              >
-                                ×
-                              </button>
-                            </span>
-                          ))}
-                          <select
-                            className="w-auto min-w-[150px] px-2 py-1 rounded-lg bg-surface-container border border-outline-variant/30 text-[11px] text-on-surface focus:outline-none"
-                            value=""
-                            onChange={(e) => {
-                              if (e.target.value) setField('observerIds', [...triageForm.observerIds, Number(e.target.value)]);
-                            }}
-                          >
-                            <option value="">+ Ajouter…</option>
-                            {staff.filter((u) => !triageForm.observerIds.includes(u.id)).map((u) => (
-                              <option key={u.id} value={u.id}>{u.fullName}</option>
-                            ))}
-                          </select>
-                        </div>
-                      </TriageField>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-3 pt-1">
-                      <div className="min-w-0 space-y-0.5">
-                        {triageSugForTicket.priority?.reasons?.length > 0 && (
-                          <p className="text-[10px] text-on-surface-variant truncate" title={triageSugForTicket.priority.reasons.join(' · ')}>
-                            Priorité : {triageSugForTicket.priority.reasons.join(' · ')}
-                          </p>
-                        )}
-                        {triageSugForTicket.analysis?.categoryAlternative && (
-                          <p className="text-[10px] text-amber-700 dark:text-amber-400 truncate" title={triageSugForTicket.analysis.categoryAlternative.reasons.join(' · ')}>
-                            {triageSugForTicket.analysis.source} → catégorie proposée « {triageSugForTicket.analysis.categoryAlternative.value} »
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex shrink-0 gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setTriageForm(buildTriageForm(triageSugForTicket))}
-                          disabled={savingTriage}
-                          className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-surface-container hover:bg-surface-container-high text-on-surface transition-all disabled:opacity-50"
-                        >
-                          Réinitialiser
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleSaveTriage}
-                          disabled={savingTriage}
-                          className="px-4 py-1.5 rounded-lg text-[11px] font-bold bg-blue-600 hover:bg-blue-700 text-white transition-all disabled:opacity-50"
-                        >
-                          {savingTriage ? '…' : 'Enregistrer le triage'}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
               {/* Contenu complet */}
+              {isReplyOpenView && detailTicket.newTicketSuggestedSummary && (
+                <div className="p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/25 space-y-2">
+                  <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider flex items-center gap-1">
+                    <Sparkles className="w-3 h-3" /> Nouveau sujet détecté
+                  </span>
+                  <p className="text-sm font-bold text-on-surface leading-snug" style={{ overflowWrap: 'anywhere' }}>{detailTicket.newTicketSuggestedSummary}</p>
+                  {detailTicket.newTicketSuggestedSubject && (
+                    <p className="text-xs italic text-on-surface-variant">Sujet de l'email : {detailTicket.newTicketSuggestedSubject}</p>
+                  )}
+                </div>
+              )}
               <div className="p-4 rounded-2xl bg-surface-container-low/40 border border-outline-variant/20 space-y-2">
-                <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Contenu du ticket</span>
-                <p className="text-sm text-on-surface leading-relaxed whitespace-pre-line" style={{ overflowWrap: 'anywhere' }}>{detailTicket.content}</p>
+                <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">
+                  {isReplyOpenView ? 'Contenu de la réponse' : 'Contenu du ticket'}
+                </span>
+                <p className="text-sm text-on-surface leading-relaxed whitespace-pre-line" style={{ overflowWrap: 'anywhere' }}>
+                  {isReplyOpenView
+                    ? (detailTicket.newTicketSuggestedBody || detailTicket.newTicketSuggestedBodyHtml || detailTicket.content)
+                    : detailTicket.content}
+                </p>
               </div>
 
               {/* Métadonnées */}
@@ -3176,24 +2960,38 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                   </div>
                 )}
 
-                {activeTab === 'replyClosed' && detailTicket.replyOnClosedSender && (
+                {isReplyClosedView && detailTicket.replyOnClosedSender && (
                   <div className="p-3 rounded-xl bg-surface-container-low/40 border border-violet-500/20 space-y-1">
                     <span className="text-[10px] font-bold text-violet-600 dark:text-violet-400 uppercase tracking-wider">Expéditeur de la réponse</span>
                     <p className="text-xs text-on-surface font-semibold">{detailTicket.replyOnClosedSender}</p>
                   </div>
                 )}
 
-                {activeTab === 'replyClosed' && detailTicket.replyOnClosedSubject && (
+                {isReplyClosedView && detailTicket.replyOnClosedSubject && (
                   <div className="p-3 rounded-xl bg-surface-container-low/40 border border-outline-variant/20 space-y-1">
                     <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Sujet de la réponse</span>
                     <p className="text-xs text-on-surface">{detailTicket.replyOnClosedSubject}</p>
                   </div>
                 )}
 
-                {activeTab === 'replyClosed' && detailTicket.replyOnClosedSuggestedAt && (
+                {isReplyClosedView && detailTicket.replyOnClosedSuggestedAt && (
                   <div className="p-3 rounded-xl bg-surface-container-low/40 border border-outline-variant/20 space-y-1">
                     <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Réponse reçue le</span>
                     <p className="text-xs text-on-surface">{new Date(detailTicket.replyOnClosedSuggestedAt).toLocaleString('fr-FR')}</p>
+                  </div>
+                )}
+
+                {isReplyOpenView && detailTicket.newTicketSuggestedSender && (
+                  <div className="p-3 rounded-xl bg-surface-container-low/40 border border-indigo-500/20 space-y-1">
+                    <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">Expéditeur de la réponse</span>
+                    <p className="text-xs text-on-surface font-semibold">{detailTicket.newTicketSuggestedSender}</p>
+                  </div>
+                )}
+
+                {isReplyOpenView && detailTicket.newTicketSuggestedAt && (
+                  <div className="p-3 rounded-xl bg-surface-container-low/40 border border-outline-variant/20 space-y-1">
+                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Réponse reçue le</span>
+                    <p className="text-xs text-on-surface">{new Date(detailTicket.newTicketSuggestedAt).toLocaleString('fr-FR')}</p>
                   </div>
                 )}
               </div>
@@ -3208,7 +3006,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                 <ExternalLink className="w-3.5 h-3.5" />
                 Ouvrir le ticket complet
               </button>
-              {activeTab === 'replyClosed' && (
+              {isReplyClosedView && (
                 <>
                   <button
                     onClick={() => { handleDismissReply(detailTicket.id); setDetailTicket(null); }}
@@ -3235,8 +3033,27 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                   </button>
                 </>
               )}
-              {/* Approbation depuis la modale : enregistre les corrections de triage
-                  puis approuve en un clic (permission tickets.approve exigée pour
+              {isReplyOpenView && (
+                <>
+                  <button
+                    onClick={() => { handleDismissNewSuggestion(detailTicket.id); setDetailTicket(null); }}
+                    disabled={processingReplyId === detailTicket.id}
+                    className="px-4 py-2 rounded-xl text-xs font-semibold border border-outline-variant/40 text-on-surface-variant hover:bg-surface-container-high transition-all disabled:opacity-50"
+                  >
+                    Ignorer
+                  </button>
+                  <button
+                    onClick={() => { handleAcceptNewSuggestion(detailTicket.id); setDetailTicket(null); }}
+                    disabled={processingReplyId === detailTicket.id}
+                    className="px-4 py-2 rounded-xl text-xs font-bold btn-primary shadow-md transition-all disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    <Ticket className="w-3.5 h-3.5" />
+                    Créer la demande
+                  </button>
+                </>
+              )}
+
+              {/* Approbation en un clic (permission tickets.approve exigée pour
                   accéder à l'onglet). */}
               {activeTab === 'tickets' && detailTicket.approvalStatus === 'PENDING' && (
                 <>
@@ -3247,19 +3064,12 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                     Rejeter
                   </button>
                   <button
-                    onClick={handleApproveWithTriage}
-                    disabled={savingTriage}
-                    title={triageDirtyCount > 0
-                      ? 'Enregistre les corrections de triage puis approuve le ticket'
-                      : 'Approuve le ticket'}
+                    onClick={async () => { const ok = await handleApproveTicket(detailTicket.id); if (ok) setDetailTicket(null); }}
+                    title="Approuve le ticket"
                     className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-500/20 transition-all flex items-center gap-1.5 disabled:opacity-50"
                   >
                     <Check className="w-4 h-4" />
-                    {savingTriage
-                      ? '…'
-                      : triageDirtyCount > 0
-                        ? `Approuver avec ces corrections (${triageDirtyCount})`
-                        : 'Approuver'}
+                    Approuver
                   </button>
                 </>
               )}
@@ -3370,6 +3180,46 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
             <div className="p-4 border-t border-outline-variant/20 flex items-center justify-end gap-2">
               <button onClick={() => setDetailKb(null)} className="px-4 py-2 rounded-xl text-xs font-semibold bg-surface-container hover:bg-surface-container-high text-on-surface transition-all">
                 Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODALE REJET RÉPONSE IA (motif conservé en reviewNote) */}
+      {rejectDraftId != null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fadeIn">
+          <div className="bg-surface border border-outline-variant/40 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-red-600 dark:text-red-400">
+              <AlertTriangle className="w-6 h-6" />
+              <h3 className="text-base font-bold">Rejeter cette réponse IA</h3>
+            </div>
+            <p className="text-xs text-on-surface-variant">
+              Le motif est enregistré avec le brouillon : c'est ce qui permet d'expliquer un rejet
+              et de repérer les réponses qui reviennent trop souvent.
+            </p>
+            <textarea
+              className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-none"
+              rows={3}
+              placeholder="Ex: L'information a déjà été transmise par le support, réponse hors sujet..."
+              value={draftRejectReason}
+              onChange={(e) => setDraftRejectReason(e.target.value)}
+            />
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setRejectDraftId(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold border border-outline-variant/40 hover:bg-surface-container text-on-surface transition-all"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                disabled={rejectingDraft}
+                onClick={handleConfirmRejectDraft}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 text-white shadow-md shadow-red-500/20 hover:brightness-110 disabled:opacity-50 transition-all"
+              >
+                {rejectingDraft ? 'Rejet en cours...' : 'Confirmer le rejet'}
               </button>
             </div>
           </div>
