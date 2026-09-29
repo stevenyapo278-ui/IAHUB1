@@ -7,7 +7,7 @@ const prisma = require('../prismaClient');
 const { logger } = require('../utils/logger');
 const analyticsTools = require('../services/analyticsTools');
 const { searchKnowledge } = require('../services/knowledgeSearch');
-const { searchTeams, searchTickets, buildSearchQuery, findTicketsForPersonAnyRole, handleMessage, executeTool: chatbotExecuteTool } = require('../services/chatbotService');
+const { searchTeams, searchTickets, buildSearchQuery, findTicketsForPersonAnyRole, handleMessage, executeTool: chatbotExecuteTool, normalizeStatusFilter, OPEN_GROUP_STATUSES, buildPersonTicketSummary } = require('../services/chatbotService');
 const { buildToolResultPayload, toGeminiResponse } = require('../services/voicePayloads');
 const jwt = require('jsonwebtoken');
 
@@ -126,7 +126,7 @@ Ne réponds JAMAIS de mémoire : appelle toujours cet outil pour les chiffres.`,
           type: 'object',
           properties: {
             query: { type: 'string', description: 'Mot-clé de recherche dans titre, contenu, lieu, catégorie' },
-            status: { type: 'string', enum: ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER', 'SOLVED', 'CLOSED'], description: 'Filtrer par statut' },
+            status: { type: 'string', enum: ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER', 'SOLVED', 'CLOSED'], description: "Filtrer par statut. Pour « ouverts / en cours / non clôturés », passe OPEN (étendu automatiquement au groupe NEW+OPEN+PLANNED+PENDING+WAITING_FOR_USER). Un statut explicite (PENDING, SOLVED…) reste littéral." },
             priority: { type: 'string', enum: ['P1', 'P2', 'P3', 'P4'], description: 'Filtrer par priorité' },
             locationName: { type: 'string', description: 'Filtrer par lieu/magasin' },
             assignedTo: { type: 'string', description: 'Nom du technicien assigné' },
@@ -484,11 +484,20 @@ async function executeTool(name, args, { user = null, sessionHistory = null, ws 
             period: args.period && args.period !== 'all' ? args.period : null,
             user,
           });
+          const statusCounts = broad.statusCounts || {};
           return {
+            summary: buildPersonTicketSummary({
+              personName: args.person,
+              totalCount: broad.totalCount,
+              statusCounts,
+              statusesApplied: normalizeStatusFilter(args.status) || [],
+            }),
             total: broad.totalCount,
             returned: broad.tickets.length,
             limit,
             truncated: broad.totalCount > broad.tickets.length,
+            statusCounts,
+            openCount: OPEN_GROUP_STATUSES.reduce((sum, s) => sum + (statusCounts[s] || 0), 0),
             tickets: broad.tickets.map((t) => ({
               id: t.id, titre: t.title, statut: t.status, priorite: t.priority,
               lieu: t.locationName || '',
@@ -507,7 +516,7 @@ async function executeTool(name, args, { user = null, sessionHistory = null, ws 
           const where = buildSearchQuery({
             teamName: args.team || undefined,
             personName: args.person || undefined,
-            statuses: args.status ? [args.status] : undefined,
+            statuses: args.status ? normalizeStatusFilter(args.status) : undefined,
             priorities: args.priority ? [args.priority] : undefined,
             locationName: args.locationName || undefined,
             assignedToName: args.assignedTo || undefined,
@@ -535,6 +544,7 @@ async function executeTool(name, args, { user = null, sessionHistory = null, ws 
             returned: tickets.length,
             limit,
             truncated: total > tickets.length,
+            conventionNote: "« Ouvert » = NEW+OPEN+PLANNED+PENDING+WAITING_FOR_USER. Quand l'utilisateur dit « ouverts / en cours / non clôturés » sans statut explicite, passe status=OPEN : le serveur l'étend automatiquement au groupe complet. N'annonce JAMAIS returned comme total.",
             tickets: tickets.map((t) => ({
               id: t.id, titre: t.title, statut: t.status, priorite: t.priority,
               lieu: t.locationName || '',
