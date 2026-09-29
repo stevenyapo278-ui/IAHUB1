@@ -468,16 +468,25 @@ export default function Locations() {
     return list.slice(start, start + pageSize);
   }, [locations, search, page, pageSize]);
 
-  function loadLocations() {
+  function loadLocations(highlightId) {
     setLoading(true);
     api.get('/locations')
-      .then(({ data }) => setLocations(data))
+      .then(({ data }) => {
+        setLocations(data);
+        // Après création/édition : le tri serveur (isCustom asc puis completename asc) place
+        // les lieux personnalisés tout à la fin (page 8/8 pour 187 lieux) — on saute sur la
+        // page qui contient la ligne, sinon on croit à tort que le lieu n'a pas été ajouté.
+        if (Number.isFinite(highlightId)) {
+          setSearch('');
+          const idx = data.findIndex((l) => l.id === highlightId);
+          if (idx >= 0) setPage(Math.floor(idx / pageSize) + 1);
+        }
+      })
       .catch((err) => toast.error(err.response?.data?.error || 'Erreur chargement lieux'))
       .finally(() => setLoading(false));
   }
 
   useEffect(() => { loadLocations(); }, []);
-  useEffect(() => { setPage(1); }, [search]);
 
   function openCreate() {
     setModalMode('create');
@@ -501,17 +510,20 @@ export default function Locations() {
   async function handleSave() {
     setSaving(true);
     try {
+      let highlightId = null;
       if (modalMode === 'edit' && editingId) {
         await api.patch(`/locations/${editingId}`, form);
         toast.success('Lieu mis à jour');
+        highlightId = editingId;
       } else {
-        await api.post('/locations', form);
+        const { data } = await api.post('/locations', form);
         toast.success(`Lieu « ${form.name} » créé`);
+        highlightId = data?.id;
       }
       setModalOpen(false);
       setForm(emptyForm);
       setEditingId(null);
-      loadLocations();
+      loadLocations(highlightId);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erreur sauvegarde');
     } finally {
@@ -663,7 +675,7 @@ export default function Locations() {
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface/30" />
           <input
-            value={search} onChange={(e) => setSearch(e.target.value)}
+            value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
             placeholder="Rechercher un lieu..."
             className={`${inputCls} w-full pl-9`}
           />
