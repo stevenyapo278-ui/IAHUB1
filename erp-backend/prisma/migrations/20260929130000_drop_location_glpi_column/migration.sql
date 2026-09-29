@@ -1,0 +1,12 @@
+-- Colonne GLPI orpheline sur Location : la migration 20260906000000_remove_glpi a renommé
+-- GlpiLocation → Location et a dropé son index (Location_glpiLocationId_key), mais a OUBLIÉ
+-- de dropé la colonne "glpiLocationId" elle-même (section 4 drop les colonnes glpi* des autres
+-- tables, pas de celle-ci puisque la table venait d'être renommée).
+--
+-- Conséquence en base longue durée (prod) : "glpiLocationId" INTEGER NOT NULL sans défaut,
+-- absente du modèle Prisma Location → tout INSERT Prisma échoue (P2011 null constraint) alors
+-- que SELECT/UPDATE continuent de passer. D'où « 500 Internal Server Error » à la création
+-- d'un lieu depuis le 06/09/2026, pendant que la liste et l'édition restaient normales.
+--
+-- Idempotent (IF EXISTS) : sans effet sur les bases déjà synchronisées depuis le schéma.
+ALTER TABLE "Location" DROP COLUMN IF EXISTS "glpiLocationId";
