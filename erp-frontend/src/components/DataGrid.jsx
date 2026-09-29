@@ -333,6 +333,9 @@ export default function DataGrid({
         className="ag-theme-katalyst-datagrid"
         style={{ width: '100%', height: height || '100%', flex: height ? undefined : '1 1 0' }}
       >
+        {/* Chaque ligne porte la classe « group » : les actions en fin de colonne
+            (crayon/poubelle) utilisent group-hover:opacity-100 — sans ancêtre .group,
+            elles restaient à opacity:0 même au survol, donc invisibles partout dans l'app. */}
         <AgGridReact
           ref={gridRef}
           columnDefs={columns}
@@ -355,6 +358,11 @@ export default function DataGrid({
           enableCellTextSelection={true}
           pinnedBottomRowData={pinnedBottomRowData}
           {...extraGridOptions}
+          getRowClass={(params) => {
+            const extra = extraGridOptions?.getRowClass?.(params);
+            const list = Array.isArray(extra) ? extra : extra ? [extra] : [];
+            return ['group', ...list];
+          }}
         />
       </div>
     </div>
