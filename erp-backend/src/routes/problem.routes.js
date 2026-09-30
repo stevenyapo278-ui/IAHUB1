@@ -241,6 +241,21 @@ router.patch(
         let val = req.body[key];
         if (key === 'dueDate' && val) val = new Date(val);
 
+        // Identifiants : coercition en entier (un select envoie des chaînes) et
+        // contrôle d'existence — sinon Prisma lève une FK violée → 500.
+        if (['locationId', 'requesterId', 'assignedToId', 'teamId'].includes(key)) {
+          val = val === null || val === '' ? null : Number(val);
+          if (val !== null && !Number.isInteger(val)) return res.status(400).json({ error: `${key} invalide` });
+          if (val !== null && key === 'assignedToId') {
+            const u = await prisma.user.findUnique({ where: { id: val }, select: { id: true } });
+            if (!u) return res.status(400).json({ error: 'Utilisateur introuvable' });
+          }
+          if (val !== null && key === 'teamId') {
+            const t = await prisma.team.findUnique({ where: { id: val }, select: { id: true } });
+            if (!t) return res.status(400).json({ error: 'Équipe introuvable' });
+          }
+        }
+
         // Tracker les changements importants
         if (key === 'status' && val !== existing.status) {
           events.push({ type: 'STATUS_CHANGED', payload: { from: existing.status, to: val } });

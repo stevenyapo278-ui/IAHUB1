@@ -49,6 +49,7 @@ const PRIORITY_CONFIG = {
 };
 
 const inputCls = 'px-3.5 py-2 rounded-xl border border-outline-variant/60 bg-surface text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all';
+const miniSelectCls = 'px-2 py-1 rounded-lg border border-outline-variant/60 bg-surface text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer';
 
 function StatusBadge({ status }) {
   const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.NEW;
@@ -113,6 +114,8 @@ export default function ProblemDetail() {
   const [uploadingFiles, setUploadingFiles] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [categories, setCategories] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [teams, setTeams] = useState([]);
 
   // Libère les aperçus blob:// du composeur au démontage
   const pastedImagesRef = useRef(pastedImages);
@@ -136,6 +139,15 @@ export default function ProblemDetail() {
       .catch(() => {});
   }, []);
 
+  // Équipes + techniciens pour l'assignation. /users est réservé aux admins :
+  // en cas d'échec, les membres des équipes (GET /teams, ouvert) servent de repli.
+  useEffect(() => {
+    api.get('/teams').then(({ data }) => setTeams(Array.isArray(data) ? data : [])).catch(() => {});
+    if (canManage) {
+      api.get('/users').then(({ data }) => setUsers(Array.isArray(data) ? data : data.users || [])).catch(() => {});
+    }
+  }, [canManage]);
+
   async function handleSave() {
     setSaving(true);
     try {
@@ -154,6 +166,17 @@ export default function ProblemDetail() {
     try {
       await api.patch(`/problems/${id}`, { status: newStatus });
       toast.success(`Statut changé : ${STATUS_LABELS[newStatus]}`);
+      loadProblem();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur');
+    }
+  }
+
+  // Assignation directe depuis l'en-tête (assigné à / équipe) — PATCH immédiat.
+  async function handleAssign(field, value) {
+    try {
+      await api.patch(`/problems/${id}`, { [field]: value });
+      toast.success(field === 'teamId' ? 'Équipe mise à jour' : 'Assignation mise à jour');
       loadProblem();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erreur');
@@ -267,6 +290,31 @@ export default function ProblemDetail() {
     return opts;
   }, [categories, editForm.category, problem?.category]);
 
+  // Techniciens assignables : liste /users si dispo, sinon membres des équipes.
+  const assigneeOptions = useMemo(() => {
+    const byId = new Map();
+    [...users, ...teams.flatMap((t) => t.members || [])]
+      .filter((u) => u && u.role !== 'REQUESTER')
+      .forEach((u) => byId.set(u.id, u));
+    const opts = [...byId.values()]
+      .sort((a, b) => String(a.fullName).localeCompare(String(b.fullName), 'fr'))
+      .map((u) => ({ value: u.id, label: u.fullName }));
+    const current = problem?.assignedTo;
+    if (current && !opts.some((o) => o.value === current.id)) {
+      opts.unshift({ value: current.id, label: current.fullName });
+    }
+    return opts;
+  }, [users, teams, problem?.assignedTo]);
+
+  const teamOptions = useMemo(() => {
+    const opts = teams.map((t) => ({ value: t.id, label: t.name }));
+    const current = problem?.team;
+    if (current && !opts.some((o) => o.value === current.id)) {
+      opts.unshift({ value: current.id, label: current.name });
+    }
+    return opts;
+  }, [teams, problem?.team]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -303,11 +351,40 @@ export default function ProblemDetail() {
               )}
             </div>
             <h1 className="text-xl font-bold text-on-surface mt-2">{problem.title}</h1>
-            <p className="text-sm text-on-surface-variant mt-0.5">
-              Créé le {new Date(problem.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}
-              {problem.assignedTo && ` · Assigné à ${problem.assignedTo.fullName}`}
-              {problem.team && ` · Équipe ${problem.team.name}`}
-            </p>
+            <div className="flex items-center gap-2 flex-wrap mt-0.5">
+              <span className="text-sm text-on-surface-variant">
+                Créé le {new Date(problem.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}
+              </span>
+              {canManage ? (
+                <>
+                  <select aria-label="Attribuer à" value={problem.assignedToId || ''}
+                    onChange={(e) => handleAssign('assignedToId', e.target.value ? Number(e.target.value) : null)}
+                    className={miniSelectCls}>
+                    <option value="">Non assigné</option>
+                    {assigneeOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                  <select aria-label="Équipe" value={problem.teamId || ''}
+                    onChange={(e) => handleAssign('teamId', e.target.value ? Number(e.target.value) : null)}
+                    className={miniSelectCls}>
+                    <option value="">Aucune équipe</option>
+                    {teamOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </>
+              ) : (
+                <>
+                  {problem.assignedTo && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-surface-container text-on-surface-variant">
+                      <User className="w-3 h-3" /> {problem.assignedTo.fullName}
+                    </span>
+                  )}
+                  {problem.team && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-surface-container text-on-surface-variant">
+                      <Users className="w-3 h-3" /> {problem.team.name}
+                    </span>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         </div>
         {canManage && (
