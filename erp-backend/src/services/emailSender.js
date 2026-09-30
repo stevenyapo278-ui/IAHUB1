@@ -324,7 +324,41 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
 }
 
 const DEFAULT_ACKNOWLEDGEMENT_MESSAGE = 'Nous avons bien reçu votre demande de support et un ticket a été créé automatiquement.';
+const DEFAULT_ACKNOWLEDGEMENT_OFF_HOURS_MESSAGE = 'Nous avons bien reçu votre demande. Nos bureaux sont actuellement fermés : votre demande sera prise en charge à partir du prochain jour ouvré, dès 8h00.';
 const DEFAULT_EMAIL_SIGNATURE = '<p>Cordialement,<br>Support IT</p>';
+
+// Fuseau de référence pour le calcul horaires/hors horaires de l'accusé de réception :
+// Africa/Abidjan (UTC+0, pas de changement d'heure) — cohérent avec les sites Prosuma.
+const ACK_TIMEZONE = 'Africa/Abidjan';
+
+// Indique si l'instant `date` tombe dans la plage d'ouverture configurée
+// (SystemSettings.acknowledgementBusinessDays/StartTime/EndTime). Le calcul est fait en
+// Africa/Abidjan via Intl.DateTimeFormat (le conteneur est en UTC, ce qui donne le même résultat
+// ici, mais on reste explicite). En cas de config invalide, on considère "dans les horaires".
+function isWithinBusinessHours(date = new Date(), { days, startTime, endTime } = {}) {
+  try {
+    const fmt = new Intl.DateTimeFormat('en-CA', {
+      timeZone: ACK_TIMEZONE, weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false,
+    });
+    const parts = Object.fromEntries(fmt.formatToParts(date).filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]));
+    const weekdayIndex = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[parts.weekday];
+    const minutes = parseInt(parts.hour, 10) % 24 * 60 + parseInt(parts.minute, 10);
+    // Fallback sûr : une config incomplète/invalide est ignorée (on considère "dans les horaires"),
+    // seule une config valide et explicite peut déclarer l'instant hors horaires.
+    const dayList = Array.isArray(days) ? days.filter((d) => Number.isInteger(d)) : null;
+    if (dayList && dayList.length > 0 && !dayList.includes(weekdayIndex)) return false;
+    const parseHm = (v) => {
+      const m = String(v || '').match(/^(\d{1,2}):(\d{2})$/);
+      return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : null;
+    };
+    const start = parseHm(startTime);
+    const end = parseHm(endTime);
+    if (start != null && end != null && !(minutes >= start && minutes < end)) return false;
+    return true;
+  } catch {
+    return true;
+  }
+}
 
 const STATUS_LABELS = {
   NEW: 'Nouveau',
@@ -411,30 +445,51 @@ async function getEmailSignature() {
 
 // ── Template : Accusé de réception ──────────────────────────────────────────
 // Génère le HTML de l'accusé de réception (fonction pure, sans envoi).
-// `customMessage` vient de SystemSettings.acknowledgementMessage (Paramètres > Automatisation > Emails) ;
-// placeholders supportés : {ticketId}, {subject}, {toName}.
+// `customMessage` vient de SystemSettings.acknowledgementMessage ou acknowledgementOffHoursMessage
+// (Paramètres > Automatisation > Emails) ; placeholders supportés : {ticketId}, {subject}, {toName}.
+// `withTicketBlock` = false → n'affiche ni numéro de ticket, ni bouton "Suivre mon ticket" (accusé
+// de réception de la simple demande, avant toute approbation / création de ticket GLPI).
 // `ticketLink` : lien vers le ticket dans l'application (bouton "Suivre mon ticket").
-function buildAcknowledgementHtml({ toName, glpiTicketId, ticketId, originalSubject, customMessage, signature, ticketLink }) {
+function buildAcknowledgementHtml({ toName, glpiTicketId, ticketId, originalSubject, customMessage, signature, ticketLink, withTicketBlock = true }) {
   const displayId = glpiTicketId || ticketId || 'N/A';
   const introMessage = (customMessage || DEFAULT_ACKNOWLEDGEMENT_MESSAGE)
     .replaceAll('{ticketId}', displayId)
     .replaceAll('{subject}', originalSubject)
     .replaceAll('{toName}', toName || '');
+  const showTicketBlock = withTicketBlock && (glpiTicketId || ticketId) != null;
   return buildEmailLayout({
     headerTitle: 'Votre demande a bien été enregistrée',
-    headerSubtitle: `Ticket #${displayId}`,
+    headerSubtitle: showTicketBlock ? `Ticket #${displayId}` : 'Accusé de réception',
     signature,
     children: `
 <p style="margin:0 0 12px">Bonjour ${toName || ''},</p>
 <p style="margin:0 0 12px">${introMessage}</p>
-${buildStyledTable([
+${showTicketBlock ? buildStyledTable([
   { label: 'Numéro de ticket', value: `<strong>#${displayId}</strong>` },
   { label: 'Sujet', value: originalSubject },
-])}
-<p style="margin:0 0 12px">Notre équipe va analyser votre demande et vous contactera dans les meilleurs délais.</p>
-${ticketLink ? buildActionLink(ticketLink, 'Suivre mon ticket') : ''}
-<p style="margin:0 0 12px">Vous pouvez aussi répondre directement à cet email pour ajouter des informations à votre ticket.</p>`,
+]) : ''}
+${showTicketBlock ? '<p style="margin:0 0 12px">Notre équipe va analyser votre demande et vous contactera dans les meilleurs délais.</p>' : ''}
+${showTicketBlock && ticketLink ? buildActionLink(ticketLink, 'Suivre mon ticket') : ''}
+<p style="margin:0 0 12px">Vous pouvez aussi répondre directement à cet email pour ajouter des informations à votre demande.</p>`,
   });
+}
+
+// Détermine quel message d'accusé de réception utiliser selon l'heure d'envoi : si la variante
+// horaire est activée et que l'instant est hors plage d'ouverture (jours + heures configurées),
+// on prend acknowledgementOffHoursMessage (défaut dédié), sinon acknowledgementMessage.
+function pickAcknowledgementMessage(settings, date = new Date()) {
+  if (settings.acknowledgementBusinessHoursEnabled === false) {
+    return { message: settings.acknowledgementMessage || DEFAULT_ACKNOWLEDGEMENT_MESSAGE, offHours: false };
+  }
+  const offHours = !isWithinBusinessHours(date, {
+    days: settings.acknowledgementBusinessDays,
+    startTime: settings.acknowledgementBusinessStartTime,
+    endTime: settings.acknowledgementBusinessEndTime,
+  });
+  const message = offHours
+    ? (settings.acknowledgementOffHoursMessage || DEFAULT_ACKNOWLEDGEMENT_OFF_HOURS_MESSAGE)
+    : (settings.acknowledgementMessage || DEFAULT_ACKNOWLEDGEMENT_MESSAGE);
+  return { message, offHours };
 }
 
 // Envoie un accusé de réception automatique lors de la création d'un nouveau ticket.
@@ -443,12 +498,20 @@ ${ticketLink ? buildActionLink(ticketLink, 'Suivre mon ticket') : ''}
 async function sendAcknowledgement({ ticketId, glpiTicketId, toEmail, toName, originalSubject, cc = [], to = null, inReplyToGraphMessageId = null, conversationId = null, inReplyTo = null }) {
   const settings = await getSystemSettings();
   if (settings.emailAcknowledgementEnabled === false) return null;
+  // Sélection du message selon la plage d'ouverture (variante horaires / hors horaires).
+  const { message: ackMessage, offHours } = pickAcknowledgementMessage(settings);
+  // Le numéro de ticket n'est affiché que s'il existe réellement (GLPI) ou si le message
+  // personnalisé mentionne {ticketId} — un simple accusé de demande part sans référence ticket.
+  const referencesTicket = Boolean(glpiTicketId) || (typeof ackMessage === 'string' && ackMessage.includes('{ticketId}'));
   const displayId = glpiTicketId || ticketId || 'N/A';
-  const subject = `[Ticket #${displayId}] ${originalSubject}`;
+  const subject = referencesTicket ? `[Ticket #${displayId}] ${originalSubject}` : `Accusé de réception — ${originalSubject}`;
   const signature = await getEmailSignature();
   const frontendUrl = resolveFrontendUrl(settings);
-  const ticketLink = ticketId ? `${frontendUrl}/tickets/${ticketId}` : null;
-  const bodyHtml = buildAcknowledgementHtml({ toName, glpiTicketId, ticketId, originalSubject, customMessage: settings.acknowledgementMessage, signature, ticketLink });
+  const ticketLink = referencesTicket && ticketId ? `${frontendUrl}/tickets/${ticketId}` : null;
+  const bodyHtml = buildAcknowledgementHtml({ toName, glpiTicketId, ticketId, originalSubject, customMessage: ackMessage, signature, ticketLink, withTicketBlock: referencesTicket });
+  if (process.env.NODE_ENV !== 'test') {
+    console.log(`[emailSender] Accusé de réception (${offHours ? 'HORS horaires' : 'dans les horaires'}) → ${toEmail}`);
+  }
   // `to` = liste To du message d'origine (boîtes de diffusion comprises) : on la remet dans la
   // boucle derrière le destinataire principal, sans doublon, pour une sémantique « Répondre à tous ».
   const seenTo = new Set([String(toEmail || '').toLowerCase().trim()]);
@@ -1422,4 +1485,8 @@ module.exports = {
   getEmailSignature,
   wrapDraftContentForSend,
   sendAiDraftEmail,
+  // Helpers accusé de réception (variante horaires / hors horaires)
+  isWithinBusinessHours,
+  pickAcknowledgementMessage,
+  DEFAULT_ACKNOWLEDGEMENT_OFF_HOURS_MESSAGE,
 };

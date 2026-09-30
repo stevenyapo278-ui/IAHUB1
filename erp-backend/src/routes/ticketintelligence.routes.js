@@ -107,9 +107,14 @@ router.get('/reminders/config', requirePermission('automation.manage', ['ADMIN']
 });
 
 router.put('/reminders/config', requirePermission('automation.manage', ['ADMIN']), async (req, res) => {
-  const { autoCloseDays, isActive } = req.body;
+  const { autoCloseDays, firstReminderDays, secondReminderDays, preCloseDays, isActive } = req.body;
   const existing = await prisma.reminderConfig.findFirst();
   const data = { autoCloseDays };
+  // Délais optionnels des relances (J+2 / J+5 / pré-clôture par défaut) — ignorés silencieusement
+  // avant, ce qui empêchait toute personnalisation depuis les Paramètres.
+  if (firstReminderDays !== undefined) data.firstReminderDays = firstReminderDays;
+  if (secondReminderDays !== undefined) data.secondReminderDays = secondReminderDays;
+  if (preCloseDays !== undefined) data.preCloseDays = preCloseDays;
   if (isActive !== undefined) data.isActive = isActive;
   const config = existing
     ? await prisma.reminderConfig.update({ where: { id: existing.id }, data })

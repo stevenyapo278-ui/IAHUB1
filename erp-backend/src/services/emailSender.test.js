@@ -52,6 +52,83 @@ describe('buildAcknowledgementHtml', () => {
     const html = buildAcknowledgementHtml({ toName: 'Jean', glpiTicketId: 1, originalSubject: 'Test' });
     expect(html).toContain('Cordialement');
   });
+
+  it('masque le bloc numéro de ticket quand withTicketBlock est false', () => {
+    const html = buildAcknowledgementHtml({ toName: 'Jean', glpiTicketId: 1, originalSubject: 'Test', withTicketBlock: false });
+    expect(html).not.toContain('Numéro de ticket');
+    expect(html).not.toContain('Suivre mon ticket');
+    expect(html).toContain('Accusé de réception');
+  });
+
+  it('masque le bloc ticket quand aucun identifiant n\'est fourni', () => {
+    const html = buildAcknowledgementHtml({ toName: 'Jean', originalSubject: 'Test' });
+    expect(html).not.toContain('Numéro de ticket');
+    expect(html).toContain('Accusé de réception');
+  });
+});
+
+describe('isWithinBusinessHours', () => {
+  const { isWithinBusinessHours } = require('./emailSender');
+
+  // Mardi 13:10 UTC = 13:10 à Abidjan (UTC+0) → dans les horaires 8h-17h lun-ven
+  const mardiApresMidi = new Date('2026-09-29T13:10:00Z');
+  // Mardi 18:30 UTC = 18:30 à Abidjan → hors horaires
+  const mardiSoir = new Date('2026-09-29T18:30:00Z');
+  // Dimanche 10:00 UTC = dimanche à Abidjan → hors horaires
+  const dimanche = new Date('2026-09-27T10:00:00Z');
+
+  it('considère un jour ouvré dans la plage comme dans les horaires', () => {
+    expect(isWithinBusinessHours(mardiApresMidi, { days: [1, 2, 3, 4, 5], startTime: '08:00', endTime: '17:00' })).toBe(true);
+  });
+
+  it('considère le soir comme hors horaires', () => {
+    expect(isWithinBusinessHours(mardiSoir, { days: [1, 2, 3, 4, 5], startTime: '08:00', endTime: '17:00' })).toBe(false);
+  });
+
+  it('considère le week-end comme hors horaires', () => {
+    expect(isWithinBusinessHours(dimanche, { days: [1, 2, 3, 4, 5], startTime: '08:00', endTime: '17:00' })).toBe(false);
+  });
+
+  it('accepte une plage incluant le dimanche quand configurée', () => {
+    expect(isWithinBusinessHours(dimanche, { days: [0, 1, 2, 3, 4, 5, 6], startTime: '08:00', endTime: '17:00' })).toBe(true);
+  });
+
+  it('considère une config invalide comme dans les horaires (fallback sûr)', () => {
+    expect(isWithinBusinessHours(mardiSoir, { days: 'nonsense', startTime: 'x', endTime: 'y' })).toBe(true);
+  });
+});
+
+describe('pickAcknowledgementMessage', () => {
+  const { pickAcknowledgementMessage, DEFAULT_ACKNOWLEDGEMENT_OFF_HOURS_MESSAGE } = require('./emailSender');
+
+  // Mardi 18:30 UTC = hors horaires 8h-17h lun-ven (Abidjan) ; mardi 13:10 = dans les horaires
+  const dansHoraires = new Date('2026-09-29T13:10:00Z');
+  const horsHoraires = new Date('2026-09-29T18:30:00Z');
+  // Forme identique à un enregistrement SystemSettings réel
+  const base = { acknowledgementBusinessDays: [1, 2, 3, 4, 5], acknowledgementBusinessStartTime: '08:00', acknowledgementBusinessEndTime: '17:00' };
+
+  it('prend le message standard pendant les horaires', () => {
+    const { message, offHours } = pickAcknowledgementMessage({ acknowledgementMessage: 'MSG_JOUR', acknowledgementOffHoursMessage: 'MSG_SOIR', ...base }, dansHoraires);
+    expect(message).toBe('MSG_JOUR');
+    expect(offHours).toBe(false);
+  });
+
+  it('prend la variante hors horaires en dehors de la plage', () => {
+    const { message, offHours } = pickAcknowledgementMessage({ acknowledgementMessage: 'MSG_JOUR', acknowledgementOffHoursMessage: 'MSG_SOIR', ...base }, horsHoraires);
+    expect(message).toBe('MSG_SOIR');
+    expect(offHours).toBe(true);
+  });
+
+  it('retombe sur le défaut hors horaires si la variante est vide', () => {
+    const { message } = pickAcknowledgementMessage({ acknowledgementMessage: 'MSG_JOUR', ...base }, horsHoraires);
+    expect(message).toBe(DEFAULT_ACKNOWLEDGEMENT_OFF_HOURS_MESSAGE);
+  });
+
+  it('ignore la variante horaire quand acknowledgementBusinessHoursEnabled est false', () => {
+    const { message, offHours } = pickAcknowledgementMessage({ acknowledgementMessage: 'MSG_JOUR', acknowledgementOffHoursMessage: 'MSG_SOIR', acknowledgementBusinessHoursEnabled: false, ...base }, horsHoraires);
+    expect(message).toBe('MSG_JOUR');
+    expect(offHours).toBe(false);
+  });
 });
 
 describe('buildKnownIncidentNotificationHtml', () => {

@@ -707,6 +707,18 @@ model SystemSettings {
   // Placeholders disponibles : {ticketId}, {subject}, {toName}. Laisser vide = texte par défaut codé en dur.
   acknowledgementMessage String? @db.Text
 
+  // Variantes horaires de l'accusé de réception (Paramètres > Automatisation > Emails) :
+  // acknowledgementMessage          → envoyé PENDANT les horaires d'ouverture
+  // acknowledgementOffHoursMessage  → envoyé HORS horaires (soir, week-end, fériés). Vide = texte par défaut.
+  // acknowledgementBusinessHoursEnabled = false → message unique (acknowledgementMessage), pas de variante horaire.
+  // Plage d'ouverture : acknowledgementBusinessDays (0=dimanche … 6=samedi) + heures "HH:mm".
+  // Fuseau de référence : Africa/Abidjan (UTC+0, pas de changement d'heure).
+  acknowledgementOffHoursMessage      String? @db.Text
+  acknowledgementBusinessHoursEnabled Boolean @default(true)
+  acknowledgementBusinessDays         Int[]   @default([1, 2, 3, 4, 5])
+  acknowledgementBusinessStartTime    String  @default("08:00")
+  acknowledgementBusinessEndTime      String  @default("17:00")
+
   // Notifier le technicien par email quand un ticket lui est automatiquement assigné
   // (Paramètres > Automatisation > Notifications internes).
   notifyTechnicianOnAssignment Boolean @default(false)

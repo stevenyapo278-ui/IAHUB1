@@ -93,6 +93,12 @@ router.patch(
     body('draftReminderExcludeEmails.*').optional().isEmail(),
     body('enableFewShotTriage').optional().isBoolean(),
     body('acknowledgementMessage').optional({ nullable: true }).isString().isLength({ max: 2000 }),
+    body('acknowledgementOffHoursMessage').optional({ nullable: true }).isString().isLength({ max: 2000 }),
+    body('acknowledgementBusinessHoursEnabled').optional().isBoolean(),
+    body('acknowledgementBusinessDays').optional().isArray(),
+    body('acknowledgementBusinessDays.*').optional().isInt({ min: 0, max: 6 }),
+    body('acknowledgementBusinessStartTime').optional().matches(/^([01]\d|2[0-3]):([0-5]\d)$/),
+    body('acknowledgementBusinessEndTime').optional().matches(/^([01]\d|2[0-3]):([0-5]\d)$/),
     body('emailSignature').optional({ nullable: true }).isString().isLength({ max: 2000 }),
     body('signatureLogoUrl').optional({ nullable: true }).isString(),
     body('signatureLogoHeight').optional().isInt({ min: 16, max: 200 }),
@@ -145,6 +151,11 @@ router.patch(
     if (req.body.draftReminderExcludeEmails !== undefined) data.draftReminderExcludeEmails = req.body.draftReminderExcludeEmails;
     if (req.body.enableFewShotTriage !== undefined) data.enableFewShotTriage = req.body.enableFewShotTriage;
     if (req.body.acknowledgementMessage !== undefined) data.acknowledgementMessage = req.body.acknowledgementMessage || null;
+    if (req.body.acknowledgementOffHoursMessage !== undefined) data.acknowledgementOffHoursMessage = req.body.acknowledgementOffHoursMessage || null;
+    if (req.body.acknowledgementBusinessHoursEnabled !== undefined) data.acknowledgementBusinessHoursEnabled = req.body.acknowledgementBusinessHoursEnabled;
+    if (req.body.acknowledgementBusinessDays !== undefined) data.acknowledgementBusinessDays = req.body.acknowledgementBusinessDays;
+    if (req.body.acknowledgementBusinessStartTime !== undefined) data.acknowledgementBusinessStartTime = req.body.acknowledgementBusinessStartTime;
+    if (req.body.acknowledgementBusinessEndTime !== undefined) data.acknowledgementBusinessEndTime = req.body.acknowledgementBusinessEndTime;
     if (req.body.emailSignature !== undefined) data.emailSignature = req.body.emailSignature || null;
     if (req.body.signatureLogoUrl !== undefined) data.signatureLogoUrl = req.body.signatureLogoUrl || null;
     if (req.body.signatureLogoHeight !== undefined) data.signatureLogoHeight = req.body.signatureLogoHeight;

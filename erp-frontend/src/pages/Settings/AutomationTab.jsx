@@ -6,10 +6,31 @@ import { sanitizeHtml } from '../../utils/sanitize';
 import { SettingRow, IntervalRow, inputClass, itemVariants } from './SettingsComponents';
 
 const DEFAULT_ACK_MESSAGE = 'Nous avons bien reçu votre demande de support et un ticket a été créé automatiquement.';
+const DEFAULT_ACK_OFF_HOURS_MESSAGE = 'Nous avons bien reçu votre demande. Nos bureaux sont actuellement fermés : votre demande sera prise en charge à partir du prochain jour ouvré, dès 8h00.';
 const DEFAULT_SIGNATURE = '<p>Cordialement,<br>Support IT</p>';
 const ACK_PREVIEW = { toName: 'Jean Dupont', ticketId: 42, subject: 'Problème imprimante 3e étage' };
+const DAY_LABELS = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
 
-function buildAckPreviewHtml(customMessage, signature, logoUrl, logoHeight) {
+// Miroir front de la logique backend (emailSender.isWithinBusinessHours) : indique si "maintenant"
+// (fuseau Africa/Abidjan) tombe dans la plage d'ouverture configurée — sert à l'aperçu dynamique.
+function isNowWithinBusinessHours(days, startTime, endTime) {
+  try {
+    const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Abidjan', weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+    const parts = Object.fromEntries(fmt.formatToParts(new Date()).filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]));
+    const weekdayIndex = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[parts.weekday];
+    const minutes = (parseInt(parts.hour, 10) % 24) * 60 + parseInt(parts.minute, 10);
+    const dayList = Array.isArray(days) && days.length ? days : [1, 2, 3, 4, 5];
+    if (!dayList.includes(weekdayIndex)) return false;
+    const parseHm = (v) => { const m = String(v || '').match(/^(\d{1,2}):(\d{2})$/); return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : null; };
+    const start = parseHm(startTime) ?? 8 * 60;
+    const end = parseHm(endTime) ?? 17 * 60;
+    return minutes >= start && minutes < end;
+  } catch {
+    return true;
+  }
+}
+
+function buildAckPreviewHtml(customMessage, signature, logoUrl, logoHeight, { withTicketBlock = true } = {}) {
   const intro = (customMessage || DEFAULT_ACK_MESSAGE)
     .replaceAll('{ticketId}', ACK_PREVIEW.ticketId)
     .replaceAll('{subject}', ACK_PREVIEW.subject)
@@ -18,12 +39,14 @@ function buildAckPreviewHtml(customMessage, signature, logoUrl, logoHeight) {
   return `
 <p>Bonjour ${ACK_PREVIEW.toName},</p>
 <p>${intro}</p>
+${withTicketBlock ? `
 <table style="border-collapse:collapse;margin:16px 0">
   <tr><td style="padding:4px 12px 4px 0;color:#666">Numéro de ticket</td><td><strong>#${ACK_PREVIEW.ticketId}</strong></td></tr>
   <tr><td style="padding:4px 12px 4px 0;color:#666">Sujet</td><td>${ACK_PREVIEW.subject}</td></tr>
 </table>
 <p>Notre équipe va analyser votre demande et vous contactera dans les meilleurs délais.</p>
-<p>Vous pouvez répondre directement à cet email pour ajouter des informations à votre ticket.</p>
+` : ''}
+<p>Vous pouvez répondre directement à cet email pour ajouter des informations à votre demande.</p>
 <div style="margin-top:24px">${signature || DEFAULT_SIGNATURE}${logoHtml}</div>
 `.trim();
 }
@@ -33,6 +56,7 @@ export default function AutomationTab() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [ackMessageDraft, setAckMessageDraft] = useState('');
+  const [ackOffHoursDraft, setAckOffHoursDraft] = useState('');
   const [signatureDraft, setSignatureDraft] = useState('');
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [reminderConfig, setReminderConfig] = useState(null);
@@ -43,6 +67,7 @@ export default function AutomationTab() {
     api.get('/system-settings').then(({ data }) => {
       setSettings(data);
       setAckMessageDraft(data.acknowledgementMessage || '');
+      setAckOffHoursDraft(data.acknowledgementOffHoursMessage || '');
       setSignatureDraft(data.emailSignature || '');
     }).catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
     api.get('/reminders/config').then(({ data }) => setReminderConfig(data)).catch(() => {});
@@ -128,7 +153,20 @@ export default function AutomationTab() {
     );
   }
 
-  const isAckChanged = ackMessageDraft !== (settings.acknowledgementMessage || '') || signatureDraft !== (settings.emailSignature || '');
+  const isAckChanged =
+    ackMessageDraft !== (settings.acknowledgementMessage || '') ||
+    ackOffHoursDraft !== (settings.acknowledgementOffHoursMessage || '') ||
+    signatureDraft !== (settings.emailSignature || '');
+
+  // Aperçu dynamique : bascule sur le message hors horaires si la variante est active et que
+  // l'heure actuelle (Abidjan) est hors plage d'ouverture — même choix que l'envoi réel.
+  const businessHoursEnabled = settings.acknowledgementBusinessHoursEnabled !== false;
+  const previewOffHours = businessHoursEnabled && !isNowWithinBusinessHours(settings.acknowledgementBusinessDays, settings.acknowledgementBusinessStartTime, settings.acknowledgementBusinessEndTime);
+  const ackPreviewMessage = previewOffHours ? (ackOffHoursDraft || DEFAULT_ACK_OFF_HOURS_MESSAGE) : (ackMessageDraft || DEFAULT_ACK_MESSAGE);
+  const ackPreviewWithTicket = ackPreviewMessage.includes('{ticketId}');
+  const ackPreviewSubject = ackPreviewWithTicket
+    ? `Réception de votre demande - #${ACK_PREVIEW.ticketId}`
+    : `Accusé de réception — ${ACK_PREVIEW.subject}`;
 
   return (
     <motion.div
@@ -165,17 +203,18 @@ export default function AutomationTab() {
           <div className="bento-card-header px-0 py-0 pb-md border-b border-outline-variant/40">
             <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold mb-1">Accusé de réception et signature</h3>
             <p className="font-body-sm text-body-sm text-on-surface-variant">
-              Message et signature envoyés automatiquement au demandeur à la création d'un ticket par email. 
+              Message et signature envoyés automatiquement au demandeur lors de la réception de sa demande.
               Placeholders : <code className="bg-surface-container-high px-1 rounded font-mono text-[11px]">{'{ticketId}'}</code>,{' '}
               <code className="bg-surface-container-high px-1 rounded font-mono text-[11px]">{'{subject}'}</code>,{' '}
               <code className="bg-surface-container-high px-1 rounded font-mono text-[11px]">{'{toName}'}</code>.
+              Sans <code className="bg-surface-container-high px-1 rounded font-mono text-[11px]">{'{ticketId}'}</code> dans le message, aucun numéro de ticket n'est affiché dans l'email.
             </p>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-lg">
             <div className="space-y-md">
               <div className="flex flex-col gap-sm">
-                <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Message d'accueil</span>
+                <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Message — pendant les horaires</span>
                 <motion.textarea
                   whileFocus={{ scale: 1.01 }}
                   value={ackMessageDraft}
@@ -186,6 +225,81 @@ export default function AutomationTab() {
                   placeholder={DEFAULT_ACK_MESSAGE}
                   className={`${inputClass} resize-none w-full min-h-[90px]`}
                 />
+              </div>
+
+              <div className="flex flex-col gap-sm">
+                <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Message — hors horaires</span>
+                <motion.textarea
+                  whileFocus={{ scale: 1.01 }}
+                  value={ackOffHoursDraft}
+                  onChange={(e) => setAckOffHoursDraft(e.target.value)}
+                  disabled={saving || settings.acknowledgementBusinessHoursEnabled === false}
+                  rows={3}
+                  maxLength={2000}
+                  placeholder={DEFAULT_ACK_OFF_HOURS_MESSAGE}
+                  className={`${inputClass} resize-none w-full min-h-[90px] disabled:opacity-50`}
+                />
+              </div>
+
+              <div className="bento-card flex flex-col gap-sm p-md bg-surface-container-low/20">
+                <SettingRow
+                  title="Variantes horaires / hors horaires"
+                  description="Envoie le message « hors horaires » en dehors de la plage d'ouverture ci-dessous (fuseau Abidjan). Désactivé = message unique pour toutes les demandes."
+                  checked={settings.acknowledgementBusinessHoursEnabled !== false}
+                  onChange={(v) => updateSetting('acknowledgementBusinessHoursEnabled', v)}
+                  disabled={saving}
+                />
+                <div className="flex flex-col gap-sm">
+                  <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Jours d'ouverture</span>
+                  <div className="flex flex-wrap gap-xs">
+                    {DAY_LABELS.map((label, idx) => {
+                      const days = settings.acknowledgementBusinessDays ?? [1, 2, 3, 4, 5];
+                      const active = days.includes(idx);
+                      return (
+                        <motion.button
+                          key={label}
+                          type="button"
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          disabled={saving}
+                          onClick={() => {
+                            const next = active ? days.filter((d) => d !== idx) : [...days, idx].sort();
+                            updateSetting('acknowledgementBusinessDays', next);
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-body-sm font-semibold border transition-colors disabled:opacity-50 ${
+                            active
+                              ? 'bg-primary/10 border-primary/30 text-primary'
+                              : 'bg-surface-container-high/40 border-outline-variant/50 text-on-surface-variant hover:bg-surface-container-high'
+                          }`}
+                        >
+                          {label}
+                        </motion.button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-md">
+                  <div className="flex flex-col gap-sm">
+                    <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Ouverture</span>
+                    <input
+                      type="time"
+                      value={settings.acknowledgementBusinessStartTime || '08:00'}
+                      onChange={(e) => updateSetting('acknowledgementBusinessStartTime', e.target.value)}
+                      disabled={saving || settings.acknowledgementBusinessHoursEnabled === false}
+                      className={`${inputClass} disabled:opacity-50`}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-sm">
+                    <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Fermeture</span>
+                    <input
+                      type="time"
+                      value={settings.acknowledgementBusinessEndTime || '17:00'}
+                      onChange={(e) => updateSetting('acknowledgementBusinessEndTime', e.target.value)}
+                      disabled={saving || settings.acknowledgementBusinessHoursEnabled === false}
+                      className={`${inputClass} disabled:opacity-50`}
+                    />
+                  </div>
+                </div>
               </div>
 
               <div className="flex flex-col gap-sm">
@@ -282,17 +396,24 @@ export default function AutomationTab() {
                 <div className="w-12"></div>
               </div>
 
-              {/* Mail Header Info */}
+              {/* Mail Header Info — l'aperçu bascule automatiquement sur le message hors horaires
+                  quand la variante horaire est active et que l'heure locale simule un envoi hors plage */}
               <div className="px-md py-3 bg-surface border-b border-outline-variant/20 space-y-1 text-body-xs font-body-sm text-on-surface-variant">
                 <div><span className="font-semibold text-on-surface">De :</span> Support IT &lt;support@prosuma.ci&gt;</div>
                 <div><span className="font-semibold text-on-surface">À :</span> {ACK_PREVIEW.toName} &lt;jean.dupont@client.com&gt;</div>
-                <div><span className="font-semibold text-on-surface">Objet :</span> Réception de votre demande - #{ACK_PREVIEW.ticketId}</div>
+                <div><span className="font-semibold text-on-surface">Objet :</span> {ackPreviewSubject}</div>
+                {previewOffHours && (
+                  <div className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 font-semibold">
+                    <span className="material-symbols-outlined text-[14px]">schedule</span>
+                    Aperçu du message hors horaires
+                  </div>
+                )}
               </div>
 
               {/* Mail body */}
               <div className="p-md bg-white text-gray-800 flex-1 overflow-auto font-body-sm leading-relaxed max-h-[310px] min-h-[250px]">
                 <div
-                  dangerouslySetInnerHTML={{ __html: sanitizeHtml(buildAckPreviewHtml(ackMessageDraft, signatureDraft, settings.signatureLogoUrl, settings.signatureLogoHeight)) }}
+                  dangerouslySetInnerHTML={{ __html: sanitizeHtml(buildAckPreviewHtml(ackPreviewMessage, signatureDraft, settings.signatureLogoUrl, settings.signatureLogoHeight, { withTicketBlock: ackPreviewWithTicket })) }}
                 />
               </div>
             </div>
@@ -303,6 +424,7 @@ export default function AutomationTab() {
               type="button"
               onClick={() => {
                 setAckMessageDraft(settings.acknowledgementMessage || '');
+                setAckOffHoursDraft(settings.acknowledgementOffHoursMessage || '');
                 setSignatureDraft(settings.emailSignature || '');
               }}
               disabled={saving || !isAckChanged}
@@ -316,6 +438,7 @@ export default function AutomationTab() {
               type="button"
               onClick={async () => {
                 await updateSetting('acknowledgementMessage', ackMessageDraft);
+                await updateSetting('acknowledgementOffHoursMessage', ackOffHoursDraft);
                 await updateSetting('emailSignature', signatureDraft);
               }}
               disabled={saving || !isAckChanged}
@@ -373,6 +496,33 @@ export default function AutomationTab() {
                 checked={reminderConfig.isActive}
                 onChange={(v) => updateReminderConfig({ isActive: v })}
                 disabled={reminderSaving}
+              />
+              <IntervalRow
+                title="Première relance"
+                description="Délai après la dernière réponse du demandeur avant la 1ère relance (brouillon à valider dans le Centre de Validation)."
+                value={reminderConfig.firstReminderDays}
+                onChange={(v) => updateReminderConfig({ firstReminderDays: v })}
+                disabled={reminderSaving || !reminderConfig.isActive}
+                max={60}
+                unit="jours"
+              />
+              <IntervalRow
+                title="Deuxième relance"
+                description="Délai avant la 2ème relance si aucune réponse du demandeur."
+                value={reminderConfig.secondReminderDays}
+                onChange={(v) => updateReminderConfig({ secondReminderDays: v })}
+                disabled={reminderSaving || !reminderConfig.isActive}
+                max={60}
+                unit="jours"
+              />
+              <IntervalRow
+                title="Avertissement avant clôture"
+                description="Délai avant le brouillon d'avertissement « clôture automatique prochaine » (pré-clôture)."
+                value={reminderConfig.preCloseDays}
+                onChange={(v) => updateReminderConfig({ preCloseDays: v })}
+                disabled={reminderSaving || !reminderConfig.isActive}
+                max={90}
+                unit="jours"
               />
               <IntervalRow
                 title="Clôture automatique"
