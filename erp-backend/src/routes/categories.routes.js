@@ -63,8 +63,9 @@ function subtreeNames(startId, { byId, childrenOf }) {
   return names;
 }
 
-// { [categoryId]: nombre de tickets } — sous-catégories incluses, corbeille exclue
-async function ticketCountsByCategory(categories) {
+// { [categoryId]: nombre de tickets } — sous-catégories incluses, corbeille et
+// suggestions en attente/rejetées exclues (même périmètre que la vue tickets)
+async function ticketCountsByCategory(categories, query = {}) {
   const { byId, childrenOf } = buildCategoryIndex(categories);
   const subtreeByCat = new Map(
     categories.map((c) => [c.id, subtreeNames(c.id, { byId, childrenOf })])
@@ -73,7 +74,14 @@ async function ticketCountsByCategory(categories) {
 
   const grouped = allNames.length === 0 ? [] : await prisma.ticket.groupBy({
     by: ['category'],
-    where: { deletedAt: null, category: { in: allNames } },
+    where: {
+      deletedAt: null,
+      category: { in: allNames },
+      // Même périmètre que buildTicketWhereClause : masquer par défaut les tickets en
+      // attente d'approbation ou rejetés par la Hotline (un approvalStatus explicite
+      // dans la requête le remplace, comme sur la liste principale des tickets).
+      approvalStatus: query.approvalStatus || { notIn: ['PENDING', 'REJECTED'] },
+    },
     _count: true,
   });
   const countByName = new Map(grouped.map((g) => [g.category, g._count]));
@@ -150,7 +158,7 @@ router.get('/export', async (req, res) => {
     orderBy: { name: 'asc' },
     include: { createdBy: { select: { fullName: true } } },
   });
-  const ticketCounts = await ticketCountsByCategory(categories);
+  const ticketCounts = await ticketCountsByCategory(categories, req.query);
 
   const childrenCount = new Map();
   for (const c of categories) {
@@ -189,7 +197,7 @@ router.get('/export', async (req, res) => {
 // Nombre de tickets par catégorie (une seule requête GROUP BY pour tout l'arbre)
 router.get('/counts', async (req, res) => {
   const categories = await prisma.ticketCategory.findMany({ select: { id: true, name: true, parentId: true } });
-  res.json(await ticketCountsByCategory(categories));
+  res.json(await ticketCountsByCategory(categories, req.query));
 });
 
 // Catégorie + where des tickets de son sous-arbre, filtre statut optionnel
@@ -202,7 +210,14 @@ async function resolveCategoryTickets(id, query = {}) {
   if (!cat) return null;
 
   const names = subtreeNames(id, buildCategoryIndex(categories));
-  const where = { deletedAt: null, category: { in: names } };
+  const where = {
+    deletedAt: null,
+    category: { in: names },
+    // Même périmètre que buildTicketWhereClause : masquer par défaut les tickets en
+    // attente d'approbation ou rejetés par la Hotline (un approvalStatus explicite
+    // dans la requête le remplace, comme sur la liste principale des tickets).
+    approvalStatus: query.approvalStatus || { notIn: ['PENDING', 'REJECTED'] },
+  };
   const statusCond = statusToCondition(query.status);
   if (statusCond) Object.assign(where, statusCond);
   return { cat, where };

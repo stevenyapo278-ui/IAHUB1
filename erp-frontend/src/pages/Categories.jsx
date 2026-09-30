@@ -518,7 +518,7 @@ export default function Categories() {
         endpoint={ticketsCat ? `/categories/${ticketsCat.id}/tickets` : null}
         title={`Tickets — ${ticketsCat?.name || ''}`}
         subtitle={ticketsCat ? pluralTickets(ticketCounts[ticketsCat.id] ?? 0) : null}
-        note={ticketsCat ? `Compte global (catégorie « ${ticketsCat.name} » et ses sous-catégories), corbeille exclue.` : null}
+        note={ticketsCat ? `Compte global (catégorie « ${ticketsCat.name} » et ses sous-catégories), corbeille et tickets en attente/rejetés exclus.` : null}
       />
 
       {/* ── Confirm Delete ──────────────────────────────────────────────── */}

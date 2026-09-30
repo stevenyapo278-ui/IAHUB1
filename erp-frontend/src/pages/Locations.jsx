@@ -836,7 +836,7 @@ export default function Locations() {
         endpoint={ticketsLoc ? `/locations/${ticketsLoc.id}/tickets` : null}
         title={`Tickets — ${ticketsLoc?.name || ''}`}
         subtitle={ticketsLoc ? pluralTickets(ticketCounts[ticketsLoc.id] ?? 0) : null}
-        note={ticketsLoc ? 'Compte global des tickets vivants (corbeille exclue) pointant vers ce lieu.' : null}
+        note={ticketsLoc ? 'Compte global des tickets vivants (corbeille et tickets en attente/rejetés exclus) pointant vers ce lieu.' : null}
       />
 
       <ReassignModal

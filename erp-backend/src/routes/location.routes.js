@@ -38,7 +38,8 @@ router.get('/', async (req, res) => {
 // Ticket.locationId est une colonne simple (aucune clé étrangère, aucune cascade) et
 // Ticket.locationName conserve le libellé complet : supprimer un lieu n'efface aucun
 // ticket, il coupe seulement le lien vers le lieu. On compte donc directement les
-// tickets vivants (corbeille exclue) groupés par locationId.
+// tickets vivants (corbeille exclue, suggestions en attente/rejetées exclues — même
+// périmètre que la vue tickets) groupés par locationId.
 
 // ── Extraction du tableau des lieux (colonnes identiques à la grille) ────────
 // Le filtrage reprend les champs cherchés par la grille : nom, chemin complet,
@@ -58,7 +59,7 @@ router.get('/export', async (req, res) => {
   });
   const grouped = await prisma.ticket.groupBy({
     by: ['locationId'],
-    where: { deletedAt: null, locationId: { not: null } },
+    where: applyDefaultApprovalExclusion({ deletedAt: null, locationId: { not: null } }, req.query),
     _count: true,
   });
   const countByLocation = new Map(grouped.map((g) => [g.locationId, g._count]));
@@ -93,7 +94,7 @@ router.get('/counts', async (req, res) => {
   const locations = await prisma.location.findMany({ select: { id: true } });
   const grouped = await prisma.ticket.groupBy({
     by: ['locationId'],
-    where: { deletedAt: null, locationId: { not: null } },
+    where: applyDefaultApprovalExclusion({ deletedAt: null, locationId: { not: null } }),
     _count: true,
   });
   const countByLocation = new Map(grouped.map((g) => [g.locationId, g._count]));
@@ -104,11 +105,19 @@ router.get('/counts', async (req, res) => {
 // la liste affichée et à l'extraction).
 const slugify = (s) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').toLowerCase();
 
+// Même périmètre que buildTicketWhereClause : par défaut on masque les tickets en
+// attente d'approbation ou rejetés par la Hotline. Un approvalStatus explicite dans
+// la requête le remplace (comportement identique à la liste principale des tickets).
+function applyDefaultApprovalExclusion(where, query = {}) {
+  where.approvalStatus = query.approvalStatus || { notIn: ['PENDING', 'REJECTED'] };
+  return where;
+}
+
 async function resolveLocationTickets(id, query = {}) {
   const location = await prisma.location.findUnique({ where: { id } });
   if (!location) return null;
 
-  const where = { deletedAt: null, locationId: id };
+  const where = applyDefaultApprovalExclusion({ deletedAt: null, locationId: id }, query);
   const statusCond = statusToCondition(query.status);
   if (statusCond) Object.assign(where, statusCond);
   return { location, where };
