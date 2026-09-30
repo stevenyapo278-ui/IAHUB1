@@ -709,7 +709,7 @@ function TableSkeleton() {
   );
 }
 
-function ColumnConfigPanel({ columns, onChange }) {
+function ColumnConfigPanel({ columns, onChange, onResetLayout }) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -742,6 +742,14 @@ function ColumnConfigPanel({ columns, onChange }) {
                   {col.label}
                 </label>
               ))}
+              <button
+                type="button"
+                onClick={() => { onResetLayout?.(); setOpen(false); }}
+                className="w-full px-2 pt-2 mt-1 border-t border-border/20 text-left text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                title="Remet les colonnes telles que définies par le code (ordre et largeurs d'origine)"
+              >
+                Réinitialiser la disposition
+              </button>
             </div>
           </div>
         </>
@@ -784,6 +792,28 @@ function loadColumnConfig() {
     }
   } catch {}
   return DEFAULT_COLUMNS.map((c) => ({ ...c }));
+}
+
+// ── Disposition des colonnes (ordre + largeur), propre à chaque utilisateur ──
+// Sauvegarde de l'état AG Grid (api.getColumnState) : F5, une autre session ou
+// un retour sur la liste retrouvent exactement le même agencement.
+function columnLayoutKey(userId) {
+  return `tickets_column_layout_${userId || 'anon'}`;
+}
+
+function loadColumnLayout(userId) {
+  try {
+    const state = JSON.parse(localStorage.getItem(columnLayoutKey(userId)));
+    return Array.isArray(state) && state.length > 0 ? state : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveColumnLayout(userId, state) {
+  try {
+    localStorage.setItem(columnLayoutKey(userId), JSON.stringify(state));
+  } catch {} // quota dépassé / mode privé : on ignore, la disposition reste provisoire
 }
 
 function isDueOverdue(t) {
@@ -1393,7 +1423,7 @@ export default function Tickets() {
   const [kbCursorId, setKbCursorId] = useState(null);
   const kbCursor = kbCursorId == null ? -1 : tickets.findIndex((t) => t.id === kbCursorId);
   const gridApiRef = useRef(null);
-  const handleGridReady = useCallback((event) => { gridApiRef.current = event.api; }, []);
+
   const kbRowClass = useCallback((params) => (params.data?.id === kbCursorId ? ['kb-cursor-row'] : []), [kbCursorId]);
   // AG Grid n'évalue getRowClass qu'au moment du rendu des lignes : on force le refresh
   useEffect(() => { gridApiRef.current?.redrawRows(); }, [kbCursorId]);
@@ -1957,6 +1987,88 @@ export default function Tickets() {
     setPage(1);
   }, [setSortBy, setSortOrder]);
 
+  // ── Disposition des colonnes (ordre + largeur), persistée par utilisateur ──
+  // AG Grid repart des largeurs des colDefs dès que les définitions changent
+  // (ajout du tri, colonne masquée/réaffichée) : on réapplique la disposition
+  // enregistrée à chaque nouveau jeu de colonnes, et à la mise en place du grid.
+  const columnLayoutTimer = useRef(null);
+  // Vrai pendant un apply/reset : AG Grid redéclenche columnMoved/columnResized
+  // sur ces opérations — il ne faut pas réécrire la sauvegarde qu'on applique.
+  const applyingLayoutRef = useRef(false);
+
+  const writeColumnLayout = useCallback((api) => {
+    if (!api || applyingLayoutRef.current) return;
+    // Uniquement largeur/ordre/pinning : le tri vit dans l'URL (sortBy/sortOrder)
+    const state = (api.getColumnState?.() || [])
+      .filter((c) => c?.colId)
+      .map(({ colId, width, flex, pinned }) => ({ colId, width, flex, pinned }));
+    if (state.length) saveColumnLayout(user?.id, state);
+  }, [user?.id]);
+
+  const persistColumnLayout = useCallback((api) => {
+    if (!api || applyingLayoutRef.current) return;
+    clearTimeout(columnLayoutTimer.current);
+    // Anti-rafale : un drag de redimensionnement émet beaucoup d'événements
+    columnLayoutTimer.current = setTimeout(() => writeColumnLayout(api), 400);
+  }, [writeColumnLayout]);
+
+  const applyColumnLayout = useCallback((api) => {
+    const saved = loadColumnLayout(user?.id);
+    if (!api || !saved) return;
+    // Une modification en attente (déplacement de colonne, puis tri) est écrite
+    // AVANT la réapplication : sinon elle serait écrasée par l'état enregistré.
+    if (columnLayoutTimer.current) {
+      clearTimeout(columnLayoutTimer.current);
+      columnLayoutTimer.current = null;
+      writeColumnLayout(api);
+    }
+    // Colonnes retirées depuis la sauvegarde (config qui a évolué) : ignorées
+    const available = new Set((api.getColumns?.() || []).map((c) => c.getColId()));
+    const state = saved.filter((s) => s && available.has(s.colId));
+    if (state.length === 0) return;
+    applyingLayoutRef.current = true;
+    try {
+      api.applyColumnState({ state, applyOrder: true });
+    } finally {
+      // Les événements AG Grid sont dispatchés pendant l'apply (synchrone) :
+      // verrou relâché ensuite, puis on fige l'état complet (une colonne
+      // réaffichée depuis le panneau n'était pas encore dans la sauvegarde).
+      setTimeout(() => {
+        applyingLayoutRef.current = false;
+        writeColumnLayout(api);
+      }, 0);
+    }
+  }, [user?.id, writeColumnLayout]);
+
+  const handleGridReady = useCallback((event) => {
+    gridApiRef.current = event.api;
+    applyColumnLayout(event.api);
+  }, [applyColumnLayout]);
+
+  const handleColumnStateChanged = useCallback((event) => {
+    persistColumnLayout(event.api);
+  }, [persistColumnLayout]);
+
+  // Recolle la disposition à chaque nouveau jeu de colonnes (visibilité, tri…)
+  useEffect(() => {
+    const api = gridApiRef.current;
+    if (api) applyColumnLayout(api);
+  }, [gridColumnDefs, applyColumnLayout]);
+
+  // Une écriture programmée après démontage n'a plus rien à écrire
+  useEffect(() => () => clearTimeout(columnLayoutTimer.current), []);
+
+  function resetColumnLayout() {
+    applyingLayoutRef.current = true;
+    try {
+      gridApiRef.current?.resetColumnState?.();
+    } finally {
+      setTimeout(() => { applyingLayoutRef.current = false; }, 0);
+    }
+    try { localStorage.removeItem(columnLayoutKey(user?.id)); } catch {}
+    toast.success('Disposition des colonnes réinitialisée');
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full w-full min-w-0 gap-0">
@@ -2019,7 +2131,7 @@ export default function Tickets() {
           )}
 
           {viewMode === 'table' && !showTrash && (
-            <ColumnConfigPanel columns={columns} onChange={setColumns} />
+            <ColumnConfigPanel columns={columns} onChange={setColumns} onResetLayout={resetColumnLayout} />
           )}
 
           <button onClick={() => setFilterPanelOpen(true)}
@@ -2218,6 +2330,8 @@ export default function Tickets() {
                 extraGridOptions={{
                   onSortChanged: handleGridSortChanged,
                   onGridReady: handleGridReady,
+                  onColumnResized: handleColumnStateChanged,
+                  onColumnMoved: handleColumnStateChanged,
                   getRowClass: kbRowClass,
                 }}
                 className="rounded-2xl overflow-hidden flex-1"
