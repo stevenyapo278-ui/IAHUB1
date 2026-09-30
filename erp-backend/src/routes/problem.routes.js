@@ -58,21 +58,46 @@ router.get('/stats', async (req, res) => {
   res.json({ total, open, solved, closed });
 });
 
+// Statuts admis sur une création — sert aussi de reprise de données (ex. export GLPI)
+const PROBLEM_STATUSES = ['NEW', 'IN_PROGRESS', 'ASSIGNED', 'PLANNED', 'WAITING', 'SOLVED', 'CLOSED', 'OBSERVED'];
+
 // ── Créer un problème ─────────────────────────────────────────────────
 router.post(
   '/',
   requirePermission('problems.manage', ['ADMIN', 'HOTLINE']),
-  [body('title').notEmpty().trim(), body('description').notEmpty().trim()],
+  [
+    body('title').notEmpty().trim(),
+    body('description').notEmpty().trim(),
+    // Reprise de données : sans `status` tout arrive en « Nouveau » et sans
+    // `createdAt` la date d'ouverture d'origine est perdue (remise à aujourd'hui).
+    body('status').optional({ values: 'null' }).isIn(PROBLEM_STATUSES)
+      .withMessage(`Statut invalide (valeurs : ${PROBLEM_STATUSES.join(', ')})`),
+    body('createdAt').optional({ values: 'null' }).isISO8601()
+      .withMessage('Date de création invalide (format ISO 8601 attendu)'),
+  ],
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const { title, description, priority, urgency, impact, category, locationId, locationName, dueDate, requesterId, assignedToId, teamId } = req.body;
+    const {
+      title, description, priority, urgency, impact, category, locationId, locationName,
+      dueDate, requesterId, assignedToId, teamId, status, createdAt,
+    } = req.body;
+
+    // Antidater l'ouverture n'appartient qu'à un administrateur
+    let createdAtValue;
+    if (createdAt) {
+      if (!['ADMIN', 'SUPERADMIN'].includes(req.user.role)) {
+        return res.status(403).json({ error: "Seul un administrateur peut fixer la date de création d'un problème" });
+      }
+      createdAtValue = new Date(createdAt);
+    }
 
     const problem = await prisma.problem.create({
       data: {
         title,
         description,
+        status: status || 'NEW',
         priority: priority || 'P3',
         urgency: urgency || 'MEDIUM',
         impact: impact || 'MEDIUM',
@@ -83,6 +108,9 @@ router.post(
         requesterId: requesterId || null,
         assignedToId: assignedToId || null,
         teamId: teamId || null,
+        ...(createdAtValue ? { createdAt: createdAtValue } : {}),
+        ...(status === 'SOLVED' ? { solvedAt: createdAtValue || new Date() } : {}),
+        ...(status === 'CLOSED' ? { closedAt: createdAtValue || new Date() } : {}),
       },
       include: {
         requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
