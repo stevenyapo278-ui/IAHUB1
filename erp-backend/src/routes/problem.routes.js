@@ -200,6 +200,7 @@ router.get('/:id', async (req, res) => {
     include: {
       requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
       assignedTo: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+      assignees: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
       team: { select: { id: true, name: true } },
       tickets: {
         include: {
@@ -232,12 +233,15 @@ router.patch(
     const existing = await prisma.problem.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ error: 'Problème introuvable' });
 
-    const allowed = ['title', 'description', 'status', 'priority', 'urgency', 'impact', 'category', 'locationId', 'locationName', 'dueDate', 'requesterId', 'assignedToId', 'teamId'];
+    const allowed = ['title', 'description', 'status', 'priority', 'urgency', 'impact', 'category', 'locationId', 'locationName', 'dueDate', 'requesterId', 'assignedToId', 'teamId', 'assigneeIds', 'observerIds'];
     const data = {};
     const events = [];
 
     for (const key of allowed) {
       if (req.body[key] !== undefined) {
+        // assigneeIds / observerIds sont traités plus bas (relations Prisma, pas des
+        // colonnes) : ne jamais les copier tels quels dans data — Prisma les refuserait.
+        if (key === 'assigneeIds' || key === 'observerIds') continue;
         let val = req.body[key];
         if (key === 'dueDate' && val) val = new Date(val);
 
@@ -273,9 +277,41 @@ router.patch(
       }
     }
 
-    if (Object.keys(data).length === 0) return res.json(existing);
+    if (Object.keys(data).length === 0 && req.body.assigneeIds === undefined && req.body.observerIds === undefined) return res.json(existing);
 
-    const problem = await prisma.problem.update({ where: { id }, data });
+    // Multi-assignation (miroir de Ticket.assignees) : remplace la liste complète.
+    // assignedToId suit le premier assigné si non fourni explicitement — cohérence
+    // avec la fiche ticket et l'historique d'assignation.
+    if (req.body.assigneeIds !== undefined) {
+      const ids = Array.isArray(req.body.assigneeIds) ? req.body.assigneeIds.map(Number).filter((n) => Number.isInteger(n) && n > 0) : [];
+      const existingIds = ids.length > 0
+        ? (await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true } })).map((u) => u.id)
+        : [];
+      if (ids.length !== existingIds.length) {
+        return res.status(400).json({ error: 'Un ou plusieurs assignés sont introuvables' });
+      }
+      data.assignees = { set: existingIds.map((uid) => ({ id: uid })) };
+      if (req.body.assignedToId === undefined) {
+        data.assignedToId = existingIds[0] || null;
+        if ((existing.assignedToId || null) !== (data.assignedToId || null)) {
+          events.push({ type: 'ASSIGNED', payload: { from: existing.assignedToId, to: data.assignedToId } });
+        }
+      }
+    }
+
+    // Observateurs : remplace la liste complète (ids vérifiés, sinon FK violée)
+    if (req.body.observerIds !== undefined) {
+      const ids = Array.isArray(req.body.observerIds) ? req.body.observerIds.map(Number).filter((n) => Number.isInteger(n) && n > 0) : [];
+      const existingIds = ids.length > 0
+        ? (await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true } })).map((u) => u.id)
+        : [];
+      if (ids.length !== existingIds.length) {
+        return res.status(400).json({ error: 'Un ou plusieurs observateurs sont introuvables' });
+      }
+      data.observers = { set: existingIds.map((uid) => ({ id: uid })) };
+    }
+
+    const problem = await prisma.problem.update({ where: { id }, data, include: { observers: { select: { id: true } } } });
 
     // Créer les événements
     for (const evt of events) {
@@ -429,6 +465,84 @@ router.post(
     });
 
     res.status(201).json({ ...followup, attachments: images });
+  }
+);
+
+// ── Éditer un suivi de problème (auteur du suivi ou ADMIN/SUPERADMIN) ────
+router.patch(
+  '/:id/followups/:followupId',
+  requirePermission('problems.manage', ['ADMIN', 'HOTLINE']),
+  problemUpload.array('images', 10),
+  [body('content').trim().notEmpty()],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      dropUploadedFiles(req.files);
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const problemId = Number(req.params.id);
+    const followupId = Number(req.params.followupId);
+
+    const followup = await prisma.problemFollowup.findFirst({
+      where: { id: followupId, problemId },
+      include: { author: { select: { id: true, fullName: true, avatarUrl: true } } },
+    });
+    if (!followup) {
+      dropUploadedFiles(req.files);
+      return res.status(404).json({ error: 'Commentaire introuvable' });
+    }
+
+    const isAdmin = ['ADMIN', 'SUPERADMIN'].includes(req.user.role);
+    if (!isAdmin && followup.authorId !== req.user.sub) {
+      dropUploadedFiles(req.files);
+      return res.status(403).json({ error: 'Vous ne pouvez modifier que vos propres commentaires' });
+    }
+
+    let images = [];
+    try {
+      images = await saveProblemAttachments(req.files || [], problemId);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+
+    const { content } = req.body;
+    const updated = await prisma.problemFollowup.update({
+      where: { id: followupId },
+      data: { content: sanitizeTicketHtml(applyFollowupImageMarkers(content, images)), updatedAt: new Date() },
+      include: { author: { select: { id: true, fullName: true, email: true, avatarUrl: true } } },
+    });
+
+    await prisma.problemEvent.create({
+      data: { problemId, type: 'FOLLOWUP_EDITED', actor: req.user.email || 'SYSTEM', payload: { followupId, imagesAdded: images.length } },
+    });
+
+    res.json({ followup: updated, imageAttachments: images });
+  }
+);
+
+// ── Supprimer un suivi de problème (auteur ou ADMIN/SUPERADMIN) ─────────
+router.delete(
+  '/:id/followups/:followupId',
+  requirePermission('problems.manage', ['ADMIN', 'HOTLINE']),
+  async (req, res) => {
+    const problemId = Number(req.params.id);
+    const followupId = Number(req.params.followupId);
+
+    const followup = await prisma.problemFollowup.findFirst({ where: { id: followupId, problemId } });
+    if (!followup) return res.status(404).json({ error: 'Commentaire introuvable' });
+
+    const isAdmin = ['ADMIN', 'SUPERADMIN'].includes(req.user.role);
+    if (!isAdmin && followup.authorId !== req.user.sub) {
+      return res.status(403).json({ error: 'Vous ne pouvez supprimer que vos propres commentaires' });
+    }
+
+    await prisma.problemFollowup.delete({ where: { id: followupId } });
+    await prisma.problemEvent.create({
+      data: { problemId, type: 'FOLLOWUP_DELETED', actor: req.user.email || 'SYSTEM', payload: { followupId } },
+    });
+
+    res.json({ success: true });
   }
 );
 

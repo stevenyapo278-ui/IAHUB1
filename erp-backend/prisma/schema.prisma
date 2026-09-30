@@ -198,6 +198,7 @@ model User {
   inboxRules                   InboxRule[]
   problemsCreated              Problem[]               @relation("ProblemRequester")
   problemsAssigned             Problem[]               @relation("ProblemAssignee")
+  problemsMultiAssigned        Problem[]               @relation("ProblemAssignees")
   problemsObserved             Problem[]               @relation("ProblemObservers")
   problemFollowups             ProblemFollowup[]
   dashboards                   Dashboard[]
@@ -1624,6 +1625,10 @@ model Problem {
   team         Team?  @relation(fields: [teamId], references: [id], onDelete: SetNull)
   teamId       Int?
   observers    User[] @relation("ProblemObservers")
+  // Multi-assignation (miroir de Ticket.assignees) : plusieurs techniciens peuvent
+  // travailler sur le même problème. assignedToId reste le « porteur principal »
+  // (compatibilité + synchronisé sur le premier assigné).
+  assignees    User[] @relation("ProblemAssignees")
 
   // Dates
   createdAt DateTime  @default(now())
@@ -1669,6 +1674,7 @@ model ProblemFollowup {
   content   String
   isPrivate Boolean  @default(false)
   createdAt DateTime @default(now())
+  updatedAt DateTime? // renseigné quand le suivi a été modifié (miroir de Followup.updatedAt)
 
   @@index([problemId])
   @@index([authorId])

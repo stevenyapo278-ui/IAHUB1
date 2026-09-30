@@ -14,6 +14,7 @@ import useSystemSettings from '../hooks/useSystemSettings';
 import ConfirmDialog from '../components/ConfirmDialog';
 import ActivityStream, { buildTimeline } from '../components/ActivityStream';
 import ImageAttachmentsEditor from '../components/ImageAttachmentsEditor';
+import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
 import { clipboardImageFiles, imageItemsFromFiles, revokeImageItems } from '../utils/imageAttachments';
 import { sanitizeHtml } from '../utils/sanitize';
 
@@ -116,6 +117,10 @@ export default function ProblemDetail() {
   const [categories, setCategories] = useState([]);
   const [users, setUsers] = useState([]);
   const [teams, setTeams] = useState([]);
+  // Édition d'un suivi existant (miroir du comportement de TicketDetail)
+  const [editingFollowupId, setEditingFollowupId] = useState(null);
+  const [editingFollowupContent, setEditingFollowupContent] = useState('');
+  const [savingFollowupEdit, setSavingFollowupEdit] = useState(false);
 
   // Libère les aperçus blob:// du composeur au démontage
   const pastedImagesRef = useRef(pastedImages);
@@ -180,6 +185,46 @@ export default function ProblemDetail() {
       loadProblem();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erreur');
+    }
+  }
+
+  // ── Édition d'un suivi (auteur ou ADMIN/SUPERADMIN, côté serveur) ────
+  function startEditFollowup(f) {
+    setEditingFollowupId(f.id);
+    // Le contenu peut contenir des images inline : on les conserve telles quelles,
+    // l'éditeur texte garde tout le HTML et le serveur re-sanitize à l'enregistrement.
+    setEditingFollowupContent(f.content || '');
+  }
+
+  function cancelEditFollowup() {
+    setEditingFollowupId(null);
+    setEditingFollowupContent('');
+  }
+
+  async function saveEditFollowup(followupId) {
+    const text = editingFollowupContent.trim();
+    if (!text) return;
+    setSavingFollowupEdit(true);
+    try {
+      await api.patch(`/problems/${id}/followups/${followupId}`, { content: text });
+      toast.success('Commentaire modifié');
+      setEditingFollowupId(null);
+      setEditingFollowupContent('');
+      loadProblem();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de la modification du commentaire');
+    } finally {
+      setSavingFollowupEdit(false);
+    }
+  }
+
+  async function handleDeleteFollowup(followupId) {
+    try {
+      await api.delete(`/problems/${id}/followups/${followupId}`);
+      toast.success('Commentaire supprimé');
+      loadProblem();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de la suppression');
     }
   }
 
@@ -357,12 +402,30 @@ export default function ProblemDetail() {
               </span>
               {canManage ? (
                 <>
-                  <select aria-label="Attribuer à" value={problem.assignedToId || ''}
-                    onChange={(e) => handleAssign('assignedToId', e.target.value ? Number(e.target.value) : null)}
-                    className={miniSelectCls}>
-                    <option value="">Non assigné</option>
-                    {assigneeOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
+                  <div className="min-w-[220px]">
+                    <RemoteUserMultiSelect
+                      value={(problem.assignees && problem.assignees.length > 0)
+                        ? problem.assignees.map((a) => a.id)
+                        : (problem.assignedToId ? [problem.assignedToId] : [])}
+                      onChange={async (vals, selectedUsers) => {
+                        try {
+                          // Auto-équipe : la première personne porte son équipe si aucune n'est définie
+                          const firstUser = selectedUsers && selectedUsers[0];
+                          const autoTeamId = firstUser ? (firstUser.teamId || firstUser.team?.id) : null;
+                          const payload = { assigneeIds: vals };
+                          if (autoTeamId && !problem.teamId) payload.teamId = autoTeamId;
+                          await api.patch(`/problems/${id}`, payload);
+                          toast.success('Assignés mis à jour');
+                          loadProblem();
+                        } catch (err) {
+                          toast.error(err.response?.data?.error || 'Échec de la mise à jour');
+                        }
+                      }}
+                      teamId={problem.teamId || null}
+                      onlyStaff
+                      placeholder="Rechercher des techniciens..."
+                    />
+                  </div>
                   <select aria-label="Équipe" value={problem.teamId || ''}
                     onChange={(e) => handleAssign('teamId', e.target.value ? Number(e.target.value) : null)}
                     className={miniSelectCls}>
@@ -573,6 +636,41 @@ export default function ProblemDetail() {
             )}
           </div>
 
+          {/* Observateurs (multi) */}
+          <div className="bg-surface-container rounded-xl p-4">
+            <h3 className="text-sm font-semibold text-on-surface mb-3 flex items-center gap-1.5">
+              <Eye className="w-4 h-4 text-amber-500" />
+              Observateurs {problem.observers?.length > 0 && `(${problem.observers.length})`}
+            </h3>
+            {canManage ? (
+              <RemoteUserMultiSelect
+                value={(problem.observers || []).map((o) => o.id)}
+                onChange={async (vals) => {
+                  try {
+                    await api.patch(`/problems/${id}`, { observerIds: vals });
+                    toast.success('Observateurs mis à jour');
+                    loadProblem();
+                  } catch (err) {
+                    toast.error(err.response?.data?.error || 'Échec de la mise à jour');
+                  }
+                }}
+                placeholder="Rechercher des observateurs..."
+              />
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {(problem.observers || []).length > 0 ? (
+                  problem.observers.map((o) => (
+                    <span key={o.id} className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-[11px] font-semibold text-amber-700 dark:text-amber-400">
+                      {o.fullName}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-xs text-on-surface-variant italic">Aucun observateur.</span>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Historique — Activity Stream (commentaires + journal) */}
           <div className="bg-surface-container rounded-xl p-4">
             <h3 className="text-sm font-semibold text-on-surface mb-3">Historique</h3>
@@ -580,21 +678,75 @@ export default function ProblemDetail() {
               items={historyItems}
               showFilters
               empty="Aucun échange pour le moment."
+              editingId={editingFollowupId}
               commentBadges={(f) => (
-                f.authorId && f.authorId === user?.id ? (
-                  <span className="act-tint text-[9px] px-2 py-0.5 rounded-full text-primary font-bold border">
-                    Vous
-                  </span>
-                ) : null
+                <>
+                  {f.authorId && f.authorId === user?.id && (
+                    <span className="act-tint text-[9px] px-2 py-0.5 rounded-full text-primary font-bold border">
+                      Vous
+                    </span>
+                  )}
+                  {f.updatedAt && (
+                    <span className="text-[9px] px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant font-semibold border border-outline-variant/30"
+                      title={`Modifié le ${new Date(f.updatedAt).toLocaleString('fr-FR')}`}>
+                      modifié
+                    </span>
+                  )}
+                </>
+              )}
+              commentActions={(f) => (
+                <>
+                  {canManage && f.authorId === user?.id && editingFollowupId !== f.id && (
+                    <button
+                      onClick={() => startEditFollowup(f)}
+                      title="Modifier"
+                      className="p-1 rounded-md border border-outline-variant/40 bg-surface-container text-on-surface-variant hover:text-on-surface hover:border-outline transition-colors cursor-pointer"
+                    >
+                      <Pencil className="w-3 h-3" />
+                    </button>
+                  )}
+                  {canManage && f.authorId === user?.id && (
+                    <button
+                      onClick={() => handleDeleteFollowup(f.id)}
+                      title="Supprimer"
+                      className="p-1 rounded-md border border-outline-variant/40 bg-surface-container text-on-surface-variant hover:text-red-500 hover:border-red-500/40 transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  )}
+                </>
               )}
               commentBody={(f) => (
-                f.content && (f.content.includes('<') || f.content.includes('&#') || f.content.includes('&lt;')) ? (
-                  <div
-                    className="text-sm text-on-surface-variant leading-relaxed mt-1 break-words [&_img]:max-w-full [&_img]:rounded-lg [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-2 [&_p]:mb-1.5 [&_p]:last:mb-0"
-                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(f.content) }}
-                  />
+                editingFollowupId === f.id ? (
+                  <div className="mt-2 space-y-2">
+                    <textarea
+                      rows={3}
+                      value={editingFollowupContent}
+                      onChange={(e) => setEditingFollowupContent(e.target.value)}
+                      className={`${inputCls} w-full resize-none`}
+                      autoFocus
+                    />
+                    <div className="flex gap-2">
+                      <button onClick={() => saveEditFollowup(f.id)} disabled={savingFollowupEdit || !editingFollowupContent.trim()}
+                        className="px-3 py-1.5 rounded-lg bg-primary text-on-primary text-[11px] font-bold cursor-pointer hover:opacity-90 disabled:opacity-50 flex items-center gap-1">
+                        {savingFollowupEdit ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+                        Enregistrer
+                      </button>
+                      <button onClick={cancelEditFollowup}
+                        className="px-3 py-1.5 rounded-lg border border-outline-variant/60 text-on-surface-variant text-[11px] font-semibold cursor-pointer hover:bg-surface-container-high">
+                        Annuler
+                      </button>
+                    </div>
+                  </div>
                 ) : (
-                  <p className="text-sm text-on-surface-variant mt-1 whitespace-pre-wrap break-words">{f.content}</p>
+                  f.content && (f.content.includes('<') || f.content.includes('&#') || f.content.includes('&lt;')) ? (
+                    <div
+                      className="text-sm text-on-surface-variant leading-relaxed mt-1 break-words [&_img]:max-w-full [&_img]:rounded-lg [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-2 [&_p]:mb-1.5 [&_p]:last:mb-0"
+                      dangerouslySetInnerHTML={{ __html: sanitizeHtml(f.content) }}
+                    />
+                  ) : (
+                    <p className="text-sm text-on-surface-variant mt-1 whitespace-pre-wrap break-words">{f.content}</p>
+                  )
                 )
               )}
             />
