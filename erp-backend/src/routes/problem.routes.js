@@ -1,12 +1,75 @@
 const express = require('express');
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
 const { body, validationResult } = require('express-validator');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { auditLog } = require('../services/auditLogService');
+const { validateUpload, sanitizeTicketHtml } = require('../utils/security');
 
 const router = express.Router();
 router.use(authenticate);
+
+// ── Pièces jointes d'un problème ──────────────────────────────────────
+// Captures collées dans un suivi et fichiers uploadés (miroir des tickets).
+// process.cwd() et non __dirname : le volume Docker est monté sur
+// <WORKDIR>/uploads — __dirname pointerait vers src/routes/ et les fichiers
+// seraient perdus au redémarrage du conteneur.
+const PROBLEM_ATTACHMENTS_DIR = path.join(process.cwd(), 'uploads', 'problem-attachments');
+fs.mkdirSync(PROBLEM_ATTACHMENTS_DIR, { recursive: true });
+
+const problemUpload = multer({ dest: PROBLEM_ATTACHMENTS_DIR, limits: { fileSize: 10 * 1024 * 1024 } });
+
+// Libère les fichiers temporaires de multer lorsqu'une requête échoue.
+function dropUploadedFiles(files = []) {
+  for (const f of files) { try { fs.unlinkSync(f.path); } catch {} }
+}
+
+// Écrit les fichiers reçus sur disque + crée les ProblemAttachment associés.
+async function saveProblemAttachments(files = [], problemId) {
+  const saved = [];
+  for (const file of files) {
+    const validation = validateUpload(file.originalname, file.mimetype, 'ticket');
+    if (!validation.valid) {
+      dropUploadedFiles(files);
+      throw new Error(validation.error);
+    }
+    const ext = path.extname(file.originalname) || '.bin';
+    const safeFilename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+    const destPath = path.join(PROBLEM_ATTACHMENTS_DIR, safeFilename);
+    try {
+      fs.renameSync(file.path, destPath);
+    } catch {
+      // rename peut échouer (autre périphérique) → copie puis suppression
+      fs.copyFileSync(file.path, destPath);
+      fs.unlinkSync(file.path);
+    }
+
+    const attachment = await prisma.problemAttachment.create({
+      data: {
+        problemId,
+        filename: file.originalname || safeFilename,
+        mimeType: file.mimetype || 'application/octet-stream',
+        localFilepath: path.join('uploads', 'problem-attachments', safeFilename),
+      },
+    });
+
+    saved.push({ id: attachment.id, filename: safeFilename, url: `/uploads/problem-attachments/${safeFilename}` });
+  }
+  return saved;
+}
+
+// Remplace les marqueurs <!--IMAGE_<n>--> du contenu par les <img> correspondants.
+// Chemin relatif (/uploads/…) : l'image s'affiche quel que soit le domaine ou le port.
+function applyFollowupImageMarkers(content = '', images = []) {
+  let out = content;
+  images.forEach((img, idx) => {
+    out = out.replace(new RegExp(`<!--IMAGE_${idx}-->?`, 'gi'), `<img src="${img.url}" alt="image jointe" />`);
+  });
+  return out.replace(/<!--IMAGE_\d+-->?/gi, '');
+}
 
 // ── Liste des problèmes ───────────────────────────────────────────────
 router.get('/', async (req, res) => {
@@ -150,6 +213,7 @@ router.get('/:id', async (req, res) => {
         include: { author: { select: { id: true, fullName: true, email: true, avatarUrl: true } } },
         orderBy: { createdAt: 'asc' },
       },
+      attachments: { orderBy: { createdAt: 'desc' } },
       events: { orderBy: { createdAt: 'desc' }, take: 50 },
       observers: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
     },
@@ -311,26 +375,116 @@ router.get('/:id/followups', async (req, res) => {
 router.post(
   '/:id/followups',
   requirePermission('problems.manage', ['ADMIN', 'HOTLINE']),
-  [body('content').notEmpty().trim()],
+  // Multipart : images collées (FormData) comme sur les tickets. Un appel JSON
+  // reste accepté — multer laisse passer les requêtes non multipart.
+  problemUpload.array('images', 10),
+  // trim AVANT notEmpty : sinon '   ' passe le contrôle puis devient vide
+  [body('content').trim().notEmpty()],
   async (req, res) => {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    if (!errors.isEmpty()) {
+      dropUploadedFiles(req.files);
+      return res.status(400).json({ errors: errors.array() });
+    }
 
     const problemId = Number(req.params.id);
     const problem = await prisma.problem.findUnique({ where: { id: problemId } });
-    if (!problem) return res.status(404).json({ error: 'Problème introuvable' });
+    if (!problem) {
+      dropUploadedFiles(req.files);
+      return res.status(404).json({ error: 'Problème introuvable' });
+    }
+
+    let images = [];
+    try {
+      images = await saveProblemAttachments(req.files || [], problemId);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
 
     const { content, isPrivate } = req.body;
+    const finalContent = sanitizeTicketHtml(applyFollowupImageMarkers(content, images));
+
     const followup = await prisma.problemFollowup.create({
-      data: { problemId, authorId: req.user.sub, content, isPrivate: isPrivate || false },
+      data: { problemId, authorId: req.user.sub, content: finalContent, isPrivate: isPrivate === 'true' || isPrivate === true },
       include: { author: { select: { id: true, fullName: true, email: true, avatarUrl: true } } },
     });
 
     await prisma.problemEvent.create({
-      data: { problemId, type: 'FOLLOWUP_ADDED', actor: req.user.email || 'SYSTEM', payload: { followupId: followup.id } },
+      data: { problemId, type: 'FOLLOWUP_ADDED', actor: req.user.email || 'SYSTEM', payload: { followupId: followup.id, attachmentCount: images.length } },
     });
 
-    res.status(201).json(followup);
+    res.status(201).json({ ...followup, attachments: images });
+  }
+);
+
+// ── Pièces jointes du problème (upload / téléchargement / suppression) ──
+router.post(
+  '/:id/attachments',
+  requirePermission('problems.manage', ['ADMIN', 'HOTLINE']),
+  problemUpload.array('files', 10),
+  async (req, res) => {
+    const problemId = Number(req.params.id);
+    const problem = await prisma.problem.findUnique({ where: { id: problemId }, select: { id: true } });
+    if (!problem) {
+      dropUploadedFiles(req.files);
+      return res.status(404).json({ error: 'Problème introuvable' });
+    }
+    if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'Aucun fichier fourni' });
+
+    try {
+      await saveProblemAttachments(req.files, problemId);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+
+    const updated = await prisma.problem.findUnique({ where: { id: problemId }, include: { attachments: { orderBy: { createdAt: 'desc' } } } });
+    res.status(201).json({ attachments: updated.attachments });
+  }
+);
+
+router.get('/:id/attachments/:attachmentId/file', async (req, res) => {
+  try {
+    const attachment = await prisma.problemAttachment.findFirst({
+      where: { id: Number(req.params.attachmentId), problemId: Number(req.params.id) },
+    });
+    if (!attachment) return res.status(404).json({ error: 'Pièce jointe introuvable' });
+
+    if (attachment.localFilepath) {
+      // Résolution relative à process.cwd() (= WORKDIR du conteneur)
+      const localPath = path.isAbsolute(attachment.localFilepath)
+        ? attachment.localFilepath
+        : path.join(process.cwd(), attachment.localFilepath);
+      if (fs.existsSync(localPath)) {
+        res.setHeader('Content-Type', attachment.mimeType || 'application/octet-stream');
+        res.setHeader('Content-Disposition', `${String(attachment.mimeType || '').startsWith('image/') ? 'inline' : 'attachment'}; filename="${attachment.filename}"`);
+        return res.sendFile(localPath);
+      }
+      console.error(`[problem.routes] Fichier introuvable sur le disque: ${localPath}`);
+    }
+    return res.status(404).json({ error: 'Fichier non disponible sur ce serveur' });
+  } catch (err) {
+    console.error('[problem.routes] Erreur téléchargement pièce jointe:', err);
+    return res.status(500).json({ error: 'Erreur lors du téléchargement' });
+  }
+});
+
+router.delete(
+  '/:id/attachments/:attachmentId',
+  requirePermission('problems.manage', ['ADMIN', 'HOTLINE']),
+  async (req, res) => {
+    const attachment = await prisma.problemAttachment.findFirst({
+      where: { id: Number(req.params.attachmentId), problemId: Number(req.params.id) },
+    });
+    if (!attachment) return res.status(404).json({ error: 'Pièce jointe introuvable' });
+
+    if (attachment.localFilepath) {
+      const localPath = path.isAbsolute(attachment.localFilepath)
+        ? attachment.localFilepath
+        : path.join(process.cwd(), attachment.localFilepath);
+      try { fs.unlinkSync(localPath); } catch {}
+    }
+    await prisma.problemAttachment.delete({ where: { id: attachment.id } });
+    res.json({ ok: true });
   }
 );
 

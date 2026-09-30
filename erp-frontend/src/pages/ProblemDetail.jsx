@@ -1,10 +1,11 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   AlertTriangle, ArrowLeft, Clock, CheckCircle2, Radio, User, Users, Tag,
   Link2, Plus, X, RefreshCw, Send, Eye, Calendar, Flame, Info, ArrowDown,
-  Sparkles, Pencil, Trash2, LinkIcon, Unlink, Search, Loader2,
+  Sparkles, Pencil, Trash2, LinkIcon, Unlink, Search, Loader2, Paperclip,
+  ChevronDown, FileText,
 } from 'lucide-react';
 import api from '../api/client';
 import { hasPermission } from '../utils/permissions';
@@ -12,6 +13,9 @@ import { useAuth } from '../context/AuthContext';
 import useSystemSettings from '../hooks/useSystemSettings';
 import ConfirmDialog from '../components/ConfirmDialog';
 import ActivityStream, { buildTimeline } from '../components/ActivityStream';
+import ImageAttachmentsEditor from '../components/ImageAttachmentsEditor';
+import { clipboardImageFiles, imageItemsFromFiles, revokeImageItems } from '../utils/imageAttachments';
+import { sanitizeHtml } from '../utils/sanitize';
 
 const STATUS_OPTIONS = ['NEW', 'IN_PROGRESS', 'ASSIGNED', 'PLANNED', 'WAITING', 'SOLVED', 'CLOSED', 'OBSERVED'];
 const STATUS_LABELS = {
@@ -57,6 +61,28 @@ function StatusBadge({ status }) {
   );
 }
 
+// Badge de statut devenu sélecteur : un seul clic pour changer d'état,
+// sans le volet « Actions rapides » qui occupait tout le tiers droit.
+function StatusSelect({ status, onChange }) {
+  const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.NEW;
+  const Icon = cfg.Icon;
+  return (
+    <span className={`relative inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold ${cfg.bg}`}>
+      <Icon className="w-3 h-3" />
+      {STATUS_LABELS[status] || status}
+      <ChevronDown className="w-3 h-3 -mr-1 pointer-events-none" />
+      <select
+        value={status}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label="Changer le statut"
+        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+      >
+        {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
+      </select>
+    </span>
+  );
+}
+
 function PriorityBadge({ priority }) {
   const cfg = PRIORITY_CONFIG[priority] || PRIORITY_CONFIG.P3;
   const Icon = cfg.Icon;
@@ -83,7 +109,15 @@ export default function ProblemDetail() {
   const [showLinkModal, setShowLinkModal] = useState(false);
   const [newFollowup, setNewFollowup] = useState('');
   const [sendingFollowup, setSendingFollowup] = useState(false);
+  const [pastedImages, setPastedImages] = useState([]);
+  const [uploadingFiles, setUploadingFiles] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [categories, setCategories] = useState([]);
+
+  // Libère les aperçus blob:// du composeur au démontage
+  const pastedImagesRef = useRef(pastedImages);
+  useEffect(() => { pastedImagesRef.current = pastedImages; }, [pastedImages]);
+  useEffect(() => () => revokeImageItems(pastedImagesRef.current), []);
 
   const loadProblem = useCallback(() => {
     setLoading(true);
@@ -94,6 +128,13 @@ export default function ProblemDetail() {
   }, [id, navigate]);
 
   useEffect(() => { loadProblem(); }, [loadProblem]);
+
+  // Catégories proposées à l'édition (même source que la création de problème)
+  useEffect(() => {
+    api.get('/categories')
+      .then(({ data }) => setCategories(Array.isArray(data) ? data : data.categories || []))
+      .catch(() => {});
+  }, []);
 
   async function handleSave() {
     setSaving(true);
@@ -120,17 +161,74 @@ export default function ProblemDetail() {
   }
 
   async function handleAddFollowup() {
-    if (!newFollowup.trim()) return;
+    if (!newFollowup.trim() && pastedImages.length === 0) return;
     setSendingFollowup(true);
     try {
-      await api.post(`/problems/${id}/followups`, { content: newFollowup.trim() });
+      // Multipart dès qu'une image est jointe ; JSON reste accepté sinon
+      const fd = new FormData();
+      let content = newFollowup.trim();
+      pastedImages.forEach((img, idx) => {
+        fd.append('images', img.file);
+        content += `${content ? '\n\n' : ''}<!--IMAGE_${idx}-->`;
+      });
+      fd.append('content', content);
+      await api.post(`/problems/${id}/followups`, fd);
       toast.success('Commentaire ajouté');
       setNewFollowup('');
+      revokeImageItems(pastedImages);
+      setPastedImages([]);
       loadProblem();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erreur');
     } finally {
       setSendingFollowup(false);
+    }
+  }
+
+  // Images du commentaire : collage (Ctrl+V), bouton ou glisser-déposer
+  function addCommentImages(files) {
+    const items = imageItemsFromFiles(files, 'problem');
+    if (items.length === 0) return;
+    setPastedImages((prev) => [...prev, ...items]);
+    toast.success(
+      items.length > 1
+        ? `${items.length} images ajoutées — elles partiront avec le commentaire`
+        : 'Image ajoutée — elle partira avec le commentaire',
+    );
+  }
+
+  function handlePasteImages(e) {
+    const files = clipboardImageFiles(e);
+    if (files.length === 0) return;
+    e.preventDefault();
+    addCommentImages(files);
+  }
+
+  // Pièces jointes du problème (section Description)
+  async function handleUploadFiles(fileList) {
+    const files = Array.from(fileList || []);
+    if (files.length === 0) return;
+    setUploadingFiles(true);
+    try {
+      const fd = new FormData();
+      files.forEach((f) => fd.append('files', f));
+      await api.post(`/problems/${id}/attachments`, fd);
+      toast.success(files.length > 1 ? `${files.length} fichiers ajoutés` : 'Pièce jointe ajoutée');
+      loadProblem();
+    } catch (err) {
+      toast.error(err.response?.data?.error || "Échec de l'envoi");
+    } finally {
+      setUploadingFiles(false);
+    }
+  }
+
+  async function handleDeleteAttachment(attachmentId) {
+    try {
+      await api.delete(`/problems/${id}/attachments/${attachmentId}`);
+      toast.success('Pièce jointe supprimée');
+      loadProblem();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur');
     }
   }
 
@@ -160,6 +258,15 @@ export default function ProblemDetail() {
     [problem]
   );
 
+  // Catégories de l'API + valeur courante si elle a été retirée de la liste
+  // (catégorie GLPI importée, renommée…) : elle reste sélectionnable/affichable.
+  const categoryOptions = useMemo(() => {
+    const opts = categories.map((c) => ({ value: c.name, label: c.name }));
+    const current = editForm.category || problem?.category;
+    if (current && !opts.some((o) => o.value === current)) opts.unshift({ value: current, label: current });
+    return opts;
+  }, [categories, editForm.category, problem?.category]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -183,7 +290,11 @@ export default function ProblemDetail() {
           </button>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <StatusBadge status={problem.status} />
+              {canManage ? (
+                <StatusSelect status={problem.status} onChange={handleStatusChange} />
+              ) : (
+                <StatusBadge status={problem.status} />
+              )}
               <PriorityBadge priority={problem.priority} />
               {problem.category && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-surface-container text-on-surface-variant">
@@ -257,6 +368,14 @@ export default function ProblemDetail() {
               </select>
             </div>
           </div>
+          <div>
+            <label className="block text-xs font-medium text-on-surface-variant mb-1">Catégorie</label>
+            <select value={editForm.category || ''} onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
+              className={`${inputCls} w-full text-xs`}>
+              <option value="">Aucune</option>
+              {categoryOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
           <div className="flex justify-end gap-2 pt-2">
             <button onClick={() => setEditMode(false)}
               className="px-4 py-2 rounded-xl border border-outline-variant/60 text-sm font-medium cursor-pointer hover:bg-surface-container-high">
@@ -278,13 +397,65 @@ export default function ProblemDetail() {
             {problem.requester && <span>Demandeur: <strong>{problem.requester.fullName}</strong></span>}
             {problem.locationName && <span>Lieu: <strong>{problem.locationName}</strong></span>}
           </div>
+
+          {/* Pièces jointes : captures / fichiers uploadés */}
+          <div className="mt-4 pt-3 border-t border-outline-variant/30">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-xs font-semibold text-on-surface flex items-center gap-1.5">
+                <Paperclip className="w-3.5 h-3.5" />
+                Pièces jointes ({problem.attachments?.length || 0})
+              </h4>
+              {canManage && (
+                <label className={`px-2.5 py-1 rounded-lg bg-primary/10 text-primary text-[11px] font-bold flex items-center gap-1 cursor-pointer hover:bg-primary/20 ${uploadingFiles ? 'opacity-50 pointer-events-none' : ''}`}>
+                  {uploadingFiles ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                  Joindre
+                  <input type="file" multiple hidden disabled={uploadingFiles}
+                    onChange={(e) => { handleUploadFiles(e.target.files); e.target.value = ''; }} />
+                </label>
+              )}
+            </div>
+            {(problem.attachments?.length || 0) === 0 ? (
+              <p className="text-xs text-on-surface-variant italic">Aucune pièce jointe.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {problem.attachments.map((att) => {
+                  const url = att.localFilepath
+                    ? `/${att.localFilepath.replace(/^\/+/, '').replace(/\\/g, '/')}`
+                    : `/problems/${problem.id}/attachments/${att.id}/file`;
+                  const isImage = (att.mimeType || '').startsWith('image/');
+                  return (
+                    <div key={att.id} className="relative group/att">
+                      <a href={url} target="_blank" rel="noreferrer"
+                        className={`block ${isImage ? '' : 'px-3 py-2 rounded-lg border border-outline-variant/40 bg-surface-container-high flex items-center gap-1.5'}`}>
+                        {isImage ? (
+                          <img src={url} alt={att.filename}
+                            className="h-16 w-16 object-cover rounded-lg border border-outline-variant/40 bg-surface" />
+                        ) : (
+                          <>
+                            <FileText className="w-3.5 h-3.5 text-primary" />
+                            <span className="text-[11px] font-medium text-on-surface max-w-[140px] truncate">{att.filename}</span>
+                          </>
+                        )}
+                      </a>
+                      {canManage && (
+                        <button onClick={() => handleDeleteAttachment(att.id)} title="Supprimer"
+                          className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center shadow-md opacity-0 group-hover/att:opacity-100 hover:scale-110 transition-all cursor-pointer">
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        {/* Left: Tickets liés + Timeline */}
-        <div className="lg:col-span-2 space-y-5">
-          {/* Tickets liés */}
+      {/* Contenu pleine largeur : le volet « Actions rapides » a cédé la place
+          au sélecteur de statut de l'en-tête */}
+      <div className="space-y-5">
+        {/* Tickets liés */}
           <div className="bg-surface-container rounded-xl p-4">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-on-surface flex items-center gap-1.5">
@@ -332,51 +503,54 @@ export default function ProblemDetail() {
               items={historyItems}
               showFilters
               empty="Aucun échange pour le moment."
+              commentBadges={(f) => (
+                f.authorId && f.authorId === user?.id ? (
+                  <span className="act-tint text-[9px] px-2 py-0.5 rounded-full text-primary font-bold border">
+                    Vous
+                  </span>
+                ) : null
+              )}
               commentBody={(f) => (
-                <p className="text-sm text-on-surface-variant mt-1 whitespace-pre-wrap break-words">{f.content}</p>
+                f.content && (f.content.includes('<') || f.content.includes('&#') || f.content.includes('&lt;')) ? (
+                  <div
+                    className="text-sm text-on-surface-variant leading-relaxed mt-1 break-words [&_img]:max-w-full [&_img]:rounded-lg [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-2 [&_p]:mb-1.5 [&_p]:last:mb-0"
+                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(f.content) }}
+                  />
+                ) : (
+                  <p className="text-sm text-on-surface-variant mt-1 whitespace-pre-wrap break-words">{f.content}</p>
+                )
               )}
             />
 
-            {/* New followup input */}
+            {/* Composer : texte + captures (collage Ctrl+V, fichier, glisser-déposer) */}
             {canManage && (
               <div className="flex gap-2 mt-3 pt-3 border-t border-outline-variant/30">
-                <input
-                  type="text"
-                  value={newFollowup}
-                  onChange={(e) => setNewFollowup(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAddFollowup()}
-                  placeholder="Ajouter un commentaire..."
-                  className={`${inputCls} flex-1`}
-                />
-                <button onClick={handleAddFollowup} disabled={sendingFollowup || !newFollowup.trim()}
-                  className="p-2 rounded-xl bg-primary text-on-primary cursor-pointer hover:opacity-90 disabled:opacity-50">
+                <div className="flex-1 space-y-2">
+                  <textarea
+                    rows={2}
+                    value={newFollowup}
+                    onChange={(e) => setNewFollowup(e.target.value)}
+                    onPaste={handlePasteImages}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAddFollowup(); }
+                    }}
+                    placeholder="Ajouter un commentaire… (Entrée pour envoyer, Ctrl+V pour coller une capture)"
+                    className={`${inputCls} w-full resize-none`}
+                  />
+                  <ImageAttachmentsEditor
+                    items={pastedImages}
+                    onChange={setPastedImages}
+                    onFiles={addCommentImages}
+                  />
+                </div>
+                <button onClick={handleAddFollowup}
+                  disabled={sendingFollowup || (!newFollowup.trim() && pastedImages.length === 0)}
+                  className="self-start p-2 rounded-xl bg-primary text-on-primary cursor-pointer hover:opacity-90 disabled:opacity-50">
                   {sendingFollowup ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 </button>
               </div>
             )}
           </div>
-        </div>
-
-        {/* Right: Actions sidebar */}
-        <div className="space-y-4">
-          {/* Quick status change */}
-          <div className="bg-surface-container rounded-xl p-4">
-            <h3 className="text-sm font-semibold text-on-surface mb-3">Actions rapides</h3>
-            <div className="space-y-2">
-              {STATUS_OPTIONS.filter((s) => s !== problem.status).slice(0, 5).map((s) => {
-                const cfg = STATUS_CONFIG[s];
-                const Icon = cfg?.Icon || Clock;
-                return (
-                  <button key={s} onClick={() => handleStatusChange(s)}
-                    className={`w-full text-left px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-2 cursor-pointer hover:bg-surface-container-high transition-colors ${cfg?.bg || ''}`}>
-                    <Icon className="w-3.5 h-3.5" />
-                    {STATUS_LABELS[s]}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Link ticket modal */}

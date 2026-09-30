@@ -1629,11 +1629,12 @@ model Problem {
   closedAt  DateTime?
 
   // Relations
-  tickets   ProblemTicket[]
-  followups ProblemFollowup[]
-  events    ProblemEvent[]
-  linksA    ProblemLink[]     @relation("ProblemLinksA")
-  linksB    ProblemLink[]     @relation("ProblemLinksB")
+  tickets     ProblemTicket[]
+  followups   ProblemFollowup[]
+  events      ProblemEvent[]
+  attachments ProblemAttachment[]
+  linksA      ProblemLink[]     @relation("ProblemLinksA")
+  linksB      ProblemLink[]     @relation("ProblemLinksB")
 
   @@index([status])
   @@index([requesterId])
@@ -1668,6 +1669,20 @@ model ProblemFollowup {
 
   @@index([problemId])
   @@index([authorId])
+}
+
+// Pièces jointes d'un problème (captures collées dans un suivi ou fichiers uploadés),
+// miroir de TicketAttachment mais sans le lien email entrant.
+model ProblemAttachment {
+  id            Int      @id @default(autoincrement())
+  problem       Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  problemId     Int
+  filename      String
+  mimeType      String?
+  localFilepath String? // chemin relatif à process.cwd(), ex: 'uploads/problem-attachments/…'
+  createdAt     DateTime @default(now())
+
+  @@index([problemId])
 }
 
 // Journal d'événements sur un problème
