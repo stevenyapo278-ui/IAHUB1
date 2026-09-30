@@ -32,7 +32,7 @@ function FolderCard({ team, tickets, cssClass, onClick }) {
   );
 }
 
-function TicketModal({ group, tickets, originRect, onClose }) {
+function TicketModal({ group, tickets, originRect, onClose, filterQs }) {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [isClosing, setIsClosing] = useState(false);
@@ -116,7 +116,7 @@ function TicketModal({ group, tickets, originRect, onClose }) {
             filtered.map((t) => (
               <div
                 key={t.id}
-                onClick={() => { onClose(); navigate(`/tickets/${t.id}`); }}
+                onClick={() => { onClose(); navigate(`/tickets/${t.id}${filterQs || ''}`); }}
                 className="p-3 rounded-xl border border-outline-variant/20 bg-surface-container-lowest hover:border-primary/30 hover:shadow-sm transition-all cursor-pointer"
               >
                 <div className="flex items-start gap-2">
@@ -168,7 +168,7 @@ function TicketModal({ group, tickets, originRect, onClose }) {
   );
 }
 
-export default function TeamFolderView({ tickets, teams }) {
+export default function TeamFolderView({ tickets, teams, filterQs }) {
   const [selectedTeam, setSelectedTeam] = useState(null);
   const [selectedTickets, setSelectedTickets] = useState([]);
   const [originRect, setOriginRect] = useState(null);
@@ -338,6 +338,7 @@ export default function TeamFolderView({ tickets, teams }) {
           tickets={selectedTickets}
           originRect={originRect}
           onClose={() => { setSelectedTeam(null); setSelectedTickets([]); setOriginRect(null); }}
+          filterQs={filterQs}
         />
       )}
     </>

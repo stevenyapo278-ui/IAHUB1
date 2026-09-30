@@ -3,12 +3,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import api from '../../api/client';
 import { sanitizeHtml } from '../../utils/sanitize';
+import { useAuth } from '../../context/AuthContext';
 import { SettingRow, IntervalRow, inputClass, itemVariants } from './SettingsComponents';
 
 const DEFAULT_ACK_MESSAGE = 'Nous avons bien reçu votre demande de support et un ticket a été créé automatiquement.';
 const DEFAULT_ACK_OFF_HOURS_MESSAGE = 'Nous avons bien reçu votre demande. Nos bureaux sont actuellement fermés : votre demande sera prise en charge à partir du prochain jour ouvré, dès 8h00.';
 const DEFAULT_SIGNATURE = '<p>Cordialement,<br>Support IT</p>';
-const ACK_PREVIEW = { toName: 'Jean Dupont', ticketId: 42, subject: 'Problème imprimante 3e étage' };
+const ACK_PREVIEW = { ticketId: 42, subject: 'Problème imprimante 3e étage' };
 const DAY_LABELS = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
 
 // Miroir front de la logique backend (emailSender.isWithinBusinessHours) : indique si "maintenant"
@@ -30,14 +31,14 @@ function isNowWithinBusinessHours(days, startTime, endTime) {
   }
 }
 
-function buildAckPreviewHtml(customMessage, signature, logoUrl, logoHeight, { withTicketBlock = true } = {}) {
+function buildAckPreviewHtml(customMessage, signature, logoUrl, logoHeight, { withTicketBlock = true, toName = '' } = {}) {
   const intro = (customMessage || DEFAULT_ACK_MESSAGE)
     .replaceAll('{ticketId}', ACK_PREVIEW.ticketId)
     .replaceAll('{subject}', ACK_PREVIEW.subject)
-    .replaceAll('{toName}', ACK_PREVIEW.toName);
+    .replaceAll('{toName}', toName);
   const logoHtml = logoUrl ? `<p style="margin-top:8px"><img src="${logoUrl}" alt="Logo" style="height:${logoHeight || 60}px"></p>` : '';
   return `
-<p>Bonjour ${ACK_PREVIEW.toName},</p>
+<p>Bonjour ${toName || ''},</p>
 <p>${intro}</p>
 ${withTicketBlock ? `
 <table style="border-collapse:collapse;margin:16px 0">
@@ -54,6 +55,7 @@ ${withTicketBlock ? `
 const TEST_EMAIL_STORAGE_KEY = 'automation_test_email';
 
 export default function AutomationTab() {
+  const { user } = useAuth();
   const [settings, setSettings] = useState(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -458,7 +460,7 @@ export default function AutomationTab() {
               {/* Mail body */}
               <div className="p-md bg-white text-gray-800 flex-1 overflow-auto font-body-sm leading-relaxed max-h-[310px] min-h-[250px]">
                 <div
-                  dangerouslySetInnerHTML={{ __html: sanitizeHtml(buildAckPreviewHtml(ackPreviewMessage, signatureDraft, settings.signatureLogoUrl, settings.signatureLogoHeight, { withTicketBlock: ackPreviewWithTicket })) }}
+                  dangerouslySetInnerHTML={{ __html: sanitizeHtml(buildAckPreviewHtml(ackPreviewMessage, signatureDraft, settings.signatureLogoUrl, settings.signatureLogoHeight, { withTicketBlock: ackPreviewWithTicket, toName: user?.fullName || '' })) }}
                 />
               </div>
 

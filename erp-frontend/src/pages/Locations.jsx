@@ -515,12 +515,15 @@ export default function Locations() {
     api.get('/locations')
       .then(({ data }) => {
         setLocations(data);
-        // Après création/édition : le tri serveur (isCustom asc puis completename asc) place
-        // les lieux personnalisés tout à la fin (page 8/8 pour 187 lieux) — on saute sur la
-        // page qui contient la ligne, sinon on croit à tort que le lieu n'a pas été ajouté.
+        // Après création/édition : on saute sur la page qui contient la ligne (tri serveur :
+        // isCustom asc puis completename asc). La recherche/filtre en cours est CONSERVÉE —
+        // l'utilisateur ne doit pas perdre son contexte après « Enregistrer ».
         if (Number.isFinite(highlightId)) {
-          setSearch('');
-          const idx = data.findIndex((l) => l.id === highlightId);
+          const searchLc = search.trim().toLowerCase();
+          const match = (l) => !searchLc || [l.name, l.completename, l.town, l.building, l.country, l.tag].some((f) => f?.toLowerCase().includes(searchLc));
+          const idx = data.findIndex((l) => l.id === highlightId && match(l));
+          // Le lieu ne passe plus le filtre (ex. renommé hors recherche) → on garde le filtre,
+          // mais on ne saute nulle part : il reparaîtra en réinitialisant la recherche.
           if (idx >= 0) setPage(Math.floor(idx / pageSize) + 1);
         }
       })
@@ -539,6 +542,8 @@ export default function Locations() {
       .catch(() => setAvailableTags([]));
   }
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps — chargement initial uniquement ;
+  // loadLocations lit `search` pour replacer la page après édition sans vider le filtre.
   useEffect(() => { loadLocations(); }, []);
 
   function openCreate() {

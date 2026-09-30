@@ -12,7 +12,7 @@ const COLUMNS = [
 
 const STATUS_TO_COL = Object.fromEntries(COLUMNS.flatMap((col) => col.statuses.map((s) => [s, col.key])));
 
-export default function KanbanBoard({ tickets, canAssign, onStatusChange }) {
+export default function KanbanBoard({ tickets, canAssign, onStatusChange, filterQs }) {
   const navigate = useNavigate();
   const [dragOverCol, setDragOverCol] = useState(null);
   const [draggingId, setDraggingId] = useState(null);
@@ -74,7 +74,7 @@ export default function KanbanBoard({ tickets, canAssign, onStatusChange }) {
                     draggable={canAssign}
                     onDragStart={() => setDraggingId(t.id)}
                     onDragEnd={() => { setDraggingId(null); setDragOverCol(null); }}
-                    onClick={() => navigate(`/tickets/${t.id}`)}
+                    onClick={() => navigate(`/tickets/${t.id}${filterQs || ''}`)}
                     className={`p-2.5 rounded-xl border bg-surface-container-lowest shadow-sm transition-all hover:shadow-md cursor-pointer min-w-0 ${
                       draggingId === t.id ? 'opacity-50 scale-95' : ''
                     } ${canAssign ? 'hover:border-primary/40' : ''}`}

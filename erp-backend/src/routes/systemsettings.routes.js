@@ -228,8 +228,8 @@ const {
 const EMAIL_TEST_TEMPLATES = {
   acknowledgement: {
     label: 'Accusé de réception',
-    build: ({ signature, ticketLink }) => buildAcknowledgementHtml({
-      toName: 'Jean Dupont', glpiTicketId: 999, ticketId: 999,
+    build: ({ signature, ticketLink, recipientName }) => buildAcknowledgementHtml({
+      toName: recipientName, glpiTicketId: 999, ticketId: 999,
       originalSubject: 'Problème d\'impression bureau 305',
       customMessage: 'Votre demande a bien été reçue (ticket #{ticketId}).',
       signature, ticketLink,
@@ -237,24 +237,24 @@ const EMAIL_TEST_TEMPLATES = {
   },
   known_incident: {
     label: 'Incident déjà connu',
-    build: ({ signature, ticketLink }) => buildKnownIncidentNotificationHtml({
-      toName: 'Jean Dupont', glpiTicketId: 999, ticketId: 999,
+    build: ({ signature, ticketLink, recipientName }) => buildKnownIncidentNotificationHtml({
+      toName: recipientName, glpiTicketId: 999, ticketId: 999,
       originalSubject: 'Panne réseau site Abidjan', isMajor: true, impactedCount: 12,
       signature, ticketLink,
     }),
   },
   assignment: {
     label: 'Assignation technicien',
-    build: ({ signature, ticketLink }) => buildAssignmentNotificationHtml({
-      technicianName: 'Jean Dupont', glpiTicketId: 999, ticketId: 999,
+    build: ({ signature, ticketLink, recipientName }) => buildAssignmentNotificationHtml({
+      technicianName: recipientName, glpiTicketId: 999, ticketId: 999,
       ticketTitle: 'Test template email', priority: 'P2', category: 'IT — Matériel', teamName: 'Support IT',
       signature, ticketLink,
     }),
   },
   sla_breach: {
     label: 'Dépassement SLA',
-    build: ({ signature, ticketLink }) => buildSlaBreachHtml({
-      technicianName: 'Jean Dupont', glpiTicketId: 999, ticketId: 999,
+    build: ({ signature, ticketLink, recipientName }) => buildSlaBreachHtml({
+      technicianName: recipientName, glpiTicketId: 999, ticketId: 999,
       ticketTitle: 'Test template email', priority: 'P2',
       slaResponseDueAt: new Date(Date.now() - 3600000).toISOString(),
       signature, ticketLink,
@@ -262,8 +262,8 @@ const EMAIL_TEST_TEMPLATES = {
   },
   due_date: {
     label: 'Dépassement échéance',
-    build: ({ signature, ticketLink }) => buildDueDateHtml({
-      technicianName: 'Jean Dupont', glpiTicketId: 999, ticketId: 999,
+    build: ({ signature, ticketLink, recipientName }) => buildDueDateHtml({
+      technicianName: recipientName, glpiTicketId: 999, ticketId: 999,
       ticketTitle: 'Test template email', priority: 'P2',
       dueDate: new Date(Date.now() - 7200000).toISOString(),
       signature, ticketLink,
@@ -271,21 +271,36 @@ const EMAIL_TEST_TEMPLATES = {
   },
   status_change: {
     label: 'Changement de statut',
-    build: ({ signature, ticketLink }) => buildStatusChangeHtml({
-      recipientName: 'Jean Dupont', glpiTicketId: 999, ticketId: 999,
+    build: ({ signature, ticketLink, recipientName }) => buildStatusChangeHtml({
+      recipientName, glpiTicketId: 999, ticketId: 999,
       ticketTitle: 'Test template email', status: 'OPEN', priority: 'P2', category: 'IT — Matériel',
       signature, ticketLink,
     }),
   },
   reminder: {
     label: 'Relance demandeur',
-    build: ({ signature, ticketLink }) => buildReminderHtml({
-      toName: 'Jean Dupont', glpiTicketId: 999, ticketId: 999,
+    build: ({ signature, ticketLink, recipientName }) => buildReminderHtml({
+      toName: recipientName, glpiTicketId: 999, ticketId: 999,
       subject: 'Test template email', isPreClose: false,
       signature, ticketLink,
     }),
   },
 };
+
+// Nom d'affichage du destinataire d'un email de test : si l'adresse correspond à un
+// compte ERP, on utilise son nom ; sinon on dérive un libellé propre de l'adresse
+// (prenom.nom@domaine → Prenom Nom). Jamais de nom fictif type « Jean Dupont ».
+async function resolveTestRecipientName(rawEmail) {
+  const addr = String(rawEmail || '').trim().toLowerCase();
+  const m = addr.match(/<([^>]+)>/); // accepte « Nom <email> »
+  const clean = m ? m[1].trim() : addr;
+  try {
+    const u = await prisma.user.findFirst({ where: { email: clean }, select: { fullName: true } });
+    if (u?.fullName) return u.fullName;
+  } catch { /* repli ci-dessous */ }
+  const local = clean.split('@')[0].replace(/[._\-+]+/g, ' ').trim();
+  return local ? local.split(/\s+/).filter(Boolean).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : 'Test';
+}
 
 router.post('/test-email', requirePermission('automation.manage', ['ADMIN']), async (req, res) => {
   try {
@@ -310,8 +325,9 @@ router.post('/test-email', requirePermission('automation.manage', ['ADMIN']), as
       const originalSubject = 'Demande de test';
       const referencesTicket = Boolean(typeof ackMessage === 'string' && ackMessage.includes('{ticketId}'));
       const subject = referencesTicket ? `[Ticket #999] ${originalSubject}` : `Accusé de réception — ${originalSubject}`;
+      const toName = await resolveTestRecipientName(recipientEmail);
       const bodyHtml = buildAcknowledgementHtml({
-        toName: 'Jean Dupont', ticketId: 999,
+        toName, ticketId: 999,
         originalSubject,
         customMessage: ackMessage,
         signature, ticketLink: referencesTicket ? `${frontendUrl}/tickets/999` : null,
@@ -322,7 +338,8 @@ router.post('/test-email', requirePermission('automation.manage', ['ADMIN']), as
     }
 
     const ticketLink = `${frontendUrl}/tickets/999`;
-    const templateCtx = { signature, ticketLink };
+    const recipientName = await resolveTestRecipientName(recipientEmail);
+    const templateCtx = { signature, ticketLink, recipientName };
 
     const bodyHtml = EMAIL_TEST_TEMPLATES[type].build(templateCtx);
 

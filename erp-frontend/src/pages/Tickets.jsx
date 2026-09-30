@@ -232,11 +232,11 @@ function PriorityRenderer({ data }) {
 
 function TicketNumberRenderer({ data, context }) {
   if (!data) return null;
-  const { debouncedSearch } = context || {};
+  const { debouncedSearch, filterQs } = context || {};
   const colorCls = PRIORITY_DOT[data.priority]?.text || 'text-on-surface-variant';
   return (
     <Link
-      to={`/tickets/${data.id}`}
+      to={`/tickets/${data.id}${filterQs || ''}`}
       onClick={(e) => e.stopPropagation()}
       className={`font-mono text-xs font-extrabold tabular-nums hover:underline ${colorCls}`}
     >
@@ -247,7 +247,7 @@ function TicketNumberRenderer({ data, context }) {
 
 function TicketInfoRenderer({ data, context }) {
   if (!data) return null;
-  const { debouncedSearch, currentUser } = context || {};
+  const { debouncedSearch, currentUser, filterQs } = context || {};
   const originConf = data.origin ? ORIGIN_CONFIG[data.origin] : null;
 
   // Badges contextuels technicien : indique pourquoi ce ticket est visible
@@ -264,7 +264,7 @@ function TicketInfoRenderer({ data, context }) {
       {/* Row 1: Title + Badges — le N° vit dans sa propre colonne « N° » */}
       <div className="flex items-center gap-1.5 min-w-0 w-full overflow-hidden">
         <Link
-          to={`/tickets/${data.id}`}
+          to={`/tickets/${data.id}${filterQs || ''}`}
           onClick={(e) => e.stopPropagation()}
           className="text-xs font-bold text-on-surface hover:text-primary transition-colors truncate min-w-0 flex-1 overflow-hidden"
         >
@@ -639,7 +639,7 @@ function TicketPreviewTooltip({ ticketId, data, anchorRef }) {
 
 function ActionsRenderer({ data, context }) {
   if (!data) return null;
-  const { canDelete, askDeleteOne } = context || {};
+  const { canDelete, askDeleteOne, filterQs } = context || {};
   const btnCls = "inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground";
   const [hovered, setHovered] = useState(false);
   const anchorRef = useRef(null);
@@ -658,7 +658,7 @@ function ActionsRenderer({ data, context }) {
       >
         <Link
           ref={anchorRef}
-          to={`/tickets/${data.id}`}
+          to={`/tickets/${data.id}${filterQs || ''}`}
           aria-label="Voir"
           className={btnCls}
           onClick={(e) => e.stopPropagation()}
@@ -1807,8 +1807,13 @@ export default function Tickets() {
   ].filter(Boolean).length;
 
   // ── AG Grid column definitions (Katalyst pinned style) ─────────────────────
+  // Query string des filtres actifs, partagé aux renderers AG Grid : tous les points
+  // d'entrée vers la fiche doivent transmettre les filtres pour la navigation ‹ ›.
+  const filterQs = useMemo(() => buildFilterQueryString(), [filters, debouncedSearch]);
+
   const agGridContext = useMemo(() => ({
     debouncedSearch,
+    filterQs,
     currentUser: user ? { id: user.id, role: user.role, teamId: user.teamId } : null,
     canAssign,
     canDelete,
@@ -1817,7 +1822,7 @@ export default function Tickets() {
     navigate,
     STATUS_OPTIONS: MANUAL_STATUS_OPTIONS,
     STATUS_LABELS,
-  }), [debouncedSearch, user, canAssign, canDelete, handleQuickStatusChange, askDeleteOne, navigate]);
+  }), [debouncedSearch, filterQs, user, canAssign, canDelete, handleQuickStatusChange, askDeleteOne, navigate]);
 
   const gridColumnDefs = useMemo(() => {
     const cols = [];
@@ -2275,11 +2280,12 @@ export default function Tickets() {
             <KanbanBoard
               tickets={tickets} canAssign={canAssign}
               onStatusChange={(ticket, newStatus) => handleQuickStatusChange(ticket.id, newStatus)}
+              filterQs={filterQs}
             />
           </div>
         ) : viewMode === 'folders' ? (
           <div className="flex-1 min-h-0 overflow-auto">
-            <TeamFolderView tickets={tickets} teams={teams} />
+            <TeamFolderView tickets={tickets} teams={teams} filterQs={filterQs} />
           </div>
         ) : viewMode === 'grid' ? (
           /* ── GRID VIEW ── */
