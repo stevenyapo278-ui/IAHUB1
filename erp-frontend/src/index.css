@@ -2863,3 +2863,50 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   .mention, .mention-dropdown { transition: none; animation: none; }
   .mention:hover { transform: none; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════════ */
+/* ACTIVITY STREAM — utilitaires « alpha » (rail, en-têtes, séparateurs, pilule)    */
+/* Les couleurs du thème sont déclarées en var(--color-…) : Tailwind v3 ne peut pas */
+/* y appliquer de modificateur d'opacité (bg-primary/30 n'est jamais généré).       */
+/* On passe donc par color-mix(), déjà employé ailleurs dans cette feuille.         */
+/* ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* Rail vertical continu + filet des en-têtes de jour + barres du terminal */
+.act-rail { background-color: color-mix(in srgb, var(--color-primary) 34%, transparent); }
+.act-rule { background-color: color-mix(in srgb, var(--color-primary) 30%, transparent); }
+
+/* Bandeau de jour collant (léger voile + flou derrière) */
+.act-head {
+  background-color: color-mix(in srgb, var(--color-surface-container-low) 93%, transparent);
+}
+
+/* Séparateurs pointillés entre les entrées */
+.act-dots { border-color: color-mix(in srgb, var(--color-outline-variant) 75%, transparent); }
+
+/* Survol d'une entrée */
+.act-row:hover {
+  background-color: color-mix(in srgb, var(--color-surface-container-high) 55%, transparent);
+}
+
+/* Textes secondaires (la variante /50 /70 n'existe pas sur les couleurs var()) */
+.act-muted { color: color-mix(in srgb, var(--color-on-surface-variant) 78%, transparent); }
+.act-faint { color: color-mix(in srgb, var(--color-on-surface-variant) 58%, transparent); }
+
+/* Teinte primaire pleine largeur (badges, encarts) */
+.act-tint {
+  background-color: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  border-color: color-mix(in srgb, var(--color-primary) 32%, transparent);
+}
+
+/* Pilule « Voir / Replier » des emails */
+.act-pill {
+  border-color: color-mix(in srgb, var(--color-primary) 45%, transparent);
+}
+.act-pill:hover {
+  background-color: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  border-color: color-mix(in srgb, var(--color-primary) 75%, transparent);
+}
+.act-pill.is-open {
+  border-color: var(--color-primary);
+  background-color: color-mix(in srgb, var(--color-primary) 14%, transparent);
+}

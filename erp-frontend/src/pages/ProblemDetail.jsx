@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
@@ -11,6 +11,7 @@ import { hasPermission } from '../utils/permissions';
 import { useAuth } from '../context/AuthContext';
 import useSystemSettings from '../hooks/useSystemSettings';
 import ConfirmDialog from '../components/ConfirmDialog';
+import ActivityStream, { buildTimeline } from '../components/ActivityStream';
 
 const STATUS_OPTIONS = ['NEW', 'IN_PROGRESS', 'ASSIGNED', 'PLANNED', 'WAITING', 'SOLVED', 'CLOSED', 'OBSERVED'];
 const STATUS_LABELS = {
@@ -65,11 +66,6 @@ function PriorityBadge({ priority }) {
       {cfg.label} — {PRIORITY_LABELS[priority] || priority}
     </span>
   );
-}
-
-function initials(name) {
-  if (!name) return '?';
-  return name.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase();
 }
 
 export default function ProblemDetail() {
@@ -157,6 +153,12 @@ export default function ProblemDetail() {
       toast.error(err.response?.data?.error || 'Erreur');
     }
   }
+
+  // Historique fusionné (commentaires + journal d'événements), trié une seule fois.
+  const historyItems = useMemo(
+    () => buildTimeline({ followups: problem?.followups, events: problem?.events }),
+    [problem]
+  );
 
   if (loading) {
     return (
@@ -323,45 +325,35 @@ export default function ProblemDetail() {
             )}
           </div>
 
-          {/* Timeline (followups) */}
+          {/* Historique — Activity Stream (commentaires + journal) */}
           <div className="bg-surface-container rounded-xl p-4">
-            <h3 className="text-sm font-semibold text-on-surface mb-3">Timeline</h3>
-            <div className="space-y-3">
-              {problem.followups?.map((f) => (
-                <div key={f.id} className="flex gap-3">
-                  <div className="w-8 h-8 rounded-full bg-primary/15 text-primary flex items-center justify-center text-xs font-bold shrink-0">
-                    {initials(f.author?.fullName)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-on-surface">{f.author?.fullName || 'Système'}</span>
-                      <span className="text-[10px] text-on-surface-variant">
-                        {new Date(f.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                    </div>
-                    <p className="text-sm text-on-surface-variant mt-0.5 whitespace-pre-wrap">{f.content}</p>
-                  </div>
-                </div>
-              ))}
-
-              {/* New followup input */}
-              {canManage && (
-                <div className="flex gap-2 mt-3 pt-3 border-t border-outline-variant/30">
-                  <input
-                    type="text"
-                    value={newFollowup}
-                    onChange={(e) => setNewFollowup(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddFollowup()}
-                    placeholder="Ajouter un commentaire..."
-                    className={`${inputCls} flex-1`}
-                  />
-                  <button onClick={handleAddFollowup} disabled={sendingFollowup || !newFollowup.trim()}
-                    className="p-2 rounded-xl bg-primary text-on-primary cursor-pointer hover:opacity-90 disabled:opacity-50">
-                    {sendingFollowup ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                  </button>
-                </div>
+            <h3 className="text-sm font-semibold text-on-surface mb-3">Historique</h3>
+            <ActivityStream
+              items={historyItems}
+              showFilters
+              empty="Aucun échange pour le moment."
+              commentBody={(f) => (
+                <p className="text-sm text-on-surface-variant mt-1 whitespace-pre-wrap break-words">{f.content}</p>
               )}
-            </div>
+            />
+
+            {/* New followup input */}
+            {canManage && (
+              <div className="flex gap-2 mt-3 pt-3 border-t border-outline-variant/30">
+                <input
+                  type="text"
+                  value={newFollowup}
+                  onChange={(e) => setNewFollowup(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAddFollowup()}
+                  placeholder="Ajouter un commentaire..."
+                  className={`${inputCls} flex-1`}
+                />
+                <button onClick={handleAddFollowup} disabled={sendingFollowup || !newFollowup.trim()}
+                  className="p-2 rounded-xl bg-primary text-on-primary cursor-pointer hover:opacity-90 disabled:opacity-50">
+                  {sendingFollowup ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -382,25 +374,6 @@ export default function ProblemDetail() {
                   </button>
                 );
               })}
-            </div>
-          </div>
-
-          {/* Event log */}
-          <div className="bg-surface-container rounded-xl p-4">
-            <h3 className="text-sm font-semibold text-on-surface mb-3">Journal</h3>
-            <div className="space-y-2 max-h-60 overflow-y-auto">
-              {problem.events?.map((e) => (
-                <div key={e.id} className="text-[11px] text-on-surface-variant">
-                  <span className="font-medium">{e.actor}</span> — {e.type.replace(/_/g, ' ').toLowerCase()}
-                  <br />
-                  <span className="text-[10px] opacity-70">
-                    {new Date(e.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </div>
-              ))}
-              {(!problem.events || problem.events.length === 0) && (
-                <p className="text-[11px] text-on-surface-variant italic">Aucun événement</p>
-              )}
             </div>
           </div>
         </div>

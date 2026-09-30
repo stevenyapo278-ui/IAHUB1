@@ -15,6 +15,7 @@ import SearchableSelect from '../components/SearchableSelect';
 import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
 import SlaBadge from '../components/SlaBadge';
 import ImageAttachmentsEditor from '../components/ImageAttachmentsEditor';
+import ActivityStream, { buildTimeline } from '../components/ActivityStream';
 import { clipboardImageFiles, imageItemsFromFiles, imageSrc, revokeImageItems } from '../utils/imageAttachments';
 import { flattenCategoryTree } from '../utils/categoryTree';
 import {
@@ -353,6 +354,22 @@ export default function TicketDetail() {
   // Images de la description en édition : [{ id, url }] (existantes ou déjà uploadées)
   const [editingContentImages, setEditingContentImages] = useState([]);
   const [savingContent, setSavingContent] = useState(false);
+
+  // Historique fusionné (commentaires + emails + événements système), trié une seule fois.
+  const timelineItems = useMemo(
+    () => buildTimeline({
+      followups: ticket?.followups,
+      messages: ticket?.messages,
+      events,
+    }),
+    [ticket, events]
+  );
+
+  const toggleEmailExpanded = (id) => setExpandedEmails((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
 
   const openEscalateModal = async () => {
     setEscalateTargetTeamId('');
@@ -2336,7 +2353,10 @@ export default function TicketDetail() {
           {/* (Problèmes racines et Sous-tickets déplacés dans la modale Relations) */}
 
           {/* Follow-up / Timeline Card */}
-          <div className="bento-card p-6 space-y-6">
+          {/* overflow: visible — indispensable pour que les séparateurs de jour
+              en position sticky se collent au conteneur de scroll de la page
+              (.bento-card force overflow: hidden, ce qui neutralise le sticky). */}
+          <div className="bento-card p-6 space-y-6" style={{ overflow: 'visible' }}>
             <h3 className="text-sm font-extrabold uppercase tracking-wider text-on-surface border-b border-outline-variant/20 pb-3 flex items-center gap-2">
               <span className="w-8 h-8 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
                 <MessageSquare className="w-4 h-4" />
@@ -2344,325 +2364,122 @@ export default function TicketDetail() {
               Suivi & Échanges
             </h3>
 
-            {/* Timeline entries */}
-            <div className="relative pl-10 space-y-4" ref={followupContainerRef}>
-              {/* Rail verticale de la timeline */}
-              <div className="absolute left-[19px] top-3 bottom-3 w-px bg-gradient-to-b from-primary/40 via-outline-variant/40 to-transparent" aria-hidden="true" />
-              {(() => {
-                const timeline = [
-                  ...(ticket?.followups || []).map((f) => ({ kind: 'followup', date: f.createdAt, data: f })),
-                  ...(ticket?.messages || []).map((m) => ({ kind: 'email', date: m.timestamp, data: m })),
-                  ...(events || []).map((e) => ({ kind: 'event', date: e.createdAt, data: e })),
-                ].sort((a, b) => new Date(a.date) - new Date(b.date));
-
-                if (timeline.length === 0) {
-                  return (
-                    <div className="py-8 text-center text-on-surface-variant/60 text-xs italic">
-                      Aucun commentaire pour le moment.
-                    </div>
-                  );
-                }
-
-                return timeline.map((item) =>
-                  item.kind === 'followup' ? (
-                    <div key={`f-${item.data.id}`} className="relative p-4 rounded-2xl border border-outline-variant/30 bg-surface-container-low/30 flex gap-3">
-                      <span className="absolute -left-[26px] top-5 w-2.5 h-2.5 rounded-full bg-primary ring-4 ring-surface-container-lowest shrink-0" aria-hidden="true" />
-                      <div className="w-9 h-9 rounded-full border border-outline-variant/60 bg-surface-container-high text-on-surface flex items-center justify-center text-xs font-bold shrink-0 shadow-sm">
-                        {initials(item.data.author?.fullName)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-on-surface">
-                              {item.data.source === 'glpi' ? 'GLPI' : (item.data.author?.fullName || 'Inconnu')}
-                            </span>
-                            {item.data.source === 'glpi' && (
-                              <span className="text-[9px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400 font-bold border border-amber-500/25">GLPI</span>
-                            )}
-                            {item.data.isPrivate && (
-                              <span className="text-[9px] px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-700 dark:text-purple-400 font-bold border border-purple-500/25" title="Visible uniquement par l'équipe">
-                                <Lock className="w-2.5 h-2.5 inline mr-0.5" />
-                                PRIVÉ
-                              </span>
-                            )}
-                            {canAssign && item.data.source !== 'glpi' && (
-                              <button
-                                onClick={() => toggleFollowupVisibility(item.data)}
-                                title={item.data.isPrivate ? 'Rendre public' : 'Rendre privé'}
-                                className={`p-1 rounded-md border transition-colors cursor-pointer ${
-                                  item.data.isPrivate
-                                    ? 'border-purple-500/30 bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20'
-                                    : 'border-outline-variant/40 bg-surface-container text-on-surface-variant hover:text-on-surface hover:border-outline'
-                                }`}
-                              >
-                                <Lock className="w-3 h-3" />
-                              </button>
-                            )}
-                            {(canAssign || isAssignedTechnician) && item.data.source !== 'glpi' && item.data.authorId === user?.id && editingFollowupId !== item.data.id && (
-                              <button
-                                onClick={() => startEditFollowup(item.data)}
-                                title="Modifier"
-                                className="p-1 rounded-md border border-outline-variant/40 bg-surface-container text-on-surface-variant hover:text-on-surface hover:border-outline transition-colors cursor-pointer"
-                              >
-                                <Pencil className="w-3 h-3" />
-                              </button>
-                            )}
-                            {['ADMIN', 'SUPERADMIN'].includes(user?.role) && item.data.source !== 'glpi' && editingFollowupId !== item.data.id && (
-                              <button
-                                onClick={() => setFollowupToDelete(item.data.id)}
-                                title="Supprimer"
-                                className="p-1 rounded-md border border-outline-variant/40 bg-surface-container text-on-surface-variant hover:text-red-600 hover:border-red-500/50 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </button>
-                            )}
-                          </div>
-                          <time className="text-[10px] font-mono text-on-surface-variant bg-surface-container border border-outline-variant/30 px-2 py-0.5 rounded-full">
-                            {new Date(item.data.createdAt).toLocaleString('fr-FR')}
-                            {item.data.updatedAt && (
-                              <span className="text-on-surface-variant/60 ml-1">(modifié)</span>
-                            )}
-                          </time>
-                        </div>
-                        {editingFollowupId === item.data.id ? (
-                          <div className="space-y-2">
-                            <textarea
-                              className="w-full min-h-[150px] p-3 rounded-xl border border-primary/40 bg-surface text-sm text-on-surface leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-primary/30"
-                              rows={6}
-                              value={editingFollowupContent}
-                              onChange={(e) => setEditingFollowupContent(e.target.value)}
-                              onPaste={handleEditFollowupPaste}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Escape') cancelEditFollowup();
-                                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') saveEditFollowup(item.data.id);
-                              }}
-                              autoFocus
-                            />
-                            <ImageAttachmentsEditor
-                              items={editingFollowupImages}
-                              onChange={setEditingFollowupImages}
-                              onFiles={addEditFollowupFiles}
-                            />
-                            <div className="flex items-center gap-2">
-                              <button
-                                onClick={() => saveEditFollowup(item.data.id)}
-                                disabled={savingFollowupEdit || (!editingFollowupContent.trim() && editingFollowupImages.length === 0)}
-                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary text-on-primary text-[10px] font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 cursor-pointer"
-                              >
-                                {savingFollowupEdit ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-                                Enregistrer
-                              </button>
-                              <button
-                                onClick={cancelEditFollowup}
-                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-outline-variant/40 bg-surface-container text-on-surface-variant text-[10px] font-semibold hover:bg-surface-container-high transition-colors cursor-pointer"
-                              >
-                                <X className="w-3 h-3" />
-                                Annuler
-                              </button>
-                              <span className="text-[9px] text-on-surface-variant/50 ml-1">Ctrl+Entrée pour sauvegarder · Échap pour annuler</span>
-                            </div>
-                          </div>
-                        ) : item.data.content && (item.data.content.includes('<') || item.data.content.includes('&#') || item.data.content.includes('&lt;')) ? (
-                          <div
-                            className="leading-relaxed text-xs text-on-surface [&_img]:max-w-full [&_img]:rounded-lg [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-2 [&_a]:text-blue-600 [&_a]:underline [&_p]:mb-1.5 [&_p]:last:mb-0 [&_h1]:text-sm [&_h1]:font-bold [&_h1]:mt-3 [&_h1]:mb-1.5 [&_h2]:text-xs [&_h2]:font-bold [&_h2]:mt-2.5 [&_h2]:mb-1 [&_h3]:text-xs [&_h3]:font-bold [&_h3]:mt-2 [&_h3]:mb-0.5 [&_div]:mb-1 [&_b]:font-semibold"
-                            dangerouslySetInnerHTML={{ __html: sanitizeHtml(item.data.content) }}
-                          />
-                        ) : (
-                          <div className="text-xs text-on-surface leading-relaxed whitespace-pre-wrap font-normal">
-                            {item.data.content}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ) : item.kind === 'event' ? (
-                    <div key={`e-${item.data.id}`} className="relative flex items-center gap-3 px-4 py-2.5 rounded-xl border border-dashed border-outline-variant/40 bg-surface-container-low/20">
-                      <span className="absolute -left-[26px] top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-slate-400 ring-4 ring-surface-container-lowest shrink-0" aria-hidden="true" />
-                      <div className="w-7 h-7 rounded-full border border-outline-variant/40 bg-surface-container text-on-surface-variant flex items-center justify-center shrink-0">
-                        {eventIcon(item.data.type)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-2 flex-wrap">
-                          <span className="text-[11px] font-bold text-on-surface-variant">
-                            {eventLabel(item.data.type)}
-                            {item.data.actor && item.data.actor !== 'SYSTEM' && (
-                              <span className="text-on-surface-variant/70 font-medium"> — {item.data.actor}</span>
-                            )}
-                          </span>
-                          <time className="text-[9px] font-mono text-on-surface-variant/70">
-                            {new Date(item.data.createdAt).toLocaleString('fr-FR')}
-                          </time>
-                        </div>
-                        {eventDetail(item.data) && (
-                          <p className="text-[10px] text-on-surface-variant/80 mt-0.5 leading-snug">{eventDetail(item.data)}</p>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    (() => {
-                      const emailExpanded = expandedEmails.has(item.data.id);
-                      const toggleEmail = () => setExpandedEmails((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(item.data.id)) next.delete(item.data.id); else next.add(item.data.id);
-                        return next;
-                      });
-                      const ts = new Date(item.data.timestamp);
-                      const dateStr = ts.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-                      const timeStr = ts.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-                      const summaryText = item.data.summary || (
-                        (item.data.body || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 120) +
-                        ((item.data.body || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().length > 120 ? '…' : '')
-                      ) || item.data.subject;
-                      return (
-                        <div
-                          key={`m-${item.data.id}`}
-                          className={`relative rounded-2xl border transition-all duration-200 ${
-                            emailExpanded
-                              ? 'border-outline-variant/50 bg-surface-container-lowest shadow-md'
-                              : 'border-outline-variant/30 bg-surface-container-lowest hover:border-outline-variant/50 hover:shadow-sm'
-                          }`}
-                        >
-                          <span className="absolute -left-[26px] top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-sky-500 ring-4 ring-surface-container-lowest shrink-0" aria-hidden="true" />
-                          {/* Header compact : toujours visible, cliquable pour déplier/replier */}
-                          <button
-                            type="button"
-                            onClick={toggleEmail}
-                            className="w-full flex items-center gap-3 p-3 text-left cursor-pointer select-none group/email"
-                          >
-                            {/* Icone direction */}
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-sm border ${
-                              item.data.direction === 'INBOUND'
-                                ? 'border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400'
-                                : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                            }`}>
-                              {item.data.direction === 'INBOUND' ? <Inbox className="w-4 h-4" /> : <Send className="w-4 h-4" />}
-                            </div>
-
-                            {/* Titre = résumé tronqué + badge direction */}
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-1.5 mb-0.5">
-                                <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider ${
-                                  item.data.direction === 'INBOUND'
-                                    ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
-                                    : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                                }`}>
-                                  {item.data.direction === 'INBOUND' ? 'Reçu' : 'Envoyé'}
-                                </span>
-                                <span className="text-[10px] text-on-surface-variant/70 font-medium truncate">
-                                  {item.data.direction === 'INBOUND' ? item.data.sender : (item.data.recipients?.[0] || '—')}
-                                </span>
-                              </div>
-                              <p className={`text-xs font-semibold text-on-surface leading-snug ${emailExpanded ? '' : 'line-clamp-1'}`}>
-                                {summaryText}
-                              </p>
-                            </div>
-
-                            {/* Date + heure */}
-                            <div className="flex flex-col items-end shrink-0 gap-0.5">
-                              <time className="text-[10px] font-mono text-on-surface-variant bg-surface-container border border-outline-variant/30 px-2 py-0.5 rounded-full">
-                                {dateStr}
-                              </time>
-                              <span className="text-[10px] font-mono text-on-surface-variant/70">{timeStr}</span>
-                            </div>
-
-                            {/* Chevron expand/collapse */}
-                            <ChevronDown className={`w-4 h-4 text-on-surface-variant/50 transition-transform duration-200 shrink-0 ${emailExpanded ? 'rotate-180' : ''}`} />
-                          </button>
-
-                          {/* Contenu déplié */}
-                          {emailExpanded && (
-                            <div className="px-4 pb-4 pt-0 space-y-3 border-t border-outline-variant/20 mt-0">
-                              {/* Ligne De → À */}
-                              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] pt-3">
-                                <div className="flex items-center gap-1">
-                                  <span className="text-on-surface-variant/70 font-semibold">De :</span>
-                                  <span className="text-on-surface font-bold truncate max-w-[260px]" title={item.data.sender}>{item.data.sender}</span>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <span className="text-on-surface-variant/70 font-semibold">À :</span>
-                                  <span className="text-on-surface font-bold truncate max-w-[260px]" title={item.data.recipients?.join(', ')}>
-                                    {item.data.recipients?.join(', ') || '—'}
-                                  </span>
-                                </div>
-                              </div>
-
-                              {/* Sujet */}
-                              <div className="text-[11px] text-on-surface-variant font-semibold italic flex items-center gap-1.5">
-                                <span className="text-on-surface-variant/50 not-italic">Objet :</span> {item.data.subject}
-                              </div>
-
-                              {/* Résumé IA (texte complet) */}
-                              {(item.data.summary || item.data.body) && (
-                                <div className="bg-blue-500/5 dark:bg-blue-500/8 border border-blue-500/15 rounded-xl px-3 py-2">
-                                  <div className="flex items-center gap-1.5 mb-1">
-                                    <Sparkles className="w-3 h-3 text-blue-500 dark:text-blue-400" />
-                                    <span className="text-[9px] font-black uppercase tracking-wider text-blue-600 dark:text-blue-400">Résumé</span>
-                                  </div>
-                                  <p className="text-[11px] text-on-surface leading-relaxed font-medium">
-                                    {item.data.summary || (
-                                      <span className="text-on-surface-variant italic font-normal">
-                                        {(item.data.body || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 200)}
-                                        {(item.data.body || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().length > 200 ? '…' : ''}
-                                      </span>
-                                    )}
-                                  </p>
-                                </div>
-                              )}
-
-                              {/* Statut du ticket au moment de l'email */}
-                              {item.data.ticketStatusAtTime && (
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-[9px] text-on-surface-variant/70 font-semibold">Statut du ticket :</span>
-                                  <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
-                                    item.data.ticketStatusAtTime === 'SOLVED' || item.data.ticketStatusAtTime === 'CLOSED'
-                                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-                                      : item.data.ticketStatusAtTime === 'NEW'
-                                      ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20'
-                                      : 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20'
-                                  }`}>
-                                    {item.data.ticketStatusAtTime}
-                                  </span>
-                                </div>
-                              )}
-
-                              {/* Contenu HTML complet */}
-                              {(item.data.bodyHtml || item.data.body) && (
-                                <details className="group">
-                                  <summary className="flex items-center gap-1.5 text-[10px] text-on-surface-variant/70 font-semibold cursor-pointer select-none hover:text-on-surface-variant transition-colors">
-                                    <ChevronRight className="w-3 h-3 transition-transform group-open:rotate-90" />
-                                    <span>Voir le contenu complet</span>
-                                  </summary>
-                                  <div className="mt-2 pt-2 border-t border-outline-variant/20">
-                                    {item.data.bodyHtml ? (
-                                      <div
-                                        className="leading-relaxed text-xs text-on-surface [&_img]:max-w-full [&_img]:rounded-lg [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-2 [&_a]:text-blue-600 [&_a]:underline [&_p]:mb-1.5 [&_p]:last:mb-0 [&_h1]:text-sm [&_h1]:font-bold [&_h1]:mt-3 [&_h1]:mb-1.5 [&_h2]:text-xs [&_h2]:font-bold [&_h2]:mt-2.5 [&_h2]:mb-1 [&_h3]:text-xs [&_h3]:font-bold [&_h3]:mt-2 [&_h3]:mb-0.5 [&_div]:mb-1 [&_b]:font-semibold"
-                                        dangerouslySetInnerHTML={{ __html: sanitizeHtml(item.data.bodyHtml) }}
-                                      />
-                                    ) : (
-                                      <div className="text-xs text-on-surface whitespace-pre-wrap leading-relaxed">{item.data.body}</div>
-                                    )}
-                                  </div>
-                                </details>
-                              )}
-
-                              {/* Lien vers la boîte mail */}
-                              <div className="pt-1">
-                                <Link
-                                  to="/inbox"
-                                  className="inline-flex items-center gap-1.5 text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
-                                >
-                                  <Mail className="w-3 h-3" />
-                                  Voir dans la boîte mail
-                                </Link>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()
-                  )
-                );
-              })()}
-            </div>
+            {/* Historique — Activity Stream (dense, façon Linear) */}
+            <ActivityStream
+              items={timelineItems}
+              containerRef={followupContainerRef}
+              showFilters
+              empty="Aucun échange pour le moment."
+              editingId={editingFollowupId}
+              expandedIds={expandedEmails}
+              onToggleExpand={toggleEmailExpanded}
+              commentBadges={(f) => (
+                <>
+                  {f.source === 'glpi' && (
+                    <span className="text-[9px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400 font-bold border border-amber-500/25">
+                      GLPI
+                    </span>
+                  )}
+                  {f.isPrivate && (
+                    <span
+                      className="text-[9px] px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-700 dark:text-purple-400 font-bold border border-purple-500/25"
+                      title="Visible uniquement par l'équipe"
+                    >
+                      <Lock className="w-2.5 h-2.5 inline mr-0.5" />
+                      PRIVÉ
+                    </span>
+                  )}
+                </>
+              )}
+              commentActions={(f) => (
+                <>
+                  {canAssign && f.source !== 'glpi' && (
+                    <button
+                      onClick={() => toggleFollowupVisibility(f)}
+                      title={f.isPrivate ? 'Rendre public' : 'Rendre privé'}
+                      className={`p-1 rounded-md border transition-colors cursor-pointer ${
+                        f.isPrivate
+                          ? 'border-purple-500/30 bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20'
+                          : 'border-outline-variant/40 bg-surface-container text-on-surface-variant hover:text-on-surface hover:border-outline'
+                      }`}
+                    >
+                      <Lock className="w-3 h-3" />
+                    </button>
+                  )}
+                  {(canAssign || isAssignedTechnician) && f.source !== 'glpi' && f.authorId === user?.id && editingFollowupId !== f.id && (
+                    <button
+                      onClick={() => startEditFollowup(f)}
+                      title="Modifier"
+                      className="p-1 rounded-md border border-outline-variant/40 bg-surface-container text-on-surface-variant hover:text-on-surface hover:border-outline transition-colors cursor-pointer"
+                    >
+                      <Pencil className="w-3 h-3" />
+                    </button>
+                  )}
+                  {['ADMIN', 'SUPERADMIN'].includes(user?.role) && f.source !== 'glpi' && editingFollowupId !== f.id && (
+                    <button
+                      onClick={() => setFollowupToDelete(f.id)}
+                      title="Supprimer"
+                      className="p-1 rounded-md border border-outline-variant/40 bg-surface-container text-on-surface-variant hover:text-red-600 hover:border-red-500/50 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  )}
+                </>
+              )}
+              commentBody={(f) => (
+                f.content && (f.content.includes('<') || f.content.includes('&#') || f.content.includes('&lt;')) ? (
+                  <div
+                    className="leading-relaxed text-xs text-on-surface [&_img]:max-w-full [&_img]:rounded-lg [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-2 [&_a]:text-blue-600 [&_a]:underline [&_p]:mb-1.5 [&_p]:last:mb-0 [&_h1]:text-sm [&_h1]:font-bold [&_h1]:mt-3 [&_h1]:mb-1.5 [&_h2]:text-xs [&_h2]:font-bold [&_h2]:mt-2.5 [&_h2]:mb-1 [&_h3]:text-xs [&_h3]:font-bold [&_h3]:mt-2 [&_h3]:mb-0.5 [&_div]:mb-1 [&_b]:font-semibold"
+                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(f.content) }}
+                  />
+                ) : (
+                  <div className="text-xs text-on-surface leading-relaxed whitespace-pre-wrap font-normal">
+                    {f.content}
+                  </div>
+                )
+              )}
+              commentEditor={(f) => (
+                <div className="space-y-2">
+                  <textarea
+                    className="w-full min-h-[150px] p-3 rounded-xl border border-primary/40 bg-surface text-sm text-on-surface leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    rows={6}
+                    value={editingFollowupContent}
+                    onChange={(e) => setEditingFollowupContent(e.target.value)}
+                    onPaste={handleEditFollowupPaste}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') cancelEditFollowup();
+                      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') saveEditFollowup(f.id);
+                    }}
+                    autoFocus
+                  />
+                  <ImageAttachmentsEditor
+                    items={editingFollowupImages}
+                    onChange={setEditingFollowupImages}
+                    onFiles={addEditFollowupFiles}
+                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => saveEditFollowup(f.id)}
+                      disabled={savingFollowupEdit || (!editingFollowupContent.trim() && editingFollowupImages.length === 0)}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary text-on-primary text-[10px] font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 cursor-pointer"
+                    >
+                      {savingFollowupEdit ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                      Enregistrer
+                    </button>
+                    <button
+                      onClick={cancelEditFollowup}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-outline-variant/40 bg-surface-container text-on-surface-variant text-[10px] font-semibold hover:bg-surface-container-high transition-colors cursor-pointer"
+                    >
+                      <X className="w-3 h-3" />
+                      Annuler
+                    </button>
+                    <span className="text-[9px] text-on-surface-variant/50 ml-1">Ctrl+Entrée pour sauvegarder · Échap pour annuler</span>
+                  </div>
+                </div>
+              )}
+              emailPreview={(m) => emailSummary(m)}
+              emailBody={(m) => <EmailExpandedBody m={m} />}
+            />
 
             {/* Add Comment Form */}
             {user?.role === 'TECHNICIAN' && ['SOLVED', 'CLOSED'].includes(ticket.status) ? (
@@ -4803,92 +4620,99 @@ export default function TicketDetail() {
   );
 }
 
-function eventIcon(type) {
-  switch (type) {
-    case 'CREATED': return <Plus className="w-3 h-3" />;
-    case 'STATUS_CHANGED': return <RefreshCw className="w-3 h-3" />;
-    case 'PRIORITY_CHANGED': return <Flame className="w-3 h-3" />;
-    case 'ASSIGNED': return <UserCheck className="w-3 h-3" />;
-    case 'EMAIL_RECEIVED': case 'EMAIL_SENT': return <Mail className="w-3 h-3" />;
-    case 'FOLLOWUP_ADDED': return <MessageSquare className="w-3 h-3" />;
-    case 'FOLLOWUP_DELETED': return <Trash2 className="w-3 h-3" />;
-    case 'AI_ANALYZED': case 'AI_DRAFT_GENERATED': case 'AI_FOLLOWUP_DRAFT_GENERATED':
-    case 'AI_AUTO_REPLY_IGNORED': case 'AI_CONVERSATION_ESCALATED': return <Sparkles className="w-3 h-3" />;
-    case 'KNOWLEDGE_CREATED': return <FileText className="w-3 h-3" />;
-    case 'REOPENED': return <HelpCircle className="w-3 h-3" />;
-    case 'ESCALATED': case 'ESCALATION_REQUESTED': return <TrendingUp className="w-3 h-3" />;
-    case 'REMINDER_SENT': return <Clock className="w-3 h-3" />;
-    case 'CLOSED_AUTO': case 'CLOSURE_SUGGESTED': return <CheckCircle2 className="w-3 h-3" />;
-    case 'CLOSURE_VALIDATED': return <Shield className="w-3 h-3" />;
-    case 'CLOSURE_REJECTED': return <X className="w-3 h-3" />;
-    case 'APPROVED': return <Shield className="w-3 h-3" />;
-    case 'REJECTED': return <X className="w-3 h-3" />;
-    case 'SLA_BREACHED': return <AlertTriangle className="w-3 h-3 text-red-500" />;
-    case 'SLA_UPDATED': return <Clock className="w-3 h-3" />;
-    case 'MERGED_INTO': case 'MERGED_FROM': return <Layers className="w-3 h-3" />;
-    case 'LINKED': case 'UNLINKED': return <Link2 className="w-3 h-3" />;
-    case 'GLPI_SYNC_FAILED': return <AlertTriangle className="w-3 h-3 text-red-500" />;
-    default: return <History className="w-3 h-3" />;
-  }
+
+/* ── Historique : résumé et corps déplié d'un email du fil ────────────── */
+function emailSummary(m) {
+  const plain = (m.body || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  return m.summary || (plain.length > 120 ? `${plain.slice(0, 120)}…` : plain) || m.subject;
 }
 
-function eventLabel(type) {
-  const labels = {
-    CREATED: 'Ticket créé',
-    STATUS_CHANGED: 'Statut modifié',
-    PRIORITY_CHANGED: 'Priorité modifiée',
-    ASSIGNED: 'Ticket assigné',
-    EMAIL_RECEIVED: 'Email reçu',
-    EMAIL_SENT: 'Email envoyé',
-    FOLLOWUP_ADDED: 'Commentaire ajouté',
-    FOLLOWUP_DELETED: 'Commentaire supprimé',
-    AI_ANALYZED: 'Analyse IA',
-    AI_DRAFT_GENERATED: 'Brouillon IA généré',
-    AI_FOLLOWUP_DRAFT_GENERATED: 'Brouillon de réponse IA',
-    AI_AUTO_REPLY_IGNORED: 'Réponse auto IA ignorée',
-    AI_CONVERSATION_ESCALATED: 'Conversation escaladée vers un humain',
-    KNOWLEDGE_CREATED: 'Article de connaissance créé',
-    REOPENED: 'Ticket rouvert',
-    ESCALATED: 'Ticket escaladé',
-    ESCALATION_REQUESTED: 'Escalade demandée',
-    REMINDER_SENT: 'Relance envoyée',
-    CLOSED_AUTO: 'Clôture automatique',
-    CLOSURE_SUGGESTED: 'Clôture suggérée',
-    CLOSURE_VALIDATED: 'Clôture validée',
-    CLOSURE_REJECTED: 'Clôture rejetée',
-    APPROVED: 'Approuvé (Hotline)',
-    REJECTED: 'Rejeté (Hotline)',
-    SLA_BREACHED: 'SLA dépassé',
-    SLA_UPDATED: 'SLA mis à jour',
-    MERGED_INTO: 'Fusionné dans un autre ticket',
-    MERGED_FROM: 'Ticket fusionné ici',
-    LINKED: 'Ticket lié',
-    UNLINKED: 'Lien supprimé',
-    GLPI_SYNC_FAILED: 'Échec synchronisation GLPI',
-    FOLLOWUP_MADE_PRIVATE: 'Commentaire rendu privé',
-    FOLLOWUP_MADE_PUBLIC: 'Commentaire rendu public',
-    REPLY_ON_CLOSED_SUGGESTED: 'Réponse suggérée (ticket fermé)',
-    REPLY_ON_CLOSED_REOPENED: 'Réponse sur ticket fermé : ticket rouvert',
-    REPLY_ON_CLOSED_NEW_TICKET: 'Réponse sur ticket fermé : nouvelle demande créée',
-    REPLY_ON_CLOSED_DISMISSED: 'Réponse sur ticket fermé : suggestion ignorée',
-    NEW_TICKET_SUGGESTED: 'Nouvelle demande détectée dans le fil',
-    NEW_TICKET_SUGGESTED_CREATED: 'Nouvelle demande créée depuis la suggestion',
-    NEW_TICKET_SUGGESTED_DISMISSED: 'Suggestion de nouvelle demande ignorée',
-    FOLLOWUP_EDITED: 'Commentaire modifié',
-  };
-  return labels[type] || type;
-}
+function EmailExpandedBody({ m }) {
+  const plain = (m.body || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  return (
+    <div className="pt-3 space-y-3">
+      {/* De → À */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px]">
+        <span className="flex items-center gap-1">
+          <span className="text-on-surface-variant/70 font-semibold">De :</span>
+          <span className="text-on-surface font-bold truncate max-w-[260px]" title={m.sender}>{m.sender}</span>
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="text-on-surface-variant/70 font-semibold">À :</span>
+          <span className="text-on-surface font-bold truncate max-w-[260px]" title={m.recipients?.join(', ')}>
+            {m.recipients?.join(', ') || '—'}
+          </span>
+        </span>
+      </div>
 
-function eventDetail(event) {
-  const p = event.payload || {};
-  const parts = [];
-  if (p.oldStatus && p.newStatus) parts.push(`${p.oldStatus} → ${p.newStatus}`);
-  if (p.oldPriority && p.newPriority) parts.push(`${p.oldPriority} → ${p.newPriority}`);
-  if (p.action) parts.push(p.action);
-  if (p.reason) parts.push(p.reason);
-  if (p.error) parts.push(p.error);
-  if (p.dueAt) parts.push(`Échéance : ${new Date(p.dueAt).toLocaleString('fr-FR')}`);
-  if (p.level) parts.push(`Niveau ${p.level}`);
-  if (p.targetTicketId) parts.push(`Ticket #${p.targetTicketId}`);
-  return parts.join(' · ');
+      {/* Sujet */}
+      <div className="text-[11px] text-on-surface-variant font-semibold italic flex items-center gap-1.5">
+        <span className="text-on-surface-variant/50 not-italic">Objet :</span> {m.subject}
+      </div>
+
+      {/* Résumé IA (ou extrait du texte brut) */}
+      {(m.summary || m.body) && (
+        <div className="bg-blue-500/5 dark:bg-blue-500/10 border border-blue-500/15 rounded-xl px-3 py-2">
+          <div className="flex items-center gap-1.5 mb-1">
+            <Sparkles className="w-3 h-3 text-blue-500 dark:text-blue-400" />
+            <span className="text-[9px] font-black uppercase tracking-wider text-blue-600 dark:text-blue-400">Résumé</span>
+          </div>
+          <p className="text-[11px] text-on-surface leading-relaxed font-medium">
+            {m.summary || (
+              <span className="text-on-surface-variant italic font-normal">
+                {plain.slice(0, 200)}{plain.length > 200 ? '…' : ''}
+              </span>
+            )}
+          </p>
+        </div>
+      )}
+
+      {/* Statut du ticket au moment de l'email */}
+      {m.ticketStatusAtTime && (
+        <div className="flex items-center gap-1.5">
+          <span className="text-[9px] text-on-surface-variant/70 font-semibold">Statut du ticket :</span>
+          <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
+            ['SOLVED', 'CLOSED'].includes(m.ticketStatusAtTime)
+              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+              : m.ticketStatusAtTime === 'NEW'
+              ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20'
+              : 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20'
+          }`}>
+            {m.ticketStatusAtTime}
+          </span>
+        </div>
+      )}
+
+      {/* Contenu HTML complet */}
+      {(m.bodyHtml || m.body) && (
+        <details className="group">
+          <summary className="flex items-center gap-1.5 text-[10px] text-on-surface-variant/70 font-semibold cursor-pointer select-none hover:text-on-surface-variant transition-colors">
+            <ChevronRight className="w-3 h-3 transition-transform group-open:rotate-90" />
+            <span>Voir le contenu complet</span>
+          </summary>
+          <div className="mt-2 pt-2 border-t border-outline-variant/20">
+            {m.bodyHtml ? (
+              <div
+                className="leading-relaxed text-xs text-on-surface [&_img]:max-w-full [&_img]:rounded-lg [&_img]:border [&_img]:border-outline-variant/50 [&_img]:my-2 [&_a]:text-blue-600 [&_a]:underline [&_p]:mb-1.5 [&_p]:last:mb-0 [&_h1]:text-sm [&_h1]:font-bold [&_h1]:mt-3 [&_h1]:mb-1.5 [&_h2]:text-xs [&_h2]:font-bold [&_h2]:mt-2.5 [&_h2]:mb-1 [&_h3]:text-xs [&_h3]:font-bold [&_h3]:mt-2 [&_h3]:mb-0.5 [&_div]:mb-1 [&_b]:font-semibold"
+                dangerouslySetInnerHTML={{ __html: sanitizeHtml(m.bodyHtml) }}
+              />
+            ) : (
+              <div className="text-xs text-on-surface whitespace-pre-wrap leading-relaxed">{m.body}</div>
+            )}
+          </div>
+        </details>
+      )}
+
+      {/* Lien vers la boîte mail */}
+      <div className="pt-1">
+        <Link
+          to="/inbox"
+          className="inline-flex items-center gap-1.5 text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
+        >
+          <Mail className="w-3 h-3" />
+          Voir dans la boîte mail
+        </Link>
+      </div>
+    </div>
+  );
 }

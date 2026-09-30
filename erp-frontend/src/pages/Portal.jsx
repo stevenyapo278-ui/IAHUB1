@@ -14,6 +14,7 @@ import SlaBadge from '../components/SlaBadge';
 import ImageAttachmentsEditor from '../components/ImageAttachmentsEditor';
 import { clipboardImageFiles, imageItemsFromFiles, revokeImageItems } from '../utils/imageAttachments';
 import EmptyState from '../components/EmptyState';
+import ActivityStream, { buildTimeline } from '../components/ActivityStream';
 import { sanitizeHtml } from '../utils/sanitize';
 import useSystemSettings from '../hooks/useSystemSettings';
 
@@ -60,6 +61,7 @@ export default function Portal() {
   const [comment, setComment] = useState('');
   const [sendingComment, setSendingComment] = useState(false);
   const [pastedImages, setPastedImages] = useState([]);
+  const [expandedEmails, setExpandedEmails] = useState(new Set());
 
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -234,13 +236,22 @@ export default function Portal() {
     }
   }
 
-  const timeline = useMemo(() => {
-    if (!detail) return [];
-    return [
-      ...(detail.followups || []).map((f) => ({ kind: 'followup', ...f })),
-      ...(detail.messages || []).map((m) => ({ kind: 'message', ...m })),
-    ].sort((a, b) => new Date(a.createdAt || a.timestamp) - new Date(b.createdAt || b.timestamp));
-  }, [detail]);
+  const timeline = useMemo(
+    () => (detail
+      ? buildTimeline({
+        followups: detail.followups || [],
+        messages: detail.messages || [],
+        messageKind: 'email',
+      })
+      : []),
+    [detail]
+  );
+
+  const toggleEmail = (id) => setExpandedEmails((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto flex flex-col gap-5">
@@ -588,40 +599,51 @@ export default function Portal() {
                       </div>
                     )}
 
-                    {/* Timeline */}
+                    {/* Historique — Activity Stream */}
                     <div>
                       <div className="text-[11px] font-black uppercase tracking-widest text-on-surface-variant mb-2">
                         Échanges ({timeline.length})
                       </div>
-                      {timeline.length === 0 ? (
-                        <p className="text-sm text-on-surface-variant italic">Aucun échange pour le moment.</p>
-                      ) : (
-                        <div className="flex flex-col gap-2">
-                          {timeline.map((item, idx) => {
-                            const isOutbound = item.kind === 'message' && item.direction === 'OUTBOUND';
-                            return (
-                              <div key={idx} className={`rounded-xl border p-3 ${isOutbound ? 'border-primary/20 bg-primary/5' : 'border-outline-variant/20 bg-surface-container-lowest'}`}>
-                                <div className="flex items-center gap-2 mb-1">
-                                  <Circle className={`w-2 h-2 fill-current ${item.kind === 'message' ? 'text-sky-500' : 'text-primary'}`} />
-                                  <span className="text-[11px] font-bold text-on-surface-variant">
-                                    {item.kind === 'message' ? (item.sender || 'Support') : (item.author?.fullName || 'Support')}
-                                  </span>
-                                  {isOutbound && (
-                                    <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400">NOTRE ÉQUIPE</span>
-                                  )}
-                                  <span className="text-[10px] text-outline ml-auto">
-                                    {new Date(item.createdAt || item.timestamp).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}
-                                  </span>
-                                </div>
-                                <div
-                                  className="text-sm text-on-surface leading-relaxed break-words"
-                                  dangerouslySetInnerHTML={{ __html: sanitizeHtml(item.bodyHtml || item.content || '') }}
-                                />
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
+                      <ActivityStream
+                        items={timeline}
+                        empty="Aucun échange pour le moment."
+                        expandedIds={expandedEmails}
+                        onToggleExpand={toggleEmail}
+                        commentBadges={(f) => (
+                          f.authorId && f.authorId === user?.id ? (
+                            <span className="act-tint text-[9px] px-2 py-0.5 rounded-full text-primary font-bold border">
+                              Vous
+                            </span>
+                          ) : null
+                        )}
+                        commentBody={(f) => (
+                          <div
+                            className="text-sm text-on-surface leading-relaxed break-words [&_img]:max-w-full [&_img]:rounded-lg [&_img]:my-2"
+                            dangerouslySetInnerHTML={{ __html: sanitizeHtml(f.content || f.bodyHtml || '') }}
+                          />
+                        )}
+                        emailPreview={(m) => m.subject
+                          || (m.body || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 140)
+                          || 'Sans objet'}
+                        emailBody={(m) => (
+                          <div className="pt-3 space-y-2">
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]">
+                              <span className="text-on-surface-variant/70 font-semibold">De :</span>
+                              <span className="text-on-surface font-bold truncate max-w-[240px]" title={m.sender}>{m.sender}</span>
+                              <span className="text-on-surface-variant/70 font-semibold">À :</span>
+                              <span className="text-on-surface font-bold truncate max-w-[240px]" title={m.recipients?.join(', ')}>
+                                {m.recipients?.join(', ') || '—'}
+                              </span>
+                            </div>
+                            {(m.bodyHtml || m.body || m.content) && (
+                              <div
+                                className="leading-relaxed text-xs text-on-surface break-words [&_img]:max-w-full [&_img]:rounded-lg [&_img]:my-2 [&_p]:mb-1.5 [&_p]:last:mb-0"
+                                dangerouslySetInnerHTML={{ __html: sanitizeHtml(m.bodyHtml || m.body || m.content) }}
+                              />
+                            )}
+                          </div>
+                        )}
+                      />
                     </div>
 
                     {/* CSAT */}
