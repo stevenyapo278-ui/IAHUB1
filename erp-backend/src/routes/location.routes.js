@@ -4,6 +4,9 @@ const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { auditLog } = require('../services/auditLogService');
+const { statusToCondition } = require('../services/ticketQueryService');
+const { TICKET_EXPORT_SELECT, sendTicketsExport } = require('../services/ticketReportService');
+const { sendTableExport } = require('../services/tableExportService');
 
 const router = express.Router();
 router.use(authenticate);
@@ -29,6 +32,130 @@ router.get('/', async (req, res) => {
     },
   });
   res.json(locations);
+});
+
+// ── Tickets rattachés aux lieux ─────────────────────────────────────────────
+// Ticket.locationId est une colonne simple (aucune clé étrangère, aucune cascade) et
+// Ticket.locationName conserve le libellé complet : supprimer un lieu n'efface aucun
+// ticket, il coupe seulement le lien vers le lieu. On compte donc directement les
+// tickets vivants (corbeille exclue) groupés par locationId.
+
+// ── Extraction du tableau des lieux (colonnes identiques à la grille) ────────
+// Le filtrage reprend les champs cherchés par la grille : nom, chemin complet,
+// ville, bâtiment et pays.
+function buildLocationGridRows(locations, rawSearch) {
+  const search = String(rawSearch || '').trim().toLowerCase();
+  if (!search) return locations;
+  return locations.filter((l) => [l.name, l.completename, l.town, l.building, l.country]
+    .some((field) => field?.toLowerCase().includes(search)));
+}
+
+// Extraction du tableau (une ligne par lieu), recherche incluse
+router.get('/export', async (req, res) => {
+  const locations = await prisma.location.findMany({
+    orderBy: [{ isCustom: 'asc' }, { completename: 'asc' }],
+    include: { _count: { select: { requesterLinks: true } } },
+  });
+  const grouped = await prisma.ticket.groupBy({
+    by: ['locationId'],
+    where: { deletedAt: null, locationId: { not: null } },
+    _count: true,
+  });
+  const countByLocation = new Map(grouped.map((g) => [g.locationId, g._count]));
+
+  const rows = buildLocationGridRows(locations, req.query.search).map((l) => ({
+    name: l.name,
+    completename: l.completename || '',
+    townBuilding: [l.town, l.building].filter(Boolean).join(' · '),
+    country: l.country || '',
+    tickets: countByLocation.get(l.id) ?? 0,
+    requesters: l._count?.requesterLinks ?? 0,
+  }));
+
+  await sendTableExport(res, {
+    columns: [
+      { header: 'Lieu', key: 'name', width: 30 },
+      { header: 'Chemin complet', key: 'completename', width: 40 },
+      { header: 'Ville / Bâtiment', key: 'townBuilding', width: 24 },
+      { header: 'Pays', key: 'country', width: 16 },
+      { header: 'Tickets', key: 'tickets', width: 10 },
+      { header: 'Demandeurs', key: 'requesters', width: 12 },
+    ],
+    rows,
+    format: req.query.format,
+    filenamePrefix: 'lieux',
+    sheetName: 'Lieux',
+  });
+});
+
+// { [locationId]: nombre de tickets }
+router.get('/counts', async (req, res) => {
+  const locations = await prisma.location.findMany({ select: { id: true } });
+  const grouped = await prisma.ticket.groupBy({
+    by: ['locationId'],
+    where: { deletedAt: null, locationId: { not: null } },
+    _count: true,
+  });
+  const countByLocation = new Map(grouped.map((g) => [g.locationId, g._count]));
+  res.json(Object.fromEntries(locations.map((l) => [l.id, countByLocation.get(l.id) || 0])));
+});
+
+// Lieu + where de ses tickets, filtre statut optionnel (le même statut sert à
+// la liste affichée et à l'extraction).
+const slugify = (s) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').toLowerCase();
+
+async function resolveLocationTickets(id, query = {}) {
+  const location = await prisma.location.findUnique({ where: { id } });
+  if (!location) return null;
+
+  const where = { deletedAt: null, locationId: id };
+  const statusCond = statusToCondition(query.status);
+  if (statusCond) Object.assign(where, statusCond);
+  return { location, where };
+}
+
+// Tickets rattachés à un lieu
+router.get('/:id/tickets', async (req, res) => {
+  const resolved = await resolveLocationTickets(Number(req.params.id), req.query);
+  if (!resolved) return res.status(404).json({ error: 'Lieu introuvable' });
+
+  const { location, where } = resolved;
+  const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 200));
+
+  const [items, total] = await Promise.all([
+    prisma.ticket.findMany({
+      where,
+      select: {
+        id: true, title: true, status: true, priority: true, category: true, locationName: true, createdAt: true,
+        requester: { select: { id: true, fullName: true } },
+        assignedTo: { select: { id: true, fullName: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    }),
+    prisma.ticket.count({ where }),
+  ]);
+
+  res.json({ location: location.name, total, limit, status: req.query.status || '', items });
+});
+
+// Extraction des tickets d'un lieu (CSV / XLSX, mêmes colonnes que
+// GET /tickets/export, filtre statut identique à la liste)
+router.get('/:id/tickets/export', async (req, res) => {
+  const resolved = await resolveLocationTickets(Number(req.params.id), req.query);
+  if (!resolved) return res.status(404).json({ error: 'Lieu introuvable' });
+
+  const tickets = await prisma.ticket.findMany({
+    where: resolved.where,
+    select: TICKET_EXPORT_SELECT,
+    orderBy: { createdAt: 'desc' },
+    take: 10000,
+  });
+
+  await sendTicketsExport(res, tickets, {
+    format: req.query.format,
+    filenamePrefix: `tickets_lieu_${slugify(resolved.location.name)}`,
+  });
 });
 
 // Créer un lieu

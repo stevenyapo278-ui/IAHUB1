@@ -234,8 +234,85 @@ function describeFilters(query) {
   return parts.length > 0 ? parts.join(' · ') : 'tous les tickets visibles pour vous';
 }
 
+// ── Valeurs en français dans les extractions ─────────────────────────────────
+// Les codes techniques (OPEN, INCIDENT, NOT_REQUIRED…) sont lisibles par la
+// machine mais pas par un export envoyé à un utilisateur : on traduit dans le
+// CSV comme dans le XLSX. Libellés alignés sur erp-frontend/src/constants/tickets.js.
+const EXPORT_STATUS_LABELS = {
+  NEW: 'Nouveau',
+  OPEN: 'En cours',
+  PLANNED: 'Planifié',
+  PENDING: 'En attente',
+  WAITING_FOR_USER: 'En attente demandeur',
+  SOLVED: 'Résolu',
+  CLOSED: 'Fermé',
+};
+const EXPORT_TYPE_LABELS = { INCIDENT: 'Incident', REQUEST: 'Demande' };
+// source est une chaîne libre : on ne traduit que les valeurs connues
+const EXPORT_SOURCE_LABELS = { Phone: 'Téléphone', Other: 'Autre' };
+const EXPORT_APPROVAL_LABELS = {
+  NOT_REQUIRED: 'Non requise',
+  PENDING: 'En attente Hotline',
+  APPROVED: 'Approuvé',
+  REJECTED: 'Rejeté',
+  SUPERSEDED: 'Remplacé',
+};
+
+// Libellé français d'une valeur technique (vide si absent, sinon valeur brute)
+function frLabel(map, value) {
+  if (value === null || value === undefined || value === '') return '';
+  return map[value] || value;
+}
+
+// ── Catégorie / Sous-catégorie dans les extractions ──────────────────────────
+// Ticket.category stocke le NOM de la catégorie (feuille), pas sa position dans
+// l'arbre : on remonte les parents pour produire deux colonnes exploitables —
+// « Catégorie » = racine de premier niveau, « Sous-catégorie » = chemin sous la
+// racine (ex. « SOUS CA », ou « parent > enfant » au-delà de deux niveaux).
+async function buildCategoryPathResolver() {
+  const categories = await prisma.ticketCategory.findMany({ select: { id: true, name: true, parentId: true } });
+  const byId = new Map(categories.map((c) => [c.id, c]));
+  const byName = new Map(categories.map((c) => [c.name, c]));
+  const cache = new Map();
+
+  return function resolve(name) {
+    if (!name) return { root: '', sub: '' };
+    if (cache.has(name)) return cache.get(name);
+
+    const chain = [];
+    const seen = new Set();
+    let current = byName.get(name);
+    while (current && !seen.has(current.id)) {
+      seen.add(current.id);
+      chain.unshift(current);
+      current = current.parentId == null ? null : byId.get(Number(current.parentId));
+    }
+    // Catégorie inconnue (renommée ou supprimée) : on garde le libellé brut en racine
+    const res = chain.length === 0
+      ? { root: name, sub: '' }
+      : { root: chain[0].name, sub: chain.slice(1).map((c) => c.name).join(' > ') };
+    cache.set(name, res);
+    return res;
+  };
+}
+
+// Ajoute t.categoryRoot / t.categorySub sur chaque ticket. Idempotent : on ne
+// recharge l'arbre des catégories que si un ticket n'a pas encore été traité.
+async function decorateCategoryPaths(tickets) {
+  if (!Array.isArray(tickets) || tickets.length === 0) return tickets;
+  if (tickets.every((t) => t.categoryRoot !== undefined)) return tickets;
+  const resolve = await buildCategoryPathResolver();
+  for (const t of tickets) {
+    const { root, sub } = resolve(t.category);
+    t.categoryRoot = root;
+    t.categorySub = sub;
+  }
+  return tickets;
+}
+
 // ── Génération XLSX (mêmes colonnes que l'export serveur) ────────────────────
 async function buildTicketsXlsxBuffer(tickets) {
+  await decorateCategoryPaths(tickets);
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('Tickets');
   sheet.columns = [
@@ -244,6 +321,7 @@ async function buildTicketsXlsxBuffer(tickets) {
     { header: 'Statut', key: 'status', width: 16 },
     { header: 'Priorité', key: 'priority', width: 10 },
     { header: 'Catégorie', key: 'category', width: 22 },
+    { header: 'Sous-catégorie', key: 'categorySub', width: 26 },
     { header: 'Type', key: 'type', width: 12 },
     { header: 'Source', key: 'source', width: 12 },
     { header: 'Demandeur', key: 'requester', width: 28 },
@@ -267,17 +345,18 @@ async function buildTicketsXlsxBuffer(tickets) {
   headerRow.font = { bold: true };
   headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F0FE' } };
   sheet.views = [{ state: 'frozen', ySplit: 1 }];
-  sheet.autoFilter = { from: 'A1', to: 'T1' };
+  sheet.autoFilter = { from: 'A1', to: `${sheet.getColumn(sheet.columns.length).letter}1` };
 
   for (const t of tickets) {
     sheet.addRow({
       id: t.id,
       title: t.title,
-      status: t.status,
+      status: frLabel(EXPORT_STATUS_LABELS, t.status),
       priority: t.priority,
-      category: t.category || '',
-      type: t.type,
-      source: t.source || '',
+      category: t.categoryRoot || t.category || '',
+      categorySub: t.categorySub || '',
+      type: frLabel(EXPORT_TYPE_LABELS, t.type),
+      source: frLabel(EXPORT_SOURCE_LABELS, t.source),
       requester: t.requester?.fullName ? `${t.requester.fullName} (${t.requester.email})` : (t.requester?.email || ''),
       technician: t.assignedTo?.fullName ? `${t.assignedTo.fullName} (${t.assignedTo.email})` : (t.assignedTo?.email || ''),
       team: t.team?.name || '',
@@ -290,11 +369,56 @@ async function buildTicketsXlsxBuffer(tickets) {
       slaBreachedAt: t.slaBreachedAt,
       firstResponseAt: t.firstResponseAt,
       aiProcessed: t.aiProcessed ? 'oui' : 'non',
-      approvalStatus: t.approvalStatus,
+      approvalStatus: frLabel(EXPORT_APPROVAL_LABELS, t.approvalStatus),
     });
   }
   const buffer = await workbook.xlsx.writeBuffer();
   return Buffer.from(buffer);
+}
+
+// ── Génération CSV (séparateur « ; », UTF-8 BOM, mêmes colonnes que le XLSX) ─
+async function buildTicketsCsv(tickets) {
+  await decorateCategoryPaths(tickets);
+  const header = [
+    'id', 'titre', 'statut', 'priorite', 'categorie', 'sous_categorie', 'type', 'source',
+    'demandeur', 'technicien', 'equipe', 'lieu', 'cree_le', 'resolu_le', 'ferme_le',
+    'sla_reponse_due', 'sla_resolution_due', 'sla_depasse_le', 'premiere_reponse', 'ia', 'approbation',
+  ];
+  const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const rows = tickets.map((t) => [
+    t.id, cell(t.title), frLabel(EXPORT_STATUS_LABELS, t.status), t.priority,
+    cell(t.categoryRoot || t.category || ''), cell(t.categorySub || ''),
+    frLabel(EXPORT_TYPE_LABELS, t.type), cell(frLabel(EXPORT_SOURCE_LABELS, t.source)),
+    t.requester?.fullName ? `${t.requester.fullName} (${t.requester.email})` : (t.requester?.email || ''),
+    t.assignedTo?.fullName ? `${t.assignedTo.fullName} (${t.assignedTo.email})` : (t.assignedTo?.email || ''),
+    t.team?.name || '',
+    t.locationName || '', t.createdAt?.toISOString() || '', t.solvedAt?.toISOString() || '',
+    t.closedAt?.toISOString() || '', t.slaResponseDueAt?.toISOString() || '', t.slaResolutionDueAt?.toISOString() || '',
+    t.slaBreachedAt?.toISOString() || '', t.firstResponseAt?.toISOString() || '', t.aiProcessed ? 'oui' : 'non',
+    frLabel(EXPORT_APPROVAL_LABELS, t.approvalStatus),
+  ]);
+  return [header.join(';'), ...rows.map((r) => r.join(';'))].join('\n');
+}
+
+// ── Envoi HTTP d'une extraction (CSV / XLSX) ─────────────────────────────────
+// Réutilisé par les exports des vues Catégories et Lieux : mêmes colonnes que
+// GET /tickets/export, y compris Catégorie / Sous-catégorie.
+async function sendTicketsExport(res, tickets, { format = 'xlsx', filenamePrefix = 'tickets_export' } = {}) {
+  const normalized = format === 'csv' ? 'csv' : 'xlsx';
+  const day = new Date().toISOString().slice(0, 10);
+  const filename = `${filenamePrefix}_${day}.${normalized}`;
+  await decorateCategoryPaths(tickets);
+
+  if (normalized === 'csv') {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send('\uFEFF' + await buildTicketsCsv(tickets));
+  }
+
+  const buffer = await buildTicketsXlsxBuffer(tickets);
+  res.setHeader('Content-Type', XLSX_MIME);
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  return res.send(buffer);
 }
 
 // ── Aperçu (avant confirmation) : compte les tickets sans rien envoyer ───────
@@ -375,6 +499,10 @@ module.exports = {
   fetchReportTickets,
   describeFilters,
   buildTicketsXlsxBuffer,
+  buildTicketsCsv,
+  decorateCategoryPaths,
+  sendTicketsExport,
+  TICKET_EXPORT_SELECT: REPORT_SELECT,
   previewReport,
   sendTicketReportEmail,
 };

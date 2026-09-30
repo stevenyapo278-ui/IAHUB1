@@ -4,6 +4,14 @@
 jest.mock('../prismaClient', () => ({
   team: { findFirst: jest.fn(async () => null) },
   ticket: { findMany: jest.fn(async () => []) },
+  // Arbre minimal : « Système » est une sous-catégorie de « Matériel » →
+  // l'extraction doit sortir racine + sous-chemin dans deux colonnes distinctes.
+  ticketCategory: {
+    findMany: jest.fn(async () => [
+      { id: 1, name: 'Matériel', parentId: null },
+      { id: 2, name: 'Système', parentId: 1 },
+    ]),
+  },
 }));
 jest.mock('./emailSender', () => ({
   sendEmail: jest.fn(async () => undefined),
@@ -12,6 +20,7 @@ jest.mock('./emailSender', () => ({
   buildEmailLayout: jest.fn(({ children }) => `<html><body>${children}</body></html>`),
 }));
 
+const ExcelJS = require('exceljs');
 const prisma = require('../prismaClient');
 const { sendEmail, sendEmailViaSmtp, getActiveEmailAccount } = require('./emailSender');
 const {
@@ -21,6 +30,7 @@ const {
   resolveCcEmails,
   describeFilters,
   buildTicketsXlsxBuffer,
+  buildTicketsCsv,
   previewReport,
   sendTicketReportEmail,
 } = require('./ticketReportService');
@@ -195,6 +205,20 @@ describe('describeFilters — résumé affiché avant confirmation', () => {
   });
 });
 
+// Ticket minimal conforme à TICKET_EXPORT_SELECT (champs utilisés par XLSX/CSV)
+function buildTicket(overrides = {}) {
+  return {
+    id: 123, title: 'Ticket de test', status: 'OPEN', priority: 'P2', category: 'Système',
+    type: 'incident', source: 'CHATBOT', createdAt: new Date(), solvedAt: null, closedAt: null,
+    slaResponseDueAt: null, slaResolutionDueAt: null, slaBreachedAt: null, firstResponseAt: null,
+    aiProcessed: true, approvalStatus: null,
+    requester: { email: 'user@prosuma.ci', fullName: 'Jean Test', avatarUrl: null },
+    assignedTo: { email: 'tech@prosuma.ci', fullName: 'Tech Test', avatarUrl: null },
+    assignees: [], team: { name: 'Système' }, locationName: 'Abidjan', observers: [],
+    ...overrides,
+  };
+}
+
 describe('buildTicketsXlsxBuffer — fichier Excel généré', () => {
   it('produit un buffer XLSX valide avec les tickets fournis', async () => {
     const buffer = await buildTicketsXlsxBuffer([
@@ -212,6 +236,60 @@ describe('buildTicketsXlsxBuffer — fichier Excel généré', () => {
     expect(buffer.length).toBeGreaterThan(1000);
     // Signature ZIP du format OOXML
     expect(buffer.slice(0, 2).toString('latin1')).toBe('PK');
+  });
+
+  it('sépare la catégorie racine de la sous-catégorie (colonnes dédiées)', async () => {
+    const buffer = await buildTicketsXlsxBuffer([buildTicket({ category: 'Système' })]);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+    const sheet = workbook.getWorksheet('Tickets');
+
+    const headers = sheet.getRow(1).values.slice(1);
+    expect(headers).toContain('Catégorie');
+    expect(headers).toContain('Sous-catégorie');
+
+    const row = sheet.getRow(2).values;
+    expect(row[headers.indexOf('Catégorie') + 1]).toBe('Matériel');
+    expect(row[headers.indexOf('Sous-catégorie') + 1]).toBe('Système');
+  });
+
+  it('garde le nom brut en catégorie racine quand il est absent de l\'arbre', async () => {
+    const buffer = await buildTicketsXlsxBuffer([buildTicket({ category: 'Catégorie orpheline' })]);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+    const sheet = workbook.getWorksheet('Tickets');
+    const headers = sheet.getRow(1).values.slice(1);
+    const row = sheet.getRow(2).values;
+    expect(row[headers.indexOf('Catégorie') + 1]).toBe('Catégorie orpheline');
+    expect(row[headers.indexOf('Sous-catégorie') + 1]).toBe('');
+  });
+});
+
+describe('buildTicketsCsv — extraction CSV', () => {
+  it('reprend les colonnes categorie / sous_categorie du XLSX', async () => {
+    const csv = await buildTicketsCsv([buildTicket({ category: 'Système' })]);
+    const [header, line] = csv.split('\n');
+    const cols = header.split(';');
+    expect(cols).toEqual(expect.arrayContaining(['categorie', 'sous_categorie']));
+    // Les deux colonnes se suivent
+    expect(cols[cols.indexOf('categorie') + 1]).toBe('sous_categorie');
+    expect(line).toContain('"Matériel"');
+    expect(line).toContain('"Système"');
+  });
+
+  it('traduit les codes techniques en libellés français', async () => {
+    const csv = await buildTicketsCsv([
+      buildTicket({ status: 'OPEN', type: 'INCIDENT', source: 'Phone', approvalStatus: 'NOT_REQUIRED' }),
+    ]);
+    const [, line] = csv.split('\n');
+    expect(line).toContain(';En cours;');
+    expect(line).toContain(';Incident;');
+    expect(line).toContain(';"Téléphone";');
+    expect(line).toContain('Non requise');
+    // Plus aucune valeur technique brute dans la ligne
+    expect(line).not.toContain('OPEN');
+    expect(line).not.toContain('INCIDENT');
+    expect(line).not.toContain('NOT_REQUIRED');
   });
 });
 

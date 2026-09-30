@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { toast } from 'sonner';
-import { Tag, Plus, Search, RefreshCw, Trash2, Pencil, Globe, FolderTree, ChevronRight, ChevronLeft, X } from 'lucide-react';
+import { Tag, Plus, Search, RefreshCw, Trash2, Pencil, Globe, FolderTree, ChevronRight, ChevronLeft, X, Ticket, FileSpreadsheet, FileDown, Loader2 } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import { flattenCategoryTree } from '../utils/categoryTree';
 import ConfirmDialog from '../components/ConfirmDialog';
+import LinkedTicketsDrawer from '../components/LinkedTicketsDrawer';
+import exportFile from '../utils/exportFile';
 import DataGrid from '../components/DataGrid';
 import FormDrawer from '../components/FormDrawer';
 import PaginationButtons from '../components/PaginationButtons';
@@ -23,6 +25,9 @@ export default function Categories() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [exporting, setExporting] = useState(null);
+  const [ticketCounts, setTicketCounts] = useState({});
+  const [ticketsCat, setTicketsCat] = useState(null);
   const [pageSize, setPageSize] = useState(50);
   const [page, setPage] = useState(1);
 
@@ -40,6 +45,12 @@ export default function Categories() {
       .then(({ data }) => setCategories(data))
       .catch((err) => toast.error(err.response?.data?.error || 'Erreur chargement catégories'))
       .finally(() => setLoading(false));
+
+    // Nombre de tickets par catégorie (sous-catégories incluses) — affiché en colonne
+    // et rappelé dans la boîte de suppression pour mesurer l'impact.
+    api.get('/categories/counts')
+      .then(({ data }) => setTicketCounts(data || {}))
+      .catch(() => setTicketCounts({}));
   }
 
   useEffect(() => { loadCategories(); }, []);
@@ -188,6 +199,31 @@ export default function Categories() {
     }
   }
 
+  function pluralTickets(n) {
+    return n <= 0 ? 'Aucun ticket' : n === 1 ? '1 ticket' : `${n} tickets`;
+  }
+
+  function openTickets(cat) {
+    setTicketsCat(cat);
+  }
+
+  // Extraction du tableau affiché (colonnes de la grille, recherche incluse)
+  async function exportTable(format) {
+    setExporting(format);
+    try {
+      await exportFile({
+        url: '/categories/export',
+        params: { format, ...(search.trim() ? { search: search.trim() } : {}) },
+        fallbackName: `categories_${new Date().toISOString().slice(0, 10)}.${format}`,
+      });
+      toast.success(`Export ${format.toUpperCase()} du tableau généré`);
+    } catch {
+      toast.error("Échec de l'export");
+    } finally {
+      setExporting(null);
+    }
+  }
+
   function childCount(id) {
     return categories.filter((c) => c.parentId != null && Number(c.parentId) === id).length;
   }
@@ -254,6 +290,26 @@ export default function Categories() {
         ),
       },
       {
+        field: 'ticketCount', headerName: 'Tickets', width: 110,
+        valueGetter: (params) => ticketCounts[params.data.id] ?? 0,
+        comparator: (a, b) => a - b,
+        cellRenderer: (params) => (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); openTickets(params.data); }}
+            title={params.value > 0 ? 'Voir les tickets de cette catégorie' : 'Aucun ticket rattaché'}
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border transition-colors cursor-pointer ${
+              params.value > 0
+                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/25 hover:bg-blue-500/20'
+                : 'bg-surface-container text-on-surface-variant border-outline-variant hover:bg-surface-container-high'
+            }`}
+          >
+            <Ticket className="w-3 h-3" />
+            {params.value}
+          </button>
+        ),
+      },
+      {
         field: 'createdAt', headerName: 'Créé le', width: 120,
         cellRenderer: (params) => <span className="text-xs text-on-surface-variant font-mono">{formatDate(params.value)}</span>,
         comparator: (a, b) => (a ? new Date(a).getTime() : 0) - (b ? new Date(b).getTime() : 0),
@@ -284,7 +340,22 @@ export default function Categories() {
     }
 
     return cols;
-  }, [canManage]);
+  }, [canManage, ticketCounts]);
+
+  function deleteMessage() {
+    if (!pendingDelete) return '';
+    const n = ticketCounts[pendingDelete.id] ?? 0;
+    const kids = childCount(pendingDelete.id);
+    let msg = `Supprimer la catégorie « ${pendingDelete.name} » ? `;
+    msg += n === 1
+      ? '1 ticket y est rattaché (sous-catégories incluses) : aucun ticket ne sera supprimé, il conservera son libellé mais la catégorie disparaîtra des sélecteurs.'
+      : n > 1
+        ? `${n} tickets y sont rattachés (sous-catégories incluses) : aucun ticket ne sera supprimé, ils conserveront leur libellé mais la catégorie disparaîtra des sélecteurs.`
+        : 'Aucun ticket n\'est rattaché : les tickets existants conserveront leur libellé.';
+    if (kids === 1) msg += " ⚠️ 1 sous-catégorie sera détachée (elle deviendra une catégorie racine) : déplacez-la d'abord.";
+    else if (kids > 1) msg += ` ⚠️ ${kids} sous-catégories seront détachées (elles deviendront des catégories racines) : déplacez-les d'abord.`;
+    return msg;
+  }
 
   return (
     <div className="flex flex-col h-full w-full min-w-0 gap-0">
@@ -319,6 +390,28 @@ export default function Categories() {
             placeholder="Rechercher une catégorie..."
             className={`${inputCls} w-full pl-9`}
           />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => exportTable('xlsx')}
+            disabled={exporting !== null || tableRows.length === 0}
+            title="Exporter le tableau des catégories en Excel"
+            className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl border border-outline-variant text-on-surface-variant text-xs font-bold hover:border-emerald-500 hover:text-emerald-600 disabled:opacity-40 disabled:pointer-events-none transition-colors cursor-pointer"
+          >
+            {exporting === 'xlsx' ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+            <span className="hidden sm:inline">XLSX</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => exportTable('csv')}
+            disabled={exporting !== null || tableRows.length === 0}
+            title="Exporter le tableau des catégories en CSV"
+            className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl border border-outline-variant text-on-surface-variant text-xs font-bold hover:border-teal-500 hover:text-teal-600 disabled:opacity-40 disabled:pointer-events-none transition-colors cursor-pointer"
+          >
+            {exporting === 'csv' ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
+            <span className="hidden sm:inline">CSV</span>
+          </button>
         </div>
         <button onClick={loadCategories}
           className="p-2 rounded-xl border border-outline-variant/60 text-on-surface-variant hover:bg-surface-container-high cursor-pointer transition-colors">
@@ -418,11 +511,21 @@ export default function Categories() {
         </form>
       </FormDrawer>
 
+      {/* ── Tickets rattachés à la catégorie ────────────────────────────── */}
+      <LinkedTicketsDrawer
+        open={!!ticketsCat}
+        onClose={() => setTicketsCat(null)}
+        endpoint={ticketsCat ? `/categories/${ticketsCat.id}/tickets` : null}
+        title={`Tickets — ${ticketsCat?.name || ''}`}
+        subtitle={ticketsCat ? pluralTickets(ticketCounts[ticketsCat.id] ?? 0) : null}
+        note={ticketsCat ? `Compte global (catégorie « ${ticketsCat.name} » et ses sous-catégories), corbeille exclue.` : null}
+      />
+
       {/* ── Confirm Delete ──────────────────────────────────────────────── */}
       <ConfirmDialog
         open={!!pendingDelete}
         title="Supprimer la catégorie"
-        message={`Supprimer la catégorie « ${pendingDelete?.name} » ? Les tickets existants conserveront leur libellé.${pendingDelete && childCount(pendingDelete.id) > 0 ? ` ⚠️ Cette catégorie a ${childCount(pendingDelete.id)} sous-catégorie(s) : déplacez-les ou supprimez-les d'abord.` : ''}`}
+        message={deleteMessage()}
         confirmLabel="Supprimer"
         onConfirm={handleDelete}
         onCancel={() => setPendingDelete(null)}

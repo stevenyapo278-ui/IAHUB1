@@ -1,11 +1,7 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  MapPin, Plus, X, Search, RefreshCw, Trash2, Globe,
-  Building2, Mail, Check, ChevronLeft, ChevronRight, ChevronDown, Pencil,
-  Users, ArrowRightLeft, UserMinus, UserPlus, Clock, CheckCircle2
-} from 'lucide-react';
+import { MapPin, Plus, X, Search, RefreshCw, Trash2, Globe, Building2, Mail, Check, ChevronLeft, ChevronRight, ChevronDown, Pencil, Users, ArrowRightLeft, UserMinus, UserPlus, Clock, CheckCircle2, Ticket, FileSpreadsheet, FileDown, Loader2 } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
@@ -14,6 +10,8 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import DataGrid from '../components/DataGrid';
 import FormDrawer from '../components/FormDrawer';
 import PaginationButtons from '../components/PaginationButtons';
+import LinkedTicketsDrawer from '../components/LinkedTicketsDrawer';
+import exportFile from '../utils/exportFile';
 
 const emptyForm = { name: '', completename: '', address: '', postcode: '', town: '', country: '', building: '', room: '' };
 
@@ -444,6 +442,9 @@ export default function Locations() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [ticketCounts, setTicketCounts] = useState({});
+  const [exporting, setExporting] = useState(null);
+  const [ticketsLoc, setTicketsLoc] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [detailId, setDetailId] = useState(null);
   const [reassignData, setReassignData] = useState(null);
@@ -468,6 +469,23 @@ export default function Locations() {
     return list.slice(start, start + pageSize);
   }, [locations, search, page, pageSize]);
 
+  // Extraction du tableau affiché (colonnes de la grille, recherche incluse)
+  async function exportTable(format) {
+    setExporting(format);
+    try {
+      await exportFile({
+        url: '/locations/export',
+        params: { format, ...(search.trim() ? { search: search.trim() } : {}) },
+        fallbackName: `lieux_${new Date().toISOString().slice(0, 10)}.${format}`,
+      });
+      toast.success(`Export ${format.toUpperCase()} du tableau généré`);
+    } catch {
+      toast.error("Échec de l'export");
+    } finally {
+      setExporting(null);
+    }
+  }
+
   function loadLocations(highlightId) {
     setLoading(true);
     api.get('/locations')
@@ -484,6 +502,12 @@ export default function Locations() {
       })
       .catch((err) => toast.error(err.response?.data?.error || 'Erreur chargement lieux'))
       .finally(() => setLoading(false));
+
+    // Nombre de tickets par lieu (Ticket.locationId, corbeille exclue) — affiché
+    // en colonne et rappelé dans la boîte de suppression pour mesurer l'impact.
+    api.get('/locations/counts')
+      .then(({ data }) => setTicketCounts(data || {}))
+      .catch(() => setTicketCounts({}));
   }
 
   useEffect(() => { loadLocations(); }, []);
@@ -567,6 +591,10 @@ export default function Locations() {
     }
   }
 
+  function pluralTickets(n) {
+    return n <= 0 ? 'Aucun ticket' : n === 1 ? '1 ticket' : `${n} tickets`;
+  }
+
   const canManage = hasPermission(user, 'locations.manage') || ['ADMIN', 'HOTLINE'].includes(user?.role);
 
   const stats = useMemo(() => {
@@ -608,6 +636,26 @@ export default function Locations() {
         cellRenderer: (params) => <span className="text-xs text-on-surface-variant">{params.value || '—'}</span>,
       },
       {
+        field: 'ticketCount', headerName: 'Tickets', width: 110,
+        valueGetter: (params) => ticketCounts[params.data.id] ?? 0,
+        comparator: (a, b) => a - b,
+        cellRenderer: (params) => (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setTicketsLoc(params.data); }}
+            title={params.value > 0 ? 'Voir les tickets de ce lieu' : 'Aucun ticket rattaché'}
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border transition-colors cursor-pointer ${
+              params.value > 0
+                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/25 hover:bg-blue-500/20'
+                : 'bg-surface-container text-on-surface-variant border-outline-variant hover:bg-surface-container-high'
+            }`}
+          >
+            <Ticket className="w-3 h-3" />
+            {params.value}
+          </button>
+        ),
+      },
+      {
         field: 'requesterCount', headerName: 'Demandeurs', width: 120,
         valueGetter: (params) => params.data._count?.requesterLinks ?? params.data.requesters?.length ?? 0,
         cellRenderer: (params) => <span className="text-xs font-semibold text-on-surface">{params.value}</span>,
@@ -633,7 +681,7 @@ export default function Locations() {
     }
 
     return cols;
-  }, [canManage]);
+  }, [canManage, ticketCounts]);
 
   return (
     <div className="flex flex-col h-full w-full min-w-0 gap-0">
@@ -679,6 +727,28 @@ export default function Locations() {
             placeholder="Rechercher un lieu..."
             className={`${inputCls} w-full pl-9`}
           />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => exportTable('xlsx')}
+            disabled={exporting !== null || total === 0}
+            title="Exporter le tableau des lieux en Excel"
+            className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl border border-outline-variant text-on-surface-variant text-xs font-bold hover:border-emerald-500 hover:text-emerald-600 disabled:opacity-40 disabled:pointer-events-none transition-colors cursor-pointer"
+          >
+            {exporting === 'xlsx' ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+            <span className="hidden sm:inline">XLSX</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => exportTable('csv')}
+            disabled={exporting !== null || total === 0}
+            title="Exporter le tableau des lieux en CSV"
+            className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl border border-outline-variant text-on-surface-variant text-xs font-bold hover:border-teal-500 hover:text-teal-600 disabled:opacity-40 disabled:pointer-events-none transition-colors cursor-pointer"
+          >
+            {exporting === 'csv' ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
+            <span className="hidden sm:inline">CSV</span>
+          </button>
         </div>
         <button onClick={loadLocations}
           className="p-2 rounded-xl border border-outline-variant/60 text-on-surface-variant hover:bg-surface-container-high cursor-pointer transition-colors">
@@ -744,10 +814,29 @@ export default function Locations() {
       <ConfirmDialog
         open={!!pendingDelete}
         title="Supprimer le lieu"
-        message="Supprimer ce lieu ? Les demandeurs associés devront être réassignés."
+        message={(() => {
+          const n = pendingDelete ? (ticketCounts[pendingDelete] ?? 0) : 0;
+          let msg = 'Supprimer ce lieu ? Les demandeurs associés devront être réassignés.';
+          msg += n === 1
+            ? ' 1 ticket y est rattaché : aucun ticket ne sera supprimé, il conservera son libellé mais perdra le lien vers ce lieu.'
+            : n > 1
+              ? ` ${n} tickets y sont rattachés : aucun ticket ne sera supprimé, ils conserveront leur libellé mais perdront le lien vers ce lieu.`
+              : ' Aucun ticket n\'est rattaché à ce lieu.';
+          return msg;
+        })()}
         confirmLabel="Supprimer" danger
         onConfirm={() => handleDelete(pendingDelete)}
         onCancel={() => setPendingDelete(null)}
+      />
+
+      {/* ── Tickets rattachés au lieu ───────────────────────────────────── */}
+      <LinkedTicketsDrawer
+        open={!!ticketsLoc}
+        onClose={() => setTicketsLoc(null)}
+        endpoint={ticketsLoc ? `/locations/${ticketsLoc.id}/tickets` : null}
+        title={`Tickets — ${ticketsLoc?.name || ''}`}
+        subtitle={ticketsLoc ? pluralTickets(ticketCounts[ticketsLoc.id] ?? 0) : null}
+        note={ticketsLoc ? 'Compte global des tickets vivants (corbeille exclue) pointant vers ce lieu.' : null}
       />
 
       <ReassignModal

@@ -8,7 +8,7 @@ const { requirePermission } = require('../middleware/permissions');
 const { notifyMajorIncidentResolved, sendTicketStatusNotification, sendResolvedNotificationEmail, sendTicketCreationNotification, sendAcknowledgement, sendAssignmentNotificationEmail, sendEmail } = require('../services/emailSender');
 const { approveTicket } = require('../services/ticketApproval');
 const { isRequesterOnly, buildTicketWhereClause } = require('../services/ticketQueryService');
-const { buildTicketsXlsxBuffer } = require('../services/ticketReportService');
+const { buildTicketsXlsxBuffer, buildTicketsCsv, decorateCategoryPaths } = require('../services/ticketReportService');
 const { autoAssignTechnician } = require('../services/ticketAutoAssign');
 const { logEvent } = require('../services/ticketEvent');
 const { auditLog } = require('../services/auditLogService');
@@ -298,6 +298,9 @@ router.get('/export', async (req, res) => {
     },
   });
 
+  // Catégorie racine + sous-catégorie pour le CSV et le JSON (le XLSX se décore lui-même)
+  await decorateCategoryPaths(tickets);
+
   if (format === 'xlsx') {
     const buffer = await buildTicketsXlsxBuffer(tickets);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -306,15 +309,7 @@ router.get('/export', async (req, res) => {
   }
 
   if (format === 'csv') {
-    const header = ['id', 'titre', 'statut', 'priorite', 'categorie', 'type', 'source', 'demandeur', 'technicien', 'equipe', 'lieu', 'cree_le', 'resolu_le', 'ferme_le', 'sla_reponse_due', 'sla_resolution_due', 'sla_depasse_le', 'premiere_reponse', 'ia', 'approbation'];
-    const rows = tickets.map((t) => [
-      t.id, `"${(t.title || '').replace(/"/g, '""')}"`, t.status, t.priority, `"${(t.category || '').replace(/"/g, '""')}"`,
-      t.type, t.source || '', t.requester?.fullName ? `${t.requester.fullName} (${t.requester.email})` : (t.requester?.email || ''), t.assignedTo?.fullName ? `${t.assignedTo.fullName} (${t.assignedTo.email})` : (t.assignedTo?.email || ''), t.team?.name || '',
-      t.locationName || '', t.createdAt?.toISOString() || '', t.solvedAt?.toISOString() || '',
-      t.closedAt?.toISOString() || '', t.slaResponseDueAt?.toISOString() || '', t.slaResolutionDueAt?.toISOString() || '',
-      t.slaBreachedAt?.toISOString() || '', t.firstResponseAt?.toISOString() || '', t.aiProcessed ? 'oui' : 'non', t.approvalStatus,
-    ]);
-    const csv = [header.join(';'), ...rows.map((r) => r.join(';'))].join('\n');
+    const csv = await buildTicketsCsv(tickets);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="tickets_export_${new Date().toISOString().slice(0, 10)}.csv"`);
     return res.send('\uFEFF' + csv);

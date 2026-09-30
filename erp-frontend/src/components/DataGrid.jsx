@@ -275,9 +275,16 @@ export default function DataGrid({
   }, [onSelectionChange]);
 
   const onRowClicked = useCallback((event) => {
-    if (onRowClick && event.data) {
-      onRowClick(event.data);
+    if (!onRowClick || !event.data) return;
+    // Un clic sur un contrôle de la ligne (bouton d'action, badge cliquable, lien)
+    // ne doit pas ouvrir la fiche : ag-grid écoute au niveau de la grille, un
+    // stopPropagation() posé dans la cellule n'empêche pas la propagation.
+    const target = event.event?.target;
+    if (target instanceof Element
+      && target.closest('button, a, input, select, textarea, label, [role="button"], [role="tab"]')) {
+      return;
     }
+    onRowClick(event.data);
   }, [onRowClick]);
 
   const defaultGetRowId = useCallback((params) => {

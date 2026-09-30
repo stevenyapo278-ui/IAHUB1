@@ -54,6 +54,19 @@ function buildTicketSearchCondition(rawTerm) {
   return { OR: conditions };
 }
 
+// Statut → condition Prisma. Comprend les groupes utilisés par l'UI (Ouverts,
+// En attente, Résolus, Fermés, Non résolus) en plus d'un statut exact.
+// Renvoie null si aucun filtre n'est demandé — réutilisé par les exports.
+function statusToCondition(status) {
+  if (!status) return null;
+  if (status === 'OPEN_GROUP') return { status: { in: ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER'] } };
+  if (status === 'PENDING_GROUP' || status === 'PENDING') return { status: { in: ['PENDING', 'WAITING_FOR_USER'] } };
+  if (status === 'CLOSED_GROUP') return { status: { in: ['SOLVED', 'CLOSED'] } };
+  if (status === 'NOT_CLOSED') return { status: { notIn: ['SOLVED', 'CLOSED'] } };
+  if (status === 'SOLVED_GROUP') return { status: 'SOLVED' };
+  return { status };
+}
+
 function buildTicketWhereClause(user, queryParams = {}) {
   const {
     status, priority, teamId, assignedToId, mine, title, search, query,
@@ -83,21 +96,8 @@ function buildTicketWhereClause(user, queryParams = {}) {
     });
   }
 
-  if (status) {
-    if (status === 'OPEN_GROUP') {
-      andConditions.push({ status: { in: ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER'] } });
-    } else if (status === 'PENDING_GROUP' || status === 'PENDING') {
-      andConditions.push({ status: { in: ['PENDING', 'WAITING_FOR_USER'] } });
-    } else if (status === 'CLOSED_GROUP') {
-      andConditions.push({ status: { in: ['SOLVED', 'CLOSED'] } });
-    } else if (status === 'NOT_CLOSED') {
-      andConditions.push({ status: { notIn: ['SOLVED', 'CLOSED'] } });
-    } else if (status === 'SOLVED_GROUP') {
-      andConditions.push({ status: 'SOLVED' });
-    } else {
-      andConditions.push({ status });
-    }
-  }
+  const statusCond = statusToCondition(status);
+  if (statusCond) andConditions.push(statusCond);
 
   if (priority) andConditions.push({ priority });
   if (source) andConditions.push({ source });
@@ -197,4 +197,4 @@ function buildTicketWhereClause(user, queryParams = {}) {
   return { AND: andConditions };
 }
 
-module.exports = { isRequesterOnly, buildTicketSearchCondition, buildTicketWhereClause };
+module.exports = { isRequesterOnly, buildTicketSearchCondition, buildTicketWhereClause, statusToCondition };
