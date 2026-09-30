@@ -51,6 +51,8 @@ ${withTicketBlock ? `
 `.trim();
 }
 
+const TEST_EMAIL_STORAGE_KEY = 'automation_test_email';
+
 export default function AutomationTab() {
   const [settings, setSettings] = useState(null);
   const [error, setError] = useState('');
@@ -62,6 +64,9 @@ export default function AutomationTab() {
   const [reminderConfig, setReminderConfig] = useState(null);
   const [reminderSaving, setReminderSaving] = useState(false);
   const [autoClosing, setAutoClosing] = useState(false);
+  // Envoi de test : email mémorisé localement pour ne pas le retaper à chaque essai
+  const [testEmail, setTestEmail] = useState(() => localStorage.getItem(TEST_EMAIL_STORAGE_KEY) || '');
+  const [sendingTest, setSendingTest] = useState(false);
 
   function load() {
     api.get('/system-settings').then(({ data }) => {
@@ -94,11 +99,25 @@ export default function AutomationTab() {
     try {
       const { data } = await api.patch('/system-settings', { [key]: value });
       setSettings(data);
+      return true;
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la mise à jour');
+      return false;
     } finally {
       setSaving(false);
     }
+  }
+
+  // Enregistre les trois brouillons de la section Signatures & Accusé (message, hors horaires,
+  // signature). Retourne true si tout est passé — utilisé par « Enregistrer » et par l'envoi
+  // de test, afin que l'email reflète exactement ce qui est en cours d'édition.
+  async function saveAckDrafts() {
+    const results = [
+      await updateSetting('acknowledgementMessage', ackMessageDraft),
+      await updateSetting('acknowledgementOffHoursMessage', ackOffHoursDraft),
+      await updateSetting('emailSignature', signatureDraft),
+    ];
+    return results.every(Boolean);
   }
 
   async function handleRunAutoClose() {
@@ -114,6 +133,32 @@ export default function AutomationTab() {
       toast.error(err.response?.data?.error || 'Erreur lors de l\'exécution');
     } finally {
       setAutoClosing(false);
+    }
+  }
+
+  // Envoie un accusé de réception de test (type ack_auto) : le backend réutilise la logique
+  // réelle de sendAcknowledgement — message courant (variante horaires/hors horaires incluse),
+  // signature + logo configurés ici, sujet identique à un envoi de production.
+  async function handleSendTestEmail() {
+    const email = testEmail.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast.error('Veuillez saisir une adresse email valide');
+      return;
+    }
+    // On enregistre d'abord les brouillons en cours : le test doit refléter ce que vous voyez
+    if (isAckChanged) {
+      const ok = await saveAckDrafts();
+      if (!ok) return;
+    }
+    setSendingTest(true);
+    try {
+      const { data } = await api.post('/system-settings/test-email', { type: 'ack_auto', recipientEmail: email });
+      localStorage.setItem(TEST_EMAIL_STORAGE_KEY, email);
+      toast.success(`Email de test envoyé à ${email}${data.offHours ? ' (variante hors horaires)' : ''}`);
+    } catch (err) {
+      toast.error(err.response?.data?.error || "Échec de l'envoi de l'email de test");
+    } finally {
+      setSendingTest(false);
     }
   }
 
@@ -416,6 +461,39 @@ export default function AutomationTab() {
                   dangerouslySetInnerHTML={{ __html: sanitizeHtml(buildAckPreviewHtml(ackPreviewMessage, signatureDraft, settings.signatureLogoUrl, settings.signatureLogoHeight, { withTicketBlock: ackPreviewWithTicket })) }}
                 />
               </div>
+
+              {/* Envoi de test : l'email part avec la logique réelle (message courant, variante
+                  horaires, signature + logo) — voir POST /system-settings/test-email type ack_auto */}
+              <div className="px-md py-sm border-t border-outline-variant/40 bg-surface-container-high/40 flex flex-col gap-xs">
+                <div className="flex items-center gap-sm">
+                  <input
+                    type="email"
+                    value={testEmail}
+                    onChange={(e) => setTestEmail(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !sendingTest) handleSendTestEmail(); }}
+                    placeholder="votre.adresse@prosuma.ci"
+                    disabled={saving || sendingTest}
+                    className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-surface border border-outline-variant/60 text-body-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all disabled:opacity-50"
+                  />
+                  <motion.button
+                    type="button"
+                    onClick={handleSendTestEmail}
+                    disabled={saving || sendingTest}
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.96 }}
+                    title="Envoyer cet accusé de réception à l'adresse saisie pour vérifier le rendu réel"
+                    className="flex items-center gap-1.5 px-3.5 py-2 btn-gradient font-semibold rounded-xl shadow-md shadow-primary/10 hover:shadow-lg transition-all duration-300 text-body-sm disabled:opacity-50 shrink-0"
+                  >
+                    <span className={`material-symbols-outlined text-[16px] ${sendingTest ? 'animate-spin' : ''}`}>
+                      {sendingTest ? 'progress_activity' : 'send'}
+                    </span>
+                    {sendingTest ? 'Envoi...' : 'Tester'}
+                  </motion.button>
+                </div>
+                <p className="text-[11px] leading-snug text-on-surface-variant">
+                  Envoie l'accusé de réception réel (message courant, variante {previewOffHours ? 'hors horaires' : 'horaires'} active, signature + logo) à l'adresse saisie, sans créer de ticket.
+                </p>
+              </div>
             </div>
           </div>
 
@@ -436,11 +514,7 @@ export default function AutomationTab() {
             </motion.button>
             <motion.button
               type="button"
-              onClick={async () => {
-                await updateSetting('acknowledgementMessage', ackMessageDraft);
-                await updateSetting('acknowledgementOffHoursMessage', ackOffHoursDraft);
-                await updateSetting('emailSignature', signatureDraft);
-              }}
+              onClick={async () => { await saveAckDrafts(); }}
               disabled={saving || !isAckChanged}
               whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.96 }}

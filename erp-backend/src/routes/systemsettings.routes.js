@@ -222,6 +222,7 @@ const {
   buildAcknowledgementHtml, buildKnownIncidentNotificationHtml,
   buildAssignmentNotificationHtml, buildSlaBreachHtml, buildDueDateHtml,
   buildStatusChangeHtml, buildReminderHtml, getEmailSignature,
+  pickAcknowledgementMessage,
 } = require('../services/emailSender');
 
 const EMAIL_TEST_TEMPLATES = {
@@ -289,8 +290,8 @@ const EMAIL_TEST_TEMPLATES = {
 router.post('/test-email', requirePermission('automation.manage', ['ADMIN']), async (req, res) => {
   try {
     const { type, recipientEmail } = req.body;
-    if (!type || !EMAIL_TEST_TEMPLATES[type]) {
-      return res.status(400).json({ error: `Type inconnu. Types disponibles : ${Object.keys(EMAIL_TEST_TEMPLATES).join(', ')}` });
+    if (!type || (!EMAIL_TEST_TEMPLATES[type] && type !== 'ack_auto')) {
+      return res.status(400).json({ error: `Type inconnu. Types disponibles : ack_auto, ${Object.keys(EMAIL_TEST_TEMPLATES).join(', ')}` });
     }
     if (!recipientEmail) {
       return res.status(400).json({ error: 'recipientEmail est requis' });
@@ -299,6 +300,26 @@ router.post('/test-email', requirePermission('automation.manage', ['ADMIN']), as
     const settings = await getOrCreateSettings();
     const frontendUrl = resolveFrontendUrl(settings);
     const signature = await getEmailSignature();
+
+    // Cas spécial « accusé de réception automatique » : réutilise la logique réelle de
+    // sendAcknowledgement (pickAcknowledgementMessage) — message configuré courant, variante
+    // horaires/hors horaires appliquée comme en production, signature + logo de l'app, sujet
+    // identique à un envoi réel. Permet de tester depuis Automatisation > Signatures & Accusé.
+    if (type === 'ack_auto') {
+      const { message: ackMessage, offHours } = pickAcknowledgementMessage(settings);
+      const originalSubject = 'Demande de test';
+      const referencesTicket = Boolean(typeof ackMessage === 'string' && ackMessage.includes('{ticketId}'));
+      const subject = referencesTicket ? `[Ticket #999] ${originalSubject}` : `Accusé de réception — ${originalSubject}`;
+      const bodyHtml = buildAcknowledgementHtml({
+        toName: 'Jean Dupont', ticketId: 999,
+        originalSubject,
+        customMessage: ackMessage,
+        signature, ticketLink: referencesTicket ? `${frontendUrl}/tickets/999` : null,
+        withTicketBlock: referencesTicket,
+      });
+      await sendEmail({ ticketId: null, to: recipientEmail, subject, bodyHtml, saveAsMessage: false });
+      return res.json({ sent: true, type, recipientEmail, offHours });
+    }
 
     const ticketLink = `${frontendUrl}/tickets/999`;
     const templateCtx = { signature, ticketLink };
