@@ -7,9 +7,17 @@ const { auditLog } = require('../services/auditLogService');
 const { statusToCondition } = require('../services/ticketQueryService');
 const { TICKET_EXPORT_SELECT, sendTicketsExport } = require('../services/ticketReportService');
 const { sendTableExport } = require('../services/tableExportService');
+const cacheStore = require('../services/cacheStore');
 
 const router = express.Router();
 router.use(authenticate);
+
+// Invalider le cache TTL monté sur /api/locations (apiCache(60) dans app.js) : sans ça,
+// une création/édition/suppression n'apparaît qu'après expiration (60 s) — l'utilisateur
+// croit que l'action a échoué et la répète.
+function invalidateLocationsCache() {
+  cacheStore.clear('GET /api/locations');
+}
 
 // Liste tous les lieux
 router.get('/', async (req, res) => {
@@ -51,9 +59,13 @@ function buildLocationGridRows(locations, rawSearch) {
     .some((field) => field?.toLowerCase().includes(search)));
 }
 
-// Extraction du tableau (une ligne par lieu), recherche incluse
+// Extraction du tableau (une ligne par lieu), recherche et filtre par tag inclus.
+// ?tag=X extrait uniquement les lieux portant ce tag (insensible à la casse) —
+// même colonne Tag que la grille.
 router.get('/export', async (req, res) => {
+  const { tag } = req.query;
   const locations = await prisma.location.findMany({
+    where: tag ? { tag: { equals: String(tag).trim(), mode: 'insensitive' } } : undefined,
     orderBy: [{ isCustom: 'asc' }, { completename: 'asc' }],
     include: { _count: { select: { requesterLinks: true } } },
   });
@@ -69,6 +81,7 @@ router.get('/export', async (req, res) => {
     completename: l.completename || '',
     townBuilding: [l.town, l.building].filter(Boolean).join(' · '),
     country: l.country || '',
+    tag: l.tag || '',
     tickets: countByLocation.get(l.id) ?? 0,
     requesters: l._count?.requesterLinks ?? 0,
   }));
@@ -79,6 +92,7 @@ router.get('/export', async (req, res) => {
       { header: 'Chemin complet', key: 'completename', width: 40 },
       { header: 'Ville / Bâtiment', key: 'townBuilding', width: 24 },
       { header: 'Pays', key: 'country', width: 16 },
+      { header: 'Tag', key: 'tag', width: 18 },
       { header: 'Tickets', key: 'tickets', width: 10 },
       { header: 'Demandeurs', key: 'requesters', width: 12 },
     ],
@@ -87,6 +101,17 @@ router.get('/export', async (req, res) => {
     filenamePrefix: 'lieux',
     sheetName: 'Lieux',
   });
+});
+
+// Tags distincts en usage (pour le sélecteur de filtre de la grille)
+router.get('/tags', async (req, res) => {
+  const rows = await prisma.location.findMany({
+    where: { tag: { not: null } },
+    select: { tag: true },
+    distinct: ['tag'],
+    orderBy: { tag: 'asc' },
+  });
+  res.json(rows.map((r) => r.tag).filter(Boolean));
 });
 
 // { [locationId]: nombre de tickets }
@@ -176,7 +201,7 @@ router.post(
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const { name, completename, address, postcode, town, country, building, room } = req.body;
+    const { name, completename, address, postcode, town, country, building, room, tag } = req.body;
 
     const existing = await prisma.location.findFirst({
       where: { name: { equals: name, mode: 'insensitive' } },
@@ -194,10 +219,12 @@ router.post(
         country: country || null,
         building: building || null,
         room: room || null,
+        tag: tag?.trim() || null,
       },
     });
 
     res.status(201).json(location);
+    invalidateLocationsCache();
     auditLog('LOCATION_CREATED', { actor: req.user, targetType: 'GlpiLocation', targetId: location.id, targetLabel: name, metadata: { town } }).catch(() => {});
   }
 );
@@ -208,7 +235,7 @@ router.patch(
   requirePermission('locations.manage', ['ADMIN', 'HOTLINE']),
   async (req, res) => {
     const id = Number(req.params.id);
-    const { name, completename, address, postcode, town, country, building, room, isActive } = req.body;
+    const { name, completename, address, postcode, town, country, building, room, isActive, tag } = req.body;
 
     const existing = await prisma.location.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ error: 'Lieu introuvable' });
@@ -223,9 +250,11 @@ router.patch(
     if (building !== undefined) data.building = building;
     if (room !== undefined) data.room = room;
     if (isActive !== undefined) data.isActive = isActive;
+    if (tag !== undefined) data.tag = typeof tag === 'string' ? (tag.trim() || null) : tag;
 
     const location = await prisma.location.update({ where: { id }, data });
     res.json(location);
+    invalidateLocationsCache();
     auditLog('LOCATION_UPDATED', { actor: req.user, targetType: 'GlpiLocation', targetId: id, targetLabel: existing.name, metadata: { changedFields: Object.keys(data) } }).catch(() => {});
   }
 );
@@ -473,6 +502,7 @@ router.post('/:id/reassign', requirePermission('locations.manage', ['ADMIN']), a
     data: { locationId: Number(targetLocationId) },
   });
 
+  invalidateLocationsCache();
   res.json({ moved, skipped, ticketsUpdated: ticketsUpdated.count, source: source.name, target: target.name });
   auditLog('LOCATION_REASSIGNED', {
     actor: req.user, targetType: 'GlpiLocation', targetId: sourceId, targetLabel: source.name,
@@ -495,6 +525,7 @@ router.delete('/:id', requirePermission('locations.manage', ['ADMIN']), async (r
   }
 
   await prisma.location.delete({ where: { id } });
+  invalidateLocationsCache();
   await auditLog('LOCATION_DELETED', { actor: req.user, targetType: 'GlpiLocation', targetId: id, targetLabel: existing.name });
   res.status(204).send();
 });

@@ -341,6 +341,9 @@ model Location {
   country      String?
   building     String?
   room         String?
+  // Tag libre posé manuellement (ex. « Technique », « Commercial ») : regroupement
+  // et filtrage des lieux dans la grille et l'export — indépendant du référentiel GLPI.
+  tag          String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

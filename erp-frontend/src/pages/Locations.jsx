@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MapPin, Plus, X, Search, RefreshCw, Trash2, Globe, Building2, Mail, Check, ChevronLeft, ChevronRight, ChevronDown, Pencil, Users, ArrowRightLeft, UserMinus, UserPlus, Clock, CheckCircle2, Ticket, FileSpreadsheet, FileDown, Loader2 } from 'lucide-react';
+import { MapPin, Plus, X, Search, RefreshCw, Trash2, Globe, Building2, Mail, Check, ChevronLeft, ChevronRight, ChevronDown, Pencil, Users, ArrowRightLeft, UserMinus, UserPlus, Clock, CheckCircle2, Ticket, FileSpreadsheet, FileDown, Loader2, Tag as TagIcon } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
@@ -13,7 +13,7 @@ import PaginationButtons from '../components/PaginationButtons';
 import LinkedTicketsDrawer from '../components/LinkedTicketsDrawer';
 import exportFile from '../utils/exportFile';
 
-const emptyForm = { name: '', completename: '', address: '', postcode: '', town: '', country: '', building: '', room: '' };
+const emptyForm = { name: '', completename: '', address: '', postcode: '', town: '', country: '', building: '', room: '', tag: '' };
 
 const inputCls = 'px-3.5 py-2 rounded-xl border border-outline-variant/60 bg-surface text-sm text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all';
 
@@ -81,6 +81,11 @@ function LocationModal({ open, onClose, onSave, form, setForm, title, saving, is
             <span>Salle</span>
             <input value={form.room} onChange={(e) => setForm({ ...form, room: e.target.value })}
               placeholder="Salle" className="input-katalyst" />
+          </label>
+          <label className="field-label sm:col-span-2">
+            <span>Tag</span>
+            <input value={form.tag} onChange={(e) => setForm({ ...form, tag: e.target.value })}
+              placeholder="ex: Technique, Commercial, Logistique" className="input-katalyst" />
           </label>
         </div>
       </form>
@@ -230,6 +235,15 @@ function LocationDetailModal({ open, onClose, locationId, locations, canManage, 
                 <div className="px-3 py-2 rounded-xl bg-surface-container-high/50">
                   <p className="text-[9px] uppercase font-bold text-on-surface-variant tracking-wider">Pays</p>
                   <p className="text-xs font-semibold text-on-surface">{loc.country}</p>
+                </div>
+              )}
+              {loc?.tag && (
+                <div className="px-3 py-2 rounded-xl bg-surface-container-high/50">
+                  <p className="text-[9px] uppercase font-bold text-on-surface-variant tracking-wider">Tag</p>
+                  <span className="inline-flex items-center gap-1 mt-0.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/25">
+                    <TagIcon className="w-3 h-3" />
+                    {loc.tag}
+                  </span>
                 </div>
               )}
               <div className="px-3 py-2 rounded-xl bg-surface-container-high/50">
@@ -451,31 +465,41 @@ export default function Locations() {
   const [reassigning, setReassigning] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(() => Number(localStorage.getItem('locations_page_size') || '25'));
+  // Filtre par tag : charge la liste des tags en usage pour le sélecteur
+  const [tagFilter, setTagFilter] = useState('');
+  const [availableTags, setAvailableTags] = useState([]);
 
   const total = useMemo(() => {
-    if (!search.trim()) return locations.length;
+    let list = locations;
+    if (tagFilter) list = list.filter((l) => (l.tag || '').toLowerCase() === tagFilter.toLowerCase());
+    if (!search.trim()) return list.length;
     const q = search.toLowerCase();
-    return locations.filter((l) => [l.name, l.completename, l.town, l.building, l.country].some((f) => f?.toLowerCase().includes(q))).length;
-  }, [locations, search]);
+    return list.filter((l) => [l.name, l.completename, l.town, l.building, l.country, l.tag].some((f) => f?.toLowerCase().includes(q))).length;
+  }, [locations, search, tagFilter]);
   const totalPages = Math.ceil(total / pageSize) || 1;
 
   const filteredLocations = useMemo(() => {
     let list = locations;
+    if (tagFilter) list = list.filter((l) => (l.tag || '').toLowerCase() === tagFilter.toLowerCase());
     if (search.trim()) {
       const q = search.toLowerCase();
-      list = list.filter((l) => [l.name, l.completename, l.town, l.building, l.country].some((f) => f?.toLowerCase().includes(q)));
+      list = list.filter((l) => [l.name, l.completename, l.town, l.building, l.country, l.tag].some((f) => f?.toLowerCase().includes(q)));
     }
     const start = (page - 1) * pageSize;
     return list.slice(start, start + pageSize);
-  }, [locations, search, page, pageSize]);
+  }, [locations, search, tagFilter, page, pageSize]);
 
-  // Extraction du tableau affiché (colonnes de la grille, recherche incluse)
+  // Extraction du tableau affiché (colonnes de la grille, recherche et filtre tag inclus)
   async function exportTable(format) {
     setExporting(format);
     try {
       await exportFile({
         url: '/locations/export',
-        params: { format, ...(search.trim() ? { search: search.trim() } : {}) },
+        params: {
+          format,
+          ...(search.trim() ? { search: search.trim() } : {}),
+          ...(tagFilter ? { tag: tagFilter } : {}),
+        },
         fallbackName: `lieux_${new Date().toISOString().slice(0, 10)}.${format}`,
       });
       toast.success(`Export ${format.toUpperCase()} du tableau généré`);
@@ -508,6 +532,11 @@ export default function Locations() {
     api.get('/locations/counts')
       .then(({ data }) => setTicketCounts(data || {}))
       .catch(() => setTicketCounts({}));
+
+    // Tags distincts en usage (sélecteur de filtre)
+    api.get('/locations/tags')
+      .then(({ data }) => setAvailableTags(Array.isArray(data) ? data : []))
+      .catch(() => setAvailableTags([]));
   }
 
   useEffect(() => { loadLocations(); }, []);
@@ -527,6 +556,7 @@ export default function Locations() {
       address: loc.address || '', postcode: loc.postcode || '',
       town: loc.town || '', country: loc.country || '',
       building: loc.building || '', room: loc.room || '',
+      tag: loc.tag || '',
     });
     setModalOpen(true);
   }
@@ -636,6 +666,17 @@ export default function Locations() {
         cellRenderer: (params) => <span className="text-xs text-on-surface-variant">{params.value || '—'}</span>,
       },
       {
+        field: 'tag', headerName: 'Tag', width: 130,
+        cellRenderer: (params) => (params.value ? (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/25">
+            <TagIcon className="w-3 h-3" />
+            {params.value}
+          </span>
+        ) : (
+          <span className="text-xs text-on-surface-variant">—</span>
+        )),
+      },
+      {
         field: 'ticketCount', headerName: 'Tickets', width: 110,
         valueGetter: (params) => ticketCounts[params.data.id] ?? 0,
         comparator: (a, b) => a - b,
@@ -728,6 +769,17 @@ export default function Locations() {
             className={`${inputCls} w-full pl-9`}
           />
         </div>
+        {availableTags.length > 0 && (
+          <select
+            value={tagFilter}
+            onChange={(e) => { setTagFilter(e.target.value); setPage(1); }}
+            title="Filtrer par tag"
+            className={`${inputCls} w-auto pr-8 cursor-pointer ${tagFilter ? 'border-violet-500/50 text-violet-600 dark:text-violet-400 font-semibold' : ''}`}
+          >
+            <option value="">Tous les tags</option>
+            {availableTags.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        )}
         <div className="flex items-center gap-1.5">
           <button
             type="button"
