@@ -85,9 +85,12 @@ router.get('/', async (req, res) => {
   if (assignedToId) where.assignedToId = Number(assignedToId);
   if (teamId) where.teamId = Number(teamId);
   if (search) {
+    // Recherche par numéro : « 12 » ou « #12 » doit retrouver le problème #12
+    const searchId = Number(String(search).replace(/^#/, ''));
     where.OR = [
       { title: { contains: search, mode: 'insensitive' } },
       { description: { contains: search, mode: 'insensitive' } },
+      ...(Number.isInteger(searchId) && searchId > 0 ? [{ id: { equals: searchId } }] : []),
     ];
   }
 

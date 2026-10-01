@@ -395,7 +395,12 @@ export default function ProblemDetail() {
                 </span>
               )}
             </div>
-            <h1 className="text-xl font-bold text-on-surface mt-2">{problem.title}</h1>
+            <div className="flex items-center gap-2.5 mt-2 flex-wrap">
+              <span className="px-2 py-0.5 rounded-md text-[11px] font-mono font-extrabold tabular-nums bg-surface-container border border-outline-variant/40 text-on-surface-variant select-none">
+                PROBLÈME #{problem.id}
+              </span>
+              <h1 className="text-xl font-bold text-on-surface">{problem.title}</h1>
+            </div>
             <div className="flex items-center gap-2 flex-wrap mt-0.5">
               <span className="text-sm text-on-surface-variant">
                 Créé le {new Date(problem.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}

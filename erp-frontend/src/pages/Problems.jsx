@@ -76,6 +76,9 @@ export default function Problems() {
   const canManage = hasPermission(user, 'tickets.manage', settings);
 
   const problemColumns = useMemo(() => [
+    { field: 'id', headerName: 'N°', width: 78, pinned: 'left', cellRenderer: (params) => (
+      <span className="font-mono text-xs font-extrabold tabular-nums text-on-surface-variant">#{params.value}</span>
+    ) },
     { field: 'title', headerName: 'TITRE', flex: 2, minWidth: 250, cellRenderer: (params) => (
       <span className="text-sm font-semibold text-on-surface truncate">{params.value}</span>
     ) },
