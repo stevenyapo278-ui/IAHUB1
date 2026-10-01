@@ -496,10 +496,14 @@ router.post('/:id/reassign', requirePermission('locations.manage', ['ADMIN']), a
     }
   }
 
-  // Aussi mettre à jour les tickets existants qui pointent vers ce lieu
+  // Aussi mettre à jour les tickets existants qui pointent vers ce lieu — locationId ET
+  // locationName denormalisé (libellé affiché dans listes/filtres/exports), sinon les tickets
+  // migrés continueraient d'afficher le nom de l'ancien lieu supprimé. Convention de libellé
+  // identique à locationDetector : name || completename.
+  const targetLocationName = target.name || target.completename || null;
   const ticketsUpdated = await prisma.ticket.updateMany({
     where: { locationId: sourceId },
-    data: { locationId: Number(targetLocationId) },
+    data: { locationId: Number(targetLocationId), locationName: targetLocationName },
   });
 
   invalidateLocationsCache();
@@ -510,17 +514,23 @@ router.post('/:id/reassign', requirePermission('locations.manage', ['ADMIN']), a
   }).catch(() => {});
 });
 
-// Supprimer définitivement un lieu (après réassignation)
+// Supprimer définitivement un lieu (après migration des tickets/demandeurs)
 router.delete('/:id', requirePermission('locations.manage', ['ADMIN']), async (req, res) => {
   const id = Number(req.params.id);
   const existing = await prisma.location.findUnique({ where: { id }, include: { _count: { select: { requesterLinks: true } } } });
   if (!existing) return res.status(404).json({ error: 'Lieu introuvable' });
 
-  // S'il reste des demandeurs associés, refuser la suppression
-  if (existing._count.requesterLinks > 0) {
+  // Tickets OU demandeurs encore rattachés → refuser et renvoyer les deux compteurs :
+  // l'UI ouvre alors le modal de migration (POST /:id/reassign) avant de réessayer la
+  // suppression. Sans ce garde-fou, la suppression laissait des tickets orphelins
+  // (locationId pointant vers une ligne supprimée + libellé figé de l'ancien lieu).
+  const ticketCount = await prisma.ticket.count({ where: { locationId: id } });
+  const requesterCount = existing._count.requesterLinks;
+  if (requesterCount > 0 || ticketCount > 0) {
     return res.status(409).json({
-      error: `Ce lieu a encore ${existing._count.requesterLinks} demandeur(s) associé(s). Réassignez-les avant de supprimer.`,
-      requesterCount: existing._count.requesterLinks,
+      error: `Ce lieu a encore ${ticketCount} ticket(s) et ${requesterCount} demandeur(s) associé(s). Migrez-les vers un autre lieu avant de supprimer.`,
+      requesterCount,
+      ticketCount,
     });
   }
 

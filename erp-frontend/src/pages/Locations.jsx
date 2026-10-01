@@ -390,11 +390,15 @@ function LocationDetailModal({ open, onClose, locationId, locations, canManage, 
 }
 
 // ── Modal réassignation lors suppression ──────────────────────────────
-function ReassignModal({ open, onClose, onConfirm, sourceLocation, locations, loading }) {
+function ReassignModal({ open, onClose, onConfirm, sourceLocation, locations, loading, ticketCount = 0, requesterCount = 0 }) {
   const [targetId, setTargetId] = useState('');
 
   if (!open) return null;
   const otherLocations = locations.filter((l) => l.id !== sourceLocation?.id && l.isActive);
+  const parts = [];
+  if (ticketCount > 0) parts.push(`${ticketCount} ticket${ticketCount > 1 ? 's' : ''}`);
+  if (requesterCount > 0) parts.push(`${requesterCount} demandeur${requesterCount > 1 ? 's' : ''}`);
+  const toMigrate = parts.length > 0 ? parts.join(' et ') : 'ces éléments';
 
   return (
     <AnimatePresence>
@@ -409,9 +413,10 @@ function ReassignModal({ open, onClose, onConfirm, sourceLocation, locations, lo
               <ArrowRightLeft className="w-5 h-5 text-amber-500" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-on-surface">Réassigner les demandeurs</h2>
+              <h2 className="text-base font-bold text-on-surface">Migrer puis supprimer</h2>
               <p className="text-[11px] text-on-surface-variant">
-                Avant de supprimer « {sourceLocation?.name} », déplacez les demandeurs vers un autre lieu.
+                Avant de supprimer « {sourceLocation?.name} », migrez {toMigrate} vers un autre lieu.
+                Aucun ticket n'est supprimé — seul le lien change.
               </p>
             </div>
           </div>
@@ -599,9 +604,14 @@ export default function Locations() {
       loadLocations();
     } catch (err) {
       const data = err.response?.data;
-      if (err.response?.status === 409 && data?.requesterCount) {
+      // 409 = tickets ou demandeurs encore rattachés → ouvre le modal de migration
+      if (err.response?.status === 409 && (data?.requesterCount || data?.ticketCount)) {
         setPendingDelete(null);
-        setReassignData({ location: locations.find((l) => l.id === id), requesterCount: data.requesterCount });
+        setReassignData({
+          location: locations.find((l) => l.id === id),
+          requesterCount: data.requesterCount || 0,
+          ticketCount: data.ticketCount || 0,
+        });
       } else {
         toast.error(data?.error || 'Erreur suppression');
       }
@@ -615,7 +625,7 @@ export default function Locations() {
     setReassigning(true);
     try {
       const { data } = await api.post(`/locations/${reassignData.location.id}/reassign`, { targetLocationId: targetId });
-      toast.success(`${data.moved} demandeur(s) déplacé(s) vers « ${data.target} » — ${data.ticketsUpdated} ticket(s) mis à jour`);
+      toast.success(`Migré vers « ${data.target} » : ${data.ticketsUpdated} ticket(s), ${data.moved} demandeur(s) — lieu supprimé`);
       await api.delete(`/locations/${reassignData.location.id}`);
       setReassignData(null);
       loadLocations();
@@ -873,12 +883,15 @@ export default function Locations() {
         title="Supprimer le lieu"
         message={(() => {
           const n = pendingDelete ? (ticketCounts[pendingDelete] ?? 0) : 0;
-          let msg = 'Supprimer ce lieu ? Les demandeurs associés devront être réassignés.';
+          let msg = 'Supprimer ce lieu ?';
           msg += n === 1
-            ? ' 1 ticket y est rattaché : aucun ticket ne sera supprimé, il conservera son libellé mais perdra le lien vers ce lieu.'
+            ? ' 1 ticket y est rattaché.'
             : n > 1
-              ? ` ${n} tickets y sont rattachés : aucun ticket ne sera supprimé, ils conserveront leur libellé mais perdront le lien vers ce lieu.`
+              ? ` ${n} tickets y sont rattachés.`
               : ' Aucun ticket n\'est rattaché à ce lieu.';
+          msg += n > 0
+            ? ' Aucun ticket ne sera supprimé : à l\'étape suivante, vous pourrez les migrer vers un autre lieu avant la suppression.'
+            : ' Les demandeurs associés, s\'il y en a, devront être migrés vers un autre lieu (étape suivante).';
           return msg;
         })()}
         confirmLabel="Supprimer" danger
@@ -903,6 +916,8 @@ export default function Locations() {
         sourceLocation={reassignData?.location}
         locations={locations}
         loading={reassigning}
+        ticketCount={reassignData?.ticketCount || 0}
+        requesterCount={reassignData?.requesterCount || 0}
       />
     </div>
   );
