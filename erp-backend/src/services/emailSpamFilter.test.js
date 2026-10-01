@@ -42,4 +42,43 @@ describe('emailSpamFilter', () => {
     const res = checkEmailSpam([], "Demande de création de compte pour nouvel arrivant", "Merci de créer un compte AD pour Jean Dupont à partir de lundi.", "manager@entreprise.com");
     expect(res.isSpam).toBe(false);
   });
+
+  // ── Accusés de remise / de lecture (MDN) ────────────────────────────────────
+  test('devrait ignorer un accusé de remise Outlook (sujet FR)', () => {
+    const res = checkEmailSpam([], 'Accusé de remise : Imprimante caisse 3 bloquée', 'Votre message a été remis au destinataire.', 'client@prosuma.ci');
+    expect(res.isSpam).toBe(true);
+    expect(res.isInformational).toBe(true);
+    expect(res.isTechnicalAutomated).toBe(true);
+  });
+
+  test('devrait ignorer un accusé de lecture (corps FR)', () => {
+    const res = checkEmailSpam([], 'RE: Imprimante bloquée', 'Votre message a été lu par le destinataire le 01/10/2026.', 'client@prosuma.ci');
+    expect(res.isSpam).toBe(true);
+    expect(res.isTechnicalAutomated).toBe(true);
+  });
+
+  test('devrait ignorer un read receipt en anglais', () => {
+    const res = checkEmailSpam([], 'Read Receipt: Printer jam', 'Your message has been read by the recipient.', 'user@client.com');
+    expect(res.isSpam).toBe(true);
+    expect(res.isTechnicalAutomated).toBe(true);
+  });
+
+  test('devrait ignorer un rapport MIME multipart/report (MDN/NDR)', () => {
+    const headers = [{ name: 'Content-Type', value: 'multipart/report; report-type=disposition-notification' }];
+    const res = checkEmailSpam(headers, 'Succès de la délivrance', 'Détails du rapport', 'exchange@prosuma.ci');
+    expect(res.isSpam).toBe(true);
+    expect(res.isTechnicalAutomated).toBe(true);
+  });
+
+  test('devrait ignorer un message portant X-Auto-Response-Suppress', () => {
+    const headers = [{ name: 'X-Auto-Response-Suppress', value: 'DR, RN, NDR, OOF' }];
+    const res = checkEmailSpam(headers, 'Sujet anodin', 'Corps anodin', 'partner@ext.com');
+    expect(res.isSpam).toBe(true);
+    expect(res.isTechnicalAutomated).toBe(true);
+  });
+
+  test('NE DEVRAIT PAS bloquer une demande de support mentionnant une remise de matériel', () => {
+    const res = checkEmailSpam([], 'Remise de matériel pour le nouveau collègue', 'Bonjour, merci de préparer le poste de travail de M. Dupont avant sa prise de poste.', 'rh@entreprise.com');
+    expect(res.isSpam).toBe(false);
+  });
 });

@@ -22,6 +22,31 @@ const BLACKLISTED_DOMAINS = [
   'touts-les-collaborateurs',
 ];
 
+// ── Accusés de remise / de lecture (MDN) et statuts de livraison (FR / EN) ─────
+// Messages purement techniques générés par Exchange/Outlook : aucun ticket, aucune
+// analyse IA, aucun coût LLM. Ils sont classés INFORMATIONAL dès la couche 0 du
+// pipeline (emailPipeline.js), AVANT la création du ticket et le rattachement au fil.
+const RECEIPT_SUBJECT_REGEX = [
+  /accus[ée]\s+de\s+remise/i,
+  /accus[ée]\s+de\s+lecture/i,
+  /succ[èe]s\s+de\s+la\s+d[ée]livrance/i,
+  /read\s*receipt/i,
+  /delivery\s*receipt/i,
+  /your\s+message\b.{0,80}\b(has\s+been|was)\s+(read|delivered)/is,
+  /undeliverable/i,
+  /non\s+d[ée]livrable/i,
+  /retour\s+[àa]\s+l['’]exp[ée]diteur/i,
+];
+
+const RECEIPT_BODY_REGEX = [
+  /votre\s+message\s+a\s+(bien\s+)?(e|é)t(e|é)\s+(remis|lu|d[ée]livr[ée]|distribu[ée])/i,
+  /your\s+message\s+(has\s+been|was)\s+(delivered|read)/i,
+  /ceci\s+est\s+un\s+accus[ée]\s+de\s+(remise|lecture)/i,
+];
+
+const isReceiptSubject = (subject = '') => RECEIPT_SUBJECT_REGEX.some((r) => r.test(subject));
+const isReceiptBody = (body = '') => RECEIPT_BODY_REGEX.some((r) => r.test(body));
+
 /**
  * Analyse un email et détermine s'il s'agit d'un spam / message automatique / email d'information.
  * @param {Array} headers - Tableau d'objets en-têtes { name, value }
@@ -38,11 +63,18 @@ function checkEmailSpam(headers = [], subject = '', body = '', fromEmail = '') {
 
   const bodySnippet = body.substring(0, 4000);
   const fromLower = (fromEmail || '').toLowerCase();
+  const contentType = getHeader('content-type') || '';
+  const autoResponseSuppress = getHeader('x-auto-response-suppress');
 
   const isTechnicalAutomated = (
     fromLower.includes('bounce') || fromLower.includes('postmaster') || fromLower.includes('mailer-daemon') ||
+    // Accusés de remise/lecture et rapports MIME (multipart/report = MDN/NDR)
+    isReceiptSubject(subject) ||
+    isReceiptBody(bodySnippet) ||
+    /multipart\/report/i.test(contentType) ||
+    !!autoResponseSuppress ||
     /statut\s*de\s*remise|undelivered\s*mail|delivery\s*status|postmaster|failure\s*notice/i.test(subject) ||
-    /mail\s*delivery\s*system|mailer\-daemon|d(e|é)lai\s*de\s*remise\s*d(e|é)pass(e|é)/i.test(bodySnippet)
+    /mail\s*delivery\s*system|mailer\-daemon|d(e|é)lai\s*de\s+remise\s*d(e|é)pass(e|é)/i.test(bodySnippet)
   );
 
   const makeResult = (isSpam, isInformational, reason) => ({
@@ -51,6 +83,22 @@ function checkEmailSpam(headers = [], subject = '', body = '', fromEmail = '') {
     isTechnicalAutomated: isSpam ? isTechnicalAutomated : false,
     reason,
   });
+
+  // 0. Accusés de remise / de lecture et statuts de livraison (les plus fréquents des
+  // « mails de remise ») — testés en premier pour un diagnostic explicite dans les logs.
+  if (isReceiptSubject(subject)) {
+    return makeResult(true, true, `Accusé de remise/lecture (sujet) : ${subject}`);
+  }
+  if (isReceiptBody(bodySnippet)) {
+    return makeResult(true, true, `Accusé de remise/lecture (corps) : ${bodySnippet.substring(0, 80)}`);
+  }
+  if (/multipart\/report/i.test(contentType)) {
+    return makeResult(true, true, `Rapport MIME technique (Content-Type: ${contentType})`);
+  }
+  if (autoResponseSuppress) {
+    return makeResult(true, true, `Header X-Auto-Response-Suppress: ${autoResponseSuppress}`);
+  }
+
 
   // 1. Analyse des en-têtes MIME typiques de réponses automatiques et listes de diffusion
   // Auto-Submitted header (RFC 3834)

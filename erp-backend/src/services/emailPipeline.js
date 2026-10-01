@@ -256,6 +256,35 @@ async function processMessage(message, account) {
     return null;
   }
 
+  // ── Couche 0 — accusés de remise / de lecture (MDN), statuts de livraison, bounces ──
+  // Placée AVANT la création de l'IncomingEmail, AVANT le rattachement à un ticket
+  // existant (conversationMatcher) et AVANT toute analyse IA : un accusé de remise ou
+  // un mailer-daemon rattaché à un fil ne doit ni s'ajouter à la conversation, ni
+  // déclencher d'appel LLM. La trace est conservée en INFORMATIONAL (Inbox + logs).
+  // Bypassée en mode retraitement (bypassSpamRules) et en création forcée (needs-review).
+  if (!bypassSpamRules && !forceTicketCreation) {
+    const { checkEmailSpam } = require('./emailSpamFilter');
+    const earlyCheck = checkEmailSpam(headers, subject, bodyPreview, fromEmail);
+    if (earlyCheck.isSpam && earlyCheck.isTechnicalAutomated) {
+      console.log(`[emailPipeline] Message technique ignoré avant analyse (INFORMATIONAL) : ${earlyCheck.reason}`);
+      const ignored = await prisma.incomingEmail.create({
+        data: {
+          graphMessageId, internetMessageId, conversationId, inReplyTo, references,
+          emailAccountId: account.id, fromEmail, fromName, subject,
+          bodyPreview, bodyHtml, receivedAt, status: 'INFORMATIONAL',
+          ccRecipients, hasAttachments,
+          aiSummary: `Message automatique technique : ${earlyCheck.reason}`,
+          aiIsSpam: false,
+          aiConfidence: 1.0,
+          aiIntent: 'INFORMATIONAL',
+        },
+      });
+      const ioEarly = getIO();
+      if (ioEarly) ioEarly.emit('email_updated', ignored);
+      return applyInboxRulesSafe(ignored, 'spam-filter');
+    }
+  }
+
   // Corps nettoyé de la signature/disclaimer, calculé une seule fois ici et réutilisé par toutes
   // les analyses IA en aval (intention, filtrage des images, résumé) pour éviter qu'elles soient
   // biaisées par le texte de signature répété à chaque message du fil.

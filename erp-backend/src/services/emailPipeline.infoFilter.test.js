@@ -173,3 +173,88 @@ describe('emailPipeline — filtrage strict des emails d\'information', () => {
     expect(mockCreateTicketFromEmail).toHaveBeenCalled();
   });
 });
+
+describe('emailPipeline — couche 0 : accusés de remise / de lecture (MDN)', () => {
+  const { findExistingTicket } = require('./conversationMatcher');
+
+  beforeEach(() => {
+    // mockReset (et non clearAllMocks) : indispensable pour purger les "Once" en file
+    // d'attente des tests précédents — sinon un matcheur de fil non consommé fausse le test.
+    jest.clearAllMocks();
+    mockIncomingEmailFindUnique.mockReset().mockResolvedValue(null);
+    mockIncomingEmailCreate.mockReset().mockResolvedValue({ id: 101, status: 'INFORMATIONAL' });
+    mockIncomingEmailUpdate.mockReset().mockResolvedValue({ id: 101, status: 'INFORMATIONAL' });
+    mockAnalyzeEmail.mockReset();
+    findExistingTicket.mockReset().mockResolvedValue(null);
+  });
+
+  it("classe un accusé de remise en INFORMATIONAL : aucune analyse IA, aucun ticket", async () => {
+    const receipt = buildMessage({
+      id: 'graph-msg-mdn-1',
+      subject: 'Accusé de remise : Imprimante caisse 3 bloquée',
+      from: { emailAddress: { address: 'client@prosuma.ci', name: 'Client Test' } },
+      bodyPreview: 'Votre message a été remis au destinataire.',
+      conversationId: 'conv-mdn-1',
+    });
+
+    const result = await processMessage(receipt, { id: 1 });
+
+    expect(mockIncomingEmailCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'INFORMATIONAL', aiIntent: 'INFORMATIONAL' }),
+    }));
+    expect(result).toEqual(expect.objectContaining({ status: 'INFORMATIONAL' }));
+    expect(findExistingTicket).not.toHaveBeenCalled();
+    expect(mockIncomingEmailUpdate).not.toHaveBeenCalled();
+    expect(mockAnalyzeEmail).not.toHaveBeenCalled();
+    expect(mockCreateTicketFromEmail).not.toHaveBeenCalled();
+  });
+
+  it("n'attache pas un accusé de remise au ticket existant du fil (rattachement sauté)", async () => {
+    // Le conversationMatcher RÉPONDRAIT avec un ticket — la couche 0 doit l'empêcher d'être appelé.
+    findExistingTicket.mockResolvedValueOnce({ ticketId: 77, matchedBy: 'conversationId' });
+
+    const threadedReceipt = buildMessage({
+      id: 'graph-msg-mdn-2',
+      subject: 'Accusé de lecture : Réponse support',
+      from: { emailAddress: { address: 'client@prosuma.ci', name: 'Client Test' } },
+      bodyPreview: 'Votre message a été lu par le destinataire.',
+      conversationId: 'conv-existant',
+    });
+
+    await processMessage(threadedReceipt, { id: 1 });
+
+    expect(findExistingTicket).not.toHaveBeenCalled();
+    expect(mockTicketCreate).not.toHaveBeenCalled();
+    expect(mockAnalyzeEmail).not.toHaveBeenCalled();
+    expect(mockIncomingEmailCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'INFORMATIONAL' }),
+    }));
+  });
+
+  it("analyse normalement un vrai message humain (la couche 0 ne bloque pas)", async () => {
+    const human = buildMessage({
+      id: 'graph-msg-human-1',
+      subject: 'Remise de badge permanent',
+      from: { emailAddress: { address: 'nouveau@prosuma.ci', name: 'Nouveau collègue' } },
+      bodyPreview: 'Bonjour, je souhaite récupérer mon badge, merci de me dire quand passer.',
+    });
+
+    mockAnalyzeEmail.mockResolvedValueOnce({
+      summary: 'Demande de badge par un nouvel arrivant',
+      category: 'Comptes & Accès',
+      priority: 'P4',
+      isSpam: false,
+      isInformational: true,
+      requiresAction: false,
+      confidence: 0.9,
+    });
+
+    await processMessage(human, { id: 1 });
+    expect(findExistingTicket).toHaveBeenCalled();
+    expect(mockAnalyzeEmail).toHaveBeenCalled();
+    expect(mockIncomingEmailCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'PROCESSING' }),
+    }));
+    expect(mockCreateTicketFromEmail).not.toHaveBeenCalled();
+  });
+});
