@@ -21,6 +21,9 @@ const DEFAULT_GROUPS = [
     name: 'Équipe Hotline',
     description: 'Groupe par défaut pour le rôle Hotline.',
     permissions: [
+      // Présent aussi dans HOTLINE_DEFAULT_PERMISSIONS (prisma/seed.js) : indispensable pour
+      // la liste /tickets ET pour la lecture du Centre de Validation (GET /dashboard/pending-ai-drafts).
+      'tickets.view',
       'tickets.approve', 'tickets.assign', 'tickets.escalate', 'tickets.manage', 'problems.manage', 'teams.manage',
       'aiweeklyreports.manage', 'emaildrafts.manage', 'locations.manage',
     ],

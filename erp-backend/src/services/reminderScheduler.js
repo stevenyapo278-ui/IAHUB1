@@ -1,4 +1,5 @@
 const prisma = require('../prismaClient');
+const { getIO } = require('../utils/socket');
 const { logEvent } = require('./ticketEvent');
 
 const { processApprovalReminders } = require('./approvalReminderScheduler');
@@ -26,7 +27,7 @@ async function createReminderDraftIfMissing(ticket, isPreClose) {
     orderBy: { createdAt: 'desc' },
   });
   if (hasPendingReminderDraft) return;
-  await prisma.aiEmailDraft.create({
+  const created = await prisma.aiEmailDraft.create({
     data: {
       ticketId: ticket.id,
       recipientEmail: ticket.sourceEmail,
@@ -39,6 +40,25 @@ async function createReminderDraftIfMissing(ticket, isPreClose) {
       draftKind: 'REMINDER',
     },
   });
+
+  // Temps réel : le Centre de Validation n'écoute que `ai_draft_created` — sans cet événement
+  // la relance n'apparaît qu'au prochain clic sur « Rafraîchir ». L'émission est best-effort :
+  // une panne Socket.IO ne doit jamais faire échouer la génération des relances.
+  try {
+    if (!created?.id) return;
+    const io = getIO();
+    if (io) {
+      io.emit('ai_draft_created', {
+        draftId: created.id,
+        ticketId: created.ticketId,
+        subject: created.subject,
+        draftKind: 'REMINDER',
+        createdAt: created.createdAt,
+      });
+    }
+  } catch (err) {
+    console.error('[reminderScheduler] Échec émission temps réel:', err.message);
+  }
 }
 
 async function runReminderScheduler() {

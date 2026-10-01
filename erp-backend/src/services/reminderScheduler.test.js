@@ -3,6 +3,8 @@ const mockFindMany = jest.fn();
 const mockDraftFindFirst = jest.fn();
 const mockDraftCreate = jest.fn();
 const mockTicketUpdate = jest.fn();
+const mockGetIO = jest.fn();
+const mockEmit = jest.fn();
 
 jest.mock('../prismaClient', () => ({
   reminderConfig: { findFirst: (...args) => mockFindFirst(...args) },
@@ -12,6 +14,7 @@ jest.mock('../prismaClient', () => ({
     create: (...args) => mockDraftCreate(...args),
   },
 }));
+jest.mock('../utils/socket', () => ({ getIO: (...args) => mockGetIO(...args) }));
 jest.mock('./emailSender', () => ({ sendReminder: jest.fn() }));
 jest.mock('./ticketEvent', () => ({ logEvent: jest.fn() }));
 jest.mock('./approvalReminderScheduler', () => ({ processApprovalReminders: jest.fn().mockResolvedValue(undefined) }));
@@ -128,5 +131,60 @@ describe('runReminderScheduler — création des brouillons de relance (Centre d
     const results = await runReminderScheduler();
     expect(mockDraftCreate).not.toHaveBeenCalled();
     expect(results).toEqual([]);
+  });
+});
+
+describe('runReminderScheduler — notification temps réel du Centre de Validation', () => {
+  const activeConfig = { isActive: true, firstReminderDays: 2, secondReminderDays: 5, preCloseDays: 10, autoCloseDays: 15 };
+
+  beforeEach(() => {
+    mockFindFirst.mockReset();
+    mockFindMany.mockReset();
+    mockDraftFindFirst.mockReset().mockResolvedValue(null);
+    mockDraftCreate.mockReset();
+    mockTicketUpdate.mockReset();
+    mockGetIO.mockReset();
+    mockEmit.mockReset();
+    mockFindFirst.mockResolvedValue(activeConfig);
+  });
+
+  it('émet ai_draft_created avec draftKind REMINDER quand le brouillon est créé', async () => {
+    mockGetIO.mockReturnValue({ emit: mockEmit });
+    mockDraftCreate.mockResolvedValue({
+      id: 900, ticketId: 101, subject: '[Ticket #101] Imprimante hors service',
+      draftKind: 'REMINDER', createdAt: new Date('2026-10-01T10:00:00Z'),
+    });
+    mockFindMany.mockResolvedValue([makeTicket({ lastUserReplyAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) })]);
+
+    await runReminderScheduler();
+
+    expect(mockEmit).toHaveBeenCalledTimes(1);
+    expect(mockEmit).toHaveBeenCalledWith('ai_draft_created', expect.objectContaining({
+      draftId: 900,
+      ticketId: 101,
+      draftKind: 'REMINDER',
+      subject: '[Ticket #101] Imprimante hors service',
+    }));
+  });
+
+  it("n'émet rien quand un brouillon de relance est déjà en attente (pas de doublon)", async () => {
+    mockGetIO.mockReturnValue({ emit: mockEmit });
+    mockDraftFindFirst.mockResolvedValue({ id: 55, draftKind: 'REMINDER', status: 'PENDING' });
+    mockFindMany.mockResolvedValue([makeTicket({ lastUserReplyAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) })]);
+
+    await runReminderScheduler();
+
+    expect(mockDraftCreate).not.toHaveBeenCalled();
+    expect(mockEmit).not.toHaveBeenCalled();
+  });
+
+  it('fait échouer la génération de relance si getIO() lance une erreur (best-effort)', async () => {
+    mockGetIO.mockImplementation(() => { throw new Error('socket indisponible'); });
+    mockDraftCreate.mockResolvedValue({ id: 901, ticketId: 101, subject: 'x', draftKind: 'REMINDER' });
+    mockFindMany.mockResolvedValue([makeTicket({ lastUserReplyAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) })]);
+
+    const results = await runReminderScheduler();
+
+    expect(results).toEqual([{ ticketId: 101, action: 'REMINDER_1' }]);
   });
 });

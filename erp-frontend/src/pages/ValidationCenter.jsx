@@ -63,7 +63,7 @@ function matchesSearch(item, tab, q) {
     ];
   } else if (tab === 'drafts' || tab === 'reminders') {
     fields = [
-      item.ticket?.title, item.recipientName, item.recipientEmail,
+      item.ticket?.title, item.subject, item.recipientName, item.recipientEmail,
       item.proposedContent, String(item.ticketId || ''),
     ];
   } else if (tab === 'knowledge') {
@@ -172,6 +172,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   // Rejet d'une réponse IA AVEC motif (le motif est stocké en reviewNote côté serveur
   // et sert de retour d'erreur exploitable — un rejet muet n'apprend rien à personne).
   const [rejectDraftId, setRejectDraftId] = useState(null);
+  const [rejectDraftIsReminder, setRejectDraftIsReminder] = useState(false);
   const [draftRejectReason, setDraftRejectReason] = useState('');
   const [rejectingDraft, setRejectingDraft] = useState(false);
 
@@ -245,7 +246,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     if (!socket) return undefined;
     function onDraftCreated(payload) {
       loadAllData(true);
-      if (payload?.supersededCount > 0) {
+      if (payload?.draftKind === 'REMINDER') {
+        toast('Nouvelle relance en attente de validation');
+      } else if (payload?.supersededCount > 0) {
         toast.info(`Nouvelle réponse IA : ${payload.supersededCount} proposition(s) antérieure(s) neutralisée(s)`);
       } else {
         toast('Nouvelle réponse IA en attente de validation');
@@ -272,7 +275,10 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
   const TAB_PERMISSIONS = {
     tickets: 'tickets.approve', // POST /tickets/:id/approve|reject|validate-close
     drafts: 'emaildrafts.manage', // PATCH/POST /ai-email-drafts/:id/approve|reject
-    reminders: 'automation.manage', // POST /reminders/run + config
+    // Relances auto : lecture GET /dashboard/pending-ai-drafts (gâché tickets.view) et
+    // actions POST /ai-email-drafts/:id/approve|reject (gâché emaildrafts.manage) — on garde
+    // la permission la plus restrictive des deux, celle de la page elle-même.
+    reminders: 'emaildrafts.manage',
     closures: 'tickets.approve', // POST /tickets/:id/validate-close
     replies: 'tickets.approve', // GET /tickets/reply-suggestions + /tickets/new-ticket-suggestions, POST accept/reopen/dismiss
     knowledge: 'knowledge.manage', // POST /knowledge/drafts/:id/approve|reject
@@ -523,7 +529,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     // Ticket déjà dans GLPI : approuver directement le brouillon
     try {
       await api.post(`/ai-email-drafts/${draft.id}/approve`);
-      toast.success('Réponse IA approuvée et envoyée au demandeur !');
+      toast.success(draft?.draftKind === 'REMINDER'
+        ? 'Relance approuvée et envoyée au demandeur !'
+        : 'Réponse IA approuvée et envoyée au demandeur !');
       loadAllData(true);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erreur lors de l\'envoi de la réponse');
@@ -582,8 +590,9 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
     }
   }
 
-  function openDraftRejectModal(draftId) {
-    setRejectDraftId(draftId);
+  function openDraftRejectModal(draft) {
+    setRejectDraftId(draft?.id ?? null);
+    setRejectDraftIsReminder(draft?.draftKind === 'REMINDER');
     setDraftRejectReason('');
   }
 
@@ -595,7 +604,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
         ...(draftRejectReason.trim() ? { reviewNote: draftRejectReason.trim() } : {}),
       });
       playRejection();
-      toast.success('Réponse IA rejetée (motif enregistré)');
+      toast.success(rejectDraftIsReminder ? 'Relance rejetée (motif enregistré)' : 'Réponse IA rejetée (motif enregistré)');
       setRejectDraftId(null);
       loadAllData(true);
     } catch (err) {
@@ -1459,7 +1468,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
 
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => openDraftRejectModal(draft.id)}
+                          onClick={() => openDraftRejectModal(draft)}
                           className="px-3.5 py-2 rounded-xl text-xs font-bold border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-all"
                         >
                           Rejeter la réponse
@@ -1515,7 +1524,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                         </div>
                         <div>
                           <h3 className="text-sm font-bold text-on-surface">
-                            Relance pour : {ticketObj?.title || (draft.ticketId ? `Ticket #EN_ATTENTE` : 'Ticket sans numéro')}
+                            Relance pour : {ticketObj?.title || (draft.ticketId ? `Ticket #${draft.ticketId}` : 'Ticket sans numéro')}
                           </h3>
                           <p className="text-[11px] text-on-surface-variant">
                             Destinataire : <strong className="text-on-surface">{draft.recipientName || draft.recipientEmail}</strong>
@@ -1545,7 +1554,7 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
                         Détails
                       </button>
                       <button
-                        onClick={() => openDraftRejectModal(draft.id)}
+                        onClick={() => openDraftRejectModal(draft)}
                         className="px-3.5 py-2 rounded-xl text-xs font-bold border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-all"
                       >
                         Ne pas envoyer
@@ -3192,16 +3201,19 @@ export default function ValidationCenter({ defaultTab = 'tickets' }) {
           <div className="bg-surface border border-outline-variant/40 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
             <div className="flex items-center gap-3 text-red-600 dark:text-red-400">
               <AlertTriangle className="w-6 h-6" />
-              <h3 className="text-base font-bold">Rejeter cette réponse IA</h3>
+              <h3 className="text-base font-bold">{rejectDraftIsReminder ? 'Ne pas envoyer cette relance' : 'Rejeter cette réponse IA'}</h3>
             </div>
             <p className="text-xs text-on-surface-variant">
-              Le motif est enregistré avec le brouillon : c'est ce qui permet d'expliquer un rejet
-              et de repérer les réponses qui reviennent trop souvent.
+              {rejectDraftIsReminder
+                ? 'Le motif est enregistré avec la relance. Ce n\'est que ce brouillon qui est écarté : les prochaines étapes (relance suivante, pré-clôture, clôture automatique) restent programmées.'
+                : 'Le motif est enregistré avec le brouillon : c\'est ce qui permet d\'expliquer un rejet et de repérer les réponses qui reviennent trop souvent.'}
             </p>
             <textarea
               className="w-full bg-surface border border-outline-variant/60 rounded-xl px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-none"
               rows={3}
-              placeholder="Ex: L'information a déjà été transmise par le support, réponse hors sujet..."
+              placeholder={rejectDraftIsReminder
+                ? 'Ex: Le demandeur a déjà répondu par ailleurs, message inutile...'
+                : "Ex: L'information a déjà été transmise par le support, réponse hors sujet..."}
               value={draftRejectReason}
               onChange={(e) => setDraftRejectReason(e.target.value)}
             />
