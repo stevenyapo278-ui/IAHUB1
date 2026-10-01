@@ -329,8 +329,14 @@ function TicketInfoRenderer({ data, context }) {
 
 function StatusRenderer({ data, context }) {
   if (!data) return null;
-  const { canAssign, handleQuickStatusChange, STATUS_OPTIONS: opts, STATUS_LABELS: labels } = context || {};
-  if (canAssign) {
+  const { canAssign, currentUser, handleQuickStatusChange, STATUS_OPTIONS: opts, STATUS_LABELS: labels } = context || {};
+  // Miroir du garde-fou serveur allowTechnicianStatusOnly : un TECHNICIAN ne change
+  // que le statut, et uniquement sur un ticket de SON ÉQUIPE encore actif.
+  const isTeamTicketForTech = currentUser?.role === 'TECHNICIAN'
+    && currentUser?.teamId
+    && data.teamId === currentUser?.teamId;
+  const isEditable = canAssign || (isTeamTicketForTech && !['SOLVED', 'CLOSED'].includes(data.status));
+  if (isEditable) {
     return (
       <div className="flex items-center h-full w-full">
         <select

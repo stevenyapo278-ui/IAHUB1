@@ -11,11 +11,13 @@ export function hasPermission(user, key) {
   return Array.isArray(user.permissions) && user.permissions.includes(key);
 }
 
-// Plafond par RÔLE — miroir du garde-fou serveur forbidTechnicianTicketEdits (ticket.routes.js) :
-// un TECHNICIAN (comme un REQUESTER) ne modifie JAMAIS les éléments d'un ticket (titre, contenu,
-// statut, priorité, lieu, assignation, approbation, liens, suppression...). Il consulte le ticket
-// et ajoute des suivis — rien d'autre. Ce plafond s'applique quel que soit le groupe de droits :
-// aucune permission ne peut redonner ce droit à un technicien.
+// Plafond par RÔLE — miroir du garde-fou serveur allowTechnicianStatusOnly/forbidTechnicianTicketEdits
+// (ticket.routes.js) : un TECHNICIAN (comme un REQUESTER) ne modifie jamais les champs d'un
+// ticket (titre, contenu, priorité, catégorie, affectation, demandeur, approbation, liens,
+// suppression...), même si le ticket lui est assigné. Il consulte le ticket et ajoute des
+// suivis. Seule exception côté serveur : le STATUT d'un ticket de SON ÉQUIPE (statut uniquement,
+// ticket actif). Ce plafond s'applique quel que soit le groupe de droits : aucune permission
+// ne peut redonner le droit de modifier les champs à un technicien.
 export function canEditTickets(user) {
   if (!user) return false;
   return !['TECHNICIAN', 'REQUESTER'].includes(user.role);

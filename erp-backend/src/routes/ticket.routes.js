@@ -58,11 +58,16 @@ function isTechnicianOnly(user) {
   return user.role === 'TECHNICIAN';
 }
 
-// RÈGLE : un TECHNICIAN ne peut pas modifier librement un ticket (titre, contenu,
-// priorité, catégorie, lieu, assignation, approbation, liens, fusion, suppression...).
-// Exception : un technicien ASSIGNÉ au ticket peut changer le statut (ex: mettre en SOLVED/CLOSED).
-// Ce garde-fou s'applique par RÔLE : seule la modification de statut par l'assigné est autorisée.
-const TECHNICIAN_EDIT_ERROR = 'Un technicien ne peut modifier que le statut des tickets qui lui sont assignés.';
+// RÈGLE : un TECHNICIAN n'est jamais admin — il ne peut pas modifier les champs
+// d'un ticket (titre, contenu, priorité, catégorie, lieu, assignation, demandeur,
+// approbation, liens, fusion, suppression...), même si le ticket lui est assigné.
+// Seule exception : le STATUT, et uniquement sur un ticket de SON ÉQUIPE.
+// Un ticket assigné hors de son équipe reste en lecture seule (suivis et pièces
+// jointes uniquement). Ce garde-fou s'applique par RÔLE, quel que soit le groupe
+// de droits : aucune permission ne peut l'assouplir.
+const TECHNICIAN_EDIT_ERROR = 'Un technicien ne peut modifier que le statut des tickets de son équipe.';
+const TECHNICIAN_READONLY_ERROR = 'Ticket hors de votre équipe : lecture seule. Ajoutez un suivi ou une pièce jointe.';
+
 function forbidTechnicianTicketEdits(req, res, next) {
   if (req.user && req.user.role === 'TECHNICIAN') {
     return res.status(403).json({ error: TECHNICIAN_EDIT_ERROR });
@@ -70,18 +75,20 @@ function forbidTechnicianTicketEdits(req, res, next) {
   next();
 }
 
-// Middleware PATCH : un technicien assigné ne peut changer que le statut.
-// Un technicien peut modifier tous les champs d'un ticket appartenant à son équipe.
+// Middleware PATCH : un TECHNICIAN ne peut envoyer que { status }, et seulement
+// sur un ticket actif de SON ÉQUIPE. Un ticket qui lui est assigné mais qui
+// appartient à une autre équipe (ou sans équipe) est en lecture seule.
 // Les autres rôles passent directement.
 async function allowTechnicianStatusOnly(req, res, next) {
   if (!req.user || req.user.role !== 'TECHNICIAN') return next();
 
   const id = Number(req.params.id);
+  const bodyKeys = Object.keys(req.body || {});
 
   try {
     const ticket = await prisma.ticket.findUnique({
       where: { id },
-      select: { status: true, teamId: true, assignedToId: true, assignees: { select: { id: true } } },
+      select: { status: true, teamId: true },
     });
     if (!ticket) return res.status(404).json({ error: 'Ticket introuvable' });
 
@@ -90,25 +97,14 @@ async function allowTechnicianStatusOnly(req, res, next) {
       return res.status(403).json({ error: 'Aucune modification ne peut être apportée par un technicien sur un ticket résolu ou fermé.' });
     }
 
-    // Ticket de l'équipe du technicien → tous les champs autorisés
-    if (ticket.teamId && ticket.teamId === req.user.teamId) {
-      req.isTechnicianTeamEdit = true;
-      return next();
+    // Hors équipe (même si assigné) → lecture seule
+    const isTeamTicket = Boolean(ticket.teamId) && ticket.teamId === req.user.teamId;
+    if (!isTeamTicket) {
+      return res.status(403).json({ error: TECHNICIAN_READONLY_ERROR });
     }
 
-    // Ticket assigné au technicien → statut uniquement
-    const isAssigned =
-      ticket.assignedToId === req.user.sub ||
-      ticket.assignees.some((a) => a.id === req.user.sub);
-
-    const bodyKeys = Object.keys(req.body);
-    const forbiddenFields = bodyKeys.filter((k) => k !== 'status');
-
-    if (!isAssigned) {
-      return res.status(403).json({ error: 'Vous ne pouvez modifier que les tickets de votre équipe ou qui vous sont assignés.' });
-    }
-
-    if (forbiddenFields.length > 0) {
+    // Ticket de l'équipe du technicien → statut uniquement
+    if (bodyKeys.some((k) => k !== 'status')) {
       return res.status(403).json({ error: TECHNICIAN_EDIT_ERROR });
     }
 
@@ -121,7 +117,7 @@ async function allowTechnicianStatusOnly(req, res, next) {
 }
 
 function requireTicketAssignOrTechnicianStatusOnly(req, res, next) {
-  if (req.isTechnicianStatusOnly || req.isTechnicianTeamEdit) return next();
+  if (req.isTechnicianStatusOnly) return next();
   return requirePermission('tickets.assign', ['ADMIN', 'TECHNICIAN'])(req, res, next);
 }
 
@@ -1379,6 +1375,13 @@ router.patch('/:id', allowTechnicianStatusOnly, requireTicketAssignOrTechnicianS
   // Liaison fil conversation : réservé aux rôles privilégiés
   if (req.body.outlookConversationId !== undefined && ['REQUESTER', 'TECHNICIAN'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Accès refusé : seuls ADMIN/HOTLINE/SUPERADMIN peuvent lier un fil de conversation' });
+  }
+
+  // Défense en profondeur (miroir de allowTechnicianStatusOnly) : même si
+  // l'ordre des middlewares change, un TECHNICIAN ne passe jamais un autre
+  // champ que le statut.
+  if (req.user.role === 'TECHNICIAN' && Object.keys(req.body).some((k) => k !== 'status')) {
+    return res.status(403).json({ error: TECHNICIAN_EDIT_ERROR });
   }
 
   // ── Validation de la transition de statut ──────────────────────────────

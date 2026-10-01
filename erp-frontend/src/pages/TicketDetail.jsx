@@ -433,10 +433,11 @@ export default function TicketDetail() {
   };
 
   // Plafond par RÔLE (miroir du garde-fou serveur allowTechnicianStatusOnly) : un TECHNICIAN
-  // ne modifie jamais les éléments d'un ticket — il consulte et ajoute des suivis, quel que
-  // soit son groupe de permissions. Exceptions :
-  // - technicien assigné → peut changer le statut
-  // - technicien dont l'équipe correspond au ticket → peut modifier tous les champs
+  // n'est jamais admin — il ne modifie jamais les champs d'un ticket (titre, contenu, priorité,
+  // catégorie, affectation, demandeur, approbation...), même si le ticket lui est assigné.
+  // Exceptions :
+  // - ticket de SON ÉQUIPE → peut changer le statut uniquement
+  // - ticket résolu/fermé → aucune modification
   const canEditTicketsRole = canEditTickets(user);
   const isAssignedTechnician = user?.role === 'TECHNICIAN' &&
     ticket != null &&
@@ -448,7 +449,8 @@ export default function TicketDetail() {
     ticket != null &&
     ticket.teamId != null &&
     ticket.teamId === user?.teamId;
-  const canAssign = (canEditTicketsRole || isTeamTicket) && (hasPermission(user, 'tickets.assign') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN');
+  const isTechnicianClosedTicket = user?.role === 'TECHNICIAN' && ['SOLVED', 'CLOSED'].includes(ticket?.status);
+  const canAssign = canEditTicketsRole && (hasPermission(user, 'tickets.assign') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN');
   const canApprove = canEditTicketsRole && (hasPermission(user, 'tickets.approve') || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN');
   // Escalade = transfert d'équipe : droit tickets.escalate (permission dédiée, délégable à une
   // personne précise via les groupes de droits — Administrateurs et Équipe Hotline l'ont par
@@ -465,7 +467,9 @@ export default function TicketDetail() {
   const canDeleteRole = ['SUPERADMIN', 'ADMIN', 'HOTLINE'].includes(user?.role);
   const canDelete = canEditTicketsRole && (canDeleteRole || hasPermission(user, 'tickets.delete'));
   const canManageProblems = canEditTicketsRole && (hasPermission(user, 'problems.manage') || user?.role === 'SUPERADMIN');
-  const canEdit = (canEditTicketsRole || isTeamTicket) && (hasPermission(user, 'tickets.edit') || user?.role === 'ADMIN' || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN' || isTeamTicket);
+  // Titre/description jamais éditables par un TECHNICIAN (le backend rejette tout
+  // champ hors statut) — miroir serveur : seul le statut d'un ticket de son équipe.
+  const canEdit = canEditTicketsRole && (hasPermission(user, 'tickets.edit') || user?.role === 'ADMIN' || user?.role === 'HOTLINE' || user?.role === 'SUPERADMIN');
   const isRequesterOfTicket = ticket?.requesterIds?.includes(user?.id);
   const canForward = isAssignedTechnician || isRequesterOfTicket || ['SUPERADMIN', 'ADMIN'].includes(user?.role);
 
@@ -2975,7 +2979,7 @@ export default function TicketDetail() {
                 <select
                   className="w-full bg-surface border border-slate-200 dark:border-outline-variant/25 rounded-xl px-3 py-2 text-xs font-bold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
                   value={ticket.status}
-                  disabled={(!canAssign && !isAssignedTechnician && !isTeamTicket) || savingField === 'status' || (user?.role === 'TECHNICIAN' && ['SOLVED', 'CLOSED'].includes(ticket.status))}
+                  disabled={(!canAssign && !isTeamTicket) || savingField === 'status' || isTechnicianClosedTicket}
                   onChange={(e) => updateField('status', e.target.value)}
                 >
                   {MANUAL_STATUS_OPTIONS.map((s) => (
