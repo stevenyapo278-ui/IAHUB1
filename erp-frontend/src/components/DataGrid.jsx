@@ -250,9 +250,23 @@ export default function DataGrid({
   height,
   totalFilteredCount,
   onSelectAllFiltered,
+  // Contexte partagé des cell renderers (filtres, droits, callbacks).
+  // SANS cette transmission, params.context est undefined dans les renderers :
+  // liens de cellules sans filtres, colonne statut non éditable, actions masquées.
+  context,
 }) {
   const gridRef = useRef(null);
   const containerRef = useRef(null);
+
+  // AG Grid ne re-rend pas les cellules quand l'objet `context` change : on le
+  // repousse à chaque mutation puis on force le re-render des cellules, sinon
+  // les renderers gardent le contexte figé au premier rendu (filttres/droits périmés).
+  useEffect(() => {
+    const api = gridRef.current?.api;
+    if (!api) return;
+    api.setGridOption('context', context);
+    api.refreshCells({ force: true });
+  }, [context]);
 
   // Gérer la sélection externe
   useEffect(() => {
@@ -347,6 +361,7 @@ export default function DataGrid({
           ref={gridRef}
           columnDefs={columns}
           rowData={rowData}
+          context={context}
           defaultColDef={defaultColDef}
           onRowClicked={onRowClicked}
           rowSelection={rowSelection}
