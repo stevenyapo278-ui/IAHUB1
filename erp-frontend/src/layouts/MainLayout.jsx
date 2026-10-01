@@ -748,8 +748,10 @@ export default function MainLayout() {
         onCancel={() => setShowLogoutConfirm(false)}
       />
 
+      {/* Orbe/chat MARIE IA : masqué si la vue /chat est retirée à ce rôle (Paramètres > Navigation)
+          — même garde que la sidebar et la redirection de route. */}
       <Suspense fallback={null}>
-        <ChatWidget />
+        {isPathAllowed('/chat') && <ChatWidget />}
       </Suspense>
 
       <LayoutSettings open={showLayoutSettings} onClose={() => setShowLayoutSettings(false)} />

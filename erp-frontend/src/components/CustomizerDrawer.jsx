@@ -221,6 +221,7 @@ function ShortcutsTab() {
   const ALL_NAV_ITEMS = [
     { to: '/', permission: null },
     { to: '/portal', permission: null },
+    { to: '/chat', permission: null },
     { to: '/tickets', permission: null },
     { to: '/problems', permission: null, fallbackRoles: ['ADMIN', 'HOTLINE'] },
     { to: '/email-drafts', permission: 'emaildrafts.manage', fallbackRoles: ['ADMIN', 'HOTLINE', 'TECHNICIAN'] },

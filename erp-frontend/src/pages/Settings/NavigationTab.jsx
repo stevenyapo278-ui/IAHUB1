@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { LayoutDashboard, Monitor, Ticket, AlertTriangle, MailCheck, Inbox, BookOpen, TrendingUp, Users, User, Gauge, BrainCircuit, Tag, MapPin, Boxes, Terminal, ShieldCheck, FileText, History, Shield, Settings, Loader2, Check, X } from 'lucide-react';
+import { LayoutDashboard, Monitor, Bot, Ticket, AlertTriangle, MailCheck, Inbox, BookOpen, TrendingUp, Users, User, Gauge, BrainCircuit, Tag, MapPin, Boxes, Terminal, ShieldCheck, FileText, History, Shield, Settings, Loader2, Check, X } from 'lucide-react';
 import api from '../../api/client';
 import { clearSystemSettingsCache } from '../../hooks/useSystemSettings';
 import { itemVariants } from './SettingsComponents';
@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { section: 'Plateforme', items: [
     { path: '/', label: 'Dashboard', icon: LayoutDashboard },
     { path: '/portal', label: 'Portail', icon: Monitor },
+    { path: '/chat', label: 'MARIE IA', icon: Bot },
     { path: '/tickets', label: 'Tickets', icon: Ticket },
     { path: '/problems', label: 'Problèmes', icon: AlertTriangle },
     { path: '/email-drafts', label: 'Centre de Validation', icon: MailCheck },

@@ -9,6 +9,7 @@
 const DEFAULT_VISIBILITY = {
   '/':                   ['REQUESTER', 'TECHNICIAN', 'HOTLINE', 'ADMIN', 'SUPERADMIN'],
   '/portal':             ['REQUESTER', 'TECHNICIAN', 'HOTLINE', 'ADMIN', 'SUPERADMIN'],
+  '/chat':               ['REQUESTER', 'TECHNICIAN', 'HOTLINE', 'ADMIN', 'SUPERADMIN'],
   '/tickets':            ['REQUESTER', 'TECHNICIAN', 'HOTLINE', 'ADMIN', 'SUPERADMIN'],
   '/problems':           ['HOTLINE', 'ADMIN', 'SUPERADMIN'],
   '/email-drafts':       ['TECHNICIAN', 'HOTLINE', 'ADMIN', 'SUPERADMIN'],
