@@ -10,32 +10,51 @@ const { indexTicketMessage } = require('./emailRagService');
 
 const LOGO_CONTENT_ID = 'logo-signature';
 
-// Le logo de signature est référencé en cid: dans le HTML (voir getEmailSignature) plutôt que par
-// une URL http(s) — les destinataires Outlook/M365 peuvent être hors du réseau local et n'auraient
-// alors aucun moyen de charger une image hébergée sur le serveur ERP. L'image est donc lue depuis
-// le disque local et jointe en pièce jointe inline à l'envoi, ce qui fonctionne sans dépendance réseau.
-function getLogoAttachmentIfReferenced(bodyHtml, signatureLogoUrl) {
-  if (!signatureLogoUrl || !bodyHtml.includes(`cid:${LOGO_CONTENT_ID}`)) return null;
-  try {
-    // signatureLogoUrl est de la forme {BACKEND_URL}/uploads/signature-logo/<fichier> (voir systemsettings.routes.js)
-    const filename = signatureLogoUrl.split('/uploads/signature-logo/')[1];
-    if (!filename) return null;
-    const filePath = path.join(process.cwd(), 'uploads', 'signature-logo', filename);
-    if (!fs.existsSync(filePath)) return null;
-    const buffer = fs.readFileSync(filePath);
-    const ext = path.extname(filename).slice(1).toLowerCase();
-    const mimeType = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp' }[ext] || 'image/png';
-    return {
-      '@odata.type': '#microsoft.graph.fileAttachment',
-      name: filename,
-      contentType: mimeType,
-      contentBytes: buffer.toString('base64'),
-      isInline: true,
-      contentId: LOGO_CONTENT_ID,
-    };
-  } catch {
-    return null; // fichier introuvable (ex: supprimé manuellement) : on envoie sans logo plutôt que d'échouer l'email
-  }
+// Les images de signature sont référencées en cid: dans le HTML (voir getEmailSignature) plutôt
+// que par des URL http(s) — les destinataires Outlook/M365 peuvent être hors du réseau local et
+// n'auraient alors aucun moyen de charger des images hébergées sur le serveur ERP. Chaque image
+// est donc lue depuis le disque local et jointe en pièce jointe inline à l'envoi, ce qui
+// fonctionne sans dépendance réseau.
+//
+// Multi-images : chaque entrée de SystemSettings.signatureLogos ({ url, height }) est référencée
+// dans le HTML par son propre cid (logo-signature, logo-signature-1, logo-signature-2, ...) dans
+// l'ordre de la liste. Retourne la liste des pièces jointes inline pour TOUTES les images
+// effectivement référencées dans le corps du message (les non référencées sont ignorées).
+function getSignatureLogoAttachments(bodyHtml, settings) {
+  // Liste multi-images, avec repli sur l'ancien champ unique (compat réglages existants)
+  const logos = Array.isArray(settings?.signatureLogos) && settings.signatureLogos.length > 0
+    ? settings.signatureLogos
+    : settings?.signatureLogoUrl
+      ? [{ url: settings.signatureLogoUrl, height: settings.signatureLogoHeight || 60 }]
+      : [];
+  if (logos.length === 0) return [];
+
+  const attachments = [];
+  logos.forEach((logo, index) => {
+    const cid = index === 0 ? LOGO_CONTENT_ID : `${LOGO_CONTENT_ID}-${index}`;
+    if (!bodyHtml.includes(`cid:${cid}`)) return; // non référencée dans ce corps : pas jointe
+    try {
+      // url est de la forme {BACKEND_URL}/uploads/signature-logo/<fichier> (voir systemsettings.routes.js)
+      const filename = String(logo.url || '').split('/uploads/signature-logo/')[1];
+      if (!filename) return;
+      const filePath = path.join(process.cwd(), 'uploads', 'signature-logo', filename);
+      if (!fs.existsSync(filePath)) return;
+      const buffer = fs.readFileSync(filePath);
+      const ext = path.extname(filename).slice(1).toLowerCase();
+      const mimeType = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp' }[ext] || 'image/png';
+      attachments.push({
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        name: filename,
+        contentType: mimeType,
+        contentBytes: buffer.toString('base64'),
+        isInline: true,
+        contentId: cid,
+      });
+    } catch {
+      // fichier introuvable (ex: supprimé manuellement) : on envoie sans cette image plutôt que d'échouer l'email
+    }
+  });
+  return attachments;
 }
 
 // Envoie un email via Microsoft Graph et l'enregistre dans TicketMessage.
@@ -71,7 +90,7 @@ function describeSmtpError(err, account) {
   return `Échec d'envoi SMTP vers ${target} — ${msg}`;
 }
 
-async function sendEmailViaSmtp({ to, cc, subject, bodyHtml, account, logoAttachment, attachments: extraAttachments = [] }) {
+async function sendEmailViaSmtp({ to, cc, subject, bodyHtml, account, logoAttachments = [], attachments: extraAttachments = [] }) {
   // Garde-fou : sans hôte SMTP, nodemailer retombe silencieusement sur localhost:587 et
   // échoue avec un ECONNREFUSED illisible — surtout pour un compte OAuth (OUTLOOK) qui
   // n'a aucun identifiant SMTP et aurait dû partir via l'API Graph (sendEmail).
@@ -90,12 +109,12 @@ async function sendEmailViaSmtp({ to, cc, subject, bodyHtml, account, logoAttach
     socketTimeout: 30000,
   });
   const attachments = [
-    ...(logoAttachment ? [{
-      filename: logoAttachment.name,
-      content: Buffer.from(logoAttachment.contentBytes, 'base64'),
-      contentType: logoAttachment.contentType,
-      cid: LOGO_CONTENT_ID,
-    }] : []),
+    ...logoAttachments.map((att) => ({
+      filename: att.name,
+      content: Buffer.from(att.contentBytes, 'base64'),
+      contentType: att.contentType,
+      cid: att.contentId,
+    })),
     ...extraAttachments,
   ];
   const mailOptions = {
@@ -146,15 +165,38 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
   const isOutlook = account.provider === 'OUTLOOK';
 
   const settings = await getSystemSettings();
-  let logoAttachment = getLogoAttachmentIfReferenced(bodyHtml, settings.signatureLogoUrl);
+  // Images de signature : résolues pour TOUTES les images référencées dans le corps. Chaque cid
+  // résolu en pièce jointe est retiré du remplacement de repli ci-dessous (sans pièce jointe,
+  // p. ex. fichier supprimé du disque, on retombe sur l'URL absolue ou on retire l'image).
+  const logoAttachments = getSignatureLogoAttachments(bodyHtml, settings);
+  const referencedCids = new Set(logoAttachments.map((att) => att.contentId));
 
   let effectiveBodyHtml = bodyHtml;
-  if (effectiveBodyHtml.includes(`cid:${LOGO_CONTENT_ID}`)) {
-    if (!logoAttachment && settings.signatureLogoUrl) {
-      effectiveBodyHtml = effectiveBodyHtml.replaceAll(`cid:${LOGO_CONTENT_ID}`, settings.signatureLogoUrl);
-    } else if (!logoAttachment && !settings.signatureLogoUrl) {
+  referencedCids.forEach((cid) => {
+    // Le cid est déjà couvert par la pièce jointe inline : neutraliser tout remplacement de repli
+    // en le remplaçant par lui-même (no-op explicite, garde le HTML tel quel).
+    effectiveBodyHtml = effectiveBodyHtml.replaceAll(`cid:${cid}`, `cid:${cid}`);
+  });
+
+  // Repli sans pièce jointe : remplacer chaque cid restant par l'URL absolue de l'image
+  // correspondante (destinataire capable de charger l'image en http) — sinon retirer la balise.
+  if (referencedCids.size === 0) {
+    const logos = Array.isArray(settings?.signatureLogos) && settings.signatureLogos.length > 0
+      ? settings.signatureLogos
+      : settings?.signatureLogoUrl
+        ? [{ url: settings.signatureLogoUrl, height: settings.signatureLogoHeight || 60 }]
+        : [];
+    logos.forEach((logo, index) => {
+      const cid = index === 0 ? LOGO_CONTENT_ID : `${LOGO_CONTENT_ID}-${index}`;
+      if (logo?.url) {
+        effectiveBodyHtml = effectiveBodyHtml.replaceAll(`cid:${cid}`, logo.url);
+      } else {
+        effectiveBodyHtml = effectiveBodyHtml.replaceAll(`cid:${cid}`, '');
+      }
+    });
+    // Aucune image configurée du tout : retirer le paragraphe du logo historique
+    if (logos.length === 0) {
       effectiveBodyHtml = effectiveBodyHtml.replace(/<p[^>]*><img[^>]*alt="Logo"[^>]*><\/p>/gi, '');
-      effectiveBodyHtml = effectiveBodyHtml.replaceAll(`cid:${LOGO_CONTENT_ID}`, '');
     }
   }
 
@@ -167,7 +209,7 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
     const toFiltered = toList.filter((addr) => addr.toLowerCase() !== senderAddress);
     const smtpTo = toFiltered.length > 0 ? toFiltered : toList;
     const ccList = (cc || []).filter((addr) => addr && String(addr).toLowerCase().trim() !== senderAddress);
-    await sendEmailViaSmtp({ to: smtpTo, cc: ccList, subject, bodyHtml: effectiveBodyHtml, account, logoAttachment, attachments });
+    await sendEmailViaSmtp({ to: smtpTo, cc: ccList, subject, bodyHtml: effectiveBodyHtml, account, logoAttachments, attachments });
     if (saveAsMessage && ticketId) {
       const sender = account.emailAddress || account.username;
       // Récupérer le statut actuel du ticket pour le suivi
@@ -227,7 +269,7 @@ async function sendEmail({ ticketId, to, cc = [], subject, bodyHtml, inReplyTo =
   // Pièces jointes additionnelles ({ filename, content: Buffer, contentType }) converties au
   // format fileAttachment de Graph (contentBytes en base64), avec le logo inline éventuel.
   const graphAttachments = [
-    ...(logoAttachment ? [logoAttachment] : []),
+    ...logoAttachments,
     ...(attachments || []).map((a) => ({
       '@odata.type': '#microsoft.graph.fileAttachment',
       name: a.filename,
@@ -432,14 +474,26 @@ function buildEmailLayout({ headerTitle, headerSubtitle, children, signature }) 
 `.trim();
 }
 
-// Récupère la signature configurée (Paramètres > Automatisation), avec le logo uploadé ajouté
-// dessous s'il existe, et l'espace toujours du corps du message via une marge dédiée.
+// Récupère la signature configurée (Paramètres > Automatisation), avec toutes les images
+// uploadées ajoutées dessous s'il y en a, et l'espace toujours du corps du message via une marge
+// dédiée. Chaque image est référencée par son propre cid (logo-signature, logo-signature-1, ...)
+// et dispose de sa propre hauteur ; les images se suivent horizontalement dans un même paragraphe.
 async function getEmailSignature() {
   const settings = await getSystemSettings();
   const base = settings.emailSignature || DEFAULT_EMAIL_SIGNATURE;
-  const logoHtml = settings.signatureLogoUrl
-    ? `<p style="margin-top:8px"><img src="cid:${LOGO_CONTENT_ID}" alt="Logo" style="height:${settings.signatureLogoHeight || 60}px"></p>`
-    : '';
+  const logos = Array.isArray(settings.signatureLogos) && settings.signatureLogos.length > 0
+    ? settings.signatureLogos
+    : settings.signatureLogoUrl
+      ? [{ url: settings.signatureLogoUrl, height: settings.signatureLogoHeight || 60 }]
+      : [];
+  const imgs = logos
+    .map((logo, index) => {
+      const cid = index === 0 ? LOGO_CONTENT_ID : `${LOGO_CONTENT_ID}-${index}`;
+      const height = Number.isFinite(Number(logo.height)) && Number(logo.height) >= 16 ? Math.round(Number(logo.height)) : 60;
+      return `<img src="cid:${cid}" alt="Logo" style="height:${height}px;margin-right:12px;vertical-align:middle">`;
+    })
+    .join('');
+  const logoHtml = imgs ? `<p style="margin-top:8px">${imgs}</p>` : '';
   return `<div style="margin-top:24px">${base}${logoHtml}</div>`;
 }
 
@@ -1028,7 +1082,8 @@ ${buildActionLink(ticketLink, 'Consulter mon ticket')}`,
 //    donc leur présence = déjà enveloppé aussi.
 function isDraftContentAlreadyWrapped(content, signature) {
   if (!content) return false;
-  if (content.includes('cid:logo-signature')) return true;
+  // Multi-images : cid:logo-signature ou cid:logo-signature-1, -2, ...
+  if (/cid:logo-signature(-\d+)?/.test(content)) return true;
   const plainSignature = (signature || DEFAULT_EMAIL_SIGNATURE || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
   if (plainSignature.length > 10) {
     const plainContent = content.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ');

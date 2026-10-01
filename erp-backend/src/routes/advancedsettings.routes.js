@@ -112,7 +112,7 @@ const PUT_FIELDS = [
   'acknowledgementMessage', 'acknowledgementOffHoursMessage', 'acknowledgementBusinessHoursEnabled',
   'acknowledgementBusinessDays', 'acknowledgementBusinessStartTime', 'acknowledgementBusinessEndTime',
   'notifyTechnicianOnAssignment', 'emailFailureNotificationEmail',
-  'emailSignature', 'signatureLogoUrl', 'signatureLogoHeight', 'goLiveDate',
+  'emailSignature', 'signatureLogoUrl', 'signatureLogoHeight', 'signatureLogos', 'goLiveDate',
   'emailAcknowledgementEnabled', 'emailKnownIncidentEnabled', 'emailAssignmentEnabled',
   'emailSlaBreachEnabled', 'emailDueDateBreachEnabled', 'emailStatusChangeEnabled',
   'emailResolvedEnabled', 'emailEscalationEnabled', 'emailMajorIncidentResolvedEnabled',

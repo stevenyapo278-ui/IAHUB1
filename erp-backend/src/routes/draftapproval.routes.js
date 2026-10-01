@@ -27,9 +27,10 @@ router.get('/:token', async (req, res) => {
   if (error) return res.status(410).json({ error });
 
   const { draft } = approvalToken;
-  // signatureLogoUrl est renvoyée uniquement pour permettre à cette page publique d'afficher
-  // l'aperçu du logo (cid:logo-signature, résolu seulement dans l'email réellement envoyé, jamais
-  // dans un navigateur) — aucune donnée sensible, juste l'URL publique du fichier image.
+  // signatureLogoUrl/signatureLogos sont renvoyés uniquement pour permettre à cette page publique
+  // d'afficher l'aperçu des images de signature (cid:logo-signature[-N], résolus seulement dans
+  // l'email réellement envoyé, jamais dans un navigateur) — aucune donnée sensible, juste les
+  // URL publiques des fichiers image.
   const settings = await getSystemSettings();
   return res.json({
     id: draft.id,
@@ -40,6 +41,7 @@ router.get('/:token', async (req, res) => {
     proposedContent: draft.proposedContent,
     createdAt: draft.createdAt,
     signatureLogoUrl: settings.signatureLogoUrl || null,
+    signatureLogos: Array.isArray(settings.signatureLogos) ? settings.signatureLogos : null,
   });
 });
 

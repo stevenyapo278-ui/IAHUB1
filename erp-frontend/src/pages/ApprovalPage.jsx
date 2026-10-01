@@ -34,15 +34,30 @@ export default function ApprovalPage() {
       .finally(() => setLoading(false));
   }, [token]);
 
-  // L'aperçu navigateur ne peut pas résoudre cid:logo-signature (réservé aux emails réellement
-  // envoyés, où le logo est joint en pièce jointe inline) — on l'échange pour l'URL réelle juste
-  // pour l'affichage, puis on revient à cid: avant sauvegarde pour ne pas casser l'envoi.
+  // L'aperçu navigateur ne peut pas résoudre les cid:logo-signature[-N] (réservés aux emails
+  // réellement envoyés, où chaque image est jointe en pièce jointe inline) — on les échange pour
+  // les URL réelles juste pour l'affichage, puis on revient aux cid: avant sauvegarde pour ne pas
+  // casser l'envoi.
+  function logoList() {
+    if (Array.isArray(draft?.signatureLogos) && draft.signatureLogos.length > 0) return draft.signatureLogos;
+    return draft?.signatureLogoUrl ? [{ url: draft.signatureLogoUrl, height: 60 }] : [];
+  }
   function toDisplayHtml(html) {
-    return draft?.signatureLogoUrl ? html.replaceAll('cid:logo-signature', draft.signatureLogoUrl) : html;
+    let out = html;
+    logoList().forEach((logo, index) => {
+      const cid = index === 0 ? 'cid:logo-signature' : `cid:logo-signature-${index}`;
+      if (logo?.url) out = out.split(cid).join(logo.url);
+    });
+    return out;
   }
 
   function fromDisplayHtml(html) {
-    return draft?.signatureLogoUrl ? html.split(draft.signatureLogoUrl).join('cid:logo-signature') : html;
+    let out = html;
+    logoList().forEach((logo, index) => {
+      const cid = index === 0 ? 'cid:logo-signature' : `cid:logo-signature-${index}`;
+      if (logo?.url) out = out.split(logo.url).join(cid);
+    });
+    return out;
   }
 
   async function handleApprove() {

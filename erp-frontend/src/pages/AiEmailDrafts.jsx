@@ -37,6 +37,7 @@ export default function AiEmailDrafts() {
   const [reviewNote, setReviewNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [signatureLogoUrl, setSignatureLogoUrl] = useState(null);
+  const [signatureLogos, setSignatureLogos] = useState([]);
   const editorRef = useRef(null);
   const [toolbarState, setToolbarState] = useState({
     bold: false, italic: false, underline: false,
@@ -79,15 +80,34 @@ export default function AiEmailDrafts() {
 
   useEffect(() => {
     api.get('/system-settings')
-      .then(({ data }) => setSignatureLogoUrl(data.signatureLogoUrl || null))
+      .then(({ data }) => {
+        setSignatureLogoUrl(data.signatureLogoUrl || null);
+        setSignatureLogos(Array.isArray(data.signatureLogos) ? data.signatureLogos : []);
+      })
       .catch(() => {});
   }, []);
 
+  // Résolution cid: → URL réelle pour l'affichage navigateur (multi-images : logo-signature,
+  // logo-signature-1, -2... dans l'ordre de signatureLogos), et l'inverse avant sauvegarde.
+  function logoList() {
+    if (signatureLogos.length > 0) return signatureLogos;
+    return signatureLogoUrl ? [{ url: signatureLogoUrl, height: 60 }] : [];
+  }
   function toDisplayHtml(html) {
-    return signatureLogoUrl ? html.replaceAll('cid:logo-signature', signatureLogoUrl) : html;
+    let out = html;
+    logoList().forEach((logo, index) => {
+      const cid = index === 0 ? 'cid:logo-signature' : `cid:logo-signature-${index}`;
+      if (logo?.url) out = out.split(cid).join(logo.url);
+    });
+    return out;
   }
   function fromDisplayHtml(html) {
-    return signatureLogoUrl ? html.split(signatureLogoUrl).join('cid:logo-signature') : html;
+    let out = html;
+    logoList().forEach((logo, index) => {
+      const cid = index === 0 ? 'cid:logo-signature' : `cid:logo-signature-${index}`;
+      if (logo?.url) out = out.split(logo.url).join(cid);
+    });
+    return out;
   }
 
   function addCc() {

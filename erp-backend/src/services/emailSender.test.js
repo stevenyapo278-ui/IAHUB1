@@ -4,6 +4,7 @@ jest.mock('../prismaClient', () => ({
   ticketMessage: { findFirst: jest.fn(), create: jest.fn() },
 }));
 jest.mock('../utils/graphClient', () => ({ graphFetch: jest.fn() }));
+jest.mock('fs');
 jest.mock('./systemSettings', () => ({
   getSystemSettings: jest.fn().mockResolvedValue({ emailApprovalEnabled: true, signatureLogoUrl: null }),
   resolveFrontendUrl: jest.fn(() => 'http://localhost:3000'),
@@ -14,7 +15,9 @@ jest.mock('nodemailer', () => ({ createTransport: jest.fn(() => ({ sendMail: jes
 
 const prisma = require('../prismaClient');
 const nodemailer = require('nodemailer');
+const fs = require('fs');
 const { graphFetch } = require('../utils/graphClient');
+const { getSystemSettings } = require('./systemSettings');
 const { buildAcknowledgementHtml, buildKnownIncidentNotificationHtml, sendAiDraftEmail } = require('./emailSender');
 
 describe('buildAcknowledgementHtml', () => {
@@ -349,6 +352,97 @@ describe('sendEmail — routage par provider + pièces jointes', () => {
       account: { label: 'Boîte principale', emailAddress: 'support@prosuma.ci' },
     })).rejects.toThrow(/n'a pas d'hôte SMTP configuré/);
     expect(nodemailer.createTransport).not.toHaveBeenCalled();
+  });
+
+  it('getEmailSignature référence une image cid par image de la liste (multi-images)', async () => {
+    getSystemSettings.mockResolvedValueOnce({
+      emailSignature: null,
+      signatureLogos: [
+        { url: 'http://x/uploads/signature-logo/logo-a.png', height: 60 },
+        { url: 'http://x/uploads/signature-logo/logo-b.png', height: 40 },
+      ],
+    });
+    const { getEmailSignature } = require('./emailSender');
+    const signature = await getEmailSignature();
+    expect(signature).toContain('cid:logo-signature"');
+    expect(signature).toContain('cid:logo-signature-1"');
+    expect(signature).toContain('height:60px');
+    expect(signature).toContain('height:40px');
+  });
+
+  it('getEmailSignature retombe sur l\'ancien champ unique si signatureLogos est vide', async () => {
+    getSystemSettings.mockResolvedValueOnce({
+      emailSignature: null,
+      signatureLogos: null,
+      signatureLogoUrl: 'http://x/uploads/signature-logo/legacy.png',
+      signatureLogoHeight: 72,
+    });
+    const { getEmailSignature } = require('./emailSender');
+    const signature = await getEmailSignature();
+    expect(signature).toContain('cid:logo-signature"');
+    expect(signature).toContain('height:72px');
+    expect(signature).not.toContain('cid:logo-signature-1');
+  });
+
+  it('sendEmail joint uniquement les images de signature référencées dans le corps', async () => {
+    getSystemSettings.mockResolvedValueOnce({
+      signatureLogos: [
+        { url: 'http://x/uploads/signature-logo/logo-a.png', height: 60 },
+        { url: 'http://x/uploads/signature-logo/logo-b.png', height: 40 },
+      ],
+    });
+    const mod = require('./emailSender');
+    prisma.emailAccount.findFirst.mockResolvedValue({
+      provider: 'OUTLOOK', emailAddress: 'support@prosuma.ci', refreshToken: 'tok',
+    });
+    graphFetch
+      .mockResolvedValueOnce({ id: 'MSG-1', internetMessageId: '<m@x>' }) // création du draft
+      .mockResolvedValueOnce({}); // envoi
+    fs.existsSync.mockReturnValue(true);
+    fs.readFileSync.mockReturnValue(Buffer.from('img'));
+    await mod.sendEmail({
+      ticketId: 1,
+      to: ['client@ext.com'],
+      subject: 'S',
+      bodyHtml: '<p>Bonjour</p><img src="cid:logo-signature"><img src="cid:logo-signature-1">',
+      saveAsMessage: false,
+    });
+    const createCall = graphFetch.mock.calls.find(([, p, opts]) => String(p) === '/me/messages' && opts?.method === 'POST');
+    expect(createCall).toBeTruthy();
+    const payload = JSON.parse(createCall[2].body);
+    const inline = (payload.attachments || []).filter((a) => a.isInline);
+    expect(inline).toHaveLength(2);
+    expect(inline.map((a) => a.contentId).sort()).toEqual(['logo-signature', 'logo-signature-1']);
+  });
+
+  it('sendEmail ignore les images de signature non référencées dans le corps', async () => {
+    getSystemSettings.mockResolvedValueOnce({
+      signatureLogos: [
+        { url: 'http://x/uploads/signature-logo/logo-a.png', height: 60 },
+        { url: 'http://x/uploads/signature-logo/logo-b.png', height: 40 },
+      ],
+    });
+    const mod = require('./emailSender');
+    prisma.emailAccount.findFirst.mockResolvedValue({
+      provider: 'OUTLOOK', emailAddress: 'support@prosuma.ci', refreshToken: 'tok',
+    });
+    graphFetch
+      .mockResolvedValueOnce({ id: 'MSG-2', internetMessageId: '<m2@x>' })
+      .mockResolvedValueOnce({});
+    fs.existsSync.mockReturnValue(true);
+    fs.readFileSync.mockReturnValue(Buffer.from('img'));
+    await mod.sendEmail({
+      ticketId: 1,
+      to: ['client@ext.com'],
+      subject: 'S',
+      bodyHtml: '<p>Bonjour</p>', // aucune image référencée
+      saveAsMessage: false,
+    });
+    const createCall = graphFetch.mock.calls.find(([, p, opts]) => String(p) === '/me/messages' && opts?.method === 'POST');
+    expect(createCall).toBeTruthy();
+    const payload = JSON.parse(createCall[2].body);
+    const inline = (payload.attachments || []).filter((a) => a.isInline);
+    expect(inline).toHaveLength(0);
   });
 
   it("contextualise l'erreur de connexion SMTP en français avec hôte:port", async () => {

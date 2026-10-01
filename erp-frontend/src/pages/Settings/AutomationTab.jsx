@@ -31,12 +31,18 @@ function isNowWithinBusinessHours(days, startTime, endTime) {
   }
 }
 
-function buildAckPreviewHtml(customMessage, signature, logoUrl, logoHeight, { withTicketBlock = true, toName = '' } = {}) {
+// logos : liste [{ url, height }] — même structure que SystemSettings.signatureLogos (repli sur
+// l'ancien champ unique géré par l'appelant). Les images se suivent horizontalement, comme dans
+// l'email réel généré par emailSender.getEmailSignature.
+function buildAckPreviewHtml(customMessage, signature, logos = [], { withTicketBlock = true, toName = '' } = {}) {
   const intro = (customMessage || DEFAULT_ACK_MESSAGE)
     .replaceAll('{ticketId}', ACK_PREVIEW.ticketId)
     .replaceAll('{subject}', ACK_PREVIEW.subject)
     .replaceAll('{toName}', toName);
-  const logoHtml = logoUrl ? `<p style="margin-top:8px"><img src="${logoUrl}" alt="Logo" style="height:${logoHeight || 60}px"></p>` : '';
+  const imgs = (Array.isArray(logos) ? logos : [])
+    .map((logo) => `<img src="${logo.url}" alt="Logo" style="height:${logo.height || 60}px;margin-right:12px;vertical-align:middle">`)
+    .join('');
+  const logoHtml = imgs ? `<p style="margin-top:8px">${imgs}</p>` : '';
   return `
 <p>Bonjour ${toName || ''},</p>
 <p>${intro}</p>
@@ -164,28 +170,41 @@ export default function AutomationTab() {
     }
   }
 
+  // Upload multi-images : plusieurs fichiers sélectionnables (Ctrl+clic), envoyés en une requête
+  // et chaînés à la liste existante côté serveur.
   async function handleLogoUpload(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (files.length === 0) return;
     setUploadingLogo(true);
     setError('');
     try {
       const formData = new FormData();
-      formData.append('logo', file);
+      files.forEach((file) => formData.append('logo', file));
       const { data } = await api.post('/system-settings/signature-logo', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setSettings(data);
+      toast.success(files.length > 1 ? `${files.length} images ajoutées à la signature` : 'Image ajoutée à la signature');
     } catch (err) {
-      setError(err.response?.data?.error || "Erreur lors de l'upload du logo");
+      setError(err.response?.data?.error || "Erreur lors de l'upload de l'image");
     } finally {
       setUploadingLogo(false);
-      e.target.value = '';
     }
   }
 
-  async function removeLogo() {
-    await updateSetting('signatureLogoUrl', null);
+  // Retire une image de la liste (par URL) et met à jour les deux champs côté serveur.
+  async function removeLogo(logoUrl) {
+    const current = signatureLogos;
+    const next = current.filter((l) => l.url !== logoUrl);
+    const ok = await updateSetting('signatureLogos', next);
+    if (ok) toast.success('Image retirée de la signature');
+  }
+
+  // Ajuste la hauteur d'une image précise (champ signatureLogos complet en un PATCH).
+  async function updateLogoHeight(logoUrl, height) {
+    const next = signatureLogos.map((l) => (l.url === logoUrl ? { ...l, height } : l));
+    await updateSetting('signatureLogos', next);
   }
 
   if (!settings) {
@@ -204,6 +223,14 @@ export default function AutomationTab() {
     ackMessageDraft !== (settings.acknowledgementMessage || '') ||
     ackOffHoursDraft !== (settings.acknowledgementOffHoursMessage || '') ||
     signatureDraft !== (settings.emailSignature || '');
+
+  // Liste des images de signature : nouveau champ multi (signatureLogos) avec repli sur l'ancien
+  // champ unique (signatureLogoUrl) pour les réglages non encore migrés.
+  const signatureLogos = (Array.isArray(settings.signatureLogos) && settings.signatureLogos.length > 0
+    ? settings.signatureLogos
+    : settings.signatureLogoUrl
+      ? [{ url: settings.signatureLogoUrl, height: settings.signatureLogoHeight || 60 }]
+      : []);
 
   // Aperçu dynamique : bascule sur le message hors horaires si la variante est active et que
   // l'heure actuelle (Abidjan) est hors plage d'ouverture — même choix que l'envoi réel.
@@ -366,66 +393,70 @@ export default function AutomationTab() {
               </div>
 
               <div className="bento-card flex flex-col gap-sm p-md bg-surface-container-low/20">
-                <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Logo de signature</span>
-                {settings.signatureLogoUrl ? (
+                <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider font-semibold">Images de signature</span>
+                <p className="font-body-xs text-body-xs text-on-surface-variant/80">
+                  Ajoutez autant d'images que nécessaire (logo, badges, certifications…) : elles apparaissent côte à côte sous la signature dans chaque email.
+                </p>
+                {signatureLogos.length > 0 && (
                   <motion.div
-                    initial={{ opacity: 0, scale: 0.95 }}
+                    initial={{ opacity: 0, scale: 0.98 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    className="flex flex-col gap-md"
+                    className="flex flex-col gap-sm"
                   >
-                    <div className="flex items-center gap-md">
-                      <img
-                        src={settings.signatureLogoUrl}
-                        alt="Logo actuel"
-                        style={{ height: `${settings.signatureLogoHeight || 60}px` }}
-                        className="border border-outline-variant/60 rounded-lg p-1 bg-white max-h-20 object-contain"
-                      />
-                      <motion.button
-                        type="button"
-                        onClick={removeLogo}
-                        disabled={saving || uploadingLogo}
-                        whileHover={{ scale: 1.03 }}
-                        whileTap={{ scale: 0.96 }}
-                        className="px-3 py-2 border border-red-500/20 bg-red-500/5 hover:bg-red-500/10 text-red-500 rounded-xl transition-colors disabled:opacity-50 text-body-sm font-semibold"
-                      >
-                        Retirer le logo
-                      </motion.button>
-                    </div>
-                    <div className="flex items-center gap-sm">
-                      <span className="font-body-sm text-body-sm text-on-surface-variant shrink-0 font-medium">Hauteur</span>
-                      <input
-                        type="range"
-                        min={16}
-                        max={200}
-                        value={settings.signatureLogoHeight || 60}
-                        onChange={(e) => updateSetting('signatureLogoHeight', Number(e.target.value))}
-                        disabled={saving}
-                        className="flex-1 accent-primary"
-                      />
-                      <span className="font-body-sm text-body-sm text-on-surface font-semibold shrink-0 w-12 text-right">
-                        {settings.signatureLogoHeight || 60}px
-                      </span>
-                    </div>
+                    {signatureLogos.map((logo) => (
+                      <div key={logo.url} className="flex items-center gap-md">
+                        <img
+                          src={logo.url}
+                          alt="Image de signature"
+                          style={{ height: `${logo.height || 60}px` }}
+                          className="border border-outline-variant/60 rounded-lg p-1 bg-white max-h-20 object-contain shrink-0"
+                        />
+                        <div className="flex items-center gap-sm flex-1 min-w-0">
+                          <span className="font-body-sm text-body-sm text-on-surface-variant shrink-0 font-medium">Hauteur</span>
+                          <input
+                            type="range"
+                            min={16}
+                            max={200}
+                            value={logo.height || 60}
+                            onChange={(e) => updateLogoHeight(logo.url, Number(e.target.value))}
+                            disabled={saving}
+                            className="flex-1 accent-primary min-w-0"
+                          />
+                          <span className="font-body-sm text-body-sm text-on-surface font-semibold shrink-0 w-12 text-right">
+                            {logo.height || 60}px
+                          </span>
+                        </div>
+                        <motion.button
+                          type="button"
+                          onClick={() => removeLogo(logo.url)}
+                          disabled={saving || uploadingLogo}
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          className="p-2 border border-red-500/20 bg-red-500/5 hover:bg-red-500/10 text-red-500 rounded-xl transition-colors disabled:opacity-50 shrink-0"
+                          title="Retirer cette image"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">delete</span>
+                        </motion.button>
+                      </div>
+                    ))}
                   </motion.div>
-                ) : (
-                  <div className="flex flex-col gap-sm">
-                    <input
-                      type="file"
-                      accept="image/png,image/jpeg,image/gif,image/svg+xml,image/webp"
-                      onChange={handleLogoUpload}
-                      disabled={uploadingLogo}
-                      className="font-body-sm text-body-sm text-on-surface-variant disabled:opacity-50 cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-body-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 file:transition-all"
-                    />
-                    {uploadingLogo && (
-                      <motion.span
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        className="font-body-sm text-body-sm text-on-surface-variant italic"
-                      >
-                        Envoi en cours...
-                      </motion.span>
-                    )}
-                  </div>
+                )}
+                <input
+                  type="file"
+                  multiple
+                  accept="image/png,image/jpeg,image/gif,image/svg+xml,image/webp"
+                  onChange={handleLogoUpload}
+                  disabled={uploadingLogo}
+                  className="font-body-sm text-body-sm text-on-surface-variant disabled:opacity-50 cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-body-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 file:transition-all"
+                />
+                {uploadingLogo && (
+                  <motion.span
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="font-body-sm text-body-sm text-on-surface-variant italic"
+                  >
+                    Envoi en cours...
+                  </motion.span>
                 )}
               </div>
             </div>
@@ -460,7 +491,7 @@ export default function AutomationTab() {
               {/* Mail body */}
               <div className="p-md bg-white text-gray-800 flex-1 overflow-auto font-body-sm leading-relaxed max-h-[310px] min-h-[250px]">
                 <div
-                  dangerouslySetInnerHTML={{ __html: sanitizeHtml(buildAckPreviewHtml(ackPreviewMessage, signatureDraft, settings.signatureLogoUrl, settings.signatureLogoHeight, { withTicketBlock: ackPreviewWithTicket, toName: user?.fullName || '' })) }}
+                  dangerouslySetInnerHTML={{ __html: sanitizeHtml(buildAckPreviewHtml(ackPreviewMessage, signatureDraft, signatureLogos, { withTicketBlock: ackPreviewWithTicket, toName: user?.fullName || '' })) }}
                 />
               </div>
 

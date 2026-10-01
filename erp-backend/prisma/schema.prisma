@@ -738,6 +738,9 @@ model SystemSettings {
   // URL absolue du logo uploadé (Paramètres > Automatisation), insérée automatiquement dans emailSignature.
   signatureLogoUrl    String? @db.Text
   signatureLogoHeight Int     @default(60) // hauteur d'affichage du logo dans l'email, en pixels
+  // Plusieurs images de signature : [{ url, height }] — signatureLogoUrl/Height (ancien champ unique)
+  // restent lus en secours si la liste est vide, pour compatibilité avec les réglages existants.
+  signatureLogos      Json?
 
   // Récapitulatif quotidien des tickets ouverts (Paramètres > Automatisation > Récapitulatif quotidien).
   dailySummaryEnabled      Boolean  @default(false)

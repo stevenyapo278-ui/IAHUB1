@@ -64,24 +64,50 @@ router.get('/', async (req, res) => {
 router.post(
   '/signature-logo',
   requirePermission('automation.manage', ['ADMIN']),
-  logoUpload.single('logo'),
+  logoUpload.array('logo', 10),
   async (req, res) => {
-    if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu' });
+    if (!req.files?.length) return res.status(400).json({ error: 'Aucun fichier reçu' });
 
-    // Valider que le fichier n'est pas dangereux
-    const validation = validateUpload(req.file.originalname, req.file.mimetype, 'logo');
-    if (!validation.valid) {
-      return res.status(400).json({ error: validation.error });
+    // Valider que chaque fichier n'est pas dangereux
+    for (const file of req.files) {
+      const validation = validateUpload(file.originalname, file.mimetype, 'logo');
+      if (!validation.valid) {
+        return res.status(400).json({ error: validation.error });
+      }
     }
 
     const settings = await getOrCreateSettings();
     const backendUrl = resolveBackendUrl(settings);
-    const logoUrl = `${backendUrl}/uploads/signature-logo/${req.file.filename}`;
+    // Chaîne la/les nouvelle(s) image(s) à la liste existante (max 10) au lieu de remplacer :
+    // l'admin construit sa signature image par image. Même paramétrage de hauteur pour les
+    // nouvelles images que le réglage global (l'ajustement fin reste possible image par image).
+    const existing = Array.isArray(settings.signatureLogos) ? settings.signatureLogos : [];
+    const defaultsHeight = settings.signatureLogoHeight || 60;
+    const added = req.files.map((file) => ({
+      url: `${backendUrl}/uploads/signature-logo/${file.filename}`,
+      height: defaultsHeight,
+    }));
+    const signatureLogos = [...existing, ...added].slice(-10);
 
-    const updated = await prisma.systemSettings.update({ where: { id: 1 }, data: { signatureLogoUrl: logoUrl } });
+    const updated = await prisma.systemSettings.update({ where: { id: 1 }, data: { signatureLogos, signatureLogoUrl: signatureLogos[0]?.url || null } });
     return res.json(updated);
   }
 );
+
+// Recharge la liste complète des images de signature (PATCH / avec signatureLogos = [...]).
+// Validation stricte : tableau de { url: string, height: int 16-200 }, max 10 entrées — jamais
+// de confiance aveugle en un payload admin (le endpoint est réservé ADMIN, mais on reste propre).
+function normalizeSignatureLogos(raw) {
+  if (!Array.isArray(raw)) return null;
+  const cleaned = raw
+    .filter((l) => l && typeof l === 'object' && typeof l.url === 'string' && l.url.trim() !== '')
+    .map((l) => ({
+      url: l.url.trim(),
+      height: Number.isFinite(Number(l.height)) && Number(l.height) >= 16 && Number(l.height) <= 200 ? Math.round(Number(l.height)) : 60,
+    }))
+    .slice(0, 10);
+  return cleaned;
+}
 
 router.patch(
   '/',
@@ -102,6 +128,7 @@ router.patch(
     body('emailSignature').optional({ nullable: true }).isString().isLength({ max: 2000 }),
     body('signatureLogoUrl').optional({ nullable: true }).isString(),
     body('signatureLogoHeight').optional().isInt({ min: 16, max: 200 }),
+    body('signatureLogos').optional({ nullable: true }).isArray({ max: 10 }),
     body('dailySummaryEnabled').optional().isBoolean(),
     body('dailySummaryTime').optional().matches(/^([01]\d|2[0-3]):([0-5]\d)$/),
     body('dailySummaryRecipients').optional().isArray(),
@@ -159,6 +186,12 @@ router.patch(
     if (req.body.emailSignature !== undefined) data.emailSignature = req.body.emailSignature || null;
     if (req.body.signatureLogoUrl !== undefined) data.signatureLogoUrl = req.body.signatureLogoUrl || null;
     if (req.body.signatureLogoHeight !== undefined) data.signatureLogoHeight = req.body.signatureLogoHeight;
+    if (req.body.signatureLogos !== undefined) {
+      const normalized = normalizeSignatureLogos(req.body.signatureLogos);
+      data.signatureLogos = normalized && normalized.length > 0 ? normalized : [];
+      // Champ historique unique maintenu en cohérence (1ère image) pour les anciens lecteurs
+      data.signatureLogoUrl = data.signatureLogos[0]?.url || null;
+    }
     if (req.body.dailySummaryEnabled !== undefined) data.dailySummaryEnabled = req.body.dailySummaryEnabled;
     if (req.body.dailySummaryTime !== undefined) data.dailySummaryTime = req.body.dailySummaryTime;
     if (req.body.dailySummaryRecipients !== undefined) data.dailySummaryRecipients = req.body.dailySummaryRecipients;
