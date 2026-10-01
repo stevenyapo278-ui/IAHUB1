@@ -3,6 +3,7 @@ const { getIO } = require('../utils/socket');
 const { pollAllAccounts } = require('./emailPoller');
 const { analyzeEmail } = require('./mailAnalyzer');
 const { createTicketFromEmail } = require('./ticketCreator');
+const { applySla } = require('./slaService');
 const { findExistingTicket } = require('./conversationMatcher');
 const { findSimilarOpenTicket, attachSiteToTicket, saveTicketEmbedding } = require('./similarIncidentDetector');
 const { analyzeIntent, applyIntentActions } = require('./intentAnalyzer');
@@ -1123,6 +1124,8 @@ async function processMessage(message, account) {
               },
             });
             fallbackTicketId = fallbackTicket.id;
+            // SLA : le ticket de repli suit le même calcul d'échéances que le circuit normal
+            applySla(fallbackTicket).catch((e) => console.warn('[emailPipeline] Calcul SLA fallback:', e.message));
 
             // Enregistrer le message dans le ticket
             const fallbackMsg = await prisma.ticketMessage.create({

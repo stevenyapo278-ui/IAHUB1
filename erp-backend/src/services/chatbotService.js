@@ -3,7 +3,7 @@ const { getActiveProviders, callProviderWithFallback, callAiWithRetry } = requir
 const { emitTicketCreated, emitTicketAssigned, emitTicketUpdated } = require('../utils/socket');
 const { sendTicketCreationNotification, sendAssignmentNotificationEmail } = require('./emailSender');
 const { sanitizeTicketHtml } = require('../utils/security');
-const { recordFirstResponse } = require('./slaService');
+const { recordFirstResponse, applySla } = require('./slaService');
 const { logEvent } = require('./ticketEvent');
 const analyticsTools = require('./analyticsTools');
 const { searchEmailRag } = require('./emailRagService');
@@ -3186,6 +3186,9 @@ async function createTicketFromChat(title, description, priority, userId, { team
       category: category || null,
     },
   });
+  // SLA : échéances de réponse/résolution calculées à la création, comme pour tout ticket
+  // (sinon les tickets créés par chatbot échappaient au moteur SLA : ni échéance, ni dépassement)
+  try { await applySla(ticket); } catch (err) { console.error('[chatbot] Calcul SLA échoué:', err.message); }
   emitTicketCreated(ticket);
   // Notification aux boîtes configurées dans les Paramètres (best-effort, non bloquant)
   // Uniquement si le ticket est approuvé — sinon on attend l'approbation (ticketApproval.js)
@@ -3212,6 +3215,8 @@ async function escalateToTechnician(message, userId) {
       approvalStatus: 'PENDING',
     },
   });
+  // SLA : même calcul d'échéances que les autres chemins de création
+  try { await applySla(ticket); } catch (err) { console.error('[chatbot] Calcul SLA échoué:', err.message); }
   emitTicketCreated(ticket);
   if (ticket.approvalStatus === 'APPROVED') {
     sendTicketCreationNotification(ticket).catch((err) =>

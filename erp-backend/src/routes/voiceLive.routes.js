@@ -6,6 +6,7 @@ const { GoogleGenAI } = require('@google/genai');
 const prisma = require('../prismaClient');
 const { logger } = require('../utils/logger');
 const analyticsTools = require('../services/analyticsTools');
+const { applySla } = require('../services/slaService');
 const { searchKnowledge } = require('../services/knowledgeSearch');
 const { searchTeams, searchTickets, buildSearchQuery, findTicketsForPersonAnyRole, handleMessage, executeTool: chatbotExecuteTool, normalizeStatusFilter, OPEN_GROUP_STATUSES, buildPersonTicketSummary } = require('../services/chatbotService');
 const { buildToolResultPayload, toGeminiResponse } = require('../services/voicePayloads');
@@ -791,6 +792,9 @@ async function executeTool(name, args, { user = null, sessionHistory = null, ws 
           },
           select: { id: true, title: true, status: true, priority: true },
         });
+
+        // SLA : échéances calculées à la création (comme POST /tickets)
+        try { await applySla(ticket); } catch (err) { logger.error(`[voice-live] Calcul SLA create_ticket: ${err.message}`); }
 
         // Logger l'événement de création dans l'historique du ticket (Inspiré de live-dj EP3)
         try {

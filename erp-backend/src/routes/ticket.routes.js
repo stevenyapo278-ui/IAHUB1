@@ -2634,6 +2634,9 @@ router.post('/:id/children', forbidTechnicianTicketEdits, requirePermission('tic
     },
   });
 
+  // SLA : échéances calculées à la création (héritées de la priorité du parent)
+  try { await applySla(child); } catch (err) { console.error('[ticket.routes] Calcul SLA sous-ticket échoué:', err.message); }
+
   // Lien hiérarchique PARENT → CHILD (direction préservée quel que soit l'ordre des ids)
   const { idA, idB } = normalizeLinkEndpoints(parentId, child.id);
   const linkType = normalizeParentChildType(parentId, child.id, 'PARENT');

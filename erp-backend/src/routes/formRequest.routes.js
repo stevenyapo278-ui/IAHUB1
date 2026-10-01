@@ -1,6 +1,7 @@
 const express = require('express');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
+const { applySla } = require('../services/slaService');
 
 const router = express.Router();
 
@@ -89,6 +90,9 @@ router.post('/:id/submit', authenticate, async (req, res) => {
         requesterIds: [req.user.sub],
       },
     });
+
+    // SLA : échéances calculées à la création (comme POST /tickets)
+    try { await applySla(ticket); } catch (err) { console.error('[formRequest] Calcul SLA échoué:', err.message); }
 
     await prisma.formSubmission.create({
       data: { formId, ticketId: ticket.id, submittedById: req.user.sub, answers },
