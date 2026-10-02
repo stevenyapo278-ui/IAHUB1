@@ -131,8 +131,8 @@ export default function App() {
               }
             />
             <Route path="tickets/:id" element={<ProtectedRoute permission="tickets.view"><TicketDetail /></ProtectedRoute>} />
-            <Route path="problems" element={<ProtectedRoute roles={['ADMIN', 'HOTLINE', 'SUPERADMIN']}><Problems /></ProtectedRoute>} />
-            <Route path="problems/:id" element={<ProtectedRoute roles={['ADMIN', 'HOTLINE', 'SUPERADMIN']}><ProblemDetail /></ProtectedRoute>} />
+            <Route path="problems" element={<ProtectedRoute permission="problems.manage"><Problems /></ProtectedRoute>} />
+            <Route path="problems/:id" element={<ProtectedRoute permission="problems.manage"><ProblemDetail /></ProtectedRoute>} />
             <Route path="teams" element={<ProtectedRoute permission="teams.manage"><Teams /></ProtectedRoute>} />
             <Route path="knowledge-base" element={<KnowledgeBase />} />
             <Route path="inbox" element={<ProtectedRoute permission="inbox.sync"><Inbox /></ProtectedRoute>} />

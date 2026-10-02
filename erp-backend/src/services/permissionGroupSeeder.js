@@ -33,7 +33,7 @@ const DEFAULT_GROUPS = [
     description: 'Groupe par défaut pour le rôle Technicien.',
     permissions: [
       'tickets.view', 'tickets.assign', 'tickets.approve', 'tickets.timesheet',
-      'tickets.manage', 'knowledge.manage', 'inbox.sync',
+      'tickets.manage', 'problems.manage', 'knowledge.manage', 'inbox.sync',
       'emaildrafts.manage', 'locations.manage', 'assets.manage',
     ],
   },
