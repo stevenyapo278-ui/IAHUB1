@@ -64,15 +64,19 @@ function checkEmailSpam(headers = [], subject = '', body = '', fromEmail = '') {
   const bodySnippet = body.substring(0, 4000);
   const fromLower = (fromEmail || '').toLowerCase();
   const contentType = getHeader('content-type') || '';
-  const autoResponseSuppress = getHeader('x-auto-response-suppress');
 
+  // NB : X-Auto-Response-Suppress n'est PAS un marqueur fiable de message automatique.
+  // Exchange/Outlook le tamponne sur des emails normaux (boîte avec absence configurée,
+  // boîte déléguée/réunion) pour demander au serveur destinataire de SUPPRIMER les
+  // auto-réponses — il exprime un souhait, pas une automatisation. Classer sur ce seul
+  // header envoyait des demandes légitimes en INFORMATIONAL, sans analyse IA ni centre
+  // de validation. Les vrais MDN/NDR sont couverts par le sujet, le corps et multipart/report.
   const isTechnicalAutomated = (
     fromLower.includes('bounce') || fromLower.includes('postmaster') || fromLower.includes('mailer-daemon') ||
     // Accusés de remise/lecture et rapports MIME (multipart/report = MDN/NDR)
     isReceiptSubject(subject) ||
     isReceiptBody(bodySnippet) ||
     /multipart\/report/i.test(contentType) ||
-    !!autoResponseSuppress ||
     /statut\s*de\s*remise|undelivered\s*mail|delivery\s*status|postmaster|failure\s*notice/i.test(subject) ||
     /mail\s*delivery\s*system|mailer\-daemon|d(e|é)lai\s*de\s+remise\s*d(e|é)pass(e|é)/i.test(bodySnippet)
   );
@@ -95,9 +99,8 @@ function checkEmailSpam(headers = [], subject = '', body = '', fromEmail = '') {
   if (/multipart\/report/i.test(contentType)) {
     return makeResult(true, true, `Rapport MIME technique (Content-Type: ${contentType})`);
   }
-  if (autoResponseSuppress) {
-    return makeResult(true, true, `Header X-Auto-Response-Suppress: ${autoResponseSuppress}`);
-  }
+  // X-Auto-Response-Suppress : volontairement absent — présent sur de nombreux emails
+  // légitimes (voir note dans isTechnicalAutomated). Il ne doit jamais classer seul.
 
 
   // 1. Analyse des en-têtes MIME typiques de réponses automatiques et listes de diffusion

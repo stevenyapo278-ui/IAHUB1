@@ -70,9 +70,23 @@ describe('emailSpamFilter', () => {
     expect(res.isTechnicalAutomated).toBe(true);
   });
 
-  test('devrait ignorer un message portant X-Auto-Response-Suppress', () => {
+  test('NE DEVRAIT PAS bloquer un email légitime portant X-Auto-Response-Suppress', () => {
+    // Outlook/Exchange tamponne ce header sur des emails normaux (absence configurée,
+    // boîte déléguée) : il demande à supprimer les auto-réponses, il ne prouve rien.
+    // Régression : des demandes légitimes (URGENT dépannage…) partaient en INFORMATIONAL
+    // sans analyse IA ni centre de validation.
     const headers = [{ name: 'X-Auto-Response-Suppress', value: 'DR, RN, NDR, OOF' }];
-    const res = checkEmailSpam(headers, 'Sujet anodin', 'Corps anodin', 'partner@ext.com');
+    const res = checkEmailSpam(headers, 'URGENT URGENT - Dépannage imprimante Mle Layya FAKHRY', 'Bonsoir, l\'imprimante HP LASERJET PRO présente un bourrage papier depuis quelques jours.', 'hussein.fakih@prosuma.ci');
+    expect(res.isSpam).toBe(false);
+    expect(res.isTechnicalAutomated).toBe(false);
+  });
+
+  test('détecte toujours un accusé de remise malgré la suppression du header', () => {
+    const headers = [
+      { name: 'X-Auto-Response-Suppress', value: 'DR, OOF, AutoReply' },
+      { name: 'Content-Type', value: 'multipart/report; report-type=disposition-notification' },
+    ];
+    const res = checkEmailSpam(headers, 'Accusé de remise : Imprimante caisse 3', 'Votre message a été remis.', 'exchange@prosuma.ci');
     expect(res.isSpam).toBe(true);
     expect(res.isTechnicalAutomated).toBe(true);
   });
