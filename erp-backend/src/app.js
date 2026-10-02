@@ -29,6 +29,7 @@ const ticketIntelligenceRoutes = require('./routes/ticketintelligence.routes');
 const systemSettingsRoutes = require('./routes/systemsettings.routes');
 const advancedSettingsRoutes = require('./routes/advancedsettings.routes');
 const promptTemplateRoutes = require('./routes/prompttemplate.routes');
+const emailTemplateRoutes = require('./routes/emailtemplate.routes');
 const skillRoutes = require('./routes/skill.routes');
 const reassignmentRoutes = require('./routes/reassignment.routes');
 const notificationRoutes = require('./routes/notification.routes');
@@ -231,6 +232,7 @@ app.use('/api', ticketIntelligenceRoutes);
 app.use('/api/system-settings', apiCache(30), systemSettingsRoutes);
 app.use('/api/advanced-settings', advancedSettingsRoutes);
 app.use('/api/prompt-templates', promptTemplateRoutes);
+app.use('/api/email-templates', emailTemplateRoutes);
 app.use('/api/skills', apiCache(30), skillRoutes);
 app.use('/api/reassignments', reassignmentRoutes);
 

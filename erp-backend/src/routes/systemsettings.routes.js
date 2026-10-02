@@ -12,6 +12,9 @@ const { resolveBackendUrl, resolveFrontendUrl } = require('../services/systemSet
 const { auditLog } = require('../services/auditLogService');
 const { validateUpload } = require('../utils/security');
 const cacheStore = require('../services/cacheStore');
+const { EMAIL_TEMPLATE_REGISTRY } = require('../services/emailTemplateRegistry');
+const { getTemplateOverride } = require('../services/emailTemplates');
+const { buildTemplateSample } = require('../services/emailTemplateSamples');
 
 const router = express.Router();
 router.use(authenticate);
@@ -252,12 +255,13 @@ router.post('/daily-summary/test', requirePermission('automation.manage', ['ADMI
 // que recevront les destinataires.
 const {
   sendEmail,
-  buildAcknowledgementHtml, buildKnownIncidentNotificationHtml,
-  buildAssignmentNotificationHtml, buildSlaBreachHtml, buildDueDateHtml,
-  buildStatusChangeHtml, buildReminderHtml, getEmailSignature,
+  buildAcknowledgementHtml, buildReminderHtml, getEmailSignature,
   pickAcknowledgementMessage,
 } = require('../services/emailSender');
 
+// Templates de test historiques (hors registre éditable) : rendus via le builder réel
+// avec des données fictives. Les clés du registre (assignment, status_change, etc.)
+// passent par buildTemplateSample (aperçu + sujet réel, surcharge incluse).
 const EMAIL_TEST_TEMPLATES = {
   acknowledgement: {
     label: 'Accusé de réception',
@@ -265,48 +269,6 @@ const EMAIL_TEST_TEMPLATES = {
       toName: recipientName, glpiTicketId: 999, ticketId: 999,
       originalSubject: 'Problème d\'impression bureau 305',
       customMessage: 'Votre demande a bien été reçue (ticket #{ticketId}).',
-      signature, ticketLink,
-    }),
-  },
-  known_incident: {
-    label: 'Incident déjà connu',
-    build: ({ signature, ticketLink, recipientName }) => buildKnownIncidentNotificationHtml({
-      toName: recipientName, glpiTicketId: 999, ticketId: 999,
-      originalSubject: 'Panne réseau site Abidjan', isMajor: true, impactedCount: 12,
-      signature, ticketLink,
-    }),
-  },
-  assignment: {
-    label: 'Assignation technicien',
-    build: ({ signature, ticketLink, recipientName }) => buildAssignmentNotificationHtml({
-      technicianName: recipientName, glpiTicketId: 999, ticketId: 999,
-      ticketTitle: 'Test template email', priority: 'P2', category: 'IT — Matériel', teamName: 'Support IT',
-      signature, ticketLink,
-    }),
-  },
-  sla_breach: {
-    label: 'Dépassement SLA',
-    build: ({ signature, ticketLink, recipientName }) => buildSlaBreachHtml({
-      technicianName: recipientName, glpiTicketId: 999, ticketId: 999,
-      ticketTitle: 'Test template email', priority: 'P2',
-      slaResponseDueAt: new Date(Date.now() - 3600000).toISOString(),
-      signature, ticketLink,
-    }),
-  },
-  due_date: {
-    label: 'Dépassement échéance',
-    build: ({ signature, ticketLink, recipientName }) => buildDueDateHtml({
-      technicianName: recipientName, glpiTicketId: 999, ticketId: 999,
-      ticketTitle: 'Test template email', priority: 'P2',
-      dueDate: new Date(Date.now() - 7200000).toISOString(),
-      signature, ticketLink,
-    }),
-  },
-  status_change: {
-    label: 'Changement de statut',
-    build: ({ signature, ticketLink, recipientName }) => buildStatusChangeHtml({
-      recipientName, glpiTicketId: 999, ticketId: 999,
-      ticketTitle: 'Test template email', status: 'OPEN', priority: 'P2', category: 'IT — Matériel',
       signature, ticketLink,
     }),
   },
@@ -338,8 +300,9 @@ async function resolveTestRecipientName(rawEmail) {
 router.post('/test-email', requirePermission('automation.manage', ['ADMIN']), async (req, res) => {
   try {
     const { type, recipientEmail } = req.body;
-    if (!type || (!EMAIL_TEST_TEMPLATES[type] && type !== 'ack_auto')) {
-      return res.status(400).json({ error: `Type inconnu. Types disponibles : ack_auto, ${Object.keys(EMAIL_TEST_TEMPLATES).join(', ')}` });
+    const knownTypes = ['ack_auto', ...Object.keys(EMAIL_TEMPLATE_REGISTRY), ...Object.keys(EMAIL_TEST_TEMPLATES)];
+    if (!type || !knownTypes.includes(type)) {
+      return res.status(400).json({ error: `Type inconnu. Types disponibles : ${knownTypes.join(', ')}` });
     }
     if (!recipientEmail) {
       return res.status(400).json({ error: 'recipientEmail est requis' });
@@ -368,6 +331,19 @@ router.post('/test-email', requirePermission('automation.manage', ['ADMIN']), as
       });
       await sendEmail({ ticketId: null, to: recipientEmail, subject, bodyHtml, saveAsMessage: false });
       return res.json({ sent: true, type, recipientEmail, offHours });
+    }
+
+    // Clés du registre éditables : envoie l'échantillon rendu avec les surcharges
+    // courantes de la table EmailTemplate — même builder et même sujet que l'envoi réel.
+    if (EMAIL_TEMPLATE_REGISTRY[type]) {
+      const override = await getTemplateOverride(type);
+      const recipientName = await resolveTestRecipientName(recipientEmail);
+      const sample = await buildTemplateSample(type, { override, signature, frontendUrl, recipientName });
+      if (!sample || !sample.subject) {
+        return res.status(400).json({ error: `Template non rendable : ${type}` });
+      }
+      await sendEmail({ ticketId: null, to: recipientEmail, subject: sample.subject, bodyHtml: sample.html, saveAsMessage: false });
+      return res.json({ sent: true, type, recipientEmail });
     }
 
     const ticketLink = `${frontendUrl}/tickets/999`;

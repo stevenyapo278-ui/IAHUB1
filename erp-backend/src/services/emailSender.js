@@ -7,6 +7,7 @@ const { getSystemSettings, resolveFrontendUrl } = require('./systemSettings');
 const { logEvent } = require('./ticketEvent');
 const { generateEmailSummary } = require('./emailSummaryGenerator');
 const { indexTicketMessage } = require('./emailRagService');
+const { resolveTemplate } = require('./emailTemplates');
 
 const LOGO_CONTENT_ID = 'logo-signature';
 
@@ -627,7 +628,7 @@ async function sendReminder({ ticketId, glpiTicketId, toEmail, toName, subject, 
 
 // ── Template : Incident déjà connu ───────────────────────────────────────────
 // Génère le HTML de la notification "incident déjà connu" (fonction pure, sans envoi)
-function buildKnownIncidentNotificationHtml({ toName, glpiTicketId, ticketId, originalSubject, isMajor, impactedCount, signature, ticketLink }) {
+function buildKnownIncidentNotificationHtml({ toName, glpiTicketId, ticketId, originalSubject, isMajor, impactedCount, signature, ticketLink, customMessage }) {
   const displayId = glpiTicketId || ticketId || 'N/A';
   const majorNote = isMajor
     ? `<p style="margin:0 0 12px;color:#d97706;font-weight:600">Cet incident a été promu en <strong>incident majeur</strong> (${impactedCount} sites impactés). Notre équipe est mobilisée en priorité.</p>`
@@ -638,8 +639,8 @@ function buildKnownIncidentNotificationHtml({ toName, glpiTicketId, ticketId, or
     signature,
     children: `
 <p style="margin:0 0 12px">Bonjour ${toName || ''},</p>
-<p style="margin:0 0 12px">Votre demande a bien été prise en compte.</p>
-<p style="margin:0 0 12px">Un incident déjà identifié est actuellement en cours d'investigation par nos équipes :</p>
+${customMessage || `<p style="margin:0 0 12px">Votre demande a bien été prise en compte.</p>
+<p style="margin:0 0 12px">Un incident déjà identifié est actuellement en cours d'investigation par nos équipes :</p>`}
 ${buildStyledTable([
   { label: 'Sujet', value: `<strong>${originalSubject}</strong>` },
   { label: 'Sites impactés', value: `${impactedCount}` },
@@ -655,24 +656,27 @@ async function sendKnownIncidentNotification({ ticketId, glpiTicketId, toEmail, 
   const settings = await getSystemSettings();
   if (settings.emailKnownIncidentEnabled === false) return null;
   const displayId = glpiTicketId || ticketId || 'N/A';
-  const subject = `[Ticket #${displayId}] ${originalSubject}`;
+  const tpl = await resolveTemplate('known_incident', {
+    ticketId: displayId, subject: originalSubject, toName, impactedCount: impactedCount ?? '',
+  });
+  const subject = tpl.subject || `[Ticket #${displayId}] ${originalSubject}`;
   const signature = await getEmailSignature();
   const frontendUrl = resolveFrontendUrl(settings);
   const ticketLink = ticketId ? `${frontendUrl}/tickets/${ticketId}` : null;
-  const bodyHtml = buildKnownIncidentNotificationHtml({ toName, glpiTicketId, ticketId, originalSubject, isMajor, impactedCount, signature, ticketLink });
+  const bodyHtml = buildKnownIncidentNotificationHtml({ toName, glpiTicketId, ticketId, originalSubject, isMajor, impactedCount, signature, ticketLink, customMessage: tpl.message || undefined });
   return sendEmail({ ticketId, to: toEmail, subject, bodyHtml, saveAsMessage: true });
 }
 
 // ── Template : Résolution d'incident majeur ──────────────────────────────────
-function buildMajorIncidentResolvedHtml({ glpiTicketId, ticketTitle, signature }) {
+function buildMajorIncidentResolvedHtml({ glpiTicketId, ticketTitle, signature, customMessage }) {
   return buildEmailLayout({
     headerTitle: 'Incident majeur résolu',
     headerSubtitle: `Ticket #${glpiTicketId}`,
     signature,
     children: `
 <p style="margin:0 0 12px">Bonjour,</p>
-<p style="margin:0 0 12px">L'incident <strong>#${glpiTicketId} — ${ticketTitle}</strong> a été résolu.</p>
-<p style="margin:0 0 12px">Le service est maintenant rétabli. Merci de votre patience.</p>`,
+${customMessage || `<p style="margin:0 0 12px">L'incident <strong>#${glpiTicketId} — ${ticketTitle}</strong> a été résolu.</p>
+<p style="margin:0 0 12px">Le service est maintenant rétabli. Merci de votre patience.</p>`}`,
   });
 }
 
@@ -680,9 +684,10 @@ function buildMajorIncidentResolvedHtml({ glpiTicketId, ticketTitle, signature }
 async function notifyMajorIncidentResolved({ ticketId, glpiTicketId, ticketTitle, impactedSites }) {
   const settings = await getSystemSettings();
   if (settings.emailMajorIncidentResolvedEnabled === false) return null;
-  const subject = `[Ticket #${glpiTicketId}] ${ticketTitle}`;
+  const tpl = await resolveTemplate('major_incident_resolved', { ticketId: glpiTicketId, subject: ticketTitle });
+  const subject = tpl.subject || `[Ticket #${glpiTicketId}] ${ticketTitle}`;
   const signature = await getEmailSignature();
-  const bodyHtml = buildMajorIncidentResolvedHtml({ glpiTicketId, ticketTitle, signature });
+  const bodyHtml = buildMajorIncidentResolvedHtml({ glpiTicketId, ticketTitle, signature, customMessage: tpl.message || undefined });
 
   for (const site of impactedSites) {
     if (!site.includes('@')) continue; // ignorer les noms sans email
@@ -695,7 +700,7 @@ async function notifyMajorIncidentResolved({ ticketId, glpiTicketId, ticketTitle
 }
 
 // ── Template : Assignation technicien ────────────────────────────────────────
-function buildAssignmentNotificationHtml({ technicianName, glpiTicketId, ticketId, ticketTitle, priority, category, teamName, signature, ticketLink }) {
+function buildAssignmentNotificationHtml({ technicianName, glpiTicketId, ticketId, ticketTitle, priority, category, teamName, signature, ticketLink, customMessage }) {
   const priorityLabel = buildPriorityLabel(priority);
   const priorityColor = buildPriorityColor(priority);
   return buildEmailLayout({
@@ -704,7 +709,7 @@ function buildAssignmentNotificationHtml({ technicianName, glpiTicketId, ticketI
     signature,
     children: `
 <p style="margin:0 0 12px">Bonjour ${technicianName || ''},</p>
-<p style="margin:0 0 12px">Un nouveau ticket vient de vous être <strong>assigné automatiquement</strong> par notre système d'analyse IA.</p>
+${customMessage || `<p style="margin:0 0 12px">Un nouveau ticket vient de vous être <strong>assigné automatiquement</strong> par notre système d'analyse IA.</p>`}
 ${buildStyledTable([
   { label: 'Numéro de ticket', value: `<strong>#${glpiTicketId || ticketId}</strong>` },
   { label: 'Sujet', value: `<strong>${ticketTitle}</strong>` },
@@ -723,17 +728,22 @@ ${buildActionLink(ticketLink, 'Prendre en charge le ticket')}
 async function sendAssignmentNotificationEmail({ ticketId, glpiTicketId, ticketTitle, priority, technicianEmail, technicianName, category, teamName }) {
   const settings = await getSystemSettings();
   if (settings.emailAssignmentEnabled === false) return null;
-  const subject = `[Ticket #${glpiTicketId || ticketId}] Nouvelle assignation — ${ticketTitle}`;
+  const displayId = glpiTicketId || ticketId;
+  const tpl = await resolveTemplate('assignment', {
+    ticketId: displayId, subject: ticketTitle, toName: technicianName,
+    priority, category: category ?? '', teamName: teamName ?? '',
+  });
+  const subject = tpl.subject || `[Ticket #${displayId}] Nouvelle assignation — ${ticketTitle}`;
   const signature = await getEmailSignature();
   const frontendUrl = resolveFrontendUrl(settings);
   const ticketLink = `${frontendUrl}/tickets/${ticketId}`;
-  const bodyHtml = buildAssignmentNotificationHtml({ technicianName, glpiTicketId, ticketId, ticketTitle, priority, category, teamName, signature, ticketLink });
+  const bodyHtml = buildAssignmentNotificationHtml({ technicianName, glpiTicketId, ticketId, ticketTitle, priority, category, teamName, signature, ticketLink, customMessage: tpl.message || undefined });
 
   return sendEmail({ ticketId, to: technicianEmail, subject, bodyHtml, saveAsMessage: false });
 }
 
 // ── Template : Dépassement SLA ───────────────────────────────────────────────
-function buildSlaBreachHtml({ technicianName, glpiTicketId, ticketId, ticketTitle, priority, slaResponseDueAt, signature, ticketLink }) {
+function buildSlaBreachHtml({ technicianName, glpiTicketId, ticketId, ticketTitle, priority, slaResponseDueAt, signature, ticketLink, customMessage }) {
   const priorityLabel = buildPriorityLabel(priority);
   const priorityColor = buildPriorityColor(priority);
   const dueAt = slaResponseDueAt
@@ -745,7 +755,7 @@ function buildSlaBreachHtml({ technicianName, glpiTicketId, ticketId, ticketTitl
     signature,
     children: `
 <p style="margin:0 0 12px">Bonjour ${technicianName || ''},</p>
-<p style="margin:0 0 12px">Le ticket <strong>#${glpiTicketId || ticketId} — ${ticketTitle}</strong> a dépassé son délai de réponse SLA.</p>
+${customMessage || `<p style="margin:0 0 12px">Le ticket <strong>#${glpiTicketId || ticketId} — ${ticketTitle}</strong> a dépassé son délai de réponse SLA.</p>`}
 ${buildStyledTable([
   { label: 'Numéro de ticket', value: `<strong>#${glpiTicketId || ticketId}</strong>` },
   { label: 'Sujet', value: ticketTitle },
@@ -761,17 +771,21 @@ ${buildActionLink(ticketLink, 'Prendre en charge le ticket')}
 async function sendSlaBreachEmail({ ticketId, glpiTicketId, ticketTitle, priority, slaResponseDueAt, technicianEmail, technicianName }) {
   const settings = await getSystemSettings();
   if (settings.emailSlaBreachEnabled === false) return null;
-  const subject = `[SLA] Dépassement — Ticket #${glpiTicketId || ticketId} : ${ticketTitle}`;
+  const displayId = glpiTicketId || ticketId;
+  const tpl = await resolveTemplate('sla_breach', {
+    ticketId: displayId, subject: ticketTitle, toName: technicianName, priority,
+  });
+  const subject = tpl.subject || `[SLA] Dépassement — Ticket #${displayId} : ${ticketTitle}`;
   const signature = await getEmailSignature();
   const frontendUrl = resolveFrontendUrl(settings);
   const ticketLink = `${frontendUrl}/tickets/${ticketId}`;
-  const bodyHtml = buildSlaBreachHtml({ technicianName, glpiTicketId, ticketId, ticketTitle, priority, slaResponseDueAt, signature, ticketLink });
+  const bodyHtml = buildSlaBreachHtml({ technicianName, glpiTicketId, ticketId, ticketTitle, priority, slaResponseDueAt, signature, ticketLink, customMessage: tpl.message || undefined });
 
   return sendEmail({ ticketId, to: technicianEmail, subject, bodyHtml, saveAsMessage: false });
 }
 
 // ── Template : Dépassement d'échéance manuelle ───────────────────────────────
-function buildDueDateHtml({ technicianName, glpiTicketId, ticketId, ticketTitle, priority, dueDate, signature, ticketLink }) {
+function buildDueDateHtml({ technicianName, glpiTicketId, ticketId, ticketTitle, priority, dueDate, signature, ticketLink, customMessage }) {
   const priorityLabel = buildPriorityLabel(priority);
   const priorityColor = buildPriorityColor(priority);
   const dueAt = dueDate
@@ -783,7 +797,7 @@ function buildDueDateHtml({ technicianName, glpiTicketId, ticketId, ticketTitle,
     signature,
     children: `
 <p style="margin:0 0 12px">Bonjour ${technicianName || ''},</p>
-<p style="margin:0 0 12px">Le ticket <strong>#${glpiTicketId || ticketId} — ${ticketTitle}</strong> a dépassé son <strong>échéance manuelle</strong>.</p>
+${customMessage || `<p style="margin:0 0 12px">Le ticket <strong>#${glpiTicketId || ticketId} — ${ticketTitle}</strong> a dépassé son <strong>échéance manuelle</strong>.</p>`}
 ${buildStyledTable([
   { label: 'Numéro de ticket', value: `<strong>#${glpiTicketId || ticketId}</strong>` },
   { label: 'Sujet', value: ticketTitle },
@@ -799,17 +813,21 @@ ${buildActionLink(ticketLink, 'Traiter le ticket')}
 async function sendDueDateEmail({ ticketId, glpiTicketId, ticketTitle, priority, dueDate, technicianEmail, technicianName }) {
   const settings = await getSystemSettings();
   if (settings.emailDueDateBreachEnabled === false) return null;
-  const subject = `[Échéance] Dépassement — Ticket #${glpiTicketId || ticketId} : ${ticketTitle}`;
+  const displayId = glpiTicketId || ticketId;
+  const tpl = await resolveTemplate('due_date', {
+    ticketId: displayId, subject: ticketTitle, toName: technicianName, priority,
+  });
+  const subject = tpl.subject || `[Échéance] Dépassement — Ticket #${displayId} : ${ticketTitle}`;
   const signature = await getEmailSignature();
   const frontendUrl = resolveFrontendUrl(settings);
   const ticketLink = `${frontendUrl}/tickets/${ticketId}`;
-  const bodyHtml = buildDueDateHtml({ technicianName, glpiTicketId, ticketId, ticketTitle, priority, dueDate, signature, ticketLink });
+  const bodyHtml = buildDueDateHtml({ technicianName, glpiTicketId, ticketId, ticketTitle, priority, dueDate, signature, ticketLink, customMessage: tpl.message || undefined });
 
   return sendEmail({ ticketId, to: technicianEmail, subject, bodyHtml, saveAsMessage: false });
 }
 
 // ── Template : Changement de statut ──────────────────────────────────────────
-function buildStatusChangeHtml({ recipientName, glpiTicketId, ticketId, ticketTitle, status, priority, category, signature, ticketLink }) {
+function buildStatusChangeHtml({ recipientName, glpiTicketId, ticketId, ticketTitle, status, priority, category, signature, ticketLink, customMessage }) {
   const displayId = glpiTicketId || ticketId || 'N/A';
   const priorityLabel = buildPriorityLabel(priority);
   const priorityColor = buildPriorityColor(priority);
@@ -821,7 +839,7 @@ function buildStatusChangeHtml({ recipientName, glpiTicketId, ticketId, ticketTi
     signature,
     children: `
 <p style="margin:0 0 12px">Bonjour ${recipientName || ''},</p>
-<p style="margin:0 0 12px">Le statut de votre demande a changé :</p>
+${customMessage || `<p style="margin:0 0 12px">Le statut de votre demande a changé :</p>`}
 ${buildStyledTable([
   { label: 'Numéro de ticket', value: `<strong>#${displayId}</strong>` },
   { label: 'Sujet', value: `<strong>${ticketTitle}</strong>` },
@@ -840,11 +858,15 @@ async function sendTicketStatusNotification({ ticketId, glpiTicketId, ticketTitl
   if (settings.emailStatusChangeEnabled === false) return null;
   const displayId = glpiTicketId || ticketId || 'N/A';
   const statusLabel = STATUS_LABELS[status] || status;
-  const subject = `[Ticket #${displayId}] ${statusLabel} — ${ticketTitle}`;
+  const tpl = await resolveTemplate('status_change', {
+    ticketId: displayId, subject: ticketTitle, toName: recipientName,
+    statusLabel, priority, category: category ?? '',
+  });
+  const subject = tpl.subject || `[Ticket #${displayId}] ${statusLabel} — ${ticketTitle}`;
   const signature = await getEmailSignature();
   const frontendUrl = resolveFrontendUrl(settings);
   const ticketLink = `${frontendUrl}/tickets/${ticketId}`;
-  const bodyHtml = buildStatusChangeHtml({ recipientName, glpiTicketId, ticketId, ticketTitle, status, priority, category, signature, ticketLink });
+  const bodyHtml = buildStatusChangeHtml({ recipientName, glpiTicketId, ticketId, ticketTitle, status, priority, category, signature, ticketLink, customMessage: tpl.message || undefined });
 
   return sendEmail({ ticketId, to: recipientEmail, subject, bodyHtml, saveAsMessage: false });
 }
@@ -853,7 +875,7 @@ async function sendTicketStatusNotification({ ticketId, glpiTicketId, ticketTitl
 // Alerte un destinataire interne (équipe cible, admin, technicien sortant) qu'un ticket a été
 // escaladé — c'est-à-dire TRANSFÉRÉ à une autre équipe responsable (ou signalé comme prioritaire
 // quand l'escalade se fait au sein de la même équipe). Lien direct vers le ticket.
-function buildEscalationEmailHtml({ recipientName, ticketId, ticketTitle, priority, reason, targetTeamName, signature, ticketLink }) {
+function buildEscalationEmailHtml({ recipientName, ticketId, ticketTitle, priority, reason, targetTeamName, signature, ticketLink, customMessage }) {
   const priorityLabel = buildPriorityLabel(priority);
   const transferLine = targetTeamName
     ? `<p style="margin:0 0 12px">Le ticket <strong>#${ticketId} — ${ticketTitle}</strong> vient d'être <strong>transféré à l'équipe ${targetTeamName}</strong>, désormais responsable de sa prise en charge.</p>`
@@ -864,7 +886,7 @@ function buildEscalationEmailHtml({ recipientName, ticketId, ticketTitle, priori
     signature,
     children: `
 <p style="margin:0 0 12px">Bonjour ${recipientName || ''},</p>
-${transferLine}
+${customMessage || transferLine}
 ${buildStyledTable([
   { label: 'Numéro de ticket', value: `<strong>#${ticketId}</strong>` },
   { label: 'Sujet', value: `<strong>${ticketTitle}</strong>` },
@@ -880,13 +902,17 @@ ${buildActionLink(ticketLink, 'Prendre en charge le ticket')}
 async function sendEscalationEmail({ ticketId, ticketTitle, priority, reason, escalationLevel, targetTeamName, recipientEmail, recipientName }) {
   const settings = await getSystemSettings();
   if (settings.emailEscalationEnabled === false) return null;
-  const subject = targetTeamName
+  const tpl = await resolveTemplate('escalation', {
+    ticketId, subject: ticketTitle, toName: recipientName, priority,
+    reason: reason ?? '', targetTeam: targetTeamName ?? '',
+  });
+  const subject = tpl.subject || (targetTeamName
     ? `[Transfert] Ticket #${ticketId} : ${ticketTitle}`
-    : `[Escalade] Ticket #${ticketId} : ${ticketTitle}`;
+    : `[Escalade] Ticket #${ticketId} : ${ticketTitle}`);
   const signature = await getEmailSignature();
   const frontendUrl = resolveFrontendUrl(settings);
   const ticketLink = `${frontendUrl}/tickets/${ticketId}`;
-  const bodyHtml = buildEscalationEmailHtml({ recipientName, ticketId, ticketTitle, priority, reason, targetTeamName, signature, ticketLink });
+  const bodyHtml = buildEscalationEmailHtml({ recipientName, ticketId, ticketTitle, priority, reason, targetTeamName, signature, ticketLink, customMessage: tpl.message || undefined });
 
   return sendEmail({ ticketId, to: recipientEmail, subject, bodyHtml, saveAsMessage: false });
 }
@@ -894,7 +920,7 @@ async function sendEscalationEmail({ ticketId, ticketTitle, priority, reason, es
 // ── Template : Escalade demandeur ────────────────────────────────────────────
 // Notifie le demandeur que sa demande a été transférée à l'équipe en charge du sujet
 // (ou signalée comme prioritaire). Lien vers le portail REQUESTER pour suivre sa demande.
-function buildRequesterEscalationEmailHtml({ recipientName, ticketId, ticketTitle, priority, reason, targetTeamName, signature, portalLink }) {
+function buildRequesterEscalationEmailHtml({ recipientName, ticketId, ticketTitle, priority, reason, targetTeamName, signature, portalLink, customMessage }) {
   const priorityLabel = buildPriorityLabel(priority);
   const transferLine = targetTeamName
     ? `<p style="margin:0 0 12px">Votre demande <strong>#${ticketId} — ${ticketTitle}</strong> a été <strong>transmise à l'équipe ${targetTeamName}</strong>, spécialisée dans ce type de demande : elle est désormais prise en charge par leurs soins.</p>`
@@ -905,7 +931,7 @@ function buildRequesterEscalationEmailHtml({ recipientName, ticketId, ticketTitl
     signature,
     children: `
 <p style="margin:0 0 12px">Bonjour ${recipientName || ''},</p>
-${transferLine}
+${customMessage || transferLine}
 ${buildStyledTable([
   { label: 'Numéro de ticket', value: `<strong>#${ticketId}</strong>` },
   { label: 'Sujet', value: `<strong>${ticketTitle}</strong>` },
@@ -921,13 +947,17 @@ ${buildActionLink(portalLink, 'Suivre ma demande dans le portail')}
 async function sendRequesterEscalationEmail({ ticketId, ticketTitle, priority, reason, escalationLevel, targetTeamName, recipientEmail, recipientName }) {
   const settings = await getSystemSettings();
   if (settings.emailEscalationEnabled === false) return null;
-  const subject = targetTeamName
+  const tpl = await resolveTemplate('escalation_requester', {
+    ticketId, subject: ticketTitle, toName: recipientName, priority,
+    reason: reason ?? '', targetTeam: targetTeamName ?? '',
+  });
+  const subject = tpl.subject || (targetTeamName
     ? `[Ticket #${ticketId}] Votre demande a été transmise à l'équipe ${targetTeamName}`
-    : `[Ticket #${ticketId}] Votre demande a été escaladée`;
+    : `[Ticket #${ticketId}] Votre demande a été escaladée`);
   const signature = await getEmailSignature();
   const frontendUrl = resolveFrontendUrl(settings);
   const portalLink = `${frontendUrl}/portal`;
-  const bodyHtml = buildRequesterEscalationEmailHtml({ recipientName, ticketId, ticketTitle, priority, reason, targetTeamName, signature, portalLink });
+  const bodyHtml = buildRequesterEscalationEmailHtml({ recipientName, ticketId, ticketTitle, priority, reason, targetTeamName, signature, portalLink, customMessage: tpl.message || undefined });
 
   return sendEmail({ ticketId, to: recipientEmail, subject, bodyHtml, saveAsMessage: false });
 }
@@ -1039,7 +1069,7 @@ async function sendHotlineApprovalReminderEmail({ recipientEmail, recipientName,
 
 // ── Template : Approbation ticket ────────────────────────────────────────────
 // Envoie un email au demandeur quand son ticket est APPROUVÉ (comme GLPI)
-function buildApprovalNotificationHtml({ requesterName, ticketId, ticketTitle, status, priority, category, assignedToName, content, signature, ticketLink }) {
+function buildApprovalNotificationHtml({ requesterName, ticketId, ticketTitle, status, priority, category, assignedToName, content, signature, ticketLink, customMessage }) {
   const priorityLabel = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' }[priority] || priority || 'Moyenne';
   const priorityColor = { P1: '#dc2626', P2: '#d97706', P3: '#2563eb', P4: '#16a34a' }[priority] || '#2563eb';
   return buildEmailLayout({
@@ -1048,7 +1078,7 @@ function buildApprovalNotificationHtml({ requesterName, ticketId, ticketTitle, s
     signature,
     children: `
 <p style="margin:0 0 12px">Bonjour ${requesterName || ''},</p>
-<p style="margin:0 0 12px">Nous vous confirmons que votre demande a bien été <strong style="color:#16a34a">prise en compte</strong> et votre ticket est validé par notre équipe support.</p>
+${customMessage || `<p style="margin:0 0 12px">Nous vous confirmons que votre demande a bien été <strong style="color:#16a34a">prise en compte</strong> et votre ticket est validé par notre équipe support.</p>`}
 ${buildStyledTable([
   { label: 'Numéro de ticket', value: `<strong>#${ticketId}</strong>` },
   { label: 'Sujet', value: `<strong>${ticketTitle}</strong>` },
@@ -1219,8 +1249,12 @@ async function sendApprovalNotificationEmail({ ticketId, ticketTitle, status, pr
   const frontendUrl = resolveFrontendUrl(settings);
   const ticketLink = `${frontendUrl}/tickets/${ticketId}`;
   const signature = await getEmailSignature();
-  const subject = `[Ticket #${ticketId}] Prise en compte — ${ticketTitle}`;
-  const bodyHtml = buildApprovalNotificationHtml({ requesterName, ticketId, ticketTitle, status, priority, category, assignedToName, content, signature, ticketLink });
+  const tpl = await resolveTemplate('approval', {
+    ticketId, subject: ticketTitle, toName: requesterName,
+    priority, category: category ?? '', assignedToName: assignedToName ?? '',
+  });
+  const subject = tpl.subject || `[Ticket #${ticketId}] Prise en compte — ${ticketTitle}`;
+  const bodyHtml = buildApprovalNotificationHtml({ requesterName, ticketId, ticketTitle, status, priority, category, assignedToName, content, signature, ticketLink, customMessage: tpl.message || undefined });
 
   // Sémantique « Répondre à tous » : derrière le demandeur, on remet la liste To d'origine
   // (boîtes de diffusion comprises) — sans doublon avec le demandeur ni avec les CC.
@@ -1241,7 +1275,7 @@ async function sendApprovalNotificationEmail({ ticketId, ticketTitle, status, pr
 
 // ── Template : Résolution ticket ─────────────────────────────────────────────
 // Envoie un email au demandeur 10 minutes après la résolution (comme GLPI)
-function buildResolvedNotificationHtml({ requesterName, ticketId, ticketTitle, priority, category, assignedToName, content, signature, ticketLink }) {
+function buildResolvedNotificationHtml({ requesterName, ticketId, ticketTitle, priority, category, assignedToName, content, signature, ticketLink, customMessage }) {
   const priorityLabel = { P1: 'Critique', P2: 'Haute', P3: 'Moyenne', P4: 'Basse' }[priority] || priority;
   const priorityColor = { P1: '#dc2626', P2: '#d97706', P3: '#2563eb', P4: '#16a34a' }[priority] || '#666';
   return buildEmailLayout({
@@ -1250,7 +1284,7 @@ function buildResolvedNotificationHtml({ requesterName, ticketId, ticketTitle, p
     signature,
     children: `
 <p style="margin:0 0 12px">Bonjour ${requesterName || ''},</p>
-<p style="margin:0 0 12px">Votre demande a été <strong style="color:#2563eb">résolue</strong> par notre équipe support.</p>
+${customMessage || `<p style="margin:0 0 12px">Votre demande a été <strong style="color:#2563eb">résolue</strong> par notre équipe support.</p>`}
 ${buildStyledTable([
   { label: 'Numéro de ticket', value: `<strong>#${ticketId}</strong>` },
   { label: 'Sujet', value: `<strong>${ticketTitle}</strong>` },
@@ -1271,8 +1305,12 @@ async function sendResolvedNotificationEmail({ ticketId, ticketTitle, priority, 
   const frontendUrl = resolveFrontendUrl(settings);
   const ticketLink = `${frontendUrl}/tickets/${ticketId}`;
   const signature = await getEmailSignature();
-  const subject = `[Ticket #${ticketId}] Résolu — ${ticketTitle}`;
-  const bodyHtml = buildResolvedNotificationHtml({ requesterName, ticketId, ticketTitle, priority, category, assignedToName, content, signature, ticketLink });
+  const tpl = await resolveTemplate('resolved', {
+    ticketId, subject: ticketTitle, toName: requesterName,
+    priority, category: category ?? '', assignedToName: assignedToName ?? '',
+  });
+  const subject = tpl.subject || `[Ticket #${ticketId}] Résolu — ${ticketTitle}`;
+  const bodyHtml = buildResolvedNotificationHtml({ requesterName, ticketId, ticketTitle, priority, category, assignedToName, content, signature, ticketLink, customMessage: tpl.message || undefined });
 
   return sendEmail({ ticketId, to: requesterEmail, subject, bodyHtml, saveAsMessage: false });
 }
@@ -1347,14 +1385,14 @@ async function sendTicketCreationNotification(ticket) {
 }
 
 // ── Template : Révision humaine requise ─────────────────────────────────────
-function buildNeedsHumanReviewNotificationHtml({ senderEmail, senderName, subject, category, priority, confidence, reason, aiSummary, signature, inboxLink }) {
+function buildNeedsHumanReviewNotificationHtml({ senderEmail, senderName, subject, category, priority, confidence, reason, aiSummary, signature, inboxLink, customMessage }) {
   return buildEmailLayout({
     headerTitle: 'Révision humaine requise',
     headerSubtitle: 'Email nécessitant une validation',
     signature,
     children: `
 <p style="margin:0 0 12px">Bonjour,</p>
-<p style="margin:0 0 12px">Un email entrant nécessite une <strong style="color:#f59e0b">révision humaine</strong>. L'IA n'a pas pu traiter automatiquement ce message.</p>
+${customMessage || `<p style="margin:0 0 12px">Un email entrant nécessite une <strong style="color:#f59e0b">révision humaine</strong>. L'IA n'a pas pu traiter automatiquement ce message.</p>`}
 ${buildStyledTable([
   { label: 'Expéditeur', value: senderName ? `${senderName} (${senderEmail})` : (senderEmail || 'Inconnu') },
   { label: 'Sujet', value: `<strong>${subject || 'Sans objet'}</strong>` },
@@ -1391,12 +1429,17 @@ async function sendNeedsHumanReviewNotification({ incomingEmailId, senderEmail, 
     }[reason] || reason || 'Révision requise';
 
     const subjectLine = `[Révision requise] ${subject || 'Email sans objet'}`;
+    const tpl = await resolveTemplate('needs_human_review', {
+      subject: subject || 'Email sans objet', category: category ?? '',
+      priority: priority ?? '', reason: displayReason,
+    });
     const bodyHtml = buildNeedsHumanReviewNotificationHtml({
       senderEmail, senderName, subject, category, priority, confidence,
       reason: displayReason, aiSummary, signature, inboxLink,
+      customMessage: tpl.message || undefined,
     });
 
-    await sendEmail({ to: recipients, subject: subjectLine, bodyHtml, saveAsMessage: false });
+    await sendEmail({ to: recipients, subject: tpl.subject || subjectLine, bodyHtml, saveAsMessage: false });
     return { sent: true, recipients };
   } catch (err) {
     console.error('[emailSender] Notification révision humaine échouée:', err.message);
@@ -1532,6 +1575,7 @@ module.exports = {
   buildHotlineApprovalReminderHtml,
   buildApprovalNotificationHtml,
   buildResolvedNotificationHtml,
+  buildNeedsHumanReviewNotificationHtml,
   buildTicketCreationNotificationHtml,
   buildReopenNotificationHtml,
   buildFollowupMentionHtml,

@@ -1371,6 +1371,20 @@ model PromptTemplate {
   updatedAt DateTime @updatedAt
 }
 
+// Surcharge éditable du contenu des emails de notification (Paramètres > Notifications >
+// Contenu des emails). key = clé du registre services/emailTemplateRegistry.js.
+// subject/message sont des templates avec placeholders {ticketId}, {subject}, {toName}…
+// S'ils sont nuls ou si la ligne n'existe pas, emailSender.js utilise le gabarit par défaut
+// codé en dur (jamais de crash, comportement identique avant création de la table).
+model EmailTemplate {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  subject   String?
+  message   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 // Workflow n8n déclenchable depuis l'UI (ex: notification, automatisation)
 model N8nWorkflow {
   id          Int       @id @default(autoincrement())

@@ -21,23 +21,28 @@ import {
 } from '../../utils/browserNotification';
 import Toggle from '../../components/Toggle';
 import { SettingRow, inputClass, itemVariants } from './SettingsComponents';
+import AckSignatureCard from './AckSignatureCard';
+import EmailTemplatesSection from './EmailTemplatesSection';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TOGGLES EMAILS PAR TYPE (déjà existants)
+// templateKeys : clés du registre /api/email-templates — le sujet affiché est alors
+// celui réellement rendu (surcharge incluse). testKey : type envoyé par
+// POST /system-settings/test-email.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const EMAIL_TOGGLES = [
   { key: 'emailAcknowledgementEnabled', label: 'Accusé de réception', description: "Email automatique envoyé au demandeur lors de la création d'un ticket par email.", icon: Mail, category: 'Automatiques (pipeline email)', subjects: ['[Ticket #ID] Objet du ticket'], testKey: 'acknowledgement' },
-  { key: 'emailKnownIncidentEnabled', label: 'Incident déjà connu', description: 'Notification quand un email correspond à un incident existant (le demandeur est rattaché au ticket existant).', icon: AlertTriangle, category: 'Automatiques (pipeline email)', subjects: ['[Ticket #ID] Objet du ticket'], testKey: 'known_incident' },
-  { key: 'emailAssignmentEnabled', label: 'Assignation technicien', description: "Email envoyé au technicien quand l'IA lui attribue automatiquement un ticket.", icon: UserCheck, category: 'Automatiques (pipeline email)', subjects: ['[Ticket #ID] Nouvelle assignation — Titre du ticket'], testKey: 'assignment' },
-  { key: 'emailSlaBreachEnabled', label: 'Dépassement SLA', description: 'Alerte envoyée au technicien assigné quand le SLA de réponse est dépassé.', icon: Clock, category: 'Automatiques (schedulers)', subjects: ['[SLA] Dépassement — Ticket #ID : Titre du ticket'], testKey: 'sla_breach' },
-  { key: 'emailDueDateBreachEnabled', label: "Dépassement d'échéance", description: "Alerte envoyée au technicien assigné quand la date d'échéance manuelle est dépassée.", icon: Clock, category: 'Automatiques (schedulers)', subjects: ['[Échéance] Dépassement — Ticket #ID : Titre du ticket'], testKey: 'due_date' },
-  { key: 'emailStatusChangeEnabled', label: 'Changement de statut', description: 'Notification envoyée au demandeur à chaque changement de statut du ticket.', icon: RefreshCw, category: 'Manuelles (actions utilisateur)', subjects: ['[Ticket #ID] Statut — Titre du ticket'], testKey: 'status_change' },
-  { key: 'emailResolvedEnabled', label: 'Résolution (différé 10 min)', description: 'Email de résolution envoyé au demandeur 10 minutes après le passage en "Résolu" (laisse un délai de correction).', icon: CheckCircle2, category: 'Manuelles (actions utilisateur)', subjects: ['[Ticket #ID] Résolu — Titre du ticket'], testKey: null },
-  { key: 'emailEscalationEnabled', label: 'Escalade', description: "Notification envoyée aux admins/techniciens et au demandeur lors d'une escalade de ticket.", icon: TrendingUp, category: 'Manuelles (actions utilisateur)', subjects: ['[Escalade Niv.1] Ticket #ID : Titre du ticket', '[Ticket #ID] Votre demande a été escaladée'], testKey: null },
-  { key: 'emailMajorIncidentResolvedEnabled', label: 'Résolution incident majeur', description: 'Notification envoyée aux emails des sites impactés quand un incident majeur est résolu.', icon: Shield, category: 'Manuelles (actions utilisateur)', subjects: ['[Ticket #ID] Titre du ticket'], testKey: null },
-  { key: 'emailApprovalEnabled', label: 'Approbation ticket', description: 'Notification envoyée au demandeur quand son ticket est approuvé par la Hotline.', icon: Send, category: 'Manuelles (actions utilisateur)', subjects: ['[Ticket #ID] Approuvé — Titre du ticket'], testKey: null },
-  { key: 'needsHumanReviewNotificationEnabled', label: 'Révision humaine', description: "Email envoyé quand un email entrant nécessite une révision humaine (confiance IA faible, spam ambigu, etc.).", icon: AlertTriangle, category: 'Automatiques (pipeline email)', subjects: ['[Révision requise] Objet du mail'], testKey: null },
+  { key: 'emailKnownIncidentEnabled', label: 'Incident déjà connu', description: 'Notification quand un email correspond à un incident existant (le demandeur est rattaché au ticket existant).', icon: AlertTriangle, category: 'Automatiques (pipeline email)', subjects: ['[Ticket #ID] Objet du ticket'], templateKeys: ['known_incident'], testKey: 'known_incident' },
+  { key: 'emailAssignmentEnabled', label: 'Assignation technicien', description: "Email envoyé au technicien quand l'IA lui attribue automatiquement un ticket.", icon: UserCheck, category: 'Automatiques (pipeline email)', subjects: ['[Ticket #ID] Nouvelle assignation — Titre du ticket'], templateKeys: ['assignment'], testKey: 'assignment' },
+  { key: 'emailSlaBreachEnabled', label: 'Dépassement SLA', description: 'Alerte envoyée au technicien assigné quand le SLA de réponse est dépassé.', icon: Clock, category: 'Automatiques (schedulers)', subjects: ['[SLA] Dépassement — Ticket #ID : Titre du ticket'], templateKeys: ['sla_breach'], testKey: 'sla_breach' },
+  { key: 'emailDueDateBreachEnabled', label: "Dépassement d'échéance", description: "Alerte envoyée au technicien assigné quand la date d'échéance manuelle est dépassée.", icon: Clock, category: 'Automatiques (schedulers)', subjects: ['[Échéance] Dépassement — Ticket #ID : Titre du ticket'], templateKeys: ['due_date'], testKey: 'due_date' },
+  { key: 'emailStatusChangeEnabled', label: 'Changement de statut', description: 'Notification envoyée au demandeur à chaque changement de statut du ticket.', icon: RefreshCw, category: 'Manuelles (actions utilisateur)', subjects: ['[Ticket #ID] Statut — Titre du ticket'], templateKeys: ['status_change'], testKey: 'status_change' },
+  { key: 'emailResolvedEnabled', label: 'Résolution (différé 10 min)', description: 'Email de résolution envoyé au demandeur 10 minutes après le passage en "Résolu" (laisse un délai de correction).', icon: CheckCircle2, category: 'Manuelles (actions utilisateur)', subjects: ['[Ticket #ID] Résolu — Titre du ticket'], templateKeys: ['resolved'], testKey: 'resolved' },
+  { key: 'emailEscalationEnabled', label: 'Escalade', description: "Notification envoyée aux admins/techniciens et au demandeur lors d'une escalade de ticket.", icon: TrendingUp, category: 'Manuelles (actions utilisateur)', subjects: ['[Escalade Niv.1] Ticket #ID : Titre du ticket', '[Ticket #ID] Votre demande a été escaladée'], templateKeys: ['escalation', 'escalation_requester'], testKey: 'escalation' },
+  { key: 'emailMajorIncidentResolvedEnabled', label: 'Résolution incident majeur', description: 'Notification envoyée aux emails des sites impactés quand un incident majeur est résolu.', icon: Shield, category: 'Manuelles (actions utilisateur)', subjects: ['[Ticket #ID] Titre du ticket'], templateKeys: ['major_incident_resolved'], testKey: 'major_incident_resolved' },
+  { key: 'emailApprovalEnabled', label: 'Approbation ticket', description: 'Notification envoyée au demandeur quand son ticket est approuvé par la Hotline.', icon: Send, category: 'Manuelles (actions utilisateur)', subjects: ['[Ticket #ID] Approuvé — Titre du ticket'], templateKeys: ['approval'], testKey: 'approval' },
+  { key: 'needsHumanReviewNotificationEnabled', label: 'Révision humaine', description: "Email envoyé quand un email entrant nécessite une révision humaine (confiance IA faible, spam ambigu, etc.).", icon: AlertTriangle, category: 'Automatiques (pipeline email)', subjects: ['[Révision requise] Objet du mail'], templateKeys: ['needs_human_review'], testKey: 'needs_human_review' },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -74,8 +79,18 @@ export default function EmailNotificationsTab() {
   const [testingEmailType, setTestingEmailType] = useState(null);
   const [testEmailResult, setTestEmailResult] = useState(null);
 
+  // ── Gabarits éditables (Contenu des emails) ──
+  const [templates, setTemplates] = useState(null);
+
+  function loadTemplates() {
+    return api.get('/email-templates')
+      .then(({ data }) => setTemplates(data))
+      .catch((err) => setError(err.response?.data?.error || 'Erreur de chargement des gabarits'));
+  }
+
   useEffect(() => {
     api.get('/system-settings').then(({ data }) => setSettings(data)).catch((err) => setError(err.response?.data?.error || 'Erreur de chargement'));
+    loadTemplates();
   }, []);
 
   async function updateSetting(key, value) {
@@ -84,8 +99,10 @@ export default function EmailNotificationsTab() {
     try {
       const { data } = await api.patch('/system-settings', { [key]: value });
       setSettings(data);
+      return true;
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la mise à jour');
+      return false;
     } finally {
       setSaving(false);
     }
@@ -213,6 +230,17 @@ export default function EmailNotificationsTab() {
 
   const categories = [...new Set(EMAIL_TOGGLES.map((t) => t.category))];
 
+  // Sujets affichés sur chaque toggle : ceux réellement rendus par le backend (surcharge
+  // incluse) quand des gabarits existent, sinon le exemple statique par défaut.
+  function subjectsForToggle(toggle) {
+    if (!templates || !toggle.templateKeys?.length) return toggle.subjects;
+    const items = toggle.templateKeys.map((k) => templates.find((t) => t.key === k)).filter(Boolean);
+    if (items.length === 0) return toggle.subjects;
+    return items
+      .map((t) => t.previewSubject || t.defaultSubject || (t.subjectExamples || [])[0])
+      .filter(Boolean);
+  }
+
   return (
     <motion.div
       initial="hidden"
@@ -236,14 +264,24 @@ export default function EmailNotificationsTab() {
       </AnimatePresence>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* SECTION 1 : EMAILS PAR TYPE */}
+      {/* SECTION 1 : CONTENU DES EMAILS (accusé, signature + gabarits éditables) */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       <div className="space-y-md">
         <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
-          <span className="material-symbols-outlined text-primary text-2xl">toggle_on</span>
-          <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Activer / Désactiver par type</h4>
+          <span className="material-symbols-outlined text-primary text-2xl">mail</span>
+          <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Contenu des emails</h4>
         </div>
-        <p className="text-xs text-on-surface-variant px-1 -mt-2">Choisissez quels emails automatiques sont envoyés. Chaque type correspond à un événement déclencheur dans le cycle de vie d'un ticket.</p>
+        <p className="text-xs text-on-surface-variant px-1 -mt-2">
+          Personnalisez le message, l'objet et la signature de chaque email envoyé. Sans modification, les gabarits par défaut sont utilisés.
+        </p>
+
+        <AckSignatureCard
+          settings={settings}
+          updateSetting={updateSetting}
+          saving={saving}
+          setError={setError}
+          onSettingsUpdated={setSettings}
+        />
 
         {/* Champ email de test global */}
         <motion.div variants={itemVariants} className="bento-card flex flex-col sm:flex-row sm:items-center gap-3 p-lg">
@@ -259,9 +297,28 @@ export default function EmailNotificationsTab() {
               placeholder="email@exemple.com — adresse de test"
               className={`${inputClass} flex-1`}
             />
-            <span className="text-xs text-on-surface-variant/60 shrink-0 hidden sm:block">Puis cliquez sur "Tester" à droite du toggle souhaité.</span>
+            <span className="text-xs text-on-surface-variant/60 shrink-0 hidden sm:block">Puis cliquez sur "Tester" à droite du gabarit ou du toggle souhaité.</span>
           </div>
         </motion.div>
+
+        <EmailTemplatesSection
+          templates={templates}
+          settings={settings}
+          testEmailInput={testEmailInput}
+          reloadTemplates={loadTemplates}
+          setError={setError}
+        />
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* SECTION 2 : EMAILS PAR TYPE */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      <div className="space-y-md">
+        <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
+          <span className="material-symbols-outlined text-primary text-2xl">toggle_on</span>
+          <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Activer / Désactiver par type</h4>
+        </div>
+        <p className="text-xs text-on-surface-variant px-1 -mt-2">Choisissez quels emails automatiques sont envoyés. Chaque type correspond à un événement déclencheur dans le cycle de vie d'un ticket.</p>
 
         {categories.map((category) => (
         <div key={category} className="space-y-3">
@@ -287,7 +344,7 @@ export default function EmailNotificationsTab() {
                     <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5 break-words">{toggle.description}</p>
                     {toggle.subjects && (
                       <div className="mt-2 space-y-1">
-                        {toggle.subjects.map((subject, i) => (
+                        {subjectsForToggle(toggle).map((subject, i) => (
                           <div key={i} className="flex items-start gap-1.5 text-xs text-on-surface-variant/70 font-mono">
                             <span className="shrink-0 mt-0.5">✉</span>
                             <span className="break-all">{subject}</span>
@@ -344,7 +401,7 @@ export default function EmailNotificationsTab() {
       </AnimatePresence>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* SECTION 2 : RÉCAPITULATIF QUOTIDIEN & NOTIFICATIONS EMAIL */}
+      {/* SECTION 3 : RÉCAPITULATIF QUOTIDIEN & NOTIFICATIONS EMAIL */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       <div className="space-y-md">
         <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
@@ -762,7 +819,7 @@ export default function EmailNotificationsTab() {
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* SECTION 3 : NOTIFICATIONS LOCALES (navegateur + sons) */}
+      {/* SECTION 4 : NOTIFICATIONS LOCALES (navegateur + sons) */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       <div className="space-y-md">
         <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
