@@ -1,8 +1,10 @@
 const express = require('express');
 const prisma = require('../prismaClient');
 const { authenticate } = require('../middleware/auth');
-const { requirePermission } = require('../middleware/permissions');
+const { requirePermission, hasPermission } = require('../middleware/permissions');
 const { generateReport } = require('../services/pdfReportService');
+const { getInboxCounts, buildEmailScope } = require('../services/inboxThreading');
+const { isRequesterOnly } = require('../services/ticketQueryService');
 
 const router = express.Router();
 router.use(authenticate);
@@ -94,6 +96,115 @@ router.get('/stats', async (req, res) => {
     byTeamPriority: byTeamPriority
       .map((t) => ({ teamId: t.teamId, teamName: teamLabel(t.teamId), priority: t.priority, count: t._count }))
       .sort((a, b) => b.count - a.count),
+  });
+});
+
+// Pouls système : TOUS les compteurs des widgets « Pouls système » (flottant SystemPulse.jsx
+// ET widget du tableau de bord) en UN SEUL appel. Compteurs ciblés (count agrégés, pas de
+// groupBy) pour rester léger : le front le sollicite toutes les 60 s.
+// Même définition « ouverts », même exclusion de la corbeille et mêmes règles de périmètre
+// que buildTicketWhereClause (un demandeur ne compte QUE ses tickets).
+router.get('/pulse', async (req, res) => {
+  const notPendingApproval = { ...NOT_DELETED, approvalStatus: { notIn: ['PENDING', 'REJECTED'] } };
+  const openWhere = { ...notPendingApproval, status: { in: OPEN_STATUSES } };
+
+  // Périmètre demandeur (miroir de isRequesterOnly dans ticketQueryService)
+  const requesterOnly = isRequesterOnly(req.user);
+  const requesterScope = requesterOnly
+    ? {
+      OR: [
+        { requesterId: req.user.sub },
+        { secondaryRequesterId: req.user.sub },
+        { requesterIds: { has: req.user.sub } },
+        { observers: { some: { id: req.user.sub } } },
+      ],
+    }
+    : {};
+  const scopedOpen = { ...openWhere, ...requesterScope };
+  const myWhere = requesterOnly
+    ? { ...openWhere, ...requesterScope } // pour un demandeur, « les miens » = son propre périmètre
+    : {
+      ...openWhere,
+      OR: [{ assignedToId: req.user.sub }, { assignees: { some: { id: req.user.sub } } }],
+    };
+
+  const [
+    openTickets,
+    slaBreached,
+    unassigned,
+    myOpenTickets,
+    aiDrafts,
+    reminders,
+    replySuggestions,
+    approvals,
+    inboxCounts,
+    lastEmailSync,
+  ] = await Promise.all([
+    prisma.ticket.count({ where: scopedOpen }),
+    prisma.ticket.count({ where: { ...scopedOpen, slaBreachedAt: { not: null } } }),
+    // Même définition « non assigné » que le filtre assignedToId=none de la vue tickets :
+    // ni titulaire (assignedToId) ni co-affecté (assignees).
+    prisma.ticket.count({ where: { ...scopedOpen, assignedToId: null, assignees: { none: {} } } }),
+    prisma.ticket.count({ where: myWhere }),
+    prisma.aiEmailDraft.count({ where: { status: 'PENDING' } }),
+    prisma.aiEmailDraft.count({ where: { status: 'PENDING', draftKind: 'REMINDER' } }),
+    // AND explicite : la portée demandeur porte déjà sur une clé OR, on ne peut pas
+    // l'écraser avec l'OR « suggestions ».
+    prisma.ticket.count({
+      where: {
+        ...NOT_DELETED,
+        AND: [
+          ...(requesterOnly ? [requesterScope] : []),
+          { OR: [{ replyOnClosedSuggested: true }, { newTicketSuggested: true }] },
+        ],
+      },
+    }),
+    prisma.ticket.count({ where: { ...NOT_DELETED, ...requesterScope, approvalStatus: 'PENDING' } }),
+    // Portée identique à la boîte de réception : un demandeur ne voit que SES emails.
+    getInboxCounts(await buildEmailScope(req.user)),
+    prisma.emailAccount.aggregate({ _max: { lastSyncAt: true } }),
+  ]);
+
+  // Santé des connecteurs : réservée à ceux qui ont le droit de la voir (miroir de
+  // GET /dashboard/integrations, gating settings.integrations).
+  let integrations = null;
+  if (await hasPermission(req.user, 'settings.integrations')) {
+    const [glpiConfig, emailAccounts, settings, activeProviders, n8nWorkflows] = await Promise.all([
+      prisma.apiConfig.findFirst({
+        where: { serviceName: { contains: 'glpi', mode: 'insensitive' }, isActive: true },
+        select: { baseUrl: true },
+      }),
+      prisma.emailAccount.count({ where: { isActive: true } }),
+      prisma.systemSettings.findUnique({ where: { id: 1 }, select: { aiEnabled: true } }),
+      prisma.aiProvider.count({ where: { isDeleted: false, isActive: true } }),
+      prisma.n8nWorkflow.findMany({ select: { isActive: true, lastStatus: true } }),
+    ]);
+    integrations = {
+      glpi: { configured: Boolean(glpiConfig?.baseUrl) },
+      email: { accounts: emailAccounts },
+      ai: { enabled: settings?.aiEnabled ?? true, providers: activeProviders },
+      n8n: {
+        active: n8nWorkflows.filter((w) => w.isActive).length,
+        failing: n8nWorkflows.filter((w) => w.isActive && w.lastStatus === 'error').length,
+      },
+    };
+  }
+
+  return res.json({
+    openTickets,
+    slaBreached,
+    unassigned,
+    myOpenTickets,
+    aiDrafts,
+    reminders,
+    replySuggestions,
+    approvals,
+    inboxErrors: inboxCounts.error, // ERROR + RETRY + DEAD_LETTER
+    inboxUnread: inboxCounts.unread,
+    inboxProcessing: inboxCounts.pending + inboxCounts.processing,
+    lastEmailSyncAt: lastEmailSync?._max?.lastSyncAt || null,
+    integrations,
+    fetchedAt: new Date().toISOString(),
   });
 });
 

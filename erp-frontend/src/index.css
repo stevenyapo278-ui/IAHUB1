@@ -615,6 +615,14 @@
 .border-gold-400\/20 { border-color: rgba(251, 191, 36, 0.2) !important; }
 .border-gold-400\/30 { border-color: rgba(251, 191, 36, 0.3) !important; }
 
+/* ─── Fonds teintés des statuts (suivent le skin choisi + le mode) ─────────────
+   Équivalent « bg-success/15 » que Tailwind ne peut pas générer pour une couleur
+   en var() : color-mix() reste piloté par --skin-success/warning/danger/info. */
+.bg-status-success { background-color: color-mix(in srgb, var(--skin-success) 15%, transparent); }
+.bg-status-warning { background-color: color-mix(in srgb, var(--skin-warning) 15%, transparent); }
+.bg-status-danger  { background-color: color-mix(in srgb, var(--skin-danger) 15%, transparent); }
+.bg-status-info    { background-color: color-mix(in srgb, var(--skin-info) 15%, transparent); }
+
 /* ─── Transition fluide entre les thèmes ─────────────────────────────────────── */
 /* Transition globale pour les vues SANS View Transitions API (fallback).
    Quand la vague circulaire est active, on ajoute .theme-animating sur <html>

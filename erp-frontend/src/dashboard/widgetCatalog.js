@@ -36,6 +36,7 @@ export const WIDGET_CATALOG = [
   { type: 'ai_pipeline',          name: 'Pipeline IA',            category: 'Données',  defaultW: 4, defaultH: 3, icon: 'Sparkles',      description: 'Stats traitement IA' },
   { type: 'quick_access',         name: 'Accès rapides',          category: 'Données',  defaultW: 3, defaultH: 2, icon: 'Zap',           description: 'Raccourcis modules' },
   { type: 'integrations_health',  name: 'Santé intégrations',     category: 'Données',  defaultW: 4, defaultH: 3, icon: 'ShieldCheck',   description: 'État des connecteurs' },
+  { type: 'pulse_status',         name: 'Pouls système',          category: 'Données',  defaultW: 4, defaultH: 4, icon: 'Activity',      description: 'Compteurs temps réel et alertes, adaptés à votre rôle' },
 ];
 
 // Map type → component path (lazy loaded)
@@ -65,8 +66,9 @@ export const WIDGET_MAP = {
   sla_status:          './widgets/SlaStatusWidget',
   team_breakdown:      './widgets/TeamBreakdownWidget',
   ai_pipeline:         './widgets/AiPipelineWidget',
-  quick_access:        './widgets/QuickAccessWidget',
+  quick_access: './widgets/QuickAccessWidget',
   integrations_health: './widgets/IntegrationsWidget',
+  pulse_status: './widgets/PulseStatusWidget',
 };
 
 // Helper to get widget metadata by type

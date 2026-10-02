@@ -49,6 +49,7 @@ import AccountModal from '../components/AccountModal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import GlobalSearch from '../components/GlobalSearch';
 import NotificationPanel from '../components/NotificationPanel';
+import FloatingDock from '../components/FloatingDock';
 import LayoutSettings from '../components/LayoutSettings';
 import CustomizerDrawer from '../components/CustomizerDrawer';
 import CursorGlow from '../components/CursorGlow';
@@ -753,6 +754,11 @@ export default function MainLayout() {
       <Suspense fallback={null}>
         {isPathAllowed('/chat') && <ChatWidget />}
       </Suspense>
+
+      {/* Rail flottant à gauche : Pouls système + Actions rapides, déplaçable et
+          position mémorisée (languette type onglet d'extension). Les filtres de rôle
+          et de permission sont gérés à l'intérieur (tickets.view, etc.). */}
+      <FloatingDock />
 
       <LayoutSettings open={showLayoutSettings} onClose={() => setShowLayoutSettings(false)} />
       <CustomizerDrawer open={showCustomizer} onClose={() => setShowCustomizer(false)} />

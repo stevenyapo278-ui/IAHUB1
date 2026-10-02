@@ -69,6 +69,8 @@ jest.mock('../prismaClient', () => {
     user: { findMany: jest.fn(async () => [{ id: 1, fullName: 'Tech', email: 'tech@t.ci' }]) },
     ticketTimeEntry: { groupBy: jest.fn(async () => []) },
     aiEmailDraft: { count: jest.fn(async () => 0) },
+    incomingEmail: { count: jest.fn(async () => 0) },
+    emailAccount: { aggregate: jest.fn(async () => ({ _max: { lastSyncAt: null } })) },
     ticketEvent: { groupBy: jest.fn(async () => []), findMany: jest.fn(async () => []) },
     senderReputation: { count: jest.fn(async () => 0) },
     $queryRaw: jest.fn(async () => []),
@@ -77,7 +79,12 @@ jest.mock('../prismaClient', () => {
 });
 
 jest.mock('../middleware/auth', () => ({ authenticate: (_req, _res, next) => next() }));
-jest.mock('../middleware/permissions', () => ({ requirePermission: () => (_req, _res, next) => next() }));
+// hasPermission → false : le bloc « santé des intégrations » de /pulse est ignoré ici
+// (couvert par dashboard.pulse.test.js), donc pas de mock prisma apiConfig/systemSettings.
+jest.mock('../middleware/permissions', () => ({
+  requirePermission: () => (_req, _res, next) => next(),
+  hasPermission: jest.fn(async () => false),
+}));
 jest.mock('../services/pdfReportService', () => ({ generateReport: jest.fn() }));
 jest.mock('../utils/logger', () => ({ logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() } }));
 
@@ -188,6 +195,7 @@ describe('GET /dashboard/stats — compteurs alignés sur la vue tickets', () =>
 describe('Tous les endpoints dashboard excluent la corbeille', () => {
   const ENDPOINTS = [
     '/stats',
+    '/pulse',
     '/workload-by-team',
     '/pending-approvals',
     '/reply-suggestions-count',

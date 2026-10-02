@@ -18,6 +18,7 @@ import WorkloadTeamsWidget from './widgets/WorkloadTeamsWidget';
 import AiPipelineWidget from './widgets/AiPipelineWidget';
 import QuickAccessWidget from './widgets/QuickAccessWidget';
 import IntegrationsWidget from './widgets/IntegrationsWidget';
+import PulseStatusWidget from './widgets/PulseStatusWidget';
 import { getWidgetMeta, SCOPE_SELECTABLE } from './widgetCatalog';
 
 // Périmètres disponibles — le choix est persisté dans widget.config.scope
@@ -76,6 +77,8 @@ function subtitleFor(widgetType, periodLabel, scope) {
       return 'Raccourcis vers les modules';
     case 'integrations_health':
       return 'État des connecteurs';
+    case 'pulse_status':
+      return 'Compteurs temps réel adaptés à votre rôle';
     default: {
       const scopeLabel = scope === 'open'
         ? 'Tickets ouverts'
@@ -186,6 +189,9 @@ function resolveWidget(widget, allData) {
 
     case 'integrations_health':
       return <IntegrationsWidget integrations={integrations} config={widget.config} />;
+
+    case 'pulse_status':
+      return <PulseStatusWidget />;
 
     default:
       return <div className="text-sm text-on-surface-variant p-4">Widget inconnu : {widgetType}</div>;

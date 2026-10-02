@@ -20,6 +20,17 @@ export default {
           600: '#3f4456',
         },
 
+        // ── Statuts liés au thème : suivent le skin courant (--skin-*), donc
+        //    changent avec le skin choisi et le mode clair/sombre ───────────
+        // NB : ne JAMAIS écrire bg-danger/15 — le modificateur d'opacité Tailwind
+        // n'est pas généré pour une couleur en var() (classe silencieusement absente).
+        // Pour un fond teinté, utiliser les utilitaires .bg-status-* (index.css).
+        success: 'var(--skin-success)',
+        warning: 'var(--skin-warning)',
+        danger: 'var(--skin-danger)',
+        info: 'var(--skin-info)',
+        'primary-hover': 'var(--skin-primary-hover)',
+
         // ── Mode clair (valeurs par défaut) ──────────────────────────────────
         'surface-container-high': 'var(--color-surface-container-high)',
         'on-secondary-container': 'var(--color-on-secondary-container)',
