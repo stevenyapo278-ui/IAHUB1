@@ -1177,6 +1177,7 @@ router.post(
     const {
       title, content, priority, category, teamId, assignedToId, requesterId, secondaryRequesterId,
       type, urgency, impact, source, externalId, status, openedAt, locationId, dueDate,
+      sourceEmailId, outlookConversationId,
     } = req.body;
 
     // requesterIds (tableau de demandeurs) — tolérance JSON/multipart
@@ -1284,6 +1285,20 @@ router.post(
       finalLocationName = loc.completename || loc.name;
     }
 
+    // ── Email source (création depuis la boîte mail) ─────────────────────────
+    // L'Inbox transmet l'id de l'IncomingEmail + l'identifiant de conversation
+    // Outlook. Sans eux, findExistingTicket ne retrouve jamais ce ticket sur la
+    // réponse suivante du demandeur (ni priorité 1 outlookConversationId, ni
+    // priorité 2 internetMessageId) : chaque relance créait un nouveau ticket.
+    let sourceEmail = null;
+    if (sourceEmailId !== undefined && sourceEmailId !== null && sourceEmailId !== '') {
+      const emailPk = Number(sourceEmailId);
+      if (Number.isInteger(emailPk)) {
+        sourceEmail = await prisma.incomingEmail.findUnique({ where: { id: emailPk } });
+      }
+    }
+    const finalConversationId = String(outlookConversationId || sourceEmail?.conversationId || '').trim() || null;
+
     const ticket = await prisma.ticket.create({
       data: {
 
@@ -1313,6 +1328,13 @@ router.post(
         ...(dueDate ? { dueDate: new Date(dueDate) } : {}),
         source: source || null,
         externalId: externalId || null,
+        // Rattachement de conversation (création depuis la boîte mail)
+        ...(finalConversationId ? { outlookConversationId: finalConversationId } : {}),
+        ...(sourceEmail ? {
+          sourceEmail: sourceEmail.fromEmail,
+          sourceName: sourceEmail.fromName || null,
+          sourceSubject: sourceEmail.subject || null,
+        } : {}),
         locationId: finalLocationId,
         locationName: finalLocationName,
         createdById: req.user.sub,
@@ -1332,6 +1354,43 @@ router.post(
         await autoAssignTechnician(ticket.id, ticket.category);
       } catch (err) {
         console.error('[ticket.routes] Auto-assignation échouée:', err.message);
+      }
+    }
+
+    // ── Rattachement de l'email source ──────────────────────────────────────
+    // IncomingEmail.erpTicketId + message initial reprenant les identifiants
+    // Outlook : les deux niveaux de findExistingTicket (conversationId sur le
+    // ticket, internetMessageId/inReply-To sur le TicketMessage) retrouvent ce
+    // ticket quand le demandeur répond — sinon chaque réponse créait un doublon.
+    if (sourceEmail) {
+      try {
+        await prisma.incomingEmail.update({
+          where: { id: sourceEmail.id },
+          data: { status: 'DONE', erpTicketId: ticket.id, isNewTicket: false },
+        });
+        await prisma.ticketMessage.create({
+          data: {
+            ticketId: ticket.id,
+            direction: 'INBOUND',
+            sender: sourceEmail.fromEmail,
+            recipients: [],
+            ccRecipients: sourceEmail.ccRecipients || [],
+            subject: sourceEmail.subject || ticket.title,
+            body: sourceEmail.bodyPreview || '',
+            bodyHtml: sourceEmail.bodyHtml || null,
+            outlookMessageId: sourceEmail.graphMessageId,
+            internetMessageId: sourceEmail.internetMessageId,
+            inReplyTo: sourceEmail.inReplyTo,
+            conversationId: sourceEmail.conversationId,
+            timestamp: sourceEmail.receivedAt,
+            summary: sourceEmail.aiSummary || null,
+            ticketStatusAtTime: ticket.status,
+          },
+        });
+      } catch (err) {
+        // outlookMessageId est unique : un message déjà rattaché ailleurs ne doit
+        // pas faire échouer la création du ticket — le lien reste priorité 1.
+        console.error('[ticket.routes] Rattachement conversation email échoué:', err.message);
       }
     }
 

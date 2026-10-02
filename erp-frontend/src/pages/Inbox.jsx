@@ -546,6 +546,11 @@ export default function Inbox() {
       lowTrustSender: !!latest.lowTrustSender,
       fromEmail: latest.fromEmail || thread?.latest?.fromEmail || '',
       fromName: latest.fromName || thread?.latest?.fromName || '',
+      // Lien de conversation transmis au POST /tickets : permet au matcher de
+      // rattacher la réponse suivante du demandeur à ce ticket (et non d'en
+      // recréer un nouveau à chaque relance du fil).
+      emailId: latest.id || latest.emailId || '',
+      conversationId: latest.conversationId || thread?.conversationId || '',
     });
 
     setActiveTicketTab('form');
@@ -643,7 +648,10 @@ export default function Inbox() {
   function ctxCreateTicket() {
     if (!contextMenu) return;
     setSelectedThread(contextMenu.thread);
-    setShowCreateTicket(true);
+    // Pré-remplit le formulaire et les métadonnées (dont emailId/conversationId
+    // du fil) comme le bouton de la lecture — sinon le ticket serait créé sans
+    // lien de conversation et la réponse du demandeur partirait dans un doublon.
+    openCreateTicket(contextMenu.thread);
     closeContextMenu();
   }
 
@@ -2585,6 +2593,12 @@ export default function Inbox() {
                             assignedToId: ticketForm.assignedToId ? Number(ticketForm.assignedToId) : null,
                             source: 'Email',
                             requesterEmail: aiAnalysisMeta.fromEmail || threadDetail?.latest?.fromEmail || null,
+                            // Lien de conversation (voir conversationMatcher) :
+                            // id de l'IncomingEmail source + conversation Outlook,
+                            // pour que la prochaine réponse rattachée au même fil
+                            // retrouve CE ticket au lieu d'en créer un nouveau.
+                            sourceEmailId: aiAnalysisMeta.emailId || threadDetail?.latest?.emailId || threadDetail?.latest?.id || null,
+                            outlookConversationId: aiAnalysisMeta.conversationId || threadDetail?.latest?.conversationId || null,
                           });
                           toast.success(`Ticket #${data.id} créé et transmis avec succès !`);
                           setShowCreateTicket(false);
