@@ -19,12 +19,40 @@
  *   extraGridOptions – options supplémentaires passées à AgGridReact
  *   totalFilteredCount – nombre total de résultats filtrés (pour "Sélectionner les X")
  *   onSelectAllFiltered – callback quand l'utilisateur clique "Sélectionner les X correspondants"
+ *   storageKey       – string : active la persistance de la disposition des colonnes
+ *                      (ordre + largeur + épinglage) dans localStorage, par utilisateur.
+ *                      Même comportement que la table Tickets : F5 ou un retour sur la
+ *                      page retrouve l'agencement exact. Ex. storageKey="problems".
  */
 
 import { useMemo, useRef, useCallback, useEffect } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
 import UserAvatar from './UserAvatar';
+import { useAuth } from '../context/AuthContext';
+
+// ── Persistance de la disposition des colonnes (ordre + largeur) ──────────
+// Miroir de l'implémentation de la page Tickets (columnLayoutKey/load/save) :
+// sauvegarde de l'état AG Grid (api.getColumnState) par utilisateur — F5, une
+// autre session ou un retour sur la liste retrouvent le même agencement.
+function columnLayoutStorageKey(storageKey, userId) {
+  return `${storageKey}_column_layout_${userId || 'anon'}`;
+}
+
+function loadColumnLayout(storageKey, userId) {
+  try {
+    const state = JSON.parse(localStorage.getItem(columnLayoutStorageKey(storageKey, userId)));
+    return Array.isArray(state) && state.length > 0 ? state : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveColumnLayout(storageKey, userId, state) {
+  try {
+    localStorage.setItem(columnLayoutStorageKey(storageKey, userId), JSON.stringify(state));
+  } catch {} // quota dépassé / mode privé : on ignore, la disposition reste provisoire
+}
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -254,9 +282,89 @@ export default function DataGrid({
   // SANS cette transmission, params.context est undefined dans les renderers :
   // liens de cellules sans filtres, colonne statut non éditable, actions masquées.
   context,
+  storageKey,
 }) {
   const gridRef = useRef(null);
   const containerRef = useRef(null);
+  const { user } = useAuth() || {};
+
+  // ── Persistance de la disposition (uniquement si storageKey est fourni) ──
+  const layoutTimerRef = useRef(null);
+  // Vrai pendant un apply : AG Grid redéclenche columnResized/columnMoved
+  // sur ces opérations — il ne faut pas réécrire la sauvegarde qu'on applique.
+  const applyingLayoutRef = useRef(false);
+
+  const writeColumnLayout = useCallback((api) => {
+    if (!api || !storageKey || applyingLayoutRef.current) return;
+    // Uniquement largeur/ordre/épinglage (le tri reste géré par la page)
+    const state = (api.getColumnState?.() || [])
+      .filter((c) => c?.colId)
+      .map(({ colId, width, flex, pinned }) => ({ colId, width, flex, pinned }));
+    if (state.length) saveColumnLayout(storageKey, user?.id, state);
+  }, [storageKey, user?.id]);
+
+  const persistColumnLayout = useCallback((api) => {
+    if (!api || !storageKey || applyingLayoutRef.current) return;
+    clearTimeout(layoutTimerRef.current);
+    // Anti-rafale : un drag de redimensionnement émet beaucoup d'événements
+    layoutTimerRef.current = setTimeout(() => writeColumnLayout(api), 400);
+  }, [storageKey, writeColumnLayout]);
+
+  const applyColumnLayout = useCallback((api) => {
+    if (!api || !storageKey) return;
+    // Une modification en attente (déplacement de colonne, puis re-render) est
+    // écrite AVANT la réapplication : sinon elle serait écrasée par le sauvegardé.
+    if (layoutTimerRef.current) {
+      clearTimeout(layoutTimerRef.current);
+      layoutTimerRef.current = null;
+      writeColumnLayout(api);
+    }
+    const saved = loadColumnLayout(storageKey, user?.id);
+    if (!saved) return;
+    // Colonnes retirées depuis la sauvegarde (colonnes qui ont évolué) : ignorées
+    const available = new Set((api.getColumns?.() || []).map((c) => c.getColId()));
+    const state = saved.filter((s) => s && available.has(s.colId));
+    if (state.length === 0) return;
+    applyingLayoutRef.current = true;
+    try {
+      api.applyColumnState({ state, applyOrder: true });
+    } finally {
+      // Les événements AG Grid sont dispatchés pendant l'apply (synchrone) :
+      // verrou relâché ensuite, puis on fige l'état complet.
+      setTimeout(() => {
+        applyingLayoutRef.current = false;
+        writeColumnLayout(api);
+      }, 0);
+    }
+  }, [storageKey, user?.id, writeColumnLayout]);
+
+  // Recolle la disposition à chaque nouveau jeu de colonnes : AG Grid repart des
+  // largeurs des colDefs dès que les définitions changent.
+  useEffect(() => {
+    if (!storageKey) return;
+    const api = gridRef.current?.api;
+    if (api) applyColumnLayout(api);
+  }, [columns, storageKey, applyColumnLayout]);
+
+  // Une écriture programmée après démontage n'a plus rien à écrire
+  useEffect(() => () => clearTimeout(layoutTimerRef.current), []);
+
+  // Événements de grille : la persistance compose avec ceux du parent
+  // (extraGridOptions) — les handlers du parent restent appelés.
+  const persistedGridOptions = storageKey ? {
+    onGridReady: (event) => {
+      applyColumnLayout(event.api);
+      extraGridOptions?.onGridReady?.(event);
+    },
+    onColumnResized: (event) => {
+      persistColumnLayout(event.api);
+      extraGridOptions?.onColumnResized?.(event);
+    },
+    onColumnMoved: (event) => {
+      persistColumnLayout(event.api);
+      extraGridOptions?.onColumnMoved?.(event);
+    },
+  } : {};
 
   // AG Grid ne re-rend pas les cellules quand l'objet `context` change : on le
   // repousse à chaque mutation puis on force le re-render des cellules, sinon
@@ -380,6 +488,7 @@ export default function DataGrid({
           enableCellTextSelection={true}
           pinnedBottomRowData={pinnedBottomRowData}
           {...extraGridOptions}
+          {...persistedGridOptions}
           getRowClass={(params) => {
             const extra = extraGridOptions?.getRowClass?.(params);
             const list = Array.isArray(extra) ? extra : extra ? [extra] : [];

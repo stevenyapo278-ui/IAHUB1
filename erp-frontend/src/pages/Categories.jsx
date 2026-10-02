@@ -424,6 +424,7 @@ export default function Categories() {
         <div className="flex-1 min-h-0 mx-4 sm:mx-6 lg:mx-8 mt-3.5 mb-4 flex flex-col">
           <div className="flex-1 min-h-0 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest overflow-hidden flex flex-col">
             <DataGrid
+              storageKey="categories"
               columns={columnDefs}
               rowData={paginatedRows}
               loading={loading}

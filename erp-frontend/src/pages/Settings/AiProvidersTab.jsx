@@ -248,6 +248,7 @@ function ProviderModal({ provider, onClose, onUpdate }) {
             <div className="space-y-4">
               <div className="border border-outline-variant/50 rounded-xl overflow-hidden bg-surface-container-lowest">
                 <DataGrid
+                  storageKey="ai-providers-models"
                   columns={[
                     { field: 'name', headerName: 'Nom', flex: 1, cellRenderer: (p) => <span className="font-semibold">{p.value}</span> },
                     { field: 'label', headerName: 'Libellé', width: 150, cellRenderer: (p) => <span className="text-on-surface-variant">{p.value || '-'}</span> },
@@ -316,6 +317,7 @@ function ProviderModal({ provider, onClose, onUpdate }) {
             <div className="space-y-4">
               <div className="border border-outline-variant/50 rounded-xl overflow-hidden bg-surface-container-lowest">
                 <DataGrid
+                  storageKey="ai-providers-keys"
                   columns={[
                     { field: 'label', headerName: 'Libellé', flex: 1, cellRenderer: (p) => <span className="font-semibold">{p.value}</span> },
                     { field: 'apiKey', headerName: 'Clé', width: 200, cellRenderer: (p) => <span className="font-mono text-on-surface-variant truncate max-w-[160px] block">{p.value}</span> },

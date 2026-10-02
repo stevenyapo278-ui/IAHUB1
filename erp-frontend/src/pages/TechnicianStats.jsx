@@ -331,6 +331,7 @@ export default function TechnicianStats() {
           {/* Tableau détaillé AG Grid */}
           <div className="flex-1 min-h-0 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest overflow-hidden flex flex-col">
             <DataGrid
+              storageKey="technician-stats"
               columns={[
                 ...(!isTechnicianOnly ? [
                   { field: 'fullName', headerName: 'Technicien', flex: 1.5, minWidth: 160, cellRenderer: (p) => <span className="font-semibold text-sm text-on-surface">{p.value}</span> },
