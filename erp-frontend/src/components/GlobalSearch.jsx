@@ -199,7 +199,7 @@ export default function GlobalSearch() {
             const res = await api.get(section.endpoint, {
               params: { [section.queryParam]: query, limit: section.limit },
             });
-            const data = Array.isArray(res.data) ? res.data : (res.data?.items || res.data?.tickets || []);
+            const data = Array.isArray(res.data) ? res.data : (res.data?.items || res.data?.tickets || res.data?.problems || []);
             return { type: section.type, items: data };
           } catch {
             return { type: section.type, items: [] };

@@ -10,6 +10,8 @@ jest.mock('../prismaClient', () => ({
     findUnique: jest.fn(async () => null),
   },
   problemEvent: { create: jest.fn(async () => ({ id: 1 })) },
+  // Existence du demandeur vérifiée avant création (400 au lieu d'une FK violée)
+  user: { findUnique: jest.fn(async ({ where }) => (where.id === 7 ? { id: 7 } : null)) },
 }));
 jest.mock('../middleware/auth', () => {
   const state = { role: 'ADMIN' };
@@ -52,6 +54,7 @@ afterAll((done) => {
 });
 beforeEach(() => {
   prisma.problem.create.mockClear();
+  prisma.user.findUnique.mockClear();
   __setRole('ADMIN');
 });
 
@@ -119,6 +122,31 @@ describe('POST /problems — reprise de données (import GLPI)', () => {
     expect(data.status).toBe('NEW');
     expect(data.createdAt).toBeUndefined();
     expect(data.priority).toBe('P3');
+  });
+
+  it('coerce le demandeur reçu en chaîne (select) et le stocke en entier', async () => {
+    const { status } = await post({ ...BASE_PAYLOAD, requesterId: '7' });
+
+    expect(status).toBe(201);
+    expect(prisma.user.findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 7 } }));
+    const data = prisma.problem.create.mock.calls[0][0].data;
+    expect(data.requesterId).toBe(7);
+  });
+
+  it('refuse un demandeur inexistant sans rien créer', async () => {
+    const { status, body } = await post({ ...BASE_PAYLOAD, requesterId: 999 });
+
+    expect(status).toBe(400);
+    expect(JSON.stringify(body)).toMatch(/Utilisateur introuvable/);
+    expect(prisma.problem.create).not.toHaveBeenCalled();
+  });
+
+  it("refuse un demandeur non numérique", async () => {
+    const { status, body } = await post({ ...BASE_PAYLOAD, requesterId: 'abc' });
+
+    expect(status).toBe(400);
+    expect(JSON.stringify(body)).toMatch(/requesterId invalide/);
+    expect(prisma.problem.create).not.toHaveBeenCalled();
   });
 
   it('date solvedAt/closedAt quand la création porte un statut résolu', async () => {

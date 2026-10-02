@@ -72,34 +72,110 @@ function applyFollowupImageMarkers(content = '', images = []) {
 }
 
 // ── Liste des problèmes ───────────────────────────────────────────────
+// Statuts admis sur une création — sert aussi de reprise de données (ex. export GLPI).
+// Déclaré avant STATUS_GROUPS pour dériver le groupe NOT_CLOSED de la liste complète.
+const PROBLEM_STATUSES = ['NEW', 'IN_PROGRESS', 'ASSIGNED', 'PLANNED', 'WAITING', 'SOLVED', 'CLOSED', 'OBSERVED'];
+
+// Groupes de statuts (miroir des groupes de la vue Tickets) : la valeur de `status`
+// peut être un statut unique, un groupe (OPEN_GROUP…) ou une liste CSV.
+const STATUS_GROUPS = {
+  OPEN_GROUP: ['NEW', 'IN_PROGRESS', 'ASSIGNED', 'PLANNED', 'WAITING'], // aligné sur /problems/stats
+  CLOSED_GROUP: ['SOLVED', 'CLOSED'],
+  // « Tous sauf clôturés » (puce « Non clôturés ») — miroir de ticketQueryService.
+  NOT_CLOSED: PROBLEM_STATUSES.filter((s) => !['SOLVED', 'CLOSED'].includes(s)),
+};
+
+// Champs triables côté serveur (miroir de SERVER_SORTABLE côté frontend) —
+// les relations sont triées sur leur libellé principal.
+const SORTABLE_FIELDS = {
+  id: { column: 'id' },
+  title: { column: 'title' },
+  status: { column: 'status' },
+  priority: { column: 'priority' },
+  urgency: { column: 'urgency' },
+  impact: { column: 'impact' },
+  category: { column: 'category' },
+  dueDate: { column: 'dueDate' },
+  createdAt: { column: 'createdAt' },
+  updatedAt: { column: 'updatedAt' },
+  solvedAt: { column: 'solvedAt' },
+  requester: { relation: 'requester', field: 'fullName' },
+  assignedTo: { relation: 'assignedTo', field: 'fullName' },
+  team: { relation: 'team', field: 'name' },
+};
+
+// Filtre identifiant : 'none' → null (« Non assigné » / « Sans demandeur »), sinon
+// l'entier correspondant, undefined si absent ou invalide (pas de 500 Prisma).
+function parseIdFilter(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (value === 'none') return null;
+  const n = Number(value);
+  return Number.isInteger(n) ? n : undefined;
+}
+
 router.get('/', async (req, res) => {
-  const { status, priority, category, assignedToId, teamId, search, limit, page } = req.query;
+  const {
+    status, priority, category, assignedToId, teamId, requesterId,
+    dateFrom, dateTo, search, sortBy, sortOrder, limit, page,
+  } = req.query;
   const pageNum = Math.max(1, parseInt(page) || 1);
   const pageSize = Math.min(200, Math.max(1, parseInt(limit) || 50));
   const skip = (pageNum - 1) * pageSize;
 
   const where = {};
-  if (status) where.status = status;
+  if (status) {
+    const parts = String(status).split(',').map((s) => s.trim()).filter(Boolean);
+    const expanded = parts.flatMap((s) => STATUS_GROUPS[s] || [s]);
+    const valid = [...new Set(expanded)].filter((s) => PROBLEM_STATUSES.includes(s));
+    if (valid.length > 0) where.status = valid.length === 1 ? valid[0] : { in: valid };
+  }
   if (priority) where.priority = priority;
   if (category) where.category = category;
-  if (assignedToId) where.assignedToId = Number(assignedToId);
   if (teamId) where.teamId = Number(teamId);
+
+  const assigned = parseIdFilter(assignedToId);
+  if (assigned !== undefined) where.assignedToId = assigned;
+  const requester = parseIdFilter(requesterId);
+  if (requester !== undefined) where.requesterId = requester;
+
+  // Période de création — dateTo sans heure = fin de journée incluse (comme Tickets)
+  if (dateFrom || dateTo) {
+    const cond = {};
+    if (dateFrom) cond.gte = new Date(dateFrom);
+    if (dateTo) {
+      const end = new Date(dateTo);
+      if (!String(dateTo).includes('T')) end.setHours(23, 59, 59, 999);
+      cond.lte = end;
+    }
+    where.createdAt = cond;
+  }
+
   if (search) {
     // Recherche par numéro : « 12 » ou « #12 » doit retrouver le problème #12
     const searchId = Number(String(search).replace(/^#/, ''));
+    const contains = { contains: search, mode: 'insensitive' };
     where.OR = [
-      { title: { contains: search, mode: 'insensitive' } },
-      { description: { contains: search, mode: 'insensitive' } },
+      { title: contains },
+      { description: contains },
+      { requester: { fullName: contains } },
+      { assignedTo: { fullName: contains } },
       ...(Number.isInteger(searchId) && searchId > 0 ? [{ id: { equals: searchId } }] : []),
     ];
   }
+
+  // Tri serveur (clic sur l'en-tête d'une colonne)
+  const order = sortOrder === 'asc' ? 'asc' : 'desc';
+  const sortSpec = SORTABLE_FIELDS[sortBy];
+  const orderBy = sortSpec
+    ? (sortSpec.relation ? { [sortSpec.relation]: { [sortSpec.field]: order } } : { [sortSpec.column]: order })
+    : { createdAt: 'desc' };
 
   const [problems, total] = await Promise.all([
     prisma.problem.findMany({
       where,
       skip,
       take: pageSize,
-      orderBy: { createdAt: 'desc' },
+      orderBy,
       include: {
         requester: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
         assignedTo: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
@@ -124,9 +200,6 @@ router.get('/stats', async (req, res) => {
   res.json({ total, open, solved, closed });
 });
 
-// Statuts admis sur une création — sert aussi de reprise de données (ex. export GLPI)
-const PROBLEM_STATUSES = ['NEW', 'IN_PROGRESS', 'ASSIGNED', 'PLANNED', 'WAITING', 'SOLVED', 'CLOSED', 'OBSERVED'];
-
 // ── Créer un problème ─────────────────────────────────────────────────
 router.post(
   '/',
@@ -146,9 +219,30 @@ router.post(
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const {
-      title, description, priority, urgency, impact, category, locationId, locationName,
-      dueDate, requesterId, assignedToId, teamId, status, createdAt,
+      title, description, priority, urgency, impact, category, locationName,
+      dueDate, status, createdAt,
     } = req.body;
+
+    // Identifiants : coercition en entier (un <select> envoie des chaînes) —
+    // Prisma attend un Int, une string exploserait en 500 au lieu d'un 400 clair.
+    const ids = {};
+    for (const key of ['locationId', 'requesterId', 'assignedToId', 'teamId']) {
+      const raw = req.body[key];
+      if (raw === undefined || raw === null || raw === '') {
+        ids[key] = null;
+        continue;
+      }
+      const val = Number(raw);
+      if (!Number.isInteger(val)) return res.status(400).json({ error: `${key} invalide` });
+      ids[key] = val;
+    }
+
+    // Contrôle d'existence du demandeur (miroir du PATCH) : sinon Prisma lève
+    // une FK violée → 500 au lieu d'un 400 explicite.
+    if (ids.requesterId !== null) {
+      const requester = await prisma.user.findUnique({ where: { id: ids.requesterId }, select: { id: true } });
+      if (!requester) return res.status(400).json({ error: 'Utilisateur introuvable' });
+    }
 
     // Antidater l'ouverture n'appartient qu'à un administrateur
     let createdAtValue;
@@ -168,12 +262,12 @@ router.post(
         urgency: urgency || 'MEDIUM',
         impact: impact || 'MEDIUM',
         category: category || null,
-        locationId: locationId || null,
+        locationId: ids.locationId,
         locationName: locationName || null,
         dueDate: dueDate ? new Date(dueDate) : null,
-        requesterId: requesterId || null,
-        assignedToId: assignedToId || null,
-        teamId: teamId || null,
+        requesterId: ids.requesterId,
+        assignedToId: ids.assignedToId,
+        teamId: ids.teamId,
         ...(createdAtValue ? { createdAt: createdAtValue } : {}),
         ...(status === 'SOLVED' ? { solvedAt: createdAtValue || new Date() } : {}),
         ...(status === 'CLOSED' ? { closedAt: createdAtValue || new Date() } : {}),
@@ -253,7 +347,7 @@ router.patch(
         if (['locationId', 'requesterId', 'assignedToId', 'teamId'].includes(key)) {
           val = val === null || val === '' ? null : Number(val);
           if (val !== null && !Number.isInteger(val)) return res.status(400).json({ error: `${key} invalide` });
-          if (val !== null && key === 'assignedToId') {
+          if (val !== null && (key === 'assignedToId' || key === 'requesterId')) {
             const u = await prisma.user.findUnique({ where: { id: val }, select: { id: true } });
             if (!u) return res.status(400).json({ error: 'Utilisateur introuvable' });
           }

@@ -15,6 +15,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import ActivityStream, { buildTimeline } from '../components/ActivityStream';
 import ImageAttachmentsEditor from '../components/ImageAttachmentsEditor';
 import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
+import RemoteUserSelect from '../components/RemoteUserSelect';
 import { clipboardImageFiles, imageItemsFromFiles, revokeImageItems } from '../utils/imageAttachments';
 import { sanitizeHtml } from '../utils/sanitize';
 
@@ -101,7 +102,7 @@ export default function ProblemDetail() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const settings = useSystemSettings();
-  const canManage = hasPermission(user, 'tickets.manage', settings);
+  const canManage = hasPermission(user, 'problems.manage', settings);
 
   const [problem, setProblem] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -539,7 +540,6 @@ export default function ProblemDetail() {
           <div className="mt-3 flex flex-wrap gap-3 text-xs text-on-surface-variant">
             <span>Urgence: <strong>{URGENCY_IMPACT_OPTIONS.find((o) => o.value === problem.urgency)?.label || problem.urgency}</strong></span>
             <span>Impact: <strong>{URGENCY_IMPACT_OPTIONS.find((o) => o.value === problem.impact)?.label || problem.impact}</strong></span>
-            {problem.requester && <span>Demandeur: <strong>{problem.requester.fullName}</strong></span>}
             {problem.locationName && <span>Lieu: <strong>{problem.locationName}</strong></span>}
           </div>
 
@@ -638,6 +638,40 @@ export default function ProblemDetail() {
                   </div>
                 ))}
               </div>
+            )}
+          </div>
+
+          {/* Demandeur (miroir du champ « Demandeurs » de la fiche ticket) */}
+          <div className="bg-surface-container rounded-xl p-4">
+            <h3 className="text-sm font-semibold text-on-surface mb-3 flex items-center gap-1.5">
+              <User className="w-4 h-4 text-primary" />
+              Demandeur
+            </h3>
+            {canManage ? (
+              <RemoteUserSelect
+                value={problem.requesterId || ''}
+                onChange={async (val) => {
+                  try {
+                    await api.patch(`/problems/${id}`, { requesterId: val ? Number(val) : null });
+                    toast.success('Demandeur mis à jour');
+                    loadProblem();
+                  } catch (err) {
+                    toast.error(err.response?.data?.error || 'Échec de la mise à jour');
+                  }
+                }}
+                placeholder="Rechercher un demandeur..."
+              />
+            ) : (
+              problem.requester ? (
+                <div className="flex items-center gap-2 text-xs font-semibold text-on-surface">
+                  <span className="w-5 h-5 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[9px] font-bold">
+                    {problem.requester.fullName.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()}
+                  </span>
+                  {problem.requester.fullName}
+                </div>
+              ) : (
+                <span className="text-xs text-on-surface-variant italic">Non renseigné</span>
+              )
             )}
           </div>
 

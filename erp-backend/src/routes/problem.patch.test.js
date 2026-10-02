@@ -95,6 +95,23 @@ describe('PATCH /problems/:id — assignation', () => {
     expect(prisma.problem.update).not.toHaveBeenCalled();
   });
 
+  it('coerce le demandeur en chaîne et le stocke en entier', async () => {
+    const { status, body } = await patch(1, { requesterId: '7' });
+
+    expect(status).toBe(200);
+    expect(prisma.user.findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 7 } }));
+    expect(prisma.problem.update).toHaveBeenCalledWith(expect.objectContaining({ data: { requesterId: 7 } }));
+    expect(body.requesterId).toBe(7);
+  });
+
+  it("refuse un demandeur inexistant sans rien mettre à jour", async () => {
+    const { status, body } = await patch(1, { requesterId: 999 });
+
+    expect(status).toBe(400);
+    expect(JSON.stringify(body)).toMatch(/Utilisateur introuvable/);
+    expect(prisma.problem.update).not.toHaveBeenCalled();
+  });
+
   it("refuse un identifiant non numérique", async () => {
     const { status } = await patch(1, { teamId: 'abc' });
 
