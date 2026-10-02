@@ -6,25 +6,11 @@ const { requirePermission } = require('../middleware/permissions');
 const { runEmailPipeline, processMessage } = require('../services/emailPipeline');
 const { fetchEmailsByDateRange } = require('../services/emailPoller');
 const { analyzeEmail } = require('../services/mailAnalyzer');
-const { listThreads, getThread, getInboxCounts } = require('../services/inboxThreading');
+const { listThreads, getThread, getInboxCounts, buildEmailScope } = require('../services/inboxThreading');
+const { resolveEmailHtml, resolveMessagesHtml } = require('../services/emailHtml');
 
 const router = express.Router();
 router.use(authenticate);
-
-// Un demandeur (REQUESTER) ne voit que les emails qui le concernent : ceux qu'il a envoyés ou
-// ceux rattachés à ses tickets. Les autres rôles (ADMIN/HOTLINE/TECHNICIAN/SUPERADMIN) voient toute la boîte.
-async function buildEmailScope(user) {
-  if (user.role !== 'REQUESTER') return null;
-  const email = (user.email || '').toLowerCase();
-  const tickets = await prisma.ticket.findMany({ where: { requesterId: user.sub }, select: { id: true } });
-  const ticketIds = tickets.map((t) => t.id);
-  return {
-    OR: [
-      { fromEmail: { equals: email, mode: 'insensitive' } },
-      { erpTicketId: { in: ticketIds } },
-    ],
-  };
-}
 
 // Liste des emails reçus regroupés par conversation (façon Outlook), avec filtrage avancé.
 // La recherche porte sur le fil entier : si un message d'une conversation correspond, tout le fil est renvoyé.
@@ -293,6 +279,12 @@ router.get('/thread', async (req, res) => {
   const scope = await buildEmailScope(req.user);
   const thread = await getThread(key, scope);
   if (!thread) return res.status(404).json({ error: 'Conversation introuvable' });
+  // Images inline (cid:) + URL d'uploads : résolution avant affichage du fil
+  try {
+    await resolveMessagesHtml(thread.messages || []);
+  } catch (err) {
+    console.error('[inbox] Résolution des images impossible:', err.message);
+  }
   res.json(thread);
 });
 
@@ -391,6 +383,13 @@ router.get('/sent', requirePermission('inbox.sync', ['ADMIN', 'TECHNICIAN', 'HOT
       }),
       prisma.ticketMessage.count({ where }),
     ]);
+
+    // Copies envoyées : la signature est stockée en cid:logo-signature → résolution pour l'affichage
+    try {
+      await resolveMessagesHtml(messages);
+    } catch (err) {
+      console.error('[inbox/sent] Résolution des images impossible:', err.message);
+    }
 
     res.json({ messages, total, limit, offset });
   } catch (err) {
@@ -578,6 +577,14 @@ router.get('/:id', async (req, res) => {
     where: { id: Number(req.params.id), ...(scope || {}) },
   });
   if (!item) return res.status(404).json({ error: 'Email introuvable' });
+  // Images inline (cid:) : résolution avant affichage du détail
+  if (item.bodyHtml) {
+    try {
+      item.bodyHtml = await resolveEmailHtml(item.bodyHtml, { incomingEmailIds: [item.id] });
+    } catch (err) {
+      console.error('[inbox/:id] Résolution des images impossible:', err.message);
+    }
+  }
   res.json(item);
 });
 

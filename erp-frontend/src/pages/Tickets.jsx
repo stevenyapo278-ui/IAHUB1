@@ -28,6 +28,7 @@ import {
   Tag,
   Trash2,
   ArchiveRestore,
+  Ban,
   ChevronLeft,
   ChevronRight,
   ArrowUpDown,
@@ -940,6 +941,7 @@ function buildListParams({ filters, debouncedSearch, sortBy, sortOrder, page, pa
   if (filters.closeSuggested) params.closeSuggested = filters.closeSuggested;
   if (filters.dateFrom) params.dateFrom = filters.dateFrom;
   if (filters.dateTo) params.dateTo = filters.dateTo;
+  if (filters.slaBreached) params.slaBreached = filters.slaBreached;
   if (debouncedSearch) params.search = debouncedSearch;
   return params;
 }
@@ -1079,6 +1081,32 @@ export default function Tickets() {
   const [trashItems, setTrashItems] = useState([]);
   const [trashLoading, setTrashLoading] = useState(false);
 
+  // ── Vue « Suggestions rejetées » (tickets refusés, clôtures IA refusées,
+  //    nouvelles demandes ignorées) — panneau latéral façon corbeille ──
+  const [showRejected, setShowRejected] = useState(false);
+  const [rejectedLoading, setRejectedLoading] = useState(false);
+  const [rejectedData, setRejectedData] = useState({ tickets: [], closures: [], newRequests: [] });
+  const [rejectedTab, setRejectedTab] = useState('tickets');
+  // Vue latérale (corbeille / rejetées) : masque la liste en render (les gardes des
+  // callbacks et effets restent calqués sur showTrash, comme avant).
+  const isSideView = showTrash || showRejected;
+  const rejectedCounts = {
+    tickets: rejectedData.tickets.length,
+    closures: rejectedData.closures.length,
+    newRequests: rejectedData.newRequests.length,
+  };
+  const rejectedTotal = rejectedCounts.tickets + rejectedCounts.closures + rejectedCounts.newRequests;
+  const rejectedItems = rejectedTab === 'tickets'
+    ? rejectedData.tickets
+    : rejectedTab === 'closures'
+      ? rejectedData.closures
+      : rejectedData.newRequests;
+  const rejectedEmptyLabel = rejectedTab === 'tickets'
+    ? 'Aucun ticket rejeté'
+    : rejectedTab === 'closures'
+      ? 'Aucune clôture suggérée rejetée'
+      : 'Aucune suggestion de nouvelle demande ignorée';
+
   const [sortBy, setSortBy] = useState(() => searchParams.get('sortBy') || 'createdAt');
   const [sortOrder, setSortOrder] = useState(() => searchParams.get('sortOrder') || 'desc');
 
@@ -1142,6 +1170,8 @@ export default function Tickets() {
     closeSuggested: searchParams.get('closeSuggested') || '',
     dateFrom: searchParams.get('dateFrom') || '',
     dateTo: searchParams.get('dateTo') || '',
+    // Drill-down « SLA dépassés » (Pouls système, Évolution tickets) — paramètre backend slaBreached
+    slaBreached: searchParams.get('slaBreached') || '',
   });
 
   const [showForm, setShowForm] = useState(searchParams.get('new') === '1');
@@ -1188,7 +1218,10 @@ export default function Tickets() {
     localStorage.setItem('tickets_view_mode', mode);
   }
 
-  useEffect(() => {
+  // Construit la query string qui REFLETTE l'état courant (filtres, tri, page, recherche).
+  // Servie à la fois pour ÉCRIRE l'URL (effet suivant) et pour DÉTECTER une URL venue de
+  // l'extérieur (effet « URL → état ») : si l'URL réelle diffère de ce reflet, c'est un lien.
+  function buildUrlFromState() {
     const params = new URLSearchParams();
     if (debouncedSearch) params.set('search', debouncedSearch);
     if (sortBy && sortBy !== 'createdAt') params.set('sortBy', sortBy);
@@ -1201,8 +1234,57 @@ export default function Tickets() {
         params.set(k, v);
       }
     });
-    setSearchParams(params, { replace: true });
+    return params;
+  }
+
+  // État → URL : miroir en place (replace) pour ne pas polluer l'historique.
+  useEffect(() => {
+    setSearchParams(buildUrlFromState(), { replace: true });
   }, [debouncedSearch, sortBy, sortOrder, filters, page]);
+
+  // URL → ÉTAT : les liens externes vers /tickets (?assignedToId=none depuis le Pouls
+  // système, ?priority=P1 depuis un widget du tableau de bord…) ne faisaient RIEN quand
+  // l'utilisateur était déjà sur /tickets : l'URL changeait, les filtres non, puis l'effet-
+  // miroir ci-dessus réécrivait aussitôt l'URL d'origine. On ne réapplique donc QUE si
+  // l'URL réelle diffère du reflet de l'état → aucun risque de boucle.
+  useEffect(() => {
+    if (buildUrlFromState().toString() === searchParams.toString()) return undefined;
+    const nextFilters = {
+      status: searchParams.get('status') ?? DEFAULT_STATUS_FILTER,
+      approvalStatus: searchParams.get('approvalStatus') || '',
+      priority: searchParams.get('priority') || '',
+      source: searchParams.get('source') || '',
+      origin: searchParams.get('origin') || '',
+      category: searchParams.get('category') || '',
+      teamId: searchParams.get('teamId') || '',
+      assignedToId: searchParams.get('assignedToId') || '',
+      mine: searchParams.get('mine') || '',
+      aiProcessed: searchParams.get('aiProcessed') || '',
+      closeSuggested: searchParams.get('closeSuggested') || '',
+      dateFrom: searchParams.get('dateFrom') || '',
+      dateTo: searchParams.get('dateTo') || '',
+      slaBreached: searchParams.get('slaBreached') || '',
+    };
+    const nextSearch = searchParams.get('search') || '';
+    const nextSortBy = searchParams.get('sortBy') || 'createdAt';
+    const nextSortOrder = searchParams.get('sortOrder') || 'desc';
+    const nextPage = parseInt(searchParams.get('page'), 10) || 1;
+
+    // Application DIFFÉRÉE : react-hooks/set-state-in-effect refuse tout setState appelé
+    // synchrone­ment dans le corps d'un effet (cf. AuthContext, qui passe par des callbacks).
+    const id = setTimeout(() => {
+      setFilters((prev) => (Object.keys(nextFilters).some((k) => (prev[k] || '') !== nextFilters[k]) ? nextFilters : prev));
+      if (nextSearch !== debouncedSearch) {
+        setSearchQuery(nextSearch);
+        setDebouncedSearch(nextSearch);
+      }
+      if (nextSortBy !== sortBy) setSortBy(nextSortBy);
+      if (nextSortOrder !== sortOrder) setSortOrder(nextSortOrder);
+      // filtre externe sans ?page → retour page 1
+      if (nextPage !== page) setPage(nextPage);
+    }, 0);
+    return () => clearTimeout(id);
+  }, [searchParams]);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -1237,6 +1319,7 @@ export default function Tickets() {
     if (filters.closeSuggested) p.set('closeSuggested', filters.closeSuggested);
     if (filters.dateFrom) p.set('dateFrom', filters.dateFrom);
     if (filters.dateTo) p.set('dateTo', filters.dateTo);
+    if (filters.slaBreached) p.set('slaBreached', filters.slaBreached);
     if (debouncedSearch) p.set('search', debouncedSearch);
     const qs = p.toString();
     return qs ? `?${qs}` : '';
@@ -1252,7 +1335,7 @@ export default function Tickets() {
   }, [columns]);
 
   function clearFilters() {
-    setFilters({ status: '', priority: '', source: '', category: '', teamId: '', assignedToId: '', mine: '', aiProcessed: '', approvalStatus: '', closeSuggested: '', dateFrom: '', dateTo: '' });
+    setFilters({ status: '', priority: '', source: '', category: '', teamId: '', assignedToId: '', mine: '', aiProcessed: '', approvalStatus: '', closeSuggested: '', dateFrom: '', dateTo: '', slaBreached: '' });
     setSearchQuery('');
     setDebouncedSearch('');
     setSortBy('createdAt');
@@ -1273,8 +1356,41 @@ export default function Tickets() {
   }, []);
 
   function openTrash() {
+    setShowRejected(false);
     setShowTrash(true);
     loadTrash();
+  }
+
+  const loadRejectedSuggestions = useCallback(async function loadRejectedSuggestions() {
+    setRejectedLoading(true);
+    try {
+      const { data } = await api.get('/tickets/rejected-suggestions');
+      setRejectedData({
+        tickets: data.tickets || [],
+        closures: data.closures || [],
+        newRequests: data.newRequests || [],
+      });
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur chargement des suggestions rejetées');
+    } finally {
+      setRejectedLoading(false);
+    }
+  }, []);
+
+  function openRejected() {
+    setShowTrash(false);
+    setShowRejected(true);
+    loadRejectedSuggestions();
+  }
+
+  async function recoverClosureSuggestion(id) {
+    try {
+      await api.post(`/tickets/${id}/recover-closure`);
+      toast.success(`Suggestion de clôture réactivée sur le ticket #${id}`);
+      loadRejectedSuggestions();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de la réactivation');
+    }
   }
 
   async function restoreFromTrash(id) {
@@ -1810,6 +1926,7 @@ export default function Tickets() {
     filters.status, filters.priority, filters.source, filters.category,
     filters.teamId, filters.assignedToId, filters.mine, filters.aiProcessed,
     filters.approvalStatus, filters.closeSuggested, filters.dateFrom, filters.dateTo,
+    filters.slaBreached,
   ].filter(Boolean).length;
 
   // ── AG Grid column definitions (Katalyst pinned style) ─────────────────────
@@ -2141,7 +2258,22 @@ export default function Tickets() {
             </button>
           )}
 
-          {viewMode === 'table' && !showTrash && (
+          {canApprove && (
+            <button onClick={openRejected}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+                showRejected ? 'bg-red-500/10 text-red-600 border-red-500/30' : 'border-border/30 text-muted-foreground hover:text-foreground hover:bg-surface-muted'
+              }`} title="Suggestions rejetées — tickets refusés, clôtures IA refusées, nouvelles demandes ignorées">
+              <Ban className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Rejetées</span>
+              {rejectedTotal > 0 && (
+                <span className="min-w-4 h-4 px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-black tabular-nums">
+                  {rejectedTotal}
+                </span>
+              )}
+            </button>
+          )}
+
+          {viewMode === 'table' && !isSideView && (
             <ColumnConfigPanel columns={columns} onChange={setColumns} onResetLayout={resetColumnLayout} />
           )}
 
@@ -2278,6 +2410,91 @@ export default function Tickets() {
                     </button>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+        ) : showRejected ? (
+          /* ── SUGGESTIONS REJETÉES (décisions négatives de la Hotline) ── */
+          <div className="flex-1 min-h-0 flex flex-col gap-3 px-4 sm:px-6 lg:px-8 py-3">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <h3 className="text-sm font-bold text-on-surface flex items-center gap-2">
+                <Ban className="w-4 h-4 text-red-500" />
+                Suggestions rejetées — {rejectedTotal} élément(s)
+              </h3>
+              <button onClick={() => setShowRejected(false)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-border/30 text-muted-foreground hover:text-foreground hover:bg-surface-muted transition-all">
+                <X className="w-3.5 h-3.5" /> Fermer
+              </button>
+            </div>
+            <p className="text-[11px] text-muted-foreground -mt-1">
+              Tickets refusés par la Hotline, clôtures suggérées par l'IA puis refusées et suggestions de nouvelles demandes ignorées.
+            </p>
+
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {[
+                { key: 'tickets', label: 'Tickets rejetés', count: rejectedCounts.tickets, Icon: Ban },
+                { key: 'closures', label: 'Clôtures IA', count: rejectedCounts.closures, Icon: CheckCircle2 },
+                { key: 'newRequests', label: 'Nouvelles demandes', count: rejectedCounts.newRequests, Icon: Ticket },
+              ].map(({ key, label, count, Icon }) => (
+                <button key={key} onClick={() => setRejectedTab(key)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-all cursor-pointer ${
+                    rejectedTab === key
+                      ? 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/40'
+                      : 'border-border/30 text-muted-foreground hover:text-foreground hover:bg-surface-muted'
+                  }`}>
+                  <Icon className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">{label}</span>
+                  <span className="sm:hidden">{label.split(' ')[0]}</span>
+                  <span className="min-w-4 h-4 px-1 flex items-center justify-center rounded-full bg-surface-muted text-[9px] font-black tabular-nums">{count}</span>
+                </button>
+              ))}
+            </div>
+
+            {rejectedLoading ? (
+              <div className="flex items-center justify-center py-10 text-muted-foreground text-xs gap-2">
+                <RefreshCw className="w-4 h-4 animate-spin" /> Chargement...
+              </div>
+            ) : rejectedItems.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center text-muted-foreground/50 text-sm italic">{rejectedEmptyLabel}</div>
+            ) : (
+              <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+                {rejectedItems.map((item) => {
+                  const id = item.id ?? item.ticketId;
+                  const isClosure = rejectedTab === 'closures';
+                  const isNewRequest = rejectedTab === 'newRequests';
+                  const when = isNewRequest ? item.dismissedAt : (isClosure ? item.rejectedAt : item.approvedAt);
+                  const reason = item.rejectionReason
+                    || (isNewRequest ? item.summary : null)
+                    || null;
+                  return (
+                    <div key={id} className="flex flex-wrap items-center gap-3 p-3 rounded-xl border border-border/20 bg-surface hover:border-border/40 transition-all">
+                      <span className="text-xs font-mono font-bold text-muted-foreground w-12 shrink-0">#{id}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-semibold text-on-surface truncate">{item.title}</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {isNewRequest ? 'Ignorée' : 'Rejetée'} {when ? new Date(when).toLocaleString('fr-FR') : ''}
+                          {isNewRequest && item.dismissedBy ? ` par ${item.dismissedBy}` : ''}
+                          {!isNewRequest && item.requester ? ` · demandeur ${item.requester.fullName}` : ''}
+                          {isNewRequest && item.sender ? ` · expéditeur ${item.sender}` : ''}
+                          {!isNewRequest && item.status ? ` · ${item.status}` : ''}
+                        </p>
+                        {reason && (
+                          <p className="text-[10px] text-muted-foreground/80 truncate" title={reason}>Motif : {reason}</p>
+                        )}
+                      </div>
+                      {isClosure && item.canRecover && (
+                        <button onClick={() => recoverClosureSuggestion(id)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 text-xs font-bold hover:bg-cyan-500/20 transition-colors cursor-pointer">
+                          <RefreshCw className="w-3.5 h-3.5" /> Réactiver
+                        </button>
+                      )}
+                      <button onClick={() => { setShowRejected(false); navigate(`/tickets/${id}`); }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border/30 text-muted-foreground text-xs font-semibold hover:text-foreground hover:bg-surface-muted transition-colors cursor-pointer">
+                        <Eye className="w-3.5 h-3.5" /> Ouvrir
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

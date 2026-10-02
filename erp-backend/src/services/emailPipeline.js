@@ -21,6 +21,7 @@ const { getBreaker } = require('../utils/circuitBreaker');
 const { htmlToText } = require('../utils/htmlToText');
 const { indexIncomingEmail, indexTicketMessage } = require('./emailRagService');
 const { isLowTrustSender } = require('./senderReputation');
+const { applyCidMap } = require('./emailHtml');
 
 // Wrapper pour appliquer les inbox rules sur TOUS les emails, quelle que soit l'issue du pipeline.
 // Évite la duplication du try/catch à chaque point de sortie.
@@ -419,7 +420,7 @@ async function processMessage(message, account) {
           .catch(() => {});
       }
 
-      const { cidMap } = await processIncomingAttachments({
+      const { cidMap } = await safeProcessIncomingAttachments({
         account, graphMessageId, incomingEmailId: incoming.id,
         ticketId: match.ticketId,
         simulatedAttachments: message.simulatedAttachments,
@@ -851,7 +852,7 @@ async function processMessage(message, account) {
         select: { impactedSites: true, isMajorIncident: true },
       });
 
-      const { cidMap } = await processIncomingAttachments({
+      const { cidMap } = await safeProcessIncomingAttachments({
         account, graphMessageId, incomingEmailId: incoming.id,
         ticketId: similarMatch.ticketId,
         simulatedAttachments: message.simulatedAttachments,
@@ -1011,7 +1012,7 @@ async function processMessage(message, account) {
     erpTicketId = txResult.erpTicketId;
     ticketMessageId = txResult.ticketMessageId;
 
-    const { cidMap } = await processIncomingAttachments({
+    const { cidMap } = await safeProcessIncomingAttachments({
       account, graphMessageId, incomingEmailId: incoming.id,
       ticketId: erpTicketId,
       simulatedAttachments: message.simulatedAttachments,
@@ -1271,15 +1272,25 @@ async function runEmailPipeline() {
   return results;
 }
 
+// Les pièces jointes ne doivent jamais faire échouer la réception d'un mail : en cas d'échec
+// (API Graph indisponible, quota, message simulé…) on continue avec un cidMap vide — les cid:
+// restants sont alors réécrits (ou retirés) à la lecture par services/emailHtml.js.
+async function safeProcessIncomingAttachments(args) {
+  try {
+    return await processIncomingAttachments(args);
+  } catch (err) {
+    console.warn('[emailPipeline] Pièces jointes non récupérées:', err.message);
+    return { saved: [], cidMap: {} };
+  }
+}
+
 function rewriteCidRefs(html, cidMap) {
-  if (!html || !cidMap || Object.keys(cidMap).length === 0) return html;
-  return html.replace(/cid:([^"'>\s]+)/gi, (match, cid) => {
-    const cleanCid = cid.replace(/^<|>$/g, '');
-    const mapped = cidMap[cleanCid] || cidMap[cid];
-    if (mapped) return mapped;
-    const docId = cidMap[cid] || cidMap[cleanCid];
-    return docId ? (String(docId).startsWith('/') ? docId : `/glpi/document/${docId}/file`) : match;
-  });
+  if (!html || !cidMap) return html;
+  // Lookup insensible à la casse + candidats ('<image001@corp>' → 'image001@corp' → 'image001') :
+  // un cid non résolu est laissé tel quel, il est réécrit à la lecture (services/emailHtml.js).
+  const lowerMap = new Map(Object.entries(cidMap).map(([k, v]) => [String(k).toLowerCase(), v]));
+  if (lowerMap.size === 0) return html;
+  return applyCidMap(html, lowerMap);
 }
 
 module.exports = { runEmailPipeline, processMessage };

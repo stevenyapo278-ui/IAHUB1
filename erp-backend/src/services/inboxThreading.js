@@ -272,6 +272,22 @@ async function listThreads({ status, q, priority, attachments, category, read, d
   return { items: threads, total: threads.length };
 }
 
+// Portée email d'un utilisateur — extraite de inbox.routes.js pour être partagée avec
+// GET /dashboard/pulse (mêmes règles : un demandeur ne voit que les emails qui le
+// concernent, les autres rôles voient toute la boîte).
+async function buildEmailScope(user) {
+  if (!user || user.role !== 'REQUESTER') return null;
+  const email = (user.email || '').toLowerCase();
+  const tickets = await prisma.ticket.findMany({ where: { requesterId: user.sub }, select: { id: true } });
+  const ticketIds = tickets.map((t) => t.id);
+  return {
+    OR: [
+      { fromEmail: { equals: email, mode: 'insensitive' } },
+      { erpTicketId: { in: ticketIds } },
+    ],
+  };
+}
+
 // Compteurs globaux pour les badges des dossiers (façon Outlook)
 // Les badges built-in n comptent que les emails dans l'inbox (folderId IS NULL)
 async function getInboxCounts(scope = null) {
@@ -359,4 +375,4 @@ async function getThread(key, scope = null) {
   return thread || null;
 }
 
-module.exports = { listThreads, getThread, buildThreads, threadKeyFor, getInboxCounts };
+module.exports = { listThreads, getThread, buildThreads, threadKeyFor, getInboxCounts, buildEmailScope };

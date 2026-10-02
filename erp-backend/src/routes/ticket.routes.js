@@ -20,6 +20,7 @@ const { mergeTickets } = require('../services/ticketMergeService');
 const { normalizeLinkType, normalizeLinkEndpoints, normalizeParentChildType, resolveChildrenIds } = require('../utils/ticketLinks');
 const { formatTicketTitle, UNDETERMINED } = require('../utils/ticketTitle');
 const { sanitizeTicketHtml } = require('../utils/security');
+const { loadCidMap, resolveHtml } = require('../services/emailHtml');
 const multer = require('multer');
 const { validateUpload, safeFilename: makeSafeFilename } = require('../utils/security');
 
@@ -604,46 +605,145 @@ router.get('/:id/preview', async (req, res) => {
 
 // ── Suggestions de clôture rejetées — récupération ─────────────────────
 // AVANT /:id pour éviter le matching "rejected-closures" comme un id
-router.get('/rejected-closures', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
-  try {
-    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
-
-    const events = await prisma.ticketEvent.findMany({
-      where: { type: 'CLOSURE_REJECTED' },
-      orderBy: { createdAt: 'desc' },
-      take: limit * 2,
-      include: {
-        ticket: {
-          select: {
-            id: true, title: true, content: true, status: true, priority: true,
-            category: true, closeSuggested: true, closeSuggestionCount: true,
-            sourceEmail: true, sourceName: true, createdAt: true,
-            requester: { select: { id: true, fullName: true, email: true } },
-            assignedTo: { select: { id: true, fullName: true } },
-          },
+async function fetchRejectedClosures(limit) {
+  const events = await prisma.ticketEvent.findMany({
+    where: { type: 'CLOSURE_REJECTED' },
+    orderBy: { createdAt: 'desc' },
+    take: limit * 2,
+    include: {
+      ticket: {
+        select: {
+          id: true, title: true, content: true, status: true, priority: true,
+          category: true, closeSuggested: true, closeSuggestionCount: true,
+          sourceEmail: true, sourceName: true, createdAt: true,
+          requester: { select: { id: true, fullName: true, email: true } },
+          assignedTo: { select: { id: true, fullName: true } },
         },
       },
-    });
+    },
+  });
 
-    const seen = new Set();
-    const rejected = [];
-    for (const ev of events) {
-      if (!ev.ticket || seen.has(ev.ticket.id)) continue;
-      if (['SOLVED', 'CLOSED'].includes(ev.ticket.status)) continue;
-      if (ev.ticket.closeSuggested) continue;
-      seen.add(ev.ticket.id);
+  const seen = new Set();
+  const rejected = [];
+  for (const ev of events) {
+    if (!ev.ticket || seen.has(ev.ticket.id)) continue;
+    if (['SOLVED', 'CLOSED'].includes(ev.ticket.status)) continue;
+    if (ev.ticket.closeSuggested) continue;
+    seen.add(ev.ticket.id);
       rejected.push({
         ...ev.ticket,
         rejectedAt: ev.createdAt,
         rejectionReason: ev.payload?.reason || null,
         rejectionConfidence: ev.payload?.confidence ?? null,
-        canRecover: (ev.ticket.closeSuggestionCount || 0) < 2,
+        // récupérable seulement si le compteur est cohérent avec POST /:id/recover-closure (>0) < MAX (2)
+        canRecover: (ev.ticket.closeSuggestionCount || 0) > 0 && (ev.ticket.closeSuggestionCount || 0) < 2,
       });
-      if (rejected.length >= limit) break;
-    }
+    if (rejected.length >= limit) break;
+  }
+  return rejected;
+}
 
-    return res.json(rejected);
+router.get('/rejected-closures', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    return res.json(await fetchRejectedClosures(limit));
   } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Suggestions de tickets rejetées (vue Tickets > bouton « Rejetées ») ──
+// Regroupe les trois décisions négatives de la Hotline :
+//   tickets     : tickets refusés (approvalStatus = REJECTED, motif dans approvalNote)
+//   closures    : clôtures suggérées par l'IA puis refusées (event CLOSURE_REJECTED)
+//   newRequests : suggestions « créer une nouvelle demande » ignorées (event ..._DISMISSED)
+async function fetchRejectedNewRequests(limit) {
+  const events = await prisma.ticketEvent.findMany({
+    where: { type: 'NEW_TICKET_SUGGESTED_DISMISSED' },
+    orderBy: { createdAt: 'desc' },
+    take: limit * 2,
+    include: {
+      ticket: {
+        select: {
+          id: true, title: true, status: true, priority: true, category: true, createdAt: true,
+          requester: { select: { id: true, fullName: true, email: true } },
+          assignedTo: { select: { id: true, fullName: true } },
+        },
+      },
+    },
+  });
+
+  const seen = new Set();
+  const items = [];
+  for (const ev of events) {
+    if (!ev.ticket || seen.has(ev.ticket.id)) continue;
+    seen.add(ev.ticket.id);
+    items.push({
+      ticketId: ev.ticket.id,
+      title: ev.ticket.title,
+      status: ev.ticket.status,
+      priority: ev.ticket.priority,
+      category: ev.ticket.category,
+      ticketCreatedAt: ev.ticket.createdAt,
+      requester: ev.ticket.requester,
+      assignedTo: ev.ticket.assignedTo,
+      sender: ev.payload?.sender || null,
+      summary: ev.payload?.summary || null,
+      dismissedAt: ev.createdAt,
+      dismissedBy: ev.actor,
+    });
+    if (items.length >= limit) break;
+  }
+
+  // Enrichit avec la suggestion d'origine (confiance / intention de l'IA)
+  if (items.length > 0) {
+    const suggestions = await prisma.ticketEvent.findMany({
+      where: { ticketId: { in: items.map((i) => i.ticketId) }, type: 'NEW_TICKET_SUGGESTED' },
+      orderBy: { createdAt: 'desc' },
+      select: { ticketId: true, createdAt: true, payload: true },
+    });
+    const latest = new Map();
+    for (const s of suggestions) if (!latest.has(s.ticketId)) latest.set(s.ticketId, s);
+    for (const item of items) {
+      const suggestion = latest.get(item.ticketId);
+      if (!suggestion) continue;
+      item.confidence = suggestion.payload?.confidence ?? null;
+      item.intent = suggestion.payload?.intent || null;
+      item.suggestedAt = suggestion.createdAt;
+      if (!item.summary) item.summary = suggestion.payload?.newIssueSummary || null;
+    }
+  }
+  return items;
+}
+
+router.get('/rejected-suggestions', requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+
+    const [tickets, closures, newRequests] = await Promise.all([
+      prisma.ticket.findMany({
+        where: { approvalStatus: 'REJECTED' },
+        orderBy: { approvedAt: 'desc' },
+        take: limit,
+        select: {
+          id: true, title: true, status: true, priority: true, category: true,
+          source: true, origin: true, sourceName: true, sourceEmail: true,
+          createdAt: true, closedAt: true, approvedAt: true, approvalNote: true,
+          requester: { select: { id: true, fullName: true, email: true } },
+          assignedTo: { select: { id: true, fullName: true } },
+        },
+      }),
+      fetchRejectedClosures(limit),
+      fetchRejectedNewRequests(limit),
+    ]);
+
+    return res.json({
+      tickets: tickets.map((t) => ({ ...t, rejectionReason: t.approvalNote || null })),
+      closures,
+      newRequests,
+    });
+  } catch (err) {
+    console.error('[ticket.routes] Erreur rejected-suggestions:', err);
     return res.status(500).json({ error: err.message });
   }
 });
@@ -985,6 +1085,20 @@ router.get('/:id', async (req, res) => {
   const isStaffMember = ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'].includes(req.user.role);
   if (!isStaffMember) {
     ticket.followups = ticket.followups.filter((f) => !f.isPrivate);
+  }
+
+  // Images des emails/suivis : résolution des cid: inline, des URL absolues en HTTP (mixed
+  // content) et retrait des <img> dont le fichier n'existe plus sur le volume.
+  try {
+    const cidMap = await loadCidMap({ ticketIds: [ticket.id] });
+    for (const msg of ticket.messages || []) {
+      if (msg.bodyHtml) msg.bodyHtml = resolveHtml(msg.bodyHtml, cidMap);
+    }
+    for (const fu of ticket.followups || []) {
+      if (fu.content) fu.content = resolveHtml(fu.content, cidMap);
+    }
+  } catch (err) {
+    console.error('[ticket.routes] Résolution des images impossible:', err.message);
   }
 
   return res.json(ticket);

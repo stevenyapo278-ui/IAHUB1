@@ -262,6 +262,9 @@ export default function TicketFilterBar({
           {filters.closeSuggested && (
             <ActiveChip label="Clôture suggérée" onRemove={() => onUpdate('closeSuggested', '')} />
           )}
+          {filters.slaBreached && (
+            <ActiveChip label="SLA dépassé" onRemove={() => onUpdate('slaBreached', '')} />
+          )}
           {searchQuery && (
             <ActiveChip
               label={`"${searchQuery}"`}
