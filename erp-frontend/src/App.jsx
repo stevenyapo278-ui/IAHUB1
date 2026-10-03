@@ -234,7 +234,7 @@ export default function App() {
             <Route
               path="ai-weekly-reports"
               element={
-                <ProtectedRoute roles={['ADMIN', 'HOTLINE']}>
+                <ProtectedRoute permission="aiweeklyreports.manage">
                   <AiWeeklyReports />
                 </ProtectedRoute>
               }

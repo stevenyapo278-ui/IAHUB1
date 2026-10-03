@@ -17,6 +17,7 @@ const { withHealthTracking } = require('./services/schedulerHealth');
 const { seedPermissionGroups } = require('./services/permissionGroupSeeder');
 const { runSlaMonitor } = require('./services/slaService');
 const { runDueDateMonitor } = require('./services/dueDateService');
+const { maybeGenerateWeeklyReport } = require('./services/aiWeeklyReportScheduler');
 const { logger } = require('./utils/logger');
 const prisma = require('./prismaClient');
 
@@ -216,6 +217,12 @@ scheduleSync('SLA', runSlaMonitor, (s) => s.slaMonitorIntervalSeconds);
 // (socket + notification persistée + email au technicien). Fréquence configurable dans
 // Paramètres > Automatisation (dueDateMonitorIntervalSeconds, 0 = désactivé).
 scheduleSync('échéances tickets', runDueDateMonitor, (s) => s.dueDateMonitorIntervalSeconds);
+
+// Rapport hebdomadaire d'apprentissage IA (page /ai-weekly-reports). Tick toutes les
+// 30 min : le service ne génère que si la config l'active (aiWeeklyAutoEnabled) et si le
+// jour/heure configurés sont atteints ; le dédoublonnage de fenêtre évite les doublons
+// quand plusieurs ticks tombent dans la même heure.
+scheduleSync('rapport apprentissage IA', maybeGenerateWeeklyReport, () => 30 * 60);
 
 // Relance des brouillons AiEmailDraft en attente (Paramètres > Automatisation > Relance des
 // brouillons) — le délai d'attente avant relance est configurable, mais la vérification elle-même

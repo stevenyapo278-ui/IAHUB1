@@ -794,6 +794,21 @@ model SystemSettings {
   needsHumanReviewNotificationEnabled Boolean  @default(true)
   needsHumanReviewRecipients          String[] @default([])
 
+  // ── Apprentissage IA hebdomadaire (page /ai-weekly-reports) ───────────────
+  // Génération automatique hebdomadaire (jour/heure, fuseau Africa/Abidjan UTC+0).
+  // false = génération manuelle uniquement (bouton de la page).
+  aiWeeklyAutoEnabled          Boolean @default(true)
+  aiWeeklyDay                  Int     @default(1) // 0=Dimanche … 6=Samedi
+  aiWeeklyHour                 Int     @default(7) // 0-23
+  // Corrections min. du même pattern (champ + avant→après) pour proposer une règle.
+  aiWeeklyMinOccurrences       Int     @default(3)
+  // Rejets min. du même domaine expéditeur pour proposer une règle anti-spam.
+  aiWeeklyDomainThreshold      Int     @default(5)
+  // Confiance min. (0 à 1) pour inclure une règle dans le rapport.
+  aiWeeklyConfidenceThreshold  Float   @default(0.5)
+  // Fenêtre glissante d'analyse en jours.
+  aiWeeklyWindowDays           Int     @default(7)
+
   // Configuration de visibilité de la barre latérale par rôle (Paramètres > Navigation).
   // Clé = chemin de la route (ex: "/tickets"), Valeur = liste des rôles autorisés à voir cet élément.
   // Si null ou vide, les defaults codés en dur (fallbackRoles) s'appliquent.
