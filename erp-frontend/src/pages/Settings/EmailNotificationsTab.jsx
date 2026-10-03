@@ -4,6 +4,7 @@ import api from '../../api/client';
 import {
   Mail, UserCheck, AlertTriangle, Clock, RefreshCw, CheckCircle2,
   TrendingUp, Shield, Send, Bell, Volume2, MousePointer2, FlaskConical, Eye,
+  ChevronRight,
 } from 'lucide-react';
 import {
   isSoundsEnabled,
@@ -20,7 +21,7 @@ import {
   requestBrowserNotifPermission,
 } from '../../utils/browserNotification';
 import Toggle from '../../components/Toggle';
-import { SettingRow, inputClass, itemVariants } from './SettingsComponents';
+import { SettingRow, inputClass, itemVariants, SectionModal } from './SettingsComponents';
 import AckSignatureCard from './AckSignatureCard';
 import EmailTemplatesSection from './EmailTemplatesSection';
 
@@ -81,6 +82,9 @@ export default function EmailNotificationsTab() {
 
   // ── Gabarits éditables (Contenu des emails) ──
   const [templates, setTemplates] = useState(null);
+
+  // ── Rubrique ouverte en modale (page résumé → modale de section) ──
+  const [openSection, setOpenSection] = useState(null);
 
   function loadTemplates() {
     return api.get('/email-templates')
@@ -241,6 +245,44 @@ export default function EmailNotificationsTab() {
       .filter(Boolean);
   }
 
+  // Bandeau d'erreur réutilisé sur la page ET dans la modale ouverte.
+  const errorBanner = (
+    <AnimatePresence>
+      {error && (
+        <motion.div
+          key="settings-error"
+          initial={{ opacity: 0, height: 0, y: -8 }}
+          animate={{ opacity: 1, height: 'auto', y: 0 }}
+          exit={{ opacity: 0, height: 0, y: -8 }}
+          transition={{ duration: 0.3 }}
+          className="border border-red-500/20 bg-red-500/5 text-red-500 p-md rounded-xl font-body-md overflow-hidden"
+        >
+          {error}
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+
+  // Cartes résumé de la page : chaque rubrique s'ouvre dans sa modale.
+  const enabledCount = EMAIL_TOGGLES.filter((t) => settings[t.key] ?? true).length;
+  const failureRecipientCount = settings.emailFailureNotificationRecipients?.length
+    || (settings.emailFailureNotificationEmail ? 1 : 0);
+  const activeAdditional = [
+    settings.ticketCreationEmailEnabled,
+    settings.needsHumanReviewNotificationEnabled,
+    settings.dailySummaryEnabled,
+    settings.observerSummaryEnabled,
+  ].filter(Boolean).length + (failureRecipientCount > 0 ? 1 : 0);
+  const activeLocal = [browserNotif, soundsEnabled].filter(Boolean).length;
+
+  const sections = [
+    { id: 'content', icon: 'mail', title: 'Contenu des emails', desc: "Personnalisez le message, l'objet et la signature de chaque email envoyé, puis éditez les gabarits.", stat: templates ? `${templates.length} gabarits éditables` : 'Chargement des gabarits…' },
+    { id: 'toggles', icon: 'toggle_on', title: 'Activer / Désactiver par type', desc: "Choisissez quels emails automatiques sont envoyés selon leur événement déclencheur.", stat: `${enabledCount}/${EMAIL_TOGGLES.length} types activés` },
+    { id: 'additional', icon: 'forward_to_inbox', title: 'Emails additionnels', desc: 'Création de ticket, révision humaine, récapitulatifs quotidien et observateurs, échec IA.', stat: `${activeAdditional}/5 rubriques actives` },
+    { id: 'local', icon: 'notifications', title: 'Notifications locales', desc: 'Notifications navigateur (bureau) et sons de notification.', stat: `${activeLocal}/2 actives` },
+  ];
+  const active = sections.find((s) => s.id === openSection);
+
   return (
     <motion.div
       initial="hidden"
@@ -248,33 +290,51 @@ export default function EmailNotificationsTab() {
       variants={{ visible: { transition: { staggerChildren: 0.04 } } }}
       className="space-y-xl"
     >
-      <AnimatePresence>
-        {error && (
-          <motion.div
-            key="settings-error"
-            initial={{ opacity: 0, height: 0, y: -8 }}
-            animate={{ opacity: 1, height: 'auto', y: 0 }}
-            exit={{ opacity: 0, height: 0, y: -8 }}
-            transition={{ duration: 0.3 }}
-            className="border border-red-500/20 bg-red-500/5 text-red-500 p-md rounded-xl font-body-md overflow-hidden"
+      {errorBanner}
+
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* PAGE RÉSUMÉ : 4 cartes, chacune ouvre sa rubrique en modale        */}
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-lg">
+        {sections.map((s) => (
+          <motion.button
+            key={s.id}
+            type="button"
+            variants={itemVariants}
+            whileHover={{ y: -2, borderColor: 'var(--color-outline-variant)' }}
+            whileTap={{ scale: 0.99 }}
+            onClick={() => setOpenSection(s.id)}
+            className="bento-card text-left p-lg flex items-start gap-4 cursor-pointer"
           >
-            {error}
-          </motion.div>
-        )}
-      </AnimatePresence>
+            <div className="p-2.5 rounded-xl bg-primary/10 border border-primary/20 text-primary shrink-0">
+              <span className="material-symbols-outlined text-2xl">{s.icon}</span>
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-headline-sm text-headline-sm text-on-surface font-semibold">{s.title}</span>
+                <ChevronRight className="w-4 h-4 text-on-surface-variant shrink-0" />
+              </div>
+              <p className="font-body-sm text-body-sm text-on-surface-variant mt-1.5">{s.desc}</p>
+              <div className="mt-2.5 text-xs font-semibold text-primary">{s.stat}</div>
+            </div>
+          </motion.button>
+        ))}
+      </div>
 
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* SECTION 1 : CONTENU DES EMAILS (accusé, signature + gabarits éditables) */}
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      <div className="space-y-md">
-        <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
-          <span className="material-symbols-outlined text-primary text-2xl">mail</span>
-          <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Contenu des emails</h4>
-        </div>
-        <p className="text-xs text-on-surface-variant px-1 -mt-2">
-          Personnalisez le message, l'objet et la signature de chaque email envoyé. Sans modification, les gabarits par défaut sont utilisés.
-        </p>
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      {/* MODALE : SECTION 1 — CONTENU DES EMAILS (accusé, signature, gabarits) */}
+      {/* ═══════════════════════════════════════════════════════════════════ */}
+      <SectionModal
+        open={openSection !== null}
+        onClose={() => setOpenSection(null)}
+        title={active?.title}
+        description={active?.desc}
+        icon={active?.icon}
+      >
+        {errorBanner}
 
+        {openSection === 'content' && (
+        <div className="space-y-md">
         <AckSignatureCard
           settings={settings}
           updateSetting={updateSetting}
@@ -308,17 +368,14 @@ export default function EmailNotificationsTab() {
           reloadTemplates={loadTemplates}
           setError={setError}
         />
-      </div>
+        </div>
+        )}
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* SECTION 2 : EMAILS PAR TYPE */}
+      {/* MODALE : SECTION 2 — EMAILS PAR TYPE                                    */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
-      <div className="space-y-md">
-        <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
-          <span className="material-symbols-outlined text-primary text-2xl">toggle_on</span>
-          <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Activer / Désactiver par type</h4>
-        </div>
-        <p className="text-xs text-on-surface-variant px-1 -mt-2">Choisissez quels emails automatiques sont envoyés. Chaque type correspond à un événement déclencheur dans le cycle de vie d'un ticket.</p>
+        {openSection === 'toggles' && (
+        <div className="space-y-md">
 
         {categories.map((category) => (
         <div key={category} className="space-y-3">
@@ -376,7 +433,6 @@ export default function EmailNotificationsTab() {
         </div>
       </div>
       ))}
-      </div>
 
       {/* Résultat du test email */}
       <AnimatePresence>
@@ -399,16 +455,14 @@ export default function EmailNotificationsTab() {
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* SECTION 3 : RÉCAPITULATIF QUOTIDIEN & NOTIFICATIONS EMAIL */}
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      <div className="space-y-md">
-        <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
-          <span className="material-symbols-outlined text-primary text-2xl">mail</span>
-          <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Emails additionnels</h4>
         </div>
+        )}
 
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* MODALE : SECTION 3 — RÉCAPITULATIF QUOTIDIEN & NOTIFICATIONS EMAIL      */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+        {openSection === 'additional' && (
+        <div className="space-y-md">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-lg">
           <div className="space-y-md">
             {/* Notification à chaque création de ticket par un demandeur */}
@@ -816,17 +870,14 @@ export default function EmailNotificationsTab() {
             </motion.div>
           </div>
         </div>
-      </div>
-
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      {/* SECTION 4 : NOTIFICATIONS LOCALES (navegateur + sons) */}
-      {/* ═══════════════════════════════════════════════════════════════════════ */}
-      <div className="space-y-md">
-        <div className="flex items-center gap-2 border-b border-outline-variant/40 pb-sm">
-          <span className="material-symbols-outlined text-primary text-2xl">notifications</span>
-          <h4 className="font-headline-md text-headline-md text-on-surface font-bold">Notifications locales</h4>
         </div>
+        )}
 
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* MODALE : SECTION 4 — NOTIFICATIONS LOCALES (navigateur + sons)         */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+        {openSection === 'local' && (
+        <div className="space-y-md">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-lg">
           <div className="space-y-md">
             <SettingRow
@@ -903,7 +954,9 @@ export default function EmailNotificationsTab() {
             />
           </div>
         </div>
-      </div>
+        </div>
+        )}
+      </SectionModal>
     </motion.div>
   );
 }
