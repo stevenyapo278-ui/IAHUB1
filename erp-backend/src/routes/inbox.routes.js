@@ -989,4 +989,63 @@ router.post(
   }
 );
 
+// ── Statut d'un email (menu contextuel : marquer spam, lu/non-lu) ───────────
+// Liste blanche : status est un String en base, on n'accepte que les statuts du
+// domaine métier pour éviter d'écrire n'importe quelle valeur.
+const EMAIL_STATUS_VALUES = ['PENDING', 'PROCESSING', 'DONE', 'ERROR', 'RETRY', 'DEAD_LETTER', 'SPAM'];
+
+router.patch(
+  '/:id',
+  requirePermission('inbox.sync', ['ADMIN', 'SUPERADMIN', 'HOTLINE']),
+  async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'Identifiant invalide' });
+
+    const data = {};
+    if (req.body.status !== undefined) {
+      if (!EMAIL_STATUS_VALUES.includes(req.body.status)) {
+        return res.status(400).json({ error: `Statut invalide (attendu : ${EMAIL_STATUS_VALUES.join(', ')})` });
+      }
+      data.status = req.body.status;
+      // Marquer spam synchronise le flag IA utilisé par les filtres et le pipeline
+      if (req.body.status === 'SPAM') data.aiIsSpam = true;
+    }
+    if (req.body.aiIsSpam !== undefined) data.aiIsSpam = req.body.aiIsSpam === true;
+    if (req.body.isRead !== undefined) data.isRead = req.body.isRead === true;
+    if (Object.keys(data).length === 0) return res.status(400).json({ error: 'Aucune modification fournie' });
+
+    const scope = await buildEmailScope(req.user);
+    const existing = await prisma.incomingEmail.findFirst({ where: { id, ...(scope || {}) } });
+    if (!existing) return res.status(404).json({ error: 'Email introuvable' });
+
+    const updated = await prisma.incomingEmail.update({ where: { id }, data });
+    const io = req.app.get('io');
+    if (io) io.emit('email_updated', updated);
+    return res.json(updated);
+  }
+);
+
+// ── Suppression définitive d'un email (menu contextuel « Supprimer ») ───────
+// Les pièces jointes rattachées (TicketAttachment.incomingEmailId) sont détachées
+// automatiquement par la FK onDelete: SetNull — aucun fichier orphelin.
+router.delete(
+  '/:id',
+  requirePermission('inbox.sync', ['ADMIN', 'SUPERADMIN', 'HOTLINE']),
+  async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'Identifiant invalide' });
+
+    const scope = await buildEmailScope(req.user);
+    const existing = await prisma.incomingEmail.findFirst({ where: { id, ...(scope || {}) } });
+    if (!existing) return res.status(404).json({ error: 'Email introuvable' });
+
+    await prisma.incomingEmail.delete({ where: { id } });
+    const io = req.app.get('io');
+    // L'événement déclenche un rechargement de la liste côté client (charge utile
+    // minimale : l'email n'existe plus, la comparaison de fil se fera par id).
+    if (io) io.emit('email_updated', { id, deleted: true, subject: existing.subject });
+    return res.json({ ok: true, id });
+  }
+);
+
 module.exports = router;

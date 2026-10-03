@@ -1004,6 +1004,7 @@ model IncomingEmail {
   nextRetryAt DateTime?
   lastError   String?
 
+  recipients     String[]           @default([])
   ccRecipients   String[]           @default([])
   hasAttachments Boolean            @default(false)
   attachments    TicketAttachment[]

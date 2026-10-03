@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef, useMemo, memo, useTransition 
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Virtuoso } from 'react-virtuoso';
+import { Virtuoso, GroupedVirtuoso } from 'react-virtuoso';
 import { toast } from 'sonner';
 import api from '../api/client';
 import Skeleton from '../components/Skeleton';
@@ -13,6 +13,13 @@ import { useSocket } from '../context/SocketContext';
 import { useFilterParam, useFilterParams } from '../hooks/useFilterParam';
 import { sanitizeHtml } from '../utils/sanitize';
 import DateRangePicker from '../components/ui/date-range-picker';
+import ConfirmDialog from '../components/ConfirmDialog';
+import ThreadItem from '../components/inbox/ThreadItem';
+import MessageCard from '../components/inbox/MessageCard';
+import {
+  STATUS_CONFIG, PRIORITY_CONFIG, initialOf, displayAddr,
+  participantsLabel, formatDateTime, dateGroupLabel,
+} from '../components/inbox/inboxShared';
 import {
   Inbox as InboxIcon, MailOpen, RefreshCw, Clock, CheckCircle2, XCircle, Ban,
   Paperclip, Search, X, FlaskConical, Bot, ArrowUpRight, Reply, ChevronDown,
@@ -22,32 +29,7 @@ import {
   MapPin, ShieldAlert, Gauge, Layers,
 } from 'lucide-react';
 
-const STATUS_LABELS = {
-  PENDING: 'En attente',
-  PROCESSING: 'Traitement...',
-  DONE: 'Traité',
-  ERROR: 'Erreur',
-  SPAM: 'Spam',
-};
-
-const STATUS_CONFIG = {
-  PENDING: { label: 'En attente', icon: Clock,        color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/20' },
-  PROCESSING:{label: 'Traitement',icon: RefreshCw,    color: 'text-blue-400',   bg: 'bg-blue-500/10',   border: 'border-blue-500/20'   },
-  DONE:    { label: 'Traité',     icon: CheckCircle2, color: 'text-emerald-400',bg: 'bg-emerald-500/10',border: 'border-emerald-500/20' },
-  ERROR:   { label: 'Erreur',     icon: XCircle,      color: 'text-red-400',    bg: 'bg-red-500/10',    border: 'border-red-500/20'    },
-  RETRY:   { label: 'Relance',    icon: RefreshCw,    color: 'text-amber-400',  bg: 'bg-amber-500/10',  border: 'border-amber-500/20'  },
-  DEAD_LETTER: { label: 'Échec',  icon: AlertTriangle,color: 'text-red-500',    bg: 'bg-red-500/15',    border: 'border-red-500/25'    },
-  SPAM:    { label: 'Spam',       icon: Ban,          color: 'text-zinc-400',   bg: 'bg-zinc-500/10',   border: 'border-zinc-500/20'   },
-  INFORMATIONAL: { label: 'Info', icon: Mail,          color: 'text-on-surface-variant',  bg: 'bg-surface-container',  border: 'border-slate-500/20'  },
-  NEEDS_REVIEW: { label: 'Révision', icon: AlertTriangle, color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20' },
-};
-
-const PRIORITY_CONFIG = {
-  P1: { label: 'P1 Critique', icon: Flame,         color: 'text-red-400',    bg: 'bg-red-500',    stripe: '#ef4444' },
-  P2: { label: 'P2 Haute',   icon: AlertTriangle,  color: 'text-orange-400', bg: 'bg-orange-500', stripe: '#f97316' },
-  P3: { label: 'P3 Moyenne', icon: ChevronRight,   color: 'text-amber-400',  bg: 'bg-amber-500',  stripe: '#f59e0b' },
-  P4: { label: 'P4 Basse',   icon: ChevronRight,   color: 'text-blue-400',   bg: 'bg-blue-500',   stripe: '#3b82f6' },
-};
+// STATUS_CONFIG / PRIORITY_CONFIG : voir ../components/inbox/inboxShared.js
 
 // Dossiers façon Outlook
 const FOLDERS = [
@@ -84,168 +66,8 @@ const PRIORITY_OPTIONS = [
   { value: 'P4', label: 'P4 Basse' },
 ];
 
-const AVATAR_COLORS = ['bg-sky-600', 'bg-indigo-600', 'bg-emerald-600', 'bg-violet-600', 'bg-rose-600'];
-
-function initialOf(name, email) {
-  return ((name || email) || '?').charAt(0).toUpperCase();
-}
-
-function displayAddr(addr) {
-  const s = String(addr || '');
-  return s.length > 28 ? `${s.slice(0, 26)}…` : s;
-}
-
-function participantsLabel(participants) {
-  if (!participants || participants.length === 0) return 'Inconnu';
-  const names = participants.slice(0, 2).map((p) => p.name || p.email);
-  if (participants.length > 2) return `${names.join(', ')} +${participants.length - 2}`;
-  return names.join(', ');
-}
-
-// Date façon Outlook : toujours avec l'heure (ex. 14:32, Hier 14:32, 12 août 07:21)
-function formatDate(d) {
-  if (!d) return '';
-  const date = new Date(d);
-  const now = new Date();
-  const time = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-  const startOfDay = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate());
-  const diffDays = Math.round((startOfDay(now) - startOfDay(date)) / 86400000);
-  if (diffDays === 0) return time;
-  if (diffDays === 1) return `Hier ${time}`;
-  if (diffDays < 7) return `${date.toLocaleDateString('fr-FR', { weekday: 'short' })} ${time}`;
-  if (date.getFullYear() === now.getFullYear()) {
-    return `${date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })} ${time}`;
-  }
-  return `${date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })} ${time}`;
-}
-
-function formatDateTime(d) {
-  return new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
-
-// ── Thread item mémoïsé (ne re-render que si ses props changent) ─────────────
-const ThreadItem = memo(function ThreadItem({ thread, isSelected, isUnread, isCompact, onSelect, onContextMenu, onToggleSelect }) {
-  const latest = thread.latest || {};
-  const pCfg = PRIORITY_CONFIG[latest.aiPriority];
-  const sCfg = STATUS_CONFIG[latest.status];
-  const SIcon = sCfg?.icon;
-  const sender = latest.fromName || latest.fromEmail || participantsLabel(thread.participants);
-  const snippet = latest.aiSummary || latest.bodyPreview || '';
-
-  return (
-    <button
-      onClick={() => onSelect(thread)}
-      onContextMenu={(e) => onContextMenu(e, thread)}
-      className={`w-full text-left flex items-stretch gap-0 border-b border-outline-variant/15 transition-all group ${
-        isSelected
-          ? 'bg-primary/[0.06] ring-1 ring-inset ring-primary/20'
-          : isUnread
-            ? 'bg-surface-container-low/40 hover:bg-primary/[0.03]'
-            : 'hover:bg-primary/[0.03]'
-      }`}
-    >
-      {/* Bande de priorité */}
-      <div className="w-0.5 shrink-0 rounded-r" style={{ background: pCfg ? pCfg.stripe : 'transparent' }} />
-
-      <div className={`flex items-start gap-2.5 flex-1 min-w-0 px-3 ${isCompact ? 'py-2' : 'py-3'}`}>
-        {/* Case à cocher */}
-        <div className="shrink-0 flex items-center pt-1.5" onClick={(e) => e.stopPropagation()}>
-          <input
-            type="checkbox"
-            checked={isSelected}
-            onChange={() => onToggleSelect(thread.id)}
-            className="cursor-pointer accent-sky-500 w-3.5 h-3.5 rounded"
-          />
-        </div>
-
-        {/* Avatar */}
-        <div className={`shrink-0 rounded-xl flex items-center justify-center text-[11px] font-bold text-white ${pCfg ? pCfg.bg : isUnread ? 'bg-primary' : 'bg-zinc-500'}`}
-          style={{ width: isCompact ? 30 : 34, height: isCompact ? 30 : 34 }}
-        >
-          {initialOf(latest.fromName, latest.fromEmail)}
-        </div>
-
-        {/* Contenu */}
-        <div className="flex-1 min-w-0">
-          {/* Ligne 1 : expéditeur + heure */}
-          <div className="flex items-center gap-1.5">
-            <span className={`truncate ${isUnread ? 'text-on-surface font-bold' : 'text-on-surface font-semibold'}`}
-              style={{ fontSize: isCompact ? 11 : 12 }}
-            >
-              {sender}
-            </span>
-            {isUnread && <CircleDot className="w-2.5 h-2.5 text-primary shrink-0" />}
-            <span className="ml-auto shrink-0 text-[10px] text-on-surface-variant/70">{formatDate(latest.date)}</span>
-          </div>
-
-          {/* Ligne 2 : sujet + badges */}
-          <div className="flex items-center gap-1.5 mt-0.5">
-            <span className={`truncate ${isUnread ? 'text-on-surface font-bold' : 'text-on-surface'}`} style={{ fontSize: isCompact ? 11 : 12 }}>
-              {latest.subject || '(sans objet)'}
-            </span>
-            {thread.count > 1 && (
-              <span className="shrink-0 inline-flex items-center justify-center min-w-4 px-1 py-0.5 rounded-full bg-primary/10 text-primary text-[9px] font-bold border border-primary/20">
-                {thread.count}
-              </span>
-            )}
-            {thread.hasAttachments && <Paperclip className="w-3 h-3 text-on-surface-variant/70 shrink-0" />}
-            {pCfg && <pCfg.icon className="w-3 h-3 shrink-0" style={{ color: pCfg.stripe }} />}
-          </div>
-
-          {/* Ligne 3 : extrait IA */}
-          {snippet && (
-            <p className={`truncate mt-0.5 ${latest.aiSummary ? 'text-on-surface-variant italic' : 'text-on-surface-variant/70'}`} style={{ fontSize: isCompact ? 10 : 11 }}>
-              {snippet}
-            </p>
-          )}
-
-          {/* Ligne 4 : CC + métadonnées */}
-          {(thread.ccRecipients?.length > 0 || latest.erpTicketId || sCfg) && (
-            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-              {thread.ccRecipients?.length > 0 && (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-[9px] font-semibold text-on-surface-variant">
-                  <Send className="w-2.5 h-2.5 shrink-0" />
-                  Cc : {thread.ccRecipients.slice(0, 2).map(displayAddr).join(', ')}
-                  {thread.ccRecipients.length > 2 ? ` +${thread.ccRecipients.length - 2}` : ''}
-                </span>
-              )}
-              {latest.erpTicketId && (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-primary/10 text-primary border border-primary/20 text-[9px] font-bold hover:bg-primary/15 transition-all cursor-pointer">
-                  <ArrowUpRight className="w-2.5 h-2.5" /> Ticket #{latest.erpTicketId}
-                </span>
-              )}
-              {sCfg && (
-                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold border ${sCfg.bg} ${sCfg.color} ${sCfg.border}`}>
-                  {SIcon && <SIcon className="w-2 h-2" />}
-                  {sCfg.label}
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Actions rapides au hover (Outlook-like) */}
-      <div className="hidden group-hover:flex items-center gap-0.5 shrink-0 px-2 self-center" onClick={(e) => e.stopPropagation()}>
-        <button onClick={() => onToggleRead(thread)}
-          className="p-1.5 rounded-lg text-on-surface-variant/60 hover:text-sky-400 hover:bg-sky-500/10 transition-all cursor-pointer"
-          title={isUnread ? 'Marquer lu' : 'Marquer non lu'}>
-          {isUnread ? <MailOpen className="w-3.5 h-3.5" /> : <CircleDot className="w-3.5 h-3.5" />}
-        </button>
-        <button onClick={() => onMove(thread)}
-          className="p-1.5 rounded-lg text-on-surface-variant/60 hover:text-violet-400 hover:bg-violet-500/10 transition-all cursor-pointer"
-          title="Déplacer">
-          <ArrowRight className="w-3.5 h-3.5" />
-        </button>
-        {thread.hasAttachments && (
-          <span className="p-1.5 text-on-surface-variant/40">
-            <Paperclip className="w-3.5 h-3.5" />
-          </span>
-        )}
-      </div>
-    </button>
-  );
-});
+// initialOf / displayAddr / participantsLabel / formatDate / formatDateTime
+// : voir ../components/inbox/inboxShared.js
 
 // Petit sélecteur déroulant pour la barre d'outils (façon ruban Outlook)
 function FilterSelect({ label, icon: Icon, value, options, onChange, active }) {
@@ -325,7 +147,24 @@ export default function Inbox() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [bulkAction, setBulkAction] = useState(null);
-  const [expandedErrors, setExpandedErrors] = useState(new Set());
+
+  // ── Confirmation générique (remplace les window.confirm natifs) ─────
+  // confirmCfg : { title, message, confirmLabel, danger, run } — run est appelé
+  // par ConfirmDialog, le loading et les erreurs sont gérés ici.
+  const [confirmCfg, setConfirmCfg] = useState(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  async function runConfirmed() {
+    if (!confirmCfg) return;
+    setConfirmBusy(true);
+    try {
+      await confirmCfg.run();
+      setConfirmCfg(null);
+    } catch (err) {
+      toast.error(err?.response?.data?.error || err?.message || 'Erreur');
+    } finally {
+      setConfirmBusy(false);
+    }
+  }
 
   // ── Dossiers masqués (persistés dans localStorage) ──────────────────
   const [hiddenFolders, setHiddenFolders] = useState(() => {
@@ -482,20 +321,29 @@ export default function Inbox() {
     closeContextMenu();
   }
 
-  async function ctxMarkSpam() {
+  function ctxMarkSpam() {
     if (!contextMenu) return;
     const t = contextMenu.thread;
-    if (!confirm('Marquer ce fil comme spam ?')) return;
-    try {
-      for (const emailId of (t.emailIds || [])) {
-        await api.patch(`/inbox/${emailId}`, { status: 'SPAM', aiIsSpam: true });
-      }
-      cacheRef.current.clear();
-      setThreads((prev) => prev.filter((th) => th.id !== t.id));
-      refreshCounts();
-      toast.success('Marqué comme spam');
-    } catch (err) { toast.error('Erreur'); }
+    const emailIds = t.emailIds || (t.latest ? [t.latest.id] : []);
     closeContextMenu();
+    if (emailIds.length === 0) { toast.error('Aucun email à traiter dans ce fil'); return; }
+    setConfirmCfg({
+      title: 'Marquer comme spam',
+      message: `Les ${emailIds.length} email(s) de ce fil seront déplacés vers le dossier Spam.`,
+      confirmLabel: 'Marquer spam',
+      danger: true,
+      run: async () => {
+        for (const emailId of emailIds) {
+          await api.patch(`/inbox/${emailId}`, { status: 'SPAM', aiIsSpam: true });
+        }
+        cacheRef.current.clear();
+        setThreads((prev) => prev.filter((th) => th.id !== t.id));
+        if (selectedThread?.id === t.id) { setSelectedThread(null); setThreadDetail(null); }
+        refreshCounts();
+        window.dispatchEvent(new CustomEvent('sidebar:refresh-badges'));
+        toast.success('Marqué comme spam');
+      },
+    });
   }
 
   function openCreateTicket(target) {
@@ -620,20 +468,33 @@ export default function Inbox() {
     await handleUnspam(contextMenu.thread);
   }
 
-  async function ctxDelete() {
+  function deleteThread(t) {
+    const emailIds = t.emailIds || (t.latest ? [t.latest.id] : []);
+    if (emailIds.length === 0) { toast.error('Aucun email à supprimer dans ce fil'); return; }
+    setConfirmCfg({
+      title: 'Supprimer ce fil',
+      message: `Les ${emailIds.length} email(s) de cette conversation seront définitivement supprimés. Cette action est irréversible.`,
+      confirmLabel: 'Supprimer',
+      danger: true,
+      run: async () => {
+        for (const emailId of emailIds) {
+          await api.delete(`/inbox/${emailId}`);
+        }
+        cacheRef.current.clear();
+        setThreads((prev) => prev.filter((th) => th.id !== t.id));
+        if (selectedThread?.id === t.id) { setSelectedThread(null); setThreadDetail(null); }
+        refreshCounts();
+        window.dispatchEvent(new CustomEvent('sidebar:refresh-badges'));
+        toast.success('Fil supprimé');
+      },
+    });
+  }
+
+  function ctxDelete() {
     if (!contextMenu) return;
     const t = contextMenu.thread;
-    if (!confirm('Supprimer ce fil ?')) return;
-    try {
-      for (const emailId of (t.emailIds || [])) {
-        await api.delete(`/inbox/${emailId}`);
-      }
-      cacheRef.current.clear();
-      setThreads((prev) => prev.filter((th) => th.id !== t.id));
-      refreshCounts();
-      toast.success('Fil supprimé');
-    } catch (err) { toast.error('Erreur'); }
     closeContextMenu();
+    deleteThread(t);
   }
 
   function ctxCreateRule() {
@@ -780,15 +641,20 @@ export default function Inbox() {
     }
   }
 
-  async function handleDeleteFolder(id) {
-    if (!confirm('Les emails de ce dossier reviendront dans la boîte de réception. Supprimer ?')) return;
-    try {
-      await api.delete(`/inbox/folders/${id}`);
-      loadCustomFolders();
-      if (folder === `folder-${id}`) setFolder('all');
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'Erreur lors de la suppression');
-    }
+  function handleDeleteFolder(id) {
+    const f = customFolders.find((x) => x.id === id);
+    setConfirmCfg({
+      title: 'Supprimer le dossier',
+      message: `« ${f?.name || 'Ce dossier'} » — Les emails de ce dossier reviendront dans la boîte de réception. Supprimer ?`,
+      confirmLabel: 'Supprimer',
+      danger: true,
+      run: async () => {
+        await api.delete(`/inbox/folders/${id}`);
+        loadCustomFolders();
+        if (folder === `folder-${id}`) setFolder('all');
+        toast.success('Dossier supprimé');
+      },
+    });
   }
 
   async function handleMoveToFolder(folderId) {
@@ -846,7 +712,17 @@ export default function Inbox() {
     };
     const onUpdated = (email) => {
       load();
-      if (selectedThread && (keyOfEmail(email) === selectedThread.id)) refreshSelection();
+      if (!selectedThread) return;
+      // Les clés de repli (subj-…) ne sont pas recalculables côté client à partir
+      // d'un seul email → on compare par id d'email / conversationId réel.
+      const inOpenThread = (selectedThread.emailIds || []).includes(email.id)
+        || (email.conversationId && email.conversationId === selectedThread.conversationId);
+      if (email.deleted) {
+        // Email du fil supprimé : refermer le volet plutôt que de recharger un 404
+        if (inOpenThread) { setSelectedThread(null); setThreadDetail(null); }
+        return;
+      }
+      if (inOpenThread) refreshSelection();
     };
     socket.on('email_received', onReceived);
     socket.on('email_updated', onUpdated);
@@ -958,10 +834,6 @@ export default function Inbox() {
     fetchSentEmails(0, '');
   }
 
-  function keyOfEmail(email) {
-    return email.conversationId || `single-${email.id}`;
-  }
-
   function toggleSelect(id) { setSelectedIds((ids) => ids.includes(id) ? ids.filter((i) => i !== id) : [...ids, id]); }
   function toggleSelectAll() { setSelectedIds((ids) => ids.length === threads.length ? [] : threads.map((t) => t.id)); }
 
@@ -978,6 +850,8 @@ export default function Inbox() {
       case 'pending': return counts.pending;
       case 'done': return counts.done;
       case 'error': return counts.error;
+      case 'retry': return counts.retry;
+      case 'dead_letter': return counts.deadLetter;
       case 'spam': return counts.spam;
       case 'attachments': return counts.withAttachments;
       default: return null;
@@ -994,8 +868,43 @@ export default function Inbox() {
 
   const isCompact = density === 'compact';
 
+  // Regroupement par date façon Outlook (en-têtes collants).
+  // Uniquement pour un tri chronologique, sinon les groupes seraient fragmentés.
+  const dateGroups = useMemo(() => {
+    if (threads.length === 0) return null;
+    if (sortBy !== 'date' && sortBy !== 'date_asc') return null;
+    const labels = [];
+    const counts = [];
+    let last = null;
+    for (const t of threads) {
+      const label = dateGroupLabel(t.latest?.date);
+      if (label !== last) {
+        labels.push(label);
+        counts.push(0);
+        last = label;
+      }
+      counts[counts.length - 1] += 1;
+    }
+    return { labels, counts };
+  }, [threads, sortBy]);
+
+  const renderThread = (t) => (
+    <ThreadItem
+      thread={t}
+      isSelected={selectedThread?.id === t.id}
+      isUnread={t.isUnread}
+      isCompact={isCompact}
+      onSelect={openThread}
+      onContextMenu={handleContextMenu}
+      onToggleSelect={toggleSelect}
+      onToggleRead={(th) => ctxMarkRead(th.isUnread)}
+      onMove={(th) => { setSelectedIds([th.id]); setShowMoveModal(true); }}
+      onDelete={deleteThread}
+    />
+  );
+
   return (
-    <div className="flex flex-col h-[calc(100vh-64px)] max-h-[calc(100vh-64px)] overflow-hidden">
+    <div className="flex flex-col h-[calc(100vh-56px)] max-h-[calc(100vh-56px)] overflow-hidden">
       {/* ── Barre supérieure ──────────────────────────────────────────────── */}
       <div className="shrink-0 border-b border-outline-variant/30 bg-surface-container-lowest px-4 sm:px-6 py-3 flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-3 min-w-0">
@@ -1050,36 +959,34 @@ export default function Inbox() {
           {canSync && (
             <button
               onClick={openLogsModal}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/50 bg-surface-container text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high text-xs font-semibold transition-all cursor-pointer"
+              className="p-2.5 rounded-xl border border-outline-variant/50 bg-surface-container text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-all cursor-pointer"
+              title="Logs IA"
             >
-              <FlaskConical className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Logs IA</span>
+              <FlaskConical className="w-4 h-4" />
             </button>
           )}
           <button
             onClick={openSentModal}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 text-xs font-semibold transition-all cursor-pointer"
+            className="p-2.5 rounded-xl border border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-all cursor-pointer"
             title="Historique des mails envoyés"
           >
-            <Send className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Mails envoyés</span>
+            <Send className="w-4 h-4" />
           </button>
           <button
             onClick={() => setShowRulesModal(true)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-violet-500/40 text-violet-600 dark:text-violet-400 hover:bg-violet-500/10 text-xs font-semibold transition-all cursor-pointer"
+            className="p-2.5 rounded-xl border border-violet-500/40 text-violet-600 dark:text-violet-400 hover:bg-violet-500/10 transition-all cursor-pointer"
             title="Règles de tri automatique"
           >
-            <Filter className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Règles</span>
+            <Filter className="w-4 h-4" />
           </button>
           {canSync && (
             <button
               onClick={handleSync}
               disabled={syncing}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-blue-500 text-white text-xs font-bold shadow-md shadow-sky-500/20 transition-all hover:brightness-110 disabled:opacity-60 cursor-pointer"
+              className="p-2.5 rounded-xl bg-primary text-white shadow-md shadow-primary/25 transition-all hover:brightness-110 disabled:opacity-60 cursor-pointer"
+              title={syncing ? 'Synchronisation…' : 'Synchroniser les emails'}
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">{syncing ? 'Syncing...' : 'Sync'}</span>
+              <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
             </button>
           )}
         </div>
@@ -1110,11 +1017,14 @@ export default function Inbox() {
               const c = countFor(f.id);
               return (
                 <div key={f.id} className="relative group">
+                  {isActive && (
+                    <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-r-full bg-primary z-10" />
+                  )}
                   <button
                     onClick={() => { setFolder(f.id); }}
                     className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                       isActive
-                        ? 'bg-primary/10 text-primary border border-primary/20'
+                        ? 'bg-primary/[0.12] text-primary border border-primary/25'
                         : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface border border-transparent'
                     }`}
                   >
@@ -1122,7 +1032,7 @@ export default function Inbox() {
                     <span className="flex-1 text-left truncate">{f.label}</span>
                     {c != null && c > 0 && (
                       <span className={`shrink-0 min-w-4 px-1 py-0.5 rounded-full text-center text-[9px] font-bold ${
-                        isActive ? 'bg-sky-500/20 text-sky-300' : 'bg-surface-container-high text-on-surface-variant'
+                        isActive ? 'bg-primary/20 text-primary' : 'bg-surface-container-high text-on-surface-variant'
                       }`}>
                         {c > 999 ? '999+' : c}
                       </span>
@@ -1158,12 +1068,15 @@ export default function Inbox() {
                     <button
                       key={`folder-${f.id}`}
                       onClick={() => { setFolder(`folder-${f.id}`); }}
-                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer group ${
+                    className={`relative w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer group ${
                       isActive
-                        ? 'bg-primary/10 text-primary border border-primary/20'
+                        ? 'bg-primary/[0.12] text-primary border border-primary/25'
                         : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface border border-transparent'
                     }`}
                     >
+                      {isActive && (
+                        <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-r-full bg-primary z-10" />
+                      )}
                       <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: f.color || '#6b7280' }} />
                       <span className="flex-1 text-left truncate">{f.name}</span>
                       {f.emailCount > 0 && (
@@ -1345,7 +1258,7 @@ export default function Inbox() {
                     {selectedIds.length} sélectionnée{selectedIds.length !== 1 ? 's' : ''}
                   </span>
                   <div className="ml-auto flex items-center gap-1.5">
-                    {activeFolder === 'spam' && (
+                    {folder === 'spam' && (
                       <button
                         onClick={handleBulkUnspam}
                         disabled={bulkAction}
@@ -1416,27 +1329,30 @@ export default function Inbox() {
                   </button>
                 )}
               </div>
-            ) : (
-              <Virtuoso
-                className={`h-full transition-opacity duration-150 ${isPending ? 'opacity-60' : 'opacity-100'}`}
-                data={threads}
-                computeItemKey={(index, t) => t.id}
-                overscan={300}
-                itemContent={(index, t) => (
-                  <ThreadItem
-                    key={t.id}
-                    thread={t}
-                    isSelected={selectedThread?.id === t.id}
-                    isUnread={t.isUnread}
-                    isCompact={isCompact}
-                    onSelect={openThread}
-                    onContextMenu={handleContextMenu}
-                    onToggleSelect={toggleSelect}
-                    onToggleRead={(thread) => ctxMarkRead(thread.isUnread)}
-                    onMove={(thread) => { setSelectedIds([thread.id]); setShowMoveModal(true); }}
-                  />
-                )}
-              />
+            ) : dateGroups ? (
+                <GroupedVirtuoso
+                  className={`h-full transition-opacity duration-150 ${isPending ? 'opacity-60' : 'opacity-100'}`}
+                  totalCount={threads.length}
+                  groupCounts={dateGroups.counts}
+                  groupContent={(gi) => (
+                    <div className="flex items-baseline gap-2 bg-surface-container-lowest/95 backdrop-blur-sm border-b border-outline-variant/15 px-4 py-1.5">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant/75">
+                        {dateGroups.labels[gi]}
+                      </span>
+                      <span className="h-px flex-1 bg-outline-variant/30" />
+                    </div>
+                  )}
+                  itemContent={(itemIndex, groupIndex) => renderThread(threads[itemIndex])}
+                  overscan={300}
+                />
+              ) : (
+                <Virtuoso
+                  className={`h-full transition-opacity duration-150 ${isPending ? 'opacity-60' : 'opacity-100'}`}
+                  data={threads}
+                  computeItemKey={(index, t) => t.id}
+                  overscan={300}
+                  itemContent={(index, t) => renderThread(t)}
+                />
             )}
           </div>
         </div>
@@ -1600,166 +1516,15 @@ export default function Inbox() {
 
                   {/* Corps de la conversation */}
                   <div className="flex-1 overflow-y-auto">
-                    <div className="max-w-3xl mx-auto px-5 py-6 space-y-6">
-                      {(threadDetail.messages || []).map((msg) => {
-                        const isInbound = msg.kind === 'inbound';
-                        const sCfg = STATUS_CONFIG[msg.status];
-                        const pCfg = PRIORITY_CONFIG[msg.aiPriority];
-                        return (
-                          <div key={`${msg.kind}-${msg.emailId || msg.messageId}`} className="space-y-4">
-                            {/* En-tête du message */}
-                            <div className="flex items-start gap-3">
-                              <div className={`w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-xs font-bold text-white ${isInbound ? (pCfg ? pCfg.bg : 'bg-zinc-600') : 'bg-sky-600'}`}>
-                                {initialOf(msg.fromName, msg.fromEmail)}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="text-xs font-bold text-on-surface truncate">{msg.fromName || msg.fromEmail}</span>
-                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${
-                                    isInbound ? 'bg-surface-container text-on-surface-variant border-outline-variant/40' : 'bg-sky-500/10 text-sky-400 border-sky-500/20'
-                                  }`}>
-                                    {isInbound ? <MailOpen className="w-2.5 h-2.5" /> : <Reply className="w-2.5 h-2.5" />}
-                                    {isInbound ? 'Reçu' : 'Envoyé'}
-                                  </span>
-                                  {!isInbound && msg.ccRecipients?.length > 0 && (
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold text-on-surface-variant border border-outline-variant/40 bg-surface-container">
-                                      <Send className="w-2.5 h-2.5" /> Cc : {msg.ccRecipients.map(displayAddr).join(', ')}
-                                    </span>
-                                  )}
-                                  {sCfg && isInbound && (
-                                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${sCfg.bg} ${sCfg.color} ${sCfg.border}`}>
-                                      <sCfg.icon className="w-2.5 h-2.5" />
-                                      {sCfg.label}
-                                    </span>
-                                  )}
-                                  {pCfg && isInbound && (
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border" style={{ color: pCfg.stripe, borderColor: pCfg.stripe + '44', backgroundColor: pCfg.stripe + '11' }}>
-                                      <pCfg.icon className="w-2.5 h-2.5" />
-                                      {pCfg.label}
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="text-[10px] text-on-surface-variant mt-0.5">{formatDateTime(msg.receivedAt || msg.timestamp)}</p>
-                              </div>
-                            </div>
-
-                            {/* Analyse IA (entrant uniquement) */}
-                            {isInbound && (msg.aiSummary || msg.aiCategory || msg.aiTeam || msg.aiConfidence != null) && (
-                              <div className="ml-12 rounded-2xl border border-purple-500/20 bg-purple-500/5 overflow-hidden">
-                                <div className="flex items-center gap-2 px-4 py-2.5 border-b border-purple-500/15">
-                                  <div className="p-1.5 rounded-lg bg-purple-500/10">
-                                    <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                                  </div>
-                                  <span className="text-[10px] font-bold text-purple-400 uppercase tracking-wider">Analyse IA — Gemini</span>
-                                  {msg.aiConfidence != null && (
-                                    <span className="ml-auto text-[10px] font-bold text-purple-300">
-                                      {Math.round(msg.aiConfidence * 100)}% confiance
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="p-4 space-y-3">
-                                  {msg.aiSummary && (
-                                    <p className="text-sm text-on-surface leading-relaxed italic">"{msg.aiSummary}"</p>
-                                  )}
-                                  <div className="grid grid-cols-2 gap-3">
-                                    {msg.aiCategory && (
-                                      <div className="bg-surface-container/40 rounded-xl p-3">
-                                        <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Catégorie</p>
-                                        <p className="text-sm font-semibold text-on-surface">{msg.aiCategory}</p>
-                                      </div>
-                                    )}
-                                    {msg.aiTeam && (
-                                      <div className="bg-surface-container/40 rounded-xl p-3">
-                                        <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Équipe suggérée</p>
-                                        <p className="text-sm font-semibold text-on-surface">{msg.aiTeam}</p>
-                                      </div>
-                                    )}
-                                    {msg.glpiTicketId && (
-                                      <div className="bg-surface-container/40 rounded-xl p-3">
-                                        <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Ticket Externe</p>
-                                        <p className="text-sm font-semibold text-on-surface">#{msg.glpiTicketId}</p>
-                                      </div>
-                                    )}
-                                    {msg.erpTicketId && (
-                                      <div className="bg-surface-container/40 rounded-xl p-3">
-                                        <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">Ticket ERP</p>
-                                        <p className="text-sm font-semibold text-primary cursor-pointer" onClick={() => navigate(`/tickets/${msg.erpTicketId}`)}>#{msg.erpTicketId}</p>
-                                      </div>
-                                    )}
-                                  </div>
-                                  {msg.aiConfidence != null && (
-                                    <div className="h-1.5 bg-surface-container rounded-full overflow-hidden">
-                                      <motion.div
-                                        initial={{ width: 0 }}
-                                        animate={{ width: `${Math.round(msg.aiConfidence * 100)}%` }}
-                                        transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-                                        className="h-full bg-gradient-to-r from-purple-500 to-violet-400 rounded-full"
-                                      />
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Erreur */}
-                            {isInbound && msg.error && (
-                              <div className="ml-12 rounded-xl border border-red-500/20 bg-red-500/5 p-4 space-y-2">
-                                <div className="flex items-start gap-3">
-                                  <XCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                                  <p className="text-sm text-red-400 flex-1">{msg.error}</p>
-                                  {msg.errorDetail && (
-                                    <button
-                                      onClick={() => {
-                                        const key = msg.emailId || msg.messageId;
-                                        setExpandedErrors((prev) => {
-                                          const next = new Set(prev);
-                                          if (next.has(key)) next.delete(key); else next.add(key);
-                                          return next;
-                                        });
-                                      }}
-                                      className="shrink-0 flex items-center gap-1 text-[11px] text-red-300/70 hover:text-red-300 transition-colors cursor-pointer"
-                                    >
-                                      <Info className="w-3 h-3" />
-                                      {expandedErrors.has(msg.emailId || msg.messageId) ? 'Masquer' : 'Détails'}
-                                      {expandedErrors.has(msg.emailId || msg.messageId)
-                                        ? <ChevronUp className="w-3 h-3" />
-                                        : <ChevronDown className="w-3 h-3" />}
-                                    </button>
-                                  )}
-                                </div>
-                                {msg.errorDetail && expandedErrors.has(msg.emailId || msg.messageId) && (
-                                  <div className="ml-7 rounded-lg border border-red-500/10 bg-red-500/[0.03] p-3">
-                                    <pre className="text-xs text-red-300/60 whitespace-pre-wrap font-sans leading-relaxed">{msg.errorDetail}</pre>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-
-                            {/* Corps du message */}
-                            <div className={`rounded-2xl border border-outline-variant/25 ${isInbound ? 'bg-surface-container-low/40' : 'bg-sky-500/[0.03]'} overflow-hidden`}>
-                              <div className="flex items-center gap-2 px-4 py-2.5 border-b border-outline-variant/15">
-                                <MailOpen className="w-3.5 h-3.5 text-on-surface-variant" />
-                                <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">
-                                  {isInbound ? 'Corps du message' : 'Réponse envoyée'}
-                                </span>
-                              </div>
-                              <div className="p-5">
-                                {(() => {
-                                  const html = msg.bodyHtml;
-                                  const plain = isInbound ? msg.bodyPreview : msg.body;
-                                  return html ? (
-                                    <div className="text-sm text-on-surface leading-relaxed prose prose-sm dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} />
-                                  ) : plain ? (
-                                    <pre className="text-sm text-on-surface leading-relaxed whitespace-pre-wrap font-sans">{plain}</pre>
-                                  ) : (
-                                    <p className="text-sm text-on-surface-variant italic">Corps du message non disponible.</p>
-                                  );
-                                })()}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
+                    <div className="px-5 py-6 space-y-6">
+                      {[...(threadDetail.messages || [])].reverse().map((msg, i, arr) => (
+                        <MessageCard
+                          key={`${msg.kind}-${msg.emailId || msg.messageId}`}
+                          msg={msg}
+                          isLast={i === arr.length - 1}
+                          onOpenTicket={(m) => navigate(`/tickets/${m.erpTicketId}`)}
+                        />
+                      ))}
                       {threadDetail.messages.length === 0 && (
                         <div className="flex flex-col items-center justify-center gap-3 text-on-surface-variant py-16">
                           <Mail className="w-10 h-10 text-outline/30" />
@@ -2015,7 +1780,7 @@ export default function Inbox() {
                     value={sentSearch}
                     onChange={(e) => setSentSearch(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') { setSentPage(0); fetchSentEmails(0, sentSearch); } }}
-                    className="w-full bg-surface border border-outline-variant/40 rounded-xl pl-9 pr-8 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+            className="w-full bg-surface-container border border-outline-variant/40 rounded-full pl-9 pr-8 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
                   />
                   {sentSearch && (
                     <button onClick={() => { setSentSearch(''); setSentPage(0); fetchSentEmails(0, ''); }} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant/50 hover:text-on-surface cursor-pointer">
@@ -2879,6 +2644,18 @@ export default function Inbox() {
         </AnimatePresence>,
         document.body
       )}
+
+      {/* Confirmation générique (spam, suppression de fil, dossier…) */}
+      <ConfirmDialog
+        open={!!confirmCfg}
+        title={confirmCfg?.title || 'Confirmer'}
+        message={confirmCfg?.message}
+        confirmLabel={confirmCfg?.confirmLabel || 'Confirmer'}
+        danger={!!confirmCfg?.danger}
+        loading={confirmBusy}
+        onConfirm={runConfirmed}
+        onCancel={() => { if (!confirmBusy) setConfirmCfg(null); }}
+      />
     </div>
   );
 }
@@ -2925,7 +2702,7 @@ function InboxRulesModal({ onClose }) {
   const [folders, setFolders] = useState([]);
 
   useEffect(() => {
-    setLoading(true);
+    // loading est déjà initialisé à true : pas de setState synchrone ici
     Promise.all([
       api.get('/inbox/rules').catch(() => ({ data: [] })),
       api.get('/inbox/folders').catch(() => ({ data: [] })),
@@ -3001,14 +2778,34 @@ function InboxRulesModal({ onClose }) {
     }
   }
 
-  async function handleDelete(id) {
-    if (!confirm('Supprimer cette règle ?')) return;
+  // Confirmation locale du panneau de règles (ConfirmDialog plutôt que window.confirm)
+  const [confirmRule, setConfirmRule] = useState(null);
+  const [confirmRuleBusy, setConfirmRuleBusy] = useState(false);
+  async function runRuleConfirm() {
+    if (!confirmRule) return;
+    setConfirmRuleBusy(true);
     try {
-      await api.delete(`/inbox/rules/${id}`);
-      setRules((r) => r.filter((x) => x.id !== id));
+      await confirmRule.run();
+      setConfirmRule(null);
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Erreur');
+      toast.error(err?.response?.data?.error || err?.message || 'Erreur');
+    } finally {
+      setConfirmRuleBusy(false);
     }
+  }
+
+  function handleDelete(id) {
+    setConfirmRule({
+      title: 'Supprimer la règle',
+      message: 'Supprimer définitivement cette règle de triage ? Les emails suivants ne seront plus déplacés automatiquement.',
+      confirmLabel: 'Supprimer',
+      danger: true,
+      run: async () => {
+        await api.delete(`/inbox/rules/${id}`);
+        setRules((r) => r.filter((x) => x.id !== id));
+        toast.success('Règle supprimée');
+      },
+    });
   }
 
   async function handleToggle(id) {
@@ -3033,14 +2830,16 @@ function InboxRulesModal({ onClose }) {
     }
   }
 
-  async function handleApply(id) {
-    if (!confirm('Appliquer cette règle sur tous les emails existants ?')) return;
-    try {
-      const { data } = await api.post(`/inbox/rules/${id}/apply`);
-      toast.success(`${data.applied} email(s) déplacé(s) sur ${data.total} analysés`);
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'Erreur lors de l\'application');
-    }
+  function handleApply(id) {
+    setConfirmRule({
+      title: 'Appliquer la règle',
+      message: 'Appliquer cette règle sur tous les emails existants ? Les emails correspondants seront déplacés immédiatement.',
+      confirmLabel: 'Appliquer',
+      run: async () => {
+        const { data } = await api.post(`/inbox/rules/${id}/apply`);
+        toast.success(`${data.applied} email(s) déplacé(s) sur ${data.total} analysés`);
+      },
+    });
   }
 
   const FIELD_OPTIONS = [
@@ -3285,6 +3084,17 @@ function InboxRulesModal({ onClose }) {
           </div>
         )}
       </motion.div>
+
+      <ConfirmDialog
+        open={!!confirmRule}
+        title={confirmRule?.title || 'Confirmer'}
+        message={confirmRule?.message}
+        confirmLabel={confirmRule?.confirmLabel || 'Confirmer'}
+        danger={!!confirmRule?.danger}
+        loading={confirmRuleBusy}
+        onConfirm={runRuleConfirm}
+        onCancel={() => { if (!confirmRuleBusy) setConfirmRule(null); }}
+      />
     </div>
   );
 }

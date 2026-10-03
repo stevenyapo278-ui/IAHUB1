@@ -134,7 +134,7 @@ async function retryDeadLetters() {
           conversationId: incoming.conversationId,
           internetMessageId: incoming.internetMessageId,
           hasAttachments: incoming.hasAttachments,
-          toRecipients: [],
+          toRecipients: (incoming.recipients || []).map(e => ({ emailAddress: { address: e } })),
           ccRecipients: (incoming.ccRecipients || []).map(e => ({ emailAddress: { address: e } })),
           internetMessageHeaders: [],
         };

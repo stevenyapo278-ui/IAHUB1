@@ -12,7 +12,7 @@ jest.mock('../prismaClient', () => ({
   },
 }));
 
-const { listThreads, getThread, buildThreads } = require('./inboxThreading');
+const { listThreads, getThread, buildThreads, threadKeyFor } = require('./inboxThreading');
 
 function email(id, { conversationId = null, status = 'DONE', subject = `Sujet ${id}`, fromEmail = `a${id}@x.com`, receivedAt = new Date(`2026-08-01T0${id}:00:00Z`) } = {}) {
   const iso = receivedAt.toISOString();
@@ -49,11 +49,45 @@ describe('buildThreads', () => {
     expect(conv.messages.map((m) => m.kind)).toEqual(['inbound', 'sent', 'inbound']);
   });
 
-  it('les emails sans conversationId forment chacun un fil isolé', () => {
-    const threads = buildThreads([email(1, { conversationId: null }), email(2, { conversationId: null })], [], { status: null, q: null });
+  it('sans conversationId : regroupe par sujet normalisé (fallback Outlook)', () => {
+    const threads = buildThreads([
+      email(1, { conversationId: null, subject: 'Problème VPN au bureau', receivedAt: new Date('2026-08-01T01:00:00Z') }),
+      email(2, { conversationId: null, subject: 'Re: Problème VPN au bureau', receivedAt: new Date('2026-08-01T02:00:00Z') }),
+    ], [], { status: null, q: null });
+    expect(threads).toHaveLength(1);
+    expect(threads[0].id).toBe('subj-problème vpn au bureau');
+    expect(threads[0].conversationId).toBeNull(); // clé de repli ≠ conversationId
+    expect(threads[0].count).toBe(2);
+    expect(threads[0].emailIds).toEqual([1, 2]);
+  });
+
+  it('sans conversationId : des sujets distincts restent des fils distincts', () => {
+    const threads = buildThreads([
+      email(1, { conversationId: null, subject: 'Demande accès VPN' }),
+      email(2, { conversationId: null, subject: 'Imprimante bloquée étage 4' }),
+    ], [], { status: null, q: null });
     expect(threads).toHaveLength(2);
-    expect(threads[0].id.startsWith('single-')).toBe(true);
-    expect(threads[0].conversationId).toBeNull();
+    expect(threads[0].id).not.toBe(threads[1].id);
+    expect(threads.every((t) => t.id.startsWith('subj-'))).toBe(true);
+  });
+
+  it('sujet trop court ou vide : email isolé via single-<id>', () => {
+    const threads = buildThreads([
+      email(1, { conversationId: null, subject: 'ok' }),
+      email(2, { conversationId: null, subject: '' }),
+    ], [], { status: null, q: null });
+    expect(threads).toHaveLength(2);
+    expect(threads.map((t) => t.id).sort()).toEqual(['single-1', 'single-2']);
+  });
+
+  it('expose emailIds (actions groupées côté client) mais pas pour les envois', () => {
+    const threads = buildThreads(
+      [email(1, { conversationId: 'C' }), email(2, { conversationId: 'C' })],
+      [sent(10, 'C')],
+      { status: null, q: null }
+    );
+    expect(threads[0].emailIds).toEqual([1, 2]);
+    expect(threads[0].emailIds).not.toContain(10);
   });
 
   it('trie les fils du plus récent au plus ancien', () => {
@@ -109,12 +143,32 @@ describe('getThread', () => {
     expect(res).toBeNull();
   });
 
-  it('rassemble un email isolé via single-<id>', async () => {
-    mockIncomingEmailFindUnique.mockResolvedValue(email(7, { conversationId: null }));
+  it('rassemble un email isolé via single-<id> (sujet inexploitable)', async () => {
+    mockIncomingEmailFindUnique.mockResolvedValue(email(7, { conversationId: null, subject: 'ok' }));
     mockTicketMessageFindMany.mockResolvedValue([]);
     const thread = await getThread('single-7');
     expect(thread.id).toBe('single-7');
     expect(thread.count).toBe(1);
+  });
+
+  it('résout une clé de repli subj- en filtrant les emails avec le même helper', async () => {
+    mockIncomingEmailFindMany.mockResolvedValue([
+      email(1, { conversationId: null, subject: 'Problème VPN au bureau', receivedAt: new Date('2026-08-01T01:00:00Z') }),
+      email(2, { conversationId: null, subject: 'Re: Problème VPN au bureau', receivedAt: new Date('2026-08-01T02:00:00Z') }),
+      email(3, { conversationId: null, subject: 'Autre sujet totalement différent', receivedAt: new Date('2026-08-01T03:00:00Z') }),
+    ]);
+    mockTicketMessageFindMany.mockResolvedValue([]);
+
+    const thread = await getThread('subj-problème vpn au bureau');
+
+    expect(thread).not.toBeNull();
+    expect(thread.count).toBe(2);
+    expect(thread.conversationId).toBeNull();
+    expect(thread.emailIds).toEqual([1, 2]);
+    // La jambe envoyée n'est rattachée que par conversationId réel (jamais par clé de repli)
+    expect(mockTicketMessageFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { direction: 'OUTBOUND' } })
+    );
   });
 
   it('rassemble une conversation via sa clé conversationId', async () => {
@@ -126,5 +180,33 @@ describe('getThread', () => {
     const thread = await getThread('CV');
     expect(thread).not.toBeNull();
     expect(thread.count).toBe(2);
+  });
+});
+
+describe('threadKeyFor — cascade de clés', () => {
+  it('priorise le conversationId Outlook', () => {
+    expect(threadKeyFor({ id: 1, conversationId: 'AA@conv.microsoft.com', subject: 'Bonjour' })).toBe('AA@conv.microsoft.com');
+  });
+
+  it('retire les préfixes Re:/Fwd: répétés et normalise la casse/espaces', () => {
+    const base = threadKeyFor({ id: 1, subject: 'Demande de matériel' });
+    expect(threadKeyFor({ id: 2, subject: 'Re: Demande de matériel' })).toBe(base);
+    expect(threadKeyFor({ id: 3, subject: 'RE: FWD:   Demande   de matériel' })).toBe(base);
+    expect(base.startsWith('subj-')).toBe(true);
+  });
+
+  it('ignore les sujets trop courts (risque de fusion abusive)', () => {
+    expect(threadKeyFor({ id: 1, subject: 'ok' })).toBe('single-1');
+    expect(threadKeyFor({ id: 1, subject: '   ' })).toBe('single-1');
+    expect(threadKeyFor({ id: 1, subject: null })).toBe('single-1');
+  });
+
+  it('tombe sur inReplyTo quand le sujet est inexploitable', () => {
+    expect(threadKeyFor({ id: 5, subject: '', inReplyTo: '<abc@mail.local>' })).toBe('ref-<abc@mail.local>');
+  });
+
+  it('reste stable pour un même email (clé déterministe, calculable côté client)', () => {
+    const e = { id: 9, subject: 'Re: Incident VPN', conversationId: null };
+    expect(threadKeyFor(e)).toBe(threadKeyFor(e));
   });
 });

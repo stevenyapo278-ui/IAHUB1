@@ -8,8 +8,43 @@ const prisma = require('../prismaClient');
 // Limite de fenêtre analysée : on regroupe parmi les emails les plus récents.
 const MAX_EMAILS = 10000;
 
+// Normalise un sujet pour servir de clé de fil de repli (façon Outlook) quand
+// `conversationId` manque : casse unique, préfixes de réponse/transfert retirés
+// ("Re: Re: Fwd:" → ""), espaces réduits. Déterministe pour un même sujet :
+// la même clé est calculable côté frontend à partir d'un seul email.
+const SUBJECT_PREFIX_RE = /^((re|fw|fwd|aw|tr|rv|ref|antw|sv|vs)\s*:\s*)+/i;
+
+function normalizeSubject(subject) {
+  let s = String(subject || '').trim().toLowerCase();
+  // Retire les préfixes répétés (et les "Re[2]:" type Outlook)
+  while (SUBJECT_PREFIX_RE.test(s) || /^\w+\[\d+\]\s*:/.test(s)) {
+    s = s.replace(SUBJECT_PREFIX_RE, '').replace(/^\w+\[\d+\]\s*:\s*/, '').trim();
+  }
+  return s.replace(/\s+/g, ' ').trim();
+}
+
+// Sujet jugé suffisamment significatif pour fusionner des fils distincts :
+// un sujet très court ("ok", "test") regrouperait à tort des conversations sans lien.
+const MIN_SUBJECT_KEY_LEN = 6;
+const SUBJECT_KEY_MAX_LEN = 160;
+
+function subjectKeyFor(subject) {
+  const normalized = normalizeSubject(subject);
+  if (normalized.length < MIN_SUBJECT_KEY_LEN) return null;
+  return `subj-${normalized.substring(0, SUBJECT_KEY_MAX_LEN)}`;
+}
+
+// Clé de fil d'un email :
+//   1. conversationId Outlook (fiable, fourni par Graph)
+//   2. sujet normalisé (repli principal : les réponses conservent le sujet en général)
+//   3. inReplyTo (dernier recours, quand le sujet est inexploitable)
+//   4. email isolé
 function threadKeyFor(email) {
-  return email.conversationId || `single-${email.id}`;
+  if (email.conversationId) return email.conversationId;
+  const bySubject = subjectKeyFor(email.subject);
+  if (bySubject) return bySubject;
+  if (email.inReplyTo) return `ref-${String(email.inReplyTo).trim().toLowerCase()}`;
+  return `single-${email.id}`;
 }
 
 function matchesSearch(email, q) {
@@ -59,6 +94,7 @@ function inboundToMessage(email) {
     glpiTicketId: email.glpiTicketId,
     erpTicketId: email.erpTicketId,
     hasAttachments: email.hasAttachments,
+    recipients: email.recipients || [],
     ccRecipients: email.ccRecipients || [],
     isRead: email.isRead,
     attachments: Array.isArray(email.attachments)
@@ -121,7 +157,10 @@ function buildThreads(emails, sentMessages, { status, q }) {
     groups.get(key).push(email);
   }
 
-  const conversations = new Set([...groups.keys()].filter((k) => !k.startsWith('single-')));
+  // Une clé de repli (subj-/ref-/single-) n'est PAS un conversationId Outlook :
+  // on ne doit pas la renvoyer comme telle (le frontend la compare aux
+  // conversationId réels des emails, et getThread l'utilise en where Prisma).
+  const conversations = new Set([...groups.keys()].filter((k) => !/^(single|subj|ref)-/.test(k)));
 
   const threads = [];
   for (const [key, list] of groups) {
@@ -157,6 +196,9 @@ function buildThreads(emails, sentMessages, { status, q }) {
     threads.push({
       id: key,
       conversationId: conversations.has(key) ? key : null,
+      // Ids des emails entrants du fil — utilisés côté client pour les actions
+      // groupées (spam / suppression / unspam) qui ciblent PATCH|DELETE /inbox/:id.
+      emailIds: inbound.map((m) => m.emailId),
       count: messages.length,
       inboundCount: inbound.length,
       sentCount: sent.length,
@@ -329,6 +371,26 @@ async function getThread(key, scope = null) {
         where: { direction: 'OUTBOUND', conversationId: email.conversationId },
       });
     }
+  } else if (key.startsWith('subj-') || key.startsWith('ref-')) {
+    // Clé de repli (pas un conversationId) : la résolution se fait en JS avec le
+    // même helper que le groupement, pour garantir une clé identique des deux côtés.
+    const candidates = await prisma.incomingEmail.findMany({
+      where: { ...(scope || {}) },
+      orderBy: { receivedAt: 'desc' },
+      take: MAX_EMAILS,
+      include: { attachments: attachmentSelect },
+    });
+    emails = candidates.filter((e) => threadKeyFor(e) === key);
+    // Jambe envoyée : rattachée par sujet normalisé (pas de conversationId partagé)
+    const sent = await prisma.ticketMessage.findMany({
+      where: { direction: 'OUTBOUND' },
+      orderBy: { timestamp: 'desc' },
+      take: MAX_EMAILS,
+    });
+    const wanted = key.slice('subj-'.length);
+    sentMessages = key.startsWith('subj-')
+      ? sent.filter((m) => subjectKeyFor(m.subject) === `subj-${wanted}`)
+      : [];
   } else {
     emails = await prisma.incomingEmail.findMany({
       where: { conversationId: key, ...(scope || {}) },

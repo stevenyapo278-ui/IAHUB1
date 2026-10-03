@@ -273,7 +273,7 @@ async function processMessage(message, account) {
           graphMessageId, internetMessageId, conversationId, inReplyTo, references,
           emailAccountId: account.id, fromEmail, fromName, subject,
           bodyPreview, bodyHtml, receivedAt, status: 'INFORMATIONAL',
-          ccRecipients, hasAttachments,
+          recipients: toRecipients, ccRecipients, hasAttachments,
           aiSummary: `Message automatique technique : ${earlyCheck.reason}`,
           aiIsSpam: false,
           aiConfidence: 1.0,
@@ -311,7 +311,7 @@ async function processMessage(message, account) {
       graphMessageId, internetMessageId, conversationId, inReplyTo, references,
       emailAccountId: account.id, fromEmail, fromName, subject,
       bodyPreview, bodyHtml, receivedAt, status: 'PROCESSING',
-      ccRecipients, hasAttachments,
+      recipients: toRecipients, ccRecipients, hasAttachments,
     },
   });
   // RAG mails : indexer le mail entrant (fire-and-forget, n=1 chunk)
