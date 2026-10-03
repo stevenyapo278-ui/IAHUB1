@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Activity, Zap } from 'lucide-react';
+import { Activity, Zap, StickyNote } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { hasPermission } from '../utils/permissions';
@@ -7,14 +7,15 @@ import { visiblePulseSections, pulseAlerts } from '../config/pulse';
 import { visibleActions } from '../config/quickActions';
 import SystemPulse from './SystemPulse';
 import QuickActionsMenu from './QuickActionsFab';
+import QuickNotesPanel from './QuickNotesPanel';
 
 // ─── Rail flottant unique (style onglet d'extension, bord gauche) ─────────────
-// Regroupe les deux anciens boutons ronds (Actions rapides + Pouls système) dans une
+// Regroupe les boutons ronds (Pouls système + Actions rapides + Mes notes) dans une
 // languette étroite, glissable partout à l'écran (souris/tactile) avec position
 // mémorisée. Un déplacement < 5 px reste un CLIC : les boutons restent cliquables.
 const STORE_KEY = 'floatingDock:position';
 const RAIL_W = 40;
-const RAIL_H = 92;
+const RAIL_H = 124;
 const PANEL_W = 336;
 const MENU_W = 224;
 const MENU_ITEM_H = 41;
@@ -50,6 +51,7 @@ export default function FloatingDock() {
   const [dragging, setDragging] = useState(false);
   const [pulseOpen, setPulseOpen] = useState(() => localStorage.getItem('systemPulse:open') === '1');
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
   const [data, setData] = useState(null);
   const [failed, setFailed] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -151,18 +153,27 @@ export default function FloatingDock() {
     };
   };
 
-  // ── Fermeture : clic extérieur (menu) + Échap (menu et panneau) ────────────
+  // ── Fermeture : clic extérieur (menu, pouls et notes) + Échap (tout) ──────
+  const closePulse = useCallback(() => {
+    setPulseOpen(false);
+    try { localStorage.setItem('systemPulse:open', '0'); } catch { /* noop */ }
+  }, []);
+
   useEffect(() => {
-    if (!actionsOpen && !pulseOpen) return undefined;
+    if (!actionsOpen && !pulseOpen && !notesOpen) return undefined;
     const onDown = (e) => {
       if (railRef.current?.contains(e.target)) return;
       if (e.target.closest?.('#system-pulse-panel')) return;
+      if (e.target.closest?.('#quick-notes-panel')) return;
       setActionsOpen(false);
+      setNotesOpen(false);
+      closePulse();
     };
     const onKey = (e) => {
       if (e.key !== 'Escape') return;
       setActionsOpen(false);
-      setPulseOpen(false);
+      setNotesOpen(false);
+      closePulse();
     };
     window.addEventListener('mousedown', onDown);
     window.addEventListener('keydown', onKey);
@@ -170,41 +181,63 @@ export default function FloatingDock() {
       window.removeEventListener('mousedown', onDown);
       window.removeEventListener('keydown', onKey);
     };
-  }, [actionsOpen, pulseOpen]);
+  }, [actionsOpen, pulseOpen, notesOpen, closePulse]);
 
-  if (forbidden && visibleActions(user).length === 0) return null;
-
+  // Le rail est toujours affiché : « Mes notes » est accessible à tout utilisateur
+  // authentifié (notes personnelles, aucune permission requise).
   const sections = forbidden ? [] : visiblePulseSections(user, hasPermission);
   const { critical, warning } = pulseAlerts(data, sections);
   const actions = visibleActions(user);
   const canPulse = !forbidden && hasPermission(user, 'tickets.view');
-  if (!canPulse && actions.length === 0) return null;
 
   const togglePulse = () => {
-    setPulseOpen((prev) => {
-      const next = !prev;
-      try { localStorage.setItem('systemPulse:open', next ? '1' : '0'); } catch { /* noop */ }
-      return next;
-    });
+    const next = !pulseOpen;
+    setPulseOpen(next);
+    if (next) setNotesOpen(false); // panneaux exclusifs : même ancrage
+    try { localStorage.setItem('systemPulse:open', next ? '1' : '0'); } catch { /* noop */ }
   };
 
-  // ── Ancrage : les panneaux suivent le rail (à sa droite, re-plafonnés au viewport)
-  const panelLeft = clamp(pos.x + RAIL_W + GAP, 8, Math.max(8, vp.w - PANEL_W - 8));
-  const panelTop = clamp(pos.y - 16, 8, Math.max(8, vp.h - 320));
+  // Notes personnelles (rail flottant) — panneau exclusif avec le Pouls, transitoire
+  // (clic extérieur / Échap le referment, état non persisté).
+  const toggleNotes = () => {
+    const next = !notesOpen;
+    setNotesOpen(next);
+    if (next) {
+      setActionsOpen(false);
+      setPulseOpen(false);
+      try { localStorage.setItem('systemPulse:open', '0'); } catch { /* noop */ }
+    }
+  };
+
+  // ── Ancrage intelligent : le panneau s'ouvre du côté où il y a de la place
+  //    (droite du rail si possible, sinon gauche) et remonte s'il déborde du bas,
+  //    pour rester entièrement visible quel que soit l'endroit où le rail est posé.
+  const spaceRight = vp.w - (pos.x + RAIL_W) - 8;
+  const rawLeft = spaceRight >= PANEL_W + GAP ? pos.x + RAIL_W + GAP : pos.x - PANEL_W - GAP;
+  const panelLeft = clamp(rawLeft, 8, Math.max(8, vp.w - PANEL_W - 8));
+
+  const PANEL_MIN_H = 360;
+  let panelTop = pos.y - 16;
+  if (vp.h - panelTop - 8 < PANEL_MIN_H) {
+    // Pas assez d'espace en bas : panneau au-dessus du rail, sinon collé en haut
+    panelTop = pos.y - 16 - PANEL_MIN_H >= 8 ? pos.y - 16 - PANEL_MIN_H : 8;
+  }
+  panelTop = clamp(panelTop, 8, Math.max(8, vp.h - PANEL_MIN_H));
   const panelStyle = { left: panelLeft, top: panelTop, maxHeight: `calc(100vh - ${panelTop + 8}px)` };
 
   const menuH = 8 + actions.length * MENU_ITEM_H;
   let menuTop = pos.y + 12;
   if (menuTop + menuH > vp.h - 8) menuTop = pos.y - menuH - 12;
   menuTop = clamp(menuTop, 8, Math.max(8, vp.h - menuH - 8));
+  const menuRawLeft = spaceRight >= MENU_W + GAP ? pos.x + RAIL_W + GAP : pos.x - MENU_W - GAP;
   const menuStyle = {
-    left: clamp(pos.x + RAIL_W + GAP, 8, Math.max(8, vp.w - MENU_W - 8)),
+    left: clamp(menuRawLeft, 8, Math.max(8, vp.w - MENU_W - 8)),
     top: menuTop,
   };
 
   return (
     <>
-      {/* La languette : gribouillis de prise en haut, puis les 2 boutons */}
+      {/* La languette : gribouillis de prise en haut, puis les boutons */}
       <div
         ref={railRef}
         onPointerDown={onRailPointerDown}
@@ -262,6 +295,18 @@ export default function FloatingDock() {
             <Zap className="w-3.5 h-3.5" aria-hidden />
           </button>
         )}
+
+        <button
+          type="button"
+          onClick={toggleNotes}
+          aria-expanded={notesOpen}
+          aria-label={notesOpen ? 'Fermer mes notes' : 'Ouvrir mes notes'}
+          title="Mes notes"
+          className={`h-7 w-7 rounded-xl flex items-center justify-center transition-colors
+            ${notesOpen ? 'bg-primary text-on-primary' : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'}`}
+        >
+          <StickyNote className="w-3.5 h-3.5" aria-hidden />
+        </button>
       </div>
 
       {pulseOpen && canPulse && (
@@ -272,7 +317,14 @@ export default function FloatingDock() {
           style={panelStyle}
           refreshing={refreshing}
           onRefresh={manualRefresh}
-          onClose={() => setPulseOpen(false)}
+          onClose={closePulse}
+        />
+      )}
+
+      {notesOpen && (
+        <QuickNotesPanel
+          style={panelStyle}
+          onClose={() => setNotesOpen(false)}
         />
       )}
 

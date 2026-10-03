@@ -199,6 +199,7 @@ model User {
   problemsCreated              Problem[]               @relation("ProblemRequester")
   problemsAssigned             Problem[]               @relation("ProblemAssignee")
   problemsMultiAssigned        Problem[]               @relation("ProblemAssignees")
+  userNotes                    UserNote[]              @relation("UserNoteOwner")
   problemsObserved             Problem[]               @relation("ProblemObservers")
   problemFollowups             ProblemFollowup[]
   dashboards                   Dashboard[]
@@ -1383,6 +1384,20 @@ model EmailTemplate {
   message   String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// Notes personnelles du rail flottant (« Mes notes ») — visibilité strictement
+// personnelle : chaque requête est scopée sur ownerId = utilisateur connecté.
+model UserNote {
+  id        Int      @id @default(autoincrement())
+  ownerId   Int
+  owner     User     @relation("UserNoteOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  title     String   @default("")
+  content   String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId, updatedAt])
 }
 
 // Workflow n8n déclenchable depuis l'UI (ex: notification, automatisation)
