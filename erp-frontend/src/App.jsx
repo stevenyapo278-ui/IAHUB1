@@ -44,6 +44,7 @@ const ProblemDetail = lazy(() => import('./pages/ProblemDetail'));
 const ChatPage = lazy(() => import('./pages/ChatPage'));
 const ChatMonitor = lazy(() => import('./pages/ChatMonitor'));
 const FormRequest = lazy(() => import('./pages/FormRequest'));
+const ExplorerPage = lazy(() => import('./pages/ExplorerPage'));
 
 // Écran de chargement plein écran, centré — affiché pendant le chargement d'un chunk
 // (navigation) et le premier montage React. Même visuel que le boot loader d'index.html.
@@ -111,6 +112,8 @@ export default function App() {
             }
           >
             <Route index element={<Dashboard />} />
+            {/* URL inconnue (dont l'ancienne /network retirée) → dashboard */}
+            <Route path="*" element={<Navigate to="/" replace />} />
             <Route path="portal" element={<Portal />} />
             <Route path="chat" element={<ChatPage />} />
             <Route
@@ -131,6 +134,7 @@ export default function App() {
               }
             />
             <Route path="tickets/:id" element={<ProtectedRoute permission="tickets.view"><TicketDetail /></ProtectedRoute>} />
+            <Route path="explorer" element={<ProtectedRoute permission="tickets.view"><ExplorerPage /></ProtectedRoute>} />
             <Route path="problems" element={<ProtectedRoute permission="problems.manage"><Problems /></ProtectedRoute>} />
             <Route path="problems/:id" element={<ProtectedRoute permission="problems.manage"><ProblemDetail /></ProtectedRoute>} />
             <Route path="teams" element={<ProtectedRoute permission="teams.manage"><Teams /></ProtectedRoute>} />

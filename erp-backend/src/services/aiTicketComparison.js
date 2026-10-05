@@ -438,4 +438,4 @@ Sois très concret et précis dans tes recommandations d'amélioration du code. 
   };
 }
 
-module.exports = { analyzeTicketDifferences, makeAIRequest };
+module.exports = { analyzeTicketDifferences, makeAIRequest, callAI };
