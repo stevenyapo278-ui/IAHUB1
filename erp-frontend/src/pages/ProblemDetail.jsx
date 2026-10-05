@@ -5,7 +5,7 @@ import {
   AlertTriangle, ArrowLeft, Clock, CheckCircle2, Radio, User, Users, Tag,
   Link2, Plus, X, RefreshCw, Send, Eye, Calendar, Flame, Info, ArrowDown,
   Sparkles, Pencil, Trash2, LinkIcon, Unlink, Search, Loader2, Paperclip,
-  ChevronDown, FileText,
+  ChevronDown, FileText, MapPin,
 } from 'lucide-react';
 import api from '../api/client';
 import { hasPermission } from '../utils/permissions';
@@ -94,6 +94,50 @@ function PriorityBadge({ priority }) {
       <Icon className="w-3 h-3" />
       {cfg.label} — {PRIORITY_LABELS[priority] || priority}
     </span>
+  );
+}
+
+// Barre d'accent colorée en tête de carte, par statut (miroir STATUS_ACCENT de TicketDetail)
+const PROBLEM_ACCENT = {
+  NEW: 'bg-blue-500', IN_PROGRESS: 'bg-indigo-500', ASSIGNED: 'bg-purple-500',
+  PLANNED: 'bg-violet-500', WAITING: 'bg-amber-500', SOLVED: 'bg-emerald-500',
+  CLOSED: 'bg-slate-400', OBSERVED: 'bg-cyan-500',
+};
+
+function initialsOf(name) {
+  return (name || '').split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase() || '—';
+}
+
+// Puce méta compacte (miroir MetaChip de TicketDetail)
+function MetaChip({ icon: Icon, children, title }) {
+  return (
+    <span title={title}
+      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-outline-variant/30 bg-surface-container-low/70 text-[11px] font-semibold text-on-surface-variant max-w-[240px]">
+      <Icon className="w-3 h-3 shrink-0 text-on-surface-variant/70" />
+      <span className="truncate">{children}</span>
+    </span>
+  );
+}
+
+// Tuile d'info label + valeur (miroir InfoTile de TicketDetail, version non copiable)
+function InfoTile({ icon: Icon, label, value, tone = 'primary', title }) {
+  const tones = {
+    primary: 'bg-primary/10 text-primary',
+    emerald: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+    amber: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+    violet: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
+    slate: 'bg-slate-500/10 text-slate-600 dark:text-slate-400',
+  };
+  return (
+    <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-surface-container-low/70 border border-outline-variant/30 min-w-0">
+      <span className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${tones[tone] || tones.primary}`}>
+        <Icon className="w-4 h-4" />
+      </span>
+      <div className="min-w-0">
+        <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant/70 leading-none">{label}</p>
+        <p className="text-xs font-semibold text-on-surface mt-0.5 truncate" title={title}>{value}</p>
+      </div>
+    </div>
   );
 }
 
@@ -362,9 +406,35 @@ export default function ProblemDetail() {
   }, [teams, problem?.team]);
 
   if (loading) {
+    // Skeleton « en forme de page » : barre + badges + grille (skeleton > spinner)
     return (
-      <div className="flex items-center justify-center h-64">
-        <RefreshCw className="w-6 h-6 animate-spin text-on-surface-variant" />
+      <div
+        className="p-4 sm:p-6 lg:p-8 flex flex-col gap-6 w-full max-w-none min-w-0 animate-pulse"
+        role="status"
+        aria-label="Chargement du problème"
+      >
+        <div className="flex items-center gap-3 pb-4 border-b border-outline-variant/30">
+          <div className="w-9 h-9 rounded-xl bg-surface-container shrink-0" />
+          <div className="w-24 h-5 rounded-md bg-surface-container shrink-0" />
+          <div className="flex-1 h-6 rounded-md bg-surface-container min-w-0" />
+          <div className="w-24 h-9 rounded-xl bg-surface-container shrink-0 hidden sm:block" />
+        </div>
+        <div className="flex items-center gap-2 flex-wrap pb-4 border-b border-outline-variant/30">
+          <div className="w-24 h-6 rounded-full bg-surface-container" />
+          <div className="w-16 h-6 rounded-full bg-surface-container" />
+          <div className="w-28 h-6 rounded-full bg-surface-container" />
+        </div>
+        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-6">
+          <div className="space-y-4 order-2 xl:order-1">
+            <div className="h-36 rounded-2xl bg-surface-container" />
+            <div className="h-28 rounded-2xl bg-surface-container" />
+            <div className="h-52 rounded-2xl bg-surface-container" />
+          </div>
+          <div className="space-y-4 order-3">
+            <div className="h-44 rounded-2xl bg-surface-container" />
+            <div className="h-32 rounded-2xl bg-surface-container" />
+          </div>
+        </div>
       </div>
     );
   }
@@ -372,248 +442,253 @@ export default function ProblemDetail() {
   if (!problem) return null;
 
   const linkedTickets = problem.tickets?.map((pt) => pt.ticket) || [];
+  const urgLabel = (v) => URGENCY_IMPACT_OPTIONS.find((o) => o.value === v)?.label || v || '—';
+  const assigneeNames = (problem.assignees?.length
+    ? problem.assignees.map((a) => a.fullName)
+    : (problem.assignedTo ? [problem.assignedTo.fullName] : []));
 
   return (
-    <div className="max-w-5xl mx-auto p-5 space-y-5">
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div className="flex items-start gap-3">
-          <button onClick={() => navigate('/problems')}
-            className="mt-1 p-2 rounded-xl hover:bg-surface-container-high cursor-pointer transition-colors">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              {canManage ? (
-                <StatusSelect status={problem.status} onChange={handleStatusChange} />
-              ) : (
-                <StatusBadge status={problem.status} />
-              )}
-              <PriorityBadge priority={problem.priority} />
-              {problem.category && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-surface-container text-on-surface-variant">
-                  <Tag className="w-3 h-3" /> {problem.category}
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-2.5 mt-2 flex-wrap">
-              <span className="px-2 py-0.5 rounded-md text-[11px] font-mono font-extrabold tabular-nums bg-surface-container border border-outline-variant/40 text-on-surface-variant select-none">
-                PROBLÈME #{problem.id}
-              </span>
-              <h1 className="text-xl font-bold text-on-surface">{problem.title}</h1>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap mt-0.5">
-              <span className="text-sm text-on-surface-variant">
-                Créé le {new Date(problem.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}
-              </span>
-              {canManage ? (
-                <>
-                  <div className="min-w-[220px]">
-                    <RemoteUserMultiSelect
-                      value={(problem.assignees && problem.assignees.length > 0)
-                        ? problem.assignees.map((a) => a.id)
-                        : (problem.assignedToId ? [problem.assignedToId] : [])}
-                      onChange={async (vals, selectedUsers) => {
-                        try {
-                          // Auto-équipe : la première personne porte son équipe si aucune n'est définie
-                          const firstUser = selectedUsers && selectedUsers[0];
-                          const autoTeamId = firstUser ? (firstUser.teamId || firstUser.team?.id) : null;
-                          const payload = { assigneeIds: vals };
-                          if (autoTeamId && !problem.teamId) payload.teamId = autoTeamId;
-                          await api.patch(`/problems/${id}`, payload);
-                          toast.success('Assignés mis à jour');
-                          loadProblem();
-                        } catch (err) {
-                          toast.error(err.response?.data?.error || 'Échec de la mise à jour');
-                        }
-                      }}
-                      teamId={problem.teamId || null}
-                      onlyStaff
-                      placeholder="Rechercher des techniciens..."
-                    />
-                  </div>
-                  <select aria-label="Équipe" value={problem.teamId || ''}
-                    onChange={(e) => handleAssign('teamId', e.target.value ? Number(e.target.value) : null)}
-                    className={miniSelectCls}>
-                    <option value="">Aucune équipe</option>
-                    {teamOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                </>
-              ) : (
-                <>
-                  {problem.assignedTo && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-surface-container text-on-surface-variant">
-                      <User className="w-3 h-3" /> {problem.assignedTo.fullName}
-                    </span>
-                  )}
-                  {problem.team && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-surface-container text-on-surface-variant">
-                      <Users className="w-3 h-3" /> {problem.team.name}
-                    </span>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
+    <div className="p-4 sm:p-6 lg:p-8 flex flex-col gap-6 w-full max-w-none min-w-0 overflow-visible">
+      {/* ── Barre d'en-tête : retour, référence, titre, actions ─────────── */}
+      <div className="flex items-center gap-3 pb-4 border-b border-outline-variant/30 shrink-0">
+        <button
+          onClick={() => navigate('/problems')}
+          className="p-2 rounded-xl border border-outline-variant/40 bg-surface text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-all cursor-pointer shrink-0"
+          title="Retour aux problèmes"
+        >
+          <ArrowLeft className="w-4 h-4" />
+        </button>
+        <span className="px-2 py-0.5 rounded-md text-[11px] font-mono font-extrabold tabular-nums bg-surface-container border border-outline-variant/40 text-on-surface-variant select-none shrink-0">
+          PROBLÈME #{problem.id}
+        </span>
+        <div className="flex-1 min-w-0">
+          <h1 className="text-base sm:text-lg font-black text-on-surface leading-tight tracking-tight line-clamp-1 uppercase truncate">
+            {problem.title}
+          </h1>
         </div>
         {canManage && (
-          <div className="flex items-center gap-2">
-            <button onClick={() => setEditMode(!editMode)}
-              className="px-3 py-2 rounded-xl border border-outline-variant/60 text-xs font-medium flex items-center gap-1.5 cursor-pointer hover:bg-surface-container-high">
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => setEditMode(!editMode)}
+              className="px-3 py-2 rounded-xl border border-outline-variant/60 text-xs font-medium flex items-center gap-1.5 cursor-pointer hover:bg-surface-container-high"
+            >
               <Pencil className="w-3.5 h-3.5" />
               {editMode ? 'Annuler' : 'Modifier'}
             </button>
-            <button onClick={() => setShowDeleteConfirm(true)}
-              className="p-2 rounded-xl border border-red-300/60 text-red-500 cursor-pointer hover:bg-red-50 dark:hover:bg-red-500/10">
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              className="p-2 rounded-xl border border-red-500/20 text-red-600 hover:bg-red-500/10 transition-all cursor-pointer"
+              title="Supprimer le problème"
+            >
               <Trash2 className="w-4 h-4" />
             </button>
           </div>
         )}
       </div>
 
-      {/* Edit form or display */}
-      {editMode ? (
-        <div className="bg-surface-container rounded-xl p-4 space-y-3">
-          <div>
-            <label className="block text-xs font-medium text-on-surface-variant mb-1">Titre</label>
-            <input value={editForm.title || ''} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
-              className={`${inputCls} w-full`} />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-on-surface-variant mb-1">Description</label>
-            <textarea value={editForm.description || ''} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
-              rows={5} className={`${inputCls} w-full resize-none`} />
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-on-surface-variant mb-1">Statut</label>
-              <select value={editForm.status || ''} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
-                className={`${inputCls} w-full text-xs`}>
-                {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-on-surface-variant mb-1">Priorité</label>
-              <select value={editForm.priority || ''} onChange={(e) => setEditForm({ ...editForm, priority: e.target.value })}
-                className={`${inputCls} w-full text-xs`}>
-                {PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-on-surface-variant mb-1">Urgence</label>
-              <select value={editForm.urgency || ''} onChange={(e) => setEditForm({ ...editForm, urgency: e.target.value })}
-                className={`${inputCls} w-full text-xs`}>
-                {URGENCY_IMPACT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-on-surface-variant mb-1">Impact</label>
-              <select value={editForm.impact || ''} onChange={(e) => setEditForm({ ...editForm, impact: e.target.value })}
-                className={`${inputCls} w-full text-xs`}>
-                {URGENCY_IMPACT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-on-surface-variant mb-1">Catégorie</label>
-            <select value={editForm.category || ''} onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
-              className={`${inputCls} w-full text-xs`}>
-              <option value="">Aucune</option>
-              {categoryOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <button onClick={() => setEditMode(false)}
-              className="px-4 py-2 rounded-xl border border-outline-variant/60 text-sm font-medium cursor-pointer hover:bg-surface-container-high">
-              Annuler
-            </button>
-            <button onClick={handleSave} disabled={saving}
-              className="px-4 py-2 rounded-xl bg-primary text-on-primary text-sm font-bold cursor-pointer hover:opacity-90 disabled:opacity-50">
-              {saving ? <RefreshCw className="w-4 h-4 animate-spin inline" /> : 'Enregistrer'}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="bg-surface-container rounded-xl p-4">
-          <h3 className="text-sm font-semibold text-on-surface mb-2">Description</h3>
-          <p className="text-sm text-on-surface-variant whitespace-pre-wrap">{problem.description}</p>
-          <div className="mt-3 flex flex-wrap gap-3 text-xs text-on-surface-variant">
-            <span>Urgence: <strong>{URGENCY_IMPACT_OPTIONS.find((o) => o.value === problem.urgency)?.label || problem.urgency}</strong></span>
-            <span>Impact: <strong>{URGENCY_IMPACT_OPTIONS.find((o) => o.value === problem.impact)?.label || problem.impact}</strong></span>
-            {problem.locationName && <span>Lieu: <strong>{problem.locationName}</strong></span>}
-          </div>
+      {/* ── Badges : statut (sélecteur), priorité, catégorie ───────────── */}
+      <div className="flex items-center gap-2 flex-wrap pb-4 border-b border-outline-variant/30">
+        {canManage ? (
+          <StatusSelect status={problem.status} onChange={handleStatusChange} />
+        ) : (
+          <StatusBadge status={problem.status} />
+        )}
+        <PriorityBadge priority={problem.priority} />
+        {problem.category && (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-surface-container text-on-surface-variant border border-outline-variant/40">
+            <Tag className="w-3 h-3" /> {problem.category}
+          </span>
+        )}
+      </div>
 
-          {/* Pièces jointes : captures / fichiers uploadés */}
-          <div className="mt-4 pt-3 border-t border-outline-variant/30">
-            <div className="flex items-center justify-between mb-2">
-              <h4 className="text-xs font-semibold text-on-surface flex items-center gap-1.5">
-                <Paperclip className="w-3.5 h-3.5" />
-                Pièces jointes ({problem.attachments?.length || 0})
-              </h4>
-              {canManage && (
-                <label className={`px-2.5 py-1 rounded-lg bg-primary/10 text-primary text-[11px] font-bold flex items-center gap-1 cursor-pointer hover:bg-primary/20 ${uploadingFiles ? 'opacity-50 pointer-events-none' : ''}`}>
-                  {uploadingFiles ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
-                  Joindre
-                  <input type="file" multiple hidden disabled={uploadingFiles}
-                    onChange={(e) => { handleUploadFiles(e.target.files); e.target.value = ''; }} />
-                </label>
-              )}
-            </div>
-            {(problem.attachments?.length || 0) === 0 ? (
-              <p className="text-xs text-on-surface-variant italic">Aucune pièce jointe.</p>
+      {/* ── Puce méta : acteurs et contexte ─────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-outline-variant/30 bg-surface-container-low/70 text-[11px] font-semibold text-on-surface">
+          <span className="w-5 h-5 rounded-full bg-primary/15 text-primary border border-primary/25 flex items-center justify-center text-[8px] font-black shrink-0">
+            {initialsOf(problem.requester?.fullName)}
+          </span>
+          <span className="truncate max-w-[200px]">{problem.requester?.fullName || 'Demandeur inconnu'}</span>
+        </span>
+        <MetaChip icon={Clock}>{`Créé le ${new Date(problem.createdAt).toLocaleString('fr-FR')}`}</MetaChip>
+        {problem.locationName && <MetaChip icon={MapPin}>{problem.locationName}</MetaChip>}
+        {problem.team?.name && <MetaChip icon={Users}>{problem.team.name}</MetaChip>}
+        {assigneeNames.length > 0 && (
+          <MetaChip icon={User} title={assigneeNames.join(', ')}>
+            {assigneeNames.length === 1 ? assigneeNames[0] : `${assigneeNames.length} assignés`}
+          </MetaChip>
+        )}
+      </div>
+
+      {/* ── Layout 2 colonnes façon Ticket : contenu + rail sticky ──────── */}
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-5 min-w-0">
+        {/* ── Colonne gauche : description, tickets liés, historique ───── */}
+        <div className="flex flex-col gap-5 min-w-0 order-2 xl:order-1">
+          {/* Description / formulaire d'édition */}
+          <div className="bento-card overflow-hidden">
+            <div className={`h-1.5 w-full ${PROBLEM_ACCENT[problem.status] || 'bg-primary'}`} />
+            {editMode ? (
+              <div className="p-6 space-y-4">
+                <h2 className="text-sm font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
+                  <span className="w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                    <Pencil className="w-4 h-4" />
+                  </span>
+                  Modifier le problème
+                </h2>
+                <div>
+                  <label className="block text-xs font-medium text-on-surface-variant mb-1">Titre</label>
+                  <input value={editForm.title || ''} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                    className={`${inputCls} w-full`} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-on-surface-variant mb-1">Description</label>
+                  <textarea value={editForm.description || ''} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                    rows={5} className={`${inputCls} w-full resize-none`} />
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-on-surface-variant mb-1">Statut</label>
+                    <select value={editForm.status || ''} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
+                      className={`${inputCls} w-full text-xs`}>
+                      {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-on-surface-variant mb-1">Priorité</label>
+                    <select value={editForm.priority || ''} onChange={(e) => setEditForm({ ...editForm, priority: e.target.value })}
+                      className={`${inputCls} w-full text-xs`}>
+                      {PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-on-surface-variant mb-1">Urgence</label>
+                    <select value={editForm.urgency || ''} onChange={(e) => setEditForm({ ...editForm, urgency: e.target.value })}
+                      className={`${inputCls} w-full text-xs`}>
+                      {URGENCY_IMPACT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-on-surface-variant mb-1">Impact</label>
+                    <select value={editForm.impact || ''} onChange={(e) => setEditForm({ ...editForm, impact: e.target.value })}
+                      className={`${inputCls} w-full text-xs`}>
+                      {URGENCY_IMPACT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-on-surface-variant mb-1">Catégorie</label>
+                  <select value={editForm.category || ''} onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
+                    className={`${inputCls} w-full text-xs`}>
+                    <option value="">Aucune</option>
+                    {categoryOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </div>
+                <div className="flex justify-end gap-2 pt-1">
+                  <button onClick={() => setEditMode(false)}
+                    className="px-4 py-2 rounded-xl border border-outline-variant/60 text-sm font-medium cursor-pointer hover:bg-surface-container-high">
+                    Annuler
+                  </button>
+                  <button onClick={handleSave} disabled={saving}
+                    className="px-4 py-2 rounded-xl bg-primary text-on-primary text-sm font-bold cursor-pointer hover:opacity-90 disabled:opacity-50">
+                    {saving ? <RefreshCw className="w-4 h-4 animate-spin inline" /> : 'Enregistrer'}
+                  </button>
+                </div>
+              </div>
             ) : (
-              <div className="flex flex-wrap gap-2">
-                {problem.attachments.map((att) => {
-                  const url = att.localFilepath
-                    ? `/${att.localFilepath.replace(/^\/+/, '').replace(/\\/g, '/')}`
-                    : `/problems/${problem.id}/attachments/${att.id}/file`;
-                  const isImage = (att.mimeType || '').startsWith('image/');
-                  return (
-                    <div key={att.id} className="relative group/att">
-                      <a href={url} target="_blank" rel="noreferrer"
-                        className={`block ${isImage ? '' : 'px-3 py-2 rounded-lg border border-outline-variant/40 bg-surface-container-high flex items-center gap-1.5'}`}>
-                        {isImage ? (
-                          <img src={url} alt={att.filename}
-                            className="h-16 w-16 object-cover rounded-lg border border-outline-variant/40 bg-surface" />
-                        ) : (
-                          <>
-                            <FileText className="w-3.5 h-3.5 text-primary" />
-                            <span className="text-[11px] font-medium text-on-surface max-w-[140px] truncate">{att.filename}</span>
-                          </>
-                        )}
-                      </a>
-                      {canManage && (
-                        <button onClick={() => handleDeleteAttachment(att.id)} title="Supprimer"
-                          className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center shadow-md opacity-0 group-hover/att:opacity-100 hover:scale-110 transition-all cursor-pointer">
-                          <X className="w-3 h-3" />
-                        </button>
-                      )}
+              <div className="p-6 space-y-5">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <h2 className="text-sm font-extrabold uppercase tracking-wider text-on-surface flex items-center gap-2">
+                    <span className="w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                      <FileText className="w-4 h-4" />
+                    </span>
+                    Description
+                  </h2>
+                  {problem.category && (
+                    <span className="bg-slate-100 text-slate-700 dark:bg-surface-container-high dark:text-on-surface-variant border border-slate-200 dark:border-outline-variant/40 text-[11px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                      {problem.category}
+                    </span>
+                  )}
+                </div>
+
+                {/* Grille d'informations rapides */}
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-2.5">
+                  <InfoTile icon={Flame} label="Urgence" value={urgLabel(problem.urgency)} tone="amber" />
+                  <InfoTile icon={AlertTriangle} label="Impact" value={urgLabel(problem.impact)} tone="violet" />
+                  <InfoTile icon={MapPin} label="Lieu" value={problem.locationName || '—'} tone="slate" title={problem.locationName} />
+                </div>
+
+                <p className="text-sm text-on-surface-variant leading-relaxed whitespace-pre-wrap">
+                  {problem.description || <span className="italic">Aucune description.</span>}
+                </p>
+
+                {/* Pièces jointes : captures / fichiers uploadés */}
+                <div className="pt-4 border-t border-outline-variant/30">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-xs font-semibold text-on-surface flex items-center gap-1.5">
+                      <Paperclip className="w-3.5 h-3.5" />
+                      Pièces jointes ({problem.attachments?.length || 0})
+                    </h4>
+                    {canManage && (
+                      <label className={`px-2.5 py-1 rounded-lg bg-primary/10 text-primary text-[11px] font-bold flex items-center gap-1 cursor-pointer hover:bg-primary/20 ${uploadingFiles ? 'opacity-50 pointer-events-none' : ''}`}>
+                        {uploadingFiles ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                        Joindre
+                        <input type="file" multiple hidden disabled={uploadingFiles}
+                          onChange={(e) => { handleUploadFiles(e.target.files); e.target.value = ''; }} />
+                      </label>
+                    )}
+                  </div>
+                  {(problem.attachments?.length || 0) === 0 ? (
+                    <p className="text-xs text-on-surface-variant italic">Aucune pièce jointe.</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {problem.attachments.map((att) => {
+                        const url = att.localFilepath
+                          ? `/${att.localFilepath.replace(/^\/+/, '').replace(/\\/g, '/')}`
+                          : `/problems/${problem.id}/attachments/${att.id}/file`;
+                        const isImage = (att.mimeType || '').startsWith('image/');
+                        return (
+                          <div key={att.id} className="relative group/att">
+                            <a href={url} target="_blank" rel="noreferrer"
+                              className={`block ${isImage ? '' : 'px-3 py-2 rounded-lg border border-outline-variant/40 bg-surface-container-high flex items-center gap-1.5'}`}>
+                              {isImage ? (
+                                <img src={url} alt={att.filename}
+                                  className="h-16 w-16 object-cover rounded-lg border border-outline-variant/40 bg-surface" />
+                              ) : (
+                                <>
+                                  <FileText className="w-3.5 h-3.5 text-primary" />
+                                  <span className="text-[11px] font-medium text-on-surface max-w-[140px] truncate">{att.filename}</span>
+                                </>
+                              )}
+                            </a>
+                            {canManage && (
+                              <button onClick={() => handleDeleteAttachment(att.id)} title="Supprimer"
+                                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center shadow-md opacity-0 group-hover/att:opacity-100 hover:scale-110 transition-all cursor-pointer">
+                                <X className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
+                  )}
+                </div>
               </div>
             )}
           </div>
-        </div>
-      )}
 
-      {/* Contenu pleine largeur : le volet « Actions rapides » a cédé la place
-          au sélecteur de statut de l'en-tête */}
-      <div className="space-y-5">
-        {/* Tickets liés */}
-          <div className="bg-surface-container rounded-xl p-4">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-on-surface flex items-center gap-1.5">
-                <Link2 className="w-4 h-4" />
+          {/* Tickets liés */}
+          <div className="bento-card p-5 space-y-3">
+            <h3 className="bento-card-header -mx-5 -mt-5 mb-0" style={{ borderTopLeftRadius: 'inherit', borderTopRightRadius: 'inherit' }}>
+              <span className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-on-surface">
+                <Link2 className="w-4 h-4 text-primary" />
                 Tickets liés ({linkedTickets.length})
-              </h3>
+              </span>
               {canManage && (
                 <button onClick={() => setShowLinkModal(true)}
                   className="px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-bold flex items-center gap-1 cursor-pointer hover:bg-primary/20">
                   <Plus className="w-3 h-3" /> Lier un ticket
                 </button>
               )}
-            </div>
+            </h3>
             {linkedTickets.length === 0 ? (
               <p className="text-xs text-on-surface-variant italic">Aucun ticket lié. Cliquez sur « Lier un ticket » pour associer des incidents à ce problème.</p>
             ) : (
@@ -641,78 +716,11 @@ export default function ProblemDetail() {
             )}
           </div>
 
-          {/* Demandeur (miroir du champ « Demandeurs » de la fiche ticket) */}
-          <div className="bg-surface-container rounded-xl p-4">
-            <h3 className="text-sm font-semibold text-on-surface mb-3 flex items-center gap-1.5">
-              <User className="w-4 h-4 text-primary" />
-              Demandeur
-            </h3>
-            {canManage ? (
-              <RemoteUserSelect
-                value={problem.requesterId || ''}
-                onChange={async (val) => {
-                  try {
-                    await api.patch(`/problems/${id}`, { requesterId: val ? Number(val) : null });
-                    toast.success('Demandeur mis à jour');
-                    loadProblem();
-                  } catch (err) {
-                    toast.error(err.response?.data?.error || 'Échec de la mise à jour');
-                  }
-                }}
-                placeholder="Rechercher un demandeur..."
-              />
-            ) : (
-              problem.requester ? (
-                <div className="flex items-center gap-2 text-xs font-semibold text-on-surface">
-                  <span className="w-5 h-5 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[9px] font-bold">
-                    {problem.requester.fullName.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()}
-                  </span>
-                  {problem.requester.fullName}
-                </div>
-              ) : (
-                <span className="text-xs text-on-surface-variant italic">Non renseigné</span>
-              )
-            )}
-          </div>
-
-          {/* Observateurs (multi) */}
-          <div className="bg-surface-container rounded-xl p-4">
-            <h3 className="text-sm font-semibold text-on-surface mb-3 flex items-center gap-1.5">
-              <Eye className="w-4 h-4 text-amber-500" />
-              Observateurs {problem.observers?.length > 0 && `(${problem.observers.length})`}
-            </h3>
-            {canManage ? (
-              <RemoteUserMultiSelect
-                value={(problem.observers || []).map((o) => o.id)}
-                onChange={async (vals) => {
-                  try {
-                    await api.patch(`/problems/${id}`, { observerIds: vals });
-                    toast.success('Observateurs mis à jour');
-                    loadProblem();
-                  } catch (err) {
-                    toast.error(err.response?.data?.error || 'Échec de la mise à jour');
-                  }
-                }}
-                placeholder="Rechercher des observateurs..."
-              />
-            ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {(problem.observers || []).length > 0 ? (
-                  problem.observers.map((o) => (
-                    <span key={o.id} className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-[11px] font-semibold text-amber-700 dark:text-amber-400">
-                      {o.fullName}
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-xs text-on-surface-variant italic">Aucun observateur.</span>
-                )}
-              </div>
-            )}
-          </div>
-
           {/* Historique — Activity Stream (commentaires + journal) */}
-          <div className="bg-surface-container rounded-xl p-4">
-            <h3 className="text-sm font-semibold text-on-surface mb-3">Historique</h3>
+          <div className="bento-card p-5 space-y-3" style={{ overflow: 'visible' }}>
+            <h3 className="bento-card-header -mx-5 -mt-5 mb-0" style={{ borderTopLeftRadius: 'inherit', borderTopRightRadius: 'inherit' }}>
+              <span className="text-xs font-extrabold uppercase tracking-wider text-on-surface">Historique</span>
+            </h3>
             <ActivityStream
               items={historyItems}
               showFilters
@@ -819,6 +827,144 @@ export default function ProblemDetail() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* ── Rail droit sticky : assignation, demandeur, observateurs ─── */}
+        <div className="flex flex-col gap-5 min-w-0 order-3 xl:sticky xl:top-6 xl:self-start xl:w-[340px] xl:shrink-0">
+          {/* Assignation (miroir des champs de l'ancien en-tête) */}
+          <div className="bento-card p-5 space-y-3">
+            <h3 className="bento-card-header -mx-5 -mt-5 mb-0" style={{ borderTopLeftRadius: 'inherit', borderTopRightRadius: 'inherit' }}>
+              <span className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-on-surface">
+                <Users className="w-4 h-4 text-primary" />
+                Assignation
+              </span>
+            </h3>
+            {canManage ? (
+              <div className="space-y-2.5">
+                <RemoteUserMultiSelect
+                  value={(problem.assignees && problem.assignees.length > 0)
+                    ? problem.assignees.map((a) => a.id)
+                    : (problem.assignedToId ? [problem.assignedToId] : [])}
+                  onChange={async (vals, selectedUsers) => {
+                    try {
+                      // Auto-équipe : la première personne porte son équipe si aucune n'est définie
+                      const firstUser = selectedUsers && selectedUsers[0];
+                      const autoTeamId = firstUser ? (firstUser.teamId || firstUser.team?.id) : null;
+                      const payload = { assigneeIds: vals };
+                      if (autoTeamId && !problem.teamId) payload.teamId = autoTeamId;
+                      await api.patch(`/problems/${id}`, payload);
+                      toast.success('Assignés mis à jour');
+                      loadProblem();
+                    } catch (err) {
+                      toast.error(err.response?.data?.error || 'Échec de la mise à jour');
+                    }
+                  }}
+                  teamId={problem.teamId || null}
+                  onlyStaff
+                  placeholder="Rechercher des techniciens..."
+                />
+                <select aria-label="Équipe" value={problem.teamId || ''}
+                  onChange={(e) => handleAssign('teamId', e.target.value ? Number(e.target.value) : null)}
+                  className={`${miniSelectCls} w-full`}>
+                  <option value="">Aucune équipe</option>
+                  {teamOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {assigneeNames.length > 0 || problem.team ? (
+                  <>
+                    {assigneeNames.map((n) => (
+                      <span key={n} className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-[11px] font-semibold text-primary">
+                        {n}
+                      </span>
+                    ))}
+                    {problem.team && (
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-surface-container text-on-surface-variant text-[11px] font-semibold">
+                        {problem.team.name}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-xs text-on-surface-variant italic">Non assigné.</span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Demandeur (miroir du champ « Demandeurs » de la fiche ticket) */}
+          <div className="bento-card p-5 space-y-3">
+            <h3 className="bento-card-header -mx-5 -mt-5 mb-0" style={{ borderTopLeftRadius: 'inherit', borderTopRightRadius: 'inherit' }}>
+              <span className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-on-surface">
+                <User className="w-4 h-4 text-primary" />
+                Demandeur
+              </span>
+            </h3>
+            {canManage ? (
+              <RemoteUserSelect
+                value={problem.requesterId || ''}
+                onChange={async (val) => {
+                  try {
+                    await api.patch(`/problems/${id}`, { requesterId: val ? Number(val) : null });
+                    toast.success('Demandeur mis à jour');
+                    loadProblem();
+                  } catch (err) {
+                    toast.error(err.response?.data?.error || 'Échec de la mise à jour');
+                  }
+                }}
+                placeholder="Rechercher un demandeur..."
+              />
+            ) : (
+              problem.requester ? (
+                <div className="flex items-center gap-2 text-xs font-semibold text-on-surface">
+                  <span className="w-5 h-5 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[9px] font-bold">
+                    {initialsOf(problem.requester.fullName)}
+                  </span>
+                  {problem.requester.fullName}
+                </div>
+              ) : (
+                <span className="text-xs text-on-surface-variant italic">Non renseigné</span>
+              )
+            )}
+          </div>
+
+          {/* Observateurs (multi) */}
+          <div className="bento-card p-5 space-y-3">
+            <h3 className="bento-card-header -mx-5 -mt-5 mb-0" style={{ borderTopLeftRadius: 'inherit', borderTopRightRadius: 'inherit' }}>
+              <span className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-on-surface">
+                <Eye className="w-4 h-4 text-amber-500" />
+                Observateurs {problem.observers?.length > 0 && `(${problem.observers.length})`}
+              </span>
+            </h3>
+            {canManage ? (
+              <RemoteUserMultiSelect
+                value={(problem.observers || []).map((o) => o.id)}
+                onChange={async (vals) => {
+                  try {
+                    await api.patch(`/problems/${id}`, { observerIds: vals });
+                    toast.success('Observateurs mis à jour');
+                    loadProblem();
+                  } catch (err) {
+                    toast.error(err.response?.data?.error || 'Échec de la mise à jour');
+                  }
+                }}
+                placeholder="Rechercher des observateurs..."
+              />
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {(problem.observers || []).length > 0 ? (
+                  problem.observers.map((o) => (
+                    <span key={o.id} className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-[11px] font-semibold text-amber-700 dark:text-amber-400">
+                      {o.fullName}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-xs text-on-surface-variant italic">Aucun observateur.</span>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Link ticket modal */}
@@ -893,7 +1039,12 @@ function LinkTicketModal({ problemId, onClose, onLinked }) {
               <p className="text-[11px] text-on-surface-variant">Associez un ticket à ce problème</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg text-on-surface-variant hover:bg-surface-container transition-colors cursor-pointer">
+          <button
+            onClick={onClose}
+            aria-label="Fermer"
+            title="Fermer"
+            className="p-2 rounded-lg text-on-surface-variant hover:bg-surface-container transition-colors cursor-pointer"
+          >
             <X className="w-4 h-4" />
           </button>
         </div>
