@@ -43,6 +43,7 @@ const auditLogRoutes = require('./routes/auditLog.routes');
 const locationRoutes = require('./routes/location.routes');
 const categoriesRoutes = require('./routes/categories.routes');
 const problemRoutes = require('./routes/problem.routes');
+const graphRoutes = require('./routes/graph.routes');
 const { allBreakerStatuses } = require('./utils/circuitBreaker');
 
 const aiWeeklyReportRoutes = require('./routes/aiweeklyreport.routes');
@@ -121,10 +122,17 @@ function getAuthSub(req) {
   }
 }
 
+const GLOBAL_AUTH_MAX = Number.parseInt(process.env.RATE_LIMIT_MAX, 10) || 10000;
+const GLOBAL_ANON_MAX = Number.parseInt(process.env.RATE_LIMIT_ANON_MAX, 10) || 1500;
+
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  // Utilisateur authentifié : 5000 req/15 min. Anonyme / IP : 1500 req/15 min.
-  max: (req) => (getAuthSub(req) ? 5000 : 1500),
+  // Utilisateur authentifié : RATE_LIMIT_MAX req/15 min (défaut 10000).
+  // Toutes les fenêtres/postes d'un même compte partagent le quota (clé user:<sub>),
+  // d'où un plafond volontairement large : un onglet /explorer consomme déjà
+  // ~60 req/15 min rien qu'en veille (refresh 45 s × 3 requêtes).
+  // Anonyme / IP : 1500 req/15 min inchangé (protection anti-bots).
+  max: (req) => (getAuthSub(req) ? GLOBAL_AUTH_MAX : GLOBAL_ANON_MAX),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Trop de requêtes. Réessayez dans quelques minutes.' },
@@ -247,6 +255,7 @@ app.use('/api/triage-rules', apiCache(30), triageRuleRoutes);
 app.use('/api/locations', apiCache(60), locationRoutes);
 app.use('/api/categories', apiCache(30), categoriesRoutes);
 app.use('/api/problems', problemRoutes);
+app.use('/api/graph', graphRoutes);
 app.use('/api/ai-weekly-reports', aiWeeklyReportRoutes);
 app.use('/api/form-requests', formRequestRoutes);
 app.use('/api/chat', chatbotRoutes);

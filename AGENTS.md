@@ -28,7 +28,7 @@ Alternative: `docker compose up -d --build` or `docker compose -f docker-compose
 
 ### Middleware stack (app.js)
 - `helmet` with custom CSP, `cors`, `express.json({ limit: '10mb' })`
-- Rate limit: 1000/15min on `/api`, 15/15min on `/auth/login`
+- Rate limit: `RATE_LIMIT_MAX` (default 10000)/15min per authenticated user (key `user:<sub>`, all tabs/devices share it), 1500/15min anonymous/IP on `/api`; `/auth/login`, `/auth/login-theme`, `/health` exempt. Login extras: 20/15min per account + 100/15min per IP (successful attempts excluded)
 - `express-async-errors` — async routes never need try/catch
 - `requestId` middleware — each request gets a unique ID for logging
 - Global 404 handler, global error handler (500)
