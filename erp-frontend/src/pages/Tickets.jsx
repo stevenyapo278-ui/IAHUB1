@@ -63,6 +63,7 @@ import KanbanBoard from '../components/KanbanBoard';
 import TeamFolderView from '../components/TeamFolderView';
 import SearchableSelect from '../components/SearchableSelect';
 import TicketFilterDrawer from '../components/TicketFilterDrawer';
+import TicketPreviewDrawer from '../components/TicketPreviewDrawer';
 import SearchableMultiSelect from '../components/SearchableMultiSelect';
 import RemoteUserSelect from '../components/RemoteUserSelect';
 import RemoteUserMultiSelect from '../components/RemoteUserMultiSelect';
@@ -168,10 +169,11 @@ function Avatar({ user, name, colorClass = 'bg-blue-500/15 text-blue-600 dark:te
 }
 
 // Carte ticket réutilisée par la vue Grille et par la variante mobile de la vue Table
-function TicketCard({ t, query, onClick }) {
+function TicketCard({ t, query, onClick, onDoubleClick }) {
   return (
     <motion.div initial={false} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
       className="rounded-xl border border-border/25 bg-surface hover:border-primary/30 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer group relative overflow-hidden p-4 flex flex-col gap-3">
       <div className={`absolute top-0 left-0 right-0 h-0.5 ${
         t.priority === 'P1' ? 'bg-red-500' : t.priority === 'P2' ? 'bg-orange-400' :
@@ -1076,6 +1078,30 @@ export default function Tickets() {
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('tickets_view_mode') || 'table');
   const isMobile = useIsMobile();
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  // Aperçu latéral ouvert par double-clic sur une ligne (voir handleRowPreview)
+  const [previewTicket, setPreviewTicket] = useState(null);
+  const rowClickTimerRef = useRef(null);
+  function clearRowClickTimer() {
+    if (rowClickTimerRef.current) {
+      clearTimeout(rowClickTimerRef.current);
+      rowClickTimerRef.current = null;
+    }
+  }
+  // Purge du timer de navigation différée si le composant est démonté
+  useEffect(() => clearRowClickTimer, []);
+  // Clic simple : navigation différée (~280 ms) pour laisser la place au
+  // double-clic, qui ouvre le volet d'aperçu au lieu de quitter la liste.
+  function handleRowOpen(id) {
+    clearRowClickTimer();
+    rowClickTimerRef.current = setTimeout(() => {
+      rowClickTimerRef.current = null;
+      navigate(`/tickets/${id}${buildFilterQueryString()}`);
+    }, 280);
+  }
+  function handleRowPreview(ticket) {
+    clearRowClickTimer();
+    if (ticket) setPreviewTicket(ticket);
+  }
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [showTrash, setShowTrash] = useState(false);
   const [trashItems, setTrashItems] = useState([]);
@@ -2516,7 +2542,8 @@ export default function Tickets() {
             <AnimatePresence mode="popLayout">
               {tickets.map((t) => (
                 <TicketCard key={t.id} t={t} query={debouncedSearch}
-                  onClick={() => navigate(`/tickets/${t.id}${buildFilterQueryString()}`)} />
+                  onClick={() => handleRowOpen(t.id)}
+                  onDoubleClick={() => handleRowPreview(t)} />
               ))}
             </AnimatePresence>
             {tickets.length === 0 && (
@@ -2530,7 +2557,8 @@ export default function Tickets() {
           <div className="p-4 space-y-3 overflow-auto">
             {tickets.map((t) => (
               <TicketCard key={t.id} t={t} query={debouncedSearch}
-                onClick={() => navigate(`/tickets/${t.id}${buildFilterQueryString()}`)} />
+                onClick={() => handleRowOpen(t.id)}
+                onDoubleClick={() => handleRowPreview(t)} />
             ))}
             {tickets.length === 0 && (
               <EmptyState icon="tickets" title="Aucun ticket trouvé" description="Modifie les filtres ou crée un nouveau ticket." />
@@ -2552,7 +2580,7 @@ export default function Tickets() {
                 headerHeight={44}
                 rowHeight={60}
                 suppressRowClickSelection={!!showSelectionColumn}
-                onRowClick={(data) => navigate(`/tickets/${data.id}${buildFilterQueryString()}`)}
+                onRowClick={(data) => handleRowOpen(data.id)}
                 noRowsText="Aucun ticket trouvé"
                 totalFilteredCount={showSelectionColumn ? totalCount : undefined}
                 onSelectAllFiltered={handleSelectAllFiltered}
@@ -2562,6 +2590,13 @@ export default function Tickets() {
                   onColumnResized: handleColumnStateChanged,
                   onColumnMoved: handleColumnStateChanged,
                   getRowClass: kbRowClass,
+                  // Double-clic → volet d'aperçu (garde identique à DataGrid.onRowClicked)
+                  onRowDoubleClicked: (e) => {
+                    const target = e.event?.target;
+                    if (target instanceof Element
+                      && target.closest('button, a, input, select, textarea, label, [role="button"], [role="tab"], [role="checkbox"]')) return;
+                    if (e.data) handleRowPreview(e.data);
+                  },
                 }}
                 className="rounded-2xl overflow-hidden flex-1"
               />
@@ -2659,6 +2694,15 @@ export default function Tickets() {
         onRestoreView={restoreView} onDeleteSavedView={deleteSavedView}
         searchQuery={searchQuery} setSearchQuery={setSearchQuery}
         setDebouncedSearch={setDebouncedSearch} setPage={setPage}
+      />
+
+      {/* ── DRAWER D'APERÇU TICKET (double-clic) ────────────────────────────── */}
+      <TicketPreviewDrawer
+        key="tickets-preview-drawer"
+        open={!!previewTicket}
+        ticket={previewTicket}
+        filterQs={filterQs}
+        onClose={() => setPreviewTicket(null)}
       />
 
       {/* ── SAVE VIEW MODAL (nommage) ─────────────────────────────────────────── */}
@@ -2952,6 +2996,7 @@ export default function Tickets() {
                     <FormField label="Assets liés">
                       <SearchableMultiSelect options={assetOptions} value={form.assetIds}
                         onChange={(vals) => setForm({ ...form, assetIds: vals })}
+                        valueKey="id" subLabelKey="subLabel"
                         placeholder="Rechercher un asset..." />
                     </FormField>
                   )}

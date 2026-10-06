@@ -7,7 +7,8 @@ const MAX_RENDERED = 80;
 
 export default function SearchableMultiSelect({
   options = [],
-  selectedIds = [],
+  value,          // tableau de valeurs sélectionnées (prop principale)
+  selectedIds,    // alias rétrocompatible
   onChange,
   placeholder = 'Rechercher...',
   searchPlaceholder = 'Rechercher par nom ou email...',
@@ -18,6 +19,7 @@ export default function SearchableMultiSelect({
   disabled = false,
   className = '',
 }) {
+  const ids = value ?? selectedIds ?? [];
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const containerRef = useRef(null);
@@ -46,16 +48,16 @@ export default function SearchableMultiSelect({
   }, []);
 
   function toggle(id) {
-    const isSelected = selectedIds.includes(id);
+    const isSelected = ids.includes(id);
     const next = isSelected
-      ? selectedIds.filter((item) => item !== id)
-      : [...selectedIds, id];
+      ? ids.filter((item) => item !== id)
+      : [...ids, id];
     onChange(next);
   }
 
   const selectedOptions = useMemo(
-    () => options.filter((opt) => selectedIds.includes(opt[valueKey])),
-    [options, selectedIds, valueKey]
+    () => options.filter((opt) => ids.includes(opt[valueKey])),
+    [options, ids, valueKey]
   );
 
   return (
@@ -141,7 +143,7 @@ export default function SearchableMultiSelect({
             ) : (
               visibleOptions.map((opt) => {
                 const optVal = String(opt[valueKey]);
-                const isSelected = selectedIds.includes(opt[valueKey]);
+                const isSelected = ids.includes(opt[valueKey]);
                 return (
                   <button
                     key={optVal}
