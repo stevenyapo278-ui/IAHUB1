@@ -253,9 +253,9 @@ export default function FormRequest() {
   if (!formDef) return <div className="p-8 text-center text-sm text-on-surface-variant">Aucun formulaire disponible.</div>;
 
   return (
-    <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-5">
+    <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-6">
       {/* Header */}
-      <header className="space-y-2">
+      <header className="space-y-3">
         <div className="flex items-start gap-3.5">
           <span
             className="w-11 h-11 rounded-2xl flex items-center justify-center text-xl text-white shrink-0 shadow-lg"
@@ -303,6 +303,7 @@ export default function FormRequest() {
                 <span className={`mt-[18px] h-0.5 w-4 sm:w-7 rounded-full ${idx <= step ? 'bg-primary' : 'bg-outline-variant/60'}`} />
               )}
               <button type="button" onClick={() => setStep(idx)} aria-current={isActive ? 'step' : undefined}
+                title={sec.name}
                 className="group flex flex-col items-center gap-1 px-1.5 py-0.5">
                 <span className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all
                   ${isActive ? 'border-primary bg-primary text-white shadow-md shadow-primary/30 scale-105'
@@ -310,7 +311,7 @@ export default function FormRequest() {
                       : 'border-outline-variant/70 bg-surface text-on-surface-variant group-hover:border-primary/50 group-hover:text-primary'}`}>
                   {isDone ? <Check className="w-4 h-4" /> : idx + 1}
                 </span>
-                <span className={`hidden sm:block text-[10px] font-semibold max-w-[92px] truncate text-center ${isActive ? 'text-primary' : isDone ? 'text-emerald-600' : 'text-on-surface-variant group-hover:text-primary'}`}>
+                <span className={`hidden sm:block text-[10px] font-semibold leading-tight text-center line-clamp-2 max-w-[96px] break-words ${isActive ? 'text-primary' : isDone ? 'text-emerald-600' : 'text-on-surface-variant group-hover:text-primary'}`}>
                   {sec.name}
                 </span>
               </button>

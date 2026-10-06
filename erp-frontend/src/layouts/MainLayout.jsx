@@ -593,7 +593,7 @@ export default function MainLayout() {
         <header
           className="h-14 flex items-center gap-2 sm:gap-3 px-4 sm:px-6 shrink-0 border-b backdrop-blur-xl sticky top-0 z-30 transition-all duration-200"
           style={{
-            backgroundColor: 'color-mix(in srgb, var(--color-surface-container-lowest) 80%, transparent)',
+            backgroundColor: 'var(--color-surface-container-lowest)',
             borderColor: 'var(--color-outline-variant)',
             WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
             backdropFilter: 'blur(20px) saturate(1.4)',
