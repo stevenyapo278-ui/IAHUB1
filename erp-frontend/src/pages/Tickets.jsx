@@ -19,6 +19,7 @@ import {
   Download,
   FileSpreadsheet,
   FileCode2,
+  Paperclip,
   Plus,
   X,
   Search,
@@ -1203,6 +1204,8 @@ export default function Tickets() {
   const [showForm, setShowForm] = useState(searchParams.get('new') === '1');
   const [form, setForm] = useState(EMPTY_FORM);
   const [attachment, setAttachment] = useState(null);
+  const attachmentInputRef = useRef(null);
+  const [confirmRemoveAttachment, setConfirmRemoveAttachment] = useState(false);
   const [pastedImages, setPastedImages] = useState([]);
   const [customFieldDefs, setCustomFieldDefs] = useState([]);
   const [customValues, setCustomValues] = useState({});
@@ -1909,6 +1912,9 @@ export default function Tickets() {
     if (showForm) {
       revokeImageItems(pastedImages);
       setPastedImages([]);
+      setAttachment(null);
+      setConfirmRemoveAttachment(false);
+      if (attachmentInputRef.current) attachmentInputRef.current.value = '';
     }
     setShowForm((v) => !v);
     setSearchParams((prev) => {
@@ -3015,7 +3021,35 @@ export default function Tickets() {
                   </FormField>
 
                   <FormField label="Pièce jointe">
-                    <input type="file" onChange={(e) => setAttachment(e.target.files?.[0] || null)} className="text-sm text-muted-foreground file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 file:cursor-pointer" />
+                    <input
+                      ref={attachmentInputRef}
+                      type="file"
+                      className="hidden"
+                      onChange={(e) => setAttachment(e.target.files?.[0] || null)}
+                    />
+                    {attachment ? (
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-primary/30 bg-primary/5 text-xs font-semibold text-primary">
+                        <Paperclip className="w-3.5 h-3.5 shrink-0" />
+                        <span className="flex-1 truncate min-w-0" title={attachment.name}>{attachment.name}</span>
+                        <button
+                          type="button"
+                          aria-label="Retirer la pièce jointe"
+                          onClick={() => setConfirmRemoveAttachment(true)}
+                          className="p-1 rounded-lg hover:bg-primary/15 text-primary/70 hover:text-primary transition-colors shrink-0"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => attachmentInputRef.current?.click()}
+                        className="w-full flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl border border-dashed border-outline-variant/60 text-sm text-on-surface-variant hover:border-primary/50 hover:text-primary transition-all cursor-pointer"
+                      >
+                        <Paperclip className="w-3.5 h-3.5" />
+                        Joindre un fichier (optionnel)
+                      </button>
+                    )}
                   </FormField>
 
                   <div className="flex items-center justify-end gap-3 pt-4 border-t border-border/20">
@@ -3044,6 +3078,23 @@ export default function Tickets() {
         filters={filters}
         searchQuery={debouncedSearch}
         totalFiltered={totalCount}
+      />
+
+      {/* ── CONFIRM REMOVE ATTACHMENT ───────────────────────────────────────── */}
+      <ConfirmDialog
+        open={confirmRemoveAttachment}
+        title="Retirer la pièce jointe ?"
+        message={attachment
+          ? `Le fichier « ${attachment.name} » ne sera pas joint au ticket. Vous pourrez en sélectionner un autre.`
+          : 'Le fichier ne sera pas joint au ticket.'}
+        confirmLabel="Retirer"
+        danger
+        onConfirm={() => {
+          setAttachment(null);
+          if (attachmentInputRef.current) attachmentInputRef.current.value = '';
+          setConfirmRemoveAttachment(false);
+        }}
+        onCancel={() => setConfirmRemoveAttachment(false)}
       />
 
       {/* ── CONFIRM DELETE ───────────────────────────────────────────────────── */}

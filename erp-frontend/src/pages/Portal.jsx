@@ -14,6 +14,7 @@ import SlaBadge from '../components/SlaBadge';
 import ImageAttachmentsEditor from '../components/ImageAttachmentsEditor';
 import { clipboardImageFiles, imageItemsFromFiles, revokeImageItems } from '../utils/imageAttachments';
 import EmptyState from '../components/EmptyState';
+import ConfirmDialog from '../components/ConfirmDialog';
 import ActivityStream, { buildTimeline } from '../components/ActivityStream';
 import { sanitizeHtml } from '../utils/sanitize';
 import useSystemSettings from '../hooks/useSystemSettings';
@@ -66,6 +67,7 @@ export default function Portal() {
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [attachment, setAttachment] = useState(null);
+  const [confirmRemoveAttachment, setConfirmRemoveAttachment] = useState(false);
   const [creating, setCreating] = useState(false);
   const fileInputRef = useRef(null);
 
@@ -770,10 +772,27 @@ export default function Portal() {
               </div>
               <div>
                 <input ref={fileInputRef} type="file" className="hidden" onChange={(e) => setAttachment(e.target.files?.[0] || null)} />
-                <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl border border-dashed border-outline-variant/60 text-sm text-on-surface-variant hover:border-primary/50 hover:text-primary transition-all cursor-pointer">
-                  <Paperclip className="w-3.5 h-3.5" />
-                  {attachment ? attachment.name : 'Joindre un fichier (optionnel)'}
-                </button>
+                {attachment ? (
+                  <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl border border-primary/30 bg-primary/5 text-xs font-semibold text-primary">
+                    <button type="button" onClick={() => fileInputRef.current?.click()} className="flex items-center gap-2 flex-1 min-w-0 text-left cursor-pointer" title="Choisir un autre fichier">
+                      <Paperclip className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate">{attachment.name}</span>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Retirer la pièce jointe"
+                      onClick={() => setConfirmRemoveAttachment(true)}
+                      className="p-1 rounded-lg hover:bg-primary/15 text-primary/70 hover:text-primary transition-colors shrink-0"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl border border-dashed border-outline-variant/60 text-sm text-on-surface-variant hover:border-primary/50 hover:text-primary transition-all cursor-pointer">
+                    <Paperclip className="w-3.5 h-3.5" />
+                    Joindre un fichier (optionnel)
+                  </button>
+                )}
               </div>
               <motion.button whileTap={{ scale: 0.98 }} type="submit" disabled={creating} className="w-full py-3 rounded-xl bg-primary text-on-primary font-bold text-sm hover:opacity-90 transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer">
                 {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
@@ -783,6 +802,22 @@ export default function Portal() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <ConfirmDialog
+        open={confirmRemoveAttachment}
+        title="Retirer la pièce jointe ?"
+        message={attachment
+          ? `Le fichier « ${attachment.name} » ne sera pas joint à votre demande. Vous pourrez en sélectionner un autre.`
+          : 'Le fichier ne sera pas joint à votre demande.'}
+        confirmLabel="Retirer"
+        danger
+        onConfirm={() => {
+          setAttachment(null);
+          if (fileInputRef.current) fileInputRef.current.value = '';
+          setConfirmRemoveAttachment(false);
+        }}
+        onCancel={() => setConfirmRemoveAttachment(false)}
+      />
     </div>
   );
 }
