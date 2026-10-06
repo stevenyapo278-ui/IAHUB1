@@ -22,7 +22,7 @@ const BASE_TABS = [
   { id: 'other', label: 'Autres intégrations', desc: 'GLPI, Supabase et webhooks n8n', icon: Globe, permission: 'settings.integrations' },
   { id: 'automation', label: 'Automatisation', desc: 'Relances, intelligence IA & triage', icon: Zap, permission: 'automation.manage' },
   { id: 'notifications', label: 'Notifications', desc: 'Contenus des emails, toggles, récapitulatif, sons', icon: Bell, permission: 'automation.manage' },
-  { id: 'templates', label: 'Modèles de tickets', desc: 'Modèles réutilisables pour créer des tickets', icon: FileText, permission: 'tickets.assign' },
+  { id: 'templates', label: 'Modèles de tickets', desc: 'Modèles réutilisables + champs du formulaire des demandes de reporting', icon: FileText, permission: 'tickets.assign' },
   { id: 'custom-fields', label: 'Champs personnalisés', desc: 'Champs dynamiques par catégorie (équivalent GLPI Forms)', icon: ListChecks, permission: 'tickets.manage' },
 ];
 
@@ -134,7 +134,7 @@ export default function Settings() {
                 {activeTab === 'other' && "Gérez les autres intégrations externes (Supabase, GLPI) et connectez des webhooks n8n."}
                 {activeTab === 'automation' && "Configurez l'intelligence IA de triage, les relances automatiques et la clôture de tickets."}
                 {activeTab === 'notifications' && "Personnalisez le contenu de chaque email (accusé, signature, gabarits), puis gérez les toggles par type, le récapitulatif, le navigateur et les sons."}
-                {activeTab === 'templates' && "Créez et gérez des modèles de tickets réutilisables par l'équipe."}
+                {activeTab === 'templates' && "Modèles de tickets réutilisables par l'équipe, et configuration des sections/champs des demandes de reporting."}
                 {activeTab === 'custom-fields' && "Définissez des champs personnalisés rendus à la création d'un ticket selon la catégorie (équivalent GLPI Forms)."}
                 {activeTab === 'appearance' && "Gérez l'apparence de la page de connexion : rotation quotidienne, thème fixe ou aléatoire (réservé SUPERADMIN)."}
                 {activeTab === 'navigation' && "Configurez quels éléments de navigation chaque rôle peut voir dans la barre latérale."}

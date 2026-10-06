@@ -35,6 +35,7 @@ const skillRoutes = require('./routes/skill.routes');
 const reassignmentRoutes = require('./routes/reassignment.routes');
 const notificationRoutes = require('./routes/notification.routes');
 const draftApprovalRoutes = require('./routes/draftapproval.routes');
+const approvalsRoutes = require('./routes/approvals.routes');
 const triageRuleRoutes = require('./routes/triageRule.routes');
 const chatbotRoutes = require('./routes/chatbot.routes');
 const voiceRoutes = require('./routes/voice.routes');
@@ -48,6 +49,7 @@ const { allBreakerStatuses } = require('./utils/circuitBreaker');
 
 const aiWeeklyReportRoutes = require('./routes/aiweeklyreport.routes');
 const formRequestRoutes = require('./routes/formRequest.routes');
+const formDefinitionRoutes = require('./routes/formDefinition.routes');
 
 const { requestId } = require('./middleware/requestId');
 const { logger, childLogger } = require('./utils/logger');
@@ -235,6 +237,7 @@ app.use('/api/ai-ticket-suggestions', aiTicketSuggestionRoutes);
 app.use('/api/n8n-config', n8nConfigRoutes);
 app.use('/api/knowledge', knowledgeRoutes);
 app.use('/api/draft-approval', draftApprovalRoutes); // doit être monté avant les routers génériques /api (ligne suivante), qui appliquent authenticate à toute requête entrante peu importe si une de leurs routes internes matche
+app.use('/api/approvals', approvalsRoutes); // validation hiérarchique : publique (lien email à token opaque), avant les routers /api avec authenticate
 app.use('/api', outlookOAuthRoutes);
 app.use('/api/inbox', inboxRoutes);
 app.use('/api', ticketIntelligenceRoutes);
@@ -258,6 +261,7 @@ app.use('/api/problems', problemRoutes);
 app.use('/api/graph', graphRoutes);
 app.use('/api/ai-weekly-reports', aiWeeklyReportRoutes);
 app.use('/api/form-requests', formRequestRoutes);
+app.use('/api/form-definitions', formDefinitionRoutes);
 app.use('/api/chat', chatbotRoutes);
 app.use('/api/voice', voiceRoutes);
 app.use('/api/logs', logsRoutes);

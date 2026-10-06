@@ -1560,6 +1560,7 @@ module.exports = {
   sendResolvedNotificationEmail,
   sendTicketCreationNotification,
   sendNeedsHumanReviewNotification,
+  buildActionLink,
   buildEmailLayout,
   buildAcknowledgementHtml,
   buildReminderHtml,

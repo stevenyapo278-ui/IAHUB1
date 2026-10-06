@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Pencil, Trash2, FileText, X, Check } from 'lucide-react';
 import api from '../../api/client';
 import SearchableSelect from '../../components/SearchableSelect';
+import ReportingFormsSection from './ReportingFormsSection';
 import { PRIORITY_OPTIONS, TYPE_OPTIONS, URGENCY_IMPACT_OPTIONS, SOURCE_OPTIONS, SOURCE_LABELS } from '../../constants/tickets';
 
 const EMPTY_FORM = {
@@ -242,6 +243,7 @@ export default function TemplatesTab() {
           </div>
         </form>
       ) : (
+        <>
         <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-sm divide-y divide-outline-variant/20">
           {loading ? (
             <p className="p-6 text-xs text-on-surface-variant text-center">Chargement…</p>
@@ -291,6 +293,10 @@ export default function TemplatesTab() {
             ))
           )}
         </div>
+        <div className="pt-4 mt-2 border-t border-outline-variant/30">
+          <ReportingFormsSection />
+        </div>
+        </>
       )}
     </div>
   );

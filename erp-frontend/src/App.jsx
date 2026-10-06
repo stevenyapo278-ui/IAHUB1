@@ -25,6 +25,7 @@ const AiEmailDrafts = lazy(() => import('./pages/AiEmailDrafts'));
 const ValidationCenter = lazy(() => import('./pages/ValidationCenter'));
 const Prompts = lazy(() => import('./pages/Prompts'));
 const ApprovalPage = lazy(() => import('./pages/ApprovalPage'));
+const ApprovalDecision = lazy(() => import('./pages/ApprovalDecision'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const TechnicianStats = lazy(() => import('./pages/TechnicianStats'));
@@ -101,6 +102,8 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/approve/:token" element={<ApprovalPage />} />
+          {/* Validation hiérarchique : lien public envoyé au supérieur (sans compte) */}
+          <Route path="/approvals/:token" element={<ApprovalDecision />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password/:token" element={<ResetPassword />} />
           <Route

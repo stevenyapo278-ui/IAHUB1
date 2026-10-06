@@ -505,6 +505,7 @@ model Ticket {
   assets           AssetTicket[]
   problems         ProblemTicket[]
   formSubmission   FormSubmission?
+  approvals        TicketApproval[]
 
   @@index([requesterId])
   @@index([secondaryRequesterId])
@@ -1828,6 +1829,8 @@ model FormDefinition {
   glpiUuid    String?  @unique
   isActive    Boolean  @default(true)
   sections    Json     // [{ name, order, uuid, questions: [{ name, fieldtype, required, values, row, col, width, uuid }] }]
+  assignment  Json?    // { teamId, assignedToId, priority, type, urgency, impact, locationId, source } — appliqué à chaque soumission
+  approval    Json?    // { enabled, trigger: { question, equals? } } — validation hiérarchique conditionnelle par e-mail
   submissions FormSubmission[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -1847,4 +1850,26 @@ model FormSubmission {
   @@index([formId])
   @@index([ticketId])
   @@index([submittedById])
+}
+
+// ── Validation hiérarchique conditionnelle ──────────────────────────────────
+// Déclenchée par une condition posée sur un formulaire (bloc « Validation
+// supérieure » de l'éditeur). Le demandeur fournit l'e-mail du supérieur (+
+// copies) ; le supérieur reçoit un lien public (token opaque) pour approuver
+// ou refuser, sans compte sur la plateforme.
+model TicketApproval {
+  id              Int      @id @default(autoincrement())
+  token           String   @unique @default(uuid())
+  ticketId        Int
+  ticket          Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  formId          Int?
+  managerEmail    String
+  cc              String[] @default([])
+  status          ApprovalStatus @default(PENDING)
+  decidedAt       DateTime?
+  decidedBy       String?  // e-mail de la personne ayant cliqué (souvent le supérieur)
+  decisionComment String?
+  createdAt       DateTime @default(now())
+
+  @@index([ticketId])
 }
