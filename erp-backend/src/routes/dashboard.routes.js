@@ -19,6 +19,10 @@ const OPEN_STATUSES = ['NEW', 'OPEN', 'PLANNED', 'PENDING', 'WAITING_FOR_USER'];
 // deletedAt = null (aligné sur buildTicketWhereClause de la vue tickets).
 const NOT_DELETED = { deletedAt: null };
 
+// Rôles suivis dans les vues de performance : SUPERADMIN et HOTLINE traitent aussi des
+// tickets, ils ne doivent pas être exclus des stats (contrairement aux REQUESTER/CLIENT).
+const STAFF_ROLES = ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'];
+
 router.get('/stats', async (req, res) => {
   const { startDate, endDate, days: daysParam, scope } = req.query;
   const where = {};
@@ -392,7 +396,7 @@ router.get('/technician-performance', requirePermission('tickets.assign'), async
   const ticketDateWhere = dateFilter.gte || dateFilter.lte ? { createdAt: dateFilter } : {};
 
   const technicians = await prisma.user.findMany({
-    where: { role: { in: ['TECHNICIAN', 'ADMIN'] }, isActive: true },
+    where: { role: { in: STAFF_ROLES }, isActive: true },
     select: { id: true, fullName: true, email: true, avatarUrl: true },
   });
 
@@ -435,12 +439,12 @@ router.get('/technician-stats', async (req, res) => {
 
     const technicians = await prisma.user.findMany({
       where: {
-        role: { in: ['TECHNICIAN', 'ADMIN'] },
+        role: { in: STAFF_ROLES },
         isActive: true,
-        // Un technicien ne voit que ses propres stats
-        ...(req.user.role === 'TECHNICIAN' ? { id: req.user.sub } : {}),
         ...(teamId ? { teamId: Number(teamId) } : {}),
         ...(assignedToId ? { id: Number(assignedToId) } : {}),
+        // Un technicien ne voit que ses propres stats (écrase les filtres ci-dessus)
+        ...(req.user.role === 'TECHNICIAN' ? { id: req.user.sub } : {}),
       },
       select: { id: true, fullName: true, email: true, teamId: true, avatarUrl: true },
     });
@@ -450,14 +454,16 @@ router.get('/technician-stats', async (req, res) => {
     const teamNames = Object.fromEntries(teams.map((t) => [t.id, t.name]));
 
     // Tickets liés aux techniciens sur la période : créés OU résolus dans la plage
+    // Tickets de la période liés aux membres : reçus en assignation OU créés par eux
+    // (les rôles admin/hotline qui saisissent pour un utilisateur restent visibles)
     const tickets = await prisma.ticket.findMany({
       where: {
         ...NOT_DELETED,
-        assignedToId: { in: techIds },
-        OR: [{ createdAt: range }, { solvedAt: range }, { closedAt: range }],
+        OR: [{ assignedToId: { in: techIds } }, { requesterId: { in: techIds } }],
+        AND: [{ OR: [{ createdAt: range }, { solvedAt: range }, { closedAt: range }] }],
       },
       select: {
-        id: true, assignedToId: true, status: true, createdAt: true,
+        id: true, assignedToId: true, requesterId: true, status: true, createdAt: true,
         solvedAt: true, closedAt: true, firstResponseAt: true,
         slaResolutionDueAt: true, slaBreachedAt: true, csatScore: true,
       },
@@ -477,6 +483,8 @@ router.get('/technician-stats', async (req, res) => {
     const stats = technicians.map((tech) => {
       const mine = tickets.filter((t) => t.assignedToId === tech.id);
       const createdInPeriod = mine.filter((t) => t.createdAt >= since && t.createdAt <= until);
+      // Tickets SAISIS par ce membre (requester) sur la période : compteur « Créés »
+      const authoredInPeriod = tickets.filter((t) => t.requesterId === tech.id && t.createdAt >= since && t.createdAt <= until);
       const resolvedInPeriod = mine.filter(
         (t) => RESOLVED.includes(t.status) && (t.solvedAt || t.closedAt) >= since && (t.solvedAt || t.closedAt) <= until
       );
@@ -502,6 +510,7 @@ router.get('/technician-stats', async (req, res) => {
         fullName: tech.fullName,
         email: tech.email,
         teamName: teamNames[tech.teamId] || null,
+        created: authoredInPeriod.length,
         assigned: createdInPeriod.length,
         open: createdInPeriod.filter((t) => !RESOLVED.includes(t.status)).length,
         resolved: resolvedInPeriod.length,
@@ -521,7 +530,8 @@ router.get('/technician-stats', async (req, res) => {
     const totalResolved = stats.reduce((s, x) => s + x.resolved, 0);
     const weightedResolution = stats.reduce((s, x) => s + (x.avgResolutionHours ?? 0) * x.resolved, 0);
     const totals = {
-      technicians: stats.filter((x) => x.assigned > 0 || x.resolved > 0).length,
+      technicians: stats.filter((x) => x.assigned > 0 || x.resolved > 0 || x.created > 0).length,
+      created: stats.reduce((s, x) => s + x.created, 0),
       assigned: stats.reduce((s, x) => s + x.assigned, 0),
       open: stats.reduce((s, x) => s + x.open, 0),
       resolved: totalResolved,
@@ -538,16 +548,19 @@ router.get('/technician-stats', async (req, res) => {
 
     // Série journalière créés vs résolus (tous techniciens confondus)
     const trend = {};
+    const trendKey = (d) => d.toISOString().slice(0, 10);
     for (let i = 0; i <= days; i++) {
       const d = new Date(since);
       d.setDate(d.getDate() + i);
-      trend[d.toISOString().slice(0, 10)] = { date: d.toISOString().slice(0, 10), created: 0, resolved: 0 };
+      trend[trendKey(d)] = { date: trendKey(d), created: 0, resolved: 0 };
     }
     for (const t of tickets) {
+      const createdKey = t.createdAt >= since && t.createdAt <= until ? trendKey(t.createdAt) : null;
+      if (createdKey && trend[createdKey]) trend[createdKey].created += 1;
       if (!RESOLVED.includes(t.status)) continue;
       const end = t.solvedAt || t.closedAt;
-      if (end >= since && end <= until && trend[end.toISOString().slice(0, 10)]) trend[end.toISOString().slice(0, 10)].resolved += 1;
-      if (t.createdAt >= since && t.createdAt <= until && trend[t.createdAt.toISOString().slice(0, 10)]) trend[t.createdAt.toISOString().slice(0, 10)].created += 1;
+      const resolvedKey = end >= since && end <= until ? trendKey(end) : null;
+      if (resolvedKey && trend[resolvedKey]) trend[resolvedKey].resolved += 1;
     }
 
     return res.json({
@@ -647,7 +660,7 @@ router.get('/activity-trend', async (req, res) => {
         orderBy: { createdAt: 'desc' },
       }),
       prisma.user.findMany({
-        where: { role: { in: ['TECHNICIAN', 'ADMIN'] }, isActive: true },
+        where: { role: { in: STAFF_ROLES }, isActive: true },
         select: { fullName: true, email: true, avatarUrl: true },
       }),
       prisma.aiEmailDraft.count({ where: { status: 'APPROVED', createdAt: dateFilter } }),
@@ -741,7 +754,7 @@ router.get('/activity-trend', async (req, res) => {
 
       // Stats techniciens pour le rapport
       const techStats = await prisma.user.findMany({
-        where: { role: { in: ['TECHNICIAN', 'ADMIN'] }, isActive: true },
+        where: { role: { in: STAFF_ROLES }, isActive: true },
         select: { id: true, fullName: true },
       });
       const techIds = techStats.map((t) => t.id);

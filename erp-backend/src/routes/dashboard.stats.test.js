@@ -383,6 +383,79 @@ describe('GET /dashboard/stats — scope, days et payload enrichi', () => {
   });
 });
 
+// ── Vues « Perf. techniciens » : les rôles staff (SUPERADMIN, HOTLINE…) ne sont jamais exclus ──
+describe('Vues de performance — périmètre des rôles', () => {
+  const STAFF = ['SUPERADMIN', 'ADMIN', 'HOTLINE', 'TECHNICIAN'];
+
+  beforeEach(() => {
+    db.tickets.length = 0;
+    jest.clearAllMocks();
+  });
+
+  it('/technician-performance liste tout le personnel staff (pas seulement TECHNICIAN/ADMIN)', async () => {
+    db.tickets.push(t({ id: 1, assignedToId: 1 }));
+    const res = makeRes();
+    await getHandler('get', '/technician-performance')(makeReq(), res);
+
+    expect(prisma.user.findMany).toHaveBeenCalledTimes(1);
+    const { where } = prisma.user.findMany.mock.calls[0][0];
+    expect(where.role.in).toEqual(STAFF);
+    expect(res.body).toHaveLength(1);
+  });
+
+  it('/technician-stats inclut les rôles staff et l\'auto-isolement du technicien écrase assignedToId', async () => {
+    db.tickets.push(t({ id: 1, assignedToId: 1 }));
+    const res = makeRes();
+    await getHandler('get', '/technician-stats')(
+      makeReq({ user: { sub: 7, role: 'TECHNICIAN' }, query: { assignedToId: '3' } }),
+      res,
+    );
+
+    expect(res.statusCode).toBe(200);
+    const { where } = prisma.user.findMany.mock.calls[0][0];
+    expect(where.role.in).toEqual(STAFF);
+    expect(where.id).toBe(7); // un technicien ne peut pas ouvrir les stats d'un collègue
+  });
+
+  it('/report (CSV + PDF) inclut aussi SUPERADMIN et HOTLINE dans ses stats techniciens', async () => {
+    for (const format of ['csv', 'pdf']) {
+      const res = makeRes();
+      await getHandler('get', '/report')(makeReq({ query: { format } }), res);
+      expect(res.statusCode).toBe(200);
+    }
+
+    const roleFilters = prisma.user.findMany.mock.calls
+      .map((c) => c[0]?.where?.role?.in)
+      .filter(Boolean);
+    expect(roleFilters.length).toBeGreaterThanOrEqual(2); // export CSV + stats du rapport PDF
+    roleFilters.forEach((roles) => expect(roles).toEqual(STAFF));
+  });
+
+  it('/technician-stats : compteur « Créés » (tickets saisis) + tendance créés pour tous les tickets', async () => {
+    db.tickets.push(
+      t({ id: 1, assignedToId: 1, requesterId: 9 }),           // reçu par Tech
+      t({ id: 2, assignedToId: 2, requesterId: 1, status: 'OPEN' }), // saisi par Tech, assigné ailleurs
+      t({ id: 3, assignedToId: 1, requesterId: 1, deletedAt: new Date() }), // corbeille ignorée
+    );
+    const res = makeRes();
+    await getHandler('get', '/technician-stats')(
+      makeReq({ query: { startDate: '2026-09-01', endDate: '2026-09-30' } }),
+      res,
+    );
+
+    expect(res.statusCode).toBe(200);
+    const row = res.body.items[0];
+    expect(row.created).toBe(1); // #2 saisi par Tech, #3 en corbeille
+    expect(row.assigned).toBe(1); // #1
+    expect(res.body.totals.created).toBe(1);
+
+    // La série « créés » ne doit plus dépendre du statut (bug : seuls les tickets résolus étaient comptés)
+    const day = res.body.trend.find((d) => d.date === '2026-09-01');
+    expect(day.created).toBe(2); // #1 (assigné) + #2 (saisi par Tech, non résolu)
+    expect(day.resolved).toBe(0);
+  });
+});
+
 // ── GET /dashboard/ticket-evolution : chaque carte doit valoir la somme exacte de sa série ──
 describe('GET /dashboard/ticket-evolution — nombres fiables', () => {
   const PERIOD = { startDate: '2026-09-01', endDate: '2026-09-30' };

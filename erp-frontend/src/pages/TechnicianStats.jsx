@@ -86,7 +86,7 @@ export default function TechnicianStats() {
       const list = Array.isArray(res.data) ? res.data : res.data?.teams || [];
       setTeams(list);
     }).catch(() => {});
-    api.get('/users', { params: { role: 'TECHNICIAN', isActive: 'true', limit: 200 } }).then((res) => {
+    api.get('/users', { params: { onlyStaff: 'true', isActive: 'true', limit: 200 } }).then((res) => {
       const list = Array.isArray(res.data) ? res.data : res.data?.users || [];
       setTechnicians(list);
     }).catch(() => {});
@@ -141,7 +141,7 @@ export default function TechnicianStats() {
   ], [teams]);
 
   const techOptions = useMemo(() => [
-    { label: 'Tous les techniciens', value: '' },
+    { label: 'Tout le personnel', value: '' },
     ...technicians.map((t) => ({ label: t.fullName, value: t.id, sub: t.email })),
   ], [technicians]);
 
@@ -227,14 +227,14 @@ export default function TechnicianStats() {
             />
           </div>
 
-          {/* Technicien */}
+          {/* Membre (tous les rôles suivis : techniciens, hotline, admins, superadmins) */}
           <div className="flex items-center gap-1.5 min-w-[200px]">
             <SearchableSelect
               options={techOptions}
               value={selectedTechId}
               onChange={(v) => setSelectedTechId(v)}
-              placeholder="Technicien"
-              searchPlaceholder="Rechercher un technicien…"
+              placeholder="Membre"
+              searchPlaceholder="Rechercher un membre…"
               subLabelKey="sub"
               className="text-xs"
             />
@@ -337,6 +337,7 @@ export default function TechnicianStats() {
                   { field: 'fullName', headerName: 'Technicien', flex: 1.5, minWidth: 160, cellRenderer: (p) => <span className="font-semibold text-sm text-on-surface">{p.value}</span> },
                   { field: 'teamName', headerName: 'Équipe', width: 130, cellRenderer: (p) => <span className="text-xs text-on-surface-variant">{p.value || '—'}</span> },
                 ] : []),
+                { field: 'created', headerName: 'Créés', width: 90, cellRenderer: (p) => <span className="text-right block font-bold tabular-nums text-on-surface-variant">{p.value}</span> },
                 { field: 'assigned', headerName: 'Assignés', width: 90, cellRenderer: (p) => <span className="text-right block font-bold tabular-nums text-on-surface">{p.value}</span> },
                 { field: 'open', headerName: 'Ouverts', width: 90, cellRenderer: (p) => <span className="text-right block font-bold tabular-nums text-blue-500">{p.value}</span> },
                 { field: 'resolved', headerName: 'Résolus', width: 90, cellRenderer: (p) => <span className="text-right block font-bold tabular-nums text-emerald-500">{p.value}</span> },
