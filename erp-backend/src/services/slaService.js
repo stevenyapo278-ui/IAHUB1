@@ -35,40 +35,70 @@ function addHours(date, hours) {
   return new Date(date.getTime() + hours * 3600 * 1000);
 }
 
-// Calcule les échéances SLA d'un ticket à partir de sa priorité et de sa date de création.
-// Fonction pure et testable. Retourne null pour les seuils à 0 (SLA désactivé pour cette priorité).
-function computeSlaDeadlines({ createdAt, priority, slaHours }) {
+// Calcule les échéances SLA à partir d'un point de départ et de la priorité.
+// `start` (date d'approbation) prime sur `createdAt` : le SLA ne démarre qu'une fois
+// le ticket approuvé. Fonction pure et testable. Seuil à 0 = SLA désactivé.
+function computeSlaDeadlines({ createdAt, start, priority, slaHours }) {
   const cfg = parseSlaHours(slaHours)[priority] || DEFAULT_SLA_HOURS[priority] || { response: 0, resolution: 0 };
-  const start = createdAt || new Date();
+  const from = start || createdAt || new Date();
   return {
-    slaResponseDueAt: cfg.response > 0 ? addHours(start, cfg.response) : null,
-    slaResolutionDueAt: cfg.resolution > 0 ? addHours(start, cfg.resolution) : null,
+    slaResponseDueAt: cfg.response > 0 ? addHours(from, cfg.response) : null,
+    slaResolutionDueAt: cfg.resolution > 0 ? addHours(from, cfg.resolution) : null,
   };
 }
 
-// Recalcule et persiste les échéances SLA d'un ticket (création ou changement de priorité).
-// Log un événement SLA_UPDATED uniquement si les échéances ont réellement changé.
+// Point de départ du SLA :
+//  - PENDING / REJECTED / SUPERSEDED : aucun SLA (le chrono démarre à l'approbation) ;
+//  - APPROVED : la date d'approbation (approvedAt), sinon la création ;
+//  - approbation non requise (NOT_REQUIRED) : la création.
+// Retourne null = « pas encore de SLA à courir ».
+function resolveSlaStart({ approvalStatus, approvedAt, createdAt } = {}) {
+  if (approvalStatus === 'PENDING' || approvalStatus === 'REJECTED' || approvalStatus === 'SUPERSEDED') return null;
+  if (approvalStatus === 'APPROVED' && approvedAt) return approvedAt;
+  return createdAt || new Date();
+}
+
+// Recalcule et persiste les échéances SLA d'un ticket (création, approbation,
+// changement de priorité). Log un événement SLA_UPDATED uniquement si elles ont changé.
 async function applySla(ticket) {
   if (!ticket || CLOSED_STATUSES.includes(ticket.status)) return ticket;
+
+  // Certains appelants passent un objet partiel (select réduit) : sans les champs
+  // d'approbation on risquerait de démarrer le SLA « à la création » sur un ticket
+  // encore PENDING — on va donc les lire en base.
+  let { approvalStatus, approvedAt, createdAt } = ticket;
+  if (approvalStatus === undefined || approvedAt === undefined || createdAt === undefined) {
+    const fresh = await prisma.ticket.findUnique({
+      where: { id: ticket.id },
+      select: { approvalStatus: true, approvedAt: true, createdAt: true },
+    });
+    if (fresh) ({ approvalStatus, approvedAt, createdAt } = fresh);
+  }
+
+  const start = resolveSlaStart({ approvalStatus, approvedAt, createdAt });
   const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
-  const deadlines = computeSlaDeadlines({
-    createdAt: ticket.createdAt,
-    priority: ticket.priority,
-    slaHours: settings?.slaHours,
-  });
+  const deadlines = start
+    ? computeSlaDeadlines({ start, priority: ticket.priority, slaHours: settings?.slaHours })
+    : { slaResponseDueAt: null, slaResolutionDueAt: null };
 
   const changed =
     (ticket.slaResponseDueAt?.getTime() || null) !== (deadlines.slaResponseDueAt?.getTime() || null) ||
-    (ticket.slaResolutionDueAt?.getTime() || null) !== (deadlines.slaResolutionDueAt?.getTime() || null);
+    (ticket.slaResolutionDueAt?.getTime() || null) !== (deadlines.slaResolutionDueAt?.getTime() || null) ||
+    (!!ticket.slaBreachedAt && !start);
+
+  const data = { ...deadlines };
+  // Sans échéance, un éventuel dépassement enregistré ne peut plus être valable.
+  if (!start && ticket.slaBreachedAt) data.slaBreachedAt = null;
 
   const updated = await prisma.ticket.update({
     where: { id: ticket.id },
-    data: deadlines,
+    data,
   });
 
   if (changed) {
     await logEvent(ticket.id, 'SLA_UPDATED', 'SYSTEM', {
       priority: ticket.priority,
+      approvalStatus: approvalStatus || null,
       slaResponseDueAt: deadlines.slaResponseDueAt,
       slaResolutionDueAt: deadlines.slaResolutionDueAt,
     });
@@ -98,6 +128,9 @@ async function runSlaMonitor() {
   const overdue = await prisma.ticket.findMany({
     where: {
       status: { in: ACTIVE_STATUSES },
+      // Le SLA ne court que sur un ticket approuvé (garde de sécurité : les échéances
+      // des tickets non approuvées sont normalement nulles).
+      approvalStatus: { notIn: ['PENDING', 'REJECTED', 'SUPERSEDED'] },
       slaResponseDueAt: { not: null, lt: now },
       slaBreachedAt: null,
     },
@@ -144,12 +177,62 @@ async function runSlaMonitor() {
   return { breachedCount, escalatedCount };
 }
 
+// Recalage one-shot (au démarrage) des échéances sur la date d'approbation :
+//  - tickets non approuvés : échéances purgées (le SLA ne doit pas courir avant) ;
+//  - tickets approuvés : échéances recalculées depuis approvedAt, et dépassement
+//    éventellement effacé si la nouvelle échéance est encore dans le futur.
+// Idempotent, sans événement SLA_UPDATED : c'est une reprise de données, pas un
+// changement de suivi.
+async function realignSlaWithApproval() {
+  const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+  const now = new Date();
+  const candidates = await prisma.ticket.findMany({
+    where: {
+      deletedAt: null,
+      status: { notIn: CLOSED_STATUSES },
+      OR: [
+        { approvalStatus: { in: ['PENDING', 'REJECTED', 'SUPERSEDED'] } },
+        { approvalStatus: 'APPROVED', approvedAt: { not: null } },
+      ],
+    },
+    select: {
+      id: true, approvalStatus: true, approvedAt: true, createdAt: true, priority: true,
+      slaResponseDueAt: true, slaResolutionDueAt: true, slaBreachedAt: true,
+    },
+  });
+
+  let updatedCount = 0;
+  for (const t of candidates) {
+    const start = resolveSlaStart(t);
+    const deadlines = start
+      ? computeSlaDeadlines({ start, priority: t.priority, slaHours: settings?.slaHours })
+      : { slaResponseDueAt: null, slaResolutionDueAt: null };
+
+    const changed =
+      (t.slaResponseDueAt?.getTime() || null) !== (deadlines.slaResponseDueAt?.getTime() || null) ||
+      (t.slaResolutionDueAt?.getTime() || null) !== (deadlines.slaResolutionDueAt?.getTime() || null);
+    const breachStale = !!t.slaBreachedAt && (
+      !start ||
+      (deadlines.slaResponseDueAt && deadlines.slaResponseDueAt > now)
+    );
+    if (!changed && !breachStale) continue;
+
+    const data = { ...deadlines };
+    if (breachStale) data.slaBreachedAt = null;
+    await prisma.ticket.update({ where: { id: t.id }, data });
+    updatedCount += 1;
+  }
+  return { scannedCount: candidates.length, updatedCount };
+}
+
 module.exports = {
   DEFAULT_SLA_HOURS,
   ACTIVE_STATUSES,
   parseSlaHours,
   computeSlaDeadlines,
+  resolveSlaStart,
   applySla,
+  realignSlaWithApproval,
   recordFirstResponse,
   runSlaMonitor,
 };

@@ -37,6 +37,13 @@ async function approveTicket(id, { approvedById, approvedByEmail = 'HOTLINE', ap
     targetLabel: ticket.title,
   });
 
+  // Le SLA ne démarre qu'à l'approbation : les échéances sont calculées à partir
+  // d'approvedAt (et non plus à la création du ticket).
+  const { applySla } = require('./slaService');
+  await applySla(ticket).catch((err) =>
+    console.error(`[ticketApproval] Calcul SLA du ticket ${id} échoué:`, err.message)
+  );
+
   emitTicketUpdated(ticket, { approvalStatus: 'APPROVED' });
 
   // 1. Envoyer et valider automatiquement tout brouillon en attente associé à ce ticket dans /email-drafts?tab=drafts

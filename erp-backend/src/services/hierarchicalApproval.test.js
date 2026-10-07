@@ -17,11 +17,13 @@ jest.mock('./systemSettings', () => ({
 }));
 jest.mock('./ticketEvent', () => ({ logEvent: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('../utils/socket', () => ({ emitTicketUpdated: jest.fn() }));
+jest.mock('./slaService', () => ({ applySla: jest.fn(async (ticket) => ticket) }));
 
 const prisma = require('../prismaClient');
 const { sendEmail } = require('./emailSender');
 const { logEvent } = require('./ticketEvent');
 const { emitTicketUpdated } = require('../utils/socket');
+const { applySla } = require('./slaService');
 const { MANAGER_KEY, CC_KEY, sendManagerApprovalEmail, decideApproval } = require('./hierarchicalApproval');
 
 const TICKET = { id: 42, title: 'DEMANDE CYRUS', content: '<p>Corps du ticket</p>', priority: 'P3' };
@@ -85,6 +87,8 @@ describe('decideApproval — approbation', () => {
     }));
     expect(logEvent).toHaveBeenCalledWith(42, 'APPROVED', 'boss@x.ci', expect.objectContaining({ via: 'validation-hierarchique' }));
     expect(emitTicketUpdated).toHaveBeenCalled();
+    // Le SLA démarre à l'approbation : les échéances sont recalculées ici
+    expect(applySla).toHaveBeenCalledWith(expect.objectContaining({ id: 42, approvalStatus: 'APPROVED' }));
     // Notification : au demandeur, copie = supérieur + personnes en copie
     const mail = sendEmail.mock.calls[sendEmail.mock.calls.length - 1][0];
     expect(mail.to).toBe('dem@x.ci');

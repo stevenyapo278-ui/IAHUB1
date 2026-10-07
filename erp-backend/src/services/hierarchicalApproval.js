@@ -95,6 +95,13 @@ async function decideApproval({ record, decision, comment, actorEmail }) {
     include: { requester: { select: { email: true, fullName: true } } },
   });
 
+  // Le SLA ne démarre qu'à l'approbation : échéances calculées depuis approvedAt
+  // (et purgées en cas de refus, le ticket étant de toute façon clôturé).
+  const { applySla } = require('./slaService');
+  await applySla(ticket).catch((err) =>
+    console.error(`[hierarchicalApproval] Calcul SLA du ticket ${ticketId} échoué:`, err.message)
+  );
+
   await prisma.ticketApproval.update({
     where: { id: record.id },
     data: {

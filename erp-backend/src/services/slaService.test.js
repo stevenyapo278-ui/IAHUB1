@@ -14,7 +14,7 @@ const { sendSlaBreachEmail } = require('./emailSender');
 const { runEscalationMonitor } = require('./escalationService');
 const {
   applySla, recordFirstResponse, runSlaMonitor, DEFAULT_SLA_HOURS,
-  parseSlaHours, computeSlaDeadlines,
+  parseSlaHours, computeSlaDeadlines, resolveSlaStart,
 } = require('./slaService');
 
 describe('parseSlaHours — fusion config JSON + défauts', () => {
@@ -129,6 +129,89 @@ describe('applySla — persistance des échéances', () => {
   });
 });
 
+describe('resolveSlaStart — le SLA démarre à l’approbation', () => {
+  const createdAt = new Date('2026-08-17T08:00:00Z');
+  const approvedAt = new Date('2026-08-17T14:00:00Z');
+
+  it('PENDING / REJECTED / SUPERSEDED : aucun départ (le SLA n’a pas commencé)', () => {
+    expect(resolveSlaStart({ approvalStatus: 'PENDING', createdAt })).toBeNull();
+    expect(resolveSlaStart({ approvalStatus: 'REJECTED', createdAt })).toBeNull();
+    expect(resolveSlaStart({ approvalStatus: 'SUPERSEDED', createdAt })).toBeNull();
+  });
+
+  it('APPROVED : départ à la date d’approbation, pas à la création', () => {
+    expect(resolveSlaStart({ approvalStatus: 'APPROVED', approvedAt, createdAt })).toBe(approvedAt);
+  });
+
+  it('APPROVED sans approvedAt / approbation non requise : départ à la création', () => {
+    expect(resolveSlaStart({ approvalStatus: 'APPROVED', approvedAt: null, createdAt })).toBe(createdAt);
+    expect(resolveSlaStart({ approvalStatus: 'NOT_REQUIRED', approvedAt: null, createdAt })).toBe(createdAt);
+  });
+});
+
+describe('applySla — démarrage du SLA à l’approbation', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('un ticket PENDING n’a aucune échéance (purge de l’échéance posée à la création)', async () => {
+    const ticket = {
+      id: 9, createdAt: new Date('2026-08-17T08:00:00Z'), priority: 'P1', status: 'NEW',
+      approvalStatus: 'PENDING', approvedAt: null,
+      slaResponseDueAt: new Date('2026-08-17T09:00:00Z'),
+      slaResolutionDueAt: new Date('2026-08-17T12:00:00Z'),
+      slaBreachedAt: new Date('2026-08-17T09:30:00Z'),
+    };
+    prisma.systemSettings.findUnique = jest.fn(async () => ({ slaHours: null }));
+    prisma.ticket.update = jest.fn(async ({ data }) => ({ ...ticket, ...data }));
+
+    await applySla(ticket);
+
+    expect(prisma.ticket.update).toHaveBeenCalledWith({
+      where: { id: 9 },
+      data: { slaResponseDueAt: null, slaResolutionDueAt: null, slaBreachedAt: null },
+    });
+    expect(logEvent).toHaveBeenCalledWith(9, 'SLA_UPDATED', 'SYSTEM', expect.objectContaining({ approvalStatus: 'PENDING' }));
+  });
+
+  it('un ticket approuvé démarre son SLA à approvedAt (et non à createdAt)', async () => {
+    const ticket = {
+      id: 10, createdAt: new Date('2026-08-17T08:00:00Z'), priority: 'P1', status: 'OPEN',
+      approvalStatus: 'APPROVED', approvedAt: new Date('2026-08-17T14:00:00Z'),
+      slaResponseDueAt: null, slaResolutionDueAt: null, slaBreachedAt: null,
+    };
+    prisma.systemSettings.findUnique = jest.fn(async () => ({ slaHours: null }));
+    prisma.ticket.update = jest.fn(async ({ data }) => ({ ...ticket, ...data }));
+
+    await applySla(ticket);
+
+    expect(prisma.ticket.findUnique).not.toHaveBeenCalled();
+    expect(prisma.ticket.update).toHaveBeenCalledWith({
+      where: { id: 10 },
+      data: {
+        slaResponseDueAt: new Date('2026-08-17T15:00:00.000Z'),
+        slaResolutionDueAt: new Date('2026-08-17T18:00:00.000Z'),
+      },
+    });
+    expect(logEvent).toHaveBeenCalledWith(10, 'SLA_UPDATED', 'SYSTEM', expect.objectContaining({ approvalStatus: 'APPROVED' }));
+  });
+
+  it('relit l’approbation en base quand l’appelant passe un objet partiel', async () => {
+    const ticket = { id: 11, priority: 'P1', status: 'NEW' };
+    prisma.ticket.findUnique = jest.fn(async () => ({
+      approvalStatus: 'PENDING', approvedAt: null, createdAt: new Date('2026-08-17T08:00:00Z'),
+    }));
+    prisma.systemSettings.findUnique = jest.fn(async () => ({ slaHours: null }));
+    prisma.ticket.update = jest.fn(async ({ data }) => ({ ...ticket, ...data }));
+
+    await applySla(ticket);
+
+    expect(prisma.ticket.findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 11 } }));
+    expect(prisma.ticket.update).toHaveBeenCalledWith({
+      where: { id: 11 },
+      data: { slaResponseDueAt: null, slaResolutionDueAt: null },
+    });
+  });
+});
+
 describe('recordFirstResponse — temps de première réponse', () => {
   beforeEach(() => jest.clearAllMocks());
 
@@ -201,7 +284,12 @@ describe('runSlaMonitor — détection des dépassements', () => {
     const result = await runSlaMonitor();
 
     expect(prisma.ticket.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { status: { in: ['NEW', 'OPEN', 'PLANNED', 'PENDING'] }, slaResponseDueAt: { not: null, lt: expect.any(Date) }, slaBreachedAt: null },
+      where: {
+        status: { in: ['NEW', 'OPEN', 'PLANNED', 'PENDING'] },
+        approvalStatus: { notIn: ['PENDING', 'REJECTED', 'SUPERSEDED'] },
+        slaResponseDueAt: { not: null, lt: expect.any(Date) },
+        slaBreachedAt: null,
+      },
     }));
     expect(result.breachedCount).toBe(0);
     expect(DEFAULT_SLA_HOURS.P1).toEqual({ response: 1, resolution: 4 });

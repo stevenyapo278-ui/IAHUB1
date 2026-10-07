@@ -16,6 +16,7 @@ import {
   Table,
   LayoutGrid,
   RefreshCw,
+  RotateCcw,
   Download,
   FileSpreadsheet,
   FileCode2,
@@ -492,7 +493,9 @@ function TicketPreviewTooltip({ ticketId, data, anchorRef }) {
   let slaPct = null;
   let slaLabel = null;
   if (slaDue && !slaBreached) {
-    const total = new Date(slaDue) - new Date(data?.createdAt);
+    // Le SLA court depuis l'approbation (approvedAt), sinon depuis la création
+    const slaStart = data?.approvedAt || data?.createdAt;
+    const total = new Date(slaDue) - new Date(slaStart);
     const remaining = new Date(slaDue) - new Date();
     slaPct = Math.max(0, Math.min(100, Math.round((remaining / total) * 100)));
     const h = Math.floor(remaining / (1000 * 60 * 60));
@@ -1419,6 +1422,18 @@ export default function Tickets() {
       loadRejectedSuggestions();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erreur lors de la réactivation');
+    }
+  }
+
+  // Réintégration : le ticket rejeté repart en attente d'approbation et réapparaît dans la liste
+  async function reinstateTicket(id) {
+    try {
+      await api.post(`/tickets/${id}/reinstate`);
+      toast.success(`Ticket #${id} réintégré — remis en attente d'approbation`);
+      loadRejectedSuggestions();
+      loadTickets();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erreur lors de la réintégration');
     }
   }
 
@@ -2514,6 +2529,12 @@ export default function Tickets() {
                           <p className="text-[10px] text-muted-foreground/80 truncate" title={reason}>Motif : {reason}</p>
                         )}
                       </div>
+                      {!isClosure && !isNewRequest && canApprove && (
+                        <button onClick={() => reinstateTicket(id)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold hover:bg-emerald-500/20 transition-colors cursor-pointer">
+                          <RotateCcw className="w-3.5 h-3.5" /> Réintégrer
+                        </button>
+                      )}
                       {isClosure && item.canRecover && (
                         <button onClick={() => recoverClosureSuggestion(id)}
                           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 text-xs font-bold hover:bg-cyan-500/20 transition-colors cursor-pointer">

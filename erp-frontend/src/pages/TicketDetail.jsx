@@ -21,7 +21,7 @@ import { flattenCategoryTree } from '../utils/categoryTree';
 import {
   ArrowLeft, Clock, User, Tag, AlertTriangle, CheckCircle2,
   Trash2, Paperclip, MessageSquare, Sparkles, Shield, MapPin,
-  RefreshCw, Mail, FileText, Check, X, Send, ChevronRight,
+  RefreshCw, RotateCcw, Mail, FileText, Check, X, Send, ChevronRight,
   Flame, Radio, Info, ArrowDown, UserCheck, HelpCircle, Layers, History,
   TrendingUp, Lock, Link2, Merge, Plus, GitBranch, Timer, Play, Square, ListChecks, Boxes,
   ChevronDown, Inbox, Pencil, Save, Search,
@@ -330,6 +330,8 @@ export default function TicketDetail() {
   const [rejecting, setRejecting] = useState(false);
   const [showApproveModal, setShowApproveModal] = useState(false);
   const [approving, setApproving] = useState(false);
+  const [showReinstateModal, setShowReinstateModal] = useState(false);
+  const [reinstating, setReinstating] = useState(false);
   const [manualGlpiId, setManualGlpiId] = useState('');
   const [linking, setLinking] = useState(false);
   const [linkedProblems, setLinkedProblems] = useState([]);
@@ -1742,6 +1744,21 @@ export default function TicketDetail() {
     }
   }
 
+  // Réintégration d'un ticket rejeté : repasse en attente d'approbation et rouvre en « Ouvert »
+  async function handleReinstateConfirm() {
+    setReinstating(true);
+    try {
+      await api.post(`/tickets/${id}/reinstate`);
+      toast.success("Ticket réintégré — remis en attente d'approbation");
+      setShowReinstateModal(false);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur lors de la réintégration');
+    } finally {
+      setReinstating(false);
+    }
+  }
+
   if (error) {
     return (
       <div className="p-8 flex flex-col items-center gap-4">
@@ -2945,6 +2962,13 @@ export default function TicketDetail() {
                 </p>
               )}
 
+              {ticket.approvalStatus === 'REJECTED' && ticket.approvalNote && (
+                <p className="text-[11px] text-red-600 dark:text-red-400 bg-red-500/5 border border-red-500/20 rounded-lg px-3 py-2">
+                  <span className="font-extrabold uppercase tracking-wider">Motif du rejet : </span>
+                  {ticket.approvalNote}
+                </p>
+              )}
+
               {canApprove && ticket.approvalStatus === 'PENDING' ? (
                 <div className="flex gap-2 pt-2">
                   <button
@@ -2963,6 +2987,16 @@ export default function TicketDetail() {
                       Rejeter
                     </button>
                   )}
+                </div>
+              ) : canApprove && ticket.approvalStatus === 'REJECTED' ? (
+                <div className="flex gap-2 pt-2">
+                  <button
+                    onClick={() => setShowReinstateModal(true)}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold shadow-md cursor-pointer transition-all bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-emerald-500/20 hover:brightness-110"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Réintégrer
+                  </button>
                 </div>
               ) : null}
             </div>
@@ -3705,6 +3739,17 @@ export default function TicketDetail() {
           </div>
         </div>
       )}
+
+      {/* Confirm Reinstate Dialog */}
+      <ConfirmDialog
+        open={showReinstateModal}
+        title="Réintégrer le ticket"
+        message={`Le ticket #${id} repart en attente d'approbation et rouvre en « Ouvert ». Le SLA ne redémarrera qu'une fois approuvé.`}
+        confirmLabel="Réintégrer"
+        loading={reinstating}
+        onConfirm={handleReinstateConfirm}
+        onCancel={() => setShowReinstateModal(false)}
+      />
 
       {/* Confirm Delete Dialog */}
       <ConfirmDialog

@@ -14,10 +14,13 @@ export function getSlaState(ticket) {
   const now = new Date();
   if (now >= due) return { state: 'breach', label: 'SLA dépassé' };
 
-  const createdAt = ticket.createdAt ? new Date(ticket.createdAt) : null;
-  if (!createdAt) return null;
+  // Le SLA court depuis l'approbation (approvedAt), sinon depuis la création :
+  // c'est ce départ qui détermine la part de délai restante.
+  const start = ticket.approvedAt ? new Date(ticket.approvedAt)
+    : (ticket.createdAt ? new Date(ticket.createdAt) : null);
+  if (!start) return null;
 
-  const total = due.getTime() - createdAt.getTime();
+  const total = due.getTime() - start.getTime();
   const remaining = due.getTime() - now.getTime();
   if (total <= 0) return null;
 

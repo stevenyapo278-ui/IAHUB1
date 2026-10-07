@@ -15,7 +15,7 @@ const { checkAndSendDailySummary } = require('./services/dailySummary');
 const { runSolvedAutoCloseScheduler } = require('./services/solvedAutoCloseScheduler');
 const { withHealthTracking } = require('./services/schedulerHealth');
 const { seedPermissionGroups } = require('./services/permissionGroupSeeder');
-const { runSlaMonitor } = require('./services/slaService');
+const { runSlaMonitor, realignSlaWithApproval } = require('./services/slaService');
 const { runDueDateMonitor } = require('./services/dueDateService');
 const { maybeGenerateWeeklyReport } = require('./services/aiWeeklyReportScheduler');
 const { logger } = require('./utils/logger');
@@ -76,6 +76,18 @@ server.listen(PORT, () => {
   if (process.env.NODE_ENV === 'production') {
     logger.info(`Frontend attendu sur : ${process.env.FRONTEND_URL || 'http://localhost:' + PORT}`);
   }
+
+  // Recalage one-shot des échéances SLA sur la date d'approbation (le SLA ne court
+  // plus depuis la création). Idempotent, décalé pour ne pas ralentir le démarrage.
+  setTimeout(() => {
+    realignSlaWithApproval()
+      .then((r) => {
+        if (r.updatedCount > 0) {
+          logger.info(`[SLA] ${r.updatedCount} échéance(s) recalée(s) sur la date d'approbation (${r.scannedCount} ticket(s) examiné(s))`);
+        }
+      })
+      .catch((err) => logger.error(`[SLA] Recalage des échéances échoué: ${err.message}`));
+  }, 15000);
 });
 
 // Lance périodiquement `syncFn`, en relisant à chaque cycle la fréquence configurée via

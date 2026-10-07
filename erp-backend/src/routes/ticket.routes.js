@@ -1731,10 +1731,16 @@ router.patch('/:id', allowTechnicianStatusOnly, requireTicketAssignOrTechnicianS
         title: true, content: true, priority: true, category: true, teamId: true,
         assignedToId: true, type: true, urgency: true, impact: true, source: true,
         externalId: true, status: true, isMajorIncident: true, impactedSites: true,
-        sourceEmail: true, requesterId: true, sourceName: true,
+        sourceEmail: true, requesterId: true, sourceName: true, approvalStatus: true,
         observers: { select: { id: true } },
       },
     });
+
+    // Approbation manuelle via PATCH : approvedAt sert de point de départ au SLA
+    // (le ticket « devient » approuvé maintenant, pas à sa création).
+    if (data.approvalStatus === 'APPROVED' && before.approvalStatus !== 'APPROVED' && data.approvedAt === undefined) {
+      data.approvedAt = new Date();
+    }
 
     const ticket = await prisma.ticket.update({ where: { id }, data });
 
@@ -1743,8 +1749,9 @@ router.patch('/:id', allowTechnicianStatusOnly, requireTicketAssignOrTechnicianS
       await cleanupOrphanFollowupImages(id);
     }
 
-    // Recalculer les échéances SLA si la priorité change (et ticket toujours actif)
-    if (data.priority !== undefined) {
+    // Recalculer les échéances SLA si la priorité ou l'approbation change
+    // (le SLA ne démarre qu'à l'approbation : PENDING = aucune échéance).
+    if (data.priority !== undefined || data.approvalStatus !== undefined) {
       try {
         await applySla(ticket);
       } catch (err) {
@@ -1942,6 +1949,54 @@ router.post('/:id/reject', forbidTechnicianTicketEdits, requirePermission('ticke
       recordDecision({ email: ticket.sourceEmail, decision: 'REJECTED' })
         .catch((err) => console.error('[senderReputation] Échec enregistrement rejet:', err.message));
     }
+
+    return res.json(ticket);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Réintégrer un ticket rejeté ───────────────────────────────────────────
+// Annule un rejet : le ticket repart en attente d'approbation (PENDING) et rouvre
+// en « Ouvert » — le SLA reste suspendu jusqu'à la prochaine approbation.
+router.post('/:id/reinstate', forbidTechnicianTicketEdits, requirePermission('tickets.approve', ['ADMIN', 'TECHNICIAN', 'HOTLINE']), async (req, res) => {
+  const id = Number(req.params.id);
+  try {
+    const existing = await prisma.ticket.findUnique({ where: { id }, select: { id: true, approvalStatus: true } });
+    if (!existing) return res.status(404).json({ error: 'Ticket introuvable' });
+    if (existing.approvalStatus !== 'REJECTED') {
+      return res.status(409).json({ error: 'Seul un ticket rejeté peut être réintégré' });
+    }
+
+    const ticket = await prisma.ticket.update({
+      where: { id },
+      data: {
+        approvalStatus: 'PENDING',
+        approvedById: null,
+        approvedAt: null,
+        approvalNote: null,
+        status: 'OPEN',
+        closedAt: null,
+      },
+    });
+
+    await logEvent(id, 'REOPENED', req.user.email || 'SYSTEM', { via: 'reintegration' });
+    await auditLog('TICKET_REINSTATED', { actor: req.user, targetType: 'Ticket', targetId: id, targetLabel: ticket.title });
+    emitTicketUpdated(ticket, { approvalStatus: 'PENDING' });
+
+    // Brouillons de réponse IA tués par le rejet : remis en attente, comme
+    // POST /ai-email-drafts/:id/restore (le motif du rejet contient « ticket #id »).
+    await prisma.aiEmailDraft.updateMany({
+      where: { ticketId: id, status: 'REJECTED', reviewNote: { contains: `ticket #${id}` } },
+      data: { status: 'PENDING', reviewedById: null, reviewedAt: null, reviewNote: null, sentAt: null },
+    }).catch((err) => console.error('[ticket.routes] Restauration des brouillons échouée:', err.message));
+
+    // Suivi public : le demandeur voit que sa demande repart en attente d'approbation.
+    await prisma.followup.create({
+      data: { ticketId: id, authorId: req.user.sub, content: "♻️ Ticket réintégré — remis en attente d'approbation" },
+    }).catch((err) => console.error('[ticket.routes] Suivi de réintégration échoué:', err.message));
+
+    try { await applySla(ticket); } catch (err) { console.error('[ticket.routes] Recalcul SLA réintégration échoué:', err.message); }
 
     return res.json(ticket);
   } catch (err) {
