@@ -78,6 +78,10 @@ services:
       FRONTEND_DIST_PATH: /app/erp-frontend/dist
     volumes:
       - app_uploads:/app/erp-backend/uploads
+      # Certificats serveur (CA interne, voir scripts/generate-tls.sh) : montés depuis
+      # l'hôte pour survivre aux redéploiements. Sans ce mount, l'entrypoint régénère un
+      # certificat auto-signé à chaque déploiement → avertissement « site dangereux ».
+      - ${TLS_DIR:-/etc/dokploy/certs/ia-hub}:/app/ssl
     ports:
       - "${PORT:-4000}:4000"
       - "4001:4001"
