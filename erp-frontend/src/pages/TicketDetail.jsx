@@ -227,6 +227,11 @@ export default function TicketDetail() {
   const [followupToDelete, setFollowupToDelete] = useState(null);
   const [deletingFollowup, setDeletingFollowup] = useState(false);
 
+  // Suppression de pièce jointe (confirmation avant retrait)
+  const [attachmentToRemove, setAttachmentToRemove] = useState(null);
+  const [removingAttachment, setRemovingAttachment] = useState(false);
+  const [removeAttachmentError, setRemoveAttachmentError] = useState(null);
+
   // Tickets liés + fusion + modale « Relations » (tickets liés, problèmes racines, sous-tickets)
   const [relationsModalOpen, setRelationsModalOpen] = useState(false);
   const [relationsTab, setRelationsTab] = useState('tickets');
@@ -439,6 +444,8 @@ export default function TicketDetail() {
   // - ticket de SON ÉQUIPE → peut changer le statut uniquement
   // - ticket résolu/fermé → aucune modification
   const canEditTicketsRole = canEditTickets(user);
+  // Miroir du garde-fou serveur requirePermission('tickets.manage') sur DELETE attachments
+  const canManageAttachments = hasPermission(user, 'tickets.manage');
   const isAssignedTechnician = user?.role === 'TECHNICIAN' &&
     ticket != null &&
     (
@@ -1292,6 +1299,25 @@ export default function TicketDetail() {
     } finally {
       setUploadingAttachment(false);
       if (attachmentInputRef.current) attachmentInputRef.current.value = '';
+    }
+  }
+
+  async function confirmRemoveAttachment() {
+    if (!attachmentToRemove) return;
+    setRemovingAttachment(true);
+    setRemoveAttachmentError(null);
+    try {
+      await api.delete(`/tickets/${id}/attachments/${attachmentToRemove.id}`);
+      setTicket((prev) => prev && ({
+        ...prev,
+        attachments: (prev.attachments || []).filter((x) => x.id !== attachmentToRemove.id),
+      }));
+      toast.success('Pièce jointe retirée');
+      setAttachmentToRemove(null);
+    } catch (err) {
+      setRemoveAttachmentError(err.response?.data?.error || 'Erreur lors de la suppression de la pièce jointe');
+    } finally {
+      setRemovingAttachment(false);
     }
   }
 
@@ -2241,23 +2267,35 @@ export default function TicketDetail() {
                     const isImage = kind === 'image';
                     if (isImage) {
                       return (
-                        <button
-                          key={a.id}
-                          type="button"
-                          onClick={() => openAttachment(a)}
-                          title={`${fromEmail ? '(reçu par email) ' : ''}Cliquer pour prévisualiser`}
-                          className="relative hover:scale-105 hover:shadow-lg transition-all duration-200 group cursor-pointer rounded-xl"
-                        >
-                          <AttachmentThumbnail ticketId={ticket.id} attachment={a} />
-                          <span className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/0 group-hover:bg-black/20 transition-all duration-200">
-                            <Eye className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 drop-shadow transition-all duration-200" />
-                          </span>
-                          {fromEmail && (
-                            <span className="p-1 bg-surface rounded-full text-on-surface-variant shadow-sm border border-outline-variant/40 absolute top-1 right-1">
-                              <Mail className="w-3 h-3 text-primary" />
+                        <div key={a.id} className="relative inline-block group">
+                          <button
+                            type="button"
+                            onClick={() => openAttachment(a)}
+                            title={`${fromEmail ? '(reçu par email) ' : ''}Cliquer pour prévisualiser`}
+                            className="relative hover:scale-105 hover:shadow-lg transition-all duration-200 group cursor-pointer rounded-xl block"
+                          >
+                            <AttachmentThumbnail ticketId={ticket.id} attachment={a} />
+                            <span className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/0 group-hover:bg-black/20 transition-all duration-200">
+                              <Eye className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 drop-shadow-md" />
                             </span>
+                            {fromEmail && (
+                              <span className="p-1 bg-surface rounded-full text-on-surface-variant shadow-sm border border-outline-variant/40 absolute top-1 right-1">
+                                <Mail className="w-3 h-3 text-primary" />
+                              </span>
+                            )}
+                          </button>
+                          {canManageAttachments && (
+                            <button
+                              type="button"
+                              aria-label="Retirer la pièce jointe"
+                              title="Retirer la pièce jointe"
+                              onClick={(e) => { e.stopPropagation(); setRemoveAttachmentError(null); setAttachmentToRemove(a); }}
+                              className="absolute top-1 left-1 z-10 p-1 rounded-lg bg-surface/85 backdrop-blur-sm border border-outline-variant/50 text-on-surface-variant hover:text-red-500 hover:border-red-400/60 shadow-sm transition-colors"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
                           )}
-                        </button>
+                        </div>
                       );
                     }
                     // Fichiers non-image : carte avec icône + prévisualisation au clic (Excel → tableau, Word → HTML)
@@ -2284,26 +2322,38 @@ export default function TicketDetail() {
                       file: 'bg-slate-500/10 border-slate-500/20',
                     };
                     return (
-                      <button
-                        key={a.id}
-                        type="button"
-                        onClick={() => openAttachment(a)}
-                        title="Cliquer pour prévisualiser"
-                        className="group flex items-center gap-3 pl-2 pr-3 py-2.5 border border-outline-variant/40 bg-surface-container-low/60 hover:bg-surface-container hover:border-primary/30 hover:shadow-md rounded-xl transition-all cursor-pointer text-left min-w-0"
-                      >
-                        <span className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 shadow-sm ${bgMap[kind] || bgMap.file}`}>
-                          {iconMap[kind] || iconMap.file}
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-xs font-bold text-on-surface truncate max-w-[190px] leading-tight">{a.filename}</span>
-                          <span className="block text-[11px] font-medium text-on-surface-variant truncate">
-                            {a.mimeType || kind.toUpperCase()} {a.size ? `· ${formatBytes(a.size)}` : ''} {fromEmail ? '· email' : ''}
+                      <div key={a.id} className="relative inline-flex">
+                        <button
+                          type="button"
+                          onClick={() => openAttachment(a)}
+                          title="Cliquer pour prévisualiser"
+                          className="group flex items-center gap-3 pl-2 pr-3 py-2.5 border border-outline-variant/40 bg-surface-container-low/60 hover:bg-surface-container hover:border-primary/30 hover:shadow-md rounded-xl transition-all cursor-pointer text-left min-w-0"
+                        >
+                          <span className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 shadow-sm ${bgMap[kind] || bgMap.file}`}>
+                            {iconMap[kind] || iconMap.file}
                           </span>
-                        </span>
-                        <span className="w-7 h-7 rounded-lg bg-primary/10 group-hover:bg-primary text-primary group-hover:text-white flex items-center justify-center shrink-0 transition-colors">
-                          <Eye className="w-3.5 h-3.5" />
-                        </span>
-                      </button>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-xs font-bold text-on-surface truncate max-w-[190px] leading-tight">{a.filename}</span>
+                            <span className="block text-[11px] font-medium text-on-surface-variant truncate">
+                              {a.mimeType || kind.toUpperCase()} {a.size ? `· ${formatBytes(a.size)}` : ''} {fromEmail ? '· email' : ''}
+                            </span>
+                          </span>
+                          <span className="w-7 h-7 rounded-lg bg-primary/10 group-hover:bg-primary text-primary group-hover:text-white flex items-center justify-center shrink-0 transition-colors">
+                            <Eye className="w-3.5 h-3.5" />
+                          </span>
+                        </button>
+                        {canManageAttachments && (
+                          <button
+                            type="button"
+                            aria-label="Retirer la pièce jointe"
+                            title="Retirer la pièce jointe"
+                            onClick={(e) => { e.stopPropagation(); setRemoveAttachmentError(null); setAttachmentToRemove(a); }}
+                            className="absolute -top-2 -right-2 z-10 p-1 rounded-lg bg-surface border border-outline-variant/50 text-on-surface-variant hover:text-red-500 hover:border-red-400/60 shadow-sm transition-colors"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
                     );
                   })}
                 </div>
@@ -3678,6 +3728,21 @@ export default function TicketDetail() {
         loading={deletingFollowup}
         onConfirm={confirmDeleteFollowup}
         onCancel={() => setFollowupToDelete(null)}
+      />
+
+      {/* Confirm Remove Attachment Dialog */}
+      <ConfirmDialog
+        open={!!attachmentToRemove}
+        title="Retirer la pièce jointe ?"
+        message={attachmentToRemove
+          ? `Le fichier « ${attachmentToRemove.filename} » sera supprimé du ticket. Cette action est irréversible.`
+          : ''}
+        confirmLabel="Retirer"
+        danger
+        loading={removingAttachment}
+        error={removeAttachmentError}
+        onConfirm={confirmRemoveAttachment}
+        onCancel={() => { setAttachmentToRemove(null); setRemoveAttachmentError(null); }}
       />
 
       {/* MODALE ESCALADE : transfert vers une autre équipe + choix du technicien */}

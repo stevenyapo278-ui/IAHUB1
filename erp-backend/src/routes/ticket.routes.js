@@ -1141,6 +1141,30 @@ router.get('/:id/attachments/:attachmentId/file', async (req, res) => {
   }
 });
 
+// Suppression d'une pièce jointe (le groupe « Demandeurs » n'a pas tickets.manage :
+// un demandeur ne peut donc pas retirer les fichiers d'un ticket existant)
+router.delete('/:id/attachments/:attachmentId', requirePermission('tickets.manage'), async (req, res) => {
+  try {
+    const attachment = await prisma.ticketAttachment.findFirst({
+      where: { id: Number(req.params.attachmentId), ticketId: Number(req.params.id) },
+    });
+    if (!attachment) return res.status(404).json({ error: 'Pièce jointe introuvable' });
+
+    if (attachment.localFilepath) {
+      // Résolution relative à process.cwd() (volume Docker monté sur <WORKDIR>/uploads)
+      const localPath = path.isAbsolute(attachment.localFilepath)
+        ? attachment.localFilepath
+        : path.join(process.cwd(), attachment.localFilepath);
+      try { fs.unlinkSync(localPath); } catch {}
+    }
+    await prisma.ticketAttachment.delete({ where: { id: attachment.id } });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[ticket.routes] Erreur suppression pièce jointe:', err);
+    return res.status(500).json({ error: 'Erreur lors de la suppression de la pièce jointe' });
+  }
+});
+
 // GET /api/tickets/:id/similar — tickets similaires par vectorielle (cosine distance)
 router.get('/:id/similar', async (req, res) => {
   try {
